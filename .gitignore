@@ -1,0 +1,33 @@
+# Rust
+/target
+Cargo.lock
+
+# Development
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Nix
+result
+result-*
+
+# Logs and temporary files
+*.log
+/tmp/
+termide.log
+
+# Editor backups
+*~
+\#*\#
+.\#*
+
+# Testing
+/coverage/
+*.profdata
+*.profraw

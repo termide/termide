@@ -1,0 +1,82 @@
+mod app;
+mod config;
+mod constants;
+mod editor;
+mod event;
+mod clipboard;
+mod git;
+mod i18n;
+mod keyboard;
+mod panels;
+mod rename_pattern;
+mod state;
+mod syntax_highlighter;
+mod theme;
+mod ui;
+
+use anyhow::Result;
+use crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
+use ratatui::{backend::CrosstermBackend, Terminal};
+use std::io;
+
+use app::App;
+use panels::file_manager::FileManager;
+
+fn main() -> Result<()> {
+    // Load config first to get language setting
+    let config = config::Config::load().unwrap_or_default();
+
+    // Initialize translation system with language from config
+    i18n::init_with_language(&config.language);
+
+    // Check for git on the system
+    let git_available = git::check_git_available();
+    let t = i18n::t();
+    if git_available {
+        eprintln!("{}", t.git_detected());
+    } else {
+        eprintln!("{}", t.git_not_found());
+    }
+
+    // Initialize terminal
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    // Get terminal size (might be useful later)
+    let _size = terminal.size()?;
+
+    // Create application
+    let mut app = App::new();
+
+    // Add startup panels:
+    // Panel 0: Smart file manager (cannot be closed in MultiPanel mode)
+    app.add_panel(Box::new(FileManager::new()));
+    // Panel 1: Welcome panel (will close when other panels are opened)
+    app.add_panel(Box::new(panels::welcome::Welcome::new()));
+
+    // Run application
+    let result = app.run(&mut terminal);
+
+    // Restore terminal
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+
+    // Print error if there was one
+    if let Err(err) = result {
+        eprintln!("Error: {:?}", err);
+    }
+
+    Ok(())
+}

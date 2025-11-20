@@ -1,0 +1,126 @@
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+/// Application configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Config {
+    /// Selected theme name
+    #[serde(default = "default_theme_name")]
+    pub theme: String,
+
+    /// Tab size (number of spaces)
+    #[serde(default = "default_tab_size")]
+    pub tab_size: usize,
+
+    /// Interface language (en, ru, or auto for auto-detection)
+    #[serde(default = "default_language")]
+    pub language: String,
+
+    /// Log file path (if not specified, temporary directory is used)
+    #[serde(default)]
+    pub log_file_path: Option<String>,
+}
+
+fn default_theme_name() -> String {
+    "default".to_string()
+}
+
+fn default_tab_size() -> usize {
+    4
+}
+
+fn default_language() -> String {
+    "auto".to_string()
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            theme: default_theme_name(),
+            tab_size: default_tab_size(),
+            language: default_language(),
+            log_file_path: None,
+        }
+    }
+}
+
+impl Config {
+    /// Load configuration from file
+    /// On first run, creates config file with default values
+    pub fn load() -> Result<Self> {
+        let config_path = Self::get_config_path()?;
+
+        if config_path.exists() {
+            let content = std::fs::read_to_string(&config_path)?;
+            Ok(toml::from_str(&content)?)
+        } else {
+            // First run - create config file with default values
+            let config = Self::default();
+            let _ = config.save(); // Ignore save error
+            Ok(config)
+        }
+    }
+
+    /// Save configuration to file
+    pub fn save(&self) -> Result<()> {
+        let config_path = Self::get_config_path()?;
+
+        // Create directory if it doesn't exist
+        if let Some(parent) = config_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let content = toml::to_string_pretty(self)?;
+        std::fs::write(config_path, content)?;
+
+        Ok(())
+    }
+
+    /// Get path to config file
+    fn get_config_path() -> Result<PathBuf> {
+        let config_dir = dirs::config_dir()
+            .ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?;
+
+        Ok(config_dir.join("termide").join("config.toml"))
+    }
+
+    /// Get path to config directory (for debugging)
+    pub fn get_config_dir() -> Result<PathBuf> {
+        let config_dir = dirs::config_dir()
+            .ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?;
+
+        Ok(config_dir.join("termide"))
+    }
+
+    /// Get path to log file
+    /// If specified in config, use it; otherwise use temporary directory
+    pub fn get_log_file_path(&self) -> PathBuf {
+        if let Some(ref path) = self.log_file_path {
+            PathBuf::from(path)
+        } else {
+            // By default use temporary directory
+            std::env::temp_dir().join("termide.log")
+        }
+    }
+
+    /// Get path to config file (public version)
+    pub fn config_file_path() -> Result<PathBuf> {
+        Self::get_config_path()
+    }
+
+    /// Check if path is a config file
+    pub fn is_config_file(path: &std::path::Path) -> bool {
+        if let Ok(config_path) = Self::get_config_path() {
+            path == config_path
+        } else {
+            false
+        }
+    }
+
+    /// Validate config content
+    /// Returns Ok(Config) if validation succeeds, otherwise error
+    pub fn validate_content(content: &str) -> Result<Config> {
+        toml::from_str(content).map_err(|e| anyhow::anyhow!("{}", e))
+    }
+}

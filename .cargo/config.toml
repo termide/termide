@@ -1,0 +1,19 @@
+# Configuration for tree-sitter C library linking
+# Force using standard cc linker and BFD instead of LLD
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "linker=cc", "-C", "link-arg=-fno-lto", "-C", "link-arg=-Wl,-fuse-ld=bfd"]
+
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "linker=cc", "-C", "link-arg=-fno-lto", "-C", "link-arg=-Wl,-fuse-ld=bfd"]
+
+# macOS targets
+[target.x86_64-apple-darwin]
+linker = "cc"
+
+[target.aarch64-apple-darwin]
+linker = "cc"
+
+# Windows target (for cross-compilation if needed)
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"

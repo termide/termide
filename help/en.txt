@@ -1,0 +1,53 @@
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                                  TermIDE                                  ║
+║                       Terminal IDE and File Manager                       ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+
+  GLOBAL KEYS
+
+    F9           Open menu
+    Ctrl+H       Show this help
+    Ctrl+←/→     Switch between panels
+    Ctrl+W       Close current panel
+    Ctrl+Q       Quit application
+
+
+  FILE MANAGER KEYS
+
+    ↑↓           Navigate file list
+    Enter        Open file or directory
+    Backspace    Go to parent directory
+    Home         Jump to first item
+    End          Jump to last item
+    PgUp / PgDn  Scroll page up/down
+    Insert       Select/deselect item
+    Space        Show file information
+    Ctrl+A       Select all items
+    F4           Open file in editor
+    f / F        Create new file
+    d / D / F7   Create new directory
+    c / C / F5   Copy selected items
+    m / M / F6   Move selected items
+    F8 / Delete  Delete selected items
+    Ctrl+C       Copy to clipboard
+    Ctrl+X       Cut to clipboard
+    Ctrl+V       Paste from clipboard
+
+
+  EDITOR KEYS
+
+    Ctrl+S / F2  Save file
+    Ctrl+C       Copy to system clipboard
+    Ctrl+V       Paste from system clipboard
+    Ctrl+X       Cut to system clipboard
+    Ctrl+Y       Paste (alternative)
+    Ctrl+Z       Undo
+    Ctrl+Shift+Z Redo
+    Ctrl+F       Find text
+    Ctrl+G       Go to line
+    Escape       Close panel / Cancel
+
+
+  Use arrow keys to scroll this help text.

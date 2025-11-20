@@ -1,0 +1,29 @@
+# Light theme for TermIDE
+name = "light"
+
+[colors]
+# Base colors
+background = { rgb = [240, 240, 240] }
+text_primary = "Black"
+text_secondary = "DarkGray"
+accent_primary = "Blue"
+accent_secondary = "Gray"
+highlight = { rgb = [0, 100, 200] }
+
+# Interactive elements
+selection_bg = "LightBlue"
+selection_fg = "Black"
+selected_item = "Blue"
+cursor_line_bg = { rgb = [230, 230, 230] }
+
+# Status bar
+status_bar_bg = "Gray"
+
+# Semantic colors (status messages and Git)
+success_bg = "Green"
+success_fg = "White"
+error_bg = "Red"
+error_fg = "White"
+git_modified = { rgb = [150, 100, 0] }
+git_added = { rgb = [0, 100, 0] }
+git_deleted = "Red"

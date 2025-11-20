@@ -1,0 +1,29 @@
+# Blue sky theme for TermIDE
+name = "bluesky"
+
+[colors]
+# Base colors
+background = "LightBlue"
+text_primary = "Black"
+text_secondary = "DarkGray"
+accent_primary = "Blue"
+accent_secondary = "Cyan"
+highlight = "Yellow"
+
+# Interactive elements
+selection_bg = "Blue"
+selection_fg = "White"
+selected_item = "Magenta"
+cursor_line_bg = "Cyan"
+
+# Status bar
+status_bar_bg = "Blue"
+
+# Semantic colors (status messages and Git)
+success_bg = "Green"
+success_fg = "White"
+error_bg = "Red"
+error_fg = "White"
+git_modified = { rgb = [180, 120, 0] }
+git_added = { rgb = [0, 120, 0] }
+git_deleted = "Red"

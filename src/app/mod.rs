@@ -1,0 +1,161 @@
+use anyhow::Result;
+use ratatui::{backend::Backend, Terminal};
+use std::time::Duration;
+
+use crate::{
+    event::{Event, EventHandler},
+    panels::PanelContainer,
+    state::{ActiveModal, AppState},
+    ui::render_layout,
+};
+
+mod key_handler;
+mod modal;
+mod modal_handler;
+mod mouse_handler;
+mod panel_manager;
+
+/// Main application
+pub struct App {
+    state: AppState,
+    panels: PanelContainer,
+    event_handler: EventHandler,
+}
+
+impl App {
+    /// Create a new application
+    pub fn new() -> Self {
+        let mut state = AppState::new();
+        // Set active panel to FileManager (panel 0) by default
+        state.active_panel = 0;
+
+        Self {
+            state,
+            panels: PanelContainer::new(),
+            event_handler: EventHandler::new(Duration::from_millis(crate::constants::EVENT_HANDLER_INTERVAL_MS)),
+        }
+    }
+
+    /// Add a panel
+    pub fn add_panel(&mut self, panel: Box<dyn crate::panels::Panel>) {
+        self.panels.add_panel(panel);
+    }
+
+    /// Run the main application loop
+    pub fn run<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> Result<()> {
+        // Initialize terminal dimensions
+        let size = terminal.size()?;
+        self.state.update_terminal_size(size.width, size.height);
+
+        while !self.state.should_quit {
+            // Process events
+            match self.event_handler.next()? {
+                Event::Key(key) => {
+                    self.handle_key_event(key)?;
+                }
+                Event::Mouse(mouse) => {
+                    self.handle_mouse_event(mouse)?;
+                }
+                Event::Resize(width, height) => {
+                    // Update terminal dimensions in state
+                    self.state.update_terminal_size(width, height);
+                }
+                Event::Tick => {
+                    // Check channel for directory size calculation results
+                    self.check_dir_size_update();
+
+                    // Update spinner in Info modal if it's open
+                    self.update_info_modal_spinner();
+                }
+            }
+
+            // Check and close panels that should auto-close
+            self.check_auto_close_panels()?;
+
+            // Render UI after processing event
+            terminal.draw(|frame| {
+                render_layout(frame, &self.state, &mut self.panels);
+            })?;
+        }
+
+        Ok(())
+    }
+
+    /// Check and close panels that should auto-close
+    fn check_auto_close_panels(&mut self) -> Result<()> {
+        // Collect panel indices to close
+        let mut to_close = Vec::new();
+
+        for i in 0..self.panels.count() {
+            if let Some(panel) = self.panels.get_mut(i) {
+                if panel.should_auto_close() {
+                    // Check if this panel can be closed
+                    if crate::ui::panel_helpers::can_close_panel(i, &self.state) {
+                        to_close.push(i);
+                    }
+                }
+            }
+        }
+
+        // Close panels (in reverse order so indices don't shift)
+        for &index in to_close.iter().rev() {
+            self.panels.close_panel(index);
+
+            // If closed active panel, switch to next
+            if index == self.state.active_panel {
+                if self.panels.count() > 0 {
+                    let visible = self.panels.visible_indices();
+                    if !visible.is_empty() {
+                        self.state.active_panel = visible
+                            .iter()
+                            .find(|&&i| i >= index)
+                            .or_else(|| visible.last())
+                            .copied()
+                            .unwrap_or(0);
+                    }
+                }
+            } else if index < self.state.active_panel && self.state.active_panel > 0 {
+                // If closed panel to the left of active, shift index
+                self.state.active_panel -= 1;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Check channel for directory size calculation results
+    fn check_dir_size_update(&mut self) {
+        use crate::panels::file_manager::FileManager;
+
+        if let Some(rx) = &self.state.dir_size_receiver {
+            // Try to receive result without blocking
+            if let Ok(result) = rx.try_recv() {
+                // Update Info modal if it's open
+                if let Some(ActiveModal::Info(ref mut modal)) = self.state.active_modal {
+                    let t = crate::i18n::t();
+                    let formatted_size = FileManager::format_size_static(result.size);
+                    modal.update_value(t.file_info_size(), formatted_size);
+                }
+
+                // Clear channel
+                self.state.dir_size_receiver = None;
+            }
+        }
+    }
+
+    /// Update spinner in Info modal if it's open
+    fn update_info_modal_spinner(&mut self) {
+        if let Some(ActiveModal::Info(ref mut modal)) = self.state.active_modal {
+            // Update spinner only if calculation is still ongoing
+            if self.state.dir_size_receiver.is_some() {
+                modal.advance_spinner();
+            }
+        }
+    }
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
+}
