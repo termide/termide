@@ -1,14 +1,14 @@
 fn main() {
-    // Убедиться, что tree-sitter C библиотека линкуется правильно
-    // Используем cc crate для компиляции runtime tree-sitter
+    // Ensure that tree-sitter C library links correctly
+    // Using cc crate to compile tree-sitter runtime
 
     let dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
 
-    // Tree-sitter предоставляет собственный runtime через крейт tree-sitter
-    // Нужно убедиться что C runtime правильно скомпилирован
+    // Tree-sitter provides its own runtime through the tree-sitter crate
+    // Need to ensure that C runtime is compiled correctly
 
-    // Для tree-sitter 0.24+ нужно явно включить C runtime
-    // Это делается автоматически через cc crate в дереве зависимостей
+    // For tree-sitter 0.24+ we need to explicitly enable C runtime
+    // This is done automatically through cc crate in the dependency tree
 
     println!("cargo:rerun-if-changed=build.rs");
 }

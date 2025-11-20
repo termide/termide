@@ -122,7 +122,7 @@ impl Default for CellStyle {
     fn default() -> Self {
         Self {
             fg: Color::White,
-            bg: Color::Reset,  // Использовать фон темы по умолчанию
+            bg: Color::Reset,  // Use theme background by default
             bold: false,
             italic: false,
             underline: false,
@@ -440,20 +440,20 @@ impl Perform for VtPerformer {
     fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {}
 
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], _ignore: bool, c: char) {
-        // Обработка приватных sequences (начинаются с '?')
+        // Handle private sequences (start with '?')
         if !intermediates.is_empty() && intermediates[0] == b'?' {
             if let Ok(mut screen) = self.screen.lock() {
-                // Получить номер приватной sequence
+                // Get private sequence number
                 let mode = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(0);
 
                 match (mode, c) {
                     (1049, 'h') => {
-                        // Переключиться на alternate screen и сохранить курсор
+                        // Switch to alternate screen and save cursor
                         screen.saved_cursor = Some(screen.cursor);
                         screen.switch_to_alt_screen();
                     }
                     (1049, 'l') => {
-                        // Вернуться к основному экрану и восстановить курсор
+                        // Return to main screen and restore cursor
                         screen.switch_to_main_screen();
                         if let Some(saved) = screen.saved_cursor {
                             screen.cursor = saved;
@@ -461,19 +461,19 @@ impl Perform for VtPerformer {
                         }
                     }
                     (47, 'h') => {
-                        // Переключиться на alternate screen (без сохранения курсора)
+                        // Switch to alternate screen (without saving cursor)
                         screen.switch_to_alt_screen();
                     }
                     (47, 'l') => {
-                        // Вернуться к основному экрану
+                        // Return to main screen
                         screen.switch_to_main_screen();
                     }
                     (25, 'h') => {
-                        // Показать курсор
+                        // Show cursor
                         screen.cursor_visible = true;
                     }
                     (25, 'l') => {
-                        // Скрыть курсор
+                        // Hide cursor
                         screen.cursor_visible = false;
                     }
                     (1, 'h') => {
@@ -526,14 +526,14 @@ impl Perform for VtPerformer {
                         screen.bracketed_paste_mode = false;
                     }
                     _ => {
-                        // Другие приватные sequences игнорируем
+                        // Ignore other private sequences
                     }
                 }
             }
             return;
         }
 
-        // Игнорировать другие intermediate bytes
+        // Ignore other intermediate bytes
         if !intermediates.is_empty() {
             return;
         }
@@ -541,7 +541,7 @@ impl Perform for VtPerformer {
         if let Ok(mut screen) = self.screen.lock() {
             match c {
                 'H' | 'f' => {
-                    // Переместить курсор
+                    // Move cursor
                     let row = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
                     let col = params.iter().nth(1).and_then(|p| p.first()).copied().unwrap_or(1) as usize;
                     screen.move_cursor(row.saturating_sub(1), col.saturating_sub(1));
@@ -639,19 +639,19 @@ impl Perform for VtPerformer {
                         let buf_cols = buffer[row].len();
                         match param {
                             0 => {
-                                // От курсора до конца строки
+                                // From cursor to end of line
                                 for i in col..buf_cols {
                                     buffer[row][i] = empty_cell.clone();
                                 }
                             }
                             1 => {
-                                // От начала строки до курсора (включительно)
+                                // From start of line to cursor (inclusive)
                                 for i in 0..=col.min(buf_cols.saturating_sub(1)) {
                                     buffer[row][i] = empty_cell.clone();
                                 }
                             }
                             2 => {
-                                // Вся строка
+                                // Entire line
                                 for i in 0..buf_cols {
                                     buffer[row][i] = empty_cell.clone();
                                 }
@@ -671,12 +671,12 @@ impl Perform for VtPerformer {
                     };
 
                     let buffer = screen.active_buffer_mut();
-                    // Сдвинуть символы слева от удаленного
+                    // Shift characters left from deleted position
                     for i in col..(cols - n) {
                         buffer[row][i] = buffer[row][i + n].clone();
                     }
 
-                    // Заполнить освободившееся место пробелами
+                    // Fill freed space with blanks
                     for i in (cols - n)..cols {
                         buffer[row][i] = empty_cell.clone();
                     }
@@ -697,7 +697,7 @@ impl Perform for VtPerformer {
                     }
                 }
                 '@' => {
-                    // ICH - Insert Character (сдвинуть символы вправо)
+                    // ICH - Insert Character (shift characters right)
                     let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
                     let (row, col) = screen.cursor;
                     let cols = screen.cols;
@@ -707,20 +707,20 @@ impl Perform for VtPerformer {
                     };
 
                     let buffer = screen.active_buffer_mut();
-                    // Сдвинуть символы вправо
+                    // Shift characters right
                     if col + n < cols {
                         for i in (col + n..cols).rev() {
                             buffer[row][i] = buffer[row][i - n].clone();
                         }
                     }
 
-                    // Вставить пробелы на освободившиеся места
+                    // Insert blanks at freed positions
                     for i in col..(col + n).min(cols) {
                         buffer[row][i] = empty_cell.clone();
                     }
                 }
                 'L' => {
-                    // IL - Insert Lines (вставить пустые строки)
+                    // IL - Insert Lines (insert blank lines)
                     let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
                     let row = screen.cursor.0;
                     let cols = screen.cols;
@@ -732,20 +732,20 @@ impl Perform for VtPerformer {
 
                     let buffer = screen.active_buffer_mut();
                     if row < buffer.len() {
-                        // Удалить n строк снизу
+                        // Delete n lines from bottom
                         for _ in 0..n.min(rows - row) {
                             if buffer.len() > row {
                                 buffer.pop();
                             }
                         }
-                        // Вставить n пустых строк на позиции курсора
+                        // Insert n blank lines at cursor position
                         for _ in 0..n.min(rows - row) {
                             buffer.insert(row, vec![empty_cell.clone(); cols]);
                         }
                     }
                 }
                 'M' => {
-                    // DL - Delete Lines (удалить строки)
+                    // DL - Delete Lines (delete lines)
                     let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
                     let row = screen.cursor.0;
                     let cols = screen.cols;
@@ -757,20 +757,20 @@ impl Perform for VtPerformer {
 
                     let buffer = screen.active_buffer_mut();
                     if row < buffer.len() {
-                        // Удалить n строк на позиции курсора
+                        // Delete n lines at cursor position
                         for _ in 0..n.min(buffer.len() - row) {
                             if row < buffer.len() {
                                 buffer.remove(row);
                             }
                         }
-                        // Добавить n пустых строк внизу
+                        // Add n blank lines at bottom
                         while buffer.len() < rows {
                             buffer.push(vec![empty_cell.clone(); cols]);
                         }
                     }
                 }
                 'S' => {
-                    // SU - Scroll Up (прокрутить экран вверх)
+                    // SU - Scroll Up (scroll screen up)
                     let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
                     let cols = screen.cols;
                     let rows = screen.rows;
@@ -788,7 +788,7 @@ impl Perform for VtPerformer {
                     }
                 }
                 'T' => {
-                    // SD - Scroll Down (прокрутить экран вниз)
+                    // SD - Scroll Down (scroll screen down)
                     let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
                     let cols = screen.cols;
                     let rows = screen.rows;
@@ -806,25 +806,25 @@ impl Perform for VtPerformer {
                     }
                 }
                 'A' => {
-                    // Курсор вверх
+                    // Cursor up
                     let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
                     screen.wrap_pending = false;
                     screen.cursor.0 = screen.cursor.0.saturating_sub(n);
                 }
                 'B' => {
-                    // Курсор вниз
+                    // Cursor down
                     let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
                     screen.wrap_pending = false;
                     screen.cursor.0 = (screen.cursor.0 + n).min(screen.rows - 1);
                 }
                 'C' => {
-                    // Курсор вправо
+                    // Cursor right
                     let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
                     screen.wrap_pending = false;
                     screen.cursor.1 = (screen.cursor.1 + n).min(screen.cols - 1);
                 }
                 'D' => {
-                    // Курсор влево
+                    // Cursor left
                     let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
                     screen.wrap_pending = false;
                     screen.cursor.1 = screen.cursor.1.saturating_sub(n);
@@ -856,8 +856,8 @@ impl Perform for VtPerformer {
                     screen.cursor.0 = row.saturating_sub(1).min(screen.rows - 1);
                 }
                 'm' => {
-                    // SGR - установить стиль
-                    // Собрать все параметры в один вектор для обработки 38;5;N и 48;5;N
+                    // SGR - set style
+                    // Collect all parameters into one vector to handle 38;5;N and 48;5;N
                     let all_params: Vec<u16> = params.iter().flat_map(|p| p.iter().copied()).collect();
                     let mut i = 0;
                     while i < all_params.len() {
@@ -876,9 +876,9 @@ impl Perform for VtPerformer {
                                 screen.current_style.fg = ansi_to_color(p - 30);
                             }
                             38 => {
-                                // 256-цветный или RGB foreground
+                                // 256-color or RGB foreground
                                 if i + 2 < all_params.len() && all_params[i + 1] == 5 {
-                                    // 38;5;N - 256-цветный
+                                    // 38;5;N - 256-color
                                     let color_idx = all_params[i + 2];
                                     screen.current_style.fg = ansi_256_to_color(color_idx);
                                     i += 2;
@@ -892,16 +892,16 @@ impl Perform for VtPerformer {
                                 }
                             }
                             39 => {
-                                // Сброс foreground на default
+                                // Reset foreground to default
                                 screen.current_style.fg = Color::Reset;
                             }
                             40..=47 => {
                                 screen.current_style.bg = ansi_to_color(p - 40);
                             }
                             48 => {
-                                // 256-цветный или RGB background
+                                // 256-color or RGB background
                                 if i + 2 < all_params.len() && all_params[i + 1] == 5 {
-                                    // 48;5;N - 256-цветный
+                                    // 48;5;N - 256-color
                                     let color_idx = all_params[i + 2];
                                     screen.current_style.bg = ansi_256_to_color(color_idx);
                                     i += 2;
@@ -915,7 +915,7 @@ impl Perform for VtPerformer {
                                 }
                             }
                             49 => {
-                                // Сброс background на default
+                                // Reset background to default
                                 screen.current_style.bg = Color::Reset;
                             }
                             90..=97 => {
@@ -930,18 +930,18 @@ impl Perform for VtPerformer {
                     }
                 }
                 's' => {
-                    // Сохранить позицию курсора
+                    // Save cursor position
                     screen.save_cursor();
                 }
                 'u' => {
-                    // Восстановить позицию курсора
+                    // Restore cursor position
                     screen.restore_cursor();
                 }
                 'r' => {
-                    // DECSTBM - Set scrolling region (игнорируем, но не ломаемся)
+                    // DECSTBM - Set scrolling region (ignore but don't break)
                 }
                 'l' | 'h' => {
-                    // Set/Reset Mode (игнорируем, но не ломаемся)
+                    // Set/Reset Mode (ignore but don't break)
                 }
                 _ => {}
             }
@@ -1160,10 +1160,10 @@ impl Terminal {
         })
     }
 
-    /// Определить доступный shell
+    /// Detect available shell
     fn detect_shell() -> String {
-        // На NixOS сначала проверяем bash-interactive в системном профиле
-        // (обычный bash в nix store может быть без readline)
+        // On NixOS first check bash-interactive in system profile
+        // (regular bash in nix store might be without readline)
         let nixos_shells = [
             "/run/current-system/sw/bin/fish",
             "/run/current-system/sw/bin/zsh",
@@ -1175,14 +1175,14 @@ impl Terminal {
             }
         }
 
-        // Затем проверяем $SHELL
+        // Then check $SHELL
         if let Ok(shell) = std::env::var("SHELL") {
             if std::path::Path::new(&shell).exists() {
                 return shell;
             }
         }
 
-        // Проверяем популярные шеллы на обычных системах
+        // Check popular shells on regular systems
         let shells = ["/usr/bin/fish", "/usr/bin/zsh", "/bin/bash", "/bin/sh"];
         for shell in shells {
             if std::path::Path::new(shell).exists() {
@@ -1193,7 +1193,7 @@ impl Terminal {
         "/bin/sh".to_string()
     }
 
-    /// Получить аргументы для запуска шелла
+    /// Get arguments for launching the shell
     fn get_shell_args(shell_path: &str) -> Vec<&'static str> {
         let shell_name = std::path::Path::new(shell_path)
             .file_name()
@@ -1203,12 +1203,12 @@ impl Terminal {
         match shell_name {
             "fish" => vec!["-l"],       // login shell
             "zsh" => vec!["-l", "-i"],  // login + interactive
-            "bash" => vec![],           // PTY сделает интерактивным автоматически
-            _ => vec![],                // без аргументов
+            "bash" => vec![],           // PTY will make it interactive automatically
+            _ => vec![],                // no arguments
         }
     }
 
-    /// Изменить размер терминала
+    /// Resize terminal
     pub fn resize(&mut self, rows: u16, cols: u16) -> Result<()> {
         self.size = PtySize {
             rows,
@@ -1221,12 +1221,12 @@ impl Terminal {
             pty.resize(self.size)?;
         }
 
-        // Обновить размер виртуального экрана
+        // Update virtual screen size
         if let Ok(mut screen) = self.screen.lock() {
             let new_rows = rows as usize;
             let new_cols = cols as usize;
 
-            // Если размер изменился, создаем новый экран с сохранением содержимого
+            // If size changed, create new screen preserving content
             if screen.rows != new_rows || screen.cols != new_cols {
                 let old_lines = screen.lines.clone();
                 let empty_cell = Cell {
@@ -1234,10 +1234,10 @@ impl Terminal {
                     style: CellStyle::default(),
                 };
 
-                // Создать новый буфер нужного размера
+                // Create new buffer of needed size
                 let mut new_lines = vec![vec![empty_cell.clone(); new_cols]; new_rows];
 
-                // Скопировать старое содержимое
+                // Copy old content
                 for (i, old_line) in old_lines.iter().enumerate() {
                     if i >= new_rows {
                         break;
@@ -1254,7 +1254,7 @@ impl Terminal {
                 screen.rows = new_rows;
                 screen.cols = new_cols;
 
-                // Ограничить позицию курсора новыми размерами
+                // Limit cursor position to new dimensions
                 screen.cursor.0 = screen.cursor.0.min(new_rows.saturating_sub(1));
                 screen.cursor.1 = screen.cursor.1.min(new_cols.saturating_sub(1));
             }
@@ -1263,19 +1263,19 @@ impl Terminal {
         Ok(())
     }
 
-    /// Проверить, жив ли PTY процесс
+    /// Check if PTY process is alive
     pub fn is_alive(&self) -> bool {
         self.is_alive.lock().map(|alive| *alive).unwrap_or(false)
     }
 
-    /// Получить информацию о терминале для статусной строки
+    /// Get terminal info for status bar
     pub fn get_terminal_info(&self) -> TerminalInfo {
-        // Получить user@host
+        // Get user@host
         let username = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
         let hostname = std::env::var("HOSTNAME")
             .or_else(|_| std::env::var("HOST"))
             .unwrap_or_else(|_| {
-                // Попытаться получить hostname через gethostname
+                // Try to get hostname via gethostname
                 let mut buf = [0u8; 256];
                 unsafe {
                     if libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) == 0 {
@@ -1288,12 +1288,12 @@ impl Terminal {
             });
         let user_host = format!("{}@{}", username, hostname);
 
-        // Получить текущую директорию (используем переменную окружения)
+        // Get current directory (using environment variable)
         let cwd = std::env::current_dir()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|_| "~".to_string());
 
-        // Получить информацию о диске для текущей директории
+        // Get disk info for current directory
         let disk_space = self.get_disk_space_for_path(&cwd);
 
         TerminalInfo {
@@ -1303,7 +1303,7 @@ impl Terminal {
         }
     }
 
-    /// Получить информацию о дисковом пространстве для указанного пути
+    /// Get disk space information for specified path
     fn get_disk_space_for_path(&self, path: &str) -> Option<DiskSpaceInfo> {
         use std::ffi::CString;
 
@@ -1325,14 +1325,14 @@ impl Terminal {
         }
     }
 
-    /// Отправить ввод в PTY
+    /// Send input to PTY
     fn send_input(&mut self, data: &[u8]) -> Result<()> {
         self.writer.write_all(data)?;
         self.writer.flush()?;
         Ok(())
     }
 
-    /// Получить выделенный текст
+    /// Get selected text
     fn get_selected_text(&self) -> String {
         let screen = self.screen.lock().unwrap();
         let (start, end) = match (screen.selection_start, screen.selection_end) {
@@ -1340,7 +1340,7 @@ impl Terminal {
             _ => return String::new(),
         };
 
-        // Нормализовать
+        // Normalize
         let (start, end) = if start <= end {
             (start, end)
         } else {
@@ -1368,33 +1368,33 @@ impl Terminal {
                 }
             }
 
-            // Добавить перенос строки между строками (но не в конце)
+            // Add line break between lines (but not at the end)
             if row_idx < end.0 {
                 result.push('\n');
             }
         }
 
-        // Обрезать trailing whitespace с каждой строки
+        // Trim trailing whitespace from each line
         result.lines()
             .map(|line| line.trim_end())
             .collect::<Vec<_>>()
             .join("\n")
     }
 
-    /// Копировать выделенный текст в буфер обмена
+    /// Copy selected text to clipboard
     fn copy_selection_to_clipboard(&self) -> Result<()> {
         let text = self.get_selected_text();
         if text.is_empty() {
             return Ok(());
         }
 
-        // Используем универсальный буфер (включает OSC 52)
+        // Use universal buffer (includes OSC 52)
         crate::clipboard::copy(text);
 
         Ok(())
     }
 
-    /// Отправить событие мыши в PTY (если mouse tracking включён)
+    /// Send mouse event to PTY (if mouse tracking is enabled)
     fn send_mouse_to_pty(&mut self, mouse: &crossterm::event::MouseEvent, panel_area: Rect) -> Result<()> {
         use crossterm::event::{MouseEventKind, MouseButton};
 
@@ -1403,12 +1403,12 @@ impl Terminal {
             (screen.mouse_tracking, screen.sgr_mouse_mode)
         };
 
-        // Если mouse tracking отключён, не отправлять
+        // If mouse tracking is disabled, don't send
         if mouse_tracking == MouseTrackingMode::None {
             return Ok(());
         }
 
-        // 1-based координаты для SGR
+        // 1-based coordinates for SGR
         let inner_x = mouse.column.saturating_sub(panel_area.x + 1) + 1;
         let inner_y = mouse.row.saturating_sub(panel_area.y + 1) + 1;
 
@@ -1469,33 +1469,34 @@ impl Terminal {
         Ok(())
     }
 
-    /// Получить строки для отображения
-    fn get_display_lines(&self, show_cursor: bool) -> Vec<Line> {
+    /// Get lines for display
+    /// Returns: (lines, cursor_position, cursor_shown)
+    fn get_display_lines(&self, show_cursor: bool, theme: &crate::theme::Theme) -> (Vec<Line>, (usize, usize), bool) {
         let screen = self.screen.lock().unwrap();
         let mut lines = Vec::new();
         let buffer = screen.active_buffer();
         let cursor_pos = screen.cursor;
 
-        // Если есть смещение просмотра и мы на основном экране, показываем историю
+        // If there's scroll offset and we're on main screen, show history
         let (display_buffer, actual_cursor_pos, show_cursor_now) = if screen.scroll_offset > 0 && !screen.use_alt_screen {
-            // Собираем виртуальный буфер: scrollback + текущий экран
+            // Assemble virtual buffer: scrollback + current screen
             let total_scrollback = screen.scrollback.len();
             let visible_rows = screen.rows;
 
-            // Вычисляем начальную позицию в общей истории
-            // scroll_offset=1 означает что мы на 1 строку выше текущего экрана
+            // Calculate starting position in full history
+            // scroll_offset=1 means we're 1 line above current screen
             let total_lines = total_scrollback + visible_rows;
             let view_end = total_lines.saturating_sub(screen.scroll_offset);
             let view_start = view_end.saturating_sub(visible_rows);
 
-            // Создаем временный буфер для отображения
+            // Create temporary buffer for display
             let mut temp_buffer = Vec::with_capacity(visible_rows);
             for i in view_start..view_end {
                 if i < total_scrollback {
-                    // Строка из scrollback
+                    // Line from scrollback
                     temp_buffer.push(screen.scrollback[i].clone());
                 } else {
-                    // Строка из текущего буфера
+                    // Line from current buffer
                     let buf_idx = i - total_scrollback;
                     if buf_idx < buffer.len() {
                         temp_buffer.push(buffer[buf_idx].clone());
@@ -1503,10 +1504,11 @@ impl Terminal {
                 }
             }
 
-            // Курсор не показываем при просмотре истории
+            // Don't show cursor when viewing history
             (temp_buffer, cursor_pos, false)
         } else {
-            (buffer.clone(), cursor_pos, show_cursor)
+            // Account for cursor_visible flag, which is controlled by application via ESC sequences
+            (buffer.clone(), cursor_pos, show_cursor && screen.cursor_visible)
         };
 
         for (row_idx, row) in display_buffer.iter().enumerate() {
@@ -1515,7 +1517,7 @@ impl Terminal {
             let mut current_style = None;
 
             for (col_idx, cell) in row.iter().enumerate() {
-                // Применить reverse если установлен
+                // Apply reverse if set
                 let (fg, bg) = if cell.style.reverse {
                     (cell.style.bg, cell.style.fg)
                 } else {
@@ -1532,37 +1534,35 @@ impl Terminal {
                 if cell.style.underline {
                     style = style.add_modifier(Modifier::UNDERLINED);
                 }
+                // Add REVERSED modifier for visual cursors of TUI applications
+                if cell.style.reverse {
+                    style = style.add_modifier(Modifier::REVERSED);
+                }
 
-                // Проверить, попадает ли ячейка в выделение
+                // Check if cell is in selection
                 let is_selected = screen.is_in_selection(row_idx, col_idx);
                 if is_selected {
-                    // Яркий контрастный цвет для выделения
+                    // Bright contrasting color for selection
                     style = Style::default()
                         .fg(Color::Black)
                         .bg(Color::LightYellow);
                 }
 
-                // Если это позиция курсора и нужно его показывать, инвертировать стиль (реверс видео)
+                // If this is cursor position and needs showing, use contrasting theme colors
                 if show_cursor_now && row_idx == actual_cursor_pos.0 && col_idx == actual_cursor_pos.1 {
-                    // Сохранить текущий накопленный текст
+                    // Save current accumulated text
                     if !current_text.is_empty() {
                         spans.push(Span::styled(current_text.clone(), current_style.unwrap()));
                         current_text.clear();
                         current_style = None;
                     }
 
-                    // Поменять fg и bg местами для курсора (классическая инверсия)
-                    let cursor_fg = match bg {
-                        Color::Reset => Color::Black,  // default bg -> black text
-                        c => c                         // bg становится fg
-                    };
-                    let cursor_bg = match fg {
-                        Color::Reset => Color::White,  // default fg -> white bg
-                        c => c                         // fg становится bg
-                    };
+                    // Use fixed contrasting theme colors (like in file manager)
                     let cursor_style = Style::default()
-                        .bg(cursor_bg)
-                        .fg(cursor_fg);
+                        .bg(theme.selection_bg)
+                        .fg(theme.selection_fg)
+                        .add_modifier(Modifier::BOLD);
+
                     let cursor_char = if cell.ch == ' ' || cell.ch == '\0' {
                         ' '
                     } else {
@@ -1572,7 +1572,7 @@ impl Terminal {
                     continue;
                 }
 
-                // Группировать символы с одинаковым стилем
+                // Group characters with same style
                 if current_style.is_none() || current_style == Some(style) {
                     current_text.push(cell.ch);
                     current_style = Some(style);
@@ -1586,28 +1586,30 @@ impl Terminal {
                 }
             }
 
-            // Добавить последний span
+            // Add last span
             if !current_text.is_empty() {
                 spans.push(Span::styled(current_text, current_style.unwrap()));
             }
 
-            // Если строка пустая, курсор на ней и нужно его показывать, добавить курсор
+            // If line is empty, cursor is on it and needs showing, add cursor
             if show_cursor_now && spans.is_empty() && row_idx == actual_cursor_pos.0 {
                 let cursor_style = Style::default()
-                    .bg(Color::White);
+                    .bg(theme.selection_bg)
+                    .fg(theme.selection_fg)
+                    .add_modifier(Modifier::BOLD);
                 spans.push(Span::styled(" ", cursor_style));
             }
 
             lines.push(Line::from(spans));
         }
 
-        lines
+        (lines, cursor_pos, show_cursor_now)
     }
 }
 
 impl Panel for Terminal {
     fn render(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool, panel_index: usize, state: &AppState) {
-        // Обновить размер если изменился
+        // Update size if changed
         let new_rows = area.height.saturating_sub(2);
         let new_cols = area.width.saturating_sub(2);
 
@@ -1615,11 +1617,11 @@ impl Panel for Terminal {
             let _ = self.resize(new_rows, new_cols);
         }
 
-        // Данные читаются в отдельном потоке, просто отрисовываем текущее состояние
-        // Курсор показываем только когда панель в фокусе
-        let display_lines = self.get_display_lines(is_focused);
+        // Data is read in a separate thread, just render current state
+        // Show cursor only when panel is focused
+        let (display_lines, _cursor_pos, _cursor_shown) = self.get_display_lines(is_focused, state.theme);
 
-        // Создать заголовок панели с учетом состояния процесса
+        // Create panel title considering process state
         let panel_title = if self.is_alive() {
             self.terminal_title.clone()
         } else {
@@ -1632,38 +1634,47 @@ impl Panel for Terminal {
         let paragraph = Paragraph::new(display_lines).block(block);
         paragraph.render(area, buf);
 
-        // Заменить Color::Reset и Color::White на цвета темы
+        // Replace Color::Reset and Color::White with theme colors
+        // BUT don't touch cells with special attributes (visual cursors from applications)
         for y in inner.top()..inner.bottom() {
             for x in inner.left()..inner.right() {
                 if let Some(cell) = buf.cell_mut((x, y)) {
                     let current_style = cell.style();
-                    let mut new_style = current_style;
 
-                    // Заменить фон Reset на фон темы
-                    if current_style.bg == Some(Color::Reset) || current_style.bg.is_none() {
-                        new_style.bg = Some(state.theme.background);
+                    // DON'T replace colors for cells with special attributes
+                    // (these are visual cursors and other styling from applications)
+                    let has_modifiers = current_style.add_modifier != Modifier::empty()
+                        || current_style.sub_modifier != Modifier::empty();
+
+                    if !has_modifiers {
+                        let mut new_style = current_style;
+
+                        // Replace Reset background with theme background
+                        if current_style.bg == Some(Color::Reset) || current_style.bg.is_none() {
+                            new_style.bg = Some(state.theme.background);
+                        }
+
+                        // Replace White text with theme text
+                        if current_style.fg == Some(Color::White) || current_style.fg.is_none() {
+                            new_style.fg = Some(state.theme.text_primary);
+                        }
+
+                        cell.set_style(new_style);
                     }
-
-                    // Заменить текст White на текст темы
-                    if current_style.fg == Some(Color::White) || current_style.fg.is_none() {
-                        new_style.fg = Some(state.theme.text_primary);
-                    }
-
-                    cell.set_style(new_style);
                 }
             }
         }
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
-        // Если процесс завершился, не обрабатывать input
+        // If process exited, don't handle input
         if !self.is_alive() {
             return Ok(());
         }
 
-        // Вставка обрабатывается родительским терминалом (Ctrl+Shift+V, Shift+Insert)
+        // Paste is handled by parent terminal (Ctrl+Shift+V, Shift+Insert)
 
-        // Обработать прокрутку истории (Shift+PageUp/PageDown)
+        // Handle history scrolling (Shift+PageUp/PageDown)
         if key.modifiers.contains(KeyModifiers::SHIFT) {
             match key.code {
                 KeyCode::PageUp => {
@@ -1689,14 +1700,14 @@ impl Panel for Terminal {
             }
         }
 
-        // Сбросить прокрутку при вводе
+        // Reset scroll on input
         self.screen.lock().unwrap().reset_scroll();
 
-        // Обработать специальные клавиши
+        // Handle special keys
         match key.code {
             KeyCode::Char(c) => {
                 if key.modifiers.contains(KeyModifiers::CONTROL) {
-                    // Ctrl+C, Ctrl+D и т.д.
+                    // Ctrl+C, Ctrl+D, etc.
                     if c == 'c' {
                         self.send_input(&[3])?; // Ctrl+C
                     } else if c == 'd' {
@@ -1704,19 +1715,24 @@ impl Panel for Terminal {
                     } else if c == 'z' {
                         self.send_input(&[26])?; // Ctrl+Z
                     } else {
-                        // Другие Ctrl комбинации
+                        // Other Ctrl combinations
                         let ctrl_char = (c as u8) & 0x1f;
                         self.send_input(&[ctrl_char])?;
                     }
                 } else {
-                    // Обычный символ
+                    // Regular character
                     let mut buf = [0u8; 4];
                     let s = c.encode_utf8(&mut buf);
                     self.send_input(s.as_bytes())?;
                 }
             }
             KeyCode::Enter => {
-                self.send_input(b"\r")?;
+                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                    // Shift+Enter sends CSI u sequence
+                    self.send_input(b"\x1b[13;2u")?;
+                } else {
+                    self.send_input(b"\r")?;
+                }
             }
             KeyCode::Backspace => {
                 self.send_input(&[127])?; // DEL
@@ -1725,7 +1741,7 @@ impl Panel for Terminal {
                 self.send_input(b"\x1b[3~")?;
             }
             KeyCode::Left => {
-                // В Application Cursor Keys Mode отправляем \x1bO вместо \x1b[
+                // In Application Cursor Keys Mode send \x1bO instead of \x1b[
                 if self.screen.lock().unwrap().application_cursor_keys {
                     self.send_input(b"\x1bOD")?;
                 } else {
@@ -1754,7 +1770,7 @@ impl Panel for Terminal {
                 }
             }
             KeyCode::Home => {
-                // В Application Cursor Keys Mode отправляем \x1bO вместо \x1b[
+                // In Application Cursor Keys Mode send \x1bO instead of \x1b[
                 if self.screen.lock().unwrap().application_cursor_keys {
                     self.send_input(b"\x1bOH")?;
                 } else {
@@ -1777,11 +1793,15 @@ impl Panel for Terminal {
             KeyCode::Tab => {
                 self.send_input(b"\t")?;
             }
+            KeyCode::BackTab => {
+                // Shift+Tab sends CSI Z sequence
+                self.send_input(b"\x1b[Z")?;
+            }
             KeyCode::Esc => {
                 self.send_input(b"\x1b")?;
             }
             KeyCode::F(n) => {
-                // F-клавиши для xterm-256color
+                // F-keys for xterm-256color
                 match n {
                     1 => self.send_input(b"\x1bOP")?,
                     2 => self.send_input(b"\x1bOQ")?,
@@ -1811,64 +1831,64 @@ impl Panel for Terminal {
     fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent, panel_area: Rect) -> Result<()> {
         use crossterm::event::{MouseEventKind, MouseButton};
 
-        // Если процесс завершился, не обрабатывать мышь
+        // If process exited, don't handle mouse
         if !self.is_alive() {
             return Ok(());
         }
 
-        // Вычислить внутреннюю область (без рамки)
+        // Calculate inner area (without border)
         let inner_x_min = panel_area.x + 1;
         let inner_x_max = panel_area.x + panel_area.width.saturating_sub(2);
         let inner_y_min = panel_area.y + 1;
         let inner_y_max = panel_area.y + panel_area.height.saturating_sub(2);
 
-        // Вычислить координаты относительно внутренней области терминала (0-based для выделения)
-        // С ограничением по границам панели
+        // Calculate coordinates relative to terminal inner area (0-based for selection)
+        // Clamped to panel boundaries
         let clamped_col = mouse.column.clamp(inner_x_min, inner_x_max);
         let clamped_row = mouse.row.clamp(inner_y_min, inner_y_max);
         let inner_col = clamped_col.saturating_sub(inner_x_min) as usize;
         let inner_row = clamped_row.saturating_sub(inner_y_min) as usize;
 
-        // Проверить что клик внутри области терминала
+        // Check if click is inside terminal area
         let is_inside = mouse.column >= inner_x_min && mouse.column <= inner_x_max &&
                         mouse.row >= inner_y_min && mouse.row <= inner_y_max;
 
-        // Проверить идёт ли выделение
+        // Check if selection is active
         let selection_active = {
             let screen = self.screen.lock().unwrap();
             screen.selection_start.is_some()
         };
 
-        // Если мышь снаружи и выделение не активно - игнорировать
+        // If mouse is outside and selection is not active - ignore
         if !is_inside && !selection_active {
             return Ok(());
         }
 
-        // Обработка локального выделения текста (приоритет над передачей в PTY)
+        // Handle local text selection (priority over sending to PTY)
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                // Начать выделение только внутри панели
+                // Start selection only inside panel
                 if !is_inside {
                     return Ok(());
                 }
-                // Начать выделение текста
+                // Start text selection
                 let mut screen = self.screen.lock().unwrap();
                 screen.selection_start = Some((inner_row, inner_col));
-                screen.selection_end = Some((inner_row, inner_col)); // Установить сразу для видимости
+                screen.selection_end = Some((inner_row, inner_col)); // Set immediately for visibility
                 drop(screen);
 
-                // Также передать клик в PTY если mouse tracking включён
+                // Also send click to PTY if mouse tracking is enabled
                 self.send_mouse_to_pty(&mouse, panel_area)?;
             }
             MouseEventKind::Drag(MouseButton::Left) => {
-                // Обновить конец выделения (используем ограниченные координаты)
+                // Update selection end (using clamped coordinates)
                 let mut screen = self.screen.lock().unwrap();
                 if screen.selection_start.is_some() {
                     screen.selection_end = Some((inner_row, inner_col));
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => {
-                // Зафиксировать выделение (используем ограниченные координаты)
+                // Finalize selection (using clamped coordinates)
                 {
                     let mut screen = self.screen.lock().unwrap();
                     if screen.selection_start.is_some() {
@@ -1876,31 +1896,31 @@ impl Panel for Terminal {
                     }
                 }
 
-                // Копировать выделенный текст в CLIPBOARD
+                // Copy selected text to CLIPBOARD
                 self.copy_selection_to_clipboard()?;
 
-                // Очистить выделение после копирования
+                // Clear selection after copying
                 {
                     let mut screen = self.screen.lock().unwrap();
                     screen.selection_start = None;
                     screen.selection_end = None;
                 }
 
-                // Передать отпускание в PTY если mouse tracking включён (только если внутри)
+                // Send release to PTY if mouse tracking is enabled (only if inside)
                 if is_inside {
                     self.send_mouse_to_pty(&mouse, panel_area)?;
                 }
             }
-            // Прокрутка колёсиком мыши - для просмотра истории
+            // Mouse wheel scrolling - for viewing history
             MouseEventKind::ScrollUp => {
-                // При прокрутке вверх - показать историю
+                // On scroll up - show history
                 self.screen.lock().unwrap().scroll_view_up(3);
             }
             MouseEventKind::ScrollDown => {
-                // При прокрутке вниз - вернуться к текущему
+                // On scroll down - return to current
                 self.screen.lock().unwrap().scroll_view_down(3);
             }
-            // Остальные события мыши передаём в PTY
+            // Other mouse events send to PTY
             _ => {
                 self.send_mouse_to_pty(&mouse, panel_area)?;
             }
@@ -1910,12 +1930,12 @@ impl Panel for Terminal {
     }
 
     fn should_auto_close(&self) -> bool {
-        // Автоматически закрыть панель если процесс завершился
+        // Automatically close panel if process exited
         !self.is_alive()
     }
 
     fn needs_close_confirmation(&self) -> Option<String> {
-        // Если процесс жив и есть дочерние процессы - запросить подтверждение
+        // If process is alive and has child processes - request confirmation
         if self.is_alive() && self.has_running_processes() {
             Some("Kill running processes?".to_string())
         } else {
@@ -1924,14 +1944,14 @@ impl Panel for Terminal {
     }
 
     fn captures_escape(&self) -> bool {
-        // Если есть запущенные процессы, Escape передаётся им, а не закрывает панель
+        // If there are running processes, Escape is passed to them, not closing the panel
         self.is_alive() && self.has_running_processes()
     }
 
     fn has_running_processes(&self) -> bool {
-        // Проверить есть ли дочерние процессы у shell
+        // Check if shell has child processes
         if let Some(pid) = self.shell_pid {
-            // Читаем /proc/{pid}/task/{pid}/children
+            // Read /proc/{pid}/task/{pid}/children
             let children_path = format!("/proc/{}/task/{}/children", pid, pid);
             if let Ok(children) = std::fs::read_to_string(&children_path) {
                 return !children.trim().is_empty();
@@ -1944,18 +1964,18 @@ impl Panel for Terminal {
         if let Some(pid) = self.shell_pid {
             let pid = Pid::from_raw(pid as i32);
 
-            // Отправить SIGTERM группе процессов
+            // Send SIGTERM to process group
             let _ = signal::killpg(pid, Signal::SIGTERM);
 
-            // Подождать немного
+            // Wait a bit
             std::thread::sleep(std::time::Duration::from_millis(100));
 
-            // Если процесс ещё жив - SIGKILL
+            // If process still alive - SIGKILL
             if self.is_alive() {
                 let _ = signal::killpg(pid, Signal::SIGKILL);
             }
 
-            // Дождаться завершения чтобы избежать зомби
+            // Wait for completion to avoid zombies
             let _ = self.child.wait();
         }
     }
@@ -1963,7 +1983,7 @@ impl Panel for Terminal {
 
 impl Drop for Terminal {
     fn drop(&mut self) {
-        // Корректно завершить процессы при удалении терминала
+        // Properly terminate processes when dropping terminal
         if self.is_alive() {
             self.kill_processes();
         }
