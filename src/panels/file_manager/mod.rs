@@ -61,6 +61,8 @@ pub(crate) struct FileEntry {
     pub name: String,
     pub is_dir: bool,
     pub is_hidden: bool,
+    pub is_symlink: bool,
+    pub is_executable: bool,
     pub git_status: GitStatus,
     pub size: Option<u64>,
     pub modified: Option<std::time::SystemTime>,
@@ -124,6 +126,8 @@ impl FileManager {
                 name: "..".to_string(),
                 is_dir: true,
                 is_hidden: false,
+                is_symlink: false,
+                is_executable: false,
                 git_status: GitStatus::Unmodified,
                 size: None,
                 modified: None,
@@ -143,6 +147,22 @@ impl FileManager {
                         .map(|cache| cache.get_status(&name))
                         .unwrap_or(GitStatus::Unmodified);
 
+                    // Check if this is a symlink (use symlink_metadata to not follow links)
+                    let is_symlink = if let Ok(link_metadata) = fs::symlink_metadata(entry.path()) {
+                        link_metadata.is_symlink()
+                    } else {
+                        false
+                    };
+
+                    // Check if file is executable (Unix permissions)
+                    #[cfg(unix)]
+                    let is_executable = {
+                        use std::os::unix::fs::PermissionsExt;
+                        metadata.permissions().mode() & 0o111 != 0
+                    };
+                    #[cfg(not(unix))]
+                    let is_executable = false;
+
                     // Get size (files only) and modification time
                     let size = if metadata.is_file() { Some(metadata.len()) } else { None };
                     let modified = metadata.modified().ok();
@@ -151,6 +171,8 @@ impl FileManager {
                         name,
                         is_dir: metadata.is_dir(),
                         is_hidden,
+                        is_symlink,
+                        is_executable,
                         git_status,
                         size,
                         modified,

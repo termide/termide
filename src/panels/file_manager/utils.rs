@@ -11,36 +11,52 @@ use super::FileEntry;
 
 /// Get icon for file/directory
 pub fn get_icon(entry: &FileEntry) -> &'static str {
-    // For deleted files, show red cross
+    // For deleted files, show cross
     if entry.git_status == GitStatus::Deleted {
         return "✗";
     }
 
+    // Parent directory
     if entry.name == ".." {
         return "↑";
     }
 
-    if entry.is_dir {
-        return "📁";
+    // Symlink to directory
+    if entry.is_symlink && entry.is_dir {
+        return "⬅";
     }
 
-    // Determine icon by extension
-    if let Some(ext) = entry.name.split('.').last() {
-        match ext.to_lowercase().as_str() {
-            "rs" => "🦀",
-            "toml" => "⚙",
-            "md" => "📝",
-            "txt" => "📄",
-            "json" => "{}",
-            "yaml" | "yml" => "📋",
-            "sh" | "bash" => "🔧",
-            "py" => "🐍",
-            "js" | "ts" => "📜",
-            _ => "📄",
-        }
-    } else {
-        "📄"
+    // Symlink to file
+    if entry.is_symlink {
+        return "←";
     }
+
+    // Directory
+    if entry.is_dir {
+        return "▸";
+    }
+
+    // Determine file type by extension
+    let path = Path::new(&entry.name);
+    let highlighter = crate::syntax_highlighter::global_highlighter();
+
+    // Text files with syntax highlighting support
+    if highlighter.language_for_file(path).is_some() {
+        return "●";
+    }
+
+    // Text files without highlighting (txt, log, conf, etc.)
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        match ext.to_lowercase().as_str() {
+            "txt" | "log" | "conf" | "cfg" | "ini" | "xml" | "properties" | "env" => {
+                return "○";
+            }
+            _ => {}
+        }
+    }
+
+    // All other files (binary, executable, unknown)
+    "▫"
 }
 
 /// Truncate file name to specified length (in characters, not bytes)
