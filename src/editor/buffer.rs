@@ -91,14 +91,23 @@ impl TextBuffer {
         let mut contents = String::new();
 
         // Collect text with appropriate line endings
-        for (i, line) in self.rope.lines().enumerate() {
-            if i > 0 {
+        // rope.lines() returns lines with '\n' at the end (except possibly the last line)
+        // We need to replace '\n' with the appropriate line ending
+        for line in self.rope.lines() {
+            let line_str = line.to_string();
+
+            // If line ends with '\n', replace it with the appropriate line ending
+            if line_str.ends_with('\n') {
+                let line_without_newline = &line_str[..line_str.len() - 1];
+                contents.push_str(line_without_newline);
                 match self.line_ending {
                     LineEnding::LF => contents.push('\n'),
                     LineEnding::CRLF => contents.push_str("\r\n"),
                 }
+            } else {
+                // Last line without '\n' - add as is
+                contents.push_str(&line_str);
             }
-            contents.push_str(&line.to_string());
         }
 
         std::fs::write(path, contents)
@@ -444,12 +453,76 @@ mod tests {
     #[test]
     fn test_unicode_handling() {
         let mut buf = TextBuffer::new();
-        buf.insert(&Cursor::at(0, 0), "привет").unwrap();
+        buf.insert(&Cursor::at(0, 0), "hello").unwrap();
 
         assert_eq!(buf.line_len_graphemes(0), 6);
 
         let cursor = Cursor::at(0, 3);
         let char_idx = buf.cursor_to_char_idx(&cursor).unwrap();
         assert_eq!(char_idx, 3);
+    }
+
+    #[test]
+    fn test_save_load_cycle() {
+        use std::fs;
+        use tempfile::NamedTempFile;
+
+        // Create a temporary file
+        let temp_file = NamedTempFile::new().unwrap();
+        let temp_path = temp_file.path();
+
+        // Create a buffer with some content
+        let mut buf = TextBuffer::new();
+        buf.insert(&Cursor::at(0, 0), "line 1\nline 2\nline 3").unwrap();
+
+        // Save the buffer
+        buf.save_to(temp_path).unwrap();
+
+        // Read the saved content
+        let saved_content = fs::read_to_string(temp_path).unwrap();
+        assert_eq!(saved_content, "line 1\nline 2\nline 3");
+
+        // Load the file back
+        let mut buf2 = TextBuffer::from_file(temp_path).unwrap();
+
+        // Save it again to a different temp file
+        let temp_file2 = NamedTempFile::new().unwrap();
+        let temp_path2 = temp_file2.path();
+        buf2.save_to(temp_path2).unwrap();
+
+        // Read the re-saved content
+        let resaved_content = fs::read_to_string(temp_path2).unwrap();
+
+        // They should be identical
+        assert_eq!(saved_content, resaved_content, "Content changed after save-load-save cycle");
+    }
+
+    #[test]
+    fn test_save_preserves_line_count() {
+        use std::fs;
+        use tempfile::NamedTempFile;
+
+        let temp_file = NamedTempFile::new().unwrap();
+        let temp_path = temp_file.path();
+
+        // Create buffer with 5 lines
+        let mut buf = TextBuffer::new();
+        buf.insert(&Cursor::at(0, 0), "1\n2\n3\n4\n5").unwrap();
+
+        // Save
+        buf.save_to(temp_path).unwrap();
+        let content1 = fs::read_to_string(temp_path).unwrap();
+        let lines1: Vec<&str> = content1.lines().collect();
+        assert_eq!(lines1.len(), 5, "First save should have 5 lines");
+
+        // Load and save again
+        let mut buf2 = TextBuffer::from_file(temp_path).unwrap();
+        buf2.save_to(temp_path).unwrap();
+        let content2 = fs::read_to_string(temp_path).unwrap();
+        let lines2: Vec<&str> = content2.lines().collect();
+        assert_eq!(lines2.len(), 5, "Second save should still have 5 lines");
+
+        // Verify content is identical
+        assert_eq!(content1, content2, "Content should not change across saves");
     }
 }
