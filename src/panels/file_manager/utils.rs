@@ -56,8 +56,8 @@ pub fn get_attribute(entry: &FileEntry, is_selected: bool) -> &'static str {
         return "✓";
     }
 
-    // Executable has priority over read-only
-    if entry.is_executable {
+    // Executable has priority over read-only (but not for directories)
+    if entry.is_executable && !entry.is_dir {
         return "X";
     }
 
