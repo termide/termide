@@ -64,6 +64,8 @@ pub struct FileManager {
     drag_start_index: Option<usize>,
     /// Drag mode (Shift/Ctrl)
     drag_mode: Option<DragMode>,
+    /// Set of items already processed during current drag (to avoid re-toggling)
+    dragged_items: HashSet<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +107,7 @@ impl FileManager {
             dir_size_receiver: None,
             drag_start_index: None,
             drag_mode: None,
+            dragged_items: HashSet::new(),
         };
         let _ = fm.load_directory();
         fm
@@ -129,6 +132,7 @@ impl FileManager {
         // Clear drag state
         self.drag_start_index = None;
         self.drag_mode = None;
+        self.dragged_items.clear();
 
         // Update displayed title (will be truncated during rendering if needed)
         self.display_title = self.current_path.display().to_string();
@@ -661,6 +665,13 @@ impl Panel for FileManager {
                 }
                 return Ok(());
             }
+            MouseEventKind::Up(MouseButton::Left) => {
+                // End drag - handle this ALWAYS, even if outside panel
+                self.drag_start_index = None;
+                self.drag_mode = None;
+                self.dragged_items.clear();
+                return Ok(());
+            }
             _ => {}
         }
 
@@ -690,8 +701,10 @@ impl Panel for FileManager {
                         // Shift+click - select range from selected to clicked_index
                         let start = self.selected.min(clicked_index);
                         let end = self.selected.max(clicked_index);
+                        self.dragged_items.clear();
                         for i in start..=end {
                             self.selected_items.insert(i);
+                            self.dragged_items.insert(i);
                         }
                         self.selected = clicked_index;
                         self.drag_start_index = Some(clicked_index);
@@ -706,6 +719,9 @@ impl Panel for FileManager {
                         self.selected = clicked_index;
                         self.drag_start_index = Some(clicked_index);
                         self.drag_mode = Some(DragMode::Toggle);
+                        // Track this item as already processed during drag
+                        self.dragged_items.clear();
+                        self.dragged_items.insert(clicked_index);
                     } else {
                         // Check for double click
                         let now = std::time::Instant::now();
@@ -743,37 +759,29 @@ impl Panel for FileManager {
                     let current_index = self.scroll_offset + relative_row;
 
                     if current_index < self.entries.len() {
-                        if let Some(start_index) = self.drag_start_index {
-                            let range_start = start_index.min(current_index);
-                            let range_end = start_index.max(current_index);
-
-                            match drag_mode {
-                                DragMode::Select => {
-                                    // Shift+drag - select range
-                                    for i in range_start..=range_end {
-                                        self.selected_items.insert(i);
-                                    }
-                                }
-                                DragMode::Toggle => {
-                                    // Ctrl+drag - toggle range
-                                    for i in range_start..=range_end {
-                                        if self.selected_items.contains(&i) {
-                                            self.selected_items.remove(&i);
-                                        } else {
-                                            self.selected_items.insert(i);
-                                        }
-                                    }
+                        match drag_mode {
+                            DragMode::Select => {
+                                // Shift+drag - select current item if not already processed
+                                if !self.dragged_items.contains(&current_index) {
+                                    self.selected_items.insert(current_index);
+                                    self.dragged_items.insert(current_index);
                                 }
                             }
-                            self.selected = current_index;
+                            DragMode::Toggle => {
+                                // Ctrl+drag - toggle current item if not already processed
+                                if !self.dragged_items.contains(&current_index) {
+                                    if self.selected_items.contains(&current_index) {
+                                        self.selected_items.remove(&current_index);
+                                    } else {
+                                        self.selected_items.insert(current_index);
+                                    }
+                                    self.dragged_items.insert(current_index);
+                                }
+                            }
                         }
+                        self.selected = current_index;
                     }
                 }
-            }
-            MouseEventKind::Up(MouseButton::Left) => {
-                // End drag
-                self.drag_start_index = None;
-                self.drag_mode = None;
             }
             _ => {}
         }
