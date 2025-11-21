@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::git::{GitStatusUpdate, GitWatcher};
 use crate::theme::Theme;
 use crate::ui::modal::{ConfirmModal, ConflictModal, InfoModal, InputModal, OverwriteModal, SelectModal};
 use std::path::PathBuf;
@@ -6,6 +7,7 @@ use std::collections::{VecDeque, HashMap};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::mpsc;
+use std::thread::JoinHandle;
 
 /// Message about background directory size calculation result
 #[derive(Debug)]
@@ -377,6 +379,10 @@ pub struct AppState {
     pub logging: LoggingState,
     /// Receiver channel for background directory size calculation results
     pub dir_size_receiver: Option<mpsc::Receiver<DirSizeResult>>,
+    /// Receiver channel for git status update events
+    pub git_watcher_receiver: Option<mpsc::Receiver<GitStatusUpdate>>,
+    /// Git watcher instance (kept alive for cleanup)
+    pub git_watcher: Option<GitWatcher>,
     /// Current theme
     pub theme: &'static Theme,
     /// Application configuration
@@ -428,6 +434,8 @@ impl AppState {
             pending_action: None,
             logging,
             dir_size_receiver: None,
+            git_watcher_receiver: None,
+            git_watcher: None,
             theme,
             config,
             panel_weights: HashMap::new(),

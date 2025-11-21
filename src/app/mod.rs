@@ -29,6 +29,18 @@ impl App {
         // Set active panel to FileManager (panel 0) by default
         state.active_panel = 0;
 
+        // Initialize git watcher for automatic status updates
+        match crate::git::create_git_watcher() {
+            Ok((watcher, receiver)) => {
+                state.git_watcher = Some(watcher);
+                state.git_watcher_receiver = Some(receiver);
+                state.log_info("Git watcher initialized");
+            }
+            Err(e) => {
+                state.log_error(&format!("Failed to initialize git watcher: {}", e));
+            }
+        }
+
         Self {
             state,
             panels: PanelContainer::new(),
@@ -63,6 +75,9 @@ impl App {
                 Event::Tick => {
                     // Check channel for directory size calculation results
                     self.check_dir_size_update();
+
+                    // Check channel for git status update events
+                    self.check_git_status_update();
 
                     // Update spinner in Info modal if it's open
                     self.update_info_modal_spinner();
@@ -140,6 +155,55 @@ impl App {
                 // Clear channel
                 self.state.dir_size_receiver = None;
             }
+        }
+    }
+
+    /// Check channel for git status update events
+    fn check_git_status_update(&mut self) {
+        use crate::panels::file_manager::FileManager;
+
+        // First, register all FileManager repositories with watcher (lazy registration)
+        if let Some(watcher) = &mut self.state.git_watcher {
+            for i in 0..self.panels.count() {
+                if let Some(panel) = self.panels.get_mut(i) {
+                    if let Some(fm) = (panel as &mut dyn std::any::Any).downcast_mut::<FileManager>() {
+                        // Find repository root for this FileManager's current path
+                        if let Some(repo_root) = Self::find_git_repo_root(fm.current_path()) {
+                            // Register repository (idempotent - safe to call multiple times)
+                            let _ = watcher.watch_repository(repo_root);
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(rx) = &self.state.git_watcher_receiver {
+            // Process all pending updates (drain channel)
+            while let Ok(update) = rx.try_recv() {
+                // Update all FileManager panels showing this repository or its subdirectories
+                for i in 0..self.panels.count() {
+                    if let Some(panel) = self.panels.get_mut(i) {
+                        // Try to downcast to FileManager
+                        if let Some(fm) = (panel as &mut dyn std::any::Any).downcast_mut::<FileManager>() {
+                            // Check if this panel is showing a path within the updated repository
+                            if fm.current_path().starts_with(&update.repo_path) {
+                                let _ = fm.update_git_status();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Find git repository root by walking up from a path
+    fn find_git_repo_root(path: &std::path::Path) -> Option<std::path::PathBuf> {
+        let mut current = path;
+        loop {
+            if current.join(".git").exists() {
+                return Some(current.to_path_buf());
+            }
+            current = current.parent()?;
         }
     }
 

@@ -243,6 +243,40 @@ impl FileManager {
         Ok(())
     }
 
+    /// Update git status for current directory without reloading entire directory
+    pub fn update_git_status(&mut self) -> Result<()> {
+        // Refresh git status cache
+        self.git_status_cache = get_git_status(&self.current_path);
+
+        // Update git_status for each entry (except "..")
+        for entry in &mut self.entries {
+            if entry.name == ".." {
+                continue;
+            }
+
+            entry.git_status = if entry.is_dir {
+                // For directories: check recursively for nested changes
+                self.git_status_cache
+                    .as_ref()
+                    .map(|cache| cache.get_directory_status(&entry.name))
+                    .unwrap_or(GitStatus::Unmodified)
+            } else {
+                // For files: use direct status
+                self.git_status_cache
+                    .as_ref()
+                    .map(|cache| cache.get_status(&entry.name))
+                    .unwrap_or(GitStatus::Unmodified)
+            };
+        }
+
+        Ok(())
+    }
+
+    /// Get current directory path
+    pub fn current_path(&self) -> &std::path::Path {
+        &self.current_path
+    }
+
     /// Enter directory or open file
     fn enter(&mut self) -> Result<()> {
         if let Some(entry) = self.entries.get(self.selected) {

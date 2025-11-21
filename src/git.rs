@@ -3,6 +3,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
+mod watcher;
+pub use watcher::{create_git_watcher, GitStatusUpdate, GitWatcher};
+
 /// Global flag for git availability on system
 static GIT_AVAILABLE: OnceLock<bool> = OnceLock::new();
 
