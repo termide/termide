@@ -162,11 +162,20 @@ impl FileManager {
                     let name = entry.file_name().to_string_lossy().to_string();
                     let is_hidden = name.starts_with('.');
 
-                    // Determine git status for this file
-                    let git_status = self.git_status_cache
-                        .as_ref()
-                        .map(|cache| cache.get_status(&name))
-                        .unwrap_or(GitStatus::Unmodified);
+                    // Determine git status for this entry
+                    let git_status = if metadata.is_dir() {
+                        // For directories: check recursively for nested changes
+                        self.git_status_cache
+                            .as_ref()
+                            .map(|cache| cache.get_directory_status(&name))
+                            .unwrap_or(GitStatus::Unmodified)
+                    } else {
+                        // For files: use direct status
+                        self.git_status_cache
+                            .as_ref()
+                            .map(|cache| cache.get_status(&name))
+                            .unwrap_or(GitStatus::Unmodified)
+                    };
 
                     // Check if this is a symlink (use symlink_metadata to not follow links)
                     let is_symlink = if let Ok(link_metadata) = fs::symlink_metadata(entry.path()) {

@@ -152,4 +152,39 @@ impl GitStatusCache {
     pub fn is_ignored(&self, file_name: &str) -> bool {
         self.ignored_files.contains(&PathBuf::from(file_name))
     }
+
+    /// Check if directory contains any changes recursively
+    pub fn has_changes_in_directory(&self, dir_name: &str) -> bool {
+        let dir_prefix = format!("{}/", dir_name);
+
+        self.status_map
+            .iter()
+            .any(|(path, status)| {
+                // Check if path is inside this directory
+                if let Some(path_str) = path.to_str() {
+                    path_str.starts_with(&dir_prefix) &&
+                    *status != GitStatus::Unmodified &&
+                    *status != GitStatus::Ignored
+                } else {
+                    false
+                }
+            })
+    }
+
+    /// Get status for directory (checks nested files recursively)
+    pub fn get_directory_status(&self, dir_name: &str) -> GitStatus {
+        // First check if directory itself has status
+        if let Some(&status) = self.status_map.get(&PathBuf::from(dir_name)) {
+            if status != GitStatus::Unmodified {
+                return status;
+            }
+        }
+
+        // Then check if any nested files have changes
+        if self.has_changes_in_directory(dir_name) {
+            return GitStatus::Modified;
+        }
+
+        GitStatus::Unmodified
+    }
 }
