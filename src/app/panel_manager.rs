@@ -36,8 +36,8 @@ impl App {
         if should_add_welcome {
             let welcome = Welcome::new();
             self.panels.add_panel(Box::new(welcome));
-            let welcome_index = self.panels.count() - 1;
-            self.state.active_panel = welcome_index;
+            // Focus returns to file manager (panel 0) when welcome panel is added
+            self.state.active_panel = 0;
             return;
         }
 
