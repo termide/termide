@@ -45,8 +45,8 @@ pub const MAX_DIRECTORY_COPY_DEPTH: usize = 100;
 /// Maximum number of log entries
 pub const MAX_LOG_ENTRIES: usize = 1000;
 
-/// Event update interval in milliseconds
-pub const EVENT_HANDLER_INTERVAL_MS: u64 = 100;
+/// Event update interval in milliseconds (42ms = ~24 FPS)
+pub const EVENT_HANDLER_INTERVAL_MS: u64 = 42;
 
 /// Double-click detection interval in milliseconds
 pub const DOUBLE_CLICK_INTERVAL_MS: u128 = 500;
