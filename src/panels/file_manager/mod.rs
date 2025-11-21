@@ -63,6 +63,7 @@ pub(crate) struct FileEntry {
     pub is_hidden: bool,
     pub is_symlink: bool,
     pub is_executable: bool,
+    pub is_readonly: bool,
     pub git_status: GitStatus,
     pub size: Option<u64>,
     pub modified: Option<std::time::SystemTime>,
@@ -128,6 +129,7 @@ impl FileManager {
                 is_hidden: false,
                 is_symlink: false,
                 is_executable: false,
+                is_readonly: false,
                 git_status: GitStatus::Unmodified,
                 size: None,
                 modified: None,
@@ -163,6 +165,16 @@ impl FileManager {
                     #[cfg(not(unix))]
                     let is_executable = false;
 
+                    // Check if file is read-only (Unix permissions)
+                    #[cfg(unix)]
+                    let is_readonly = {
+                        use std::os::unix::fs::PermissionsExt;
+                        let mode = metadata.permissions().mode();
+                        (mode & 0o200) == 0  // owner write bit
+                    };
+                    #[cfg(not(unix))]
+                    let is_readonly = metadata.permissions().readonly();
+
                     // Get size (files only) and modification time
                     let size = if metadata.is_file() { Some(metadata.len()) } else { None };
                     let modified = metadata.modified().ok();
@@ -173,6 +185,7 @@ impl FileManager {
                         is_hidden,
                         is_symlink,
                         is_executable,
+                        is_readonly,
                         git_status,
                         size,
                         modified,

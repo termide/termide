@@ -51,22 +51,20 @@ impl FileManager {
             let is_selected = self.selected_items.contains(&i);
             let is_cursor = i == self.selected;
 
-            let icon = if is_selected {
-                utils::normalize_icon("✓")
-            } else {
-                utils::normalize_icon(utils::get_icon(entry))
-            };
-            let icon_width = icon.width();
+            let attr = utils::get_attribute(entry, is_selected);
+            let icon = utils::get_icon(entry);
+            let attr_width = 1;  // always 1 character
+            let icon_width = 1;  // always 1 character
             let dir_prefix = if entry.is_dir && entry.name != ".." { "/" } else { "" };
             let prefix_width = dir_prefix.width();
 
             // Calculate maximum visual width of name WITHOUT prefix, considering display mode
             let max_name_len = if show_extended {
-                // For wide mode: subtract icon, space, prefix, two columns and two separators
-                available_width.saturating_sub(icon_width + 1 + prefix_width + SEPARATOR_WIDTH + SIZE_COLUMN_WIDTH + SEPARATOR_WIDTH + TIME_COLUMN_WIDTH)
+                // For wide mode: attr + space + icon + space + prefix + two columns and two separators
+                available_width.saturating_sub(attr_width + 1 + icon_width + 1 + prefix_width + SEPARATOR_WIDTH + SIZE_COLUMN_WIDTH + SEPARATOR_WIDTH + TIME_COLUMN_WIDTH)
             } else {
-                // For normal mode: only icon, space and prefix
-                available_width.saturating_sub(icon_width + 1 + prefix_width)
+                // For normal mode: attr + space + icon + space + prefix
+                available_width.saturating_sub(attr_width + 1 + icon_width + 1 + prefix_width)
             };
 
             let name = utils::truncate_name(&entry.name, max_name_len);
@@ -90,11 +88,13 @@ impl FileManager {
                 (Style::default(), Style::default().fg(fg_color))
             };
 
-            let icon_style = if is_selected {
+            let attr_style = if is_selected {
                 Style::default().fg(theme.selected_item).add_modifier(Modifier::BOLD)
             } else {
                 fg_style
             };
+
+            let icon_style = fg_style;
 
             if show_extended {
                 // Extended mode with columns
@@ -113,6 +113,8 @@ impl FileManager {
                 let time_str = utils::format_modified_time(entry.modified);
 
                 lines.push(Line::from(vec![
+                    Span::styled(attr, attr_style),
+                    Span::styled(" ", bg_style),
                     Span::styled(icon, icon_style),
                     Span::styled(" ", bg_style),
                     Span::styled(full_name, fg_style),
@@ -124,12 +126,13 @@ impl FileManager {
                 ]));
             } else {
                 // Normal mode without columns
-                // Use name_width + prefix_width instead of full_name.width() for consistency
-                let content_width = icon_width + 1 + prefix_width + name_width;
+                let content_width = attr_width + 1 + icon_width + 1 + prefix_width + name_width;
                 let padding_len = available_width.saturating_sub(content_width);
                 let padding = " ".repeat(padding_len);
 
                 lines.push(Line::from(vec![
+                    Span::styled(attr, attr_style),
+                    Span::styled(" ", bg_style),
                     Span::styled(icon, icon_style),
                     Span::styled(" ", bg_style),
                     Span::styled(full_name, fg_style),

@@ -9,9 +9,9 @@ use crate::git::GitStatus;
 
 use super::FileEntry;
 
-/// Get icon for file/directory
+/// Get icon for file/directory (1 character)
 pub fn get_icon(entry: &FileEntry) -> &'static str {
-    // For deleted files, show cross
+    // Git deleted
     if entry.git_status == GitStatus::Deleted {
         return "✗";
     }
@@ -21,42 +21,51 @@ pub fn get_icon(entry: &FileEntry) -> &'static str {
         return "↑";
     }
 
-    // Symlink to directory
-    if entry.is_symlink && entry.is_dir {
-        return "⬅";
-    }
-
-    // Symlink to file
-    if entry.is_symlink {
-        return "←";
-    }
-
     // Directory
     if entry.is_dir {
-        return "▸";
+        return if entry.is_symlink { "▷" } else { "▶" };
     }
 
     // Determine file type by extension
     let path = Path::new(&entry.name);
     let highlighter = crate::syntax_highlighter::global_highlighter();
 
-    // Text files with syntax highlighting support
+    // File with syntax highlighting
     if highlighter.language_for_file(path).is_some() {
-        return "●";
+        return if entry.is_symlink { "○" } else { "●" };
     }
 
-    // Text files without highlighting (txt, log, conf, etc.)
+    // Known text extensions without highlighting
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         match ext.to_lowercase().as_str() {
             "txt" | "log" | "conf" | "cfg" | "ini" | "xml" | "properties" | "env" => {
-                return "○";
+                return if entry.is_symlink { "▫" } else { "▪" };
             }
             _ => {}
         }
     }
 
-    // All other files (binary, executable, unknown)
-    "▫"
+    // Binary / unknown files
+    if entry.is_symlink { "◇" } else { "◆" }
+}
+
+/// Get attribute character (R/X flag or selection checkmark)
+/// Returns 1 character
+pub fn get_attribute(entry: &FileEntry, is_selected: bool) -> &'static str {
+    if is_selected {
+        return "✓";
+    }
+
+    // Executable has priority over read-only
+    if entry.is_executable {
+        return "X";
+    }
+
+    if entry.is_readonly {
+        return "R";
+    }
+
+    " "
 }
 
 /// Truncate file name to specified length (in characters, not bytes)
@@ -155,18 +164,4 @@ pub fn format_modified_time(time: Option<SystemTime>) -> String {
         .and_then(|d| chrono::DateTime::from_timestamp(d.as_secs() as i64, 0))
         .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
         .unwrap_or_else(|| "                   ".to_string())
-}
-
-/// Normalize icon to fixed visual width (2 terminal columns)
-/// Adds spaces so all icons occupy the same visual width
-pub fn normalize_icon(icon: &str) -> String {
-    const TARGET_WIDTH: usize = 2;
-    let current_width = icon.width();
-
-    if current_width < TARGET_WIDTH {
-        let padding = " ".repeat(TARGET_WIDTH - current_width);
-        format!("{}{}", icon, padding)
-    } else {
-        icon.to_string()
-    }
 }
