@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Sender};
 use std::time::Duration;
 
-use notify_debouncer_mini::{new_debouncer, notify::*, Debouncer, DebouncedEventKind};
+use notify_debouncer_mini::{new_debouncer, notify::*, Debouncer};
 
 /// Event sent when git status needs to be updated
 #[derive(Debug, Clone)]
@@ -24,16 +24,15 @@ impl GitWatcher {
     /// Debounces events to minimum 300ms intervals
     pub fn new(tx: Sender<GitStatusUpdate>) -> anyhow::Result<Self> {
         let debouncer = new_debouncer(
-            Duration::from_millis(300),
+            Duration::from_millis(100),
             move |result: notify_debouncer_mini::DebounceEventResult| {
                 if let Ok(events) = result {
                     for event in events {
-                        // Only process actual changes, ignore metadata-only events
-                        if event.kind == DebouncedEventKind::Any {
-                            // Get repository root from the event path
-                            if let Some(repo_path) = Self::find_repo_root(&event.path) {
-                                let _ = tx.send(GitStatusUpdate { repo_path });
-                            }
+                        // Process all debounced events (not just 'Any' kind)
+                        // Get repository root from the event path
+                        if let Some(repo_path) = Self::find_repo_root(&event.path) {
+                            eprintln!("[GitWatcher] File change detected: {:?} -> repo: {:?}", event.path, repo_path);
+                            let _ = tx.send(GitStatusUpdate { repo_path });
                         }
                     }
                 }

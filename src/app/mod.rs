@@ -162,6 +162,8 @@ impl App {
     fn check_git_status_update(&mut self) {
         use crate::panels::file_manager::FileManager;
 
+        let mut registered_count = 0;
+
         // First, register all FileManager repositories with watcher (lazy registration)
         if let Some(watcher) = &mut self.state.git_watcher {
             for i in 0..self.panels.count() {
@@ -171,28 +173,48 @@ impl App {
                         if let Some(repo_root) = Self::find_git_repo_root(fm.current_path()) {
                             // Register repository (idempotent - safe to call multiple times)
                             let _ = watcher.watch_repository(repo_root);
+                            registered_count += 1;
                         }
                     }
                 }
             }
         }
 
+        if registered_count > 0 {
+            self.state.log_info(&format!("Git watcher: {} repositories registered", registered_count));
+        }
+
+        let mut updated_count = 0;
+
+        // Collect all pending updates first to avoid borrowing conflicts
+        let mut updates = Vec::new();
         if let Some(rx) = &self.state.git_watcher_receiver {
-            // Process all pending updates (drain channel)
             while let Ok(update) = rx.try_recv() {
-                // Update all FileManager panels showing this repository or its subdirectories
-                for i in 0..self.panels.count() {
-                    if let Some(panel) = self.panels.get_mut(i) {
-                        // Try to downcast to FileManager
-                        if let Some(fm) = (panel as &mut dyn std::any::Any).downcast_mut::<FileManager>() {
-                            // Check if this panel is showing a path within the updated repository
-                            if fm.current_path().starts_with(&update.repo_path) {
-                                let _ = fm.update_git_status();
-                            }
+                updates.push(update);
+            }
+        }
+
+        // Process collected updates
+        for update in updates {
+            self.state.log_info(&format!("[GitWatcher] Received update for repo: {:?}", update.repo_path));
+
+            // Update all FileManager panels showing this repository or its subdirectories
+            for i in 0..self.panels.count() {
+                if let Some(panel) = self.panels.get_mut(i) {
+                    // Try to downcast to FileManager
+                    if let Some(fm) = (panel as &mut dyn std::any::Any).downcast_mut::<FileManager>() {
+                        // Check if this panel is showing a path within the updated repository
+                        if fm.current_path().starts_with(&update.repo_path) {
+                            let _ = fm.update_git_status();
+                            updated_count += 1;
                         }
                     }
                 }
             }
+        }
+
+        if updated_count > 0 {
+            self.state.log_info(&format!("Git status updated for {} panels", updated_count));
         }
     }
 
