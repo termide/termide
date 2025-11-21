@@ -30,6 +30,12 @@ use crate::state::AppState;
 use crate::state::{ActiveModal, DirSizeResult, PendingAction};
 use crate::ui::modal::{ConfirmModal, InputModal};
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum DragMode {
+    Select,     // Shift+drag - selection
+    Toggle,     // Ctrl+drag - toggle selection
+}
+
 /// Smart file manager with advanced features
 pub struct FileManager {
     current_path: PathBuf,
@@ -54,6 +60,10 @@ pub struct FileManager {
     git_status_cache: Option<GitStatusCache>,
     /// Channel receiver for directory size calculation results (needs to be passed to AppState)
     pub dir_size_receiver: Option<mpsc::Receiver<DirSizeResult>>,
+    /// Starting index for drag selection
+    drag_start_index: Option<usize>,
+    /// Drag mode (Shift/Ctrl)
+    drag_mode: Option<DragMode>,
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +103,8 @@ impl FileManager {
             selected_items: HashSet::new(),
             git_status_cache: None,
             dir_size_receiver: None,
+            drag_start_index: None,
+            drag_mode: None,
         };
         let _ = fm.load_directory();
         fm
@@ -114,6 +126,9 @@ impl FileManager {
         self.scroll_offset = 0;
         // Clear selection when changing directory
         self.selected_items.clear();
+        // Clear drag state
+        self.drag_start_index = None;
+        self.drag_mode = None;
 
         // Update displayed title (will be truncated during rendering if needed)
         self.display_title = self.current_path.display().to_string();
@@ -306,9 +321,10 @@ impl Panel for FileManager {
             (KeyCode::Char('r'), KeyModifiers::CONTROL) => {
                 self.load_directory()?;
             }
-            // Insert - toggle selection of current item (without moving cursor)
+            // Insert - toggle selection of current item and move down
             (KeyCode::Insert, KeyModifiers::NONE) => {
                 self.toggle_selection();
+                self.move_down();
             }
             // Space - show file information
             (KeyCode::Char(' '), KeyModifiers::NONE) => {
@@ -337,6 +353,22 @@ impl Panel for FileManager {
             // Shift+End - select to end
             (KeyCode::End, KeyModifiers::SHIFT) => {
                 self.select_to_end();
+            }
+            // Ctrl+Down - toggle selection down
+            (KeyCode::Down, KeyModifiers::CONTROL) => {
+                self.move_down_with_toggle();
+            }
+            // Ctrl+Up - toggle selection up
+            (KeyCode::Up, KeyModifiers::CONTROL) => {
+                self.move_up_with_toggle();
+            }
+            // Ctrl+PageDown - toggle selection page down
+            (KeyCode::PageDown, KeyModifiers::CONTROL) => {
+                self.page_down_with_toggle();
+            }
+            // Ctrl+PageUp - toggle selection page up
+            (KeyCode::PageUp, KeyModifiers::CONTROL) => {
+                self.page_up_with_toggle();
             }
             // Regular keys - move without clearing selection
             (KeyCode::Down, KeyModifiers::NONE) => {
@@ -607,7 +639,7 @@ impl Panel for FileManager {
     }
 
     fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent, panel_area: Rect) -> Result<()> {
-        use crossterm::event::{MouseEventKind, MouseButton};
+        use crossterm::event::{MouseEventKind, MouseButton, KeyModifiers};
 
         // Handle scroll first (works anywhere in panel)
         let visible_height = panel_area.height.saturating_sub(2) as usize;
@@ -653,31 +685,95 @@ impl Panel for FileManager {
                 let clicked_index = self.scroll_offset + relative_row;
 
                 if clicked_index < self.entries.len() {
-                    // Check for double click
-                    let now = std::time::Instant::now();
-                    let is_double_click = if let (Some(last_time), Some(last_index)) =
-                        (self.last_click_time, self.last_click_index) {
-                        // Double click if less than DOUBLE_CLICK_INTERVAL_MS passed and clicked on same item
-                        now.duration_since(last_time).as_millis() < crate::constants::DOUBLE_CLICK_INTERVAL_MS && last_index == clicked_index
+                    // Check modifiers
+                    if mouse.modifiers.contains(KeyModifiers::SHIFT) {
+                        // Shift+click - select range from selected to clicked_index
+                        let start = self.selected.min(clicked_index);
+                        let end = self.selected.max(clicked_index);
+                        for i in start..=end {
+                            self.selected_items.insert(i);
+                        }
+                        self.selected = clicked_index;
+                        self.drag_start_index = Some(clicked_index);
+                        self.drag_mode = Some(DragMode::Select);
+                    } else if mouse.modifiers.contains(KeyModifiers::CONTROL) {
+                        // Ctrl+click - toggle selection on clicked element
+                        if self.selected_items.contains(&clicked_index) {
+                            self.selected_items.remove(&clicked_index);
+                        } else {
+                            self.selected_items.insert(clicked_index);
+                        }
+                        self.selected = clicked_index;
+                        self.drag_start_index = Some(clicked_index);
+                        self.drag_mode = Some(DragMode::Toggle);
                     } else {
-                        false
-                    };
+                        // Check for double click
+                        let now = std::time::Instant::now();
+                        let is_double_click = if let (Some(last_time), Some(last_index)) =
+                            (self.last_click_time, self.last_click_index) {
+                            // Double click if less than DOUBLE_CLICK_INTERVAL_MS passed and clicked on same item
+                            now.duration_since(last_time).as_millis() < crate::constants::DOUBLE_CLICK_INTERVAL_MS && last_index == clicked_index
+                        } else {
+                            false
+                        };
 
-                    if is_double_click {
-                        // Double click - open file/directory
-                        self.selected = clicked_index;
-                        self.enter()?;
-                        // Reset click state
-                        self.last_click_time = None;
-                        self.last_click_index = None;
-                    } else {
-                        // Single click - select item
-                        self.selected = clicked_index;
-                        // Save time and index for double-click detection
-                        self.last_click_time = Some(now);
-                        self.last_click_index = Some(clicked_index);
+                        if is_double_click {
+                            // Double click - open file/directory
+                            self.selected = clicked_index;
+                            self.enter()?;
+                            // Reset click state
+                            self.last_click_time = None;
+                            self.last_click_index = None;
+                        } else {
+                            // Single click - select item
+                            self.selected = clicked_index;
+                            // Save time and index for double-click detection
+                            self.last_click_time = Some(now);
+                            self.last_click_index = Some(clicked_index);
+                        }
+                        self.drag_start_index = None;
+                        self.drag_mode = None;
                     }
                 }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                // Handle drag only if there's a drag_mode
+                if let Some(drag_mode) = self.drag_mode {
+                    let relative_row = (mouse.row - inner_area.y) as usize;
+                    let current_index = self.scroll_offset + relative_row;
+
+                    if current_index < self.entries.len() {
+                        if let Some(start_index) = self.drag_start_index {
+                            let range_start = start_index.min(current_index);
+                            let range_end = start_index.max(current_index);
+
+                            match drag_mode {
+                                DragMode::Select => {
+                                    // Shift+drag - select range
+                                    for i in range_start..=range_end {
+                                        self.selected_items.insert(i);
+                                    }
+                                }
+                                DragMode::Toggle => {
+                                    // Ctrl+drag - toggle range
+                                    for i in range_start..=range_end {
+                                        if self.selected_items.contains(&i) {
+                                            self.selected_items.remove(&i);
+                                        } else {
+                                            self.selected_items.insert(i);
+                                        }
+                                    }
+                                }
+                            }
+                            self.selected = current_index;
+                        }
+                    }
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                // End drag
+                self.drag_start_index = None;
+                self.drag_mode = None;
             }
             _ => {}
         }
