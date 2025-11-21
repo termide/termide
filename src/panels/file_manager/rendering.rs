@@ -60,11 +60,11 @@ impl FileManager {
 
             // Calculate maximum visual width of name WITHOUT prefix, considering display mode
             let max_name_len = if show_extended {
-                // For wide mode: attr + space + icon + space + prefix + two columns and two separators
-                available_width.saturating_sub(attr_width + 1 + icon_width + 1 + prefix_width + SEPARATOR_WIDTH + SIZE_COLUMN_WIDTH + SEPARATOR_WIDTH + TIME_COLUMN_WIDTH)
+                // For wide mode: attr + icon + space + prefix + two columns and two separators
+                available_width.saturating_sub(attr_width + icon_width + 1 + prefix_width + SEPARATOR_WIDTH + SIZE_COLUMN_WIDTH + SEPARATOR_WIDTH + TIME_COLUMN_WIDTH)
             } else {
-                // For normal mode: attr + space + icon + space + prefix
-                available_width.saturating_sub(attr_width + 1 + icon_width + 1 + prefix_width)
+                // For normal mode: attr + icon + space + prefix
+                available_width.saturating_sub(attr_width + icon_width + 1 + prefix_width)
             };
 
             let name = utils::truncate_name(&entry.name, max_name_len);
@@ -114,7 +114,6 @@ impl FileManager {
 
                 lines.push(Line::from(vec![
                     Span::styled(attr, attr_style),
-                    Span::styled(" ", bg_style),
                     Span::styled(icon, icon_style),
                     Span::styled(" ", bg_style),
                     Span::styled(full_name, fg_style),
@@ -126,13 +125,12 @@ impl FileManager {
                 ]));
             } else {
                 // Normal mode without columns
-                let content_width = attr_width + 1 + icon_width + 1 + prefix_width + name_width;
+                let content_width = attr_width + icon_width + 1 + prefix_width + name_width;
                 let padding_len = available_width.saturating_sub(content_width);
                 let padding = " ".repeat(padding_len);
 
                 lines.push(Line::from(vec![
                     Span::styled(attr, attr_style),
-                    Span::styled(" ", bg_style),
                     Span::styled(icon, icon_style),
                     Span::styled(" ", bg_style),
                     Span::styled(full_name, fg_style),
