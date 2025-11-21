@@ -1394,6 +1394,32 @@ impl Terminal {
         Ok(())
     }
 
+    /// Paste text from clipboard to PTY with bracketed paste mode support
+    fn paste_from_clipboard(&mut self) -> Result<()> {
+        // Get text from clipboard
+        let (text, _mode) = crate::clipboard::paste();
+        if text.is_empty() {
+            return Ok(());
+        }
+
+        // Check if bracketed paste mode is enabled
+        let bracketed_paste = self.screen.lock().unwrap().bracketed_paste_mode;
+
+        if bracketed_paste {
+            // Send bracketed paste start sequence
+            self.send_input(b"\x1b[200~")?;
+            // Send the actual text
+            self.send_input(text.as_bytes())?;
+            // Send bracketed paste end sequence
+            self.send_input(b"\x1b[201~")?;
+        } else {
+            // Send text as-is without bracketing
+            self.send_input(text.as_bytes())?;
+        }
+
+        Ok(())
+    }
+
     /// Send mouse event to PTY (if mouse tracking is enabled)
     fn send_mouse_to_pty(&mut self, mouse: &crossterm::event::MouseEvent, panel_area: Rect) -> Result<()> {
         use crossterm::event::{MouseEventKind, MouseButton};
@@ -1672,7 +1698,16 @@ impl Panel for Terminal {
             return Ok(());
         }
 
-        // Paste is handled by parent terminal (Ctrl+Shift+V, Shift+Insert)
+        // Handle paste from clipboard (Ctrl+Shift+V)
+        // When Shift is pressed with a letter, crossterm returns the uppercase character
+        // with only CONTROL in modifiers (Shift is "applied" to the character)
+        match (key.code, key.modifiers) {
+            (KeyCode::Char('V'), modifiers) if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.paste_from_clipboard()?;
+                return Ok(());
+            }
+            _ => {}
+        }
 
         // Handle history scrolling (Shift+PageUp/PageDown)
         if key.modifiers.contains(KeyModifiers::SHIFT) {
