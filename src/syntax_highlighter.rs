@@ -151,6 +151,33 @@ impl TreeSitterHighlighter {
             &highlight_names,
         );
 
+        Self::load_language_config(
+            &mut configs,
+            "php",
+            tree_sitter_php::LANGUAGE_PHP.into(),
+            tree_sitter_php::HIGHLIGHTS_QUERY,
+            tree_sitter_php::INJECTIONS_QUERY,
+            &highlight_names,
+        );
+
+        Self::load_language_config(
+            &mut configs,
+            "haskell",
+            tree_sitter_haskell::LANGUAGE.into(),
+            tree_sitter_haskell::HIGHLIGHTS_QUERY,
+            tree_sitter_haskell::INJECTIONS_QUERY,
+            &highlight_names,
+        );
+
+        Self::load_language_config(
+            &mut configs,
+            "nix",
+            tree_sitter_nix::LANGUAGE.into(),
+            tree_sitter_nix::HIGHLIGHTS_QUERY,
+            tree_sitter_nix::INJECTIONS_QUERY,
+            &highlight_names,
+        );
+
         // Web technologies
         Self::load_language_config(
             &mut configs,
@@ -260,6 +287,9 @@ impl TreeSitterHighlighter {
             "cpp" | "cc" | "cxx" | "hpp" | "hxx" | "hh" | "c++" | "h++" => Some("cpp"),
             "java" => Some("java"),
             "rb" | "ruby" | "rake" | "gemspec" => Some("ruby"),
+            "php" => Some("php"),
+            "hs" | "lhs" => Some("haskell"),
+            "nix" => Some("nix"),
 
             // Web technologies
             "html" | "htm" | "xhtml" => Some("html"),
