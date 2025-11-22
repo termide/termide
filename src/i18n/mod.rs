@@ -62,6 +62,9 @@ pub trait Translation: Send + Sync {
     fn git_detected(&self) -> &str;
     fn git_not_found(&self) -> &str;
 
+    // Application quit
+    fn app_quit_confirm(&self) -> &str;
+
     // Errors
     fn error_operation_failed(&self, error: &str) -> String;
     fn error_file_exists(&self, path: &str) -> String;

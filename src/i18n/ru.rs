@@ -189,6 +189,10 @@ impl Translation for Russian {
         "Git не найден - интеграция с git отключена"
     }
 
+    fn app_quit_confirm(&self) -> &str {
+        "Есть несохранённые изменения. Всё равно выйти?"
+    }
+
     // Errors
     fn error_operation_failed(&self, error: &str) -> String {
         format!("Операция не выполнена: {}", error)

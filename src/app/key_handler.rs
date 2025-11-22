@@ -120,7 +120,8 @@ impl App {
                 PendingAction::Replace |
                 PendingAction::ReplaceStep2 { .. } |
                 PendingAction::NextPanel |
-                PendingAction::PrevPanel => {
+                PendingAction::PrevPanel |
+                PendingAction::QuitApplication => {
                     // These actions don't require panel_index update
                     // since it's already set in BatchOperation or not used
                 }
@@ -293,7 +294,20 @@ impl App {
                 }
                 6 => {
                     // Quit - exit
-                    self.state.quit();
+                    self.state.close_menu();
+                    if self.has_panels_requiring_confirmation() {
+                        let t = i18n::t();
+                        let modal = crate::ui::modal::ConfirmModal::new(
+                            t.modal_yes(),
+                            t.app_quit_confirm(),
+                        );
+                        self.state.set_pending_action(
+                            PendingAction::QuitApplication,
+                            ActiveModal::Confirm(Box::new(modal)),
+                        );
+                    } else {
+                        self.state.quit();
+                    }
                 }
                 _ => {}
             }
@@ -485,6 +499,18 @@ impl App {
         }
     }
 
+    /// Check if any panel requires close confirmation (unsaved changes, running processes)
+    fn has_panels_requiring_confirmation(&self) -> bool {
+        for i in 0..self.panels.count() {
+            if let Some(panel) = self.panels.get(i) {
+                if panel.needs_close_confirmation().is_some() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Close all Welcome panels (called before opening new panel)
     fn close_welcome_panels(&mut self) {
         // Collect welcome panel indices (in reverse order for correct removal)
@@ -582,7 +608,19 @@ impl App {
                 }
                 // Alt+Q - quit
                 KeyCode::Char('q') | KeyCode::Char('Q') => {
-                    self.state.quit();
+                    if self.has_panels_requiring_confirmation() {
+                        let t = i18n::t();
+                        let modal = crate::ui::modal::ConfirmModal::new(
+                            t.modal_yes(),
+                            t.app_quit_confirm(),
+                        );
+                        self.state.set_pending_action(
+                            PendingAction::QuitApplication,
+                            ActiveModal::Confirm(Box::new(modal)),
+                        );
+                    } else {
+                        self.state.quit();
+                    }
                     return Ok(Some(()));
                 }
                 // Alt+X / Alt+Backspace - close panel
@@ -592,7 +630,19 @@ impl App {
                 }
                 // Alt+Delete - close application
                 KeyCode::Delete => {
-                    self.state.quit();
+                    if self.has_panels_requiring_confirmation() {
+                        let t = i18n::t();
+                        let modal = crate::ui::modal::ConfirmModal::new(
+                            t.modal_yes(),
+                            t.app_quit_confirm(),
+                        );
+                        self.state.set_pending_action(
+                            PendingAction::QuitApplication,
+                            ActiveModal::Confirm(Box::new(modal)),
+                        );
+                    } else {
+                        self.state.quit();
+                    }
                     return Ok(Some(()));
                 }
                 // Alt+1..9 - go to panel by number

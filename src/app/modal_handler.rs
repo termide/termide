@@ -145,6 +145,10 @@ impl App {
                 crate::state::PendingAction::ReplaceStep2 { query } => {
                     self.handle_replace_step2(query, value)?;
                 }
+                crate::state::PendingAction::QuitApplication => {
+                    // User confirmed quit - exit application
+                    self.state.quit();
+                }
                 // Navigation actions are handled in key_handler, should not get here
                 crate::state::PendingAction::NextPanel |
                 crate::state::PendingAction::PrevPanel => {}

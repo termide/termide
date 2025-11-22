@@ -176,6 +176,10 @@ impl Translation for English {
         "Git not found - git integration disabled"
     }
 
+    fn app_quit_confirm(&self) -> &str {
+        "There are unsaved changes. Quit anyway?"
+    }
+
     // Errors
     fn error_operation_failed(&self, error: &str) -> String {
         format!("Operation failed: {}", error)

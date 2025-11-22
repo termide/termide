@@ -213,6 +213,8 @@ pub enum PendingAction {
     NextPanel,
     /// Switch to previous panel
     PrevPanel,
+    /// Quit application (with confirmation if there are unsaved changes)
+    QuitApplication,
 }
 
 /// Layout information
