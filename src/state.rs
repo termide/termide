@@ -385,6 +385,10 @@ pub struct AppState {
     pub git_watcher_receiver: Option<mpsc::Receiver<GitStatusUpdate>>,
     /// Git watcher instance (kept alive for cleanup)
     pub git_watcher: Option<GitWatcher>,
+    /// Receiver channel for filesystem update events
+    pub fs_watcher_receiver: Option<mpsc::Receiver<crate::fs_watcher::DirectoryUpdate>>,
+    /// Filesystem watcher instance (kept alive for cleanup)
+    pub fs_watcher: Option<crate::fs_watcher::FileSystemWatcher>,
     /// Current theme
     pub theme: &'static Theme,
     /// Application configuration
@@ -438,6 +442,8 @@ impl AppState {
             dir_size_receiver: None,
             git_watcher_receiver: None,
             git_watcher: None,
+            fs_watcher_receiver: None,
+            fs_watcher: None,
             theme,
             config,
             panel_weights: HashMap::new(),

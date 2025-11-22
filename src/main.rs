@@ -4,6 +4,7 @@ mod constants;
 mod editor;
 mod event;
 mod clipboard;
+mod fs_watcher;
 mod git;
 mod i18n;
 mod keyboard;

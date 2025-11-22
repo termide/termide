@@ -41,6 +41,18 @@ impl App {
             }
         }
 
+        // Initialize filesystem watcher for automatic directory updates
+        match crate::fs_watcher::create_fs_watcher() {
+            Ok((watcher, receiver)) => {
+                state.fs_watcher = Some(watcher);
+                state.fs_watcher_receiver = Some(receiver);
+                state.log_info("FS watcher initialized");
+            }
+            Err(e) => {
+                state.log_error(&format!("Failed to initialize FS watcher: {}", e));
+            }
+        }
+
         Self {
             state,
             panels: PanelContainer::new(),
@@ -78,6 +90,9 @@ impl App {
 
                     // Check channel for git status update events
                     self.check_git_status_update();
+
+                    // Check channel for filesystem update events
+                    self.check_fs_update();
 
                     // Update spinner in Info modal if it's open
                     self.update_info_modal_spinner();
@@ -231,6 +246,70 @@ impl App {
                 return Some(current.to_path_buf());
             }
             current = current.parent()?;
+        }
+    }
+
+    /// Check channel for filesystem update events
+    fn check_fs_update(&mut self) {
+        use crate::panels::file_manager::FileManager;
+
+        // Collect directories to register
+        let mut dirs_to_register = Vec::new();
+
+        // Lazy registration: register all FileManager directories with watcher
+        if let Some(watcher) = &mut self.state.fs_watcher {
+            for i in 0..self.panels.count() {
+                if let Some(panel) = self.panels.get_mut(i) {
+                    if let Some(fm) = (panel as &mut dyn std::any::Any).downcast_mut::<FileManager>() {
+                        let dir_path = fm.current_path().to_path_buf();
+
+                        // Only register if not already watching
+                        if !watcher.is_watching(&dir_path) {
+                            if let Ok(()) = watcher.watch_directory(dir_path.clone()) {
+                                dirs_to_register.push(dir_path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Log registered directories after releasing watcher borrow
+        for dir_path in dirs_to_register {
+            self.state.log_info(&format!("FS watcher: registered {}", dir_path.display()));
+        }
+
+        let mut updated_count = 0;
+
+        // Collect all pending updates first to avoid borrowing conflicts
+        let mut updates = Vec::new();
+        if let Some(rx) = &self.state.fs_watcher_receiver {
+            while let Ok(update) = rx.try_recv() {
+                updates.push(update);
+            }
+        }
+
+        // Process collected updates
+        for update in updates {
+            self.state.log_info(&format!("[FSWatcher] Received update for dir: {:?}", update.dir_path));
+
+            // Update all FileManager panels showing this directory
+            for i in 0..self.panels.count() {
+                if let Some(panel) = self.panels.get_mut(i) {
+                    // Try to downcast to FileManager
+                    if let Some(fm) = (panel as &mut dyn std::any::Any).downcast_mut::<FileManager>() {
+                        // Check if this panel is showing the updated directory
+                        if fm.current_path() == &update.dir_path {
+                            let _ = fm.load_directory();
+                            updated_count += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        if updated_count > 0 {
+            self.state.log_info(&format!("FS: reloaded {} panels", updated_count));
         }
     }
 
