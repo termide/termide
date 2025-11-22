@@ -4,9 +4,9 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
+use super::{utils, FileEntry, FileManager};
 use crate::git::GitStatus;
 use crate::theme::Theme;
-use super::{FileEntry, FileManager, utils};
 
 impl FileManager {
     /// Get display title with path
@@ -23,13 +23,26 @@ impl FileManager {
             let ellipsis = "...";
             let ellipsis_len = 3;
             let take_chars = max_path_len.saturating_sub(ellipsis_len);
-            let trimmed: String = path_str.chars().rev().take(take_chars).collect::<Vec<_>>().into_iter().rev().collect();
+            let trimmed: String = path_str
+                .chars()
+                .rev()
+                .take(take_chars)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
             format!("{}{}", ellipsis, trimmed)
         }
     }
 
     /// Get list of lines for display
-    pub(super) fn get_items(&self, height: usize, available_width: usize, theme: &Theme, is_focused: bool) -> Vec<Line> {
+    pub(super) fn get_items(
+        &self,
+        height: usize,
+        available_width: usize,
+        theme: &Theme,
+        is_focused: bool,
+    ) -> Vec<Line> {
         let mut lines = Vec::new();
         let visible_start = self.scroll_offset;
         let visible_end = visible_start + height;
@@ -53,15 +66,28 @@ impl FileManager {
 
             let attr = utils::get_attribute(entry, is_selected);
             let icon = utils::get_icon(entry);
-            let attr_width = 1;  // always 1 character
-            let icon_width = 1;  // always 1 character
-            let dir_prefix = if entry.is_dir && entry.name != ".." { "/" } else { "" };
+            let attr_width = 1; // always 1 character
+            let icon_width = 1; // always 1 character
+            let dir_prefix = if entry.is_dir && entry.name != ".." {
+                "/"
+            } else {
+                ""
+            };
             let prefix_width = dir_prefix.width();
 
             // Calculate maximum visual width of name WITHOUT prefix, considering display mode
             let max_name_len = if show_extended {
                 // For wide mode: attr + icon + space + prefix + two columns and two separators
-                available_width.saturating_sub(attr_width + icon_width + 1 + prefix_width + SEPARATOR_WIDTH + SIZE_COLUMN_WIDTH + SEPARATOR_WIDTH + TIME_COLUMN_WIDTH)
+                available_width.saturating_sub(
+                    attr_width
+                        + icon_width
+                        + 1
+                        + prefix_width
+                        + SEPARATOR_WIDTH
+                        + SIZE_COLUMN_WIDTH
+                        + SEPARATOR_WIDTH
+                        + TIME_COLUMN_WIDTH,
+                )
             } else {
                 // For normal mode: attr + icon + space + prefix
                 available_width.saturating_sub(attr_width + icon_width + 1 + prefix_width)
@@ -73,19 +99,24 @@ impl FileManager {
 
             let (bg_style, fg_style) = if is_cursor && is_focused {
                 // Show cursor only when panel is focused
-                let bg = Style::default().bg(theme.selection_bg).fg(theme.selection_fg).add_modifier(Modifier::BOLD);
+                let bg = Style::default()
+                    .bg(theme.selected_bg)
+                    .fg(theme.selected_fg)
+                    .add_modifier(Modifier::BOLD);
                 (bg, bg)
             } else {
                 let fg_style = match entry.git_status {
-                    GitStatus::Ignored => Style::default().fg(theme.text_secondary).add_modifier(Modifier::DIM),
-                    GitStatus::Modified => Style::default().fg(theme.git_modified),
-                    GitStatus::Added => Style::default().fg(theme.git_added),
-                    GitStatus::Deleted => Style::default().fg(theme.git_deleted),
+                    GitStatus::Ignored => Style::default()
+                        .fg(theme.disabled)
+                        .add_modifier(Modifier::DIM),
+                    GitStatus::Modified => Style::default().fg(theme.warning),
+                    GitStatus::Added => Style::default().fg(theme.success),
+                    GitStatus::Deleted => Style::default().fg(theme.error),
                     GitStatus::Unmodified => {
                         if entry.is_hidden {
-                            Style::default().fg(theme.text_secondary)
+                            Style::default().fg(theme.disabled)
                         } else {
-                            Style::default().fg(theme.text_primary)
+                            Style::default().fg(theme.fg)
                         }
                     }
                 };
@@ -93,7 +124,9 @@ impl FileManager {
             };
 
             let attr_style = if is_selected {
-                Style::default().fg(theme.selected_item).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(theme.accented_fg)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 fg_style
             };
@@ -122,9 +155,9 @@ impl FileManager {
                     Span::styled(" ", bg_style),
                     Span::styled(full_name, fg_style),
                     Span::styled(padding, bg_style),
-                    Span::styled(SEPARATOR, bg_style.fg(theme.accent_secondary)),
+                    Span::styled(SEPARATOR, bg_style.fg(theme.disabled)),
                     Span::styled(size_str, fg_style),
-                    Span::styled(SEPARATOR, bg_style.fg(theme.accent_secondary)),
+                    Span::styled(SEPARATOR, bg_style.fg(theme.disabled)),
                     Span::styled(time_str, fg_style),
                 ]));
             } else {

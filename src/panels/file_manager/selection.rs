@@ -39,7 +39,8 @@ impl FileManager {
     /// Page down with selection
     pub(super) fn page_down_with_selection(&mut self) {
         let start = self.selected;
-        let target = (self.selected + self.visible_height).min(self.entries.len().saturating_sub(1));
+        let target =
+            (self.selected + self.visible_height).min(self.entries.len().saturating_sub(1));
         for i in start..=target {
             self.selected_items.insert(i);
         }
@@ -108,7 +109,7 @@ impl FileManager {
 
     /// Clear file selection
     pub fn clear_selection(&mut self) {
-        self.selected_items.clear()  ;
+        self.selected_items.clear();
     }
 
     /// Move down with toggle selection
@@ -136,7 +137,8 @@ impl FileManager {
     /// Page down with toggle selection
     pub(super) fn page_down_with_toggle(&mut self) {
         let start = self.selected;
-        let target = (self.selected + self.visible_height).min(self.entries.len().saturating_sub(1));
+        let target =
+            (self.selected + self.visible_height).min(self.entries.len().saturating_sub(1));
 
         // Toggle all elements from start to target
         for i in start..=target {

@@ -8,9 +8,9 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
 
-use crate::theme::Theme;
-use crate::i18n;
 use super::{Modal, ModalResult};
+use crate::i18n;
+use crate::theme::Theme;
 
 /// Confirmation modal window (Yes/No)
 #[derive(Debug)]
@@ -36,7 +36,9 @@ impl ConfirmModal {
         let title_width = self.title.len() as u16 + 2;
 
         // 2. Maximum message line width
-        let message_max_line_width = self.message.lines()
+        let message_max_line_width = self
+            .message
+            .lines()
             .map(|line| line.len())
             .max()
             .unwrap_or(0) as u16;
@@ -110,13 +112,11 @@ impl Modal for ConfirmModal {
         let block = Block::default()
             .title(Span::styled(
                 format!(" {} ", self.title),
-                Style::default()
-                    .fg(theme.background)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(theme.bg).add_modifier(Modifier::BOLD),
             ))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.background))
-            .style(Style::default().bg(theme.text_primary));
+            .border_style(Style::default().fg(theme.bg))
+            .style(Style::default().bg(theme.fg));
 
         let inner = block.inner(modal_area);
         block.render(modal_area, buf);
@@ -126,18 +126,18 @@ impl Modal for ConfirmModal {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1),                  // Empty line at top
+                Constraint::Length(1),                    // Empty line at top
                 Constraint::Length(message_lines as u16), // Message
-                Constraint::Length(1),                  // Empty line between message and buttons
-                Constraint::Length(1),                  // Buttons
-                Constraint::Length(1),                  // Empty line at bottom
+                Constraint::Length(1),                    // Empty line between message and buttons
+                Constraint::Length(1),                    // Buttons
+                Constraint::Length(1),                    // Empty line at bottom
             ])
             .split(inner);
 
         // Render message
         let message = Paragraph::new(self.message.clone())
             .alignment(Alignment::Center)
-            .style(Style::default().fg(theme.background));
+            .style(Style::default().fg(theme.bg));
         message.render(chunks[1], buf);
 
         // Render buttons
@@ -145,20 +145,20 @@ impl Modal for ConfirmModal {
 
         let yes_style = if self.selected {
             Style::default()
-                .fg(theme.text_primary)
-                .bg(theme.accent_primary)
+                .fg(theme.fg)
+                .bg(theme.accented_fg)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(theme.accent_primary)
+            Style::default().fg(theme.accented_fg)
         };
 
         let no_style = if !self.selected {
             Style::default()
-                .fg(theme.text_primary)
-                .bg(theme.accent_primary)
+                .fg(theme.fg)
+                .bg(theme.accented_fg)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(theme.accent_primary)
+            Style::default().fg(theme.accented_fg)
         };
 
         let buttons = Line::from(vec![
@@ -179,12 +179,8 @@ impl Modal for ConfirmModal {
             }
             KeyCode::Enter => Ok(Some(ModalResult::Confirmed(self.selected))),
             KeyCode::Esc => Ok(Some(ModalResult::Cancelled)),
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
-                Ok(Some(ModalResult::Confirmed(true)))
-            }
-            KeyCode::Char('n') | KeyCode::Char('N') => {
-                Ok(Some(ModalResult::Confirmed(false)))
-            }
+            KeyCode::Char('y') | KeyCode::Char('Y') => Ok(Some(ModalResult::Confirmed(true))),
+            KeyCode::Char('n') | KeyCode::Char('N') => Ok(Some(ModalResult::Confirmed(false))),
             _ => Ok(None),
         }
     }

@@ -55,11 +55,19 @@ impl FileManager {
     }
 
     /// Recursively copy directory with depth limit
-    fn copy_directory_recursive_with_depth(&self, source: &PathBuf, destination: &PathBuf, depth: usize) -> Result<()> {
+    fn copy_directory_recursive_with_depth(
+        &self,
+        source: &PathBuf,
+        destination: &PathBuf,
+        depth: usize,
+    ) -> Result<()> {
         const MAX_DEPTH: usize = crate::constants::MAX_DIRECTORY_COPY_DEPTH;
 
         if depth > MAX_DEPTH {
-            return Err(anyhow::anyhow!("Directory nesting too deep (> {})", MAX_DEPTH));
+            return Err(anyhow::anyhow!(
+                "Directory nesting too deep (> {})",
+                MAX_DEPTH
+            ));
         }
 
         // Create target directory if it doesn't exist

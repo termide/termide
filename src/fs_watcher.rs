@@ -34,9 +34,8 @@ impl FileSystemWatcher {
 
                         // Get parent directory from the event path
                         if let Some(dir_path) = event.path.parent() {
-                            eprintln!("[FSWatcher] Change detected in {:?}", dir_path);
                             let _ = tx.send(DirectoryUpdate {
-                                dir_path: dir_path.to_path_buf()
+                                dir_path: dir_path.to_path_buf(),
                             });
                         }
                     }
@@ -63,8 +62,6 @@ impl FileSystemWatcher {
         // Watch the directory non-recursively (only direct children, not subdirectories)
         watcher.watch(&dir_path, RecursiveMode::NonRecursive)?;
 
-        eprintln!("[FSWatcher] Watching directory: {:?}", dir_path);
-
         self.watched_dirs.insert(dir_path, ());
         Ok(())
     }
@@ -85,7 +82,10 @@ impl FileSystemWatcher {
 
 /// Global filesystem watcher instance
 /// This is created once at application startup
-pub fn create_fs_watcher() -> anyhow::Result<(FileSystemWatcher, std::sync::mpsc::Receiver<DirectoryUpdate>)> {
+pub fn create_fs_watcher() -> anyhow::Result<(
+    FileSystemWatcher,
+    std::sync::mpsc::Receiver<DirectoryUpdate>,
+)> {
     let (tx, rx) = channel();
     let watcher = FileSystemWatcher::new(tx)?;
     Ok((watcher, rx))

@@ -1,13 +1,13 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
+use super::super::App;
 use crate::{
     i18n,
     panels::file_manager::FileManager,
     state::{ActiveModal, BatchOperation, BatchOperationType, ConflictMode, PendingAction},
     ui::modal::ConflictModal,
 };
-use super::super::App;
 
 impl App {
     /// Common method for handling file operations (Copy/Move)
@@ -57,11 +57,13 @@ impl App {
                             fm.get_current_directory().join(&destination)
                         }
                     } else {
-                        self.state.log_error(format!("Panel {} is not FileManager", panel_index));
+                        self.state
+                            .log_error(format!("Panel {} is not FileManager", panel_index));
                         return Ok(());
                     }
                 } else {
-                    self.state.log_error(format!("Panel with index {} not found", panel_index));
+                    self.state
+                        .log_error(format!("Panel with index {} not found", panel_index));
                     return Ok(());
                 }
             } else {
@@ -124,23 +126,27 @@ impl App {
         use crate::ui::modal::ConflictResolution;
 
         if let Some(resolution) = value.downcast_ref::<ConflictResolution>() {
-
             match resolution {
                 ConflictResolution::Overwrite => {
                     // Overwrite this file - execute operation directly
                     if let Some(source) = operation.current_source().cloned() {
-                        let item_name = source.file_name()
+                        let item_name = source
+                            .file_name()
                             .and_then(|n| n.to_str())
                             .unwrap_or("?")
                             .to_string();
 
                         // Determine target path
                         let final_dest = if operation.destination.is_dir() {
-                            operation.destination.join(source.file_name().unwrap_or_default())
+                            operation
+                                .destination
+                                .join(source.file_name().unwrap_or_default())
                         } else if operation.sources.len() == 1 {
                             operation.destination.clone()
                         } else {
-                            operation.destination.join(source.file_name().unwrap_or_default())
+                            operation
+                                .destination
+                                .join(source.file_name().unwrap_or_default())
                         };
 
                         // Execute operation
@@ -149,8 +155,12 @@ impl App {
                             let panel_any: &mut dyn Any = &mut **panel;
                             if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
                                 let result = match operation.operation_type {
-                                    BatchOperationType::Copy => fm.copy_path(source.clone(), final_dest.clone()),
-                                    BatchOperationType::Move => fm.move_path(source.clone(), final_dest.clone()),
+                                    BatchOperationType::Copy => {
+                                        fm.copy_path(source.clone(), final_dest.clone())
+                                    }
+                                    BatchOperationType::Move => {
+                                        fm.move_path(source.clone(), final_dest.clone())
+                                    }
                                 };
 
                                 match result {
@@ -160,7 +170,10 @@ impl App {
                                             BatchOperationType::Copy => t.action_copied(),
                                             BatchOperationType::Move => t.action_moved(),
                                         };
-                                        self.state.log_success(format!("'{}' {}", item_name, action_name));
+                                        self.state.log_success(format!(
+                                            "'{}' {}",
+                                            item_name, action_name
+                                        ));
                                         operation.increment_success();
                                     }
                                     Err(e) => {
@@ -169,7 +182,10 @@ impl App {
                                             BatchOperationType::Copy => t.action_copying(),
                                             BatchOperationType::Move => t.action_moving(),
                                         };
-                                        self.state.log_error(format!("Ошибка {} '{}': {}", action_name, item_name, e));
+                                        self.state.log_error(format!(
+                                            "Ошибка {} '{}': {}",
+                                            action_name, item_name, e
+                                        ));
                                         operation.increment_error();
                                     }
                                 }
@@ -201,7 +217,8 @@ impl App {
                 ConflictResolution::Rename => {
                     // Request rename pattern for single file
                     if let Some(source) = operation.current_source() {
-                        let original_name = source.file_name()
+                        let original_name = source
+                            .file_name()
                             .and_then(|n| n.to_str())
                             .unwrap_or("?")
                             .to_string();
@@ -217,7 +234,7 @@ impl App {
                         let modal = RenamePatternModal::new(
                             "Rename file",
                             &original_name,
-                            "$0",  // Default pattern
+                            "$0", // Default pattern
                             created,
                             modified,
                         );
@@ -232,7 +249,8 @@ impl App {
                 ConflictResolution::RenameAll => {
                     // Request rename pattern for all files
                     if let Some(source) = operation.current_source() {
-                        let original_name = source.file_name()
+                        let original_name = source
+                            .file_name()
                             .and_then(|n| n.to_str())
                             .unwrap_or("?")
                             .to_string();
@@ -248,13 +266,13 @@ impl App {
                         let modal = RenamePatternModal::new(
                             "Rename all conflicting files",
                             &original_name,
-                            "$0",  // Default pattern
+                            "$0", // Default pattern
                             created,
                             modified,
                         );
 
                         // Set flag that this is RenameAll
-                        operation.set_conflict_mode(ConflictMode::Ask);  // Reset to Ask to apply pattern
+                        operation.set_conflict_mode(ConflictMode::Ask); // Reset to Ask to apply pattern
 
                         self.state.pending_action = Some(PendingAction::RenameWithPattern {
                             operation,
@@ -290,7 +308,9 @@ impl App {
                     self.refresh_fm_panels(&operation.destination);
 
                     // For move - refresh source directories
-                    if operation.operation_type == BatchOperationType::Move && !operation.sources.is_empty() {
+                    if operation.operation_type == BatchOperationType::Move
+                        && !operation.sources.is_empty()
+                    {
                         if let Some(parent) = operation.sources[0].parent() {
                             self.refresh_fm_panels(parent);
                         }
@@ -305,7 +325,8 @@ impl App {
             return;
         };
 
-        let item_name = source.file_name()
+        let item_name = source
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("?")
             .to_string();
@@ -329,11 +350,15 @@ impl App {
         } else {
             // Standard logic without renaming
             if operation.destination.is_dir() {
-                operation.destination.join(source.file_name().unwrap_or_default())
+                operation
+                    .destination
+                    .join(source.file_name().unwrap_or_default())
             } else if operation.sources.len() == 1 {
                 operation.destination.clone()
             } else {
-                operation.destination.join(source.file_name().unwrap_or_default())
+                operation
+                    .destination
+                    .join(source.file_name().unwrap_or_default())
             }
         };
 
@@ -343,15 +368,15 @@ impl App {
                 ConflictMode::Ask => {
                     // Show conflict resolution modal window
                     let modal = ConflictModal::new(&source, &final_dest);
-                    self.state.pending_action = Some(PendingAction::ContinueBatchOperation {
-                        operation,
-                    });
+                    self.state.pending_action =
+                        Some(PendingAction::ContinueBatchOperation { operation });
                     self.state.active_modal = Some(ActiveModal::Conflict(Box::new(modal)));
                     return;
                 }
                 ConflictMode::SkipAll => {
                     // Skip file
-                    self.state.log_info(format!("'{}' пропущен (файл существует)", item_name));
+                    self.state
+                        .log_info(format!("'{}' пропущен (файл существует)", item_name));
                     operation.increment_skipped();
                     operation.advance();
                     self.process_batch_operation(operation);
@@ -379,7 +404,8 @@ impl App {
                             BatchOperationType::Copy => t.action_copied(),
                             BatchOperationType::Move => t.action_moved(),
                         };
-                        self.state.log_success(format!("'{}' {}", item_name, action_name));
+                        self.state
+                            .log_success(format!("'{}' {}", item_name, action_name));
                         operation.increment_success();
                     }
                     Err(e) => {
@@ -388,7 +414,8 @@ impl App {
                             BatchOperationType::Copy => t.action_copying(),
                             BatchOperationType::Move => t.action_moving(),
                         };
-                        self.state.log_error(format!("Ошибка {} '{}': {}", action_name, item_name, e));
+                        self.state
+                            .log_error(format!("Ошибка {} '{}': {}", action_name, item_name, e));
                         operation.increment_error();
                     }
                 }
@@ -461,12 +488,7 @@ impl App {
                     let created = metadata.as_ref().and_then(|m| m.created().ok());
                     let modified = metadata.as_ref().and_then(|m| m.modified().ok());
 
-                    let new_name = pattern.apply(
-                        &original_name,
-                        counter,
-                        created,
-                        modified,
-                    );
+                    let new_name = pattern.apply(&original_name, counter, created, modified);
 
                     // Create new destination path with new name
                     let new_dest = if operation.destination.is_dir() {
@@ -482,9 +504,8 @@ impl App {
                         use crate::ui::modal::ConflictModal;
 
                         let modal = ConflictModal::new(&source, &new_dest);
-                        self.state.pending_action = Some(PendingAction::ContinueBatchOperation {
-                            operation,
-                        });
+                        self.state.pending_action =
+                            Some(PendingAction::ContinueBatchOperation { operation });
                         self.state.active_modal = Some(ActiveModal::Conflict(Box::new(modal)));
                         return Ok(());
                     }

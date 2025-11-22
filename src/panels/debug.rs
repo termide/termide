@@ -21,9 +21,7 @@ pub struct Debug {
 impl Debug {
     /// Create new log panel
     pub fn new() -> Self {
-        Self {
-            scroll_offset: 0,
-        }
+        Self { scroll_offset: 0 }
     }
 
     /// Get log lines for display
@@ -38,9 +36,11 @@ impl Debug {
         // Display log entries (from old to new)
         for entry in entries.iter().skip(start).take(height) {
             let level_style = match entry.level {
-                LogLevel::Info => Style::default().fg(Color::Cyan),
-                LogLevel::Error => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                LogLevel::Success => Style::default().fg(Color::Green),
+                LogLevel::Info => Style::default().fg(state.theme.fg),
+                LogLevel::Error => Style::default()
+                    .fg(state.theme.error)
+                    .add_modifier(Modifier::BOLD),
+                LogLevel::Success => Style::default().fg(state.theme.success),
             };
 
             let level_text = match entry.level {
@@ -61,12 +61,10 @@ impl Debug {
 
         // If log is empty, show hint
         if lines.is_empty() {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "Log is empty. Perform any operations to display logs.",
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                "Log is empty. Perform any operations to display logs.",
+                Style::default().fg(Color::DarkGray),
+            )]));
         }
 
         lines
@@ -74,7 +72,14 @@ impl Debug {
 }
 
 impl Panel for Debug {
-    fn render(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool, panel_index: usize, state: &AppState) {
+    fn render(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        is_focused: bool,
+        panel_index: usize,
+        state: &AppState,
+    ) {
         let content_height = area.height.saturating_sub(2) as usize; // -2 for borders
         let log_lines = self.get_log_lines(state, content_height);
 
@@ -87,7 +92,8 @@ impl Panel for Debug {
         let entries_count = state.get_log_entries().len();
         let title = format!("Log ({} entries) - /tmp/termide.log", entries_count);
 
-        let block = crate::ui::panel_helpers::create_panel_block(&title, is_focused, panel_index, state);
+        let block =
+            crate::ui::panel_helpers::create_panel_block(&title, is_focused, panel_index, state);
 
         let paragraph = Paragraph::new(log_lines).block(block);
 

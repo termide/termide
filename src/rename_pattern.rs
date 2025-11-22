@@ -1,5 +1,5 @@
-use std::time::SystemTime;
 use chrono::{DateTime, Local};
+use std::time::SystemTime;
 
 /// File rename pattern
 #[derive(Debug, Clone)]

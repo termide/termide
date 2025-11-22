@@ -293,7 +293,10 @@ fn normalize_lang(lang: &str) -> String {
 
 /// Get the current translation
 pub fn t() -> &'static dyn Translation {
-    TRANSLATION.get().map(|b| b.as_ref()).unwrap_or(&en::English)
+    TRANSLATION
+        .get()
+        .map(|b| b.as_ref())
+        .unwrap_or(&en::English)
 }
 
 /// Get the current language code ("en", "ru", etc.)

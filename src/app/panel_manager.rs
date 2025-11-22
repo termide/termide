@@ -1,9 +1,9 @@
 use std::any::Any;
 use std::path::PathBuf;
 
+use super::App;
 use crate::panels::file_manager::FileManager;
 use crate::panels::welcome::Welcome;
-use super::App;
 
 impl App {
     /// Close panel by index and switch focus to next visible panel
@@ -26,7 +26,10 @@ impl App {
                 // Check that only one panel (FM) remains without Welcome
                 if self.panels.count() == 1 {
                     // Make sure remaining panel is not Welcome
-                    self.panels.get(0).map(|p| !p.is_welcome_panel()).unwrap_or(true)
+                    self.panels
+                        .get(0)
+                        .map(|p| !p.is_welcome_panel())
+                        .unwrap_or(true)
                 } else {
                     false
                 }

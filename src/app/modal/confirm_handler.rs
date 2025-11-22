@@ -1,11 +1,8 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
-use crate::{
-    i18n,
-    panels::file_manager::FileManager,
-};
 use super::super::App;
+use crate::{i18n, panels::file_manager::FileManager};
 
 impl App {
     /// Handle deletion of files/directories
@@ -28,9 +25,8 @@ impl App {
 
                         // Delete each file/directory
                         for path in &paths {
-                            let item_name = path.file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("?");
+                            let item_name =
+                                path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
                             let is_dir = path.is_dir();
 
                             self.state.log_info(format!(
@@ -70,7 +66,9 @@ impl App {
                             if error_count == 0 {
                                 self.state.set_info(t.status_items_deleted(success_count));
                             } else {
-                                self.state.set_info(t.status_items_deleted_with_errors(success_count, error_count));
+                                self.state.set_info(
+                                    t.status_items_deleted_with_errors(success_count, error_count),
+                                );
                             }
                         }
 
@@ -82,10 +80,12 @@ impl App {
                         // Refresh directory contents
                         let _ = fm.load_directory();
                     } else {
-                        self.state.log_error(format!("Panel {} is not FileManager", panel_index));
+                        self.state
+                            .log_error(format!("Panel {} is not FileManager", panel_index));
                     }
                 } else {
-                    self.state.log_error(format!("Panel with index {} not found", panel_index));
+                    self.state
+                        .log_error(format!("Panel with index {} not found", panel_index));
                 }
             }
         }

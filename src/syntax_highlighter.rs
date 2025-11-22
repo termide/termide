@@ -259,13 +259,9 @@ impl TreeSitterHighlighter {
         injections_query: &str,
         highlight_names: &[String],
     ) {
-        if let Ok(mut config) = HighlightConfiguration::new(
-            language,
-            name,
-            highlights_query,
-            injections_query,
-            "",
-        ) {
+        if let Ok(mut config) =
+            HighlightConfiguration::new(language, name, highlights_query, injections_query, "")
+        {
             config.configure(highlight_names);
             configs.insert(name, config);
         }

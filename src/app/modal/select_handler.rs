@@ -1,12 +1,12 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
+use super::super::App;
 use crate::{
     i18n,
     panels::editor::Editor,
     state::{ActiveModal, PendingAction},
 };
-use super::super::App;
 
 impl App {
     /// Handle editor closure with saving
@@ -46,12 +46,16 @@ impl App {
                                     t.modal_save_as_title(),
                                     t.modal_enter_filename(),
                                 );
-                                let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+                                let current_dir =
+                                    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
                                 let action = PendingAction::SaveFileAs {
                                     panel_index,
                                     directory: current_dir,
                                 };
-                                self.state.set_pending_action(action, ActiveModal::Input(Box::new(modal)));
+                                self.state.set_pending_action(
+                                    action,
+                                    ActiveModal::Input(Box::new(modal)),
+                                );
                                 // After saving file will remain open, need to close separately
                                 // This is simplification, but for full implementation need more complex PendingAction
                                 return Ok(());
@@ -85,15 +89,9 @@ impl App {
         value: Box<dyn std::any::Any>,
     ) -> Result<()> {
         if let Some(choice) = value.downcast_ref::<crate::ui::modal::OverwriteChoice>() {
-            use crate::{
-                i18n,
-                panels::file_manager::FileManager,
-                ui::modal::OverwriteChoice,
-            };
+            use crate::{i18n, panels::file_manager::FileManager, ui::modal::OverwriteChoice};
 
-            let item_name = source.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("?");
+            let item_name = source.file_name().and_then(|n| n.to_str()).unwrap_or("?");
 
             // Determine final destination path
             let final_dest = if destination.is_dir() {
@@ -107,8 +105,11 @@ impl App {
                 OverwriteChoice::Replace => true,
                 OverwriteChoice::ReplaceIfNewer => {
                     // Compare modification time
-                    if let (Ok(src_meta), Ok(dst_meta)) = (source.metadata(), final_dest.metadata()) {
-                        if let (Ok(src_time), Ok(dst_time)) = (src_meta.modified(), dst_meta.modified()) {
+                    if let (Ok(src_meta), Ok(dst_meta)) = (source.metadata(), final_dest.metadata())
+                    {
+                        if let (Ok(src_time), Ok(dst_time)) =
+                            (src_meta.modified(), dst_meta.modified())
+                        {
                             src_time > dst_time
                         } else {
                             false
@@ -119,7 +120,8 @@ impl App {
                 }
                 OverwriteChoice::ReplaceIfLarger => {
                     // Compare file sizes
-                    if let (Ok(src_meta), Ok(dst_meta)) = (source.metadata(), final_dest.metadata()) {
+                    if let (Ok(src_meta), Ok(dst_meta)) = (source.metadata(), final_dest.metadata())
+                    {
                         src_meta.len() > dst_meta.len()
                     } else {
                         false
@@ -143,9 +145,15 @@ impl App {
                         match result {
                             Ok(_) => {
                                 let t = i18n::t();
-                                let action_name = if is_move { t.action_moved() } else { t.action_copied() };
-                                self.state.log_success(format!("'{}' {}", item_name, action_name));
-                                self.state.set_info(t.status_item_actioned(&item_name, action_name));
+                                let action_name = if is_move {
+                                    t.action_moved()
+                                } else {
+                                    t.action_copied()
+                                };
+                                self.state
+                                    .log_success(format!("'{}' {}", item_name, action_name));
+                                self.state
+                                    .set_info(t.status_item_actioned(&item_name, action_name));
 
                                 // Refresh FM panels
                                 if is_move {
@@ -159,16 +167,23 @@ impl App {
                             }
                             Err(e) => {
                                 let t = i18n::t();
-                                let action_name = if is_move { t.action_moving() } else { t.action_copying() };
-                                self.state.log_error(format!("Ошибка {}: {}", action_name, e));
-                                self.state.set_error(t.status_error_action(action_name, &e.to_string()));
+                                let action_name = if is_move {
+                                    t.action_moving()
+                                } else {
+                                    t.action_copying()
+                                };
+                                self.state
+                                    .log_error(format!("Ошибка {}: {}", action_name, e));
+                                self.state
+                                    .set_error(t.status_error_action(action_name, &e.to_string()));
                             }
                         }
                     }
                 }
             } else {
                 let t = i18n::t();
-                self.state.log_info(format!("Operation '{}' skipped", item_name));
+                self.state
+                    .log_info(format!("Operation '{}' skipped", item_name));
                 self.state.set_info(t.status_operation_skipped(&item_name));
             }
         }

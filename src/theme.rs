@@ -40,27 +40,25 @@ impl TomlColor {
 /// TOML theme colors structure
 #[derive(Debug, Clone, Deserialize)]
 struct TomlColors {
-    background: TomlColor,
-    text_primary: TomlColor,
-    text_secondary: TomlColor,
-    accent_primary: TomlColor,
-    accent_secondary: TomlColor,
-    highlight: TomlColor,
+    // Base
+    bg: TomlColor,
+    fg: TomlColor,
 
-    selection_bg: TomlColor,
-    selection_fg: TomlColor,
-    selected_item: TomlColor,
-    cursor_line_bg: TomlColor,
+    // Accented
+    accented_bg: TomlColor,
+    accented_fg: TomlColor,
 
-    status_bar_bg: TomlColor,
+    // Selection
+    selected_bg: TomlColor,
+    selected_fg: TomlColor,
 
-    success_bg: TomlColor,
-    success_fg: TomlColor,
-    error_bg: TomlColor,
-    error_fg: TomlColor,
-    git_modified: TomlColor,
-    git_added: TomlColor,
-    git_deleted: TomlColor,
+    // Disabled
+    disabled: TomlColor,
+
+    // Semantic
+    success: TomlColor,
+    warning: TomlColor,
+    error: TomlColor,
 }
 
 /// TOML theme structure
@@ -75,59 +73,45 @@ struct TomlTheme {
 pub struct Theme {
     pub name: &'static str,
 
-    // Base colors
-    pub background: Color,              // Application and modal background
-    pub text_primary: Color,            // Primary text
-    pub text_secondary: Color,          // Secondary/muted text
-    pub accent_primary: Color,          // Primary accent color (active elements)
-    pub accent_secondary: Color,        // Secondary accent color (inactive elements)
-    pub highlight: Color,               // Highlight/selection color
+    // Base (2 colors)
+    pub bg: Color, // Panel backgrounds
+    pub fg: Color, // Main text
 
-    // Interactive elements
-    pub selection_bg: Color,            // Selected item background (menu, FM cursor)
-    pub selection_fg: Color,            // Selected item text
-    pub selected_item: Color,           // Selected file marker
-    pub cursor_line_bg: Color,          // Cursor line highlight in editor
+    // Accented (2 colors)
+    pub accented_bg: Color, // Menu, status bar, cursor line background
+    pub accented_fg: Color, // Active borders, first letter in menu, selected file marker
 
-    // Status bar
-    pub status_bar_bg: Color,           // Status bar background
+    // Selection (2 colors)
+    pub selected_bg: Color, // Selected item background (FM cursor, menu selection)
+    pub selected_fg: Color, // Selected item text
 
-    // Semantic colors (status messages and Git)
-    pub success_bg: Color,
-    pub success_fg: Color,
-    pub error_bg: Color,
-    pub error_fg: Color,
-    pub git_modified: Color,
-    pub git_added: Color,
-    pub git_deleted: Color,
+    // Disabled (1 color)
+    pub disabled: Color, // Inactive elements, secondary text, separators
+
+    // Semantic (3 colors)
+    pub success: Color, // Success, git added, resource indicators <50%
+    pub warning: Color, // Warning, git modified, resource indicators 50-75%, search highlight
+    pub error: Color,   // Error, git deleted, resource indicators >75%
 }
 
 /// Load theme from embedded TOML content
 fn load_theme_from_toml(content: &str, name: &'static str) -> Theme {
-    let toml_theme: TomlTheme = toml::from_str(content)
-        .unwrap_or_else(|e| panic!("Failed to parse theme {}: {}", name, e));
+    let toml_theme: TomlTheme =
+        toml::from_str(content).unwrap_or_else(|e| panic!("Failed to parse theme {}: {}", name, e));
 
     let c = &toml_theme.colors;
     Theme {
         name,
-        background: c.background.to_color(),
-        text_primary: c.text_primary.to_color(),
-        text_secondary: c.text_secondary.to_color(),
-        accent_primary: c.accent_primary.to_color(),
-        accent_secondary: c.accent_secondary.to_color(),
-        highlight: c.highlight.to_color(),
-        selection_bg: c.selection_bg.to_color(),
-        selection_fg: c.selection_fg.to_color(),
-        selected_item: c.selected_item.to_color(),
-        cursor_line_bg: c.cursor_line_bg.to_color(),
-        status_bar_bg: c.status_bar_bg.to_color(),
-        success_bg: c.success_bg.to_color(),
-        success_fg: c.success_fg.to_color(),
-        error_bg: c.error_bg.to_color(),
-        error_fg: c.error_fg.to_color(),
-        git_modified: c.git_modified.to_color(),
-        git_added: c.git_added.to_color(),
-        git_deleted: c.git_deleted.to_color(),
+        bg: c.bg.to_color(),
+        fg: c.fg.to_color(),
+        accented_bg: c.accented_bg.to_color(),
+        accented_fg: c.accented_fg.to_color(),
+        selected_bg: c.selected_bg.to_color(),
+        selected_fg: c.selected_fg.to_color(),
+        disabled: c.disabled.to_color(),
+        success: c.success.to_color(),
+        warning: c.warning.to_color(),
+        error: c.error.to_color(),
     }
 }
 

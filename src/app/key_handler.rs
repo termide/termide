@@ -2,19 +2,16 @@ use anyhow::Result;
 use crossterm::event::KeyCode;
 use std::path::PathBuf;
 
+use super::App;
 use crate::{
     i18n,
     panels::{
-        debug::Debug,
-        editor::Editor,
-        file_manager::FileManager,
-        terminal_pty::Terminal,
+        debug::Debug, editor::Editor, file_manager::FileManager, terminal_pty::Terminal,
         welcome::Welcome,
     },
     state::{ActiveModal, LayoutMode, PendingAction},
     ui::menu::MENU_ITEM_COUNT,
 };
-use super::App;
 
 impl App {
     /// Handle keyboard event
@@ -43,28 +40,29 @@ impl App {
         }
 
         // Pass event to active panel and collect results
-        let (file_to_open, modal_request, config_update) = if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
-            panel.handle_key(key)?;
+        let (file_to_open, modal_request, config_update) =
+            if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+                panel.handle_key(key)?;
 
-            // Collect results from panel
-            let file_to_open = panel.take_file_to_open();
-            let modal_request = panel.take_modal_request();
+                // Collect results from panel
+                let file_to_open = panel.take_file_to_open();
+                let modal_request = panel.take_modal_request();
 
-            // Check config update (only for Editor)
-            let config_update = {
-                use std::any::Any;
-                use crate::panels::editor::Editor;
-                if let Some(editor) = (&mut **panel as &mut dyn Any).downcast_mut::<Editor>() {
-                    editor.take_config_update()
-                } else {
-                    None
-                }
+                // Check config update (only for Editor)
+                let config_update = {
+                    use crate::panels::editor::Editor;
+                    use std::any::Any;
+                    if let Some(editor) = (&mut **panel as &mut dyn Any).downcast_mut::<Editor>() {
+                        editor.take_config_update()
+                    } else {
+                        None
+                    }
+                };
+
+                (file_to_open, modal_request, config_update)
+            } else {
+                (None, None, None)
             };
-
-            (file_to_open, modal_request, config_update)
-        } else {
-            (None, None, None)
-        };
 
         // Apply config update if present
         if let Some(new_config) = config_update {
@@ -76,23 +74,27 @@ impl App {
         // Handle file opening in editor
         if let Some(file_path) = file_to_open {
             self.close_welcome_panels();
-            let filename = file_path.file_name()
+            let filename = file_path
+                .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("?");
             let t = i18n::t();
-            self.state.log_info(format!("Attempting to open file: {}", filename));
+            self.state
+                .log_info(format!("Attempting to open file: {}", filename));
 
             match Editor::open_file(file_path.clone()) {
                 Ok(editor_panel) => {
                     self.panels.add_panel(Box::new(editor_panel));
                     let new_panel_index = self.panels.count().saturating_sub(1);
                     self.state.set_active_panel(new_panel_index);
-                    self.state.log_success(format!("File '{}' opened in editor", filename));
+                    self.state
+                        .log_success(format!("File '{}' opened in editor", filename));
                     self.state.set_info(t.editor_file_opened(filename));
                 }
                 Err(e) => {
                     let error_msg = t.status_error_open_file(filename, &e.to_string());
-                    self.state.log_error(format!("Error opening '{}': {}", filename, e));
+                    self.state
+                        .log_error(format!("Error opening '{}': {}", filename, e));
                     self.state.set_error(error_msg);
                 }
             }
@@ -102,26 +104,26 @@ impl App {
         if let Some((mut action, mut modal)) = modal_request {
             // Update panel_index in action
             match &mut action {
-                PendingAction::CreateFile { panel_index, .. } |
-                PendingAction::CreateDirectory { panel_index, .. } |
-                PendingAction::DeletePath { panel_index, .. } |
-                PendingAction::CopyPath { panel_index, .. } |
-                PendingAction::MovePath { panel_index, .. } |
-                PendingAction::SaveFileAs { panel_index, .. } |
-                PendingAction::ClosePanel { panel_index } |
-                PendingAction::CloseEditorWithSave { panel_index } |
-                PendingAction::OverwriteDecision { panel_index, .. } => {
+                PendingAction::CreateFile { panel_index, .. }
+                | PendingAction::CreateDirectory { panel_index, .. }
+                | PendingAction::DeletePath { panel_index, .. }
+                | PendingAction::CopyPath { panel_index, .. }
+                | PendingAction::MovePath { panel_index, .. }
+                | PendingAction::SaveFileAs { panel_index, .. }
+                | PendingAction::ClosePanel { panel_index }
+                | PendingAction::CloseEditorWithSave { panel_index }
+                | PendingAction::OverwriteDecision { panel_index, .. } => {
                     *panel_index = self.state.active_panel;
                 }
-                PendingAction::BatchFileOperation { .. } |
-                PendingAction::ContinueBatchOperation { .. } |
-                PendingAction::RenameWithPattern { .. } |
-                PendingAction::Search |
-                PendingAction::Replace |
-                PendingAction::ReplaceStep2 { .. } |
-                PendingAction::NextPanel |
-                PendingAction::PrevPanel |
-                PendingAction::QuitApplication => {
+                PendingAction::BatchFileOperation { .. }
+                | PendingAction::ContinueBatchOperation { .. }
+                | PendingAction::RenameWithPattern { .. }
+                | PendingAction::Search
+                | PendingAction::Replace
+                | PendingAction::ReplaceStep2 { .. }
+                | PendingAction::NextPanel
+                | PendingAction::PrevPanel
+                | PendingAction::QuitApplication => {
                     // These actions don't require panel_index update
                     // since it's already set in BatchOperation or not used
                 }
@@ -131,16 +133,23 @@ impl App {
             let is_copy = matches!(action, PendingAction::CopyPath { .. });
 
             match &mut action {
-                PendingAction::CopyPath { target_directory, sources, .. } |
-                PendingAction::MovePath { target_directory, sources, .. } => {
+                PendingAction::CopyPath {
+                    target_directory,
+                    sources,
+                    ..
+                }
+                | PendingAction::MovePath {
+                    target_directory,
+                    sources,
+                    ..
+                } => {
                     if target_directory.is_none() && !sources.is_empty() {
                         // Find another FM panel
                         let other_fm_dir = self.find_other_fm_directory(self.state.active_panel);
 
                         // If no other FM found, use parent directory of first source
-                        let default_dir = other_fm_dir.or_else(|| {
-                            sources[0].parent().map(|p| p.to_path_buf())
-                        });
+                        let default_dir =
+                            other_fm_dir.or_else(|| sources[0].parent().map(|p| p.to_path_buf()));
 
                         if let Some(dir) = default_dir {
                             *target_directory = Some(dir.clone());
@@ -150,7 +159,8 @@ impl App {
                             // Recreate modal with new default
                             let t = i18n::t();
                             let new_modal = if sources.len() == 1 {
-                                let source_name = sources[0].file_name()
+                                let source_name = sources[0]
+                                    .file_name()
                                     .and_then(|n| n.to_str())
                                     .unwrap_or("?");
 
@@ -343,17 +353,16 @@ impl App {
                         ],
                     );
                     let action = PendingAction::CloseEditorWithSave { panel_index };
-                    self.state.set_pending_action(action, ActiveModal::Select(Box::new(modal)));
+                    self.state
+                        .set_pending_action(action, ActiveModal::Select(Box::new(modal)));
                     return Ok(());
                 } else {
                     // For other panels show simple confirmation
                     let t = i18n::t();
-                    let modal = crate::ui::modal::ConfirmModal::new(
-                        t.modal_yes(),
-                        &_message,
-                    );
+                    let modal = crate::ui::modal::ConfirmModal::new(t.modal_yes(), &_message);
                     let action = PendingAction::ClosePanel { panel_index };
-                    self.state.set_pending_action(action, ActiveModal::Confirm(Box::new(modal)));
+                    self.state
+                        .set_pending_action(action, ActiveModal::Confirm(Box::new(modal)));
                     return Ok(());
                 }
             }
@@ -393,7 +402,9 @@ impl App {
     fn handle_new_file_manager(&mut self) -> Result<()> {
         self.close_welcome_panels();
         // Get working directory from current panel
-        let working_dir = self.panels.get(self.state.active_panel)
+        let working_dir = self
+            .panels
+            .get(self.state.active_panel)
             .and_then(|p| p.get_working_directory())
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
 
@@ -453,7 +464,8 @@ impl App {
         let config_path = match Config::config_file_path() {
             Ok(path) => path,
             Err(e) => {
-                self.state.set_error(format!("Failed to get config path: {}", e));
+                self.state
+                    .set_error(format!("Failed to get config path: {}", e));
                 return Ok(());
             }
         };
@@ -482,7 +494,8 @@ impl App {
                 self.state.set_active_panel(new_panel_index);
             }
             Err(e) => {
-                self.state.set_error(format!("Failed to open config: {}", e));
+                self.state
+                    .set_error(format!("Failed to open config: {}", e));
             }
         }
 
@@ -501,6 +514,7 @@ impl App {
 
     /// Check if any panel requires close confirmation (unsaved changes, running processes)
     fn has_panels_requiring_confirmation(&self) -> bool {
+        // Check if any panel has unsaved changes or running processes
         for i in 0..self.panels.count() {
             if let Some(panel) = self.panels.get(i) {
                 if panel.needs_close_confirmation().is_some() {
@@ -508,6 +522,22 @@ impl App {
                 }
             }
         }
+
+        // Check if there's an active batch file operation
+        // If FileManager with pending batch operation is closed, the operation state is lost
+        if let Some(pending) = &self.state.pending_action {
+            match pending {
+                PendingAction::BatchFileOperation { operation }
+                | PendingAction::ContinueBatchOperation { operation } => {
+                    // Check if the panel that owns this operation still exists
+                    if operation.panel_index < self.panels.count() {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+
         false
     }
 
@@ -691,7 +721,9 @@ impl App {
         // But if panel captures Escape (e.g., terminal with running program),
         // then Escape is passed to panel
         if key.code == KeyCode::Esc && key.modifiers.is_empty() {
-            let captures = self.panels.get(self.state.active_panel)
+            let captures = self
+                .panels
+                .get(self.state.active_panel)
                 .map(|p| p.captures_escape())
                 .unwrap_or(false);
             if !captures {

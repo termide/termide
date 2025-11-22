@@ -4,19 +4,11 @@ use super::Cursor;
 #[derive(Debug, Clone)]
 pub enum Action {
     /// Text insertion
-    Insert {
-        position: Cursor,
-        text: String,
-    },
+    Insert { position: Cursor, text: String },
     /// Text deletion
-    Delete {
-        position: Cursor,
-        text: String,
-    },
+    Delete { position: Cursor, text: String },
     /// Action group (for merging consecutive insertions)
-    Group {
-        actions: Vec<Action>,
-    },
+    Group { actions: Vec<Action> },
 }
 
 impl Action {

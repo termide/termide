@@ -499,11 +499,17 @@ impl Translation for Russian {
     }
 
     fn modal_copy_single_prompt(&self, name: &str) -> String {
-        format!("Куда копировать '{}'?\n(введите путь: 'subdir/', '../', или новое имя)", name)
+        format!(
+            "Куда копировать '{}'?\n(введите путь: 'subdir/', '../', или новое имя)",
+            name
+        )
     }
 
     fn modal_copy_multiple_prompt(&self, count: usize) -> String {
-        format!("Куда копировать {} элементов?\n(введите путь: 'subdir/' или '../')", count)
+        format!(
+            "Куда копировать {} элементов?\n(введите путь: 'subdir/' или '../')",
+            count
+        )
     }
 
     fn modal_move_single_prompt(&self, name: &str) -> String {

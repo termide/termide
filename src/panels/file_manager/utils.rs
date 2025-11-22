@@ -46,7 +46,11 @@ pub fn get_icon(entry: &FileEntry) -> &'static str {
     }
 
     // Binary / unknown files
-    if entry.is_symlink { "◇" } else { "◆" }
+    if entry.is_symlink {
+        "◇"
+    } else {
+        "◆"
+    }
 }
 
 /// Get attribute character (R/X flag or selection checkmark)
@@ -84,11 +88,23 @@ pub fn truncate_name(name: &str, max_len: usize) -> String {
 pub fn format_size(bytes: u64) -> String {
     let t = crate::i18n::t();
     if bytes >= GIGABYTE {
-        format!("{:.2} {}", bytes as f64 / GIGABYTE as f64, t.size_gigabytes())
+        format!(
+            "{:.2} {}",
+            bytes as f64 / GIGABYTE as f64,
+            t.size_gigabytes()
+        )
     } else if bytes >= MEGABYTE {
-        format!("{:.2} {}", bytes as f64 / MEGABYTE as f64, t.size_megabytes())
+        format!(
+            "{:.2} {}",
+            bytes as f64 / MEGABYTE as f64,
+            t.size_megabytes()
+        )
     } else if bytes >= KILOBYTE {
-        format!("{:.2} {}", bytes as f64 / KILOBYTE as f64, t.size_kilobytes())
+        format!(
+            "{:.2} {}",
+            bytes as f64 / KILOBYTE as f64,
+            t.size_kilobytes()
+        )
     } else {
         format!("{} {}", bytes, t.size_bytes())
     }

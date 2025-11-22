@@ -8,9 +8,9 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
 
-use crate::theme::Theme;
-use crate::i18n;
 use super::{Modal, ModalResult};
+use crate::i18n;
+use crate::theme::Theme;
 
 /// Text input modal window
 #[derive(Debug)]
@@ -33,9 +33,13 @@ impl InputModal {
     }
 
     /// Create with default value
-    pub fn with_default(title: impl Into<String>, prompt: impl Into<String>, default: impl Into<String>) -> Self {
+    pub fn with_default(
+        title: impl Into<String>,
+        prompt: impl Into<String>,
+        default: impl Into<String>,
+    ) -> Self {
         let default = default.into();
-        let cursor_pos = default.chars().count();  // Use character count, not bytes
+        let cursor_pos = default.chars().count(); // Use character count, not bytes
         Self {
             title: title.into(),
             prompt: prompt.into(),
@@ -50,7 +54,9 @@ impl InputModal {
         let title_width = self.title.len() as u16 + 2;
 
         // 2. Maximum prompt line width
-        let prompt_max_line_width = self.prompt.lines()
+        let prompt_max_line_width = self
+            .prompt
+            .lines()
             .map(|line| line.len())
             .max()
             .unwrap_or(0) as u16;
@@ -132,13 +138,11 @@ impl Modal for InputModal {
         let block = Block::default()
             .title(Span::styled(
                 format!(" {} ", self.title),
-                Style::default()
-                    .fg(theme.background)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(theme.bg).add_modifier(Modifier::BOLD),
             ))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.background))
-            .style(Style::default().bg(theme.text_primary));
+            .border_style(Style::default().fg(theme.bg))
+            .style(Style::default().bg(theme.fg));
 
         let inner = block.inner(modal_area);
         block.render(modal_area, buf);
@@ -149,43 +153,53 @@ impl Modal for InputModal {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(prompt_lines),  // Prompt (dynamic)
-                Constraint::Length(3),              // Input
-                Constraint::Length(1),              // Hint
+                Constraint::Length(prompt_lines), // Prompt (dynamic)
+                Constraint::Length(3),            // Input
+                Constraint::Length(1),            // Hint
             ])
             .split(inner);
 
         // Render prompt
         let prompt = Paragraph::new(self.prompt.clone())
             .alignment(Alignment::Left)
-            .style(Style::default().fg(theme.background));
+            .style(Style::default().fg(theme.bg));
         prompt.render(chunks[0], buf);
 
         // Render input field
         // Convert cursor position (in characters) to byte index
-        let byte_pos = self.input.chars().take(self.cursor_pos).map(|c| c.len_utf8()).sum::<usize>();
+        let byte_pos = self
+            .input
+            .chars()
+            .take(self.cursor_pos)
+            .map(|c| c.len_utf8())
+            .sum::<usize>();
 
         let input_line = Line::from(vec![
-            Span::styled(&self.input[..byte_pos], Style::default().fg(theme.background)),
-            Span::styled("█", Style::default().fg(theme.success_fg)),
-            Span::styled(&self.input[byte_pos..], Style::default().fg(theme.background)),
+            Span::styled(&self.input[..byte_pos], Style::default().fg(theme.bg)),
+            Span::styled("█", Style::default().fg(theme.success)),
+            Span::styled(&self.input[byte_pos..], Style::default().fg(theme.bg)),
         ]);
 
         let input_paragraph = Paragraph::new(input_line)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.success_fg)),
+                    .border_style(Style::default().fg(theme.success)),
             )
-            .style(Style::default().bg(theme.text_primary));
+            .style(Style::default().bg(theme.fg));
         input_paragraph.render(chunks[1], buf);
 
         // Render hint
         let t = i18n::t();
-        let hint_text = format!("{}{}{}", t.ui_enter_confirm(), t.ui_hint_separator(), t.ui_esc_cancel());
+        let hint_text = format!(
+            "{}{}{}",
+            t.ui_enter_confirm(),
+            t.ui_hint_separator(),
+            t.ui_esc_cancel()
+        );
         let hint = Paragraph::new(hint_text)
             .alignment(Alignment::Center)
-            .style(Style::default().fg(theme.text_secondary));
+            .style(Style::default().fg(theme.disabled));
         hint.render(chunks[2], buf);
     }
 
@@ -204,7 +218,12 @@ impl Modal for InputModal {
                     return Ok(None);
                 }
                 // Convert character position to byte index
-                let byte_pos = self.input.chars().take(self.cursor_pos).map(|c| c.len_utf8()).sum::<usize>();
+                let byte_pos = self
+                    .input
+                    .chars()
+                    .take(self.cursor_pos)
+                    .map(|c| c.len_utf8())
+                    .sum::<usize>();
                 self.input.insert(byte_pos, c);
                 self.cursor_pos += 1;
                 Ok(None)
@@ -212,7 +231,12 @@ impl Modal for InputModal {
             KeyCode::Backspace => {
                 if self.cursor_pos > 0 {
                     // Convert character position to byte index
-                    let byte_pos = self.input.chars().take(self.cursor_pos - 1).map(|c| c.len_utf8()).sum::<usize>();
+                    let byte_pos = self
+                        .input
+                        .chars()
+                        .take(self.cursor_pos - 1)
+                        .map(|c| c.len_utf8())
+                        .sum::<usize>();
                     self.input.remove(byte_pos);
                     self.cursor_pos -= 1;
                 }
@@ -222,7 +246,12 @@ impl Modal for InputModal {
                 let char_count = self.input.chars().count();
                 if self.cursor_pos < char_count {
                     // Convert character position to byte index
-                    let byte_pos = self.input.chars().take(self.cursor_pos).map(|c| c.len_utf8()).sum::<usize>();
+                    let byte_pos = self
+                        .input
+                        .chars()
+                        .take(self.cursor_pos)
+                        .map(|c| c.len_utf8())
+                        .sum::<usize>();
                     self.input.remove(byte_pos);
                 }
                 Ok(None)

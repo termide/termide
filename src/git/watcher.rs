@@ -16,7 +16,7 @@ pub struct GitStatusUpdate {
 #[derive(Debug)]
 pub struct GitWatcher {
     debouncer: Debouncer<RecommendedWatcher>,
-    watched_repos: HashMap<PathBuf, PathBuf>,  // repo_path -> git_dir_path
+    watched_repos: HashMap<PathBuf, PathBuf>, // repo_path -> git_dir_path
 }
 
 impl GitWatcher {
@@ -32,9 +32,13 @@ impl GitWatcher {
                         // This prevents processing of .git/objects/* and other irrelevant files
                         if let Some(file_name) = event.path.file_name().and_then(|n| n.to_str()) {
                             // Check if this is a file we care about
-                            let is_relevant = file_name == "index" ||
-                                             file_name == "HEAD" ||
-                                             event.path.to_str().map(|s| s.contains("/refs/") || s.contains("/logs/")).unwrap_or(false);
+                            let is_relevant = file_name == "index"
+                                || file_name == "HEAD"
+                                || event
+                                    .path
+                                    .to_str()
+                                    .map(|s| s.contains("/refs/") || s.contains("/logs/"))
+                                    .unwrap_or(false);
 
                             if !is_relevant {
                                 continue; // Skip irrelevant files
@@ -43,7 +47,6 @@ impl GitWatcher {
 
                         // Get repository root from the event path
                         if let Some(repo_path) = Self::find_repo_root(&event.path) {
-                            eprintln!("[GitWatcher] File change detected: {:?} -> repo: {:?}", event.path, repo_path);
                             let _ = tx.send(GitStatusUpdate { repo_path });
                         }
                     }
@@ -76,8 +79,6 @@ impl GitWatcher {
         // This allows us to catch rename/create events when git atomically updates files
         // (e.g., git creates .git/index.lock, writes to it, then renames to .git/index)
         watcher.watch(&git_dir, RecursiveMode::Recursive)?;
-
-        eprintln!("[GitWatcher] Watching repository: {:?}", repo_path);
 
         self.watched_repos.insert(repo_path, git_dir);
         Ok(())
@@ -121,7 +122,8 @@ impl GitWatcher {
 
 /// Global git watcher instance
 /// This is created once at application startup and runs in a background thread
-pub fn create_git_watcher() -> anyhow::Result<(GitWatcher, std::sync::mpsc::Receiver<GitStatusUpdate>)> {
+pub fn create_git_watcher(
+) -> anyhow::Result<(GitWatcher, std::sync::mpsc::Receiver<GitStatusUpdate>)> {
     let (tx, rx) = channel();
     let watcher = GitWatcher::new(tx)?;
     Ok((watcher, rx))

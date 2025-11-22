@@ -11,10 +11,10 @@ pub enum ClipboardMode {
 /// Backend for working with system clipboard
 #[derive(Debug, Clone, Copy)]
 enum ClipboardBackend {
-    WlCopy,     // Wayland
-    Xclip,      // X11
-    Xsel,       // X11 alternative
-    Osc52Only,  // OSC 52 only + internal buffer
+    WlCopy,    // Wayland
+    Xclip,     // X11
+    Xsel,      // X11 alternative
+    Osc52Only, // OSC 52 only + internal buffer
 }
 
 /// Global clipboard
@@ -99,7 +99,7 @@ fn get_backend() -> ClipboardBackend {
 
 /// Send text to system clipboard via OSC 52
 fn send_osc52(text: &str) {
-    use base64::{Engine, engine::general_purpose::STANDARD};
+    use base64::{engine::general_purpose::STANDARD, Engine};
     use crossterm::{execute, style::Print};
 
     let encoded = STANDARD.encode(text.as_bytes());

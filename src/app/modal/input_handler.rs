@@ -1,11 +1,11 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
+use super::super::App;
 use crate::{
     i18n,
     panels::{editor::Editor, file_manager::FileManager},
 };
-use super::super::App;
 
 impl App {
     /// Handle file creation
@@ -17,7 +17,10 @@ impl App {
     ) -> Result<()> {
         if let Some(name) = value.downcast_ref::<String>() {
             let t = i18n::t();
-            self.state.log_info(format!("Attempting to create file: {} (panel_index={})", name, panel_index));
+            self.state.log_info(format!(
+                "Attempting to create file: {} (panel_index={})",
+                name, panel_index
+            ));
             // Get FileManager panel and create file
             if let Some(panel) = self.panels.get_mut(panel_index) {
                 // Use Any trait for downcast
@@ -32,15 +35,19 @@ impl App {
                             let _ = fm.load_directory();
                         }
                         Err(e) => {
-                            self.state.log_error(format!("File creation error '{}': {}", name, e));
-                            self.state.set_error(t.status_error_create_file(&e.to_string()));
+                            self.state
+                                .log_error(format!("File creation error '{}': {}", name, e));
+                            self.state
+                                .set_error(t.status_error_create_file(&e.to_string()));
                         }
                     }
                 } else {
-                    self.state.log_error(format!("Panel {} is not FileManager", panel_index));
+                    self.state
+                        .log_error(format!("Panel {} is not FileManager", panel_index));
                 }
             } else {
-                self.state.log_error(format!("Panel with index {} not found", panel_index));
+                self.state
+                    .log_error(format!("Panel with index {} not found", panel_index));
             }
         }
         Ok(())
@@ -55,7 +62,10 @@ impl App {
     ) -> Result<()> {
         if let Some(name) = value.downcast_ref::<String>() {
             let t = i18n::t();
-            self.state.log_info(format!("Attempting to create directory: {} (panel_index={})", name, panel_index));
+            self.state.log_info(format!(
+                "Attempting to create directory: {} (panel_index={})",
+                name, panel_index
+            ));
             // Get FileManager panel and create directory
             if let Some(panel) = self.panels.get_mut(panel_index) {
                 use std::any::Any;
@@ -63,21 +73,26 @@ impl App {
                 if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
                     match fm.create_directory(name.clone()) {
                         Ok(_) => {
-                            self.state.log_success(format!("Directory '{}' created", name));
+                            self.state
+                                .log_success(format!("Directory '{}' created", name));
                             self.state.set_info(t.status_dir_created(name));
                             // Refresh directory contents
                             let _ = fm.load_directory();
                         }
                         Err(e) => {
-                            self.state.log_error(format!("Directory creation error '{}': {}", name, e));
-                            self.state.set_error(t.status_error_create_dir(&e.to_string()));
+                            self.state
+                                .log_error(format!("Directory creation error '{}': {}", name, e));
+                            self.state
+                                .set_error(t.status_error_create_dir(&e.to_string()));
                         }
                     }
                 } else {
-                    self.state.log_error(format!("Panel {} is not FileManager", panel_index));
+                    self.state
+                        .log_error(format!("Panel {} is not FileManager", panel_index));
                 }
             } else {
-                self.state.log_error(format!("Panel with index {} not found", panel_index));
+                self.state
+                    .log_error(format!("Panel with index {} not found", panel_index));
             }
         }
         Ok(())
@@ -92,7 +107,8 @@ impl App {
     ) -> Result<()> {
         if let Some(filename) = value.downcast_ref::<String>() {
             let t = i18n::t();
-            self.state.log_info(format!("Attempting to save file: {}", filename));
+            self.state
+                .log_info(format!("Attempting to save file: {}", filename));
             // Get Editor panel and save file
             if let Some(panel) = self.panels.get_mut(panel_index) {
                 use std::any::Any;
@@ -106,7 +122,8 @@ impl App {
                             self.state.set_info(t.status_file_saved(filename));
                         }
                         Err(e) => {
-                            self.state.log_error(format!("Save error '{}': {}", filename, e));
+                            self.state
+                                .log_error(format!("Save error '{}': {}", filename, e));
                             self.state.set_error(t.status_error_save(&e.to_string()));
                         }
                     }

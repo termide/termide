@@ -1,8 +1,8 @@
 use std::fs;
 use std::sync::mpsc;
 
+use super::{utils, FileManager};
 use crate::state::{ActiveModal, DirSizeResult, PendingAction};
-use super::{FileManager, utils};
 
 /// File information for display
 #[derive(Clone, Debug)]
@@ -50,16 +50,23 @@ impl FileManager {
         let entry = self.entries.get(self.selected)?;
 
         let file_path = if entry.name == ".." {
-            self.current_path.parent().unwrap_or(&self.current_path).to_path_buf()
+            self.current_path
+                .parent()
+                .unwrap_or(&self.current_path)
+                .to_path_buf()
         } else {
             self.current_path.join(&entry.name)
         };
 
         let metadata = fs::metadata(&file_path).ok()?;
 
-        let file_type = if metadata.is_dir() { "Directory" }
-            else if metadata.is_symlink() { "Symlink" }
-            else { "File" };
+        let file_type = if metadata.is_dir() {
+            "Directory"
+        } else if metadata.is_symlink() {
+            "Symlink"
+        } else {
+            "File"
+        };
 
         let size = if metadata.is_dir() {
             "DIR".to_string()
@@ -70,7 +77,8 @@ impl FileManager {
         let owner = utils::get_user_name(metadata.uid());
         let group = utils::get_group_name(metadata.gid());
 
-        let modified = metadata.modified()
+        let modified = metadata
+            .modified()
             .ok()
             .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
             .map(|d| {
@@ -101,7 +109,10 @@ impl FileManager {
 
         if let Some(entry) = self.entries.get(self.selected) {
             let file_path = if entry.name == ".." {
-                self.current_path.parent().unwrap_or(&self.current_path).to_path_buf()
+                self.current_path
+                    .parent()
+                    .unwrap_or(&self.current_path)
+                    .to_path_buf()
             } else {
                 self.current_path.join(&entry.name)
             };
@@ -127,7 +138,8 @@ impl FileManager {
                 let owner = utils::get_user_name(metadata.uid());
                 let group = utils::get_group_name(metadata.gid());
 
-                let modified = metadata.modified()
+                let modified = metadata
+                    .modified()
                     .ok()
                     .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
                     .map(|d| {
@@ -137,7 +149,8 @@ impl FileManager {
                     })
                     .unwrap_or_else(|| "Unknown".to_string());
 
-                let created = metadata.created()
+                let created = metadata
+                    .created()
                     .ok()
                     .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
                     .map(|d| {
@@ -149,7 +162,10 @@ impl FileManager {
 
                 // Collect data without Name and Type
                 let data = vec![
-                    (t.file_info_path().to_string(), file_path.display().to_string()),
+                    (
+                        t.file_info_path().to_string(),
+                        file_path.display().to_string(),
+                    ),
                     (t.file_info_size().to_string(), size),
                     (t.file_info_owner().to_string(), owner),
                     (t.file_info_group().to_string(), group),

@@ -5,7 +5,7 @@ mod rendering;
 mod selection;
 mod utils;
 
-pub use file_info::{FileInfo, DiskSpaceInfo};
+pub use file_info::{DiskSpaceInfo, FileInfo};
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -32,8 +32,8 @@ use crate::ui::modal::{ConfirmModal, InputModal};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum DragMode {
-    Select,     // Shift+drag - selection
-    Toggle,     // Ctrl+drag - toggle selection
+    Select, // Shift+drag - selection
+    Toggle, // Ctrl+drag - toggle selection
 }
 
 /// Smart file manager with advanced features
@@ -121,8 +121,7 @@ impl FileManager {
     /// Load the contents of the current directory
     pub fn load_directory(&mut self) -> Result<()> {
         // Save current file name to restore position
-        let current_name = self.entries.get(self.selected)
-            .map(|e| e.name.clone());
+        let current_name = self.entries.get(self.selected).map(|e| e.name.clone());
 
         self.entries.clear();
         self.selected = 0;
@@ -198,13 +197,17 @@ impl FileManager {
                     let is_readonly = {
                         use std::os::unix::fs::PermissionsExt;
                         let mode = metadata.permissions().mode();
-                        (mode & 0o200) == 0  // owner write bit
+                        (mode & 0o200) == 0 // owner write bit
                     };
                     #[cfg(not(unix))]
                     let is_readonly = metadata.permissions().readonly();
 
                     // Get size (files only) and modification time
-                    let size = if metadata.is_file() { Some(metadata.len()) } else { None };
+                    let size = if metadata.is_file() {
+                        Some(metadata.len())
+                    } else {
+                        None
+                    };
                     let modified = metadata.modified().ok();
 
                     self.entries.push(FileEntry {
@@ -223,12 +226,10 @@ impl FileManager {
         }
 
         // Sort: directories first, then files
-        self.entries.sort_by(|a, b| {
-            match (a.is_dir, b.is_dir) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-            }
+        self.entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
         });
 
         // Restore cursor position if a file with that name exists
@@ -326,7 +327,14 @@ impl FileManager {
 }
 
 impl Panel for FileManager {
-    fn render(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool, panel_index: usize, state: &AppState) {
+    fn render(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        is_focused: bool,
+        panel_index: usize,
+        state: &AppState,
+    ) {
         // Automatically update scroll offset
         let content_height = area.height.saturating_sub(2) as usize; // -2 for borders
         self.visible_height = content_height; // Save for use in handle_key
@@ -348,7 +356,12 @@ impl Panel for FileManager {
         let content_width = area.width.saturating_sub(2) as usize;
         let items = self.get_items(content_height, content_width, state.theme, is_focused);
 
-        let block = crate::ui::panel_helpers::create_panel_block(&display_title, is_focused, panel_index, state);
+        let block = crate::ui::panel_helpers::create_panel_block(
+            &display_title,
+            is_focused,
+            panel_index,
+            state,
+        );
 
         let paragraph = Paragraph::new(items).block(block);
 
@@ -466,10 +479,7 @@ impl Panel for FileManager {
             (KeyCode::Char('f'), _) | (KeyCode::Char('F'), _) => {
                 // Create new file - open InputModal
                 let t = i18n::t();
-                let modal = InputModal::new(
-                    t.fm_create_file_prompt(),
-                    t.fm_create_file_prompt(),
-                );
+                let modal = InputModal::new(t.fm_create_file_prompt(), t.fm_create_file_prompt());
                 let action = PendingAction::CreateFile {
                     panel_index: 0, // will be updated in app.rs
                     directory: self.current_path.clone(),
@@ -479,10 +489,7 @@ impl Panel for FileManager {
             (KeyCode::Char('d'), _) | (KeyCode::Char('D'), _) | (KeyCode::F(7), _) => {
                 // Create new directory - open InputModal
                 let t = i18n::t();
-                let modal = InputModal::new(
-                    t.fm_create_dir_prompt(),
-                    t.fm_create_dir_prompt(),
-                );
+                let modal = InputModal::new(t.fm_create_dir_prompt(), t.fm_create_dir_prompt());
                 let action = PendingAction::CreateDirectory {
                     panel_index: 0, // will be updated in app.rs
                     directory: self.current_path.clone(),
@@ -499,10 +506,7 @@ impl Panel for FileManager {
                 let t = i18n::t();
                 let message = t.fm_delete_confirm(paths.len());
 
-                let modal = crate::ui::modal::ConfirmModal::new(
-                    "Delete",
-                    &message,
-                );
+                let modal = crate::ui::modal::ConfirmModal::new("Delete", &message);
                 let action = PendingAction::DeletePath {
                     panel_index: 0, // will be updated in app.rs
                     paths,
@@ -517,7 +521,8 @@ impl Panel for FileManager {
             (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
                 let paths = self.get_selected_paths();
                 if !paths.is_empty() {
-                    let text = paths.iter()
+                    let text = paths
+                        .iter()
                         .map(|p| p.display().to_string())
                         .collect::<Vec<_>>()
                         .join("\n");
@@ -528,7 +533,8 @@ impl Panel for FileManager {
             (KeyCode::Char('x'), KeyModifiers::CONTROL) => {
                 let paths = self.get_selected_paths();
                 if !paths.is_empty() {
-                    let text = paths.iter()
+                    let text = paths
+                        .iter()
                         .map(|p| p.display().to_string())
                         .collect::<Vec<_>>()
                         .join("\n");
@@ -544,7 +550,7 @@ impl Panel for FileManager {
                     .lines()
                     .filter(|line| !line.is_empty())
                     .map(std::path::PathBuf::from)
-                    .filter(|path| path.exists())  // Only existing paths
+                    .filter(|path| path.exists()) // Only existing paths
                     .collect();
 
                 if !files.is_empty() {
@@ -555,29 +561,26 @@ impl Panel for FileManager {
                     } else {
                         "Move"
                     };
-                    let message = t.fm_paste_confirm(files.len(), mode_str, &self.current_path.display().to_string());
+                    let message = t.fm_paste_confirm(
+                        files.len(),
+                        mode_str,
+                        &self.current_path.display().to_string(),
+                    );
 
                     let action = match mode {
-                        crate::clipboard::ClipboardMode::Copy => {
-                            PendingAction::CopyPath {
-                                panel_index: 0,
-                                sources: files,
-                                target_directory: Some(self.current_path.clone()),
-                            }
-                        }
-                        crate::clipboard::ClipboardMode::Cut => {
-                            PendingAction::MovePath {
-                                panel_index: 0,
-                                sources: files,
-                                target_directory: Some(self.current_path.clone()),
-                            }
-                        }
+                        crate::clipboard::ClipboardMode::Copy => PendingAction::CopyPath {
+                            panel_index: 0,
+                            sources: files,
+                            target_directory: Some(self.current_path.clone()),
+                        },
+                        crate::clipboard::ClipboardMode::Cut => PendingAction::MovePath {
+                            panel_index: 0,
+                            sources: files,
+                            target_directory: Some(self.current_path.clone()),
+                        },
                     };
 
-                    let modal = crate::ui::modal::ConfirmModal::new(
-                        "Confirm",
-                        &message,
-                    );
+                    let modal = crate::ui::modal::ConfirmModal::new("Confirm", &message);
                     self.modal_request = Some((action, ActiveModal::Confirm(Box::new(modal))));
 
                     // If it was a cut operation, clear the clipboard after execution
@@ -598,19 +601,13 @@ impl Panel for FileManager {
 
                 let t = i18n::t();
                 let message = if paths.len() == 1 {
-                    let name = paths[0].file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("?");
+                    let name = paths[0].file_name().and_then(|n| n.to_str()).unwrap_or("?");
                     t.fm_copy_prompt(name)
                 } else {
                     format!("Copy {} items to:", paths.len())
                 };
 
-                let modal = InputModal::with_default(
-                    "Copy",
-                    &message,
-                    &default_dest,
-                );
+                let modal = InputModal::with_default("Copy", &message, &default_dest);
                 let action = PendingAction::CopyPath {
                     panel_index: 0, // will be updated in app.rs
                     sources: paths,
@@ -627,25 +624,16 @@ impl Panel for FileManager {
 
                 let t = i18n::t();
                 let (message, default_dest) = if paths.len() == 1 {
-                    let name = paths[0].file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("?");
-                    (
-                        t.fm_move_prompt(name),
-                        name.to_string()
-                    )
+                    let name = paths[0].file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                    (t.fm_move_prompt(name), name.to_string())
                 } else {
                     (
                         format!("Move {} items to:", paths.len()),
-                        format!("{}/", self.current_path.display())
+                        format!("{}/", self.current_path.display()),
                     )
                 };
 
-                let modal = InputModal::with_default(
-                    "Move",
-                    &message,
-                    &default_dest,
-                );
+                let modal = InputModal::with_default("Move", &message, &default_dest);
                 let action = PendingAction::MovePath {
                     panel_index: 0, // will be updated in app.rs
                     sources: paths,
@@ -657,12 +645,18 @@ impl Panel for FileManager {
             (KeyCode::Tab, KeyModifiers::NONE) => {
                 // Use dummy ConfirmModal that won't be shown
                 let modal = ConfirmModal::new("", "");
-                self.modal_request = Some((PendingAction::NextPanel, ActiveModal::Confirm(Box::new(modal))));
+                self.modal_request = Some((
+                    PendingAction::NextPanel,
+                    ActiveModal::Confirm(Box::new(modal)),
+                ));
             }
             // Shift+Tab - go to previous panel
             (KeyCode::BackTab, _) => {
                 let modal = ConfirmModal::new("", "");
-                self.modal_request = Some((PendingAction::PrevPanel, ActiveModal::Confirm(Box::new(modal))));
+                self.modal_request = Some((
+                    PendingAction::PrevPanel,
+                    ActiveModal::Confirm(Box::new(modal)),
+                ));
             }
             _ => {}
         }
@@ -685,8 +679,12 @@ impl Panel for FileManager {
         self.modal_request.take()
     }
 
-    fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent, panel_area: Rect) -> Result<()> {
-        use crossterm::event::{MouseEventKind, MouseButton, KeyModifiers};
+    fn handle_mouse(
+        &mut self,
+        mouse: crossterm::event::MouseEvent,
+        panel_area: Rect,
+    ) -> Result<()> {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEventKind};
 
         // Handle scroll first (works anywhere in panel)
         let visible_height = panel_area.height.saturating_sub(2) as usize;
@@ -727,8 +725,11 @@ impl Panel for FileManager {
         };
 
         // Check that click is inside inner area
-        if mouse.column < inner_area.x || mouse.column >= inner_area.x + inner_area.width ||
-           mouse.row < inner_area.y || mouse.row >= inner_area.y + inner_area.height {
+        if mouse.column < inner_area.x
+            || mouse.column >= inner_area.x + inner_area.width
+            || mouse.row < inner_area.y
+            || mouse.row >= inner_area.y + inner_area.height
+        {
             return Ok(());
         }
 
@@ -769,9 +770,12 @@ impl Panel for FileManager {
                         // Check for double click
                         let now = std::time::Instant::now();
                         let is_double_click = if let (Some(last_time), Some(last_index)) =
-                            (self.last_click_time, self.last_click_index) {
+                            (self.last_click_time, self.last_click_index)
+                        {
                             // Double click if less than DOUBLE_CLICK_INTERVAL_MS passed and clicked on same item
-                            now.duration_since(last_time).as_millis() < crate::constants::DOUBLE_CLICK_INTERVAL_MS && last_index == clicked_index
+                            now.duration_since(last_time).as_millis()
+                                < crate::constants::DOUBLE_CLICK_INTERVAL_MS
+                                && last_index == clicked_index
                         } else {
                             false
                         };
@@ -838,8 +842,9 @@ impl Panel for FileManager {
     }
 
     fn needs_close_confirmation(&self) -> Option<String> {
-        // Always request confirmation when closing FileManager
-        Some("Close file manager?".to_string())
+        // FileManager doesn't store critical state by itself
+        // Pending batch operations are checked in has_panels_requiring_confirmation()
+        None
     }
 }
 

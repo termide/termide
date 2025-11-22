@@ -4,7 +4,7 @@ use ratatui::{
     prelude::Widget,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Clear},
+    widgets::{Block, Borders, Clear, List, ListItem},
 };
 
 /// Dropdown menu item

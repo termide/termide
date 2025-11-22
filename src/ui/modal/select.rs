@@ -41,13 +41,17 @@ impl SelectModal {
         let title_width = self.title.len() as u16 + 2;
 
         // 2. Maximum prompt line width
-        let prompt_max_line_width = self.prompt.lines()
+        let prompt_max_line_width = self
+            .prompt
+            .lines()
             .map(|line| line.len())
             .max()
             .unwrap_or(0) as u16;
 
         // 3. Maximum list item width
-        let max_item_width = self.items.iter()
+        let max_item_width = self
+            .items
+            .iter()
             .map(|item| {
                 // "▶ " + item = prefix 2 + item
                 2 + item.len()
@@ -123,13 +127,11 @@ impl Modal for SelectModal {
         let block = Block::default()
             .title(Span::styled(
                 format!(" {} ", self.title),
-                Style::default()
-                    .fg(theme.background)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(theme.bg).add_modifier(Modifier::BOLD),
             ))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.background))
-            .style(Style::default().bg(theme.text_primary));
+            .border_style(Style::default().fg(theme.bg))
+            .style(Style::default().bg(theme.fg));
 
         let inner = block.inner(modal_area);
         block.render(modal_area, buf);
@@ -138,15 +140,15 @@ impl Modal for SelectModal {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(2),  // Prompt
-                Constraint::Min(5),     // List
-                Constraint::Length(2),  // Hint
+                Constraint::Length(2), // Prompt
+                Constraint::Min(5),    // List
+                Constraint::Length(2), // Hint
             ])
             .split(inner);
 
         let prompt = Paragraph::new(self.prompt.clone())
             .alignment(Alignment::Left)
-            .style(Style::default().fg(theme.background));
+            .style(Style::default().fg(theme.bg));
         prompt.render(chunks[0], buf);
 
         let items: Vec<ListItem> = self
@@ -158,11 +160,11 @@ impl Modal for SelectModal {
 
                 let style = if idx == self.cursor {
                     Style::default()
-                        .fg(theme.text_primary)
-                        .bg(theme.accent_primary)
+                        .fg(theme.fg)
+                        .bg(theme.accented_fg)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(theme.background)
+                    Style::default().fg(theme.bg)
                 };
 
                 ListItem::new(Line::from(vec![
@@ -176,15 +178,15 @@ impl Modal for SelectModal {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.text_secondary)),
+                    .border_style(Style::default().fg(theme.disabled)),
             )
-            .style(Style::default().bg(theme.text_primary));
+            .style(Style::default().bg(theme.fg));
 
         list.render(chunks[1], buf);
 
         let hint = Paragraph::new("↑↓ - select | Enter - confirm | Esc - cancel")
             .alignment(Alignment::Center)
-            .style(Style::default().fg(theme.text_secondary));
+            .style(Style::default().fg(theme.disabled));
         hint.render(chunks[2], buf);
     }
 
@@ -210,9 +212,7 @@ impl Modal for SelectModal {
                 self.cursor = self.items.len().saturating_sub(1);
                 Ok(None)
             }
-            KeyCode::Enter => {
-                Ok(Some(ModalResult::Confirmed(vec![self.cursor])))
-            }
+            KeyCode::Enter => Ok(Some(ModalResult::Confirmed(vec![self.cursor]))),
             KeyCode::Esc => Ok(Some(ModalResult::Cancelled)),
             _ => Ok(None),
         }

@@ -473,7 +473,8 @@ mod tests {
 
         // Create a buffer with some content
         let mut buf = TextBuffer::new();
-        buf.insert(&Cursor::at(0, 0), "line 1\nline 2\nline 3").unwrap();
+        buf.insert(&Cursor::at(0, 0), "line 1\nline 2\nline 3")
+            .unwrap();
 
         // Save the buffer
         buf.save_to(temp_path).unwrap();
@@ -494,7 +495,10 @@ mod tests {
         let resaved_content = fs::read_to_string(temp_path2).unwrap();
 
         // They should be identical
-        assert_eq!(saved_content, resaved_content, "Content changed after save-load-save cycle");
+        assert_eq!(
+            saved_content, resaved_content,
+            "Content changed after save-load-save cycle"
+        );
     }
 
     #[test]

@@ -1,9 +1,6 @@
 use anyhow::Result;
 use crossterm::event::KeyEvent;
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-};
+use ratatui::{buffer::Buffer, layout::Rect};
 use std::any::Any;
 
 use crate::state::AppState;
@@ -18,14 +15,25 @@ pub mod welcome;
 pub trait Panel: Any {
     /// Render the panel
     /// panel_index - panel index in container (for displaying [X] button)
-    fn render(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool, panel_index: usize, state: &AppState);
+    fn render(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        is_focused: bool,
+        panel_index: usize,
+        state: &AppState,
+    );
 
     /// Handle keyboard event
     fn handle_key(&mut self, key: KeyEvent) -> Result<()>;
 
     /// Handle mouse event
     /// Returns (relative coordinates inside the panel)
-    fn handle_mouse(&mut self, _mouse: crossterm::event::MouseEvent, _panel_area: Rect) -> Result<()> {
+    fn handle_mouse(
+        &mut self,
+        _mouse: crossterm::event::MouseEvent,
+        _panel_area: Rect,
+    ) -> Result<()> {
         Ok(())
     }
 
@@ -51,7 +59,9 @@ pub trait Panel: Any {
 
     /// Take modal window request (if any)
     /// Returns (PendingAction, ActiveModal) if panel requests a modal window
-    fn take_modal_request(&mut self) -> Option<(crate::state::PendingAction, crate::state::ActiveModal)> {
+    fn take_modal_request(
+        &mut self,
+    ) -> Option<(crate::state::PendingAction, crate::state::ActiveModal)> {
         None
     }
 

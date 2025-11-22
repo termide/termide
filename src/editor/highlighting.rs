@@ -125,7 +125,9 @@ impl HighlightCache {
                         segments.push((current_text.clone(), current_style));
                         current_text.clear();
                     }
-                    current_style = self.syntax_highlighter.style_for_highlight(highlight.0, self.is_light_theme);
+                    current_style = self
+                        .syntax_highlighter
+                        .style_for_highlight(highlight.0, self.is_light_theme);
                 }
                 Ok(HighlightEvent::HighlightEnd) => {
                     // Save current segment

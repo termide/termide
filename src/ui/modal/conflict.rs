@@ -42,11 +42,13 @@ pub struct ConflictModal {
 impl ConflictModal {
     /// Create a conflict modal window
     pub fn new(source: &Path, destination: &Path) -> Self {
-        let source_name = source.file_name()
+        let source_name = source
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("?")
             .to_string();
-        let dest_name = destination.file_name()
+        let dest_name = destination
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("?")
             .to_string();
@@ -68,15 +70,37 @@ impl ConflictModal {
     }
 
     fn get_options(&self) -> Vec<(String, String)> {
-        let item_type = if self.is_directory { "directory" } else { "file" };
+        let item_type = if self.is_directory {
+            "directory"
+        } else {
+            "file"
+        };
 
         vec![
-            ("Overwrite".to_string(), format!("Replace existing {}", item_type)),
-            ("Skip".to_string(), format!("Do not copy this {}", item_type)),
-            ("Rename".to_string(), format!("Set new name for this {}", item_type)),
-            ("Overwrite All".to_string(), "Replace all subsequent conflicts".to_string()),
-            ("Skip All".to_string(), "Skip all subsequent conflicts".to_string()),
-            ("Rename All".to_string(), "Set pattern for all conflicts".to_string()),
+            (
+                "Overwrite".to_string(),
+                format!("Replace existing {}", item_type),
+            ),
+            (
+                "Skip".to_string(),
+                format!("Do not copy this {}", item_type),
+            ),
+            (
+                "Rename".to_string(),
+                format!("Set new name for this {}", item_type),
+            ),
+            (
+                "Overwrite All".to_string(),
+                "Replace all subsequent conflicts".to_string(),
+            ),
+            (
+                "Skip All".to_string(),
+                "Skip all subsequent conflicts".to_string(),
+            ),
+            (
+                "Rename All".to_string(),
+                "Set pattern for all conflicts".to_string(),
+            ),
         ]
     }
 
@@ -97,16 +121,22 @@ impl ConflictModal {
         let title_width = self.title.len() as u16 + 2;
 
         // 2. Message width
-        let item_type = if self.is_directory { "Directory" } else { "File" };
-        let message = format!("{} '{}' already exists.\nWhat to do?", item_type, self.dest_name);
-        let message_max_line_width = message.lines()
-            .map(|line| line.len())
-            .max()
-            .unwrap_or(0) as u16;
+        let item_type = if self.is_directory {
+            "Directory"
+        } else {
+            "File"
+        };
+        let message = format!(
+            "{} '{}' already exists.\nWhat to do?",
+            item_type, self.dest_name
+        );
+        let message_max_line_width =
+            message.lines().map(|line| line.len()).max().unwrap_or(0) as u16;
 
         // 3. Maximum option width
         let options = self.get_options();
-        let max_option_width = options.iter()
+        let max_option_width = options
+            .iter()
             .map(|(label, desc)| {
                 // "▶ " + label + " - " + desc = prefix 2 + label + 3 + desc
                 2 + label.len() + 3 + desc.len()
@@ -181,13 +211,11 @@ impl Modal for ConflictModal {
         let block = Block::default()
             .title(Span::styled(
                 format!(" {} ", self.title),
-                Style::default()
-                    .fg(theme.background)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(theme.bg).add_modifier(Modifier::BOLD),
             ))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.background))
-            .style(Style::default().bg(theme.text_primary));
+            .border_style(Style::default().fg(theme.bg))
+            .style(Style::default().bg(theme.fg));
 
         let inner = block.inner(modal_area);
         block.render(modal_area, buf);
@@ -196,22 +224,25 @@ impl Modal for ConflictModal {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),  // Message
-                Constraint::Min(7),     // Option list (6 options + borders)
-                Constraint::Length(1),  // Hint
+                Constraint::Length(3), // Message
+                Constraint::Min(7),    // Option list (6 options + borders)
+                Constraint::Length(1), // Hint
             ])
             .split(inner);
 
         // Conflict message
-        let item_type = if self.is_directory { "Directory" } else { "File" };
+        let item_type = if self.is_directory {
+            "Directory"
+        } else {
+            "File"
+        };
         let message = format!(
             "{} '{}' already exists.\nWhat to do?",
-            item_type,
-            self.dest_name
+            item_type, self.dest_name
         );
         let prompt = Paragraph::new(message)
             .alignment(Alignment::Left)
-            .style(Style::default().fg(theme.background));
+            .style(Style::default().fg(theme.bg));
         prompt.render(chunks[0], buf);
 
         // Option list
@@ -224,11 +255,11 @@ impl Modal for ConflictModal {
 
                 let style = if idx == self.cursor {
                     Style::default()
-                        .fg(theme.text_primary)
-                        .bg(theme.accent_primary)
+                        .fg(theme.fg)
+                        .bg(theme.accented_fg)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(theme.background)
+                    Style::default().fg(theme.bg)
                 };
 
                 ListItem::new(Line::from(vec![
@@ -242,16 +273,16 @@ impl Modal for ConflictModal {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.text_secondary)),
+                    .border_style(Style::default().fg(theme.disabled)),
             )
-            .style(Style::default().bg(theme.text_primary));
+            .style(Style::default().bg(theme.fg));
 
         list.render(chunks[1], buf);
 
         // Hint
         let hint = Paragraph::new("↑↓ - select | Enter - confirm | Esc - cancel")
             .alignment(Alignment::Center)
-            .style(Style::default().fg(theme.text_secondary));
+            .style(Style::default().fg(theme.disabled));
         hint.render(chunks[2], buf);
     }
 
@@ -277,9 +308,7 @@ impl Modal for ConflictModal {
                 self.cursor = 5;
                 Ok(None)
             }
-            KeyCode::Enter => {
-                Ok(Some(ModalResult::Confirmed(self.get_resolution())))
-            }
+            KeyCode::Enter => Ok(Some(ModalResult::Confirmed(self.get_resolution()))),
             KeyCode::Esc => Ok(Some(ModalResult::Cancelled)),
             _ => Ok(None),
         }

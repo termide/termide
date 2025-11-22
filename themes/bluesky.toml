@@ -2,28 +2,22 @@
 name = "bluesky"
 
 [colors]
-# Base colors
-background = "LightBlue"
-text_primary = "Black"
-text_secondary = "DarkGray"
-accent_primary = "Blue"
-accent_secondary = "Cyan"
-highlight = "Yellow"
+# Base
+bg = "LightBlue"
+fg = "Black"
 
-# Interactive elements
-selection_bg = "Blue"
-selection_fg = "White"
-selected_item = "Magenta"
-cursor_line_bg = "Cyan"
+# Accented
+accented_bg = "Cyan"
+accented_fg = "Magenta"
 
-# Status bar
-status_bar_bg = "Blue"
+# Selection
+selected_bg = "Blue"
+selected_fg = "White"
 
-# Semantic colors (status messages and Git)
-success_bg = "Green"
-success_fg = "White"
-error_bg = "Red"
-error_fg = "White"
-git_modified = { rgb = [180, 120, 0] }
-git_added = { rgb = [0, 120, 0] }
-git_deleted = "Red"
+# Disabled
+disabled = "DarkGray"
+
+# Semantic
+success = { rgb = [0, 120, 0] }
+warning = { rgb = [180, 120, 0] }
+error = "Red"

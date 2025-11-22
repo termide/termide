@@ -16,10 +16,10 @@ pub fn create_panel_block<'a>(
 ) -> Block<'a> {
     let title_style = if is_focused {
         Style::default()
-            .fg(state.theme.accent_primary)
+            .fg(state.theme.accented_fg)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(state.theme.accent_secondary)
+        Style::default().fg(state.theme.disabled)
     };
 
     // Determine if this panel can be closed

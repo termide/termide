@@ -6,29 +6,48 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use crate::state::AppState;
-use crate::panels::file_manager::{FileInfo, DiskSpaceInfo};
-use crate::panels::editor::EditorInfo;
-use crate::panels::terminal_pty::TerminalInfo;
 use crate::i18n;
+use crate::panels::editor::EditorInfo;
+use crate::panels::file_manager::{DiskSpaceInfo, FileInfo};
+use crate::panels::terminal_pty::TerminalInfo;
+use crate::state::AppState;
 
 /// Status bar at the bottom of screen
 pub struct StatusBar;
 
 impl StatusBar {
     /// Render status bar
-    pub fn render(buf: &mut Buffer, area: Rect, state: &AppState, panel_title: &str, selected_count: Option<usize>, file_info: Option<&FileInfo>, disk_space: Option<&DiskSpaceInfo>, editor_info: Option<&EditorInfo>, terminal_info: Option<&TerminalInfo>) {
+    pub fn render(
+        buf: &mut Buffer,
+        area: Rect,
+        state: &AppState,
+        panel_title: &str,
+        selected_count: Option<usize>,
+        file_info: Option<&FileInfo>,
+        disk_space: Option<&DiskSpaceInfo>,
+        editor_info: Option<&EditorInfo>,
+        terminal_info: Option<&TerminalInfo>,
+    ) {
         if area.height == 0 {
             return;
         }
 
-        let status_text = Self::get_status_text(state, panel_title, selected_count, file_info, disk_space, editor_info, terminal_info, area.width);
+        let status_text = Self::get_status_text(
+            state,
+            panel_title,
+            selected_count,
+            file_info,
+            disk_space,
+            editor_info,
+            terminal_info,
+            area.width,
+        );
 
         // Fill entire line with background color from theme
         for x in area.left()..area.right() {
             buf[(x, area.top())]
                 .set_char(' ')
-                .set_style(Style::default().bg(state.theme.status_bar_bg));
+                .set_style(Style::default().bg(state.theme.accented_bg));
         }
 
         // Render status bar text
@@ -43,16 +62,23 @@ impl StatusBar {
                 if current_x >= area.right() {
                     break;
                 }
-                buf[(current_x, y)]
-                    .set_char(ch)
-                    .set_style(span.style);
+                buf[(current_x, y)].set_char(ch).set_style(span.style);
                 current_x += 1;
             }
         }
     }
 
     /// Get text for status bar depending on active panel
-    fn get_status_text<'a>(state: &'a AppState, panel_title: &'a str, selected_count: Option<usize>, file_info: Option<&'a FileInfo>, disk_space: Option<&'a DiskSpaceInfo>, editor_info: Option<&'a EditorInfo>, terminal_info: Option<&'a TerminalInfo>, total_width: u16) -> Vec<Span<'a>> {
+    fn get_status_text<'a>(
+        state: &'a AppState,
+        panel_title: &'a str,
+        selected_count: Option<usize>,
+        file_info: Option<&'a FileInfo>,
+        disk_space: Option<&'a DiskSpaceInfo>,
+        editor_info: Option<&'a EditorInfo>,
+        terminal_info: Option<&'a TerminalInfo>,
+        total_width: u16,
+    ) -> Vec<Span<'a>> {
         let t = i18n::t();
 
         // If there's an ERROR message, show it with priority
@@ -60,23 +86,20 @@ impl StatusBar {
         if let Some((ref message, is_error)) = state.ui.status_message {
             if is_error {
                 let msg_style = Style::default()
-                    .fg(state.theme.error_fg)
-                    .bg(state.theme.error_bg)
+                    .fg(state.theme.error)
                     .add_modifier(Modifier::BOLD);
 
-                return vec![
-                    Span::styled(format!(" {} ", message), msg_style),
-                ];
+                return vec![Span::styled(format!(" {} ", message), msg_style)];
             }
         }
 
         let base_style = Style::default()
-            .fg(state.theme.text_secondary)
-            .bg(state.theme.status_bar_bg);
+            .fg(state.theme.disabled)
+            .bg(state.theme.accented_bg);
 
         let highlight_style = Style::default()
-            .fg(state.theme.highlight)
-            .bg(state.theme.status_bar_bg)
+            .fg(state.theme.accented_fg)
+            .bg(state.theme.accented_bg)
             .add_modifier(Modifier::BOLD);
 
         // Show different information depending on panel type
@@ -95,22 +118,27 @@ impl StatusBar {
                 let disk_text = format!(" {} ", disk.format_space());
 
                 // Calculate current spans width considering unicode characters
-                let used_width: usize = spans.iter().map(|s| {
-                    match &s.content {
+                let used_width: usize = spans
+                    .iter()
+                    .map(|s| match &s.content {
                         std::borrow::Cow::Borrowed(s) => s.width(),
                         std::borrow::Cow::Owned(s) => s.width(),
-                    }
-                }).sum();
+                    })
+                    .sum();
 
                 // Add padding between left part and disk info
-                let remaining = (total_width as usize).saturating_sub(used_width + disk_text.width());
+                let remaining =
+                    (total_width as usize).saturating_sub(used_width + disk_text.width());
                 if remaining > 0 {
                     spans.push(Span::raw(" ".repeat(remaining)));
                 }
 
-                spans.push(Span::styled(disk_text, Style::default()
-                    .fg(state.theme.text_secondary)
-                    .bg(state.theme.status_bar_bg)));
+                spans.push(Span::styled(
+                    disk_text,
+                    Style::default()
+                        .fg(state.theme.disabled)
+                        .bg(state.theme.accented_bg),
+                ));
             }
 
             spans
@@ -134,20 +162,35 @@ impl StatusBar {
                 spans.push(Span::styled(info.size.as_str(), highlight_style));
             }
 
-            spans.push(Span::styled(format!("{}{} ", t.ui_hint_separator(), t.status_mod()), base_style));
+            spans.push(Span::styled(
+                format!("{}{} ", t.ui_hint_separator(), t.status_mod()),
+                base_style,
+            ));
             spans.push(Span::styled(info.mode.as_str(), highlight_style));
 
-            spans.push(Span::styled(format!("{}{} ", t.ui_hint_separator(), t.status_owner()), base_style));
-            spans.push(Span::styled(format!("{}:{}", info.owner, info.group), highlight_style));
+            spans.push(Span::styled(
+                format!("{}{} ", t.ui_hint_separator(), t.status_owner()),
+                base_style,
+            ));
+            spans.push(Span::styled(
+                format!("{}:{}", info.owner, info.group),
+                highlight_style,
+            ));
 
             // If there are selected files, add their count
             if let Some(count) = selected_count {
                 if count > 0 {
-                    spans.push(Span::styled(format!("{}{} ", t.ui_hint_separator(), t.status_selected()), base_style));
-                    spans.push(Span::styled(format!("{}", count), Style::default()
-                        .fg(state.theme.success_fg)
-                        .bg(state.theme.highlight)
-                        .add_modifier(Modifier::BOLD)));
+                    spans.push(Span::styled(
+                        format!("{}{} ", t.ui_hint_separator(), t.status_selected()),
+                        base_style,
+                    ));
+                    spans.push(Span::styled(
+                        format!("{}", count),
+                        Style::default()
+                            .fg(state.theme.success)
+                            .bg(state.theme.accented_bg)
+                            .add_modifier(Modifier::BOLD),
+                    ));
                 }
             }
 
@@ -156,22 +199,27 @@ impl StatusBar {
                 let disk_text = format!(" {} ", disk.format_space());
 
                 // Calculate current spans width considering unicode characters
-                let used_width: usize = spans.iter().map(|s| {
-                    match &s.content {
+                let used_width: usize = spans
+                    .iter()
+                    .map(|s| match &s.content {
                         std::borrow::Cow::Borrowed(s) => s.width(),
                         std::borrow::Cow::Owned(s) => s.width(),
-                    }
-                }).sum();
+                    })
+                    .sum();
 
                 // Add padding between left part and disk info
-                let remaining = (total_width as usize).saturating_sub(used_width + disk_text.width());
+                let remaining =
+                    (total_width as usize).saturating_sub(used_width + disk_text.width());
                 if remaining > 0 {
                     spans.push(Span::raw(" ".repeat(remaining)));
                 }
 
-                spans.push(Span::styled(disk_text, Style::default()
-                    .fg(state.theme.text_secondary)
-                    .bg(state.theme.status_bar_bg)));
+                spans.push(Span::styled(
+                    disk_text,
+                    Style::default()
+                        .fg(state.theme.disabled)
+                        .bg(state.theme.accented_bg),
+                ));
             }
 
             spans
@@ -206,45 +254,54 @@ impl StatusBar {
                 spans.push(Span::raw(" ".repeat(padding)));
             }
 
-            spans.push(Span::styled(
-                format!("{} ", editor_status),
-                highlight_style,
-            ));
+            spans.push(Span::styled(format!("{} ", editor_status), highlight_style));
 
             spans
         } else {
             match panel_title {
-            "Terminal" => {
-                // Terminal: current directory
-                vec![
-                    Span::styled(format!(" {} ", t.status_cwd()), base_style),
-                    Span::styled("~/Documents/Repos", highlight_style),
-                    Span::styled(format!("{}{} ", t.ui_hint_separator(), t.status_shell()), base_style),
-                    Span::styled("bash", highlight_style),
-                ]
-            }
-            "Debug" => {
-                // Debug: layout mode and dimensions
-                let layout_text = state.get_recommended_layout();
-                let terminal_info = format!("{}x{}", state.terminal.width, state.terminal.height);
+                "Terminal" => {
+                    // Terminal: current directory
+                    vec![
+                        Span::styled(format!(" {} ", t.status_cwd()), base_style),
+                        Span::styled("~/Documents/Repos", highlight_style),
+                        Span::styled(
+                            format!("{}{} ", t.ui_hint_separator(), t.status_shell()),
+                            base_style,
+                        ),
+                        Span::styled("bash", highlight_style),
+                    ]
+                }
+                "Debug" => {
+                    // Debug: layout mode and dimensions
+                    let layout_text = state.get_recommended_layout();
+                    let terminal_info =
+                        format!("{}x{}", state.terminal.width, state.terminal.height);
 
-                vec![
-                    Span::styled(format!(" {} ", t.status_terminal()), base_style),
-                    Span::styled(terminal_info, highlight_style),
-                    Span::styled(format!("{}{} ", t.ui_hint_separator(), t.status_layout()), base_style),
-                    Span::styled(layout_text, highlight_style),
-                ]
-            }
-            _ => {
-                // Default: general information
-                let panel_info = format!(" {}{}", t.status_panel(), panel_title);
-                let term_info = format!("{}{}x{}", t.ui_hint_separator(), state.terminal.width, state.terminal.height);
+                    vec![
+                        Span::styled(format!(" {} ", t.status_terminal()), base_style),
+                        Span::styled(terminal_info, highlight_style),
+                        Span::styled(
+                            format!("{}{} ", t.ui_hint_separator(), t.status_layout()),
+                            base_style,
+                        ),
+                        Span::styled(layout_text, highlight_style),
+                    ]
+                }
+                _ => {
+                    // Default: general information
+                    let panel_info = format!(" {}{}", t.status_panel(), panel_title);
+                    let term_info = format!(
+                        "{}{}x{}",
+                        t.ui_hint_separator(),
+                        state.terminal.width,
+                        state.terminal.height
+                    );
 
-                vec![
-                    Span::styled(panel_info, base_style),
-                    Span::styled(term_info, base_style),
-                ]
-            }
+                    vec![
+                        Span::styled(panel_info, base_style),
+                        Span::styled(term_info, base_style),
+                    ]
+                }
             }
         }
     }

@@ -102,13 +102,20 @@ impl RenamePatternModal {
         vec![
             Line::from(Span::styled(
                 "Variables:",
-                Style::default().fg(theme.accent_primary).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.accented_fg)
+                    .add_modifier(Modifier::BOLD),
             )),
-            Line::from(Span::styled("  $0-full name  $1-9-parts  $-1-9-from end", Style::default().fg(theme.background))),
-            Line::from(Span::styled("  $I-counter  $C-created  $M-modified", Style::default().fg(theme.background))),
+            Line::from(Span::styled(
+                "  $0-full name  $1-9-parts  $-1-9-from end",
+                Style::default().fg(theme.bg),
+            )),
+            Line::from(Span::styled(
+                "  $I-counter  $C-created  $M-modified",
+                Style::default().fg(theme.bg),
+            )),
         ]
     }
-
 
     /// Create a centered rectangle
     fn centered_rect(width: u16, height: u16, r: Rect) -> Rect {
@@ -153,13 +160,11 @@ impl Modal for RenamePatternModal {
         let block = Block::default()
             .title(Span::styled(
                 format!(" {} ", self.title),
-                Style::default()
-                    .fg(theme.background)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(theme.bg).add_modifier(Modifier::BOLD),
             ))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.background))
-            .style(Style::default().bg(theme.text_primary));
+            .border_style(Style::default().fg(theme.bg))
+            .style(Style::default().bg(theme.fg));
 
         let inner = block.inner(modal_area);
         block.render(modal_area, buf);
@@ -167,33 +172,32 @@ impl Modal for RenamePatternModal {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1),  // Original name
-                Constraint::Length(3),  // Input field
-                Constraint::Length(1),  // Preview
-                Constraint::Length(1),  // Empty line
-                Constraint::Length(3),  // Help
-                Constraint::Length(1),  // Empty line
-                Constraint::Length(1),  // Buttons
-                Constraint::Length(1),  // Empty line at bottom
+                Constraint::Length(1), // Original name
+                Constraint::Length(3), // Input field
+                Constraint::Length(1), // Preview
+                Constraint::Length(1), // Empty line
+                Constraint::Length(3), // Help
+                Constraint::Length(1), // Empty line
+                Constraint::Length(1), // Buttons
+                Constraint::Length(1), // Empty line at bottom
             ])
             .split(inner);
 
         // Original name
         let original = Paragraph::new(format!("Original: {}", self.original_name))
-            .style(Style::default().fg(theme.text_secondary));
+            .style(Style::default().fg(theme.disabled));
         original.render(chunks[0], buf);
 
         // Input field
         let input_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.accent_primary))
+            .border_style(Style::default().fg(theme.accented_fg))
             .title(" Pattern ");
 
         let input_area = input_block.inner(chunks[1]);
         input_block.render(chunks[1], buf);
 
-        let input_text = Paragraph::new(self.input.as_str())
-            .style(Style::default().fg(theme.background));
+        let input_text = Paragraph::new(self.input.as_str()).style(Style::default().fg(theme.bg));
         input_text.render(input_area, buf);
 
         // Cursor (cursor_position is character index, not byte index)
@@ -201,15 +205,14 @@ impl Modal for RenamePatternModal {
         if self.cursor_position <= char_count {
             let cursor_x = input_area.x + self.cursor_position as u16;
             if cursor_x < input_area.right() {
-                buf[(cursor_x, input_area.y)]
-                    .set_style(Style::default().bg(theme.text_primary).fg(theme.background));
+                buf[(cursor_x, input_area.y)].set_style(Style::default().bg(theme.fg).fg(theme.bg));
             }
         }
 
         // Preview
         let preview = self.get_preview();
         let is_valid = self.is_valid();
-        let preview_color = if is_valid { theme.success_fg } else { theme.error_fg };
+        let preview_color = if is_valid { theme.success } else { theme.error };
         let preview_text = if preview.is_empty() {
             "".to_string()
         } else if is_valid {
@@ -218,19 +221,18 @@ impl Modal for RenamePatternModal {
             format!("✗ {}", preview)
         };
 
-        let preview_para = Paragraph::new(preview_text)
-            .style(Style::default().fg(preview_color));
+        let preview_para = Paragraph::new(preview_text).style(Style::default().fg(preview_color));
         preview_para.render(chunks[2], buf);
 
         // Help
-        let help_text = Paragraph::new(self.get_help_lines(theme))
-            .style(Style::default().fg(theme.background));
+        let help_text =
+            Paragraph::new(self.get_help_lines(theme)).style(Style::default().fg(theme.bg));
         help_text.render(chunks[4], buf);
 
         // Buttons
         let buttons = Paragraph::new("Tab/Enter - Continue | Esc - Cancel")
             .alignment(Alignment::Center)
-            .style(Style::default().fg(theme.text_secondary));
+            .style(Style::default().fg(theme.disabled));
         buttons.render(chunks[6], buf);
     }
 

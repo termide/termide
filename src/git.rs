@@ -64,7 +64,8 @@ pub fn get_git_status(dir: &Path) -> Option<GitStatusCache> {
         .ok()
         .and_then(|output| {
             if output.status.success() {
-                String::from_utf8(output.stdout).ok()
+                String::from_utf8(output.stdout)
+                    .ok()
                     .map(|s| PathBuf::from(s.trim()))
             } else {
                 None
@@ -73,7 +74,8 @@ pub fn get_git_status(dir: &Path) -> Option<GitStatusCache> {
         .unwrap_or_else(|| dir.to_path_buf());
 
     // Calculate relative path from repository root to current directory
-    let relative_path = dir.strip_prefix(&repo_root)
+    let relative_path = dir
+        .strip_prefix(&repo_root)
         .unwrap_or(Path::new(""))
         .to_path_buf();
 
@@ -202,18 +204,16 @@ impl GitStatusCache {
 
         let dir_prefix = format!("{}/", full_dir.display());
 
-        self.status_map
-            .iter()
-            .any(|(path, status)| {
-                // Check if path is inside this directory
-                if let Some(path_str) = path.to_str() {
-                    path_str.starts_with(&dir_prefix) &&
-                    *status != GitStatus::Unmodified &&
-                    *status != GitStatus::Ignored
-                } else {
-                    false
-                }
-            })
+        self.status_map.iter().any(|(path, status)| {
+            // Check if path is inside this directory
+            if let Some(path_str) = path.to_str() {
+                path_str.starts_with(&dir_prefix)
+                    && *status != GitStatus::Unmodified
+                    && *status != GitStatus::Ignored
+            } else {
+                false
+            }
+        })
     }
 
     /// Get status for directory (checks nested files recursively)

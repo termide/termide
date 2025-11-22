@@ -2,11 +2,11 @@ use anyhow::Result;
 use crossterm::event::{MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 
+use super::App;
 use crate::{
     state::LayoutMode,
     ui::dropdown::{get_help_items, get_tools_items},
 };
-use super::App;
 
 impl App {
     /// Handle mouse event
@@ -18,13 +18,15 @@ impl App {
         }
 
         // Click on dropdown when menu is open
-        if self.state.ui.menu_open && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        if self.state.ui.menu_open && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+        {
             self.handle_dropdown_click(mouse.column, mouse.row)?;
             return Ok(());
         }
 
         // If menu is open, close it on click outside menu
-        if self.state.ui.menu_open && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        if self.state.ui.menu_open && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+        {
             self.state.close_menu();
             return Ok(());
         }
@@ -40,7 +42,10 @@ impl App {
         }
 
         // For scroll - forward to panel under cursor (doesn't require focus)
-        if matches!(mouse.kind, MouseEventKind::ScrollUp | MouseEventKind::ScrollDown) {
+        if matches!(
+            mouse.kind,
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+        ) {
             self.forward_scroll_to_panel_at_cursor(mouse)?;
             return Ok(());
         }
@@ -64,7 +69,10 @@ impl App {
     }
 
     /// Forward scroll to panel under mouse cursor
-    fn forward_scroll_to_panel_at_cursor(&mut self, mouse: crossterm::event::MouseEvent) -> Result<()> {
+    fn forward_scroll_to_panel_at_cursor(
+        &mut self,
+        mouse: crossterm::event::MouseEvent,
+    ) -> Result<()> {
         let height = self.state.terminal.height;
 
         // Check that cursor is in panel area (not menu and not status bar)
@@ -98,7 +106,9 @@ impl App {
                     }
                 } else {
                     // Cursor over main panels
-                    let visible_main: Vec<usize> = self.panels.visible_indices()
+                    let visible_main: Vec<usize> = self
+                        .panels
+                        .visible_indices()
                         .into_iter()
                         .filter(|&i| i > 0)
                         .collect();
@@ -160,7 +170,9 @@ impl App {
                     }
                 } else {
                     // Main panels on the right
-                    let visible_main: Vec<usize> = self.panels.visible_indices()
+                    let visible_main: Vec<usize> = self
+                        .panels
+                        .visible_indices()
                         .into_iter()
                         .filter(|&i| i > 0)
                         .collect();
@@ -209,11 +221,12 @@ impl App {
 
                     if let Some(panel) = self.panels.get_mut(active_index) {
                         let title = panel.title();
-                        let can_close = crate::ui::panel_helpers::can_close_panel(active_index, &self.state);
+                        let can_close =
+                            crate::ui::panel_helpers::can_close_panel(active_index, &self.state);
 
                         // Check click on [X] of active panel
                         if crate::ui::panel_helpers::is_click_on_close_button(
-                            click_x, click_y, 0, 1, &title, can_close
+                            click_x, click_y, 0, 1, &title, can_close,
                         ) {
                             self.panels.close_panel(active_index);
 
@@ -249,7 +262,7 @@ impl App {
                         let can_close = crate::ui::panel_helpers::can_close_panel(0, &self.state);
 
                         if crate::ui::panel_helpers::is_click_on_close_button(
-                            click_x, click_y, 0, 1, &title, can_close
+                            click_x, click_y, 0, 1, &title, can_close,
                         ) {
                             // FM cannot be closed in MultiPanel mode (can_close will be false)
                             return Ok(false);
@@ -258,7 +271,9 @@ impl App {
                 }
 
                 // Check click on [X] of main panels
-                let visible_main: Vec<usize> = self.panels.visible_indices()
+                let visible_main: Vec<usize> = self
+                    .panels
+                    .visible_indices()
                     .into_iter()
                     .filter(|&i| i > 0)
                     .collect();
@@ -272,14 +287,19 @@ impl App {
                         let panel_x = fm_width + (chunk_idx as u16 * panel_width);
 
                         // Get panel information
-                        let (title, can_close) = if let Some(panel) = self.panels.get_mut(panel_index) {
-                            (panel.title(), crate::ui::panel_helpers::can_close_panel(panel_index, &self.state))
+                        let (title, can_close) = if let Some(panel) =
+                            self.panels.get_mut(panel_index)
+                        {
+                            (
+                                panel.title(),
+                                crate::ui::panel_helpers::can_close_panel(panel_index, &self.state),
+                            )
                         } else {
                             continue;
                         };
 
                         if crate::ui::panel_helpers::is_click_on_close_button(
-                            click_x, click_y, panel_x, 1, &title, can_close
+                            click_x, click_y, panel_x, 1, &title, can_close,
                         ) {
                             // Close panel
                             self.panels.close_panel(panel_index);
@@ -340,7 +360,9 @@ impl App {
                 }
 
                 // Check click on main panels
-                let visible_main: Vec<usize> = self.panels.visible_indices()
+                let visible_main: Vec<usize> = self
+                    .panels
+                    .visible_indices()
                     .into_iter()
                     .filter(|&i| i > 0)
                     .collect();

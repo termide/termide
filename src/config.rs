@@ -20,6 +20,10 @@ pub struct Config {
     /// Log file path (if not specified, temporary directory is used)
     #[serde(default)]
     pub log_file_path: Option<String>,
+
+    /// System resource monitor update interval in milliseconds (default: 1000ms)
+    #[serde(default = "default_resource_monitor_interval")]
+    pub resource_monitor_interval: u64,
 }
 
 fn default_theme_name() -> String {
@@ -34,6 +38,10 @@ fn default_language() -> String {
     "auto".to_string()
 }
 
+fn default_resource_monitor_interval() -> u64 {
+    1000 // 1 second
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -41,6 +49,7 @@ impl Default for Config {
             tab_size: default_tab_size(),
             language: default_language(),
             log_file_path: None,
+            resource_monitor_interval: default_resource_monitor_interval(),
         }
     }
 }
@@ -79,16 +88,16 @@ impl Config {
 
     /// Get path to config file
     fn get_config_path() -> Result<PathBuf> {
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?;
+        let config_dir =
+            dirs::config_dir().ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?;
 
         Ok(config_dir.join("termide").join("config.toml"))
     }
 
     /// Get path to config directory (for debugging)
     pub fn get_config_dir() -> Result<PathBuf> {
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?;
+        let config_dir =
+            dirs::config_dir().ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?;
 
         Ok(config_dir.join("termide"))
     }

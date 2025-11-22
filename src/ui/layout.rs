@@ -8,27 +8,20 @@ use std::any::Any;
 
 use crate::{
     constants::DEFAULT_FM_WIDTH,
-    panels::{Panel, PanelContainer, file_manager::FileManager, editor::Editor, terminal_pty::Terminal},
+    panels::{
+        editor::Editor, file_manager::FileManager, terminal_pty::Terminal, Panel, PanelContainer,
+    },
     state::{ActiveModal, AppState, LayoutMode},
 };
 
-use super::{
-    menu::render_menu,
-    modal::Modal,
-    status_bar::StatusBar,
-};
+use super::{menu::render_menu, modal::Modal, status_bar::StatusBar};
 
 /// Render the main application layout
-pub fn render_layout(
-    frame: &mut Frame,
-    state: &AppState,
-    panels: &mut PanelContainer,
-) {
+pub fn render_layout(frame: &mut Frame, state: &AppState, panels: &mut PanelContainer) {
     let size = frame.area();
 
     // Set application background
-    let background = Block::default()
-        .style(Style::default().bg(state.theme.background));
+    let background = Block::default().style(Style::default().bg(state.theme.bg));
     frame.render_widget(background, size);
 
     // Split screen into menu (1 line), main area, and status bar (1 line)
@@ -50,20 +43,47 @@ pub fn render_layout(
             // In Single mode: render active panel (there's always at least Welcome)
             let active_index = state.active_panel;
             if let Some(panel) = panels.get_mut(active_index) {
-                panel.render(main_chunks[1], frame.buffer_mut(), true, active_index, state);
+                panel.render(
+                    main_chunks[1],
+                    frame.buffer_mut(),
+                    true,
+                    active_index,
+                    state,
+                );
 
                 // Get information depending on panel type
-                let (selected_count, file_info, disk_space, editor_info, terminal_info) = if let Some(fm) = (&mut **panel as &mut dyn Any).downcast_mut::<FileManager>() {
-                    (Some(fm.get_selected_count()), fm.get_current_file_info(), fm.get_disk_space_info(), None, None)
-                } else if let Some(editor) = (&mut **panel as &mut dyn Any).downcast_mut::<Editor>() {
-                    (None, None, None, Some(editor.get_editor_info()), None)
-                } else if let Some(terminal) = (&mut **panel as &mut dyn Any).downcast_mut::<Terminal>() {
-                    (None, None, None, None, Some(terminal.get_terminal_info()))
-                } else {
-                    (None, None, None, None, None)
-                };
+                let (selected_count, file_info, disk_space, editor_info, terminal_info) =
+                    if let Some(fm) = (&mut **panel as &mut dyn Any).downcast_mut::<FileManager>() {
+                        (
+                            Some(fm.get_selected_count()),
+                            fm.get_current_file_info(),
+                            fm.get_disk_space_info(),
+                            None,
+                            None,
+                        )
+                    } else if let Some(editor) =
+                        (&mut **panel as &mut dyn Any).downcast_mut::<Editor>()
+                    {
+                        (None, None, None, Some(editor.get_editor_info()), None)
+                    } else if let Some(terminal) =
+                        (&mut **panel as &mut dyn Any).downcast_mut::<Terminal>()
+                    {
+                        (None, None, None, None, Some(terminal.get_terminal_info()))
+                    } else {
+                        (None, None, None, None, None)
+                    };
 
-                StatusBar::render(frame.buffer_mut(), main_chunks[2], state, &panel.title(), selected_count, file_info.as_ref(), disk_space.as_ref(), editor_info.as_ref(), terminal_info.as_ref());
+                StatusBar::render(
+                    frame.buffer_mut(),
+                    main_chunks[2],
+                    state,
+                    &panel.title(),
+                    selected_count,
+                    file_info.as_ref(),
+                    disk_space.as_ref(),
+                    editor_info.as_ref(),
+                    terminal_info.as_ref(),
+                );
             }
         }
         LayoutMode::MultiPanel => {
@@ -112,10 +132,15 @@ pub fn render_layout(
                 for (chunk_idx, &panel_index) in visible_main.iter().enumerate() {
                     if let Some(panel) = panels.get_mut(panel_index) {
                         let is_focused = state.active_panel == panel_index;
-                        panel.render(main_panel_chunks[chunk_idx], frame.buffer_mut(), is_focused, panel_index, state);
+                        panel.render(
+                            main_panel_chunks[chunk_idx],
+                            frame.buffer_mut(),
+                            is_focused,
+                            panel_index,
+                            state,
+                        );
                     }
                 }
-
             }
             // Note: Welcome is now added as a real panel when needed,
             // so fallback is not needed
@@ -124,17 +149,40 @@ pub fn render_layout(
             // (can be FM or one of the main panels)
             if let Some(active_panel) = panels.get_mut(state.active_panel) {
                 // Get information depending on panel type
-                let (selected_count, file_info, disk_space, editor_info, terminal_info) = if let Some(fm) = (&mut **active_panel as &mut dyn Any).downcast_mut::<FileManager>() {
-                    (Some(fm.get_selected_count()), fm.get_current_file_info(), fm.get_disk_space_info(), None, None)
-                } else if let Some(editor) = (&mut **active_panel as &mut dyn Any).downcast_mut::<Editor>() {
-                    (None, None, None, Some(editor.get_editor_info()), None)
-                } else if let Some(terminal) = (&mut **active_panel as &mut dyn Any).downcast_mut::<Terminal>() {
-                    (None, None, None, None, Some(terminal.get_terminal_info()))
-                } else {
-                    (None, None, None, None, None)
-                };
+                let (selected_count, file_info, disk_space, editor_info, terminal_info) =
+                    if let Some(fm) =
+                        (&mut **active_panel as &mut dyn Any).downcast_mut::<FileManager>()
+                    {
+                        (
+                            Some(fm.get_selected_count()),
+                            fm.get_current_file_info(),
+                            fm.get_disk_space_info(),
+                            None,
+                            None,
+                        )
+                    } else if let Some(editor) =
+                        (&mut **active_panel as &mut dyn Any).downcast_mut::<Editor>()
+                    {
+                        (None, None, None, Some(editor.get_editor_info()), None)
+                    } else if let Some(terminal) =
+                        (&mut **active_panel as &mut dyn Any).downcast_mut::<Terminal>()
+                    {
+                        (None, None, None, None, Some(terminal.get_terminal_info()))
+                    } else {
+                        (None, None, None, None, None)
+                    };
 
-                StatusBar::render(frame.buffer_mut(), main_chunks[2], state, &active_panel.title(), selected_count, file_info.as_ref(), disk_space.as_ref(), editor_info.as_ref(), terminal_info.as_ref());
+                StatusBar::render(
+                    frame.buffer_mut(),
+                    main_chunks[2],
+                    state,
+                    &active_panel.title(),
+                    selected_count,
+                    file_info.as_ref(),
+                    disk_space.as_ref(),
+                    editor_info.as_ref(),
+                    terminal_info.as_ref(),
+                );
             }
         }
     }

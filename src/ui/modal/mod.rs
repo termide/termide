@@ -1,9 +1,6 @@
 use anyhow::Result;
 use crossterm::event::KeyEvent;
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-};
+use ratatui::{buffer::Buffer, layout::Rect};
 
 use crate::theme::Theme;
 

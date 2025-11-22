@@ -59,7 +59,10 @@ pub fn cyrillic_to_latin(ch: char) -> char {
 /// (Ctrl or Alt) is pressed, to not affect regular text input.
 pub fn translate_hotkey(key: KeyEvent) -> KeyEvent {
     // Apply only if modifier is present (Ctrl or Alt)
-    if key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
         if let KeyCode::Char(ch) = key.code {
             let translated = cyrillic_to_latin(ch);
             if translated != ch {

@@ -17,13 +17,13 @@ use std::thread;
 use vte::{Params, Parser, Perform};
 
 use super::Panel;
-use crate::state::AppState;
 use crate::panels::file_manager::DiskSpaceInfo;
+use crate::state::AppState;
 
 /// Terminal information for status bar
 pub struct TerminalInfo {
-    pub user_host: String,   // user@host
-    pub cwd: String,         // current directory
+    pub user_host: String,                 // user@host
+    pub cwd: String,                       // current directory
     pub disk_space: Option<DiskSpaceInfo>, // disk information
 }
 
@@ -122,7 +122,7 @@ impl Default for CellStyle {
     fn default() -> Self {
         Self {
             fg: Color::White,
-            bg: Color::Reset,  // Use theme background by default
+            bg: Color::Reset, // Use theme background by default
             bold: false,
             italic: false,
             underline: false,
@@ -223,10 +223,7 @@ impl TerminalScreen {
 
         if row < rows && col < cols {
             let buffer = self.active_buffer_mut();
-            buffer[row][col] = Cell {
-                ch,
-                style,
-            };
+            buffer[row][col] = Cell { ch, style };
             // Move cursor right
             if col + 1 >= cols {
                 // Reached last column - defer wrap
@@ -444,7 +441,12 @@ impl Perform for VtPerformer {
         if !intermediates.is_empty() && intermediates[0] == b'?' {
             if let Ok(mut screen) = self.screen.lock() {
                 // Get private sequence number
-                let mode = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(0);
+                let mode = params
+                    .iter()
+                    .next()
+                    .and_then(|p| p.first())
+                    .copied()
+                    .unwrap_or(0);
 
                 match (mode, c) {
                     (1049, 'h') => {
@@ -542,13 +544,28 @@ impl Perform for VtPerformer {
             match c {
                 'H' | 'f' => {
                     // Move cursor
-                    let row = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
-                    let col = params.iter().nth(1).and_then(|p| p.first()).copied().unwrap_or(1) as usize;
+                    let row = params
+                        .iter()
+                        .next()
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(1) as usize;
+                    let col = params
+                        .iter()
+                        .nth(1)
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(1) as usize;
                     screen.move_cursor(row.saturating_sub(1), col.saturating_sub(1));
                 }
                 'J' => {
                     // ED - Erase in Display
-                    let param = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(0);
+                    let param = params
+                        .iter()
+                        .next()
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(0);
                     let (row, col) = screen.cursor;
                     let empty_cell = Cell {
                         ch: ' ',
@@ -627,7 +644,12 @@ impl Perform for VtPerformer {
                 }
                 'K' => {
                     // EL - Erase in Line
-                    let param = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(0);
+                    let param = params
+                        .iter()
+                        .next()
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(0);
                     let (row, col) = screen.cursor;
                     let empty_cell = Cell {
                         ch: ' ',
@@ -662,7 +684,12 @@ impl Perform for VtPerformer {
                 }
                 'P' => {
                     // DCH - Delete Character
-                    let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
+                    let n = params
+                        .iter()
+                        .next()
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(1) as usize;
                     let (row, col) = screen.cursor;
                     let cols = screen.cols;
                     let empty_cell = Cell {
@@ -683,7 +710,12 @@ impl Perform for VtPerformer {
                 }
                 'X' => {
                     // ECH - Erase Character
-                    let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
+                    let n = params
+                        .iter()
+                        .next()
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(1) as usize;
                     let (row, col) = screen.cursor;
                     let cols = screen.cols;
                     let empty_cell = Cell {
@@ -698,7 +730,12 @@ impl Perform for VtPerformer {
                 }
                 '@' => {
                     // ICH - Insert Character (shift characters right)
-                    let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
+                    let n = params
+                        .iter()
+                        .next()
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(1) as usize;
                     let (row, col) = screen.cursor;
                     let cols = screen.cols;
                     let empty_cell = Cell {
@@ -721,7 +758,12 @@ impl Perform for VtPerformer {
                 }
                 'L' => {
                     // IL - Insert Lines (insert blank lines)
-                    let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
+                    let n = params
+                        .iter()
+                        .next()
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(1) as usize;
                     let row = screen.cursor.0;
                     let cols = screen.cols;
                     let rows = screen.rows;
@@ -746,7 +788,12 @@ impl Perform for VtPerformer {
                 }
                 'M' => {
                     // DL - Delete Lines (delete lines)
-                    let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
+                    let n = params
+                        .iter()
+                        .next()
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(1) as usize;
                     let row = screen.cursor.0;
                     let cols = screen.cols;
                     let rows = screen.rows;
@@ -771,7 +818,12 @@ impl Perform for VtPerformer {
                 }
                 'S' => {
                     // SU - Scroll Up (scroll screen up)
-                    let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
+                    let n = params
+                        .iter()
+                        .next()
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(1) as usize;
                     let cols = screen.cols;
                     let rows = screen.rows;
                     let empty_cell = Cell {
@@ -789,7 +841,12 @@ impl Perform for VtPerformer {
                 }
                 'T' => {
                     // SD - Scroll Down (scroll screen down)
-                    let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
+                    let n = params
+                        .iter()
+                        .next()
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(1) as usize;
                     let cols = screen.cols;
                     let rows = screen.rows;
                     let empty_cell = Cell {
@@ -807,58 +864,99 @@ impl Perform for VtPerformer {
                 }
                 'A' => {
                     // Cursor up
-                    let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
+                    let n = params
+                        .iter()
+                        .next()
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(1) as usize;
                     screen.wrap_pending = false;
                     screen.cursor.0 = screen.cursor.0.saturating_sub(n);
                 }
                 'B' => {
                     // Cursor down
-                    let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
+                    let n = params
+                        .iter()
+                        .next()
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(1) as usize;
                     screen.wrap_pending = false;
                     screen.cursor.0 = (screen.cursor.0 + n).min(screen.rows - 1);
                 }
                 'C' => {
                     // Cursor right
-                    let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
+                    let n = params
+                        .iter()
+                        .next()
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(1) as usize;
                     screen.wrap_pending = false;
                     screen.cursor.1 = (screen.cursor.1 + n).min(screen.cols - 1);
                 }
                 'D' => {
                     // Cursor left
-                    let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
+                    let n = params
+                        .iter()
+                        .next()
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(1) as usize;
                     screen.wrap_pending = false;
                     screen.cursor.1 = screen.cursor.1.saturating_sub(n);
                 }
                 'E' => {
                     // CNL - Cursor Next Line
-                    let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
+                    let n = params
+                        .iter()
+                        .next()
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(1) as usize;
                     screen.wrap_pending = false;
                     screen.cursor.0 = (screen.cursor.0 + n).min(screen.rows - 1);
                     screen.cursor.1 = 0;
                 }
                 'F' => {
                     // CPL - Cursor Previous Line
-                    let n = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
+                    let n = params
+                        .iter()
+                        .next()
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(1) as usize;
                     screen.wrap_pending = false;
                     screen.cursor.0 = screen.cursor.0.saturating_sub(n);
                     screen.cursor.1 = 0;
                 }
                 'G' => {
                     // CHA - Cursor Horizontal Absolute
-                    let col = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
+                    let col = params
+                        .iter()
+                        .next()
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(1) as usize;
                     screen.wrap_pending = false;
                     screen.cursor.1 = col.saturating_sub(1).min(screen.cols - 1);
                 }
                 'd' => {
                     // VPA - Vertical Position Absolute
-                    let row = params.iter().next().and_then(|p| p.first()).copied().unwrap_or(1) as usize;
+                    let row = params
+                        .iter()
+                        .next()
+                        .and_then(|p| p.first())
+                        .copied()
+                        .unwrap_or(1) as usize;
                     screen.wrap_pending = false;
                     screen.cursor.0 = row.saturating_sub(1).min(screen.rows - 1);
                 }
                 'm' => {
                     // SGR - set style
                     // Collect all parameters into one vector to handle 38;5;N and 48;5;N
-                    let all_params: Vec<u16> = params.iter().flat_map(|p| p.iter().copied()).collect();
+                    let all_params: Vec<u16> =
+                        params.iter().flat_map(|p| p.iter().copied()).collect();
                     let mut i = 0;
                     while i < all_params.len() {
                         let p = all_params[i];
@@ -1053,23 +1151,35 @@ impl Terminal {
         }
 
         // Set working directory: passed or current
-        let working_dir = cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| "/".into()));
+        let working_dir =
+            cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| "/".into()));
         cmd.cwd(&working_dir);
 
         // Set environment variables for correct readline and escape sequence behavior
         cmd.env("TERM", "xterm-256color");
         cmd.env("SHELL", &shell);
-        cmd.env("HOME", std::env::var("HOME").unwrap_or_else(|_| "/".to_string()));
-        cmd.env("USER", std::env::var("USER").unwrap_or_else(|_| "user".to_string()));
-        cmd.env("LANG", std::env::var("LANG").unwrap_or_else(|_| "en_US.UTF-8".to_string()));
+        cmd.env(
+            "HOME",
+            std::env::var("HOME").unwrap_or_else(|_| "/".to_string()),
+        );
+        cmd.env(
+            "USER",
+            std::env::var("USER").unwrap_or_else(|_| "user".to_string()),
+        );
+        cmd.env(
+            "LANG",
+            std::env::var("LANG").unwrap_or_else(|_| "en_US.UTF-8".to_string()),
+        );
         if let Ok(lc_all) = std::env::var("LC_ALL") {
             cmd.env("LC_ALL", lc_all);
         }
         cmd.env("PWD", working_dir.display().to_string());
         // PATH is critical for NixOS - without it bash-interactive won't be found
-        cmd.env("PATH", std::env::var("PATH").unwrap_or_else(|_|
-            "/run/current-system/sw/bin:/usr/bin:/bin".to_string()
-        ));
+        cmd.env(
+            "PATH",
+            std::env::var("PATH")
+                .unwrap_or_else(|_| "/run/current-system/sw/bin:/usr/bin:/bin".to_string()),
+        );
 
         let child = pair.slave.spawn_command(cmd)?;
         let shell_pid = child.process_id();
@@ -1093,23 +1203,9 @@ impl Terminal {
             let mut parser = Parser::new();
             let mut buf = [0u8; 4096];
 
-            // Temporary log for debugging
-            let mut log_file = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open("/tmp/termide_pty.log")
-                .ok();
-
             loop {
                 match reader.read(&mut buf) {
                     Ok(n) if n > 0 => {
-                        // Log raw data
-                        if let Some(ref mut log) = log_file {
-                            use std::io::Write;
-                            let _ = writeln!(log, "RAW [{} bytes]: {:?}", n, &buf[..n]);
-                            let _ = writeln!(log, "STR: {:?}", String::from_utf8_lossy(&buf[..n]));
-                        }
-
                         let mut performer = VtPerformer {
                             screen: Arc::clone(&screen_clone),
                             pending_backslash: false,
@@ -1201,10 +1297,10 @@ impl Terminal {
             .unwrap_or("");
 
         match shell_name {
-            "fish" => vec!["-l"],       // login shell
-            "zsh" => vec!["-l", "-i"],  // login + interactive
-            "bash" => vec![],           // PTY will make it interactive automatically
-            _ => vec![],                // no arguments
+            "fish" => vec!["-l"],      // login shell
+            "zsh" => vec!["-l", "-i"], // login + interactive
+            "bash" => vec![],          // PTY will make it interactive automatically
+            _ => vec![],               // no arguments
         }
     }
 
@@ -1315,10 +1411,7 @@ impl Terminal {
                 let available = (stat.f_bavail as u64) * (stat.f_bsize as u64);
                 let total = (stat.f_blocks as u64) * (stat.f_bsize as u64);
 
-                Some(DiskSpaceInfo {
-                    available,
-                    total,
-                })
+                Some(DiskSpaceInfo { available, total })
             } else {
                 None
             }
@@ -1357,7 +1450,11 @@ impl Terminal {
 
             let row = &buffer[row_idx];
             let col_start = if row_idx == start.0 { start.1 } else { 0 };
-            let col_end = if row_idx == end.0 { end.1.min(row.len().saturating_sub(1)) } else { row.len().saturating_sub(1) };
+            let col_end = if row_idx == end.0 {
+                end.1.min(row.len().saturating_sub(1))
+            } else {
+                row.len().saturating_sub(1)
+            };
 
             for col_idx in col_start..=col_end {
                 if col_idx < row.len() {
@@ -1375,7 +1472,8 @@ impl Terminal {
         }
 
         // Trim trailing whitespace from each line
-        result.lines()
+        result
+            .lines()
             .map(|line| line.trim_end())
             .collect::<Vec<_>>()
             .join("\n")
@@ -1421,8 +1519,12 @@ impl Terminal {
     }
 
     /// Send mouse event to PTY (if mouse tracking is enabled)
-    fn send_mouse_to_pty(&mut self, mouse: &crossterm::event::MouseEvent, panel_area: Rect) -> Result<()> {
-        use crossterm::event::{MouseEventKind, MouseButton};
+    fn send_mouse_to_pty(
+        &mut self,
+        mouse: &crossterm::event::MouseEvent,
+        panel_area: Rect,
+    ) -> Result<()> {
+        use crossterm::event::{MouseButton, MouseEventKind};
 
         let (mouse_tracking, sgr_mode) = {
             let screen = self.screen.lock().unwrap();
@@ -1451,7 +1553,10 @@ impl Terminal {
                     let encoded_btn = (btn_code + 32) as u8;
                     let encoded_x = (inner_x as u8).saturating_add(32).min(255);
                     let encoded_y = (inner_y as u8).saturating_add(32).min(255);
-                    format!("\x1b[M{}{}{}", encoded_btn as char, encoded_x as char, encoded_y as char)
+                    format!(
+                        "\x1b[M{}{}{}",
+                        encoded_btn as char, encoded_x as char, encoded_y as char
+                    )
                 }
             }
             MouseEventKind::Up(button) => {
@@ -1465,7 +1570,12 @@ impl Terminal {
                 } else {
                     let encoded_x = (inner_x as u8).saturating_add(32).min(255);
                     let encoded_y = (inner_y as u8).saturating_add(32).min(255);
-                    format!("\x1b[M{}{}{}", (3 + 32) as u8 as char, encoded_x as char, encoded_y as char)
+                    format!(
+                        "\x1b[M{}{}{}",
+                        (3 + 32) as u8 as char,
+                        encoded_x as char,
+                        encoded_y as char
+                    )
                 }
             }
             MouseEventKind::ScrollUp => {
@@ -1475,7 +1585,12 @@ impl Terminal {
                 } else {
                     let encoded_x = (inner_x as u8).saturating_add(32).min(255);
                     let encoded_y = (inner_y as u8).saturating_add(32).min(255);
-                    format!("\x1b[M{}{}{}", (btn_code + 32) as u8 as char, encoded_x as char, encoded_y as char)
+                    format!(
+                        "\x1b[M{}{}{}",
+                        (btn_code + 32) as u8 as char,
+                        encoded_x as char,
+                        encoded_y as char
+                    )
                 }
             }
             MouseEventKind::ScrollDown => {
@@ -1485,7 +1600,12 @@ impl Terminal {
                 } else {
                     let encoded_x = (inner_x as u8).saturating_add(32).min(255);
                     let encoded_y = (inner_y as u8).saturating_add(32).min(255);
-                    format!("\x1b[M{}{}{}", (btn_code + 32) as u8 as char, encoded_x as char, encoded_y as char)
+                    format!(
+                        "\x1b[M{}{}{}",
+                        (btn_code + 32) as u8 as char,
+                        encoded_x as char,
+                        encoded_y as char
+                    )
                 }
             }
             _ => return Ok(()),
@@ -1497,45 +1617,54 @@ impl Terminal {
 
     /// Get lines for display
     /// Returns: (lines, cursor_position, cursor_shown)
-    fn get_display_lines(&self, show_cursor: bool, theme: &crate::theme::Theme) -> (Vec<Line>, (usize, usize), bool) {
+    fn get_display_lines(
+        &self,
+        show_cursor: bool,
+        theme: &crate::theme::Theme,
+    ) -> (Vec<Line>, (usize, usize), bool) {
         let screen = self.screen.lock().unwrap();
         let mut lines = Vec::new();
         let buffer = screen.active_buffer();
         let cursor_pos = screen.cursor;
 
         // If there's scroll offset and we're on main screen, show history
-        let (display_buffer, actual_cursor_pos, show_cursor_now) = if screen.scroll_offset > 0 && !screen.use_alt_screen {
-            // Assemble virtual buffer: scrollback + current screen
-            let total_scrollback = screen.scrollback.len();
-            let visible_rows = screen.rows;
+        let (display_buffer, actual_cursor_pos, show_cursor_now) =
+            if screen.scroll_offset > 0 && !screen.use_alt_screen {
+                // Assemble virtual buffer: scrollback + current screen
+                let total_scrollback = screen.scrollback.len();
+                let visible_rows = screen.rows;
 
-            // Calculate starting position in full history
-            // scroll_offset=1 means we're 1 line above current screen
-            let total_lines = total_scrollback + visible_rows;
-            let view_end = total_lines.saturating_sub(screen.scroll_offset);
-            let view_start = view_end.saturating_sub(visible_rows);
+                // Calculate starting position in full history
+                // scroll_offset=1 means we're 1 line above current screen
+                let total_lines = total_scrollback + visible_rows;
+                let view_end = total_lines.saturating_sub(screen.scroll_offset);
+                let view_start = view_end.saturating_sub(visible_rows);
 
-            // Create temporary buffer for display
-            let mut temp_buffer = Vec::with_capacity(visible_rows);
-            for i in view_start..view_end {
-                if i < total_scrollback {
-                    // Line from scrollback
-                    temp_buffer.push(screen.scrollback[i].clone());
-                } else {
-                    // Line from current buffer
-                    let buf_idx = i - total_scrollback;
-                    if buf_idx < buffer.len() {
-                        temp_buffer.push(buffer[buf_idx].clone());
+                // Create temporary buffer for display
+                let mut temp_buffer = Vec::with_capacity(visible_rows);
+                for i in view_start..view_end {
+                    if i < total_scrollback {
+                        // Line from scrollback
+                        temp_buffer.push(screen.scrollback[i].clone());
+                    } else {
+                        // Line from current buffer
+                        let buf_idx = i - total_scrollback;
+                        if buf_idx < buffer.len() {
+                            temp_buffer.push(buffer[buf_idx].clone());
+                        }
                     }
                 }
-            }
 
-            // Don't show cursor when viewing history
-            (temp_buffer, cursor_pos, false)
-        } else {
-            // Account for cursor_visible flag, which is controlled by application via ESC sequences
-            (buffer.clone(), cursor_pos, show_cursor && screen.cursor_visible)
-        };
+                // Don't show cursor when viewing history
+                (temp_buffer, cursor_pos, false)
+            } else {
+                // Account for cursor_visible flag, which is controlled by application via ESC sequences
+                (
+                    buffer.clone(),
+                    cursor_pos,
+                    show_cursor && screen.cursor_visible,
+                )
+            };
 
         for (row_idx, row) in display_buffer.iter().enumerate() {
             let mut spans = Vec::new();
@@ -1569,13 +1698,14 @@ impl Terminal {
                 let is_selected = screen.is_in_selection(row_idx, col_idx);
                 if is_selected {
                     // Bright contrasting color for selection
-                    style = Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::LightYellow);
+                    style = Style::default().fg(Color::Black).bg(Color::LightYellow);
                 }
 
                 // If this is cursor position and needs showing, use contrasting theme colors
-                if show_cursor_now && row_idx == actual_cursor_pos.0 && col_idx == actual_cursor_pos.1 {
+                if show_cursor_now
+                    && row_idx == actual_cursor_pos.0
+                    && col_idx == actual_cursor_pos.1
+                {
                     // Save current accumulated text
                     if !current_text.is_empty() {
                         spans.push(Span::styled(current_text.clone(), current_style.unwrap()));
@@ -1585,8 +1715,8 @@ impl Terminal {
 
                     // Use fixed contrasting theme colors (like in file manager)
                     let cursor_style = Style::default()
-                        .bg(theme.selection_bg)
-                        .fg(theme.selection_fg)
+                        .bg(theme.selected_bg)
+                        .fg(theme.selected_fg)
                         .add_modifier(Modifier::BOLD);
 
                     let cursor_char = if cell.ch == ' ' || cell.ch == '\0' {
@@ -1620,8 +1750,8 @@ impl Terminal {
             // If line is empty, cursor is on it and needs showing, add cursor
             if show_cursor_now && spans.is_empty() && row_idx == actual_cursor_pos.0 {
                 let cursor_style = Style::default()
-                    .bg(theme.selection_bg)
-                    .fg(theme.selection_fg)
+                    .bg(theme.selected_bg)
+                    .fg(theme.selected_fg)
                     .add_modifier(Modifier::BOLD);
                 spans.push(Span::styled(" ", cursor_style));
             }
@@ -1634,7 +1764,14 @@ impl Terminal {
 }
 
 impl Panel for Terminal {
-    fn render(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool, panel_index: usize, state: &AppState) {
+    fn render(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        is_focused: bool,
+        panel_index: usize,
+        state: &AppState,
+    ) {
         // Update size if changed
         let new_rows = area.height.saturating_sub(2);
         let new_cols = area.width.saturating_sub(2);
@@ -1645,16 +1782,25 @@ impl Panel for Terminal {
 
         // Data is read in a separate thread, just render current state
         // Show cursor only when panel is focused
-        let (display_lines, _cursor_pos, _cursor_shown) = self.get_display_lines(is_focused, state.theme);
+        let (display_lines, _cursor_pos, _cursor_shown) =
+            self.get_display_lines(is_focused, state.theme);
 
         // Create panel title considering process state
         let panel_title = if self.is_alive() {
             self.terminal_title.clone()
         } else {
-            format!("{} [Process Exited - Press Tab to switch panel]", self.terminal_title)
+            format!(
+                "{} [Process Exited - Press Tab to switch panel]",
+                self.terminal_title
+            )
         };
 
-        let block = crate::ui::panel_helpers::create_panel_block(&panel_title, is_focused, panel_index, state);
+        let block = crate::ui::panel_helpers::create_panel_block(
+            &panel_title,
+            is_focused,
+            panel_index,
+            state,
+        );
         let inner = block.inner(area);
 
         let paragraph = Paragraph::new(display_lines).block(block);
@@ -1677,12 +1823,12 @@ impl Panel for Terminal {
 
                         // Replace Reset background with theme background
                         if current_style.bg == Some(Color::Reset) || current_style.bg.is_none() {
-                            new_style.bg = Some(state.theme.background);
+                            new_style.bg = Some(state.theme.bg);
                         }
 
                         // Replace White text with theme text
                         if current_style.fg == Some(Color::White) || current_style.fg.is_none() {
-                            new_style.fg = Some(state.theme.text_primary);
+                            new_style.fg = Some(state.theme.fg);
                         }
 
                         cell.set_style(new_style);
@@ -1714,12 +1860,18 @@ impl Panel for Terminal {
             match key.code {
                 KeyCode::PageUp => {
                     let rows = self.screen.lock().unwrap().rows;
-                    self.screen.lock().unwrap().scroll_view_up(rows.saturating_sub(1));
+                    self.screen
+                        .lock()
+                        .unwrap()
+                        .scroll_view_up(rows.saturating_sub(1));
                     return Ok(());
                 }
                 KeyCode::PageDown => {
                     let rows = self.screen.lock().unwrap().rows;
-                    self.screen.lock().unwrap().scroll_view_down(rows.saturating_sub(1));
+                    self.screen
+                        .lock()
+                        .unwrap()
+                        .scroll_view_down(rows.saturating_sub(1));
                     return Ok(());
                 }
                 KeyCode::Home => {
@@ -1863,8 +2015,12 @@ impl Panel for Terminal {
         self.terminal_title.clone()
     }
 
-    fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent, panel_area: Rect) -> Result<()> {
-        use crossterm::event::{MouseEventKind, MouseButton};
+    fn handle_mouse(
+        &mut self,
+        mouse: crossterm::event::MouseEvent,
+        panel_area: Rect,
+    ) -> Result<()> {
+        use crossterm::event::{MouseButton, MouseEventKind};
 
         // If process exited, don't handle mouse
         if !self.is_alive() {
@@ -1885,8 +2041,10 @@ impl Panel for Terminal {
         let inner_row = clamped_row.saturating_sub(inner_y_min) as usize;
 
         // Check if click is inside terminal area
-        let is_inside = mouse.column >= inner_x_min && mouse.column <= inner_x_max &&
-                        mouse.row >= inner_y_min && mouse.row <= inner_y_max;
+        let is_inside = mouse.column >= inner_x_min
+            && mouse.column <= inner_x_max
+            && mouse.row >= inner_y_min
+            && mouse.row <= inner_y_max;
 
         // Check if selection is active
         let selection_active = {

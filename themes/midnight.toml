@@ -2,28 +2,22 @@
 name = "midnight"
 
 [colors]
-# Base colors
-background = { rgb = [0, 0, 50] }
-text_primary = "White"
-text_secondary = "Gray"
-accent_primary = "Cyan"
-accent_secondary = "Blue"
-highlight = "Yellow"
+# Base
+bg = { rgb = [0, 0, 50] }
+fg = "White"
 
-# Interactive elements
-selection_bg = "Cyan"
-selection_fg = "Black"
-selected_item = "Yellow"
-cursor_line_bg = "Blue"
+# Accented
+accented_bg = "Blue"
+accented_fg = "Cyan"
 
-# Status bar
-status_bar_bg = "Blue"
+# Selection
+selected_bg = "Cyan"
+selected_fg = "Black"
 
-# Semantic colors (status messages and Git)
-success_bg = "Green"
-success_fg = "Black"
-error_bg = "Red"
-error_fg = "White"
-git_modified = "Yellow"
-git_added = "Green"
-git_deleted = "Red"
+# Disabled
+disabled = "Gray"
+
+# Semantic
+success = "Green"
+warning = "Yellow"
+error = "Red"

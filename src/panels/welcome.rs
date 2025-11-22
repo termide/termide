@@ -1,9 +1,6 @@
 use anyhow::Result;
 use crossterm::event::KeyEvent;
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-};
+use ratatui::{buffer::Buffer, layout::Rect};
 
 use super::editor::Editor;
 use super::Panel;
@@ -39,9 +36,17 @@ impl Welcome {
 }
 
 impl Panel for Welcome {
-    fn render(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool, panel_index: usize, state: &AppState) {
+    fn render(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        is_focused: bool,
+        panel_index: usize,
+        state: &AppState,
+    ) {
         // Delegate rendering to the embedded editor
-        self.editor.render(area, buf, is_focused, panel_index, state);
+        self.editor
+            .render(area, buf, is_focused, panel_index, state);
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
@@ -49,7 +54,11 @@ impl Panel for Welcome {
         self.editor.handle_key(key)
     }
 
-    fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent, panel_area: Rect) -> Result<()> {
+    fn handle_mouse(
+        &mut self,
+        mouse: crossterm::event::MouseEvent,
+        panel_area: Rect,
+    ) -> Result<()> {
         // Delegate mouse handling to the embedded editor
         self.editor.handle_mouse(mouse, panel_area)
     }

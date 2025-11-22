@@ -2,28 +2,22 @@
 name = "default"
 
 [colors]
-# Base colors
-background = { rgb = [40, 40, 40] }
-text_primary = "White"
-text_secondary = "Gray"
-accent_primary = "Green"
-accent_secondary = "Gray"
-highlight = "Yellow"
+# Base
+bg = { rgb = [20, 20, 20] }
+fg = "White"
 
-# Interactive elements
-selection_bg = "Blue"
-selection_fg = "White"
-selected_item = "Green"
-cursor_line_bg = "DarkGray"
+# Accented
+accented_bg = { rgb = [40, 40, 40] }
+accented_fg = "Green"
 
-# Status bar
-status_bar_bg = "DarkGray"
+# Selection
+selected_bg = "Blue"
+selected_fg = "White"
 
-# Semantic colors (status messages and Git)
-success_bg = "Green"
-success_fg = "Black"
-error_bg = "Red"
-error_fg = "White"
-git_modified = "Yellow"
-git_added = "Green"
-git_deleted = { rgb = [139, 0, 0] }
+# Disabled
+disabled = "Gray"
+
+# Semantic
+success = "Green"
+warning = "Yellow"
+error = "Red"

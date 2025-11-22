@@ -66,8 +66,7 @@ impl SearchState {
 
     /// Get current match
     pub fn current_match_cursor(&self) -> Option<&Cursor> {
-        self.current_match
-            .and_then(|idx| self.matches.get(idx))
+        self.current_match.and_then(|idx| self.matches.get(idx))
     }
 
     /// Go to next match
@@ -134,7 +133,10 @@ mod tests {
         state.matches = vec![
             Cursor { line: 0, column: 0 },
             Cursor { line: 1, column: 5 },
-            Cursor { line: 2, column: 10 },
+            Cursor {
+                line: 2,
+                column: 10,
+            },
         ];
 
         // Initial state
@@ -164,8 +166,14 @@ mod tests {
         let mut state = SearchState::new("test".to_string(), false);
         state.matches = vec![
             Cursor { line: 0, column: 0 },
-            Cursor { line: 5, column: 10 },
-            Cursor { line: 10, column: 5 },
+            Cursor {
+                line: 5,
+                column: 10,
+            },
+            Cursor {
+                line: 10,
+                column: 5,
+            },
         ];
 
         // Cursor before first match
@@ -177,7 +185,10 @@ mod tests {
         assert_eq!(state.current_match, Some(1));
 
         // Cursor after all matches - return to beginning
-        state.find_closest_match(&Cursor { line: 20, column: 0 });
+        state.find_closest_match(&Cursor {
+            line: 20,
+            column: 0,
+        });
         assert_eq!(state.current_match, Some(0));
     }
 }

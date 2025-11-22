@@ -1,9 +1,9 @@
 mod app;
+mod clipboard;
 mod config;
 mod constants;
 mod editor;
 mod event;
-mod clipboard;
 mod fs_watcher;
 mod git;
 mod i18n;
@@ -12,6 +12,7 @@ mod panels;
 mod rename_pattern;
 mod state;
 mod syntax_highlighter;
+mod system_monitor;
 mod theme;
 mod ui;
 

@@ -486,11 +486,17 @@ impl Translation for English {
     }
 
     fn modal_copy_single_prompt(&self, name: &str) -> String {
-        format!("Where to copy '{}'?\n(enter path: 'subdir/', '../', or new name)", name)
+        format!(
+            "Where to copy '{}'?\n(enter path: 'subdir/', '../', or new name)",
+            name
+        )
     }
 
     fn modal_copy_multiple_prompt(&self, count: usize) -> String {
-        format!("Where to copy {} items?\n(enter path: 'subdir/' or '../')", count)
+        format!(
+            "Where to copy {} items?\n(enter path: 'subdir/' or '../')",
+            count
+        )
     }
 
     fn modal_move_single_prompt(&self, name: &str) -> String {

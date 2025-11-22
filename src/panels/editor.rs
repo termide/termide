@@ -67,12 +67,12 @@ impl EditorConfig {
 /// Editor information for status bar
 #[derive(Debug, Clone)]
 pub struct EditorInfo {
-    pub line: usize,       // Current line (1-based)
-    pub column: usize,     // Current column (1-based)
-    pub tab_size: usize,   // Tab size
-    pub encoding: String,  // Encoding (UTF-8)
-    pub file_type: String, // File type / syntax language
-    pub read_only: bool,   // Read-only mode
+    pub line: usize,               // Current line (1-based)
+    pub column: usize,             // Current column (1-based)
+    pub tab_size: usize,           // Tab size
+    pub encoding: String,          // Encoding (UTF-8)
+    pub file_type: String,         // File type / syntax language
+    pub read_only: bool,           // Read-only mode
     pub syntax_highlighting: bool, // Syntax highlighting enabled
 }
 
@@ -160,7 +160,8 @@ impl Editor {
         }
 
         // Create highlighting cache and set syntax by file extension
-        let mut highlight_cache = HighlightCache::new(syntax_highlighter::global_highlighter(), false);
+        let mut highlight_cache =
+            HighlightCache::new(syntax_highlighter::global_highlighter(), false);
 
         // Set syntax only if highlighting is enabled
         if config.syntax_highlighting {
@@ -286,9 +287,9 @@ impl Editor {
             .to_string();
 
         EditorInfo {
-            line: self.cursor.line + 1,   // 1-based
+            line: self.cursor.line + 1,     // 1-based
             column: self.cursor.column + 1, // 1-based
-            tab_size: 4,                   // TODO: get from settings
+            tab_size: 4,                    // TODO: get from settings
             encoding: "UTF-8".to_string(),
             file_type,
             read_only: self.config.read_only,
@@ -353,7 +354,8 @@ impl Editor {
         let max_line = self.buffer.line_count().saturating_sub(1);
         self.cursor.move_down(page_size, max_line);
         self.clamp_cursor();
-        self.viewport.scroll_down(page_size, self.buffer.line_count());
+        self.viewport
+            .scroll_down(page_size, self.buffer.line_count());
     }
 
     /// Move cursor to start of document
@@ -428,7 +430,11 @@ impl Editor {
                             result.push_str(&chars[start.column..].iter().collect::<String>());
                             result.push('\n');
                         } else if i == end.line {
-                            result.push_str(&chars[..end.column.min(chars.len())].iter().collect::<String>());
+                            result.push_str(
+                                &chars[..end.column.min(chars.len())]
+                                    .iter()
+                                    .collect::<String>(),
+                            );
                         } else {
                             result.push_str(line);
                             result.push('\n');
@@ -453,7 +459,8 @@ impl Editor {
 
                 // Invalidate highlighting cache
                 // When deleting multiline selection, need to invalidate all lines after
-                self.highlight_cache.invalidate_range(start.line, self.buffer.line_count());
+                self.highlight_cache
+                    .invalidate_range(start.line, self.buffer.line_count());
             }
         }
         Ok(())
@@ -491,7 +498,8 @@ impl Editor {
             // Invalidate highlighting cache
             if text.contains('\n') {
                 // Multiline paste
-                self.highlight_cache.invalidate_range(start_line, self.buffer.line_count());
+                self.highlight_cache
+                    .invalidate_range(start_line, self.buffer.line_count());
             } else {
                 // Single line paste
                 self.highlight_cache.invalidate_line(start_line);
@@ -539,7 +547,8 @@ impl Editor {
         self.clamp_cursor();
 
         // Invalidate all lines after inserting new line
-        self.highlight_cache.invalidate_range(old_line, self.buffer.line_count());
+        self.highlight_cache
+            .invalidate_range(old_line, self.buffer.line_count());
 
         Ok(())
     }
@@ -556,7 +565,8 @@ impl Editor {
             // Invalidate highlighting cache
             if was_at_line_start && old_line > 0 {
                 // Deleted newline - need to invalidate all lines after
-                self.highlight_cache.invalidate_range(new_cursor.line, self.buffer.line_count());
+                self.highlight_cache
+                    .invalidate_range(new_cursor.line, self.buffer.line_count());
             } else {
                 // Regular character deletion
                 self.highlight_cache.invalidate_line(new_cursor.line);
@@ -574,7 +584,8 @@ impl Editor {
             // Invalidate highlighting cache
             if was_at_line_end {
                 // Deleted newline - need to invalidate all lines after
-                self.highlight_cache.invalidate_range(self.cursor.line, self.buffer.line_count());
+                self.highlight_cache
+                    .invalidate_range(self.cursor.line, self.buffer.line_count());
             } else {
                 // Regular character deletion
                 self.highlight_cache.invalidate_line(self.cursor.line);
@@ -593,35 +604,35 @@ impl Editor {
         self.viewport.resize(content_width, content_height);
 
         // Ensure cursor is visible
-        self.viewport.ensure_cursor_visible(&self.cursor, self.buffer.line_count());
+        self.viewport
+            .ensure_cursor_visible(&self.cursor, self.buffer.line_count());
 
-        let text_style = Style::default().fg(theme.text_primary);
-        let line_number_style = Style::default().fg(theme.text_secondary);
-        let cursor_line_style = Style::default()
-            .bg(theme.cursor_line_bg)
-            .fg(theme.text_primary);
+        let text_style = Style::default().fg(theme.fg);
+        let line_number_style = Style::default().fg(theme.disabled);
+        let cursor_line_style = Style::default().bg(theme.accented_bg).fg(theme.fg);
 
         // Style for found matches (using theme colors)
         let search_match_style = Style::default()
-            .bg(theme.highlight)      // Highlight color from theme
-            .fg(theme.background);    // Contrasting text
+            .bg(theme.warning) // Warning color for search matches
+            .fg(theme.bg); // Contrasting text
 
         let current_match_style = Style::default()
-            .bg(theme.accent_primary)   // Accent color for current match
-            .fg(theme.background)       // Contrasting text
+            .bg(theme.accented_fg) // Accent color for current match
+            .fg(theme.bg) // Contrasting text
             .add_modifier(Modifier::BOLD);
 
         // Style for selected text
-        let selection_style = Style::default()
-            .bg(theme.selection_bg)
-            .fg(theme.selection_fg);
+        let selection_style = Style::default().bg(theme.selected_bg).fg(theme.selected_fg);
 
         // Pre-extract selection information
         let selection_range = self.selection.as_ref().map(|s| (s.start(), s.end()));
 
         // Pre-extract match information to avoid borrow checker issues
-        let search_matches: Vec<(usize, usize, usize)> = if let Some(ref search) = self.search_state {
-            search.matches.iter()
+        let search_matches: Vec<(usize, usize, usize)> = if let Some(ref search) = self.search_state
+        {
+            search
+                .matches
+                .iter()
                 .map(|c| (c.line, c.column, search.query.len()))
                 .collect()
         } else {
@@ -639,7 +650,11 @@ impl Editor {
 
             while visual_row < content_height && line_idx < self.buffer.line_count() {
                 let is_cursor_line = line_idx == self.cursor.line;
-                let style = if is_cursor_line { cursor_line_style } else { text_style };
+                let style = if is_cursor_line {
+                    cursor_line_style
+                } else {
+                    text_style
+                };
 
                 if let Some(line_text) = self.buffer.line(line_idx) {
                     let line_text = line_text.trim_end_matches('\n');
@@ -679,7 +694,9 @@ impl Editor {
                         }
 
                         // Получить сегменты подсветки
-                        let segments = if self.config.syntax_highlighting && self.highlight_cache.has_syntax() {
+                        let segments = if self.config.syntax_highlighting
+                            && self.highlight_cache.has_syntax()
+                        {
                             self.highlight_cache.get_line_segments(line_idx, line_text)
                         } else {
                             &[(line_text.to_string(), style)][..]
@@ -701,18 +718,28 @@ impl Editor {
                                             cell.set_char(ch);
 
                                             // Проверить, является ли это совпадением поиска
-                                            let match_idx = search_matches.iter()
-                                                .position(|(m_line, m_col, m_len)| {
+                                            let match_idx = search_matches.iter().position(
+                                                |(m_line, m_col, m_len)| {
                                                     *m_line == line_idx
                                                         && segment_char_idx >= *m_col
                                                         && segment_char_idx < m_col + m_len
-                                                });
+                                                },
+                                            );
 
                                             // Проверить, находится ли символ в выделении
-                                            let is_selected = if let Some((sel_start, sel_end)) = &selection_range {
-                                                let pos = crate::editor::Cursor::at(line_idx, segment_char_idx);
-                                                (pos.line > sel_start.line || (pos.line == sel_start.line && pos.column >= sel_start.column))
-                                                    && (pos.line < sel_end.line || (pos.line == sel_end.line && pos.column < sel_end.column))
+                                            let is_selected = if let Some((sel_start, sel_end)) =
+                                                &selection_range
+                                            {
+                                                let pos = crate::editor::Cursor::at(
+                                                    line_idx,
+                                                    segment_char_idx,
+                                                );
+                                                (pos.line > sel_start.line
+                                                    || (pos.line == sel_start.line
+                                                        && pos.column >= sel_start.column))
+                                                    && (pos.line < sel_end.line
+                                                        || (pos.line == sel_end.line
+                                                            && pos.column < sel_end.column))
                                             } else {
                                                 false
                                             };
@@ -727,7 +754,7 @@ impl Editor {
                                             } else if is_selected {
                                                 selection_style
                                             } else if is_cursor_line {
-                                                segment_style.bg(theme.cursor_line_bg)
+                                                segment_style.bg(theme.accented_bg)
                                             } else {
                                                 *segment_style
                                             };
@@ -747,9 +774,15 @@ impl Editor {
                         }
 
                         // Проверить курсор в конце строки
-                        if is_cursor_line && self.cursor.column >= char_offset && self.cursor.column <= chunk_end {
-                            if self.cursor.column == chunk_end || (chunk_end == line_len && self.cursor.column >= line_len) {
-                                cursor_viewport_pos = Some((visual_row, self.cursor.column - char_offset));
+                        if is_cursor_line
+                            && self.cursor.column >= char_offset
+                            && self.cursor.column <= chunk_end
+                        {
+                            if self.cursor.column == chunk_end
+                                || (chunk_end == line_len && self.cursor.column >= line_len)
+                            {
+                                cursor_viewport_pos =
+                                    Some((visual_row, self.cursor.column - char_offset));
                             }
                         }
 
@@ -791,9 +824,9 @@ impl Editor {
                     if let Some(cell) = buf.cell_mut((cursor_x, cursor_y)) {
                         cell.set_style(
                             Style::default()
-                                .bg(theme.selection_bg)
-                                .fg(theme.selection_fg)
-                                .add_modifier(Modifier::BOLD)
+                                .bg(theme.selected_bg)
+                                .fg(theme.selected_fg)
+                                .add_modifier(Modifier::BOLD),
                         );
                     }
                 }
@@ -809,7 +842,11 @@ impl Editor {
                 }
 
                 let is_cursor_line = line_idx == self.cursor.line;
-                let style = if is_cursor_line { cursor_line_style } else { text_style };
+                let style = if is_cursor_line {
+                    cursor_line_style
+                } else {
+                    text_style
+                };
 
                 // Номер строки
                 let line_num = format!("{:>4} ", line_idx + 1);
@@ -831,20 +868,24 @@ impl Editor {
 
                     // Получить подсветку синтаксиса для строки (без клонирования)
                     // Учитываем config.syntax_highlighting для отключения подсветки
-                    let segments = if self.config.syntax_highlighting && self.highlight_cache.has_syntax() {
-                        self.highlight_cache.get_line_segments(line_idx, line_text)
-                    } else {
-                        // Для текста без подсветки используем временный массив
-                        &[(line_text.to_string(), style)][..]
-                    };
+                    let segments =
+                        if self.config.syntax_highlighting && self.highlight_cache.has_syntax() {
+                            self.highlight_cache.get_line_segments(line_idx, line_text)
+                        } else {
+                            // Для текста без подсветки используем временный массив
+                            &[(line_text.to_string(), style)][..]
+                        };
 
                     // Отрисовать сегменты с подсветкой
                     let mut col_offset = 0;
                     for (segment_text, segment_style) in segments {
                         for ch in segment_text.chars() {
                             if col_offset >= self.viewport.left_column
-                                && col_offset < self.viewport.left_column + content_width {
-                                let x = area.x + line_number_width + (col_offset - self.viewport.left_column) as u16;
+                                && col_offset < self.viewport.left_column + content_width
+                            {
+                                let x = area.x
+                                    + line_number_width
+                                    + (col_offset - self.viewport.left_column) as u16;
                                 let y = area.y + row as u16;
 
                                 if x < area.x + area.width && y < area.y + area.height {
@@ -852,21 +893,28 @@ impl Editor {
                                         cell.set_char(ch);
 
                                         // Проверить, является ли это совпадением поиска
-                                        let match_idx = search_matches.iter()
-                                            .position(|(m_line, m_col, m_len)| {
+                                        let match_idx = search_matches.iter().position(
+                                            |(m_line, m_col, m_len)| {
                                                 *m_line == line_idx
                                                     && col_offset >= *m_col
                                                     && col_offset < m_col + m_len
-                                            });
+                                            },
+                                        );
 
                                         // Проверить, находится ли символ в выделении
-                                        let is_selected = if let Some((sel_start, sel_end)) = &selection_range {
-                                            let pos = crate::editor::Cursor::at(line_idx, col_offset);
-                                            (pos.line > sel_start.line || (pos.line == sel_start.line && pos.column >= sel_start.column))
-                                                && (pos.line < sel_end.line || (pos.line == sel_end.line && pos.column < sel_end.column))
-                                        } else {
-                                            false
-                                        };
+                                        let is_selected =
+                                            if let Some((sel_start, sel_end)) = &selection_range {
+                                                let pos =
+                                                    crate::editor::Cursor::at(line_idx, col_offset);
+                                                (pos.line > sel_start.line
+                                                    || (pos.line == sel_start.line
+                                                        && pos.column >= sel_start.column))
+                                                    && (pos.line < sel_end.line
+                                                        || (pos.line == sel_end.line
+                                                            && pos.column < sel_end.column))
+                                            } else {
+                                                false
+                                            };
 
                                         // Определить финальный стиль с учетом подсветки, выделения, курсорной линии и совпадений
                                         let final_style = if let Some(idx) = match_idx {
@@ -883,7 +931,7 @@ impl Editor {
                                             selection_style
                                         } else if is_cursor_line {
                                             // Курсорная линия (но не совпадение и не выделение)
-                                            segment_style.bg(theme.cursor_line_bg)
+                                            segment_style.bg(theme.accented_bg)
                                         } else {
                                             // Обычный текст
                                             *segment_style
@@ -901,7 +949,9 @@ impl Editor {
                         let line_len = line_text.chars().count();
                         for col in line_len..content_width {
                             if col >= self.viewport.left_column {
-                                let x = area.x + line_number_width + (col - self.viewport.left_column) as u16;
+                                let x = area.x
+                                    + line_number_width
+                                    + (col - self.viewport.left_column) as u16;
                                 let y = area.y + row as u16;
 
                                 if x < area.x + area.width && y < area.y + area.height {
@@ -917,7 +967,9 @@ impl Editor {
             }
 
             // Отрисовать курсор
-            if let Some((viewport_row, viewport_col)) = self.viewport.cursor_to_viewport_pos(&self.cursor) {
+            if let Some((viewport_row, viewport_col)) =
+                self.viewport.cursor_to_viewport_pos(&self.cursor)
+            {
                 let cursor_x = area.x + line_number_width + viewport_col as u16;
                 let cursor_y = area.y + viewport_row as u16;
 
@@ -925,9 +977,9 @@ impl Editor {
                     if let Some(cell) = buf.cell_mut((cursor_x, cursor_y)) {
                         cell.set_style(
                             Style::default()
-                                .bg(theme.selection_bg)
-                                .fg(theme.selection_fg)
-                                .add_modifier(Modifier::BOLD)
+                                .bg(theme.selected_bg)
+                                .fg(theme.selected_fg)
+                                .add_modifier(Modifier::BOLD),
                         );
                     }
                 }
@@ -1139,12 +1191,19 @@ impl Editor {
 }
 
 impl Panel for Editor {
-    fn render(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool, _panel_index: usize, state: &AppState) {
+    fn render(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        is_focused: bool,
+        _panel_index: usize,
+        state: &AppState,
+    ) {
         // Отрисовать рамку
         let border_color = if is_focused {
-            state.theme.accent_primary
+            state.theme.accented_fg
         } else {
-            state.theme.accent_secondary
+            state.theme.disabled
         };
 
         // Рисуем простую рамку
@@ -1305,12 +1364,18 @@ impl Panel for Editor {
                 self.update_selection_active();
             }
             // Shift+Ctrl+Home/End - select to start/end of document
-            (KeyCode::Home, modifiers) if modifiers.contains(KeyModifiers::SHIFT) && modifiers.contains(KeyModifiers::CONTROL) => {
+            (KeyCode::Home, modifiers)
+                if modifiers.contains(KeyModifiers::SHIFT)
+                    && modifiers.contains(KeyModifiers::CONTROL) =>
+            {
                 self.start_or_extend_selection();
                 self.move_to_document_start();
                 self.update_selection_active();
             }
-            (KeyCode::End, modifiers) if modifiers.contains(KeyModifiers::SHIFT) && modifiers.contains(KeyModifiers::CONTROL) => {
+            (KeyCode::End, modifiers)
+                if modifiers.contains(KeyModifiers::SHIFT)
+                    && modifiers.contains(KeyModifiers::CONTROL) =>
+            {
                 self.start_or_extend_selection();
                 self.move_to_document_end();
                 self.update_selection_active();
@@ -1329,7 +1394,12 @@ impl Panel for Editor {
             }
             (KeyCode::Backspace, KeyModifiers::NONE) => {
                 if !self.config.read_only {
-                    if self.selection.as_ref().map(|s| !s.is_empty()).unwrap_or(false) {
+                    if self
+                        .selection
+                        .as_ref()
+                        .map(|s| !s.is_empty())
+                        .unwrap_or(false)
+                    {
                         self.delete_selection()?;
                     } else {
                         self.selection = None;
@@ -1339,7 +1409,12 @@ impl Panel for Editor {
             }
             (KeyCode::Delete, KeyModifiers::NONE) => {
                 if !self.config.read_only {
-                    if self.selection.as_ref().map(|s| !s.is_empty()).unwrap_or(false) {
+                    if self
+                        .selection
+                        .as_ref()
+                        .map(|s| !s.is_empty())
+                        .unwrap_or(false)
+                    {
                         self.delete_selection()?;
                     } else {
                         self.selection = None;
@@ -1363,7 +1438,8 @@ impl Panel for Editor {
                         self.cursor = new_cursor;
                         self.clamp_cursor();
                         // Invalidate entire highlighting cache after redo
-                        self.highlight_cache.invalidate_range(0, self.buffer.line_count());
+                        self.highlight_cache
+                            .invalidate_range(0, self.buffer.line_count());
                     }
                 }
             }
@@ -1375,7 +1451,8 @@ impl Panel for Editor {
                         self.cursor = new_cursor;
                         self.clamp_cursor();
                         // Invalidate entire highlighting cache after undo
-                        self.highlight_cache.invalidate_range(0, self.buffer.line_count());
+                        self.highlight_cache
+                            .invalidate_range(0, self.buffer.line_count());
                     }
                 }
             }
@@ -1387,7 +1464,8 @@ impl Panel for Editor {
                         self.cursor = new_cursor;
                         self.clamp_cursor();
                         // Invalidate entire highlighting cache after redo
-                        self.highlight_cache.invalidate_range(0, self.buffer.line_count());
+                        self.highlight_cache
+                            .invalidate_range(0, self.buffer.line_count());
                     }
                 }
             }
@@ -1397,7 +1475,8 @@ impl Panel for Editor {
                 use crate::ui::modal::InputModal;
                 let t = crate::i18n::t();
                 let input = InputModal::new(t.editor_search_title(), t.editor_search_prompt());
-                self.modal_request = Some((PendingAction::Search, ActiveModal::Input(Box::new(input))));
+                self.modal_request =
+                    Some((PendingAction::Search, ActiveModal::Input(Box::new(input))));
             }
 
             // F3 - next match
@@ -1422,14 +1501,19 @@ impl Panel for Editor {
                 if !self.config.read_only {
                     use crate::ui::modal::InputModal;
                     let t = crate::i18n::t();
-                    let input = InputModal::new(t.editor_replace_title(), t.editor_replace_prompt());
-                    self.modal_request = Some((PendingAction::Replace, ActiveModal::Input(Box::new(input))));
+                    let input =
+                        InputModal::new(t.editor_replace_title(), t.editor_replace_prompt());
+                    self.modal_request =
+                        Some((PendingAction::Replace, ActiveModal::Input(Box::new(input))));
                 }
             }
 
             // Ctrl+Alt+R - replace all matches (only if not read-only)
             // Must be BEFORE Ctrl+R for correct pattern matching
-            (KeyCode::Char('r'), modifiers) if modifiers.contains(KeyModifiers::CONTROL) && modifiers.contains(KeyModifiers::ALT) => {
+            (KeyCode::Char('r'), modifiers)
+                if modifiers.contains(KeyModifiers::CONTROL)
+                    && modifiers.contains(KeyModifiers::ALT) =>
+            {
                 if !self.config.read_only {
                     if let Ok(count) = self.replace_all() {
                         // TODO: show message to user about number of replacements
@@ -1532,8 +1616,12 @@ impl Panel for Editor {
         self.modal_request.take()
     }
 
-    fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent, panel_area: Rect) -> Result<()> {
-        use crossterm::event::{MouseEventKind, MouseButton};
+    fn handle_mouse(
+        &mut self,
+        mouse: crossterm::event::MouseEvent,
+        panel_area: Rect,
+    ) -> Result<()> {
+        use crossterm::event::{MouseButton, MouseEventKind};
 
         // Handle scroll first (works anywhere in panel)
         match mouse.kind {
@@ -1607,7 +1695,8 @@ impl Panel for Editor {
                     selection.active = self.cursor;
                 }
                 // Ensure cursor is visible during dragging
-                self.viewport.ensure_cursor_visible(&self.cursor, self.buffer.line_count());
+                self.viewport
+                    .ensure_cursor_visible(&self.cursor, self.buffer.line_count());
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 // Finish selection

@@ -1,11 +1,13 @@
 use crate::config::Config;
 use crate::git::{GitStatusUpdate, GitWatcher};
 use crate::theme::Theme;
-use crate::ui::modal::{ConfirmModal, ConflictModal, InfoModal, InputModal, OverwriteModal, SelectModal};
-use std::path::PathBuf;
-use std::collections::{VecDeque, HashMap};
+use crate::ui::modal::{
+    ConfirmModal, ConflictModal, InfoModal, InputModal, OverwriteModal, SelectModal,
+};
+use std::collections::{HashMap, VecDeque};
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread::JoinHandle;
 
@@ -168,17 +170,37 @@ pub enum ActiveModal {
 #[derive(Debug, Clone)]
 pub enum PendingAction {
     /// Create new file in specified directory
-    CreateFile { panel_index: usize, directory: PathBuf },
+    CreateFile {
+        panel_index: usize,
+        directory: PathBuf,
+    },
     /// Create new directory in specified directory
-    CreateDirectory { panel_index: usize, directory: PathBuf },
+    CreateDirectory {
+        panel_index: usize,
+        directory: PathBuf,
+    },
     /// Delete files/directories (one or multiple)
-    DeletePath { panel_index: usize, paths: Vec<PathBuf> },
+    DeletePath {
+        panel_index: usize,
+        paths: Vec<PathBuf>,
+    },
     /// Copy files/directories (one or multiple)
-    CopyPath { panel_index: usize, sources: Vec<PathBuf>, target_directory: Option<PathBuf> },
+    CopyPath {
+        panel_index: usize,
+        sources: Vec<PathBuf>,
+        target_directory: Option<PathBuf>,
+    },
     /// Move files/directories (one or multiple)
-    MovePath { panel_index: usize, sources: Vec<PathBuf>, target_directory: Option<PathBuf> },
+    MovePath {
+        panel_index: usize,
+        sources: Vec<PathBuf>,
+        target_directory: Option<PathBuf>,
+    },
     /// Save unnamed file (Save As)
-    SaveFileAs { panel_index: usize, directory: PathBuf },
+    SaveFileAs {
+        panel_index: usize,
+        directory: PathBuf,
+    },
     /// Close panel (with confirmation if there are unsaved changes)
     ClosePanel { panel_index: usize },
     /// Close editor with choice: save, don't save, cancel
@@ -188,16 +210,12 @@ pub enum PendingAction {
         panel_index: usize,
         source: PathBuf,
         destination: PathBuf,
-        is_move: bool,  // true for move, false for copy
+        is_move: bool, // true for move, false for copy
     },
     /// Batch file operation (copy/move)
-    BatchFileOperation {
-        operation: BatchOperation,
-    },
+    BatchFileOperation { operation: BatchOperation },
     /// Continue batch operation after conflict resolution
-    ContinueBatchOperation {
-        operation: BatchOperation,
-    },
+    ContinueBatchOperation { operation: BatchOperation },
     /// Request rename pattern and apply to file
     RenameWithPattern {
         operation: BatchOperation,
@@ -395,6 +413,10 @@ pub struct AppState {
     pub config: Config,
     /// Panel weights for resize (panel_index -> weight, default 100)
     pub panel_weights: HashMap<usize, u16>,
+    /// System resource monitor (CPU, RAM)
+    pub system_monitor: crate::system_monitor::SystemMonitor,
+    /// Last time system resources were updated
+    pub last_resource_update: std::time::Instant,
 }
 
 impl Default for AppState {
@@ -447,6 +469,8 @@ impl AppState {
             theme,
             config,
             panel_weights: HashMap::new(),
+            system_monitor: crate::system_monitor::SystemMonitor::new(),
+            last_resource_update: std::time::Instant::now(),
         };
 
         state.log_info("Application started");
@@ -580,7 +604,8 @@ impl AppState {
             // FM takes DEFAULT_FM_WIDTH characters on the left
             let remaining_width = width - crate::constants::DEFAULT_FM_WIDTH;
             // Each main panel minimum MIN_MAIN_PANEL_WIDTH characters
-            let main_panels_count = (remaining_width / crate::constants::MIN_MAIN_PANEL_WIDTH).max(1) as usize;
+            let main_panels_count =
+                (remaining_width / crate::constants::MIN_MAIN_PANEL_WIDTH).max(1) as usize;
             let main_panel_width = remaining_width / main_panels_count as u16;
 
             LayoutInfo {

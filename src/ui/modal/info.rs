@@ -9,17 +9,17 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use crate::constants::{SPINNER_FRAMES, SPINNER_FRAMES_COUNT};
-use crate::theme::Theme;
-use crate::i18n;
 use super::{Modal, ModalResult};
+use crate::constants::{SPINNER_FRAMES, SPINNER_FRAMES_COUNT};
+use crate::i18n;
+use crate::theme::Theme;
 
 /// Information modal window (closes on any key)
 #[derive(Debug)]
 pub struct InfoModal {
     title: String,
     lines: Vec<(String, String)>, // (key, value) pairs for table
-    spinner_frame: usize, // Frame counter for spinner animation
+    spinner_frame: usize,         // Frame counter for spinner animation
 }
 
 impl InfoModal {
@@ -55,7 +55,8 @@ impl InfoModal {
         let title_width = self.title.width() as u16 + 2;
 
         // 2. Maximum line width (key + ": " + value)
-        let max_line_width = self.lines
+        let max_line_width = self
+            .lines
             .iter()
             .map(|(key, value)| key.width() + 2 + value.width()) // +2 for ": "
             .max()
@@ -126,13 +127,11 @@ impl Modal for InfoModal {
         let block = Block::default()
             .title(Span::styled(
                 format!(" {} ", self.title),
-                Style::default()
-                    .fg(theme.background)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(theme.bg).add_modifier(Modifier::BOLD),
             ))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.background))
-            .style(Style::default().bg(theme.text_primary));
+            .border_style(Style::default().fg(theme.bg))
+            .style(Style::default().bg(theme.fg));
 
         let inner = block.inner(modal_area);
         block.render(modal_area, buf);
@@ -142,15 +141,16 @@ impl Modal for InfoModal {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1),                      // Empty line at top
+                Constraint::Length(1),                       // Empty line at top
                 Constraint::Length(self.lines.len() as u16), // Data
-                Constraint::Length(1),                      // Empty line
-                Constraint::Length(1),                      // Hint
+                Constraint::Length(1),                       // Empty line
+                Constraint::Length(1),                       // Hint
             ])
             .split(inner);
 
         // Find maximum key length for alignment
-        let max_key_len = self.lines
+        let max_key_len = self
+            .lines
             .iter()
             .map(|(key, _)| key.width())
             .max()
@@ -170,20 +170,27 @@ impl Modal for InfoModal {
             };
 
             text_lines.push(Line::from(vec![
-                Span::styled(format!("  {}{}", key, padding), Style::default().fg(theme.accent_primary).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("  {}{}", key, padding),
+                    Style::default()
+                        .fg(theme.accented_fg)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(": "),
-                Span::styled(display_value, Style::default().fg(theme.background)),
+                Span::styled(display_value, Style::default().fg(theme.bg)),
             ]));
         }
 
-        let data = Paragraph::new(text_lines)
-            .alignment(Alignment::Left);
+        let data = Paragraph::new(text_lines).alignment(Alignment::Left);
         data.render(chunks[1], buf);
 
         // Render hint
-        let hint = Paragraph::new(Line::from(vec![
-            Span::styled(t.file_info_press_key(), Style::default().fg(theme.text_secondary).add_modifier(Modifier::ITALIC)),
-        ]))
+        let hint = Paragraph::new(Line::from(vec![Span::styled(
+            t.file_info_press_key(),
+            Style::default()
+                .fg(theme.disabled)
+                .add_modifier(Modifier::ITALIC),
+        )]))
         .alignment(Alignment::Center);
         hint.render(chunks[3], buf);
     }

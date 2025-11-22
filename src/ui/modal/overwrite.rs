@@ -53,7 +53,6 @@ pub struct OverwriteModal {
 }
 
 impl OverwriteModal {
-
     /// Calculate dynamic modal width
     fn calculate_modal_width(&self, screen_width: u16) -> u16 {
         // 1. Title width
@@ -64,14 +63,13 @@ impl OverwriteModal {
             "File '{}' already exists in the target directory.\nSelect action:",
             self.dest_name
         );
-        let message_max_line_width = message.lines()
-            .map(|line| line.len())
-            .max()
-            .unwrap_or(0) as u16;
+        let message_max_line_width =
+            message.lines().map(|line| line.len()).max().unwrap_or(0) as u16;
 
         // 3. Maximum option width
         let options = OverwriteChoice::all();
-        let max_option_width = options.iter()
+        let max_option_width = options
+            .iter()
             .map(|choice| {
                 // "▶ " + label = prefix 2 + label
                 2 + choice.label().len()
@@ -146,13 +144,11 @@ impl Modal for OverwriteModal {
         let block = Block::default()
             .title(Span::styled(
                 " File already exists ",
-                Style::default()
-                    .fg(theme.background)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(theme.bg).add_modifier(Modifier::BOLD),
             ))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.background))
-            .style(Style::default().bg(theme.text_primary));
+            .border_style(Style::default().fg(theme.bg))
+            .style(Style::default().bg(theme.fg));
 
         let inner = block.inner(modal_area);
         block.render(modal_area, buf);
@@ -161,9 +157,9 @@ impl Modal for OverwriteModal {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),  // Message
-                Constraint::Min(5),     // Option list
-                Constraint::Length(2),  // Hint
+                Constraint::Length(3), // Message
+                Constraint::Min(5),    // Option list
+                Constraint::Length(2), // Hint
             ])
             .split(inner);
 
@@ -174,7 +170,7 @@ impl Modal for OverwriteModal {
         );
         let prompt = Paragraph::new(message)
             .alignment(Alignment::Left)
-            .style(Style::default().fg(theme.background));
+            .style(Style::default().fg(theme.bg));
         prompt.render(chunks[0], buf);
 
         // Option list
@@ -187,11 +183,11 @@ impl Modal for OverwriteModal {
 
                 let style = if idx == self.cursor {
                     Style::default()
-                        .fg(theme.text_primary)
-                        .bg(theme.accent_primary)
+                        .fg(theme.fg)
+                        .bg(theme.accented_fg)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(theme.background)
+                    Style::default().fg(theme.bg)
                 };
 
                 ListItem::new(Line::from(vec![
@@ -205,16 +201,16 @@ impl Modal for OverwriteModal {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.text_secondary)),
+                    .border_style(Style::default().fg(theme.disabled)),
             )
-            .style(Style::default().bg(theme.text_primary));
+            .style(Style::default().bg(theme.fg));
 
         list.render(chunks[1], buf);
 
         // Hint
         let hint = Paragraph::new("↑↓ - select | Enter - confirm | Esc - cancel")
             .alignment(Alignment::Center)
-            .style(Style::default().fg(theme.text_secondary));
+            .style(Style::default().fg(theme.disabled));
         hint.render(chunks[2], buf);
     }
 
