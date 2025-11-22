@@ -76,16 +76,20 @@ impl FileManager {
                 let bg = Style::default().bg(theme.selection_bg).fg(theme.selection_fg).add_modifier(Modifier::BOLD);
                 (bg, bg)
             } else {
-                let fg_color = match entry.git_status {
-                    GitStatus::Ignored => theme.text_secondary,
-                    GitStatus::Modified => theme.git_modified,
-                    GitStatus::Added => theme.git_added,
-                    GitStatus::Deleted => theme.git_deleted,
+                let fg_style = match entry.git_status {
+                    GitStatus::Ignored => Style::default().fg(theme.text_secondary).add_modifier(Modifier::DIM),
+                    GitStatus::Modified => Style::default().fg(theme.git_modified),
+                    GitStatus::Added => Style::default().fg(theme.git_added),
+                    GitStatus::Deleted => Style::default().fg(theme.git_deleted),
                     GitStatus::Unmodified => {
-                        if entry.is_hidden { theme.text_secondary } else { theme.text_primary }
+                        if entry.is_hidden {
+                            Style::default().fg(theme.text_secondary)
+                        } else {
+                            Style::default().fg(theme.text_primary)
+                        }
                     }
                 };
-                (Style::default(), Style::default().fg(fg_color))
+                (Style::default(), fg_style)
             };
 
             let attr_style = if is_selected {
