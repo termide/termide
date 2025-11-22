@@ -62,14 +62,12 @@ impl App {
                             } else {
                                 self.state.set_error(t.status_error_delete().to_string());
                             }
+                        } else if error_count == 0 {
+                            self.state.set_info(t.status_items_deleted(success_count));
                         } else {
-                            if error_count == 0 {
-                                self.state.set_info(t.status_items_deleted(success_count));
-                            } else {
-                                self.state.set_info(
-                                    t.status_items_deleted_with_errors(success_count, error_count),
-                                );
-                            }
+                            self.state.set_info(
+                                t.status_items_deleted_with_errors(success_count, error_count),
+                            );
                         }
 
                         // Clear selection after successful deletion

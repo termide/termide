@@ -2,8 +2,6 @@ fn main() {
     // Ensure that tree-sitter C library links correctly
     // Using cc crate to compile tree-sitter runtime
 
-    let dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-
     // Tree-sitter provides its own runtime through the tree-sitter crate
     // Need to ensure that C runtime is compiled correctly
 

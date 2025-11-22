@@ -9,7 +9,7 @@ static GLOBAL_HIGHLIGHTER: OnceLock<TreeSitterHighlighter> = OnceLock::new();
 
 /// Get global highlighter
 pub fn global_highlighter() -> &'static TreeSitterHighlighter {
-    GLOBAL_HIGHLIGHTER.get_or_init(|| TreeSitterHighlighter::new())
+    GLOBAL_HIGHLIGHTER.get_or_init(TreeSitterHighlighter::new)
 }
 
 /// Syntax highlighter manager based on tree-sitter
@@ -397,4 +397,5 @@ impl Default for TreeSitterHighlighter {
 }
 
 // Rename for backward compatibility with existing code
+#[allow(dead_code)]
 pub type SyntaxHighlighter = TreeSitterHighlighter;

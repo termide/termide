@@ -1,3 +1,6 @@
+// Allow dead code for future API methods
+#![allow(dead_code)]
+
 use super::Cursor;
 
 /// Viewport for virtual scrolling

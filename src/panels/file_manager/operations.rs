@@ -1,3 +1,6 @@
+// Allow clippy lints for file operations
+#![allow(clippy::only_used_in_recursion)]
+
 use anyhow::Result;
 use std::fs;
 use std::path::PathBuf;

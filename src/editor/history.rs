@@ -8,6 +8,7 @@ pub enum Action {
     /// Text deletion
     Delete { position: Cursor, text: String },
     /// Action group (for merging consecutive insertions)
+    #[allow(dead_code)]
     Group { actions: Vec<Action> },
 }
 
@@ -198,16 +199,19 @@ impl History {
     }
 
     /// Check if undo is possible
+    #[allow(dead_code)]
     pub fn can_undo(&self) -> bool {
         !self.undo_stack.is_empty() || self.pending_action.is_some()
     }
 
     /// Check if redo is possible
+    #[allow(dead_code)]
     pub fn can_redo(&self) -> bool {
         !self.redo_stack.is_empty()
     }
 
     /// Clear history
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.undo_stack.clear();
         self.redo_stack.clear();

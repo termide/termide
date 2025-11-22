@@ -9,14 +9,7 @@ pub use file_info::{DiskSpaceInfo, FileInfo};
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    prelude::Widget,
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::Paragraph,
-};
+use ratatui::{buffer::Buffer, layout::Rect, prelude::Widget, widgets::Paragraph};
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;

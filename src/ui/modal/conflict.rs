@@ -33,6 +33,7 @@ pub enum ConflictResolution {
 #[derive(Debug)]
 pub struct ConflictModal {
     title: String,
+    #[allow(dead_code)]
     source_name: String,
     dest_name: String,
     is_directory: bool,

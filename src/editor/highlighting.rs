@@ -20,6 +20,7 @@ pub struct HighlightCache {
     /// Access counter for LRU
     access_counter: u64,
     /// Full text cache for highlighting
+    #[allow(dead_code)]
     full_text_cache: Option<String>,
 }
 
@@ -56,6 +57,7 @@ impl HighlightCache {
     }
 
     /// Update text cache (called when buffer changes)
+    #[allow(dead_code)]
     pub fn update_text(&mut self, text: String) {
         self.full_text_cache = Some(text);
         // Invalidate all lines when text is updated
@@ -109,7 +111,7 @@ impl HighlightCache {
         let mut segments = Vec::new();
         let mut current_style = Style::default();
         let mut current_text = String::new();
-        let mut byte_offset = 0;
+        let mut _byte_offset = 0;
 
         for event in highlights {
             match event {
@@ -117,7 +119,7 @@ impl HighlightCache {
                     if let Ok(text) = std::str::from_utf8(&source[start..end]) {
                         current_text.push_str(text);
                     }
-                    byte_offset = end;
+                    _byte_offset = end;
                 }
                 Ok(HighlightEvent::HighlightStart(highlight)) => {
                     // Save current segment if exists
@@ -196,6 +198,7 @@ impl HighlightCache {
     }
 
     /// Change theme (light/dark)
+    #[allow(dead_code)]
     pub fn set_light_theme(&mut self, is_light: bool) {
         if self.is_light_theme != is_light {
             self.is_light_theme = is_light;

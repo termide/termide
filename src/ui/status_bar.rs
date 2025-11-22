@@ -1,3 +1,7 @@
+// Allow clippy lints for status bar
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::vec_init_then_push)]
+
 use ratatui::{
     buffer::Buffer,
     layout::Rect,

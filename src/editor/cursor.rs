@@ -59,11 +59,13 @@ impl Cursor {
     }
 
     /// Compare positions (for selection)
+    #[allow(dead_code)]
     pub fn is_before(&self, other: &Cursor) -> bool {
         self.line < other.line || (self.line == other.line && self.column < other.column)
     }
 
     /// Compare positions
+    #[allow(dead_code)]
     pub fn is_after(&self, other: &Cursor) -> bool {
         self.line > other.line || (self.line == other.line && self.column > other.column)
     }
@@ -121,6 +123,7 @@ impl Selection {
     }
 
     /// Check if selection contains given position
+    #[allow(dead_code)]
     pub fn contains(&self, cursor: &Cursor) -> bool {
         let start = self.start();
         let end = self.end();
@@ -128,6 +131,7 @@ impl Selection {
     }
 
     /// Update active point
+    #[allow(dead_code)]
     pub fn update_active(&mut self, new_active: Cursor) {
         self.active = new_active;
     }

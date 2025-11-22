@@ -125,6 +125,7 @@ impl PanelContainer {
     }
 
     /// Get panel by index
+    #[allow(clippy::borrowed_box)]
     pub fn get(&self, index: usize) -> Option<&Box<dyn Panel>> {
         self.panels.get(index)
     }

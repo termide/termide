@@ -9,5 +9,5 @@ pub use buffer::TextBuffer;
 pub use cursor::{Cursor, Selection};
 pub use highlighting::HighlightCache;
 pub use history::{Action, History};
-pub use search::{SearchDirection, SearchState};
+pub use search::SearchState;
 pub use viewport::Viewport;

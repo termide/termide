@@ -1,3 +1,6 @@
+// Future API methods
+#![allow(dead_code)]
+
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -140,8 +143,7 @@ fn get_ignored_files(dir: &Path) -> HashSet<PathBuf> {
         if output.status.success() {
             if let Ok(stdout) = String::from_utf8(output.stdout) {
                 for line in stdout.lines() {
-                    if line.starts_with("!! ") {
-                        let file_path = &line[3..];
+                    if let Some(file_path) = line.strip_prefix("!! ") {
                         ignored.insert(PathBuf::from(file_path));
                     }
                 }

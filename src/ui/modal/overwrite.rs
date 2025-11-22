@@ -47,6 +47,7 @@ impl OverwriteChoice {
 /// File overwrite confirmation modal window
 #[derive(Debug)]
 pub struct OverwriteModal {
+    #[allow(dead_code)]
     source_name: String,
     dest_name: String,
     cursor: usize,

@@ -70,7 +70,7 @@ impl App {
                     self.state.log_info("Selected: Close without saving");
                     self.close_panel_at_index(panel_index);
                 }
-                2 | _ => {
+                _ => {
                     // Cancel - do nothing
                     self.state.log_info("Selected: Cancel closing");
                 }
@@ -153,7 +153,7 @@ impl App {
                                 self.state
                                     .log_success(format!("'{}' {}", item_name, action_name));
                                 self.state
-                                    .set_info(t.status_item_actioned(&item_name, action_name));
+                                    .set_info(t.status_item_actioned(item_name, action_name));
 
                                 // Refresh FM panels
                                 if is_move {
@@ -184,7 +184,7 @@ impl App {
                 let t = i18n::t();
                 self.state
                     .log_info(format!("Operation '{}' skipped", item_name));
-                self.state.set_info(t.status_operation_skipped(&item_name));
+                self.state.set_info(t.status_operation_skipped(item_name));
             }
         }
         Ok(())

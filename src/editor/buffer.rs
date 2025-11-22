@@ -21,6 +21,7 @@ pub struct TextBuffer {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum LineEnding {
     LF,   // Unix \n
     CRLF, // Windows \r\n
@@ -263,6 +264,7 @@ impl TextBuffer {
         let mut grapheme_count = 0;
         let mut byte_pos = 0;
 
+        #[allow(clippy::explicit_counter_loop)]
         for grapheme in line_str.graphemes(true) {
             if grapheme_count >= cursor.column {
                 break;
@@ -301,6 +303,7 @@ impl TextBuffer {
     }
 
     /// Set modified flag
+    #[allow(dead_code)]
     pub fn set_modified(&mut self, modified: bool) {
         self.modified = modified;
     }
@@ -311,11 +314,13 @@ impl TextBuffer {
     }
 
     /// Set file path
+    #[allow(dead_code)]
     pub fn set_file_path<P: AsRef<Path>>(&mut self, path: P) {
         self.file_path = Some(path.as_ref().to_path_buf());
     }
 
     /// Get file name
+    #[allow(dead_code)]
     pub fn file_name(&self) -> Option<&str> {
         self.file_path
             .as_ref()
@@ -324,6 +329,7 @@ impl TextBuffer {
     }
 
     /// Get buffer contents as string
+    #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         self.rope.to_string()
     }
@@ -376,11 +382,13 @@ impl TextBuffer {
     }
 
     /// Check if undo is possible
+    #[allow(dead_code)]
     pub fn can_undo(&self) -> bool {
         self.history.can_undo()
     }
 
     /// Check if redo is possible
+    #[allow(dead_code)]
     pub fn can_redo(&self) -> bool {
         self.history.can_redo()
     }
@@ -455,7 +463,7 @@ mod tests {
         let mut buf = TextBuffer::new();
         buf.insert(&Cursor::at(0, 0), "hello").unwrap();
 
-        assert_eq!(buf.line_len_graphemes(0), 6);
+        assert_eq!(buf.line_len_graphemes(0), 5);
 
         let cursor = Cursor::at(0, 3);
         let char_idx = buf.cursor_to_char_idx(&cursor).unwrap();

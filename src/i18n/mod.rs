@@ -1,3 +1,6 @@
+// I18n trait methods are prepared for future use
+#![allow(dead_code)]
+
 use std::sync::OnceLock;
 
 pub mod en;

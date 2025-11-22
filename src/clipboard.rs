@@ -72,10 +72,8 @@ fn command_exists(cmd: &str) -> bool {
 /// Detect available backend for clipboard
 fn detect_backend() -> ClipboardBackend {
     // Check Wayland
-    if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        if command_exists("wl-copy") {
-            return ClipboardBackend::WlCopy;
-        }
+    if std::env::var("WAYLAND_DISPLAY").is_ok() && command_exists("wl-copy") {
+        return ClipboardBackend::WlCopy;
     }
 
     // Check X11

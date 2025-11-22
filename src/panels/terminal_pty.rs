@@ -1,3 +1,6 @@
+// Allow some clippy lints for VT100 implementation
+#![allow(clippy::needless_range_loop)]
+
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use nix::sys::signal::{self, Signal};
@@ -77,6 +80,7 @@ struct TerminalScreen {
     /// Current style
     current_style: CellStyle,
     /// Insert mode
+    #[allow(dead_code)]
     insert_mode: bool,
     /// Application Cursor Keys Mode (DECCKM)
     application_cursor_keys: bool,
@@ -328,6 +332,7 @@ impl TerminalScreen {
     }
 
     /// Clear screen (doesn't move cursor)
+    #[allow(dead_code)]
     fn clear_screen(&mut self) {
         let rows = self.rows;
         let cols = self.cols;
@@ -1122,6 +1127,7 @@ fn ansi_256_to_color(code: u16) -> Color {
 
 impl Terminal {
     /// Create new terminal with PTY
+    #[allow(dead_code)]
     pub fn new(rows: u16, cols: u16) -> Result<Self> {
         Self::new_with_cwd(rows, cols, None)
     }
@@ -1551,8 +1557,8 @@ impl Terminal {
                     format!("\x1b[<{};{};{}M", btn_code, inner_x, inner_y)
                 } else {
                     let encoded_btn = (btn_code + 32) as u8;
-                    let encoded_x = (inner_x as u8).saturating_add(32).min(255);
-                    let encoded_y = (inner_y as u8).saturating_add(32).min(255);
+                    let encoded_x = (inner_x as u8).saturating_add(32);
+                    let encoded_y = (inner_y as u8).saturating_add(32);
                     format!(
                         "\x1b[M{}{}{}",
                         encoded_btn as char, encoded_x as char, encoded_y as char
@@ -1568,8 +1574,8 @@ impl Terminal {
                     };
                     format!("\x1b[<{};{};{}m", btn_code, inner_x, inner_y)
                 } else {
-                    let encoded_x = (inner_x as u8).saturating_add(32).min(255);
-                    let encoded_y = (inner_y as u8).saturating_add(32).min(255);
+                    let encoded_x = (inner_x as u8).saturating_add(32);
+                    let encoded_y = (inner_y as u8).saturating_add(32);
                     format!(
                         "\x1b[M{}{}{}",
                         (3 + 32) as u8 as char,
@@ -1583,8 +1589,8 @@ impl Terminal {
                 if sgr_mode {
                     format!("\x1b[<{};{};{}M", btn_code, inner_x, inner_y)
                 } else {
-                    let encoded_x = (inner_x as u8).saturating_add(32).min(255);
-                    let encoded_y = (inner_y as u8).saturating_add(32).min(255);
+                    let encoded_x = (inner_x as u8).saturating_add(32);
+                    let encoded_y = (inner_y as u8).saturating_add(32);
                     format!(
                         "\x1b[M{}{}{}",
                         (btn_code + 32) as u8 as char,
@@ -1598,8 +1604,8 @@ impl Terminal {
                 if sgr_mode {
                     format!("\x1b[<{};{};{}M", btn_code, inner_x, inner_y)
                 } else {
-                    let encoded_x = (inner_x as u8).saturating_add(32).min(255);
-                    let encoded_y = (inner_y as u8).saturating_add(32).min(255);
+                    let encoded_x = (inner_x as u8).saturating_add(32);
+                    let encoded_y = (inner_y as u8).saturating_add(32);
                     format!(
                         "\x1b[M{}{}{}",
                         (btn_code + 32) as u8 as char,
@@ -1621,7 +1627,7 @@ impl Terminal {
         &self,
         show_cursor: bool,
         theme: &crate::theme::Theme,
-    ) -> (Vec<Line>, (usize, usize), bool) {
+    ) -> (Vec<Line<'_>>, (usize, usize), bool) {
         let screen = self.screen.lock().unwrap();
         let mut lines = Vec::new();
         let buffer = screen.active_buffer();

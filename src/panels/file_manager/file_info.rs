@@ -12,6 +12,7 @@ pub struct FileInfo {
     pub size: String,
     pub owner: String,
     pub group: String,
+    #[allow(dead_code)]
     pub modified: String,
     pub mode: String, // Access permissions in format "0755"
 }

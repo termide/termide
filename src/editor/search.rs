@@ -4,6 +4,7 @@ use crate::editor::cursor::Cursor;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchDirection {
     Forward,
+    #[allow(dead_code)]
     Backward,
 }
 
@@ -21,6 +22,7 @@ pub struct SearchState {
     /// Case sensitivity
     pub case_sensitive: bool,
     /// Search direction
+    #[allow(dead_code)]
     pub direction: SearchDirection,
 }
 
@@ -50,6 +52,7 @@ impl SearchState {
     }
 
     /// Check if replace mode is enabled
+    #[allow(dead_code)]
     pub fn is_replace_mode(&self) -> bool {
         self.replace_with.is_some()
     }
@@ -116,6 +119,7 @@ impl SearchState {
     }
 
     /// Clear search state
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.query.clear();
         self.matches.clear();

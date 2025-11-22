@@ -9,7 +9,6 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::thread::JoinHandle;
 
 /// Message about background directory size calculation result
 #[derive(Debug)]
@@ -157,6 +156,7 @@ pub enum ActiveModal {
     /// Selection modal
     Select(Box<SelectModal>),
     /// File overwrite modal
+    #[allow(dead_code)]
     Overwrite(Box<OverwriteModal>),
     /// File conflict resolution modal
     Conflict(Box<ConflictModal>),
@@ -206,6 +206,7 @@ pub enum PendingAction {
     /// Close editor with choice: save, don't save, cancel
     CloseEditorWithSave { panel_index: usize },
     /// File overwrite decision when copying/moving
+    #[allow(dead_code)]
     OverwriteDecision {
         panel_index: usize,
         source: PathBuf,
@@ -213,6 +214,7 @@ pub enum PendingAction {
         is_move: bool, // true for move, false for copy
     },
     /// Batch file operation (copy/move)
+    #[allow(dead_code)]
     BatchFileOperation { operation: BatchOperation },
     /// Continue batch operation after conflict resolution
     ContinueBatchOperation { operation: BatchOperation },
@@ -245,6 +247,7 @@ pub struct LayoutInfo {
     /// Number of main panels
     pub main_panels_count: usize,
     /// Width of one main panel
+    #[allow(dead_code)]
     pub main_panel_width: u16,
 }
 
@@ -268,7 +271,7 @@ pub enum LogLevel {
 }
 
 /// UI components state
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct UiState {
     /// Is menu open
     pub menu_open: bool,
@@ -278,17 +281,6 @@ pub struct UiState {
     pub selected_dropdown_item: usize,
     /// Status line message (for displaying errors and notifications)
     pub status_message: Option<(String, bool)>, // (message, is_error)
-}
-
-impl Default for UiState {
-    fn default() -> Self {
-        Self {
-            menu_open: false,
-            selected_menu_item: None,
-            selected_dropdown_item: 0,
-            status_message: None,
-        }
-    }
 }
 
 /// Terminal state (dimensions)
@@ -361,11 +353,7 @@ impl LoggingState {
         }
 
         // Write to file
-        if let Ok(mut file) = OpenOptions::new()
-            .write(true)
-            .append(true)
-            .open(&self.file_path)
-        {
+        if let Ok(mut file) = OpenOptions::new().append(true).open(&self.file_path) {
             let level_str = match level {
                 LogLevel::Info => "INFO",
                 LogLevel::Error => "ERROR",
@@ -555,6 +543,7 @@ impl AppState {
     }
 
     /// Move to next item in dropdown
+    #[allow(dead_code)]
     pub fn next_dropdown_item(&mut self, item_count: usize) {
         if item_count > 0 {
             self.ui.selected_dropdown_item = (self.ui.selected_dropdown_item + 1) % item_count;
@@ -562,6 +551,7 @@ impl AppState {
     }
 
     /// Move to previous item in dropdown
+    #[allow(dead_code)]
     pub fn prev_dropdown_item(&mut self, item_count: usize) {
         if item_count > 0 {
             self.ui.selected_dropdown_item = if self.ui.selected_dropdown_item == 0 {
@@ -712,7 +702,7 @@ impl AppState {
     /// Adjust panel weight (increase or decrease)
     pub fn adjust_panel_weight(&mut self, panel_index: usize, delta: i16) {
         let current_weight = self.get_panel_weight(panel_index);
-        let new_weight = (current_weight as i16 + delta).max(10).min(500) as u16;
+        let new_weight = (current_weight as i16 + delta).clamp(10, 500) as u16;
         self.panel_weights.insert(panel_index, new_weight);
     }
 }

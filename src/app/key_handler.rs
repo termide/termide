@@ -35,6 +35,7 @@ impl App {
         }
 
         // Handle global hotkeys
+        #[allow(clippy::redundant_pattern_matching)]
         if let Some(_) = self.handle_global_hotkeys(key)? {
             return Ok(());
         }
@@ -167,30 +168,28 @@ impl App {
                                 if is_copy {
                                     crate::ui::modal::InputModal::with_default(
                                         t.modal_copy_title(),
-                                        &t.modal_copy_single_prompt(source_name),
+                                        t.modal_copy_single_prompt(source_name),
                                         &default_dest,
                                     )
                                 } else {
                                     crate::ui::modal::InputModal::with_default(
                                         t.modal_move_title(),
-                                        &t.modal_move_single_prompt(source_name),
+                                        t.modal_move_single_prompt(source_name),
                                         &default_dest,
                                     )
                                 }
+                            } else if is_copy {
+                                crate::ui::modal::InputModal::with_default(
+                                    t.modal_copy_title(),
+                                    t.modal_copy_multiple_prompt(sources.len()),
+                                    &default_dest,
+                                )
                             } else {
-                                if is_copy {
-                                    crate::ui::modal::InputModal::with_default(
-                                        t.modal_copy_title(),
-                                        &t.modal_copy_multiple_prompt(sources.len()),
-                                        &default_dest,
-                                    )
-                                } else {
-                                    crate::ui::modal::InputModal::with_default(
-                                        t.modal_move_title(),
-                                        &t.modal_move_multiple_prompt(sources.len()),
-                                        &default_dest,
-                                    )
-                                }
+                                crate::ui::modal::InputModal::with_default(
+                                    t.modal_move_title(),
+                                    t.modal_move_multiple_prompt(sources.len()),
+                                    &default_dest,
+                                )
                             };
 
                             modal = ActiveModal::Input(Box::new(new_modal));
@@ -525,6 +524,7 @@ impl App {
 
         // Check if there's an active batch file operation
         // If FileManager with pending batch operation is closed, the operation state is lost
+        #[allow(clippy::collapsible_match)]
         if let Some(pending) = &self.state.pending_action {
             match pending {
                 PendingAction::BatchFileOperation { operation }

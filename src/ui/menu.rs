@@ -145,6 +145,7 @@ pub fn render_menu(frame: &mut Frame, area: Rect, state: &AppState) {
 }
 
 /// Get X coordinate of menu item for dropdown positioning
+#[allow(dead_code)]
 pub fn get_menu_item_x(index: usize) -> u16 {
     let menu_items = get_menu_items();
     let mut x = 1_u16;

@@ -1,5 +1,5 @@
 /// Application constants
-
+///
 /// Default file manager width in multi-panel mode
 pub const DEFAULT_FM_WIDTH: u16 = 30;
 
@@ -18,6 +18,7 @@ pub const GIGABYTE: u64 = MEGABYTE * 1024;
 pub const MIN_WIDTH_FOR_EXTENDED_VIEW: usize = 70;
 
 /// Maximum file size to open in editor (100 MB)
+#[allow(dead_code)]
 pub const MAX_EDITOR_FILE_SIZE: u64 = 100 * MEGABYTE;
 
 // ===== UI and layout constants =====
@@ -35,6 +36,7 @@ pub const MIN_MAIN_PANEL_WIDTH: u16 = 80;
 pub const DEFAULT_MAIN_PANEL_WIDTH: u16 = 80;
 
 /// Settings modal window width
+#[allow(dead_code)]
 pub const SETTINGS_MODAL_WIDTH: u16 = 50;
 
 // ===== Performance and security constants =====

@@ -64,6 +64,7 @@ impl App {
                     && matches!(result, ModalResult::Cancelled)
                 {
                     // Take operation from pending action and return to ConflictModal
+                    #[allow(clippy::collapsible_match)]
                     if let Some(action) = self.state.take_pending_action() {
                         if let crate::state::PendingAction::RenameWithPattern {
                             operation, ..

@@ -37,7 +37,7 @@ impl App {
                 state.log_info("Git watcher initialized");
             }
             Err(e) => {
-                state.log_error(&format!("Failed to initialize git watcher: {}", e));
+                state.log_error(format!("Failed to initialize git watcher: {}", e));
             }
         }
 
@@ -49,7 +49,7 @@ impl App {
                 state.log_info("FS watcher initialized");
             }
             Err(e) => {
-                state.log_error(&format!("Failed to initialize FS watcher: {}", e));
+                state.log_error(format!("Failed to initialize FS watcher: {}", e));
             }
         }
 
@@ -279,7 +279,7 @@ impl App {
                         (&mut **panel as &mut dyn std::any::Any).downcast_mut::<FileManager>()
                     {
                         // Check if this panel is showing the updated directory
-                        if fm.current_path() == &update.dir_path {
+                        if fm.current_path() == update.dir_path {
                             let _ = fm.load_directory();
                         }
                     }

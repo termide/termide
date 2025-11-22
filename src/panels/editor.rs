@@ -3,8 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
+    style::{Modifier, Style},
 };
 use std::path::PathBuf;
 
@@ -46,6 +45,7 @@ impl EditorConfig {
     }
 
     /// Create configuration without syntax highlighting
+    #[allow(dead_code)]
     pub fn no_highlighting() -> Self {
         Self {
             syntax_highlighting: false,
@@ -55,6 +55,7 @@ impl EditorConfig {
     }
 
     /// Create configuration with line wrapping enabled
+    #[allow(dead_code)]
     pub fn with_word_wrap() -> Self {
         Self {
             syntax_highlighting: true,
@@ -123,11 +124,13 @@ impl Editor {
     }
 
     /// Check if editor is read-only
+    #[allow(dead_code)]
     pub fn is_read_only(&self) -> bool {
         self.config.read_only
     }
 
     /// Check if syntax highlighting is enabled
+    #[allow(dead_code)]
     pub fn has_syntax_highlighting(&self) -> bool {
         self.config.syntax_highlighting
     }
@@ -243,7 +246,7 @@ impl Editor {
         self.cached_title = path
             .file_name()
             .and_then(|n| n.to_str())
-            .map(|s| format!("{}", s))
+            .map(|s| s.to_string())
             .unwrap_or_else(|| "Untitled".to_string());
 
         Ok(())
@@ -777,13 +780,11 @@ impl Editor {
                         if is_cursor_line
                             && self.cursor.column >= char_offset
                             && self.cursor.column <= chunk_end
+                            && (self.cursor.column == chunk_end
+                                || (chunk_end == line_len && self.cursor.column >= line_len))
                         {
-                            if self.cursor.column == chunk_end
-                                || (chunk_end == line_len && self.cursor.column >= line_len)
-                            {
-                                cursor_viewport_pos =
-                                    Some((visual_row, self.cursor.column - char_offset));
-                            }
+                            cursor_viewport_pos =
+                                Some((visual_row, self.cursor.column - char_offset));
                         }
 
                         // Заполнить остаток строки фоном (для курсорной линии)

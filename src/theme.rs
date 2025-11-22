@@ -64,6 +64,7 @@ struct TomlColors {
 /// TOML theme structure
 #[derive(Debug, Clone, Deserialize)]
 struct TomlTheme {
+    #[allow(dead_code)]
     name: String,
     colors: TomlColors,
 }
@@ -71,6 +72,7 @@ struct TomlTheme {
 /// Application theme
 #[derive(Debug, Clone, Copy)]
 pub struct Theme {
+    #[allow(dead_code)]
     pub name: &'static str,
 
     // Base (2 colors)
@@ -156,6 +158,7 @@ impl Theme {
     }
 
     /// Get list of all available themes
+    #[allow(dead_code)]
     pub fn all_themes() -> Vec<&'static Theme> {
         vec![
             get_default_theme(),
@@ -166,6 +169,7 @@ impl Theme {
     }
 
     /// Get list of all theme names
+    #[allow(dead_code)]
     pub fn all_theme_names() -> &'static [&'static str] {
         &["default", "midnight", "light", "bluesky"]
     }

@@ -95,6 +95,7 @@ impl Config {
     }
 
     /// Get path to config directory (for debugging)
+    #[allow(dead_code)]
     pub fn get_config_dir() -> Result<PathBuf> {
         let config_dir =
             dirs::config_dir().ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?;

@@ -2,8 +2,6 @@ use std::fs;
 use std::path::Path;
 use std::time::SystemTime;
 
-use unicode_width::UnicodeWidthStr;
-
 use crate::constants::{GIGABYTE, KILOBYTE, MEGABYTE};
 use crate::git::GitStatus;
 

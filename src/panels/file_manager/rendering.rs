@@ -4,7 +4,7 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use super::{utils, FileEntry, FileManager};
+use super::{utils, FileManager};
 use crate::git::GitStatus;
 use crate::theme::Theme;
 
@@ -42,7 +42,7 @@ impl FileManager {
         available_width: usize,
         theme: &Theme,
         is_focused: bool,
-    ) -> Vec<Line> {
+    ) -> Vec<Line<'_>> {
         let mut lines = Vec::new();
         let visible_start = self.scroll_offset;
         let visible_end = visible_start + height;

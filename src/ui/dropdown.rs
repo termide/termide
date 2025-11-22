@@ -1,3 +1,6 @@
+// Dropdown component is prepared for future use
+#![allow(dead_code)]
+
 use ratatui::{
     buffer::Buffer,
     layout::Rect,

@@ -8,9 +8,7 @@ use std::any::Any;
 
 use crate::{
     constants::DEFAULT_FM_WIDTH,
-    panels::{
-        editor::Editor, file_manager::FileManager, terminal_pty::Terminal, Panel, PanelContainer,
-    },
+    panels::{editor::Editor, file_manager::FileManager, terminal_pty::Terminal, PanelContainer},
     state::{ActiveModal, AppState, LayoutMode},
 };
 
