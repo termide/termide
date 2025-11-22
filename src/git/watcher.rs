@@ -28,7 +28,19 @@ impl GitWatcher {
             move |result: notify_debouncer_mini::DebounceEventResult| {
                 if let Ok(events) = result {
                     for event in events {
-                        // Process all debounced events (not just 'Any' kind)
+                        // Filter: only process changes to relevant git files
+                        // This prevents processing of .git/objects/* and other irrelevant files
+                        if let Some(file_name) = event.path.file_name().and_then(|n| n.to_str()) {
+                            // Check if this is a file we care about
+                            let is_relevant = file_name == "index" ||
+                                             file_name == "HEAD" ||
+                                             event.path.to_str().map(|s| s.contains("/refs/") || s.contains("/logs/")).unwrap_or(false);
+
+                            if !is_relevant {
+                                continue; // Skip irrelevant files
+                            }
+                        }
+
                         // Get repository root from the event path
                         if let Some(repo_path) = Self::find_repo_root(&event.path) {
                             eprintln!("[GitWatcher] File change detected: {:?} -> repo: {:?}", event.path, repo_path);
@@ -60,30 +72,12 @@ impl GitWatcher {
 
         let watcher = self.debouncer.watcher();
 
-        // Watch key git files for changes
-        // .git/index - tracks staging area changes (git add, git reset)
-        let index_path = git_dir.join("index");
-        if index_path.exists() {
-            watcher.watch(&index_path, RecursiveMode::NonRecursive)?;
-        }
+        // Watch the entire .git directory recursively
+        // This allows us to catch rename/create events when git atomically updates files
+        // (e.g., git creates .git/index.lock, writes to it, then renames to .git/index)
+        watcher.watch(&git_dir, RecursiveMode::Recursive)?;
 
-        // .git/HEAD - tracks current branch/commit
-        let head_path = git_dir.join("HEAD");
-        if head_path.exists() {
-            watcher.watch(&head_path, RecursiveMode::NonRecursive)?;
-        }
-
-        // .git/refs/heads - tracks commits to branches (recursive to catch all branches)
-        let refs_heads = git_dir.join("refs").join("heads");
-        if refs_heads.exists() {
-            watcher.watch(&refs_heads, RecursiveMode::Recursive)?;
-        }
-
-        // .git/logs/HEAD - fallback for some operations
-        let logs_head = git_dir.join("logs").join("HEAD");
-        if logs_head.exists() {
-            watcher.watch(&logs_head, RecursiveMode::NonRecursive)?;
-        }
+        eprintln!("[GitWatcher] Watching repository: {:?}", repo_path);
 
         self.watched_repos.insert(repo_path, git_dir);
         Ok(())
@@ -94,11 +88,8 @@ impl GitWatcher {
         if let Some(git_dir) = self.watched_repos.remove(repo_path) {
             let watcher = self.debouncer.watcher();
 
-            // Unwatch all paths (errors are ignored as files may not exist anymore)
-            let _ = watcher.unwatch(&git_dir.join("index"));
-            let _ = watcher.unwatch(&git_dir.join("HEAD"));
-            let _ = watcher.unwatch(&git_dir.join("refs").join("heads"));
-            let _ = watcher.unwatch(&git_dir.join("logs").join("HEAD"));
+            // Unwatch the .git directory (errors are ignored as directory may not exist anymore)
+            let _ = watcher.unwatch(&git_dir);
         }
     }
 
@@ -115,6 +106,11 @@ impl GitWatcher {
             current = parent;
         }
         None
+    }
+
+    /// Check if repository is being watched
+    pub fn is_watching(&self, repo_path: &Path) -> bool {
+        self.watched_repos.contains_key(repo_path)
     }
 
     /// Get list of currently watched repositories

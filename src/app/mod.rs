@@ -162,7 +162,8 @@ impl App {
     fn check_git_status_update(&mut self) {
         use crate::panels::file_manager::FileManager;
 
-        let mut registered_count = 0;
+        // Collect repositories to register
+        let mut repos_to_register = Vec::new();
 
         // First, register all FileManager repositories with watcher (lazy registration)
         if let Some(watcher) = &mut self.state.git_watcher {
@@ -171,17 +172,21 @@ impl App {
                     if let Some(fm) = (panel as &mut dyn std::any::Any).downcast_mut::<FileManager>() {
                         // Find repository root for this FileManager's current path
                         if let Some(repo_root) = Self::find_git_repo_root(fm.current_path()) {
-                            // Register repository (idempotent - safe to call multiple times)
-                            let _ = watcher.watch_repository(repo_root);
-                            registered_count += 1;
+                            // Only register if not already watching (avoid log spam)
+                            if !watcher.is_watching(&repo_root) {
+                                if let Ok(()) = watcher.watch_repository(repo_root.clone()) {
+                                    repos_to_register.push(repo_root);
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
-        if registered_count > 0 {
-            self.state.log_info(&format!("Git watcher: {} repositories registered", registered_count));
+        // Log registered repositories after releasing watcher borrow
+        for repo_root in repos_to_register {
+            self.state.log_info(&format!("Git watcher: registered {}", repo_root.display()));
         }
 
         let mut updated_count = 0;
