@@ -20,25 +20,64 @@ pub struct FileInfo {
 /// Disk space information
 #[derive(Clone, Debug)]
 pub struct DiskSpaceInfo {
+    pub device: Option<String>, // Device name (e.g., "NVME0N1", "SDA1")
     pub available: u64,
     pub total: u64,
 }
 
 impl DiskSpaceInfo {
-    /// Format disk information: "100GB / 512GB (20%)"
+    /// Get disk usage percentage (0-100)
+    /// Returns percentage of USED space (not available)
+    pub fn usage_percent(&self) -> u8 {
+        if self.total > 0 {
+            let used = self.total.saturating_sub(self.available);
+            ((used * 100) / self.total).min(100) as u8
+        } else {
+            0
+        }
+    }
+
+    /// Format disk information: "NVME0N1P2 386/467Гб (83%)"
     pub fn format_space(&self) -> String {
+        let t = crate::i18n::t();
+
+        // Calculate used space and percentage
+        let used = self.total.saturating_sub(self.available);
         let percent = if self.total > 0 {
-            (self.available * 100) / self.total
+            ((used * 100) / self.total).min(100)
         } else {
             0
         };
 
-        format!(
-            "{} / {} ({}%)",
-            utils::format_size(self.available),
-            utils::format_size(self.total),
-            percent
-        )
+        // Convert to GB (rounded to nearest integer)
+        let used_gb = (used as f64 / 1_073_741_824.0).round() as u64;
+        let total_gb = (self.total as f64 / 1_073_741_824.0).round() as u64;
+
+        if let Some(device) = &self.device {
+            // Extract device name from path like "/dev/nvme0n1p2" -> "NVME0N1P2"
+            let device_name = device
+                .strip_prefix("/dev/")
+                .unwrap_or(device)
+                .to_uppercase();
+
+            format!(
+                "{} {}/{}{} ({}%)",
+                device_name,
+                used_gb,
+                total_gb,
+                t.size_gigabytes(),
+                percent
+            )
+        } else {
+            // Fallback to old format if device name is not available
+            format!(
+                "{}/{}{} ({}%)",
+                used_gb,
+                total_gb,
+                t.size_gigabytes(),
+                percent
+            )
+        }
     }
 }
 
@@ -195,6 +234,74 @@ impl FileManager {
         }
     }
 
+    /// Resolve dm-X device to physical partition
+    /// e.g., /dev/dm-0 -> /dev/nvme0n1p2
+    fn resolve_dm_device(device: &str) -> Option<String> {
+        // Extract dm number (e.g., "dm-0" from "/dev/dm-0")
+        let dm_name = device.strip_prefix("/dev/")?;
+        if !dm_name.starts_with("dm-") {
+            return None;
+        }
+
+        // Read /sys/block/dm-X/slaves/ to find physical partition
+        let slaves_path = format!("/sys/block/{}/slaves", dm_name);
+        let slaves_dir = std::fs::read_dir(&slaves_path).ok()?;
+
+        // Get first slave (physical partition)
+        for entry in slaves_dir.flatten() {
+            if let Ok(name) = entry.file_name().into_string() {
+                return Some(format!("/dev/{}", name));
+            }
+        }
+
+        None
+    }
+
+    /// Get device name from /proc/mounts for a given path
+    fn get_device_for_path(path: &std::path::Path) -> Option<String> {
+        let mounts_content = std::fs::read_to_string("/proc/mounts").ok()?;
+        let mut best_match: Option<(String, usize)> = None;
+
+        for line in mounts_content.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 2 {
+                continue;
+            }
+
+            let device = parts[0];
+            let mount_point = parts[1];
+
+            // Check if this mount point is a prefix of our path
+            if let Ok(canonical_path) = path.canonicalize() {
+                if let Ok(canonical_mount) = std::path::Path::new(mount_point).canonicalize() {
+                    if canonical_path.starts_with(&canonical_mount) {
+                        let mount_len = canonical_mount.as_os_str().len();
+                        // Keep track of the longest matching mount point
+                        if best_match.is_none() || mount_len > best_match.as_ref().unwrap().1 {
+                            best_match = Some((device.to_string(), mount_len));
+                        }
+                    }
+                }
+            }
+        }
+
+        best_match.and_then(|(device, _)| {
+            // First try to resolve symlink (e.g., /dev/disk/by-uuid/... -> /dev/nvme0n1p2)
+            let resolved = std::path::Path::new(&device)
+                .canonicalize()
+                .ok()
+                .and_then(|p| p.to_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| device.clone());
+
+            // If it's a dm device, resolve to physical partition
+            if resolved.contains("/dm-") {
+                Self::resolve_dm_device(&resolved).or(Some(resolved))
+            } else {
+                Some(resolved)
+            }
+        })
+    }
+
     /// Get disk space information for the current directory
     pub fn get_disk_space_info(&self) -> Option<DiskSpaceInfo> {
         use std::ffi::CString;
@@ -202,6 +309,9 @@ impl FileManager {
 
         // Convert path to CString for passing to statvfs
         let path_cstr = CString::new(self.current_path.as_os_str().as_bytes()).ok()?;
+
+        // Get device name for this path
+        let device = Self::get_device_for_path(&self.current_path);
 
         unsafe {
             let mut stat: libc::statvfs = std::mem::zeroed();
@@ -212,7 +322,11 @@ impl FileManager {
                 let available = (stat.f_bavail as u64) * (stat.f_bsize as u64);
                 let total = (stat.f_blocks as u64) * (stat.f_bsize as u64);
 
-                Some(DiskSpaceInfo { available, total })
+                Some(DiskSpaceInfo {
+                    device,
+                    available,
+                    total,
+                })
             } else {
                 None
             }

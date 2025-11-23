@@ -1,0 +1,25 @@
+# Atom One Light theme for TermIDE
+# Popular light theme inspired by Atom editor
+# Bright white background with soft, non-glaring colors
+name = "atom-one-light"
+
+[colors]
+# Base - bright white background
+bg = { rgb = [250, 250, 250] }
+fg = { rgb = [56, 58, 66] }
+
+# Accented - light gray background with blue accent
+accented_bg = { rgb = [229, 229, 230] }
+accented_fg = { rgb = [82, 111, 255] }
+
+# Selection - medium gray
+selected_bg = { rgb = [206, 206, 206] }
+selected_fg = { rgb = [56, 58, 66] }
+
+# Disabled - muted gray
+disabled = { rgb = [160, 161, 167] }
+
+# Semantic
+success = { rgb = [80, 161, 79] }
+warning = { rgb = [193, 132, 1] }
+error = { rgb = [228, 86, 73] }

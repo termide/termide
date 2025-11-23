@@ -120,6 +120,7 @@ impl StatusBar {
             // If there's disk information, add it on the right
             if let Some(disk) = &info.disk_space {
                 let disk_text = format!(" {} ", disk.format_space());
+                let disk_color = crate::ui::menu::resource_color(disk.usage_percent(), state.theme);
 
                 // Calculate current spans width considering unicode characters
                 let used_width: usize = spans
@@ -139,9 +140,7 @@ impl StatusBar {
 
                 spans.push(Span::styled(
                     disk_text,
-                    Style::default()
-                        .fg(state.theme.disabled)
-                        .bg(state.theme.accented_bg),
+                    Style::default().fg(disk_color).bg(state.theme.accented_bg),
                 ));
             }
 
@@ -201,6 +200,7 @@ impl StatusBar {
             // If there's disk information, add it on the right
             if let Some(disk) = disk_space {
                 let disk_text = format!(" {} ", disk.format_space());
+                let disk_color = crate::ui::menu::resource_color(disk.usage_percent(), state.theme);
 
                 // Calculate current spans width considering unicode characters
                 let used_width: usize = spans
@@ -220,9 +220,7 @@ impl StatusBar {
 
                 spans.push(Span::styled(
                     disk_text,
-                    Style::default()
-                        .fg(state.theme.disabled)
-                        .bg(state.theme.accented_bg),
+                    Style::default().fg(disk_color).bg(state.theme.accented_bg),
                 ));
             }
 

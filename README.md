@@ -2,6 +2,10 @@
 
 A cross-platform terminal-based IDE, file manager, and virtual terminal written in Rust.
 
+<p align="center">
+  <img src="assets/termide.jpg" alt="TermIDE Screenshot" width="800">
+</p>
+
 ## Features
 
 - **Terminal-based IDE** - Edit files directly in your terminal with syntax highlighting for multiple programming languages
@@ -10,10 +14,12 @@ A cross-platform terminal-based IDE, file manager, and virtual terminal written 
 - **Multi-panel Layout** - Work with multiple files and terminals simultaneously
 - **Cross-platform** - Works on Linux, macOS, and Windows (WSL)
 - **Git Integration** - See file status and changes at a glance with color-coded indicators
-- **Configurable Themes** - Customize the appearance to your preference
+- **12 Built-in Themes** - Choose from popular themes like Dracula, Nord, Monokai, Solarized, and more
+- **Custom Theme Support** - Create and load your own themes from config directory
+- **System Resource Monitoring** - Real-time CPU, RAM, and disk usage indicators with color-coded alerts
 - **Batch Operations** - Copy, move, and manage multiple files efficiently
 - **Search and Replace** - Find and replace text in editor with case-sensitivity support
-- **Multi-language Support** - UI localization (English, Russian)
+- **Multi-language Support** - UI localization (English, Russian) with proper keyboard shortcuts
 - **Mouse Support** - Full mouse support for all panels and UI elements
 
 ## Installation
@@ -115,7 +121,7 @@ Configuration file location:
 ### Example Configuration
 
 ```toml
-# Theme name (default, dark, light, monokai, solarized_dark, solarized_light, nord, gruvbox)
+# Theme name - choose from built-in themes or use a custom theme from ~/.config/termide/themes/
 theme = "default"
 
 # Language (auto, en, ru)
@@ -125,6 +131,49 @@ language = "auto"
 # Optional: Custom log file path
 # log_file_path = "/custom/path/to/termide.log"
 ```
+
+### Available Themes
+
+**Dark Themes:**
+- `default` - Default dark theme
+- `midnight` - Midnight Commander inspired theme
+- `dracula` - Popular Dracula theme
+- `onedark` - Atom One Dark theme
+- `monokai` - Classic Monokai theme
+- `nord` - Nord theme with blue tones
+- `solarized-dark` - Dark Solarized theme
+
+**Light Themes:**
+- `atom-one-light` - Atom One Light theme
+- `ayu-light` - Ayu Light theme
+- `github-light` - GitHub Light theme
+- `material-lighter` - Material Lighter theme
+- `solarized-light` - Light Solarized theme
+
+**Theme Examples:**
+
+<p align="center">
+  <img src="assets/screenshots/dracula.png" alt="Dracula Theme" width="600">
+  <br>
+  <em>Dracula Theme</em>
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/monokai.png" alt="Monokai Theme" width="600">
+  <br>
+  <em>Monokai Theme</em>
+</p>
+
+### Custom Themes
+
+You can create custom themes by placing TOML files in the themes directory:
+- Linux: `~/.config/termide/themes/`
+- macOS: `~/Library/Application Support/termide/themes/`
+- Windows: `%APPDATA%\termide\themes\`
+
+User themes take priority over built-in themes with the same name. See `themes/` directory in the repository for theme file format examples.
+
+### Language Configuration
 
 You can also set the language via environment variable:
 ```bash
@@ -141,10 +190,17 @@ src/
 ├── app/           # Application core and event handling
 ├── config.rs      # Configuration management
 ├── constants.rs   # Application constants
+├── i18n/          # Internationalization (en, ru)
 ├── panels/        # Panel implementations (file manager, editor, terminal)
 ├── state.rs       # Application state management
-├── theme.rs       # Theme definitions
+├── system_monitor.rs  # CPU/RAM monitoring
+├── theme.rs       # Theme system and built-in themes
 └── ui/            # UI components (menus, modals, status bar)
+
+themes/            # Built-in theme definitions (TOML files)
+doc/
+├── en/            # English documentation
+└── ru/            # Russian documentation
 ```
 
 ### Building

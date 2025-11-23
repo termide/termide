@@ -1,0 +1,25 @@
+# Ayu Light theme for TermIDE
+# Minimalistic light theme with bright background and muted colors
+# Part of the popular Ayu theme family
+name = "ayu-light"
+
+[colors]
+# Base - bright white background
+bg = { rgb = [250, 250, 250] }
+fg = { rgb = [130, 140, 153] }
+
+# Accented - very light gray with orange accent
+accented_bg = { rgb = [242, 242, 242] }
+accented_fg = { rgb = [255, 106, 0] }
+
+# Selection - warm beige
+selected_bg = { rgb = [240, 238, 228] }
+selected_fg = { rgb = [130, 140, 153] }
+
+# Disabled - light gray
+disabled = { rgb = [171, 176, 182] }
+
+# Semantic
+success = { rgb = [76, 191, 153] }
+warning = { rgb = [231, 197, 71] }
+error = { rgb = [240, 113, 120] }

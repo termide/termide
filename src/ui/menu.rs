@@ -6,6 +6,7 @@ use ratatui::{
     widgets::Paragraph,
     Frame,
 };
+use unicode_width::UnicodeWidthStr;
 
 use crate::i18n;
 use crate::state::AppState;
@@ -31,7 +32,7 @@ pub const MENU_ITEM_COUNT: usize = 7;
 /// < 50% - зеленый (success)
 /// 50-75% - желтый (warning)
 /// > 75% - красный (error)
-fn resource_color(usage: u8, theme: &crate::theme::Theme) -> Color {
+pub fn resource_color(usage: u8, theme: &crate::theme::Theme) -> Color {
     if usage > 75 {
         theme.error
     } else if usage >= 50 {
@@ -64,16 +65,22 @@ pub fn render_menu(frame: &mut Frame, area: Rect, state: &AppState) {
             (base, accent)
         };
 
-        // Split menu item into first letter and rest
-        // Highlight first letter (keyboard accelerator) with accent color
-        if let Some(first_char) = item.chars().next() {
-            let first = first_char.to_string();
-            let rest = &item[first.len()..];
+        // Highlight first letter (keyboard accelerator) only for English locale
+        // In other locales, menu text doesn't match keyboard shortcuts
+        if crate::i18n::current_language() == "en" {
+            // English: Split menu item and highlight first letter
+            if let Some(first_char) = item.chars().next() {
+                let first = first_char.to_string();
+                let rest = &item[first.len()..];
 
-            spans.push(Span::styled(first, accent_style));
-            if !rest.is_empty() {
-                spans.push(Span::styled(rest, base_style));
+                spans.push(Span::styled(first, accent_style));
+                if !rest.is_empty() {
+                    spans.push(Span::styled(rest, base_style));
+                }
             }
+        } else {
+            // Non-English: Don't highlight first letter
+            spans.push(Span::styled(item.as_str(), base_style));
         }
 
         spans.push(Span::raw("  "));
@@ -111,7 +118,7 @@ pub fn render_menu(frame: &mut Frame, area: Rect, state: &AppState) {
     // Calculate how much space is left for hint, resources, and clock
     let used_width: usize = spans.iter().map(|s| s.width()).sum();
     let remaining = (area.width as usize).saturating_sub(
-        used_width + hint.len() + 2 + cpu_text.len() + ram_text.len() + clock_text.len(),
+        used_width + hint.width() + 2 + cpu_text.width() + ram_text.width() + clock_text.width(),
     );
 
     if remaining > 0 {

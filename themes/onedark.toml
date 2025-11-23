@@ -1,0 +1,25 @@
+# One Dark Pro theme for TermIDE
+# One of the most popular VSCode themes (10M+ installs)
+# Inspired by Atom's One Dark
+name = "onedark"
+
+[colors]
+# Base - One Dark classic dark gray background
+bg = { rgb = [40, 44, 52] }
+fg = { rgb = [171, 178, 191] }
+
+# Accented - darker background with blue accent
+accented_bg = { rgb = [33, 37, 43] }
+accented_fg = { rgb = [97, 175, 239] }
+
+# Selection - subtle gray selection
+selected_bg = { rgb = [62, 68, 81] }
+selected_fg = { rgb = [171, 178, 191] }
+
+# Disabled - comment color
+disabled = { rgb = [92, 99, 112] }
+
+# Semantic
+success = { rgb = [152, 195, 121] }
+warning = { rgb = [229, 192, 123] }
+error = { rgb = [224, 108, 117] }

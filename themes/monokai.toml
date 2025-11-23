@@ -1,0 +1,25 @@
+# Monokai theme for TermIDE
+# Classic popular theme with warm dark colors
+# Originally created for TextMate, popularized by Sublime Text
+name = "monokai"
+
+[colors]
+# Base - Monokai classic dark greenish background
+bg = { rgb = [39, 40, 34] }
+fg = { rgb = [248, 248, 242] }
+
+# Accented - slightly lighter background with cyan accent
+accented_bg = { rgb = [62, 61, 50] }
+accented_fg = { rgb = [102, 217, 239] }
+
+# Selection - warm gray selection
+selected_bg = { rgb = [73, 72, 62] }
+selected_fg = { rgb = [248, 248, 242] }
+
+# Disabled - muted gray
+disabled = { rgb = [117, 113, 94] }
+
+# Semantic
+success = { rgb = [166, 226, 46] }
+warning = { rgb = [230, 219, 116] }
+error = { rgb = [249, 38, 114] }

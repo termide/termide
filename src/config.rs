@@ -67,6 +67,10 @@ impl Config {
             // First run - create config file with default values
             let config = Self::default();
             let _ = config.save(); // Ignore save error
+
+            // Create themes directory
+            let _ = Self::ensure_themes_dir();
+
             Ok(config)
         }
     }
@@ -101,6 +105,20 @@ impl Config {
             dirs::config_dir().ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?;
 
         Ok(config_dir.join("termide"))
+    }
+
+    /// Get path to themes directory
+    pub fn get_themes_dir() -> Result<PathBuf> {
+        Ok(Self::get_config_dir()?.join("themes"))
+    }
+
+    /// Ensure themes directory exists
+    fn ensure_themes_dir() -> Result<()> {
+        let themes_dir = Self::get_themes_dir()?;
+        if !themes_dir.exists() {
+            std::fs::create_dir_all(themes_dir)?;
+        }
+        Ok(())
     }
 
     /// Get path to log file

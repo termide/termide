@@ -1,0 +1,25 @@
+# Nord theme for TermIDE
+# Popular arctic, north-bluish color palette
+# https://www.nordtheme.com
+name = "nord"
+
+[colors]
+# Base - Nord polar night dark blue-gray background
+bg = { rgb = [46, 52, 64] }
+fg = { rgb = [216, 222, 233] }
+
+# Accented - slightly lighter polar night with frost cyan
+accented_bg = { rgb = [59, 66, 82] }
+accented_fg = { rgb = [136, 192, 208] }
+
+# Selection - darker polar night
+selected_bg = { rgb = [76, 86, 106] }
+selected_fg = { rgb = [236, 239, 244] }
+
+# Disabled - muted polar night
+disabled = { rgb = [67, 76, 94] }
+
+# Semantic
+success = { rgb = [163, 190, 140] }
+warning = { rgb = [235, 203, 139] }
+error = { rgb = [191, 97, 106] }

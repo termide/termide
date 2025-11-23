@@ -1,23 +1,24 @@
-# Midnight Commander style theme for TermIDE
+# Classic Midnight Commander theme for TermIDE
+# Based on actual MC color scheme from screenshot
 name = "midnight"
 
 [colors]
-# Base
-bg = { rgb = [0, 0, 50] }
+# Base - medium steel blue background like in real MC
+bg = { rgb = [70, 130, 180] }
 fg = "White"
 
-# Accented
-accented_bg = "Blue"
-accented_fg = "Cyan"
+# Accented - cyan menu/header bar with yellow text
+accented_bg = { rgb = [0, 191, 191] }
+accented_fg = { rgb = [255, 215, 0] }
 
-# Selection
+# Selection - cyan selection like in MC
 selected_bg = "Cyan"
 selected_fg = "Black"
 
 # Disabled
 disabled = "Gray"
 
-# Semantic
-success = "Green"
-warning = "Yellow"
-error = "Red"
+# Semantic - подобраны под синюю палитру MC для визуальной гармонии
+success = { rgb = [127, 255, 0] }  # Chartreuse - яркий желто-зеленый, отличный контраст
+warning = { rgb = [255, 215, 0] }  # Gold - единство с accented_fg
+error = { rgb = [255, 105, 97] }   # Salmon - приглушенный красный

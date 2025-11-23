@@ -1,0 +1,25 @@
+# Dracula theme for TermIDE
+# One of the most popular VSCode themes (7.5M+ installs)
+# https://draculatheme.com
+name = "dracula"
+
+[colors]
+# Base - Dracula classic dark purple-gray background
+bg = { rgb = [40, 42, 54] }
+fg = { rgb = [248, 248, 242] }
+
+# Accented - current line background with pink accent
+accented_bg = { rgb = [68, 71, 90] }
+accented_fg = { rgb = [255, 121, 198] }
+
+# Selection - purple selection
+selected_bg = { rgb = [189, 147, 249] }
+selected_fg = { rgb = [40, 42, 54] }
+
+# Disabled - comment color
+disabled = { rgb = [98, 114, 164] }
+
+# Semantic
+success = { rgb = [80, 250, 123] }
+warning = { rgb = [241, 250, 140] }
+error = { rgb = [255, 85, 85] }

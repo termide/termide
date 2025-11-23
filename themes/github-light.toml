@@ -1,0 +1,25 @@
+# GitHub Light theme for TermIDE
+# Official GitHub theme using Primer design system (14M+ users)
+# Clean, professional interface matching GitHub.com
+name = "github-light"
+
+[colors]
+# Base - pure white background
+bg = { rgb = [255, 255, 255] }
+fg = { rgb = [36, 41, 47] }
+
+# Accented - light gray background with blue accent
+accented_bg = { rgb = [246, 248, 250] }
+accented_fg = { rgb = [9, 105, 218] }
+
+# Selection - GitHub blue
+selected_bg = { rgb = [9, 105, 218] }
+selected_fg = { rgb = [255, 255, 255] }
+
+# Disabled - muted gray
+disabled = { rgb = [140, 149, 159] }
+
+# Semantic
+success = { rgb = [26, 127, 55] }
+warning = { rgb = [191, 135, 0] }
+error = { rgb = [225, 111, 36] }
