@@ -42,10 +42,8 @@ impl App {
                             } else {
                                 // Unnamed file - need to request name
                                 let t = i18n::t();
-                                let modal = crate::ui::modal::InputModal::new(
-                                    t.modal_save_as_title(),
-                                    t.modal_enter_filename(),
-                                );
+                                let modal =
+                                    crate::ui::modal::InputModal::new(t.modal_save_as_title(), "");
                                 let current_dir =
                                     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
                                 let action = PendingAction::SaveFileAs {

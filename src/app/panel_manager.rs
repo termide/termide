@@ -66,6 +66,10 @@ impl App {
     }
 
     /// Find directory of another FM panel (not current_panel_index)
+    ///
+    /// Note: This method is kept for backwards compatibility.
+    /// Consider using `find_all_other_fm_panels()` for multi-panel support.
+    #[allow(dead_code)]
     pub(super) fn find_other_fm_directory(&self, current_panel_index: usize) -> Option<PathBuf> {
         // Search for another FM panel
         for i in 0..self.panels.count() {
@@ -84,6 +88,47 @@ impl App {
         }
 
         None
+    }
+
+    /// Find all panels (except current_panel_index) that have working directories
+    /// Returns deduplicated and sorted list of paths from all panel types (FM, Terminal, Editor)
+    pub(super) fn find_all_other_panel_paths(
+        &self,
+        current_panel_index: usize,
+    ) -> Vec<crate::ui::modal::SelectOption> {
+        use std::collections::HashSet;
+
+        let mut unique_paths: HashSet<PathBuf> = HashSet::new();
+
+        // Collect all unique paths from all panels (FM, Terminal, Editor)
+        for i in 0..self.panels.count() {
+            if i != current_panel_index {
+                if let Some(panel) = self.panels.get(i) {
+                    // Get working directory from any panel type
+                    if let Some(dir) = panel.get_working_directory() {
+                        unique_paths.insert(dir);
+                    }
+                }
+            }
+        }
+
+        // Convert to Vec and sort by path
+        let mut options: Vec<_> = unique_paths
+            .into_iter()
+            .map(|path| {
+                let path_str = path.display().to_string();
+                crate::ui::modal::SelectOption {
+                    panel_index: 0,          // Not used, set to 0
+                    value: path_str.clone(), // Value is the path string
+                    display: path_str,       // Display is also the path string
+                }
+            })
+            .collect();
+
+        // Sort by value for consistent ordering
+        options.sort_by(|a, b| a.value.cmp(&b.value));
+
+        options
     }
 
     /// Refresh all FM panels that show specified directory

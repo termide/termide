@@ -57,6 +57,8 @@ pub struct Terminal {
     is_alive: Arc<Mutex<bool>>,
     /// Terminal title (user@host:dir)
     terminal_title: String,
+    /// Initial working directory (set when terminal was created)
+    initial_cwd: std::path::PathBuf,
 }
 
 /// Terminal screen state
@@ -1259,6 +1261,7 @@ impl Terminal {
             size,
             is_alive,
             terminal_title,
+            initial_cwd: working_dir,
         })
     }
 
@@ -2252,6 +2255,10 @@ impl Panel for Terminal {
             // Wait for completion to avoid zombies
             let _ = self.child.wait();
         }
+    }
+
+    fn get_working_directory(&self) -> Option<std::path::PathBuf> {
+        Some(self.initial_cwd.clone())
     }
 }
 

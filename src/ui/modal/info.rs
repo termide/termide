@@ -18,8 +18,9 @@ use crate::theme::Theme;
 #[derive(Debug)]
 pub struct InfoModal {
     title: String,
-    lines: Vec<(String, String)>, // (key, value) pairs for table
-    spinner_frame: usize,         // Frame counter for spinner animation
+    lines: Vec<(String, String)>,   // (key, value) pairs for table
+    spinner_frame: usize,           // Frame counter for spinner animation
+    last_button_area: Option<Rect>, // For mouse handling
 }
 
 impl InfoModal {
@@ -29,6 +30,7 @@ impl InfoModal {
             title: title.into(),
             lines,
             spinner_frame: 0,
+            last_button_area: None,
         }
     }
 
@@ -108,10 +110,10 @@ impl InfoModal {
 impl Modal for InfoModal {
     type Result = ();
 
-    fn render(&self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+    fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         // Calculate required height based on content:
         // 1 (top border) + 1 (empty line) + N (data lines) +
-        // 1 (empty line) + 1 (hint) + 1 (bottom border) = N + 5
+        // 1 (empty line) + 1 (button) + 1 (bottom border) = N + 5
         let modal_height = (self.lines.len() + 5) as u16;
 
         // Calculate dynamic width based on content
@@ -136,7 +138,7 @@ impl Modal for InfoModal {
         let inner = block.inner(modal_area);
         block.render(modal_area, buf);
 
-        // Split into: empty line, data, empty line, hint
+        // Split into: empty line, data, empty line, button
         use ratatui::layout::{Constraint, Direction, Layout};
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -144,7 +146,7 @@ impl Modal for InfoModal {
                 Constraint::Length(1),                       // Empty line at top
                 Constraint::Length(self.lines.len() as u16), // Data
                 Constraint::Length(1),                       // Empty line
-                Constraint::Length(1),                       // Hint
+                Constraint::Length(1),                       // Button
             ])
             .split(inner);
 
@@ -184,15 +186,20 @@ impl Modal for InfoModal {
         let data = Paragraph::new(text_lines).alignment(Alignment::Left);
         data.render(chunks[1], buf);
 
-        // Render hint
-        let hint = Paragraph::new(Line::from(vec![Span::styled(
-            t.file_info_press_key(),
+        // Render Close button (always highlighted)
+        let close_button = Line::from(vec![Span::styled(
+            format!("[ {} ]", t.ui_close()),
             Style::default()
-                .fg(theme.disabled)
-                .add_modifier(Modifier::ITALIC),
-        )]))
-        .alignment(Alignment::Center);
-        hint.render(chunks[3], buf);
+                .fg(theme.fg)
+                .bg(theme.accented_fg)
+                .add_modifier(Modifier::BOLD),
+        )]);
+
+        let button_paragraph = Paragraph::new(close_button).alignment(Alignment::Center);
+        button_paragraph.render(chunks[3], buf);
+
+        // Save button area for mouse handling
+        self.last_button_area = Some(chunks[3]);
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<Option<ModalResult<Self::Result>>> {
@@ -200,6 +207,50 @@ impl Modal for InfoModal {
         match key.code {
             KeyCode::Esc => Ok(Some(ModalResult::Cancelled)),
             _ => Ok(Some(ModalResult::Confirmed(()))),
+        }
+    }
+
+    fn handle_mouse(
+        &mut self,
+        mouse: crossterm::event::MouseEvent,
+        _modal_area: Rect,
+    ) -> Result<Option<ModalResult<Self::Result>>> {
+        use crossterm::event::MouseEventKind;
+
+        // Only handle left button press
+        if mouse.kind != MouseEventKind::Down(crossterm::event::MouseButton::Left) {
+            return Ok(None);
+        }
+
+        // Check if we have stored button area
+        let Some(button_area) = self.last_button_area else {
+            return Ok(None);
+        };
+
+        // Check if click is within button area
+        if mouse.row < button_area.y
+            || mouse.row >= button_area.y + button_area.height
+            || mouse.column < button_area.x
+            || mouse.column >= button_area.x + button_area.width
+        {
+            return Ok(None);
+        }
+
+        // Calculate button position
+        // Button is centered: "[ Close ]"
+        let t = i18n::t();
+        let button_text = format!("[ {} ]", t.ui_close());
+        let button_width = button_text.len() as u16;
+
+        let start_col = button_area.x + (button_area.width.saturating_sub(button_width)) / 2;
+        let end_col = start_col + button_width;
+
+        // Check if click is within button bounds
+        if mouse.column >= start_col && mouse.column < end_col {
+            // Close button clicked
+            Ok(Some(ModalResult::Confirmed(())))
+        } else {
+            Ok(None)
         }
     }
 }

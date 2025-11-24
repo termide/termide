@@ -1715,4 +1715,10 @@ impl Panel for Editor {
 
         Ok(())
     }
+
+    fn get_working_directory(&self) -> Option<std::path::PathBuf> {
+        // Return parent directory of the file if it's saved
+        self.file_path()
+            .and_then(|p| p.parent().map(|parent| parent.to_path_buf()))
+    }
 }

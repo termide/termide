@@ -154,9 +154,15 @@ pub trait Translation: Send + Sync {
     fn action_copying(&self) -> &str;
     fn action_moving(&self) -> &str;
 
-    // Modal titles and prompts for copy/move
-    fn modal_copy_title(&self) -> &str;
-    fn modal_move_title(&self) -> &str;
+    // Modal titles and prompts for copy/move/create/delete
+    fn modal_copy_single_title(&self, name: &str) -> String;
+    fn modal_copy_multiple_title(&self, count: usize) -> String;
+    fn modal_move_single_title(&self, name: &str) -> String;
+    fn modal_move_multiple_title(&self, count: usize) -> String;
+    fn modal_create_file_title(&self) -> &str;
+    fn modal_create_dir_title(&self) -> &str;
+    fn modal_delete_single_title(&self, name: &str) -> String;
+    fn modal_delete_multiple_title(&self, count: usize) -> String;
     fn modal_save_as_title(&self) -> &str;
     fn modal_enter_filename(&self) -> &str;
     fn modal_copy_single_prompt(&self, name: &str) -> String;
@@ -206,6 +212,10 @@ pub trait Translation: Send + Sync {
     // UI elements
     fn ui_yes(&self) -> &str;
     fn ui_no(&self) -> &str;
+    fn ui_ok(&self) -> &str;
+    fn ui_cancel(&self) -> &str;
+    fn ui_continue(&self) -> &str;
+    fn ui_close(&self) -> &str;
     fn ui_enter_confirm(&self) -> &str;
     fn ui_esc_cancel(&self) -> &str;
     fn ui_hint_separator(&self) -> &str; // " | "

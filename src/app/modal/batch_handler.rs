@@ -367,7 +367,11 @@ impl App {
             match operation.conflict_mode {
                 ConflictMode::Ask => {
                     // Show conflict resolution modal window
-                    let modal = ConflictModal::new(&source, &final_dest);
+                    let remaining_items = operation
+                        .sources
+                        .len()
+                        .saturating_sub(operation.current_index + 1);
+                    let modal = ConflictModal::new(&source, &final_dest, remaining_items);
                     self.state.pending_action =
                         Some(PendingAction::ContinueBatchOperation { operation });
                     self.state.active_modal = Some(ActiveModal::Conflict(Box::new(modal)));
@@ -503,7 +507,11 @@ impl App {
                         use crate::state::{ActiveModal, PendingAction};
                         use crate::ui::modal::ConflictModal;
 
-                        let modal = ConflictModal::new(&source, &new_dest);
+                        let remaining_items = operation
+                            .sources
+                            .len()
+                            .saturating_sub(operation.current_index + 1);
+                        let modal = ConflictModal::new(&source, &new_dest, remaining_items);
                         self.state.pending_action =
                             Some(PendingAction::ContinueBatchOperation { operation });
                         self.state.active_modal = Some(ActiveModal::Conflict(Box::new(modal)));

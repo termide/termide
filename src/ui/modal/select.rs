@@ -18,6 +18,7 @@ pub struct SelectModal {
     prompt: String,
     items: Vec<String>,
     cursor: usize,
+    last_list_area: Option<Rect>,
 }
 
 impl SelectModal {
@@ -32,6 +33,7 @@ impl SelectModal {
             prompt: prompt.into(),
             items: labels,
             cursor: 0,
+            last_list_area: None,
         }
     }
 
@@ -59,20 +61,13 @@ impl SelectModal {
             .max()
             .unwrap_or(0) as u16;
 
-        // 4. Hint width
-        let hint_width = "↑↓ - select | Enter - confirm | Esc - cancel".len() as u16;
-
         // Take the maximum of all components
-        let content_width = title_width
-            .max(prompt_max_line_width)
-            .max(max_item_width)
-            .max(hint_width);
+        let content_width = title_width.max(prompt_max_line_width).max(max_item_width);
 
         // Add padding and borders:
         // - 2 for outer block border
-        // - 2 for list border
         // - 4 for padding
-        let total_width = content_width + 8;
+        let total_width = content_width + 6;
 
         // Apply constraints
         let max_width = (screen_width as f32 * 0.75) as u16;
@@ -110,14 +105,17 @@ impl SelectModal {
 impl Modal for SelectModal {
     type Result = Vec<usize>;
 
-    fn render(&self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+    fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         // Calculate dynamic width
         let modal_width = self.calculate_modal_width(area.width);
 
+        // Calculate prompt lines dynamically
+        let prompt_lines = self.prompt.lines().count().max(1) as u16;
+
         // Calculate height:
-        // 1 (top border) + 2 (prompt) + N (list with border) + 2 (hint) + 1 (bottom border)
+        // 1 (top border) + N (prompt) + M (list) + 1 (bottom border)
         let list_height = self.items.len().min(10) as u16; // Limit to 10 items
-        let modal_height = 1 + 2 + (list_height + 2) + 2 + 1;
+        let modal_height = 1 + prompt_lines + list_height + 1;
 
         // Create centered area
         let modal_area = Self::centered_rect_with_size(modal_width, modal_height, area);
@@ -140,9 +138,8 @@ impl Modal for SelectModal {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(2), // Prompt
-                Constraint::Min(5),    // List
-                Constraint::Length(2), // Hint
+                Constraint::Length(prompt_lines), // Prompt
+                Constraint::Length(list_height),  // List
             ])
             .split(inner);
 
@@ -174,24 +171,17 @@ impl Modal for SelectModal {
             })
             .collect();
 
-        let list = List::new(items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.disabled)),
-            )
-            .style(Style::default().bg(theme.fg));
+        let list = List::new(items).style(Style::default().bg(theme.fg));
 
         list.render(chunks[1], buf);
 
-        let hint = Paragraph::new("↑↓ - select | Enter - confirm | Esc - cancel")
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(theme.disabled));
-        hint.render(chunks[2], buf);
+        // Save list area for mouse handling
+        self.last_list_area = Some(chunks[1]);
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<Option<ModalResult<Self::Result>>> {
         match key.code {
+            KeyCode::Esc => Ok(Some(ModalResult::Cancelled)),
             KeyCode::Up => {
                 if self.cursor > 0 {
                     self.cursor -= 1;
@@ -213,8 +203,45 @@ impl Modal for SelectModal {
                 Ok(None)
             }
             KeyCode::Enter => Ok(Some(ModalResult::Confirmed(vec![self.cursor]))),
-            KeyCode::Esc => Ok(Some(ModalResult::Cancelled)),
             _ => Ok(None),
+        }
+    }
+
+    fn handle_mouse(
+        &mut self,
+        mouse: crossterm::event::MouseEvent,
+        _modal_area: Rect,
+    ) -> Result<Option<ModalResult<Self::Result>>> {
+        use crossterm::event::MouseEventKind;
+
+        // Only handle left button press
+        if mouse.kind != MouseEventKind::Down(crossterm::event::MouseButton::Left) {
+            return Ok(None);
+        }
+
+        // Check if we have stored list area
+        let Some(list_area) = self.last_list_area else {
+            return Ok(None);
+        };
+
+        // Check if click is within list area
+        if mouse.row < list_area.y
+            || mouse.row >= list_area.y + list_area.height
+            || mouse.column < list_area.x
+            || mouse.column >= list_area.x + list_area.width
+        {
+            return Ok(None);
+        }
+
+        // Calculate which item was clicked
+        let clicked_item = (mouse.row - list_area.y) as usize;
+
+        if clicked_item < self.items.len() {
+            // Item clicked - select and confirm immediately
+            self.cursor = clicked_item;
+            Ok(Some(ModalResult::Confirmed(vec![self.cursor])))
+        } else {
+            Ok(None)
         }
     }
 }

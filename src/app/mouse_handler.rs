@@ -11,6 +11,18 @@ use crate::{
 impl App {
     /// Handle mouse event
     pub(super) fn handle_mouse_event(&mut self, mouse: crossterm::event::MouseEvent) -> Result<()> {
+        // Handle modal mouse events first if a modal is open
+        if self.state.active_modal.is_some() {
+            let modal_area = Rect {
+                x: 0,
+                y: 0,
+                width: self.state.terminal.width,
+                height: self.state.terminal.height,
+            };
+            self.handle_modal_mouse(mouse, modal_area)?;
+            return Ok(());
+        }
+
         // Click on menu
         if mouse.row == 0 && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
             self.handle_menu_click(mouse.column)?;

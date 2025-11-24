@@ -109,7 +109,7 @@ impl App {
 
             // Render UI after processing event
             terminal.draw(|frame| {
-                render_layout(frame, &self.state, &mut self.panels);
+                render_layout(frame, &mut self.state, &mut self.panels);
             })?;
         }
 

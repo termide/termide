@@ -6,6 +6,7 @@ use crate::theme::Theme;
 
 pub mod confirm;
 pub mod conflict;
+pub mod editable_select;
 pub mod info;
 pub mod input;
 pub mod overwrite;
@@ -14,6 +15,7 @@ pub mod select;
 
 pub use confirm::ConfirmModal;
 pub use conflict::{ConflictModal, ConflictResolution};
+pub use editable_select::{EditableSelectModal, SelectOption};
 pub use info::InfoModal;
 pub use input::InputModal;
 pub use overwrite::{OverwriteChoice, OverwriteModal};
@@ -35,9 +37,19 @@ pub trait Modal {
     type Result;
 
     /// Render the modal window
-    fn render(&self, area: Rect, buf: &mut Buffer, theme: &Theme);
+    fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme);
 
     /// Handle keyboard event
     /// Returns Some(result) if the modal window should close
     fn handle_key(&mut self, key: KeyEvent) -> Result<Option<ModalResult<Self::Result>>>;
+
+    /// Handle mouse event
+    /// Returns Some(result) if the modal window should close
+    fn handle_mouse(
+        &mut self,
+        _mouse: crossterm::event::MouseEvent,
+        _modal_area: Rect,
+    ) -> Result<Option<ModalResult<Self::Result>>> {
+        Ok(None) // Default: do nothing
+    }
 }

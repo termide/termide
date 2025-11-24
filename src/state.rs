@@ -164,6 +164,8 @@ pub enum ActiveModal {
     Info(Box<InfoModal>),
     /// Rename pattern input modal
     RenamePattern(Box<crate::ui::modal::RenamePatternModal>),
+    /// Editable select modal (combobox with editable input)
+    EditableSelect(Box<crate::ui::modal::EditableSelectModal>),
 }
 
 /// Action pending modal result
@@ -644,6 +646,7 @@ impl AppState {
     }
 
     /// Get reference to active modal window
+    #[allow(dead_code)]
     pub fn get_active_modal(&self) -> Option<&ActiveModal> {
         self.active_modal.as_ref()
     }

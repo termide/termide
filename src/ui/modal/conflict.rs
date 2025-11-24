@@ -37,12 +37,14 @@ pub struct ConflictModal {
     source_name: String,
     dest_name: String,
     is_directory: bool,
+    remaining_items: usize, // Number of items remaining in queue (excluding current)
     cursor: usize,
+    last_list_area: Option<Rect>,
 }
 
 impl ConflictModal {
     /// Create a conflict modal window
-    pub fn new(source: &Path, destination: &Path) -> Self {
+    pub fn new(source: &Path, destination: &Path, remaining_items: usize) -> Self {
         let source_name = source
             .file_name()
             .and_then(|n| n.to_str())
@@ -66,7 +68,9 @@ impl ConflictModal {
             source_name,
             dest_name,
             is_directory,
+            remaining_items,
             cursor: 0,
+            last_list_area: None,
         }
     }
 
@@ -77,7 +81,7 @@ impl ConflictModal {
             "file"
         };
 
-        vec![
+        let mut options = vec![
             (
                 "Overwrite".to_string(),
                 format!("Replace existing {}", item_type),
@@ -90,29 +94,47 @@ impl ConflictModal {
                 "Rename".to_string(),
                 format!("Set new name for this {}", item_type),
             ),
-            (
-                "Overwrite All".to_string(),
-                "Replace all subsequent conflicts".to_string(),
-            ),
-            (
-                "Skip All".to_string(),
-                "Skip all subsequent conflicts".to_string(),
-            ),
-            (
-                "Rename All".to_string(),
-                "Set pattern for all conflicts".to_string(),
-            ),
-        ]
+        ];
+
+        // Only add "All" variants if there are more items remaining
+        if self.remaining_items > 0 {
+            options.extend(vec![
+                (
+                    "Overwrite All".to_string(),
+                    "Replace all subsequent conflicts".to_string(),
+                ),
+                (
+                    "Skip All".to_string(),
+                    "Skip all subsequent conflicts".to_string(),
+                ),
+                (
+                    "Rename All".to_string(),
+                    "Set pattern for all conflicts".to_string(),
+                ),
+            ]);
+        }
+
+        options
     }
 
     fn get_resolution(&self) -> ConflictResolution {
-        match self.cursor {
-            0 => ConflictResolution::Overwrite,
-            1 => ConflictResolution::Skip,
-            2 => ConflictResolution::Rename,
-            3 => ConflictResolution::OverwriteAll,
-            4 => ConflictResolution::SkipAll,
-            _ => ConflictResolution::RenameAll,
+        // If there are no remaining items, only 3 options available
+        if self.remaining_items == 0 {
+            match self.cursor {
+                0 => ConflictResolution::Overwrite,
+                1 => ConflictResolution::Skip,
+                _ => ConflictResolution::Rename,
+            }
+        } else {
+            // All 6 options available
+            match self.cursor {
+                0 => ConflictResolution::Overwrite,
+                1 => ConflictResolution::Skip,
+                2 => ConflictResolution::Rename,
+                3 => ConflictResolution::OverwriteAll,
+                4 => ConflictResolution::SkipAll,
+                _ => ConflictResolution::RenameAll,
+            }
         }
     }
 
@@ -145,20 +167,15 @@ impl ConflictModal {
             .max()
             .unwrap_or(0) as u16;
 
-        // 4. Hint width
-        let hint_width = "↑↓ - select | Enter - confirm | Esc - cancel".len() as u16;
-
         // Take the maximum of all components
         let content_width = title_width
             .max(message_max_line_width)
-            .max(max_option_width)
-            .max(hint_width);
+            .max(max_option_width);
 
         // Add padding and borders:
         // - 2 for outer block border
-        // - 2 for option list border
         // - 4 for padding
-        let total_width = content_width + 8;
+        let total_width = content_width + 6;
 
         // Apply constraints
         let max_width = (screen_width as f32 * 0.75) as u16;
@@ -196,13 +213,18 @@ impl ConflictModal {
 impl Modal for ConflictModal {
     type Result = ConflictResolution;
 
-    fn render(&self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+    fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         // Calculate dynamic width
         let modal_width = self.calculate_modal_width(area.width);
 
-        // Calculate height:
-        // 1 (top border) + 3 (message) + 8 (list of 6 options with border) + 1 (hint) + 1 (bottom border) = 14
-        let modal_height = 14;
+        // Calculate height dynamically based on number of options:
+        // - 3 options: 1 (top border) + 2 (message) + 3 (list) + 1 (bottom border) = 7
+        // - 6 options: 1 (top border) + 2 (message) + 6 (list) + 1 (bottom border) = 10
+        let modal_height = if self.remaining_items == 0 {
+            7 // Only 3 options
+        } else {
+            10 // All 6 options
+        };
 
         // Create centered area
         let modal_area = Self::centered_rect_with_size(modal_width, modal_height, area);
@@ -222,12 +244,19 @@ impl Modal for ConflictModal {
         block.render(modal_area, buf);
 
         use ratatui::layout::{Constraint, Direction, Layout};
+
+        // Calculate list constraint based on number of options
+        let list_constraint = if self.remaining_items == 0 {
+            Constraint::Length(3) // 3 options
+        } else {
+            Constraint::Length(6) // 6 options
+        };
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3), // Message
-                Constraint::Min(7),    // Option list (6 options + borders)
-                Constraint::Length(1), // Hint
+                Constraint::Length(2), // Message
+                list_constraint,       // Option list
             ])
             .split(inner);
 
@@ -270,25 +299,24 @@ impl Modal for ConflictModal {
             })
             .collect();
 
-        let list = List::new(items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.disabled)),
-            )
-            .style(Style::default().bg(theme.fg));
+        let list = List::new(items).style(Style::default().bg(theme.fg));
 
         list.render(chunks[1], buf);
 
-        // Hint
-        let hint = Paragraph::new("↑↓ - select | Enter - confirm | Esc - cancel")
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(theme.disabled));
-        hint.render(chunks[2], buf);
+        // Save list area for mouse handling
+        self.last_list_area = Some(chunks[1]);
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<Option<ModalResult<Self::Result>>> {
+        // Calculate max cursor based on number of options
+        let max_cursor = if self.remaining_items == 0 {
+            2 // Only 3 options: Overwrite, Skip, Rename
+        } else {
+            5 // All 6 options
+        };
+
         match key.code {
+            KeyCode::Esc => Ok(Some(ModalResult::Cancelled)),
             KeyCode::Up => {
                 if self.cursor > 0 {
                     self.cursor -= 1;
@@ -296,7 +324,7 @@ impl Modal for ConflictModal {
                 Ok(None)
             }
             KeyCode::Down => {
-                if self.cursor < 5 {
+                if self.cursor < max_cursor {
                     self.cursor += 1;
                 }
                 Ok(None)
@@ -306,12 +334,52 @@ impl Modal for ConflictModal {
                 Ok(None)
             }
             KeyCode::End => {
-                self.cursor = 5;
+                self.cursor = max_cursor;
                 Ok(None)
             }
             KeyCode::Enter => Ok(Some(ModalResult::Confirmed(self.get_resolution()))),
-            KeyCode::Esc => Ok(Some(ModalResult::Cancelled)),
             _ => Ok(None),
+        }
+    }
+
+    fn handle_mouse(
+        &mut self,
+        mouse: crossterm::event::MouseEvent,
+        _modal_area: Rect,
+    ) -> Result<Option<ModalResult<Self::Result>>> {
+        use crossterm::event::MouseEventKind;
+
+        // Only handle left button press
+        if mouse.kind != MouseEventKind::Down(crossterm::event::MouseButton::Left) {
+            return Ok(None);
+        }
+
+        // Check if we have stored list area
+        let Some(list_area) = self.last_list_area else {
+            return Ok(None);
+        };
+
+        // Check if click is within list area
+        if mouse.row < list_area.y
+            || mouse.row >= list_area.y + list_area.height
+            || mouse.column < list_area.x
+            || mouse.column >= list_area.x + list_area.width
+        {
+            return Ok(None);
+        }
+
+        // Calculate which item was clicked
+        let clicked_item = (mouse.row - list_area.y) as usize;
+
+        // Calculate max cursor based on number of options
+        let max_items = if self.remaining_items == 0 { 3 } else { 6 };
+
+        if clicked_item < max_items {
+            // Item clicked - select and confirm immediately
+            self.cursor = clicked_item;
+            Ok(Some(ModalResult::Confirmed(self.get_resolution())))
+        } else {
+            Ok(None)
         }
     }
 }

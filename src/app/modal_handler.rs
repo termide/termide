@@ -55,6 +55,12 @@ impl App {
                     }
                     ModalResult::Cancelled => ModalResult::Cancelled,
                 }),
+                ActiveModal::EditableSelect(m) => m.handle_key(key)?.map(|r| match r {
+                    ModalResult::Confirmed(value) => {
+                        ModalResult::Confirmed(Box::new(value) as Box<dyn std::any::Any>)
+                    }
+                    ModalResult::Cancelled => ModalResult::Cancelled,
+                }),
             };
 
             // If modal window returned result, handle it
@@ -86,7 +92,12 @@ impl App {
                                         .join(source.file_name().unwrap_or_default())
                                 };
 
-                                let modal = ConflictModal::new(source, &final_dest);
+                                let remaining_items = operation
+                                    .sources
+                                    .len()
+                                    .saturating_sub(operation.current_index + 1);
+                                let modal =
+                                    ConflictModal::new(source, &final_dest, remaining_items);
                                 self.state.pending_action =
                                     Some(crate::state::PendingAction::ContinueBatchOperation {
                                         operation,
@@ -99,6 +110,81 @@ impl App {
                     }
                 }
 
+                self.state.close_modal();
+                if let ModalResult::Confirmed(value) = result {
+                    self.handle_modal_result(value)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Handle mouse event in modal window
+    pub(super) fn handle_modal_mouse(
+        &mut self,
+        mouse: crossterm::event::MouseEvent,
+        modal_area: ratatui::layout::Rect,
+    ) -> Result<()> {
+        // Get mutable reference to active modal window
+        if let Some(modal) = self.state.get_active_modal_mut() {
+            // Handle event in corresponding modal window
+            let modal_result = match modal {
+                ActiveModal::Confirm(m) => m.handle_mouse(mouse, modal_area)?.map(|r| match r {
+                    ModalResult::Confirmed(value) => {
+                        ModalResult::Confirmed(Box::new(value) as Box<dyn std::any::Any>)
+                    }
+                    ModalResult::Cancelled => ModalResult::Cancelled,
+                }),
+                ActiveModal::Input(m) => m.handle_mouse(mouse, modal_area)?.map(|r| match r {
+                    ModalResult::Confirmed(value) => {
+                        ModalResult::Confirmed(Box::new(value) as Box<dyn std::any::Any>)
+                    }
+                    ModalResult::Cancelled => ModalResult::Cancelled,
+                }),
+                ActiveModal::Select(m) => m.handle_mouse(mouse, modal_area)?.map(|r| match r {
+                    ModalResult::Confirmed(value) => {
+                        ModalResult::Confirmed(Box::new(value) as Box<dyn std::any::Any>)
+                    }
+                    ModalResult::Cancelled => ModalResult::Cancelled,
+                }),
+                ActiveModal::Overwrite(m) => m.handle_mouse(mouse, modal_area)?.map(|r| match r {
+                    ModalResult::Confirmed(value) => {
+                        ModalResult::Confirmed(Box::new(value) as Box<dyn std::any::Any>)
+                    }
+                    ModalResult::Cancelled => ModalResult::Cancelled,
+                }),
+                ActiveModal::Conflict(m) => m.handle_mouse(mouse, modal_area)?.map(|r| match r {
+                    ModalResult::Confirmed(value) => {
+                        ModalResult::Confirmed(Box::new(value) as Box<dyn std::any::Any>)
+                    }
+                    ModalResult::Cancelled => ModalResult::Cancelled,
+                }),
+                ActiveModal::Info(m) => m.handle_mouse(mouse, modal_area)?.map(|r| match r {
+                    ModalResult::Confirmed(value) => {
+                        ModalResult::Confirmed(Box::new(value) as Box<dyn std::any::Any>)
+                    }
+                    ModalResult::Cancelled => ModalResult::Cancelled,
+                }),
+                ActiveModal::RenamePattern(m) => {
+                    m.handle_mouse(mouse, modal_area)?.map(|r| match r {
+                        ModalResult::Confirmed(value) => {
+                            ModalResult::Confirmed(Box::new(value) as Box<dyn std::any::Any>)
+                        }
+                        ModalResult::Cancelled => ModalResult::Cancelled,
+                    })
+                }
+                ActiveModal::EditableSelect(m) => {
+                    m.handle_mouse(mouse, modal_area)?.map(|r| match r {
+                        ModalResult::Confirmed(value) => {
+                            ModalResult::Confirmed(Box::new(value) as Box<dyn std::any::Any>)
+                        }
+                        ModalResult::Cancelled => ModalResult::Cancelled,
+                    })
+                }
+            };
+
+            // If modal window returned result, handle it
+            if let Some(result) = modal_result {
                 self.state.close_modal();
                 if let ModalResult::Confirmed(value) = result {
                     self.handle_modal_result(value)?;

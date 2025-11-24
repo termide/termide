@@ -130,7 +130,7 @@ impl App {
                 }
             }
 
-            // For Copy/Move - find another FM panel and set target_directory
+            // For Copy/Move - find all other FM panels and create suggestions
             let is_copy = matches!(action, PendingAction::CopyPath { .. });
 
             match &mut action {
@@ -145,55 +145,78 @@ impl App {
                     ..
                 } => {
                     if target_directory.is_none() && !sources.is_empty() {
-                        // Find another FM panel
-                        let other_fm_dir = self.find_other_fm_directory(self.state.active_panel);
+                        // Find all unique paths from other panels (FM, Terminal, Editor)
+                        let options = self.find_all_other_panel_paths(self.state.active_panel);
+                        let unique_paths_count = options.len();
 
-                        // If no other FM found, use parent directory of first source
-                        let default_dir =
-                            other_fm_dir.or_else(|| sources[0].parent().map(|p| p.to_path_buf()));
+                        // Determine default directory based on available paths
+                        let default_dir = if !options.is_empty() {
+                            // Use first option as default (parse value back to PathBuf)
+                            std::path::PathBuf::from(&options[0].value)
+                        } else {
+                            // Use parent directory of first source
+                            sources[0]
+                                .parent()
+                                .map(|p| p.to_path_buf())
+                                .unwrap_or_else(|| std::path::PathBuf::from("/"))
+                        };
 
-                        if let Some(dir) = default_dir {
-                            *target_directory = Some(dir.clone());
+                        *target_directory = Some(default_dir.clone());
 
-                            let default_dest = format!("{}/", dir.display());
+                        let default_dest = format!("{}/", default_dir.display());
 
-                            // Recreate modal with new default
-                            let t = i18n::t();
-                            let new_modal = if sources.len() == 1 {
-                                let source_name = sources[0]
-                                    .file_name()
-                                    .and_then(|n| n.to_str())
-                                    .unwrap_or("?");
+                        // Prepare title and prompt
+                        let t = i18n::t();
+                        let (title, prompt) = if sources.len() == 1 {
+                            let source_name = sources[0]
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("?");
 
-                                if is_copy {
-                                    crate::ui::modal::InputModal::with_default(
-                                        t.modal_copy_title(),
-                                        t.modal_copy_single_prompt(source_name),
-                                        &default_dest,
-                                    )
-                                } else {
-                                    crate::ui::modal::InputModal::with_default(
-                                        t.modal_move_title(),
-                                        t.modal_move_single_prompt(source_name),
-                                        &default_dest,
-                                    )
-                                }
-                            } else if is_copy {
-                                crate::ui::modal::InputModal::with_default(
-                                    t.modal_copy_title(),
-                                    t.modal_copy_multiple_prompt(sources.len()),
-                                    &default_dest,
+                            if is_copy {
+                                (
+                                    t.modal_copy_single_title(source_name),
+                                    t.modal_copy_single_prompt(source_name),
                                 )
                             } else {
-                                crate::ui::modal::InputModal::with_default(
-                                    t.modal_move_title(),
-                                    t.modal_move_multiple_prompt(sources.len()),
-                                    &default_dest,
+                                (
+                                    t.modal_move_single_title(source_name),
+                                    t.modal_move_single_prompt(source_name),
                                 )
-                            };
+                            }
+                        } else if is_copy {
+                            (
+                                t.modal_copy_multiple_title(sources.len()),
+                                t.modal_copy_multiple_prompt(sources.len()),
+                            )
+                        } else {
+                            (
+                                t.modal_move_multiple_title(sources.len()),
+                                t.modal_move_multiple_prompt(sources.len()),
+                            )
+                        };
 
-                            modal = ActiveModal::Input(Box::new(new_modal));
-                        }
+                        // Choose modal based on number of unique paths:
+                        // 0-1 paths: simple InputModal
+                        // 2+ paths: EditableSelectModal with list
+                        modal = if unique_paths_count >= 2 {
+                            // Multiple unique paths - show editable select
+                            let new_modal = crate::ui::modal::EditableSelectModal::new(
+                                title,
+                                prompt,
+                                &default_dest,
+                                options,
+                            );
+                            ActiveModal::EditableSelect(Box::new(new_modal))
+                        } else {
+                            // 0 or 1 unique path - simple input modal
+                            let new_modal = crate::ui::modal::InputModal::with_default(
+                                title,
+                                prompt,
+                                &default_dest,
+                            );
+                            ActiveModal::Input(Box::new(new_modal))
+                        };
                     }
                 }
                 _ => {}

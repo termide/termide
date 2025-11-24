@@ -13,6 +13,13 @@ use super::{Modal, ModalResult};
 use crate::rename_pattern::RenamePattern;
 use crate::theme::Theme;
 
+/// Focus area in the modal
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FocusArea {
+    Input,
+    Buttons,
+}
+
 /// Rename pattern input modal window
 #[derive(Debug)]
 pub struct RenamePatternModal {
@@ -22,6 +29,9 @@ pub struct RenamePatternModal {
     cursor_position: usize,
     created: Option<SystemTime>,
     modified: Option<SystemTime>,
+    focus: FocusArea,
+    selected_button: usize, // 0 = Continue, 1 = Cancel
+    last_buttons_area: Option<Rect>,
 }
 
 impl RenamePatternModal {
@@ -40,6 +50,9 @@ impl RenamePatternModal {
             cursor_position: default.chars().count(),
             created,
             modified,
+            focus: FocusArea::Input,
+            selected_button: 0, // Continue button selected by default
+            last_buttons_area: None,
         }
     }
 
@@ -145,7 +158,7 @@ impl RenamePatternModal {
 impl Modal for RenamePatternModal {
     type Result = String;
 
-    fn render(&self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+    fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         // Dynamic height (including outer block borders):
         // 1 (original name) + 3 (input field) + 1 (preview)
         // + 1 (empty) + 3 (help) + 1 (empty) + 1 (buttons) + 1 (empty)
@@ -230,71 +243,225 @@ impl Modal for RenamePatternModal {
         help_text.render(chunks[4], buf);
 
         // Buttons
-        let buttons = Paragraph::new("Tab/Enter - Continue | Esc - Cancel")
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(theme.disabled));
-        buttons.render(chunks[6], buf);
+        let t = crate::i18n::t();
+
+        let continue_style = if self.focus == FocusArea::Buttons && self.selected_button == 0 {
+            Style::default()
+                .fg(theme.fg)
+                .bg(theme.accented_fg)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme.accented_fg)
+        };
+
+        let cancel_style = if self.focus == FocusArea::Buttons && self.selected_button == 1 {
+            Style::default()
+                .fg(theme.fg)
+                .bg(theme.accented_fg)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme.accented_fg)
+        };
+
+        let buttons = Line::from(vec![
+            Span::styled(format!("[ {} ]", t.ui_continue()), continue_style),
+            Span::raw("    "),
+            Span::styled(format!("[ {} ]", t.ui_cancel()), cancel_style),
+        ]);
+
+        let buttons_paragraph = Paragraph::new(buttons).alignment(Alignment::Center);
+        buttons_paragraph.render(chunks[6], buf);
+
+        // Save buttons area for mouse handling
+        self.last_buttons_area = Some(chunks[6]);
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<Option<ModalResult<Self::Result>>> {
-        match key.code {
-            KeyCode::Enter | KeyCode::Tab => {
-                if self.is_valid() {
-                    Ok(Some(ModalResult::Confirmed(self.input.clone())))
-                } else {
-                    Ok(None)
+        // Escape always cancels
+        if key.code == KeyCode::Esc {
+            return Ok(Some(ModalResult::Cancelled));
+        }
+
+        match self.focus {
+            FocusArea::Input => {
+                match key.code {
+                    KeyCode::Down => {
+                        // Move focus to buttons
+                        self.focus = FocusArea::Buttons;
+                        Ok(None)
+                    }
+                    KeyCode::Enter | KeyCode::Tab => {
+                        if self.is_valid() {
+                            Ok(Some(ModalResult::Confirmed(self.input.clone())))
+                        } else {
+                            Ok(None)
+                        }
+                    }
+                    KeyCode::Left => {
+                        if self.cursor_position > 0 {
+                            self.cursor_position -= 1;
+                        }
+                        Ok(None)
+                    }
+                    KeyCode::Right => {
+                        let char_count = self.input.chars().count();
+                        if self.cursor_position < char_count {
+                            self.cursor_position += 1;
+                        }
+                        Ok(None)
+                    }
+                    KeyCode::Home => {
+                        self.cursor_position = 0;
+                        Ok(None)
+                    }
+                    KeyCode::End => {
+                        self.cursor_position = self.input.chars().count();
+                        Ok(None)
+                    }
+                    KeyCode::Backspace => {
+                        self.delete_char();
+                        Ok(None)
+                    }
+                    KeyCode::Delete => {
+                        self.delete_char_forward();
+                        Ok(None)
+                    }
+                    KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.cursor_position = 0;
+                        Ok(None)
+                    }
+                    KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.cursor_position = self.input.chars().count();
+                        Ok(None)
+                    }
+                    KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.input.clear();
+                        self.cursor_position = 0;
+                        Ok(None)
+                    }
+                    KeyCode::Char(c) => {
+                        if !key.modifiers.contains(KeyModifiers::CONTROL) {
+                            self.insert_char(c);
+                        }
+                        Ok(None)
+                    }
+                    _ => Ok(None),
                 }
             }
-            KeyCode::Esc => Ok(Some(ModalResult::Cancelled)),
-            KeyCode::Left => {
-                if self.cursor_position > 0 {
-                    self.cursor_position -= 1;
+            FocusArea::Buttons => {
+                match key.code {
+                    KeyCode::Left => {
+                        // Move to previous button (wrap around)
+                        self.selected_button = if self.selected_button == 0 { 1 } else { 0 };
+                        Ok(None)
+                    }
+                    KeyCode::Right => {
+                        // Move to next button (wrap around)
+                        self.selected_button = if self.selected_button == 1 { 0 } else { 1 };
+                        Ok(None)
+                    }
+                    KeyCode::Up => {
+                        // Move focus back to input
+                        self.focus = FocusArea::Input;
+                        Ok(None)
+                    }
+                    KeyCode::Enter => {
+                        // Execute selected button action
+                        if self.selected_button == 0 {
+                            // Continue button
+                            if self.is_valid() {
+                                Ok(Some(ModalResult::Confirmed(self.input.clone())))
+                            } else {
+                                Ok(None)
+                            }
+                        } else {
+                            // Cancel button
+                            Ok(Some(ModalResult::Cancelled))
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        if !key.modifiers.contains(KeyModifiers::CONTROL) {
+                            // Switch back to input and insert character
+                            self.focus = FocusArea::Input;
+                            self.insert_char(c);
+                        }
+                        Ok(None)
+                    }
+                    KeyCode::Backspace => {
+                        // Switch back to input and delete character
+                        self.focus = FocusArea::Input;
+                        self.delete_char();
+                        Ok(None)
+                    }
+                    KeyCode::Delete => {
+                        // Switch back to input and delete character forward
+                        self.focus = FocusArea::Input;
+                        self.delete_char_forward();
+                        Ok(None)
+                    }
+                    _ => Ok(None),
                 }
+            }
+        }
+    }
+
+    fn handle_mouse(
+        &mut self,
+        mouse: crossterm::event::MouseEvent,
+        _modal_area: Rect,
+    ) -> Result<Option<ModalResult<Self::Result>>> {
+        use crossterm::event::MouseEventKind;
+
+        // Only handle left button press
+        if mouse.kind != MouseEventKind::Down(crossterm::event::MouseButton::Left) {
+            return Ok(None);
+        }
+
+        // Check if we have stored buttons area
+        let Some(buttons_area) = self.last_buttons_area else {
+            return Ok(None);
+        };
+
+        // Check if click is within buttons area
+        if mouse.row < buttons_area.y
+            || mouse.row >= buttons_area.y + buttons_area.height
+            || mouse.column < buttons_area.x
+            || mouse.column >= buttons_area.x + buttons_area.width
+        {
+            return Ok(None);
+        }
+
+        // Calculate button positions
+        let t = crate::i18n::t();
+        let continue_text = format!("[ {} ]", t.ui_continue());
+        let cancel_text = format!("[ {} ]", t.ui_cancel());
+        let total_text_width = continue_text.len() + 4 + cancel_text.len();
+
+        let start_col =
+            buttons_area.x + (buttons_area.width.saturating_sub(total_text_width as u16)) / 2;
+        let continue_end = start_col + continue_text.len() as u16;
+        let cancel_start = continue_end + 4;
+        let cancel_end = cancel_start + cancel_text.len() as u16;
+
+        // Determine which button was clicked
+        if mouse.column >= start_col && mouse.column < continue_end {
+            // Continue button clicked
+            self.focus = FocusArea::Buttons;
+            self.selected_button = 0;
+            // Execute Continue action
+            if self.is_valid() {
+                Ok(Some(ModalResult::Confirmed(self.input.clone())))
+            } else {
                 Ok(None)
             }
-            KeyCode::Right => {
-                let char_count = self.input.chars().count();
-                if self.cursor_position < char_count {
-                    self.cursor_position += 1;
-                }
-                Ok(None)
-            }
-            KeyCode::Home => {
-                self.cursor_position = 0;
-                Ok(None)
-            }
-            KeyCode::End => {
-                self.cursor_position = self.input.chars().count();
-                Ok(None)
-            }
-            KeyCode::Backspace => {
-                self.delete_char();
-                Ok(None)
-            }
-            KeyCode::Delete => {
-                self.delete_char_forward();
-                Ok(None)
-            }
-            KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.cursor_position = 0;
-                Ok(None)
-            }
-            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.cursor_position = self.input.chars().count();
-                Ok(None)
-            }
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.input.clear();
-                self.cursor_position = 0;
-                Ok(None)
-            }
-            KeyCode::Char(c) => {
-                if !key.modifiers.contains(KeyModifiers::CONTROL) {
-                    self.insert_char(c);
-                }
-                Ok(None)
-            }
-            _ => Ok(None),
+        } else if mouse.column >= cancel_start && mouse.column < cancel_end {
+            // Cancel button clicked
+            self.focus = FocusArea::Buttons;
+            self.selected_button = 1;
+            // Execute Cancel action
+            Ok(Some(ModalResult::Cancelled))
+        } else {
+            Ok(None)
         }
     }
 }

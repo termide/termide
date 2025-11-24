@@ -15,7 +15,7 @@ use crate::{
 use super::{menu::render_menu, modal::Modal, status_bar::StatusBar};
 
 /// Render the main application layout
-pub fn render_layout(frame: &mut Frame, state: &AppState, panels: &mut PanelContainer) {
+pub fn render_layout(frame: &mut Frame, state: &mut AppState, panels: &mut PanelContainer) {
     let size = frame.area();
 
     // Set application background
@@ -190,11 +190,13 @@ pub fn render_layout(frame: &mut Frame, state: &AppState, panels: &mut PanelCont
 }
 
 /// Render modal windows
-fn render_dropdowns_and_modals(frame: &mut Frame, state: &AppState) {
+fn render_dropdowns_and_modals(frame: &mut Frame, state: &mut AppState) {
     // Render active modal window if it's open
-    if let Some(modal) = state.get_active_modal() {
+    // Copy theme before getting mutable modal reference to avoid borrow checker issues
+    let theme = state.theme;
+
+    if let Some(modal) = state.get_active_modal_mut() {
         let area = frame.area();
-        let theme = &state.theme;
         match modal {
             ActiveModal::Confirm(m) => m.render(area, frame.buffer_mut(), theme),
             ActiveModal::Input(m) => m.render(area, frame.buffer_mut(), theme),
@@ -203,6 +205,7 @@ fn render_dropdowns_and_modals(frame: &mut Frame, state: &AppState) {
             ActiveModal::Conflict(m) => m.render(area, frame.buffer_mut(), theme),
             ActiveModal::Info(m) => m.render(area, frame.buffer_mut(), theme),
             ActiveModal::RenamePattern(m) => m.render(area, frame.buffer_mut(), theme),
+            ActiveModal::EditableSelect(m) => m.render(area, frame.buffer_mut(), theme),
         }
     }
 }

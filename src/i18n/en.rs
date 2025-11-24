@@ -469,12 +469,36 @@ impl Translation for English {
     }
 
     // Modal titles and prompts for copy/move
-    fn modal_copy_title(&self) -> &str {
-        "Copy"
+    fn modal_copy_single_title(&self, name: &str) -> String {
+        format!("Copy '{}'", name)
     }
 
-    fn modal_move_title(&self) -> &str {
-        "Move"
+    fn modal_copy_multiple_title(&self, count: usize) -> String {
+        format!("Copy {} elements", count)
+    }
+
+    fn modal_move_single_title(&self, name: &str) -> String {
+        format!("Move '{}'", name)
+    }
+
+    fn modal_move_multiple_title(&self, count: usize) -> String {
+        format!("Move {} elements", count)
+    }
+
+    fn modal_create_file_title(&self) -> &str {
+        "Create File"
+    }
+
+    fn modal_create_dir_title(&self) -> &str {
+        "Create Directory"
+    }
+
+    fn modal_delete_single_title(&self, name: &str) -> String {
+        format!("Delete '{}'", name)
+    }
+
+    fn modal_delete_multiple_title(&self, count: usize) -> String {
+        format!("Delete {} elements", count)
     }
 
     fn modal_save_as_title(&self) -> &str {
@@ -485,26 +509,20 @@ impl Translation for English {
         "Enter file name:"
     }
 
-    fn modal_copy_single_prompt(&self, name: &str) -> String {
-        format!(
-            "Where to copy '{}'?\n(enter path: 'subdir/', '../', or new name)",
-            name
-        )
+    fn modal_copy_single_prompt(&self, _name: &str) -> String {
+        String::new()
     }
 
-    fn modal_copy_multiple_prompt(&self, count: usize) -> String {
-        format!(
-            "Where to copy {} items?\n(enter path: 'subdir/' or '../')",
-            count
-        )
+    fn modal_copy_multiple_prompt(&self, _count: usize) -> String {
+        String::new()
     }
 
-    fn modal_move_single_prompt(&self, name: &str) -> String {
-        format!("Move '{}' to (path/name):", name)
+    fn modal_move_single_prompt(&self, _name: &str) -> String {
+        String::new()
     }
 
-    fn modal_move_multiple_prompt(&self, count: usize) -> String {
-        format!("Move {} items to:", count)
+    fn modal_move_multiple_prompt(&self, _count: usize) -> String {
+        String::new()
     }
 
     // Batch operation results
@@ -642,6 +660,22 @@ impl Translation for English {
 
     fn ui_no(&self) -> &str {
         "No"
+    }
+
+    fn ui_ok(&self) -> &str {
+        "OK"
+    }
+
+    fn ui_cancel(&self) -> &str {
+        "Cancel"
+    }
+
+    fn ui_continue(&self) -> &str {
+        "Continue"
+    }
+
+    fn ui_close(&self) -> &str {
+        "Close"
     }
 
     fn ui_enter_confirm(&self) -> &str {

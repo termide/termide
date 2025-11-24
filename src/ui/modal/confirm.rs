@@ -18,6 +18,7 @@ pub struct ConfirmModal {
     title: String,
     message: String,
     selected: bool, // true = Yes, false = No
+    last_buttons_area: Option<Rect>,
 }
 
 impl ConfirmModal {
@@ -27,6 +28,7 @@ impl ConfirmModal {
             title: title.into(),
             message: message.into(),
             selected: true, // Default is Yes
+            last_buttons_area: None,
         }
     }
 
@@ -92,12 +94,11 @@ impl ConfirmModal {
 impl Modal for ConfirmModal {
     type Result = bool;
 
-    fn render(&self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+    fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         // Calculate required height based on content:
-        // 1 (top border) + 1 (empty line) + N (message lines) +
-        // 1 (empty line) + 1 (buttons) + 1 (empty line) + 1 (bottom border) = N + 6
+        // 1 (top border) + N (message lines) + 1 (buttons) + 1 (bottom border) = N + 3
         let message_lines = self.message.lines().count().max(1);
-        let modal_height = (message_lines + 6) as u16;
+        let modal_height = (message_lines + 3) as u16;
 
         // Calculate dynamic width based on content
         let modal_width = self.calculate_modal_width(area.width);
@@ -121,16 +122,13 @@ impl Modal for ConfirmModal {
         let inner = block.inner(modal_area);
         block.render(modal_area, buf);
 
-        // Split into: empty line, message, empty line, buttons, empty line
+        // Split into: message, buttons
         use ratatui::layout::{Constraint, Direction, Layout};
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1),                    // Empty line at top
                 Constraint::Length(message_lines as u16), // Message
-                Constraint::Length(1),                    // Empty line between message and buttons
                 Constraint::Length(1),                    // Buttons
-                Constraint::Length(1),                    // Empty line at bottom
             ])
             .split(inner);
 
@@ -138,7 +136,7 @@ impl Modal for ConfirmModal {
         let message = Paragraph::new(self.message.clone())
             .alignment(Alignment::Center)
             .style(Style::default().fg(theme.bg));
-        message.render(chunks[1], buf);
+        message.render(chunks[0], buf);
 
         // Render buttons
         let t = i18n::t();
@@ -168,7 +166,10 @@ impl Modal for ConfirmModal {
         ]);
 
         let buttons_paragraph = Paragraph::new(buttons).alignment(Alignment::Center);
-        buttons_paragraph.render(chunks[3], buf);
+        buttons_paragraph.render(chunks[1], buf);
+
+        // Save buttons area for mouse handling
+        self.last_buttons_area = Some(chunks[1]);
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<Option<ModalResult<Self::Result>>> {
@@ -182,6 +183,59 @@ impl Modal for ConfirmModal {
             KeyCode::Char('y') | KeyCode::Char('Y') => Ok(Some(ModalResult::Confirmed(true))),
             KeyCode::Char('n') | KeyCode::Char('N') => Ok(Some(ModalResult::Confirmed(false))),
             _ => Ok(None),
+        }
+    }
+
+    fn handle_mouse(
+        &mut self,
+        mouse: crossterm::event::MouseEvent,
+        _modal_area: Rect,
+    ) -> Result<Option<ModalResult<Self::Result>>> {
+        use crossterm::event::MouseEventKind;
+
+        // Only handle left button press
+        if mouse.kind != MouseEventKind::Down(crossterm::event::MouseButton::Left) {
+            return Ok(None);
+        }
+
+        // Check if we have stored buttons area
+        let Some(buttons_area) = self.last_buttons_area else {
+            return Ok(None);
+        };
+
+        // Check if click is within buttons area
+        if mouse.row < buttons_area.y
+            || mouse.row >= buttons_area.y + buttons_area.height
+            || mouse.column < buttons_area.x
+            || mouse.column >= buttons_area.x + buttons_area.width
+        {
+            return Ok(None);
+        }
+
+        // Calculate button positions
+        // Buttons are centered: "[ Yes ]    [ No ]"
+        let t = i18n::t();
+        let yes_text = format!("[ {} ]", t.ui_yes());
+        let no_text = format!("[ {} ]", t.ui_no());
+        let total_text_width = yes_text.len() + 4 + no_text.len(); // +4 for spacing
+
+        let start_col =
+            buttons_area.x + (buttons_area.width.saturating_sub(total_text_width as u16)) / 2;
+        let yes_end = start_col + yes_text.len() as u16;
+        let no_start = yes_end + 4; // 4 spaces between buttons
+        let no_end = no_start + no_text.len() as u16;
+
+        // Determine which button was clicked
+        if mouse.column >= start_col && mouse.column < yes_end {
+            // Yes button clicked
+            self.selected = true;
+            Ok(Some(ModalResult::Confirmed(true)))
+        } else if mouse.column >= no_start && mouse.column < no_end {
+            // No button clicked
+            self.selected = false;
+            Ok(Some(ModalResult::Confirmed(false)))
+        } else {
+            Ok(None)
         }
     }
 }

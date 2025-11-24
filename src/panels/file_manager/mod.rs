@@ -472,7 +472,7 @@ impl Panel for FileManager {
             (KeyCode::Char('f'), _) | (KeyCode::Char('F'), _) => {
                 // Create new file - open InputModal
                 let t = i18n::t();
-                let modal = InputModal::new(t.fm_create_file_prompt(), t.fm_create_file_prompt());
+                let modal = InputModal::new(t.modal_create_file_title(), "");
                 let action = PendingAction::CreateFile {
                     panel_index: 0, // will be updated in app.rs
                     directory: self.current_path.clone(),
@@ -482,7 +482,7 @@ impl Panel for FileManager {
             (KeyCode::Char('d'), _) | (KeyCode::Char('D'), _) | (KeyCode::F(7), _) => {
                 // Create new directory - open InputModal
                 let t = i18n::t();
-                let modal = InputModal::new(t.fm_create_dir_prompt(), t.fm_create_dir_prompt());
+                let modal = InputModal::new(t.modal_create_dir_title(), "");
                 let action = PendingAction::CreateDirectory {
                     panel_index: 0, // will be updated in app.rs
                     directory: self.current_path.clone(),
@@ -497,9 +497,14 @@ impl Panel for FileManager {
                 }
 
                 let t = i18n::t();
-                let message = t.fm_delete_confirm(paths.len());
+                let title = if paths.len() == 1 {
+                    let file_name = paths[0].file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                    t.modal_delete_single_title(file_name)
+                } else {
+                    t.modal_delete_multiple_title(paths.len())
+                };
 
-                let modal = crate::ui::modal::ConfirmModal::new("Delete", &message);
+                let modal = crate::ui::modal::ConfirmModal::new(&title, "");
                 let action = PendingAction::DeletePath {
                     panel_index: 0, // will be updated in app.rs
                     paths,

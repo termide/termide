@@ -482,12 +482,36 @@ impl Translation for Russian {
     }
 
     // Modal titles and prompts for copy/move
-    fn modal_copy_title(&self) -> &str {
-        "Копировать"
+    fn modal_copy_single_title(&self, name: &str) -> String {
+        format!("Копировать '{}'", name)
     }
 
-    fn modal_move_title(&self) -> &str {
-        "Переместить"
+    fn modal_copy_multiple_title(&self, count: usize) -> String {
+        format!("Копировать {} элементов", count)
+    }
+
+    fn modal_move_single_title(&self, name: &str) -> String {
+        format!("Переместить '{}'", name)
+    }
+
+    fn modal_move_multiple_title(&self, count: usize) -> String {
+        format!("Переместить {} элементов", count)
+    }
+
+    fn modal_create_file_title(&self) -> &str {
+        "Создать файл"
+    }
+
+    fn modal_create_dir_title(&self) -> &str {
+        "Создать каталог"
+    }
+
+    fn modal_delete_single_title(&self, name: &str) -> String {
+        format!("Удалить '{}'", name)
+    }
+
+    fn modal_delete_multiple_title(&self, count: usize) -> String {
+        format!("Удалить {} элементов", count)
     }
 
     fn modal_save_as_title(&self) -> &str {
@@ -498,26 +522,20 @@ impl Translation for Russian {
         "Введите имя файла:"
     }
 
-    fn modal_copy_single_prompt(&self, name: &str) -> String {
-        format!(
-            "Куда копировать '{}'?\n(введите путь: 'subdir/', '../', или новое имя)",
-            name
-        )
+    fn modal_copy_single_prompt(&self, _name: &str) -> String {
+        String::new()
     }
 
-    fn modal_copy_multiple_prompt(&self, count: usize) -> String {
-        format!(
-            "Куда копировать {} элементов?\n(введите путь: 'subdir/' или '../')",
-            count
-        )
+    fn modal_copy_multiple_prompt(&self, _count: usize) -> String {
+        String::new()
     }
 
-    fn modal_move_single_prompt(&self, name: &str) -> String {
-        format!("Переместить '{}' в (путь/имя):", name)
+    fn modal_move_single_prompt(&self, _name: &str) -> String {
+        String::new()
     }
 
-    fn modal_move_multiple_prompt(&self, count: usize) -> String {
-        format!("Переместить {} элементов в:", count)
+    fn modal_move_multiple_prompt(&self, _count: usize) -> String {
+        String::new()
     }
 
     // Batch operation results
@@ -655,6 +673,22 @@ impl Translation for Russian {
 
     fn ui_no(&self) -> &str {
         "Нет"
+    }
+
+    fn ui_ok(&self) -> &str {
+        "ОК"
+    }
+
+    fn ui_cancel(&self) -> &str {
+        "Отмена"
+    }
+
+    fn ui_continue(&self) -> &str {
+        "Продолжить"
+    }
+
+    fn ui_close(&self) -> &str {
+        "Закрыть"
     }
 
     fn ui_enter_confirm(&self) -> &str {
