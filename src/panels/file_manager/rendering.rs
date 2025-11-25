@@ -112,13 +112,7 @@ impl FileManager {
                     GitStatus::Modified => Style::default().fg(theme.warning),
                     GitStatus::Added => Style::default().fg(theme.success),
                     GitStatus::Deleted => Style::default().fg(theme.error),
-                    GitStatus::Unmodified => {
-                        if entry.is_hidden {
-                            Style::default().fg(theme.disabled)
-                        } else {
-                            Style::default().fg(theme.fg)
-                        }
-                    }
+                    GitStatus::Unmodified => Style::default().fg(theme.fg),
                 };
                 (Style::default(), fg_style)
             };

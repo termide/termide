@@ -242,6 +242,11 @@ pub trait Translation: Send + Sync {
     fn file_info_modified(&self) -> &str;
     fn file_info_calculating(&self) -> &str;
     fn file_info_press_key(&self) -> &str;
+    fn file_info_git(&self) -> &str;
+    fn file_info_git_uncommitted(&self, count: usize) -> String;
+    fn file_info_git_ahead(&self, count: usize) -> String;
+    fn file_info_git_behind(&self, count: usize) -> String;
+    fn file_info_git_ignored(&self) -> &str;
 
     // File types
     fn file_type_directory(&self) -> &str;

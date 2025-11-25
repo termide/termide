@@ -781,6 +781,87 @@ impl Translation for Russian {
         "Нажмите любую клавишу для закрытия"
     }
 
+    fn file_info_git(&self) -> &str {
+        "Git"
+    }
+
+    fn file_info_git_uncommitted(&self, count: usize) -> String {
+        // Helper function for Russian pluralization
+        fn pluralize(n: usize, one: &str, few: &str, many: &str) -> String {
+            let last_digit = n % 10;
+            let last_two_digits = n % 100;
+
+            if (11..=19).contains(&last_two_digits) {
+                format!("{} {}", n, many)
+            } else if last_digit == 1 {
+                format!("{} {}", n, one)
+            } else if (2..=4).contains(&last_digit) {
+                format!("{} {}", n, few)
+            } else {
+                format!("{} {}", n, many)
+            }
+        }
+
+        if count == 0 {
+            "нет изменений для коммита".to_string()
+        } else {
+            let changes = pluralize(count, "изменение", "изменения", "изменений");
+            format!("{} для коммита", changes)
+        }
+    }
+
+    fn file_info_git_ahead(&self, count: usize) -> String {
+        fn pluralize(n: usize, one: &str, few: &str, many: &str) -> String {
+            let last_digit = n % 10;
+            let last_two_digits = n % 100;
+
+            if (11..=19).contains(&last_two_digits) {
+                format!("{} {}", n, many)
+            } else if last_digit == 1 {
+                format!("{} {}", n, one)
+            } else if (2..=4).contains(&last_digit) {
+                format!("{} {}", n, few)
+            } else {
+                format!("{} {}", n, many)
+            }
+        }
+
+        if count == 0 {
+            "нет коммитов для отправки".to_string()
+        } else {
+            let commits = pluralize(count, "коммит", "коммита", "коммитов");
+            format!("{} для отправки", commits)
+        }
+    }
+
+    fn file_info_git_behind(&self, count: usize) -> String {
+        fn pluralize(n: usize, one: &str, few: &str, many: &str) -> String {
+            let last_digit = n % 10;
+            let last_two_digits = n % 100;
+
+            if (11..=19).contains(&last_two_digits) {
+                format!("{} {}", n, many)
+            } else if last_digit == 1 {
+                format!("{} {}", n, one)
+            } else if (2..=4).contains(&last_digit) {
+                format!("{} {}", n, few)
+            } else {
+                format!("{} {}", n, many)
+            }
+        }
+
+        if count == 0 {
+            "нет коммитов для получения".to_string()
+        } else {
+            let commits = pluralize(count, "коммит", "коммита", "коммитов");
+            format!("{} для получения", commits)
+        }
+    }
+
+    fn file_info_git_ignored(&self) -> &str {
+        "не в индексе git"
+    }
+
     // File types
     fn file_type_directory(&self) -> &str {
         "Каталог"

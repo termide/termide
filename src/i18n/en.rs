@@ -768,6 +768,44 @@ impl Translation for English {
         "Press any key to close"
     }
 
+    fn file_info_git(&self) -> &str {
+        "Git"
+    }
+
+    fn file_info_git_uncommitted(&self, count: usize) -> String {
+        if count == 0 {
+            "no changes to commit".to_string()
+        } else if count == 1 {
+            "1 change to commit".to_string()
+        } else {
+            format!("{} changes to commit", count)
+        }
+    }
+
+    fn file_info_git_ahead(&self, count: usize) -> String {
+        if count == 0 {
+            "no commits to push".to_string()
+        } else if count == 1 {
+            "1 commit to push".to_string()
+        } else {
+            format!("{} commits to push", count)
+        }
+    }
+
+    fn file_info_git_behind(&self, count: usize) -> String {
+        if count == 0 {
+            "no commits to pull".to_string()
+        } else if count == 1 {
+            "1 commit to pull".to_string()
+        } else {
+            format!("{} commits to pull", count)
+        }
+    }
+
+    fn file_info_git_ignored(&self) -> &str {
+        "not in git index"
+    }
+
     // File types
     fn file_type_directory(&self) -> &str {
         "Directory"

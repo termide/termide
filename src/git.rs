@@ -164,6 +164,29 @@ pub struct GitStatusCache {
 }
 
 impl GitStatusCache {
+    /// Check if any parent directory of the given path is ignored
+    fn is_parent_ignored(&self, path: &Path) -> bool {
+        // Check all parent directories
+        let mut current = path;
+        while let Some(parent) = current.parent() {
+            // Check in ignored_files set
+            if self.ignored_files.contains(parent) {
+                return true;
+            }
+            // Check in status_map
+            if let Some(&GitStatus::Ignored) = self.status_map.get(parent) {
+                return true;
+            }
+            // Move up to next parent
+            current = parent;
+            // Stop at empty path (root)
+            if parent.as_os_str().is_empty() {
+                break;
+            }
+        }
+        false
+    }
+
     /// Get status for file
     pub fn get_status(&self, file_name: &str) -> GitStatus {
         // Build full path: relative_path + file_name
@@ -173,16 +196,22 @@ impl GitStatusCache {
             self.relative_path.join(file_name)
         };
 
-        // First check ignored
+        // First check if file itself is ignored
         if self.ignored_files.contains(&full_path) {
             return GitStatus::Ignored;
         }
 
-        // Then check in status_map
-        self.status_map
-            .get(&full_path)
-            .copied()
-            .unwrap_or(GitStatus::Unmodified)
+        // Then check in status_map for exact match
+        if let Some(&status) = self.status_map.get(&full_path) {
+            return status;
+        }
+
+        // Finally, check if any parent directory is ignored
+        if self.is_parent_ignored(&full_path) {
+            return GitStatus::Ignored;
+        }
+
+        GitStatus::Unmodified
     }
 
     /// Check if file is ignored
@@ -234,6 +263,11 @@ impl GitStatusCache {
             }
         }
 
+        // Check if directory is inside an ignored parent directory
+        if self.is_parent_ignored(&full_path) {
+            return GitStatus::Ignored;
+        }
+
         // Then check if any nested files have changes
         if self.has_changes_in_directory(dir_name) {
             return GitStatus::Modified;
@@ -241,4 +275,202 @@ impl GitStatusCache {
 
         GitStatus::Unmodified
     }
+}
+
+/// Git repository status information
+#[derive(Debug, Clone, Copy)]
+pub struct GitRepoStatus {
+    /// Number of uncommitted changes (staged + unstaged)
+    pub uncommitted_changes: usize,
+    /// Number of commits ahead of remote (not pushed)
+    pub ahead: usize,
+    /// Number of commits behind remote (not pulled)
+    pub behind: usize,
+    /// Whether the file/directory is ignored by .gitignore
+    pub is_ignored: bool,
+}
+
+/// Get git repository status for a specific file or directory
+/// Returns information about uncommitted changes, ahead/behind status filtered by path
+///
+/// # Arguments
+/// * `repo_path` - Path to the git repository (used for git commands working directory)
+/// * `item_path` - Absolute path to the specific file or directory to check
+pub fn get_repo_status(repo_path: &Path, item_path: &Path) -> Option<GitRepoStatus> {
+    if !check_git_available() {
+        return None;
+    }
+
+    // Determine working directory for git commands from item_path
+    // If item_path is a file, use its parent directory
+    // If item_path is a directory, use it directly
+    let git_work_dir = if item_path.is_file() {
+        item_path.parent().unwrap_or(repo_path)
+    } else {
+        item_path
+    };
+
+    // Check if the item is in a git repository
+    let is_repo = Command::new("git")
+        .arg("rev-parse")
+        .arg("--is-inside-work-tree")
+        .current_dir(git_work_dir)
+        .output()
+        .ok()
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+
+    if !is_repo {
+        return None;
+    }
+
+    // Get repository root to calculate relative path
+    let repo_root = Command::new("git")
+        .arg("rev-parse")
+        .arg("--show-toplevel")
+        .current_dir(git_work_dir)
+        .output()
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                String::from_utf8(output.stdout)
+                    .ok()
+                    .map(|s| PathBuf::from(s.trim()))
+            } else {
+                None
+            }
+        })?;
+
+    // Calculate relative path from repository root to the item
+    let relative_path = item_path.strip_prefix(&repo_root).ok()?;
+
+    // Use "." if path is empty (item is repository root itself)
+    // Git doesn't accept empty string as pathspec
+    let git_path = if relative_path.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        relative_path
+    };
+
+    // Check if file/directory is ignored by .gitignore
+    // Uses git status --porcelain --ignored to match the logic used for file list display
+    let is_ignored = Command::new("git")
+        .arg("status")
+        .arg("--porcelain")
+        .arg("--ignored")
+        .arg("--")
+        .arg(git_path)
+        .current_dir(&repo_root)
+        .output()
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                String::from_utf8(output.stdout).ok().map(|stdout| {
+                    // Check if the specific path is ignored
+                    // For directories, only mark as ignored if the directory itself is ignored,
+                    // not if it just contains some ignored files
+                    if item_path.is_dir() {
+                        // For directories, check if the directory path appears as ignored
+                        let dir_pattern = git_path.to_str().unwrap_or("");
+                        stdout.lines().any(|line| {
+                            if let Some(ignored_path) = line.strip_prefix("!! ") {
+                                // Match exact directory or directory with trailing slash
+                                ignored_path == dir_pattern
+                                    || ignored_path == format!("{}/", dir_pattern)
+                            } else {
+                                false
+                            }
+                        })
+                    } else {
+                        // For files, check if the file path appears as ignored
+                        let file_pattern = git_path.to_str().unwrap_or("");
+                        stdout.lines().any(|line| {
+                            if let Some(ignored_path) = line.strip_prefix("!! ") {
+                                ignored_path == file_pattern
+                            } else {
+                                false
+                            }
+                        })
+                    }
+                })
+            } else {
+                None
+            }
+        })
+        .unwrap_or(false);
+
+    // Count uncommitted changes for this specific path
+    let uncommitted_changes = Command::new("git")
+        .arg("status")
+        .arg("--porcelain")
+        .arg("--")
+        .arg(git_path)
+        .current_dir(&repo_root)
+        .output()
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                String::from_utf8(output.stdout).ok().map(|stdout| {
+                    stdout
+                        .lines()
+                        .filter(|line| {
+                            // Count all lines except ignored files
+                            !line.starts_with("!!")
+                        })
+                        .count()
+                })
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+
+    // Get ahead count (commits not pushed that affect this path)
+    let ahead = Command::new("git")
+        .arg("rev-list")
+        .arg("--count")
+        .arg("@{upstream}..HEAD")
+        .arg("--")
+        .arg(git_path)
+        .current_dir(&repo_root)
+        .output()
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                String::from_utf8(output.stdout)
+                    .ok()
+                    .and_then(|s| s.trim().parse::<usize>().ok())
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+
+    // Get behind count (commits not pulled that affect this path)
+    let behind = Command::new("git")
+        .arg("rev-list")
+        .arg("--count")
+        .arg("HEAD..@{upstream}")
+        .arg("--")
+        .arg(git_path)
+        .current_dir(&repo_root)
+        .output()
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                String::from_utf8(output.stdout)
+                    .ok()
+                    .and_then(|s| s.trim().parse::<usize>().ok())
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+
+    Some(GitRepoStatus {
+        uncommitted_changes,
+        ahead,
+        behind,
+        is_ignored,
+    })
 }

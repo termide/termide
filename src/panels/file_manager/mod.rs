@@ -65,6 +65,7 @@ pub struct FileManager {
 pub(crate) struct FileEntry {
     pub name: String,
     pub is_dir: bool,
+    #[allow(dead_code)]
     pub is_hidden: bool,
     pub is_symlink: bool,
     pub is_executable: bool,

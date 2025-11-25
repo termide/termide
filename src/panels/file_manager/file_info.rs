@@ -201,7 +201,7 @@ impl FileManager {
                     .unwrap_or_else(|| "Unknown".to_string());
 
                 // Collect data without Name and Type
-                let data = vec![
+                let mut data = vec![
                     (
                         t.file_info_path().to_string(),
                         file_path.display().to_string(),
@@ -212,6 +212,33 @@ impl FileManager {
                     (t.file_info_created().to_string(), created),
                     (t.file_info_modified().to_string(), modified),
                 ];
+
+                // Add git status if in repository (filtered by specific file/directory)
+                if let Some(git_status) =
+                    crate::git::get_repo_status(&self.current_path, &file_path)
+                {
+                    if git_status.is_ignored {
+                        // If file is ignored, show only one line
+                        data.push((
+                            t.file_info_git().to_string(),
+                            t.file_info_git_ignored().to_string(),
+                        ));
+                    } else {
+                        // Otherwise show three lines for uncommitted, ahead, behind
+                        data.push((
+                            t.file_info_git().to_string(),
+                            t.file_info_git_uncommitted(git_status.uncommitted_changes),
+                        ));
+                        data.push((
+                            String::new(), // Empty key - aligns with first line's value
+                            t.file_info_git_ahead(git_status.ahead),
+                        ));
+                        data.push((
+                            String::new(), // Empty key
+                            t.file_info_git_behind(git_status.behind),
+                        ));
+                    }
+                }
 
                 let modal = crate::ui::modal::InfoModal::new(modal_title, data);
                 self.modal_request = Some((

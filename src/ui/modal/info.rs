@@ -51,32 +51,116 @@ impl InfoModal {
         SPINNER_FRAMES[self.spinner_frame]
     }
 
-    /// Calculate dynamic modal width based on content
-    fn calculate_modal_width(&self, screen_width: u16) -> u16 {
-        // 1. Title width (with padding on edges)
-        let title_width = self.title.width() as u16 + 2;
+    /// Wrap text to fit within max_width, breaking on delimiters
+    fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
+        if max_width == 0 {
+            return vec![text.to_string()];
+        }
 
-        // 2. Maximum line width (key + ": " + value)
-        let max_line_width = self
+        let text_width = text.width();
+        if text_width <= max_width {
+            return vec![text.to_string()];
+        }
+
+        let mut lines = Vec::new();
+        let mut current_line = String::new();
+        let mut current_width = 0;
+
+        // Split by path separators and spaces for better readability
+        let parts: Vec<&str> = if text.contains('/') || text.contains('\\') {
+            // For paths, split by separators
+            text.split_inclusive(&['/', '\\'][..]).collect()
+        } else {
+            // For regular text, split by words
+            text.split_inclusive(' ').collect()
+        };
+
+        for part in parts {
+            let part_width = part.width();
+
+            // If part alone is too long, do hard break
+            if part_width > max_width {
+                // Finish current line if any
+                if !current_line.is_empty() {
+                    lines.push(current_line.clone());
+                    current_line.clear();
+                    current_width = 0;
+                }
+
+                // Break the long part character by character
+                for ch in part.chars() {
+                    let ch_width = ch.to_string().width();
+                    if current_width + ch_width > max_width {
+                        lines.push(current_line.clone());
+                        current_line.clear();
+                        current_width = 0;
+                    }
+                    current_line.push(ch);
+                    current_width += ch_width;
+                }
+            } else if current_width + part_width > max_width {
+                // Part would overflow, start new line
+                if !current_line.is_empty() {
+                    lines.push(current_line.clone());
+                }
+                current_line = part.to_string();
+                current_width = part_width;
+            } else {
+                // Part fits in current line
+                current_line.push_str(part);
+                current_width += part_width;
+            }
+        }
+
+        // Add remaining line
+        if !current_line.is_empty() {
+            lines.push(current_line);
+        }
+
+        if lines.is_empty() {
+            lines.push(String::new());
+        }
+
+        lines
+    }
+
+    /// Calculate dynamic modal width based on content size
+    /// Fits content without wrapping, but respects screen size limits
+    fn calculate_modal_width(&self, screen_width: u16) -> u16 {
+        // Find maximum key length
+        let max_key_len = self
             .lines
             .iter()
-            .map(|(key, value)| key.width() + 2 + value.width()) // +2 for ": "
+            .map(|(key, _)| key.width())
             .max()
-            .unwrap_or(0) as u16;
+            .unwrap_or(0);
 
-        // Take maximum of all components
-        let content_width = title_width.max(max_line_width);
+        // Find maximum value length (accounting for potential spinner)
+        let max_value_len = self
+            .lines
+            .iter()
+            .map(|(_, value)| {
+                // Account for spinner characters if value contains "calculating"
+                let t = i18n::t();
+                if value.contains(t.file_info_calculating()) {
+                    value.width() + 2 // spinner char + space
+                } else {
+                    value.width()
+                }
+            })
+            .max()
+            .unwrap_or(0);
 
-        // Add margins and borders:
-        // - 2 for border (1 on each side)
-        // - 4 for padding (2 on each side for readability)
-        let total_width = content_width + 6;
+        // Calculate required width:
+        // padding (4) + borders (2) + key + ": " (2) + value
+        let content_width = 6 + max_key_len + 2 + max_value_len;
 
-        // Apply constraints:
-        // - Minimum 30 characters
-        // - Maximum 80% of screen width
-        let max_width = (screen_width as f32 * 0.8) as u16;
-        total_width.max(30).min(max_width).min(screen_width)
+        // Apply constraints: minimum 30, maximum 90% of screen width
+        let max_width = (screen_width as f32 * 0.9) as u16;
+        (content_width as u16)
+            .max(30)
+            .min(max_width)
+            .min(screen_width)
     }
 
     /// Create a centered rectangle with fixed size
@@ -111,13 +195,42 @@ impl Modal for InfoModal {
     type Result = ();
 
     fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
-        // Calculate required height based on content:
-        // 1 (top border) + 1 (empty line) + N (data lines) +
-        // 1 (empty line) + 1 (button) + 1 (bottom border) = N + 5
-        let modal_height = (self.lines.len() + 5) as u16;
-
         // Calculate dynamic width based on content
         let modal_width = self.calculate_modal_width(area.width);
+
+        // Find maximum key length for alignment
+        let max_key_len = self
+            .lines
+            .iter()
+            .map(|(key, _)| key.width())
+            .max()
+            .unwrap_or(0);
+
+        // Calculate available width for values
+        // modal_width - borders (2) - padding (4) - key_width - ": " (2)
+        let available_value_width = modal_width
+            .saturating_sub(6) // borders + padding
+            .saturating_sub(max_key_len as u16)
+            .saturating_sub(2) // ": "
+            .max(20) as usize; // minimum 20 chars for values
+
+        // Calculate total lines needed (with wrapping)
+        let t = i18n::t();
+        let mut total_data_lines = 0;
+        for (_, value) in &self.lines {
+            let display_value = if value.contains(t.file_info_calculating()) {
+                format!("{} {}", self.get_spinner_char(), value)
+            } else {
+                value.clone()
+            };
+            let wrapped = Self::wrap_text(&display_value, available_value_width);
+            total_data_lines += wrapped.len();
+        }
+
+        // Calculate required height based on wrapped content:
+        // 1 (top border) + 1 (empty line) + N (wrapped data lines) +
+        // 1 (empty line) + 1 (button) + 1 (bottom border) = N + 5
+        let modal_height = (total_data_lines + 5) as u16;
 
         // Create centered area with calculated dimensions
         let modal_area = Self::centered_rect_with_size(modal_width, modal_height, area);
@@ -144,22 +257,13 @@ impl Modal for InfoModal {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1),                       // Empty line at top
-                Constraint::Length(self.lines.len() as u16), // Data
+                Constraint::Length(total_data_lines as u16), // Data (wrapped)
                 Constraint::Length(1),                       // Empty line
                 Constraint::Length(1),                       // Button
             ])
             .split(inner);
 
-        // Find maximum key length for alignment
-        let max_key_len = self
-            .lines
-            .iter()
-            .map(|(key, _)| key.width())
-            .max()
-            .unwrap_or(0);
-
-        // Render tabular data with left alignment
-        let t = i18n::t();
+        // Render tabular data with left alignment and text wrapping
         let mut text_lines = Vec::new();
         for (key, value) in &self.lines {
             let padding = " ".repeat(max_key_len - key.width());
@@ -171,16 +275,47 @@ impl Modal for InfoModal {
                 value.clone()
             };
 
-            text_lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  {}{}", key, padding),
-                    Style::default()
-                        .fg(theme.accented_fg)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(": "),
-                Span::styled(display_value, Style::default().fg(theme.bg)),
-            ]));
+            // Wrap the value to fit available width
+            let wrapped_values = Self::wrap_text(&display_value, available_value_width);
+
+            // First line with key
+            if !wrapped_values.is_empty() {
+                // For empty keys, add 2 spaces instead of ": " to maintain alignment
+                let spans = if key.is_empty() {
+                    vec![
+                        Span::styled(
+                            format!("  {}{}", key, padding),
+                            Style::default()
+                                .fg(theme.accented_fg)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw("  "), // 2 spaces to align with ": "
+                        Span::styled(wrapped_values[0].clone(), Style::default().fg(theme.bg)),
+                    ]
+                } else {
+                    vec![
+                        Span::styled(
+                            format!("  {}{}", key, padding),
+                            Style::default()
+                                .fg(theme.accented_fg)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(": "),
+                        Span::styled(wrapped_values[0].clone(), Style::default().fg(theme.bg)),
+                    ]
+                };
+                text_lines.push(Line::from(spans));
+
+                // Additional lines with indent (continuation of value)
+                // Both empty and normal keys now have same indent since we add 2 spaces for empty keys
+                let indent = " ".repeat(max_key_len + 4); // "  " + key_len + "  " or ": "
+                for wrapped_line in wrapped_values.iter().skip(1) {
+                    text_lines.push(Line::from(vec![Span::styled(
+                        format!("{}{}", indent, wrapped_line),
+                        Style::default().fg(theme.bg),
+                    )]));
+                }
+            }
         }
 
         let data = Paragraph::new(text_lines).alignment(Alignment::Left);
