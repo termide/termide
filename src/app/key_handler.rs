@@ -121,7 +121,6 @@ impl App {
                 | PendingAction::RenameWithPattern { .. }
                 | PendingAction::Search
                 | PendingAction::Replace
-                | PendingAction::ReplaceStep2 { .. }
                 | PendingAction::NextPanel
                 | PendingAction::PrevPanel
                 | PendingAction::QuitApplication => {
@@ -565,7 +564,7 @@ impl App {
     }
 
     /// Close all Welcome panels (called before opening new panel)
-    fn close_welcome_panels(&mut self) {
+    pub(super) fn close_welcome_panels(&mut self) {
         // Collect welcome panel indices (in reverse order for correct removal)
         let welcome_indices: Vec<usize> = (0..self.panels.count())
             .filter(|&i| {

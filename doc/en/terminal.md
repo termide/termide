@@ -17,6 +17,11 @@ The terminal panel provides a full-featured terminal emulator with pseudotermina
 | `Shift+Home`           | Go to beginning of output history          |
 | `Shift+End`            | Go to current line (end of history)        |
 | `Ctrl+Shift+V`         | Paste text from clipboard                  |
+| `Ctrl+Shift+М`         | Paste text from clipboard (Cyrillic layout)|
+
+**Keyboard Layout Support:**
+
+TermIDE supports Cyrillic keyboard layouts for common shortcuts. When using a Russian/Cyrillic layout, you can use `Ctrl+Shift+М` (where М is the Cyrillic letter corresponding to V) instead of switching to Latin layout. This works for paste operations in the terminal.
 
 All other key combinations are passed directly to the application running in the terminal.
 

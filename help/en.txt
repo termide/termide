@@ -1,17 +1,15 @@
-
-╔═══════════════════════════════════════════════════════════════════════════╗
-║                                  TermIDE                                  ║
-║                       Terminal IDE and File Manager                       ║
-╚═══════════════════════════════════════════════════════════════════════════╝
-
-
   GLOBAL KEYS
 
-    F9           Open menu
-    Ctrl+H       Show this help
-    Ctrl+←/→     Switch between panels
-    Ctrl+W       Close current panel
-    Ctrl+Q       Quit application
+    Alt+M        Toggle menu
+    Alt+H        Show this help
+    Alt+←/→      Switch between panels
+    Alt+1..9     Go to panel by number
+    Alt+X / Esc  Close current panel
+    Alt+Q        Quit application
+    Alt+F        Open file manager panel
+    Alt+T        Open terminal panel
+    Alt+E        Open editor panel
+    Alt+P        Open config file in editor
 
 
   FILE MANAGER KEYS
@@ -45,9 +43,12 @@
     Ctrl+Y       Paste (alternative)
     Ctrl+Z       Undo
     Ctrl+Shift+Z Redo
-    Ctrl+F       Find text
+    Ctrl+F       Find text (interactive modal)
+    F3 / Shift+F3 Navigate search matches
+    Tab / Shift+Tab Navigate matches (when search active)
+    Ctrl+H       Replace text (interactive modal)
     Ctrl+G       Go to line
-    Escape       Close panel / Cancel
+    Escape       Close search/modal, or close panel
 
 
   Use arrow keys to scroll this help text.

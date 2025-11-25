@@ -73,8 +73,41 @@ impl App {
         // Determine active panel area
         let panel_area = self.get_active_panel_area();
 
-        if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+        // Handle mouse event and collect results
+        let file_to_open = if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
             panel.handle_mouse(mouse, panel_area)?;
+            panel.take_file_to_open()
+        } else {
+            None
+        };
+
+        // Handle file opening in editor (same logic as in key_handler.rs)
+        if let Some(file_path) = file_to_open {
+            self.close_welcome_panels();
+            let filename = file_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("?");
+            let t = crate::i18n::t();
+            self.state
+                .log_info(format!("Attempting to open file: {}", filename));
+
+            match crate::panels::editor::Editor::open_file(file_path.clone()) {
+                Ok(editor_panel) => {
+                    self.panels.add_panel(Box::new(editor_panel));
+                    let new_panel_index = self.panels.count().saturating_sub(1);
+                    self.state.set_active_panel(new_panel_index);
+                    self.state
+                        .log_success(format!("File '{}' opened in editor", filename));
+                    self.state.set_info(t.editor_file_opened(filename));
+                }
+                Err(e) => {
+                    let error_msg = t.status_error_open_file(filename, &e.to_string());
+                    self.state
+                        .log_error(format!("Error opening '{}': {}", filename, e));
+                    self.state.set_error(error_msg);
+                }
+            }
         }
 
         Ok(())

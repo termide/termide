@@ -4,6 +4,7 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Modifier, Style},
+    widgets::Widget,
 };
 use std::path::PathBuf;
 
@@ -93,6 +94,12 @@ pub struct Editor {
     highlight_cache: HighlightCache,
     /// Search state
     search_state: Option<SearchState>,
+    /// Last search query (preserved when search is closed)
+    last_search_query: Option<String>,
+    /// Last replace find query (preserved when replace is closed)
+    last_replace_find: Option<String>,
+    /// Last replace with text (preserved when replace is closed)
+    last_replace_with: Option<String>,
     /// Cached title
     cached_title: String,
     /// Modal window request
@@ -117,6 +124,9 @@ impl Editor {
             viewport: Viewport::default(),
             highlight_cache: HighlightCache::new(syntax_highlighter::global_highlighter(), false),
             search_state: None,
+            last_search_query: None,
+            last_replace_find: None,
+            last_replace_with: None,
             cached_title: "Untitled".to_string(),
             modal_request: None,
             config_update: None,
@@ -179,6 +189,9 @@ impl Editor {
             viewport: Viewport::default(),
             highlight_cache,
             search_state: None,
+            last_search_query: None,
+            last_replace_find: None,
+            last_replace_with: None,
             cached_title,
             modal_request: None,
             config_update: None,
@@ -200,6 +213,9 @@ impl Editor {
             viewport: Viewport::default(),
             highlight_cache: HighlightCache::new(syntax_highlighter::global_highlighter(), false),
             search_state: None,
+            last_search_query: None,
+            last_replace_find: None,
+            last_replace_with: None,
             cached_title: title,
             modal_request: None,
             config_update: None,
@@ -488,6 +504,9 @@ impl Editor {
 
     /// Paste from clipboard
     fn paste_from_clipboard(&mut self) -> Result<()> {
+        // Close search mode when editing begins
+        self.close_search();
+
         // Delete selected text before pasting
         self.delete_selection()?;
 
@@ -524,6 +543,9 @@ impl Editor {
 
     /// Insert character at cursor position
     fn insert_char(&mut self, ch: char) -> Result<()> {
+        // Close search mode when editing begins
+        self.close_search();
+
         // Delete selected text before insertion
         self.delete_selection()?;
 
@@ -540,6 +562,9 @@ impl Editor {
 
     /// Insert newline
     fn insert_newline(&mut self) -> Result<()> {
+        // Close search mode when editing begins
+        self.close_search();
+
         let old_line = self.cursor.line;
 
         // Delete selected text before insertion
@@ -998,9 +1023,12 @@ impl Editor {
         // Find closest match to current cursor
         search.find_closest_match(&self.cursor);
 
-        // Move cursor to first match
+        // Move cursor to end of match and create selection
         if let Some(match_cursor) = search.current_match_cursor() {
-            self.cursor = *match_cursor;
+            let query_len = search.query.chars().count();
+            let end_cursor = Cursor::at(match_cursor.line, match_cursor.column + query_len);
+            self.cursor = end_cursor;
+            self.selection = Some(Selection::new(*match_cursor, end_cursor));
         }
 
         self.search_state = Some(search);
@@ -1048,7 +1076,10 @@ impl Editor {
         if let Some(ref mut search) = self.search_state {
             search.next_match();
             if let Some(match_cursor) = search.current_match_cursor() {
-                self.cursor = *match_cursor;
+                let query_len = search.query.chars().count();
+                let end_cursor = Cursor::at(match_cursor.line, match_cursor.column + query_len);
+                self.cursor = end_cursor;
+                self.selection = Some(Selection::new(*match_cursor, end_cursor));
             }
         }
     }
@@ -1058,14 +1089,39 @@ impl Editor {
         if let Some(ref mut search) = self.search_state {
             search.prev_match();
             if let Some(match_cursor) = search.current_match_cursor() {
-                self.cursor = *match_cursor;
+                let query_len = search.query.chars().count();
+                let end_cursor = Cursor::at(match_cursor.line, match_cursor.column + query_len);
+                self.cursor = end_cursor;
+                self.selection = Some(Selection::new(*match_cursor, end_cursor));
             }
         }
     }
 
     /// Close search
     pub fn close_search(&mut self) {
+        // Preserve the last search/replace query before closing
+        if let Some(ref search) = self.search_state {
+            if let Some(ref replace_with) = search.replace_with {
+                // This is a replace operation - save to replace history
+                self.last_replace_find = Some(search.query.clone());
+                self.last_replace_with = Some(replace_with.clone());
+            } else {
+                // This is a search operation - save to search history
+                self.last_search_query = Some(search.query.clone());
+            }
+        }
         self.search_state = None;
+    }
+
+    /// Get search match information (current index, total count)
+    pub fn get_search_match_info(&self) -> Option<(usize, usize)> {
+        if let Some(ref search) = self.search_state {
+            let current = search.current_match.unwrap_or(0);
+            let total = search.matches.len();
+            Some((current, total))
+        } else {
+            None
+        }
     }
 
     /// Start search with replace
@@ -1078,12 +1134,22 @@ impl Editor {
         // Find closest match to current cursor
         search.find_closest_match(&self.cursor);
 
-        // Move cursor to first match
+        // Move cursor to first match and create selection
         if let Some(match_cursor) = search.current_match_cursor() {
-            self.cursor = *match_cursor;
+            let query_len = search.query.chars().count();
+            let end_cursor = Cursor::at(match_cursor.line, match_cursor.column + query_len);
+            self.cursor = end_cursor;
+            self.selection = Some(Selection::new(*match_cursor, end_cursor));
         }
 
         self.search_state = Some(search);
+    }
+
+    /// Update replace_with value in active search state without rebuilding search
+    pub fn update_replace_with(&mut self, replace_with: String) {
+        if let Some(ref mut search) = self.search_state {
+            search.replace_with = Some(replace_with);
+        }
     }
 
     /// Replace current match
@@ -1132,6 +1198,21 @@ impl Editor {
                 // Remove this match from list
                 search.matches.remove(idx);
 
+                // Update positions of remaining matches on the same line after replacement point
+                let replacement_offset = replace_with.len() as isize - query_len as isize;
+                if replacement_offset != 0 {
+                    for match_pos in search.matches.iter_mut() {
+                        // Only update matches on same line that come after the replacement
+                        if match_pos.line == match_cursor.line
+                            && match_pos.column > match_cursor.column
+                        {
+                            // Adjust column position by the length difference
+                            match_pos.column =
+                                (match_pos.column as isize + replacement_offset).max(0) as usize;
+                        }
+                    }
+                }
+
                 // Update current match index
                 if search.matches.is_empty() {
                     search.current_match = None;
@@ -1139,9 +1220,12 @@ impl Editor {
                     search.current_match = Some(search.matches.len() - 1);
                 }
 
-                // Move cursor to next match
+                // Move cursor to next match and create selection
                 if let Some(match_cursor) = search.current_match_cursor() {
-                    self.cursor = *match_cursor;
+                    let query_len = search.query.chars().count();
+                    let end_cursor = Cursor::at(match_cursor.line, match_cursor.column + query_len);
+                    self.cursor = end_cursor;
+                    self.selection = Some(Selection::new(*match_cursor, end_cursor));
                 }
             }
         }
@@ -1197,81 +1281,14 @@ impl Panel for Editor {
         area: Rect,
         buf: &mut Buffer,
         is_focused: bool,
-        _panel_index: usize,
+        panel_index: usize,
         state: &AppState,
     ) {
-        // Отрисовать рамку
-        let border_color = if is_focused {
-            state.theme.accented_fg
-        } else {
-            state.theme.disabled
-        };
-
-        // Рисуем простую рамку
-        let border_style = Style::default().fg(border_color);
-
-        // Верхняя граница с заголовком
-        if let Some(cell) = buf.cell_mut((area.x, area.y)) {
-            cell.set_char('┌');
-            cell.set_style(border_style);
-        }
-
-        let title = format!(" {} ", self.title());
-        let title_width = title.len() as u16;
-        for (i, ch) in title.chars().enumerate() {
-            if let Some(cell) = buf.cell_mut((area.x + 1 + i as u16, area.y)) {
-                cell.set_char(ch);
-                cell.set_style(border_style.add_modifier(Modifier::BOLD));
-            }
-        }
-
-        for x in (area.x + 1 + title_width)..(area.x + area.width - 1) {
-            if let Some(cell) = buf.cell_mut((x, area.y)) {
-                cell.set_char('─');
-                cell.set_style(border_style);
-            }
-        }
-
-        if let Some(cell) = buf.cell_mut((area.x + area.width - 1, area.y)) {
-            cell.set_char('┐');
-            cell.set_style(border_style);
-        }
-
-        // Боковые границы
-        for y in (area.y + 1)..(area.y + area.height - 1) {
-            if let Some(cell) = buf.cell_mut((area.x, y)) {
-                cell.set_char('│');
-                cell.set_style(border_style);
-            }
-            if let Some(cell) = buf.cell_mut((area.x + area.width - 1, y)) {
-                cell.set_char('│');
-                cell.set_style(border_style);
-            }
-        }
-
-        // Нижняя граница
-        if let Some(cell) = buf.cell_mut((area.x, area.y + area.height - 1)) {
-            cell.set_char('└');
-            cell.set_style(border_style);
-        }
-        for x in (area.x + 1)..(area.x + area.width - 1) {
-            if let Some(cell) = buf.cell_mut((x, area.y + area.height - 1)) {
-                cell.set_char('─');
-                cell.set_style(border_style);
-            }
-        }
-        if let Some(cell) = buf.cell_mut((area.x + area.width - 1, area.y + area.height - 1)) {
-            cell.set_char('┘');
-            cell.set_style(border_style);
-        }
-
-        // Отрисовать содержимое внутри рамки
-        let inner = Rect {
-            x: area.x + 1,
-            y: area.y + 1,
-            width: area.width.saturating_sub(2),
-            height: area.height.saturating_sub(2),
-        };
+        let title = self.title();
+        let block =
+            crate::ui::panel_helpers::create_panel_block(&title, is_focused, panel_index, state);
+        let inner = block.inner(area);
+        block.render(area, buf);
 
         self.render_content(inner, buf, state.theme);
     }
@@ -1281,94 +1298,113 @@ impl Panel for Editor {
         let key = crate::keyboard::translate_hotkey(key);
 
         match (key.code, key.modifiers) {
-            // Navigation (clears selection)
+            // Navigation (clears selection and closes search)
             (KeyCode::Up, KeyModifiers::NONE) => {
+                self.close_search();
                 self.selection = None;
                 self.move_cursor_up();
             }
             (KeyCode::Down, KeyModifiers::NONE) => {
+                self.close_search();
                 self.selection = None;
                 self.move_cursor_down();
             }
             (KeyCode::Left, KeyModifiers::NONE) => {
+                self.close_search();
                 self.selection = None;
                 self.move_cursor_left();
             }
             (KeyCode::Right, KeyModifiers::NONE) => {
+                self.close_search();
                 self.selection = None;
                 self.move_cursor_right();
             }
             (KeyCode::Home, KeyModifiers::NONE) => {
+                self.close_search();
                 self.selection = None;
                 self.move_to_line_start();
             }
             (KeyCode::End, KeyModifiers::NONE) => {
+                self.close_search();
                 self.selection = None;
                 self.move_to_line_end();
             }
             (KeyCode::PageUp, KeyModifiers::NONE) => {
+                self.close_search();
                 self.selection = None;
                 self.page_up();
             }
             (KeyCode::PageDown, KeyModifiers::NONE) => {
+                self.close_search();
                 self.selection = None;
                 self.page_down();
             }
             (KeyCode::Home, KeyModifiers::CONTROL) => {
+                self.close_search();
                 self.selection = None;
                 self.move_to_document_start();
             }
             (KeyCode::End, KeyModifiers::CONTROL) => {
+                self.close_search();
                 self.selection = None;
                 self.move_to_document_end();
             }
 
-            // Navigation with selection (Shift)
+            // Navigation with selection (Shift) - closes search
             (KeyCode::Up, KeyModifiers::SHIFT) => {
+                self.close_search();
                 self.start_or_extend_selection();
                 self.move_cursor_up();
                 self.update_selection_active();
             }
             (KeyCode::Down, KeyModifiers::SHIFT) => {
+                self.close_search();
                 self.start_or_extend_selection();
                 self.move_cursor_down();
                 self.update_selection_active();
             }
             (KeyCode::Left, KeyModifiers::SHIFT) => {
+                self.close_search();
                 self.start_or_extend_selection();
                 self.move_cursor_left();
                 self.update_selection_active();
             }
             (KeyCode::Right, KeyModifiers::SHIFT) => {
+                self.close_search();
                 self.start_or_extend_selection();
                 self.move_cursor_right();
                 self.update_selection_active();
             }
             (KeyCode::Home, KeyModifiers::SHIFT) => {
+                self.close_search();
                 self.start_or_extend_selection();
                 self.move_to_line_start();
                 self.update_selection_active();
             }
             (KeyCode::End, KeyModifiers::SHIFT) => {
+                self.close_search();
                 self.start_or_extend_selection();
                 self.move_to_line_end();
                 self.update_selection_active();
             }
             (KeyCode::PageUp, KeyModifiers::SHIFT) => {
+                self.close_search();
                 self.start_or_extend_selection();
                 self.page_up();
                 self.update_selection_active();
             }
             (KeyCode::PageDown, KeyModifiers::SHIFT) => {
+                self.close_search();
                 self.start_or_extend_selection();
                 self.page_down();
                 self.update_selection_active();
             }
-            // Shift+Ctrl+Home/End - select to start/end of document
+            // Shift+Ctrl+Home/End - select to start/end of document - closes search
             (KeyCode::Home, modifiers)
                 if modifiers.contains(KeyModifiers::SHIFT)
                     && modifiers.contains(KeyModifiers::CONTROL) =>
             {
+                self.close_search();
                 self.start_or_extend_selection();
                 self.move_to_document_start();
                 self.update_selection_active();
@@ -1377,6 +1413,7 @@ impl Panel for Editor {
                 if modifiers.contains(KeyModifiers::SHIFT)
                     && modifiers.contains(KeyModifiers::CONTROL) =>
             {
+                self.close_search();
                 self.start_or_extend_selection();
                 self.move_to_document_end();
                 self.update_selection_active();
@@ -1395,6 +1432,9 @@ impl Panel for Editor {
             }
             (KeyCode::Backspace, KeyModifiers::NONE) => {
                 if !self.config.read_only {
+                    // Close search mode when editing begins
+                    self.close_search();
+
                     if self
                         .selection
                         .as_ref()
@@ -1410,6 +1450,9 @@ impl Panel for Editor {
             }
             (KeyCode::Delete, KeyModifiers::NONE) => {
                 if !self.config.read_only {
+                    // Close search mode when editing begins
+                    self.close_search();
+
                     if self
                         .selection
                         .as_ref()
@@ -1435,6 +1478,9 @@ impl Panel for Editor {
             // With Shift the character becomes uppercase 'Z'
             (KeyCode::Char('Z'), modifiers) if modifiers.contains(KeyModifiers::CONTROL) => {
                 if !self.config.read_only {
+                    // Close search mode when editing begins
+                    self.close_search();
+
                     if let Some(new_cursor) = self.buffer.redo()? {
                         self.cursor = new_cursor;
                         self.clamp_cursor();
@@ -1448,6 +1494,9 @@ impl Panel for Editor {
             // Ctrl+Z - undo (only if not read-only)
             (KeyCode::Char('z'), KeyModifiers::CONTROL) => {
                 if !self.config.read_only {
+                    // Close search mode when editing begins
+                    self.close_search();
+
                     if let Some(new_cursor) = self.buffer.undo()? {
                         self.cursor = new_cursor;
                         self.clamp_cursor();
@@ -1461,6 +1510,9 @@ impl Panel for Editor {
             // Ctrl+Y - redo (only if not read-only)
             (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
                 if !self.config.read_only {
+                    // Close search mode when editing begins
+                    self.close_search();
+
                     if let Some(new_cursor) = self.buffer.redo()? {
                         self.cursor = new_cursor;
                         self.clamp_cursor();
@@ -1471,23 +1523,107 @@ impl Panel for Editor {
                 }
             }
 
-            // Ctrl+F - search (show modal window)
+            // Ctrl+F - search (show interactive search modal)
             (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
-                use crate::ui::modal::InputModal;
-                let t = crate::i18n::t();
-                let input = InputModal::new(t.editor_search_title(), t.editor_search_prompt());
-                self.modal_request =
-                    Some((PendingAction::Search, ActiveModal::Input(Box::new(input))));
+                use crate::ui::modal::SearchModal;
+                let mut search_modal = SearchModal::new("");
+
+                // Restore previous search text and match info if search is already active
+                if let Some(ref search_state) = self.search_state {
+                    search_modal.set_input(search_state.query.clone());
+                    if let Some((current, total)) = self.get_search_match_info() {
+                        search_modal.set_match_info(current, total);
+                    }
+                }
+                // If there's a saved query but no active search - restore and execute search
+                else if let Some(ref query) = self.last_search_query {
+                    search_modal.set_input(query.clone());
+
+                    // Execute search immediately
+                    self.start_search(query.clone(), false);
+
+                    // Update match info in modal
+                    if let Some((current, total)) = self.get_search_match_info() {
+                        search_modal.set_match_info(current, total);
+                    }
+                }
+
+                self.modal_request = Some((
+                    PendingAction::Search,
+                    ActiveModal::Search(Box::new(search_modal)),
+                ));
             }
 
-            // F3 - next match
+            // F3 - next match (or open search if no active search)
             (KeyCode::F(3), KeyModifiers::NONE) => {
-                self.search_next();
+                if self.search_state.is_some() {
+                    self.search_next();
+                } else {
+                    // Open search modal if no active search, restoring last query
+                    use crate::ui::modal::SearchModal;
+
+                    if let Some(ref query) = self.last_search_query {
+                        // Restore last query and immediately trigger search
+                        let mut search_modal = SearchModal::new("");
+                        search_modal.set_input(query.clone());
+
+                        // Execute search immediately
+                        self.start_search(query.clone(), false);
+
+                        // Update match info in modal
+                        if let Some((current, total)) = self.get_search_match_info() {
+                            search_modal.set_match_info(current, total);
+                        }
+
+                        self.modal_request = Some((
+                            PendingAction::Search,
+                            ActiveModal::Search(Box::new(search_modal)),
+                        ));
+                    } else {
+                        // No saved query - just open empty modal
+                        let search_modal = SearchModal::new("");
+                        self.modal_request = Some((
+                            PendingAction::Search,
+                            ActiveModal::Search(Box::new(search_modal)),
+                        ));
+                    }
+                }
             }
 
-            // Shift+F3 - previous match
+            // Shift+F3 - previous match (or open search if no active search)
             (KeyCode::F(3), KeyModifiers::SHIFT) => {
-                self.search_prev();
+                if self.search_state.is_some() {
+                    self.search_prev();
+                } else {
+                    // Open search modal if no active search, restoring last query
+                    use crate::ui::modal::SearchModal;
+
+                    if let Some(ref query) = self.last_search_query {
+                        // Restore last query and immediately trigger search
+                        let mut search_modal = SearchModal::new("");
+                        search_modal.set_input(query.clone());
+
+                        // Execute search immediately
+                        self.start_search(query.clone(), false);
+
+                        // Update match info in modal
+                        if let Some((current, total)) = self.get_search_match_info() {
+                            search_modal.set_match_info(current, total);
+                        }
+
+                        self.modal_request = Some((
+                            PendingAction::Search,
+                            ActiveModal::Search(Box::new(search_modal)),
+                        ));
+                    } else {
+                        // No saved query - just open empty modal
+                        let search_modal = SearchModal::new("");
+                        self.modal_request = Some((
+                            PendingAction::Search,
+                            ActiveModal::Search(Box::new(search_modal)),
+                        ));
+                    }
+                }
             }
 
             // Esc - close search
@@ -1497,15 +1633,49 @@ impl Panel for Editor {
                 }
             }
 
+            // Tab - next match (synonym for F3 when search is active)
+            (KeyCode::Tab, KeyModifiers::NONE) => {
+                if self.search_state.is_some() {
+                    self.search_next();
+                }
+            }
+
+            // Shift+Tab - previous match (synonym for Shift+F3 when search is active)
+            (KeyCode::BackTab, _) => {
+                if self.search_state.is_some() {
+                    self.search_prev();
+                }
+            }
+
             // Ctrl+H - text replacement (only if not read-only)
             (KeyCode::Char('h'), KeyModifiers::CONTROL) => {
                 if !self.config.read_only {
-                    use crate::ui::modal::InputModal;
-                    let t = crate::i18n::t();
-                    let input =
-                        InputModal::new(t.editor_replace_title(), t.editor_replace_prompt());
-                    self.modal_request =
-                        Some((PendingAction::Replace, ActiveModal::Input(Box::new(input))));
+                    use crate::ui::modal::ReplaceModal;
+                    let mut replace_modal = ReplaceModal::new();
+
+                    // Restore previous find/replace text if available
+                    if let Some(ref find) = self.last_replace_find {
+                        replace_modal.set_find_input(find.clone());
+                    }
+                    if let Some(ref replace) = self.last_replace_with {
+                        replace_modal.set_replace_input(replace.clone());
+                    }
+
+                    // If there's saved find text - execute search immediately
+                    if let Some(ref find) = self.last_replace_find {
+                        let replace_with = self.last_replace_with.clone().unwrap_or_default();
+                        self.start_replace(find.clone(), replace_with, false);
+
+                        // Update match info in modal
+                        if let Some((current, total)) = self.get_search_match_info() {
+                            replace_modal.set_match_info(current, total);
+                        }
+                    }
+
+                    self.modal_request = Some((
+                        PendingAction::Replace,
+                        ActiveModal::Replace(Box::new(replace_modal)),
+                    ));
                 }
             }
 
@@ -1685,6 +1855,8 @@ impl Panel for Editor {
 
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
+                // Close search mode on click
+                self.close_search();
                 // Start selection - set cursor and begin selection
                 self.cursor = Cursor::at(target_line, target_col);
                 self.selection = Some(Selection::new(self.cursor, self.cursor));
@@ -1720,5 +1892,10 @@ impl Panel for Editor {
         // Return parent directory of the file if it's saved
         self.file_path()
             .and_then(|p| p.parent().map(|parent| parent.to_path_buf()))
+    }
+
+    fn captures_escape(&self) -> bool {
+        // Capture Escape when search is active to prevent panel closure
+        self.search_state.is_some()
     }
 }

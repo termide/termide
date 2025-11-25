@@ -11,6 +11,8 @@ pub mod info;
 pub mod input;
 pub mod overwrite;
 pub mod rename_pattern;
+pub mod replace;
+pub mod search;
 pub mod select;
 
 pub use confirm::ConfirmModal;
@@ -20,6 +22,8 @@ pub use info::InfoModal;
 pub use input::InputModal;
 pub use overwrite::{OverwriteChoice, OverwriteModal};
 pub use rename_pattern::RenamePatternModal;
+pub use replace::{ReplaceAction, ReplaceModal, ReplaceModalResult};
+pub use search::{SearchAction, SearchModal, SearchModalResult};
 pub use select::SelectModal;
 
 /// Modal window result

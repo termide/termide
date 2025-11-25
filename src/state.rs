@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::git::{GitStatusUpdate, GitWatcher};
 use crate::theme::Theme;
 use crate::ui::modal::{
-    ConfirmModal, ConflictModal, InfoModal, InputModal, OverwriteModal, SelectModal,
+    ConfirmModal, ConflictModal, InfoModal, InputModal, OverwriteModal, SearchModal, SelectModal,
 };
 use std::collections::{HashMap, VecDeque};
 use std::fs::OpenOptions;
@@ -166,6 +166,10 @@ pub enum ActiveModal {
     RenamePattern(Box<crate::ui::modal::RenamePatternModal>),
     /// Editable select modal (combobox with editable input)
     EditableSelect(Box<crate::ui::modal::EditableSelectModal>),
+    /// Interactive search modal
+    Search(Box<SearchModal>),
+    /// Interactive replace modal
+    Replace(Box<crate::ui::modal::ReplaceModal>),
 }
 
 /// Action pending modal result
@@ -227,10 +231,8 @@ pub enum PendingAction {
     },
     /// Text search in editor
     Search,
-    /// Text replace in editor (step 1 - enter search query)
+    /// Text replace in editor
     Replace,
-    /// Text replace in editor (step 2 - enter replacement string)
-    ReplaceStep2 { query: String },
     /// Switch to next panel
     NextPanel,
     /// Switch to previous panel

@@ -61,14 +61,29 @@ impl App {
                     }
                     ModalResult::Cancelled => ModalResult::Cancelled,
                 }),
+                ActiveModal::Search(m) => m.handle_key(key)?.map(|r| match r {
+                    ModalResult::Confirmed(value) => {
+                        ModalResult::Confirmed(Box::new(value) as Box<dyn std::any::Any>)
+                    }
+                    ModalResult::Cancelled => ModalResult::Cancelled,
+                }),
+                ActiveModal::Replace(m) => m.handle_key(key)?.map(|r| match r {
+                    ModalResult::Confirmed(value) => {
+                        ModalResult::Confirmed(Box::new(value) as Box<dyn std::any::Any>)
+                    }
+                    ModalResult::Cancelled => ModalResult::Cancelled,
+                }),
             };
 
             // If modal window returned result, handle it
             if let Some(result) = modal_result {
+                // Check modal type before taking state references
+                let is_rename_pattern = matches!(modal, ActiveModal::RenamePattern(_));
+                let is_search = matches!(modal, ActiveModal::Search(_));
+                let is_replace = matches!(modal, ActiveModal::Replace(_));
+
                 // Handle cancellation from RenamePattern - return to ConflictModal
-                if matches!(modal, ActiveModal::RenamePattern(_))
-                    && matches!(result, ModalResult::Cancelled)
-                {
+                if is_rename_pattern && matches!(result, ModalResult::Cancelled) {
                     // Take operation from pending action and return to ConflictModal
                     #[allow(clippy::collapsible_match)]
                     if let Some(action) = self.state.take_pending_action() {
@@ -107,6 +122,130 @@ impl App {
                                 return Ok(());
                             }
                         }
+                    }
+                }
+
+                // Handle SearchModal specially - don't close on navigation
+                if is_search {
+                    if let ModalResult::Confirmed(value) = &result {
+                        if let Some(search_result) =
+                            value.downcast_ref::<crate::ui::modal::SearchModalResult>()
+                        {
+                            // Handle search action in editor
+                            self.handle_search_action(search_result)?;
+
+                            // Get match info from active editor
+                            let match_info =
+                                if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+                                    use crate::panels::editor::Editor;
+                                    use std::any::Any;
+                                    if let Some(editor) =
+                                        (&mut **panel as &mut dyn Any).downcast_mut::<Editor>()
+                                    {
+                                        editor.get_search_match_info()
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                };
+
+                            // Check if we should close modal
+                            use crate::ui::modal::SearchAction;
+                            if matches!(search_result.action, SearchAction::CloseWithSelection) {
+                                // Close modal but keep search state and selection active
+                                self.state.close_modal();
+                                return Ok(());
+                            }
+
+                            // Update match info in modal for other actions
+                            if let Some((current, total)) = match_info {
+                                if let Some(ActiveModal::Search(search_modal)) =
+                                    &mut self.state.active_modal
+                                {
+                                    search_modal.set_match_info(current, total);
+                                }
+                            }
+
+                            // Keep modal open for navigation actions
+                            return Ok(());
+                        }
+                    } else if matches!(result, ModalResult::Cancelled) {
+                        // Close modal only on cancellation
+                        self.state.close_modal();
+                        // Also close search state in editor
+                        if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+                            use crate::panels::editor::Editor;
+                            use std::any::Any;
+                            if let Some(editor) =
+                                (&mut **panel as &mut dyn Any).downcast_mut::<Editor>()
+                            {
+                                editor.close_search();
+                            }
+                        }
+                        return Ok(());
+                    }
+                }
+
+                // Handle ReplaceModal specially - don't close on navigation/replace
+                if is_replace {
+                    if let ModalResult::Confirmed(value) = &result {
+                        if let Some(replace_result) =
+                            value.downcast_ref::<crate::ui::modal::ReplaceModalResult>()
+                        {
+                            // Handle replace action in editor
+                            self.handle_replace_action(replace_result)?;
+
+                            // Get match info from active editor
+                            let match_info =
+                                if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+                                    use crate::panels::editor::Editor;
+                                    use std::any::Any;
+                                    if let Some(editor) =
+                                        (&mut **panel as &mut dyn Any).downcast_mut::<Editor>()
+                                    {
+                                        editor.get_search_match_info()
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                };
+
+                            // Check if we should close modal
+                            use crate::ui::modal::ReplaceAction;
+                            if matches!(replace_result.action, ReplaceAction::ReplaceAll) {
+                                // Close modal for ReplaceAll
+                                self.state.close_modal();
+                                return Ok(());
+                            }
+
+                            // Update match info in modal for other actions
+                            if let Some((current, total)) = match_info {
+                                if let Some(ActiveModal::Replace(replace_modal)) =
+                                    &mut self.state.active_modal
+                                {
+                                    replace_modal.set_match_info(current, total);
+                                }
+                            }
+
+                            // Keep modal open for navigation and single replace actions
+                            return Ok(());
+                        }
+                    } else if matches!(result, ModalResult::Cancelled) {
+                        // Close modal only on cancellation
+                        self.state.close_modal();
+                        // Also close search state in editor
+                        if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+                            use crate::panels::editor::Editor;
+                            use std::any::Any;
+                            if let Some(editor) =
+                                (&mut **panel as &mut dyn Any).downcast_mut::<Editor>()
+                            {
+                                editor.close_search();
+                            }
+                        }
+                        return Ok(());
                     }
                 }
 
@@ -181,10 +320,150 @@ impl App {
                         ModalResult::Cancelled => ModalResult::Cancelled,
                     })
                 }
+                ActiveModal::Search(m) => m.handle_mouse(mouse, modal_area)?.map(|r| match r {
+                    ModalResult::Confirmed(value) => {
+                        ModalResult::Confirmed(Box::new(value) as Box<dyn std::any::Any>)
+                    }
+                    ModalResult::Cancelled => ModalResult::Cancelled,
+                }),
+                ActiveModal::Replace(m) => m.handle_mouse(mouse, modal_area)?.map(|r| match r {
+                    ModalResult::Confirmed(value) => {
+                        ModalResult::Confirmed(Box::new(value) as Box<dyn std::any::Any>)
+                    }
+                    ModalResult::Cancelled => ModalResult::Cancelled,
+                }),
             };
 
             // If modal window returned result, handle it
             if let Some(result) = modal_result {
+                // Check modal type before taking state references
+                let is_search = matches!(modal, ActiveModal::Search(_));
+                let is_replace = matches!(modal, ActiveModal::Replace(_));
+
+                // Handle SearchModal specially - don't close on navigation
+                if is_search {
+                    if let ModalResult::Confirmed(value) = &result {
+                        if let Some(search_result) =
+                            value.downcast_ref::<crate::ui::modal::SearchModalResult>()
+                        {
+                            // Handle search action in editor
+                            self.handle_search_action(search_result)?;
+
+                            // Check if we should close modal
+                            use crate::ui::modal::SearchAction;
+                            if matches!(search_result.action, SearchAction::CloseWithSelection) {
+                                // Close modal but keep search state and selection active
+                                self.state.close_modal();
+                                return Ok(());
+                            }
+
+                            // Get match info from active editor
+                            let match_info =
+                                if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+                                    use crate::panels::editor::Editor;
+                                    use std::any::Any;
+                                    if let Some(editor) =
+                                        (&mut **panel as &mut dyn Any).downcast_mut::<Editor>()
+                                    {
+                                        editor.get_search_match_info()
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                };
+
+                            // Update match info in modal for other actions
+                            if let Some((current, total)) = match_info {
+                                if let Some(ActiveModal::Search(search_modal)) =
+                                    &mut self.state.active_modal
+                                {
+                                    search_modal.set_match_info(current, total);
+                                }
+                            }
+
+                            // Keep modal open for navigation actions
+                            return Ok(());
+                        }
+                    } else if matches!(result, ModalResult::Cancelled) {
+                        // Close modal only on cancellation
+                        self.state.close_modal();
+                        // Also close search state in editor
+                        if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+                            use crate::panels::editor::Editor;
+                            use std::any::Any;
+                            if let Some(editor) =
+                                (&mut **panel as &mut dyn Any).downcast_mut::<Editor>()
+                            {
+                                editor.close_search();
+                            }
+                        }
+                        return Ok(());
+                    }
+                }
+
+                // Handle ReplaceModal specially - don't close on navigation/replace
+                if is_replace {
+                    if let ModalResult::Confirmed(value) = &result {
+                        if let Some(replace_result) =
+                            value.downcast_ref::<crate::ui::modal::ReplaceModalResult>()
+                        {
+                            // Handle replace action in editor
+                            self.handle_replace_action(replace_result)?;
+
+                            // Get match info from active editor
+                            let match_info =
+                                if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+                                    use crate::panels::editor::Editor;
+                                    use std::any::Any;
+                                    if let Some(editor) =
+                                        (&mut **panel as &mut dyn Any).downcast_mut::<Editor>()
+                                    {
+                                        editor.get_search_match_info()
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                };
+
+                            // Check if we should close modal
+                            use crate::ui::modal::ReplaceAction;
+                            if matches!(replace_result.action, ReplaceAction::ReplaceAll) {
+                                // Close modal for ReplaceAll
+                                self.state.close_modal();
+                                return Ok(());
+                            }
+
+                            // Update match info in modal for other actions
+                            if let Some((current, total)) = match_info {
+                                if let Some(ActiveModal::Replace(replace_modal)) =
+                                    &mut self.state.active_modal
+                                {
+                                    replace_modal.set_match_info(current, total);
+                                }
+                            }
+
+                            // Keep modal open for navigation and single replace actions
+                            return Ok(());
+                        }
+                    } else if matches!(result, ModalResult::Cancelled) {
+                        // Close modal only on cancellation
+                        self.state.close_modal();
+                        // Also close search state in editor
+                        if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+                            use crate::panels::editor::Editor;
+                            use std::any::Any;
+                            if let Some(editor) =
+                                (&mut **panel as &mut dyn Any).downcast_mut::<Editor>()
+                            {
+                                editor.close_search();
+                            }
+                        }
+                        return Ok(());
+                    }
+                }
+
                 self.state.close_modal();
                 if let ModalResult::Confirmed(value) = result {
                     self.handle_modal_result(value)?;
@@ -269,10 +548,9 @@ impl App {
                     self.handle_search(value)?;
                 }
                 crate::state::PendingAction::Replace => {
-                    self.handle_replace(value)?;
-                }
-                crate::state::PendingAction::ReplaceStep2 { query } => {
-                    self.handle_replace_step2(query, value)?;
+                    // ReplaceModal is handled entirely through handle_replace_action
+                    // called from handle_modal_key/handle_modal_mouse (lines 183-233, 383-434).
+                    // No additional processing needed here, similar to how SearchModal works.
                 }
                 crate::state::PendingAction::QuitApplication => {
                     // User confirmed quit - exit application
@@ -304,33 +582,94 @@ impl App {
         Ok(())
     }
 
-    /// Handle replace result (first step - search query)
-    fn handle_replace(&mut self, value: Box<dyn std::any::Any>) -> Result<()> {
-        use crate::ui::modal::InputModal;
+    /// Handle replace action from ReplaceModal
+    fn handle_replace_action(
+        &mut self,
+        replace_result: &crate::ui::modal::ReplaceModalResult,
+    ) -> Result<()> {
+        use crate::panels::editor::Editor;
+        use crate::ui::modal::ReplaceAction;
+        use std::any::Any;
 
-        if let Some(query) = value.downcast_ref::<String>() {
-            // Save query and show second modal window for replacement
-            let input = InputModal::new("Replace", "Replace with:");
-            self.state.pending_action = Some(crate::state::PendingAction::ReplaceStep2 {
-                query: query.clone(),
-            });
-            self.state.active_modal = Some(ActiveModal::Input(Box::new(input)));
+        // Get active panel (should be Editor)
+        let panel_index = self.state.active_panel;
+        if let Some(panel) = self.panels.get_mut(panel_index) {
+            if let Some(editor) = (&mut **panel as &mut dyn Any).downcast_mut::<Editor>() {
+                match replace_result.action {
+                    ReplaceAction::Search => {
+                        // Perform new search/replace (or update existing)
+                        editor.start_replace(
+                            replace_result.find_query.clone(),
+                            replace_result.replace_with.clone(),
+                            false,
+                        );
+                    }
+                    ReplaceAction::Next => {
+                        // Update only replace_with value without rebuilding search
+                        editor.update_replace_with(replace_result.replace_with.clone());
+                        // Navigate to next match
+                        editor.search_next();
+                    }
+                    ReplaceAction::Previous => {
+                        // Update only replace_with value without rebuilding search
+                        editor.update_replace_with(replace_result.replace_with.clone());
+                        // Navigate to previous match
+                        editor.search_prev();
+                    }
+                    ReplaceAction::Replace => {
+                        // Update only replace_with value without rebuilding search
+                        // This preserves the current_match index for sequential replacement
+                        editor.update_replace_with(replace_result.replace_with.clone());
+                        // Replace current match and position cursor on next match
+                        editor.replace_current()?;
+                        // Don't call search_next() - replace_current() already positions cursor correctly
+                    }
+                    ReplaceAction::ReplaceAll => {
+                        // Update search state with latest values from modal before replacing all
+                        editor.start_replace(
+                            replace_result.find_query.clone(),
+                            replace_result.replace_with.clone(),
+                            false,
+                        );
+                        // Replace all matches (now uses updated replace_with)
+                        editor.replace_all()?;
+                    }
+                }
+            }
         }
         Ok(())
     }
 
-    /// Handle second step of replace (entering replacement string)
-    fn handle_replace_step2(&mut self, query: String, value: Box<dyn std::any::Any>) -> Result<()> {
+    /// Handle search action from SearchModal
+    fn handle_search_action(
+        &mut self,
+        search_result: &crate::ui::modal::SearchModalResult,
+    ) -> Result<()> {
         use crate::panels::editor::Editor;
+        use crate::ui::modal::SearchAction;
+        use std::any::Any;
 
-        if let Some(replace_with) = value.downcast_ref::<String>() {
-            // Get active panel
-            let panel_index = self.state.active_panel;
-            if let Some(panel) = self.panels.get_mut(panel_index) {
-                // Try to downcast to Editor
-                if let Some(editor) = (panel as &mut dyn std::any::Any).downcast_mut::<Editor>() {
-                    // Start replace (case insensitive by default)
-                    editor.start_replace(query, replace_with.clone(), false);
+        // Get active panel (should be Editor)
+        let panel_index = self.state.active_panel;
+        if let Some(panel) = self.panels.get_mut(panel_index) {
+            if let Some(editor) = (&mut **panel as &mut dyn Any).downcast_mut::<Editor>() {
+                match search_result.action {
+                    SearchAction::Search => {
+                        // Perform new search (or update existing)
+                        editor.start_search(search_result.query.clone(), false);
+                    }
+                    SearchAction::Next => {
+                        // Navigate to next match
+                        editor.search_next();
+                    }
+                    SearchAction::Previous => {
+                        // Navigate to previous match
+                        editor.search_prev();
+                    }
+                    SearchAction::CloseWithSelection => {
+                        // Just ensure search is active (will be handled by modal close logic)
+                        // Selection is already set by editor methods
+                    }
                 }
             }
         }

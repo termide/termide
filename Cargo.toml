@@ -1,6 +1,6 @@
 [package]
 name = "termide"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Nick Nizovtsev"]
 description = "Cross-platform terminal IDE, file manager and virtual terminal"
@@ -9,6 +9,15 @@ license = "MIT OR Apache-2.0"
 keywords = ["terminal", "ide", "file-manager", "tui", "terminal-ui"]
 categories = ["command-line-utilities", "development-tools"]
 readme = "README.md"
+exclude = [
+    ".github/",
+    "assets/screenshots/",
+    "doc/",
+    ".gitignore",
+    ".pre-commit-config.yaml",
+    "flake.nix",
+    "flake.lock"
+]
 
 [dependencies]
 anyhow = "1.0"

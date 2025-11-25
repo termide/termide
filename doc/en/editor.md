@@ -36,15 +36,65 @@ The text editor panel provides a functional editor for working with text files w
 
 ## Search and Replace
 
+### Interactive Search Modal (Ctrl+F)
+
+Press `Ctrl+F` to open an interactive search modal with live preview:
+
 | Shortcut           | Action                                     |
 |-------------------|--------------------------------------------|
-| `Ctrl+F`          | Open search dialog                         |
+| `Ctrl+F`          | Open search modal                          |
+| Type text         | Live search updates as you type            |
+| `Tab`             | Go to next match                           |
+| `Shift+Tab`       | Go to previous match                       |
 | `F3`              | Go to next match                           |
 | `Shift+F3`        | Go to previous match                       |
-| `Escape`          | Close search                               |
-| `Ctrl+H`          | Open replace dialog                        |
-| `Ctrl+R`          | Replace current match                      |
-| `Ctrl+Alt+R`      | Replace all matches                        |
+| `Enter`           | Close modal, keep current match selected   |
+| `Escape`          | Close search modal                         |
+| Mouse click       | Click navigation buttons or `[X]` to close |
+
+**Features:**
+- Live search preview as you type
+- Match counter display (e.g., "3 of 12")
+- Navigation buttons: ◄ Prev, Next ►
+- `[X]` close button in modal title
+- Search query is preserved when modal is closed
+
+**Search behavior outside modal:**
+- `F3` / `Shift+F3` - Navigate through matches with modal closed
+- `Tab` / `Shift+Tab` - Navigate matches when search is active
+- Any navigation/editing key - Deactivates search mode
+- Reopening with `F3` restores the last search query
+
+### Interactive Replace Modal (Ctrl+H)
+
+Press `Ctrl+H` to open an interactive replace modal with two input fields:
+
+| Shortcut           | Action                                     |
+|-------------------|--------------------------------------------|
+| `Ctrl+H`          | Open replace modal                         |
+| Type in Find      | Live search updates as you type            |
+| `Tab`             | Next match (in Find) or move to Replace field |
+| `Shift+Tab`       | Previous match (in Find) or move to Find field |
+| `Up` / `Down`     | Navigate between Find and Replace fields   |
+| `F3`              | Go to next match                           |
+| `Shift+F3`        | Go to previous match                       |
+| `Enter`           | Replace current match and move to next     |
+| `Escape`          | Close replace modal                        |
+| Mouse click       | Click buttons (Replace, All, Prev, Next) or `[X]` |
+
+**Features:**
+- Two input fields: Find and Replace
+- Live search preview as you type in Find field
+- Match counter display (e.g., "3 of 12")
+- Four buttons: Replace, All, ◄ Prev, Next ►
+- `[X]` close button in modal title
+- Both find and replace text are preserved when modal is closed
+
+**Replace button actions:**
+- **Replace** - Replace current match and move to next
+- **All** - Replace all matches and close modal
+- **◄ Prev** - Navigate to previous match
+- **Next ►** - Navigate to next match
 
 ## Clipboard
 

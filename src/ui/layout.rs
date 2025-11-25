@@ -206,6 +206,8 @@ fn render_dropdowns_and_modals(frame: &mut Frame, state: &mut AppState) {
             ActiveModal::Info(m) => m.render(area, frame.buffer_mut(), theme),
             ActiveModal::RenamePattern(m) => m.render(area, frame.buffer_mut(), theme),
             ActiveModal::EditableSelect(m) => m.render(area, frame.buffer_mut(), theme),
+            ActiveModal::Search(m) => m.render(area, frame.buffer_mut(), theme),
+            ActiveModal::Replace(m) => m.render(area, frame.buffer_mut(), theme),
         }
     }
 }
