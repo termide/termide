@@ -47,27 +47,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux x86_64
+          # Linux x86_64 (also works in WSL)
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             archive: tar.gz
-          # Linux aarch64
+          # Linux aarch64 (ARM servers, Raspberry Pi)
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             archive: tar.gz
             cross: true
-          # macOS x86_64
+          # macOS x86_64 (Intel Macs)
           - target: x86_64-apple-darwin
             os: macos-latest
             archive: tar.gz
-          # macOS Apple Silicon
+          # macOS Apple Silicon (M1/M2/M3)
           - target: aarch64-apple-darwin
             os: macos-latest
             archive: tar.gz
-          # Windows
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            archive: zip
 
     steps:
       - name: Checkout
@@ -86,22 +82,17 @@ jobs:
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
           echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
           echo "CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++" >> $GITHUB_ENV
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C linker=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
 
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Package (Unix)
-        if: matrix.archive == 'tar.gz'
+      - name: Package
         run: |
           cd target/${{ matrix.target }}/release
           tar czvf ../../../termide-${{ github.ref_name }}-${{ matrix.target }}.tar.gz termide
           cd ../../..
-
-      - name: Package (Windows)
-        if: matrix.archive == 'zip'
-        shell: pwsh
-        run: |
-          Compress-Archive -Path target/${{ matrix.target }}/release/termide.exe -DestinationPath termide-${{ github.ref_name }}-${{ matrix.target }}.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

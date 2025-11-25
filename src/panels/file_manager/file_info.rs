@@ -346,7 +346,16 @@ impl FileManager {
                 // f_bavail - available blocks for non-privileged users
                 // f_blocks - total blocks in the filesystem
                 // f_bsize - block size in bytes
+                // On macOS, f_bavail and f_blocks are u32, f_bsize is u64
+                // On Linux, all are u64
+                #[cfg(target_os = "macos")]
+                let available = (stat.f_bavail as u64) * stat.f_bsize;
+                #[cfg(not(target_os = "macos"))]
                 let available = stat.f_bavail * stat.f_bsize;
+
+                #[cfg(target_os = "macos")]
+                let total = (stat.f_blocks as u64) * stat.f_bsize;
+                #[cfg(not(target_os = "macos"))]
                 let total = stat.f_blocks * stat.f_bsize;
 
                 Some(DiskSpaceInfo {
