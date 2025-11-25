@@ -1488,8 +1488,8 @@ impl Terminal {
         unsafe {
             let mut stat: libc::statvfs = std::mem::zeroed();
             if libc::statvfs(path_cstr.as_ptr(), &mut stat) == 0 {
-                let available = (stat.f_bavail as u64) * (stat.f_bsize as u64);
-                let total = (stat.f_blocks as u64) * (stat.f_bsize as u64);
+                let available = stat.f_bavail * stat.f_bsize;
+                let total = stat.f_blocks * stat.f_bsize;
 
                 Some(DiskSpaceInfo {
                     device,
@@ -1927,6 +1927,9 @@ impl Panel for Terminal {
         if !self.is_alive() {
             return Ok(());
         }
+
+        // Translate Cyrillic to Latin for hotkeys
+        let key = crate::keyboard::translate_hotkey(key);
 
         // Handle paste from clipboard (Ctrl+Shift+V)
         // When Shift is pressed with a letter, crossterm returns the uppercase character
