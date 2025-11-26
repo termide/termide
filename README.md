@@ -1,6 +1,5 @@
 # TermIDE
 
-[![Version](https://img.shields.io/badge/version-0.1.1-blue.svg)](https://github.com/termide/termide/releases/tag/v0.1.1)
 [![GitHub Release](https://img.shields.io/github/v/release/termide/termide)](https://github.com/termide/termide/releases)
 [![CI](https://github.com/termide/termide/actions/workflows/release.yml/badge.svg)](https://github.com/termide/termide/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
