@@ -23,8 +23,10 @@ A cross-platform terminal-based IDE, file manager, and virtual terminal written 
 - **Custom Theme Support** - Create and load your own themes from config directory
 - **System Resource Monitoring** - Real-time CPU, RAM, and disk usage indicators with device names and color-coded alerts
 - **Batch Operations** - Copy, move, and manage multiple files efficiently
-- **Search and Replace** - Interactive modals with live search preview, match counter, Tab/Shift+Tab navigation, and state preservation
+- **Search and Replace** - Interactive modals with live search preview, match counter, Tab/Shift+Tab navigation, replace counter feedback, and state preservation
+- **Powerful Editing** - Duplicate line/selection (Ctrl+D), configurable tab size, undo/redo support
 - **Multi-language Support** - UI localization (English, Russian) with proper keyboard layout support (including Cyrillic)
+- **Robust Error Handling** - Graceful fallbacks for theme errors, file size limits (100 MB), and clear error messages
 - **Mouse Support** - Full mouse support for all panels and UI elements
 
 ## Installation
@@ -35,23 +37,23 @@ Download the latest release for your platform from [GitHub Releases](https://git
 
 ```bash
 # Linux x86_64 (also works in WSL)
-wget https://github.com/termide/termide/releases/latest/download/termide-v0.1.1-x86_64-unknown-linux-gnu.tar.gz
-tar xzf termide-v0.1.1-x86_64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-v0.1.2-x86_64-unknown-linux-gnu.tar.gz
+tar xzf termide-v0.1.2-x86_64-unknown-linux-gnu.tar.gz
 ./termide
 
 # macOS Intel (x86_64)
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-v0.1.1-x86_64-apple-darwin.tar.gz
-tar xzf termide-v0.1.1-x86_64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/latest/download/termide-v0.1.2-x86_64-apple-darwin.tar.gz
+tar xzf termide-v0.1.2-x86_64-apple-darwin.tar.gz
 ./termide
 
 # macOS Apple Silicon (ARM64)
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-v0.1.1-aarch64-apple-darwin.tar.gz
-tar xzf termide-v0.1.1-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/latest/download/termide-v0.1.2-aarch64-apple-darwin.tar.gz
+tar xzf termide-v0.1.2-aarch64-apple-darwin.tar.gz
 ./termide
 
 # Linux ARM64 (Raspberry Pi, ARM servers)
-wget https://github.com/termide/termide/releases/latest/download/termide-v0.1.1-aarch64-unknown-linux-gnu.tar.gz
-tar xzf termide-v0.1.1-aarch64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-v0.1.2-aarch64-unknown-linux-gnu.tar.gz
+tar xzf termide-v0.1.2-aarch64-unknown-linux-gnu.tar.gz
 ./termide
 ```
 
@@ -172,9 +174,15 @@ Configuration file location:
 # Theme name - choose from built-in themes or use a custom theme from ~/.config/termide/themes/
 theme = "default"
 
+# Tab size (number of spaces per tab)
+tab_size = 4
+
 # Language (auto, en, ru)
 # "auto" detects from environment variables (TERMIDE_LANG, LANG, LC_ALL)
 language = "auto"
+
+# System resource monitor update interval in milliseconds (default: 1000)
+resource_monitor_interval = 1000
 
 # Optional: Custom log file path
 # log_file_path = "/custom/path/to/termide.log"

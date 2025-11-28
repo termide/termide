@@ -118,6 +118,7 @@ pub struct Editor {
 
 impl Editor {
     /// Create new empty editor with default configuration
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::with_config(EditorConfig::default())
     }
@@ -160,6 +161,7 @@ impl Editor {
     }
 
     /// Open file with default configuration
+    #[allow(dead_code)]
     pub fn open_file(path: PathBuf) -> Result<Self> {
         Self::open_file_with_config(path, EditorConfig::default())
     }

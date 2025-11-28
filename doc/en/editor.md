@@ -29,10 +29,11 @@ The text editor panel provides a functional editor for working with text files w
 | `Ctrl+S`          | Save file                                  |
 | `Ctrl+Z`          | Undo last action                           |
 | `Ctrl+Y`          | Redo undone action                         |
+| `Ctrl+D`          | Duplicate current line or selection        |
 | `Backspace`       | Delete character to the left of cursor     |
 | `Delete`          | Delete character to the right of cursor    |
 | `Enter`           | Insert new line                            |
-| `Tab`             | Insert indent (4 spaces)                   |
+| `Tab`             | Insert indent (configurable, default 4)    |
 
 ## Search and Replace
 
@@ -91,10 +92,14 @@ Press `Ctrl+H` to open an interactive replace modal with two input fields:
 - Both find and replace text are preserved when modal is closed
 
 **Replace button actions:**
-- **Replace** - Replace current match and move to next
-- **All** - Replace all matches and close modal
+- **Replace** (`Ctrl+R`) - Replace current match and move to next
+- **All** (`Ctrl+Alt+R`) - Replace all matches, show count, and close modal
 - **◄ Prev** - Navigate to previous match
 - **Next ►** - Navigate to next match
+
+**Replace All Feedback:**
+- After using "Replace All", the status bar shows how many replacements were made
+- Example: "Replaced 5 occurrences"
 
 ## Clipboard
 
