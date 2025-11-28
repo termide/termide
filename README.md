@@ -1,9 +1,9 @@
 # TermIDE
 
+[![Crates.io](https://img.shields.io/crates/v/termide.svg)](https://crates.io/crates/termide)
 [![GitHub Release](https://img.shields.io/github/v/release/termide/termide)](https://github.com/termide/termide/releases)
 [![CI](https://github.com/termide/termide/actions/workflows/release.yml/badge.svg)](https://github.com/termide/termide/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 A cross-platform terminal-based IDE, file manager, and virtual terminal written in Rust.
 
@@ -37,23 +37,23 @@ Download the latest release for your platform from [GitHub Releases](https://git
 
 ```bash
 # Linux x86_64 (also works in WSL)
-wget https://github.com/termide/termide/releases/latest/download/termide-v0.1.2-x86_64-unknown-linux-gnu.tar.gz
-tar xzf termide-v0.1.2-x86_64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.1.2-x86_64-unknown-linux-gnu.tar.gz
+tar xzf termide-0.1.2-x86_64-unknown-linux-gnu.tar.gz
 ./termide
 
 # macOS Intel (x86_64)
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-v0.1.2-x86_64-apple-darwin.tar.gz
-tar xzf termide-v0.1.2-x86_64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.1.2-x86_64-apple-darwin.tar.gz
+tar xzf termide-0.1.2-x86_64-apple-darwin.tar.gz
 ./termide
 
 # macOS Apple Silicon (ARM64)
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-v0.1.2-aarch64-apple-darwin.tar.gz
-tar xzf termide-v0.1.2-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.1.2-aarch64-apple-darwin.tar.gz
+tar xzf termide-0.1.2-aarch64-apple-darwin.tar.gz
 ./termide
 
 # Linux ARM64 (Raspberry Pi, ARM servers)
-wget https://github.com/termide/termide/releases/latest/download/termide-v0.1.2-aarch64-unknown-linux-gnu.tar.gz
-tar xzf termide-v0.1.2-aarch64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.1.2-aarch64-unknown-linux-gnu.tar.gz
+tar xzf termide-0.1.2-aarch64-unknown-linux-gnu.tar.gz
 ./termide
 ```
 

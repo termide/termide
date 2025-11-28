@@ -211,7 +211,7 @@ impl Translation for English {
     }
 
     fn help_version(&self) -> &str {
-        "v0.1.0"
+        "0.1.2"
     }
 
     fn help_global_keys(&self) -> &str {
