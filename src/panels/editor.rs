@@ -23,6 +23,8 @@ pub struct EditorConfig {
     pub read_only: bool,
     /// Automatic line wrapping by window width
     pub word_wrap: bool,
+    /// Tab size (number of spaces)
+    pub tab_size: usize,
 }
 
 impl Default for EditorConfig {
@@ -31,6 +33,7 @@ impl Default for EditorConfig {
             syntax_highlighting: true,
             read_only: false,
             word_wrap: false,
+            tab_size: 4,
         }
     }
 }
@@ -42,6 +45,7 @@ impl EditorConfig {
             syntax_highlighting: true,
             read_only: true,
             word_wrap: false,
+            tab_size: 4,
         }
     }
 
@@ -52,6 +56,7 @@ impl EditorConfig {
             syntax_highlighting: false,
             read_only: false,
             word_wrap: false,
+            tab_size: 4,
         }
     }
 
@@ -62,6 +67,7 @@ impl EditorConfig {
             syntax_highlighting: true,
             read_only: false,
             word_wrap: true,
+            tab_size: 4,
         }
     }
 }
@@ -106,6 +112,8 @@ pub struct Editor {
     modal_request: Option<(PendingAction, ActiveModal)>,
     /// Updated config after save (for applying in AppState)
     config_update: Option<crate::config::Config>,
+    /// Status message to display to user
+    status_message: Option<String>,
 }
 
 impl Editor {
@@ -130,6 +138,7 @@ impl Editor {
             cached_title: "Untitled".to_string(),
             modal_request: None,
             config_update: None,
+            status_message: None,
         }
     }
 
@@ -157,6 +166,17 @@ impl Editor {
 
     /// Open file with specified configuration
     pub fn open_file_with_config(path: PathBuf, mut config: EditorConfig) -> Result<Self> {
+        // Check file size before loading
+        if let Ok(metadata) = std::fs::metadata(&path) {
+            if metadata.is_file() && metadata.len() > crate::constants::MAX_EDITOR_FILE_SIZE {
+                return Err(anyhow::anyhow!(
+                    "File is too large to open ({:.1} MB). Maximum allowed size is {} MB.",
+                    metadata.len() as f64 / crate::constants::MEGABYTE as f64,
+                    crate::constants::MAX_EDITOR_FILE_SIZE / crate::constants::MEGABYTE
+                ));
+            }
+        }
+
         let buffer = TextBuffer::from_file(&path)?;
 
         let cached_title = path
@@ -195,6 +215,7 @@ impl Editor {
             cached_title,
             modal_request: None,
             config_update: None,
+            status_message: None,
         })
     }
 
@@ -219,6 +240,7 @@ impl Editor {
             cached_title: title,
             modal_request: None,
             config_update: None,
+            status_message: None,
         }
     }
 
@@ -252,6 +274,11 @@ impl Editor {
     /// Get updated config (if config file was saved)
     pub fn take_config_update(&mut self) -> Option<crate::config::Config> {
         self.config_update.take()
+    }
+
+    /// Get status message (if any)
+    pub fn take_status_message(&mut self) -> Option<String> {
+        self.status_message.take()
     }
 
     /// Save file as (Save As)
@@ -308,7 +335,7 @@ impl Editor {
         EditorInfo {
             line: self.cursor.line + 1,     // 1-based
             column: self.cursor.column + 1, // 1-based
-            tab_size: 4,                    // TODO: get from settings
+            tab_size: self.config.tab_size,
             encoding: "UTF-8".to_string(),
             file_type,
             read_only: self.config.read_only,
@@ -527,6 +554,61 @@ impl Editor {
                 self.highlight_cache.invalidate_line(start_line);
             }
         }
+        Ok(())
+    }
+
+    /// Duplicate current line or selected lines
+    fn duplicate_line(&mut self) -> Result<()> {
+        // Determine which lines to duplicate
+        let (start_line, end_line) = if let Some(ref selection) = self.selection {
+            let start = selection.start();
+            let end = selection.end();
+            (start.line, end.line)
+        } else {
+            (self.cursor.line, self.cursor.line)
+        };
+
+        // Get all text and extract the lines to duplicate
+        let full_text = self.buffer.text();
+        let lines: Vec<&str> = full_text.lines().collect();
+
+        // Build text to duplicate
+        let mut text_to_duplicate = String::new();
+        for line_idx in start_line..=end_line {
+            if let Some(line) = lines.get(line_idx) {
+                text_to_duplicate.push_str(line);
+                if line_idx < end_line {
+                    text_to_duplicate.push('\n');
+                }
+            }
+        }
+
+        // Insert newline and duplicated text after the last line
+        text_to_duplicate.insert(0, '\n');
+
+        // Move cursor to end of last line to duplicate
+        let last_line_len = self.buffer.line_len_graphemes(end_line);
+        let insert_cursor = Cursor {
+            line: end_line,
+            column: last_line_len,
+        };
+
+        self.buffer.insert(&insert_cursor, &text_to_duplicate)?;
+
+        // Move cursor to the beginning of the first duplicated line
+        self.cursor = Cursor {
+            line: end_line + 1,
+            column: 0,
+        };
+        self.clamp_cursor();
+
+        // Clear selection
+        self.selection = None;
+
+        // Invalidate highlighting cache
+        self.highlight_cache
+            .invalidate_range(start_line, self.buffer.line_count());
+
         Ok(())
     }
 
@@ -1687,8 +1769,11 @@ impl Panel for Editor {
             {
                 if !self.config.read_only {
                     if let Ok(count) = self.replace_all() {
-                        // TODO: show message to user about number of replacements
-                        eprintln!("Replaced {} occurrences", count);
+                        self.status_message = Some(format!(
+                            "Replaced {} occurrence{}",
+                            count,
+                            if count == 1 { "" } else { "s" }
+                        ));
                     }
                 }
             }
@@ -1710,6 +1795,13 @@ impl Panel for Editor {
             // Ctrl+C - copy
             (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
                 self.copy_to_clipboard()?;
+            }
+
+            // Ctrl+D - duplicate line
+            (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+                if !self.config.read_only {
+                    self.duplicate_line()?;
+                }
             }
 
             // Ctrl+Insert - copy

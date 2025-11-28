@@ -1,6 +1,6 @@
 [package]
 name = "termide"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 authors = ["Nick Nizovtsev"]
 description = "Cross-platform terminal IDE, file manager and virtual terminal"

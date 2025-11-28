@@ -18,7 +18,6 @@ pub const GIGABYTE: u64 = MEGABYTE * 1024;
 pub const MIN_WIDTH_FOR_EXTENDED_VIEW: usize = 70;
 
 /// Maximum file size to open in editor (100 MB)
-#[allow(dead_code)]
 pub const MAX_EDITOR_FILE_SIZE: u64 = 100 * MEGABYTE;
 
 // ===== UI and layout constants =====

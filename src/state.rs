@@ -710,4 +710,11 @@ impl AppState {
         let new_weight = (current_weight as i16 + delta).clamp(10, 500) as u16;
         self.panel_weights.insert(panel_index, new_weight);
     }
+
+    /// Create EditorConfig with settings from global config
+    pub fn editor_config(&self) -> crate::panels::editor::EditorConfig {
+        let mut config = crate::panels::editor::EditorConfig::default();
+        config.tab_size = self.config.tab_size;
+        config
+    }
 }

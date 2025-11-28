@@ -1520,7 +1520,7 @@ impl Terminal {
 
     /// Get selected text
     fn get_selected_text(&self) -> String {
-        let screen = self.screen.lock().unwrap();
+        let screen = self.screen.lock().expect("Terminal screen lock poisoned");
         let (start, end) = match (screen.selection_start, screen.selection_end) {
             (Some(s), Some(e)) => (s, e),
             _ => return String::new(),
@@ -1594,7 +1594,11 @@ impl Terminal {
         }
 
         // Check if bracketed paste mode is enabled
-        let bracketed_paste = self.screen.lock().unwrap().bracketed_paste_mode;
+        let bracketed_paste = self
+            .screen
+            .lock()
+            .expect("Terminal screen lock poisoned")
+            .bracketed_paste_mode;
 
         if bracketed_paste {
             // Send bracketed paste start sequence
@@ -1620,7 +1624,7 @@ impl Terminal {
         use crossterm::event::{MouseButton, MouseEventKind};
 
         let (mouse_tracking, sgr_mode) = {
-            let screen = self.screen.lock().unwrap();
+            let screen = self.screen.lock().expect("Terminal screen lock poisoned");
             (screen.mouse_tracking, screen.sgr_mouse_mode)
         };
 
@@ -1715,7 +1719,7 @@ impl Terminal {
         show_cursor: bool,
         theme: &crate::theme::Theme,
     ) -> (Vec<Line<'_>>, (usize, usize), bool) {
-        let screen = self.screen.lock().unwrap();
+        let screen = self.screen.lock().expect("Terminal screen lock poisoned");
         let mut lines = Vec::new();
         let buffer = screen.active_buffer();
         let cursor_pos = screen.cursor;
@@ -1955,7 +1959,11 @@ impl Panel for Terminal {
         if key.modifiers.contains(KeyModifiers::SHIFT) {
             match key.code {
                 KeyCode::PageUp => {
-                    let rows = self.screen.lock().unwrap().rows;
+                    let rows = self
+                        .screen
+                        .lock()
+                        .expect("Terminal screen lock poisoned")
+                        .rows;
                     self.screen
                         .lock()
                         .unwrap()
@@ -1963,7 +1971,11 @@ impl Panel for Terminal {
                     return Ok(());
                 }
                 KeyCode::PageDown => {
-                    let rows = self.screen.lock().unwrap().rows;
+                    let rows = self
+                        .screen
+                        .lock()
+                        .expect("Terminal screen lock poisoned")
+                        .rows;
                     self.screen
                         .lock()
                         .unwrap()
@@ -1971,12 +1983,23 @@ impl Panel for Terminal {
                     return Ok(());
                 }
                 KeyCode::Home => {
-                    let scrollback_len = self.screen.lock().unwrap().scrollback.len();
-                    self.screen.lock().unwrap().scroll_offset = scrollback_len;
+                    let scrollback_len = self
+                        .screen
+                        .lock()
+                        .expect("Terminal screen lock poisoned")
+                        .scrollback
+                        .len();
+                    self.screen
+                        .lock()
+                        .expect("Terminal screen lock poisoned")
+                        .scroll_offset = scrollback_len;
                     return Ok(());
                 }
                 KeyCode::End => {
-                    self.screen.lock().unwrap().reset_scroll();
+                    self.screen
+                        .lock()
+                        .expect("Terminal screen lock poisoned")
+                        .reset_scroll();
                     return Ok(());
                 }
                 _ => {}
@@ -1984,7 +2007,10 @@ impl Panel for Terminal {
         }
 
         // Reset scroll on input
-        self.screen.lock().unwrap().reset_scroll();
+        self.screen
+            .lock()
+            .expect("Terminal screen lock poisoned")
+            .reset_scroll();
 
         // Handle special keys
         match key.code {
@@ -2025,28 +2051,48 @@ impl Panel for Terminal {
             }
             KeyCode::Left => {
                 // In Application Cursor Keys Mode send \x1bO instead of \x1b[
-                if self.screen.lock().unwrap().application_cursor_keys {
+                if self
+                    .screen
+                    .lock()
+                    .expect("Terminal screen lock poisoned")
+                    .application_cursor_keys
+                {
                     self.send_input(b"\x1bOD")?;
                 } else {
                     self.send_input(b"\x1b[D")?;
                 }
             }
             KeyCode::Right => {
-                if self.screen.lock().unwrap().application_cursor_keys {
+                if self
+                    .screen
+                    .lock()
+                    .expect("Terminal screen lock poisoned")
+                    .application_cursor_keys
+                {
                     self.send_input(b"\x1bOC")?;
                 } else {
                     self.send_input(b"\x1b[C")?;
                 }
             }
             KeyCode::Up => {
-                if self.screen.lock().unwrap().application_cursor_keys {
+                if self
+                    .screen
+                    .lock()
+                    .expect("Terminal screen lock poisoned")
+                    .application_cursor_keys
+                {
                     self.send_input(b"\x1bOA")?;
                 } else {
                     self.send_input(b"\x1b[A")?;
                 }
             }
             KeyCode::Down => {
-                if self.screen.lock().unwrap().application_cursor_keys {
+                if self
+                    .screen
+                    .lock()
+                    .expect("Terminal screen lock poisoned")
+                    .application_cursor_keys
+                {
                     self.send_input(b"\x1bOB")?;
                 } else {
                     self.send_input(b"\x1b[B")?;
@@ -2054,14 +2100,24 @@ impl Panel for Terminal {
             }
             KeyCode::Home => {
                 // In Application Cursor Keys Mode send \x1bO instead of \x1b[
-                if self.screen.lock().unwrap().application_cursor_keys {
+                if self
+                    .screen
+                    .lock()
+                    .expect("Terminal screen lock poisoned")
+                    .application_cursor_keys
+                {
                     self.send_input(b"\x1bOH")?;
                 } else {
                     self.send_input(b"\x1b[H")?;
                 }
             }
             KeyCode::End => {
-                if self.screen.lock().unwrap().application_cursor_keys {
+                if self
+                    .screen
+                    .lock()
+                    .expect("Terminal screen lock poisoned")
+                    .application_cursor_keys
+                {
                     self.send_input(b"\x1bOF")?;
                 } else {
                     self.send_input(b"\x1b[F")?;
@@ -2144,7 +2200,7 @@ impl Panel for Terminal {
 
         // Check if selection is active
         let selection_active = {
-            let screen = self.screen.lock().unwrap();
+            let screen = self.screen.lock().expect("Terminal screen lock poisoned");
             screen.selection_start.is_some()
         };
 
@@ -2161,7 +2217,7 @@ impl Panel for Terminal {
                     return Ok(());
                 }
                 // Start text selection
-                let mut screen = self.screen.lock().unwrap();
+                let mut screen = self.screen.lock().expect("Terminal screen lock poisoned");
                 screen.selection_start = Some((inner_row, inner_col));
                 screen.selection_end = Some((inner_row, inner_col)); // Set immediately for visibility
                 drop(screen);
@@ -2171,7 +2227,7 @@ impl Panel for Terminal {
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 // Update selection end (using clamped coordinates)
-                let mut screen = self.screen.lock().unwrap();
+                let mut screen = self.screen.lock().expect("Terminal screen lock poisoned");
                 if screen.selection_start.is_some() {
                     screen.selection_end = Some((inner_row, inner_col));
                 }
@@ -2179,7 +2235,7 @@ impl Panel for Terminal {
             MouseEventKind::Up(MouseButton::Left) => {
                 // Finalize selection (using clamped coordinates)
                 {
-                    let mut screen = self.screen.lock().unwrap();
+                    let mut screen = self.screen.lock().expect("Terminal screen lock poisoned");
                     if screen.selection_start.is_some() {
                         screen.selection_end = Some((inner_row, inner_col));
                     }
@@ -2190,7 +2246,7 @@ impl Panel for Terminal {
 
                 // Clear selection after copying
                 {
-                    let mut screen = self.screen.lock().unwrap();
+                    let mut screen = self.screen.lock().expect("Terminal screen lock poisoned");
                     screen.selection_start = None;
                     screen.selection_end = None;
                 }
@@ -2203,11 +2259,17 @@ impl Panel for Terminal {
             // Mouse wheel scrolling - for viewing history
             MouseEventKind::ScrollUp => {
                 // On scroll up - show history
-                self.screen.lock().unwrap().scroll_view_up(3);
+                self.screen
+                    .lock()
+                    .expect("Terminal screen lock poisoned")
+                    .scroll_view_up(3);
             }
             MouseEventKind::ScrollDown => {
                 // On scroll down - return to current
-                self.screen.lock().unwrap().scroll_view_down(3);
+                self.screen
+                    .lock()
+                    .expect("Terminal screen lock poisoned")
+                    .scroll_view_down(3);
             }
             // Other mouse events send to PTY
             _ => {

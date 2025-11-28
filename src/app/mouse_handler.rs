@@ -92,7 +92,10 @@ impl App {
             self.state
                 .log_info(format!("Attempting to open file: {}", filename));
 
-            match crate::panels::editor::Editor::open_file(file_path.clone()) {
+            match crate::panels::editor::Editor::open_file_with_config(
+                file_path.clone(),
+                self.state.editor_config(),
+            ) {
                 Ok(editor_panel) => {
                     self.panels.add_panel(Box::new(editor_panel));
                     let new_panel_index = self.panels.count().saturating_sub(1);

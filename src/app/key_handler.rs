@@ -41,7 +41,7 @@ impl App {
         }
 
         // Pass event to active panel and collect results
-        let (file_to_open, modal_request, config_update) =
+        let (file_to_open, modal_request, config_update, status_message) =
             if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
                 panel.handle_key(key)?;
 
@@ -49,20 +49,20 @@ impl App {
                 let file_to_open = panel.take_file_to_open();
                 let modal_request = panel.take_modal_request();
 
-                // Check config update (only for Editor)
-                let config_update = {
+                // Check config update and status message (only for Editor)
+                let (config_update, status_message) = {
                     use crate::panels::editor::Editor;
                     use std::any::Any;
                     if let Some(editor) = (&mut **panel as &mut dyn Any).downcast_mut::<Editor>() {
-                        editor.take_config_update()
+                        (editor.take_config_update(), editor.take_status_message())
                     } else {
-                        None
+                        (None, None)
                     }
                 };
 
-                (file_to_open, modal_request, config_update)
+                (file_to_open, modal_request, config_update, status_message)
             } else {
-                (None, None, None)
+                (None, None, None, None)
             };
 
         // Apply config update if present
@@ -70,6 +70,11 @@ impl App {
             self.state.config = new_config.clone();
             self.state.set_theme(&new_config.theme);
             self.state.set_info("Config saved and applied".to_string());
+        }
+
+        // Display status message if present
+        if let Some(message) = status_message {
+            self.state.set_info(message);
         }
 
         // Handle file opening in editor
@@ -83,7 +88,7 @@ impl App {
             self.state
                 .log_info(format!("Attempting to open file: {}", filename));
 
-            match Editor::open_file(file_path.clone()) {
+            match Editor::open_file_with_config(file_path.clone(), self.state.editor_config()) {
                 Ok(editor_panel) => {
                     self.panels.add_panel(Box::new(editor_panel));
                     let new_panel_index = self.panels.count().saturating_sub(1);
@@ -439,7 +444,7 @@ impl App {
     /// Create new editor
     fn handle_new_editor(&mut self) -> Result<()> {
         self.close_welcome_panels();
-        let editor_panel = Editor::new();
+        let editor_panel = Editor::with_config(self.state.editor_config());
         self.panels.add_panel(Box::new(editor_panel));
         let new_panel_index = self.panels.count().saturating_sub(1);
         self.state.set_active_panel(new_panel_index);
@@ -508,7 +513,7 @@ impl App {
 
         self.close_welcome_panels();
 
-        match Editor::open_file(config_path.clone()) {
+        match Editor::open_file_with_config(config_path.clone(), self.state.editor_config()) {
             Ok(editor_panel) => {
                 self.panels.add_panel(Box::new(editor_panel));
                 let new_panel_index = self.panels.count().saturating_sub(1);

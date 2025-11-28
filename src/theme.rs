@@ -98,24 +98,49 @@ pub struct Theme {
     pub error: Color,   // Error, git deleted, resource indicators >75%
 }
 
-/// Load theme from embedded TOML content
-fn load_theme_from_toml(content: &str, name: &'static str) -> Theme {
-    let toml_theme: TomlTheme =
-        toml::from_str(content).unwrap_or_else(|e| panic!("Failed to parse theme {}: {}", name, e));
-
-    let c = &toml_theme.colors;
+/// Hardcoded fallback theme in case of parse errors
+fn get_hardcoded_fallback_theme(name: &'static str) -> Theme {
     Theme {
         name,
-        bg: c.bg.to_color(),
-        fg: c.fg.to_color(),
-        accented_bg: c.accented_bg.to_color(),
-        accented_fg: c.accented_fg.to_color(),
-        selected_bg: c.selected_bg.to_color(),
-        selected_fg: c.selected_fg.to_color(),
-        disabled: c.disabled.to_color(),
-        success: c.success.to_color(),
-        warning: c.warning.to_color(),
-        error: c.error.to_color(),
+        bg: Color::Black,
+        fg: Color::White,
+        accented_bg: Color::DarkGray,
+        accented_fg: Color::Cyan,
+        selected_bg: Color::Blue,
+        selected_fg: Color::White,
+        disabled: Color::Gray,
+        success: Color::Green,
+        warning: Color::Yellow,
+        error: Color::Red,
+    }
+}
+
+/// Load theme from embedded TOML content
+fn load_theme_from_toml(content: &str, name: &'static str) -> Theme {
+    match toml::from_str::<TomlTheme>(content) {
+        Ok(toml_theme) => {
+            let c = &toml_theme.colors;
+            Theme {
+                name,
+                bg: c.bg.to_color(),
+                fg: c.fg.to_color(),
+                accented_bg: c.accented_bg.to_color(),
+                accented_fg: c.accented_fg.to_color(),
+                selected_bg: c.selected_bg.to_color(),
+                selected_fg: c.selected_fg.to_color(),
+                disabled: c.disabled.to_color(),
+                success: c.success.to_color(),
+                warning: c.warning.to_color(),
+                error: c.error.to_color(),
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "Failed to parse built-in theme '{}': {}. Using fallback theme.",
+                name, e
+            );
+            get_hardcoded_fallback_theme(name)
+        }
     }
 }
 
