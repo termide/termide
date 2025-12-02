@@ -90,15 +90,97 @@ jobs:
 
       - name: Package
         run: |
-          cd target/${{ matrix.target }}/release
-          tar czvf ../../../termide-${{ github.ref_name }}-${{ matrix.target }}.tar.gz termide
-          cd ../../..
+          mkdir -p package
+          cp target/${{ matrix.target }}/release/termide package/
+          cp README.md LICENSE package/
+          mkdir -p package/help
+          cp help/*.txt package/help/
+          cd package
+          tar czvf ../termide-${{ github.ref_name }}-${{ matrix.target }}.tar.gz *
+          cd ..
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: termide-${{ matrix.target }}
           path: termide-${{ github.ref_name }}-${{ matrix.target }}.*
+
+  # Build Debian packages
+  build-deb:
+    name: Build .deb packages
+    needs: quality-checks
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+
+      - name: Install cross-compilation tools (aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - name: Build and package
+        run: cargo deb --target ${{ matrix.target }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: termide-deb-${{ matrix.target }}
+          path: target/${{ matrix.target }}/debian/*.deb
+
+  # Build RPM packages
+  build-rpm:
+    name: Build .rpm packages
+    needs: quality-checks
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cargo-generate-rpm
+        run: cargo install cargo-generate-rpm
+
+      - name: Install cross-compilation tools (aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Generate RPM
+        run: cargo generate-rpm --target ${{ matrix.target }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: termide-rpm-${{ matrix.target }}
+          path: target/${{ matrix.target }}/generate-rpm/*.rpm
 
   # Publish to crates.io
   publish-crates-io:
@@ -120,7 +202,7 @@ jobs:
   # Create GitHub Release with artifacts
   release:
     name: Create Release
-    needs: build
+    needs: [build, build-deb, build-rpm]
     runs-on: ubuntu-latest
     # Only create release when triggered by tag (not workflow_dispatch)
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')

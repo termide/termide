@@ -32,62 +32,148 @@ A cross-platform terminal-based IDE, file manager, and virtual terminal written 
 
 ## Installation
 
-### Download Pre-built Binary (Recommended)
+**Quick Start:** Download pre-built binaries from [GitHub Releases](https://github.com/termide/termide/releases) or install via your package manager.
+
+**Supported Platforms:** Linux (x86_64, ARM64, WSL), macOS (Intel, Apple Silicon)
+
+### Choose Your Installation Method
+
+<details open>
+<summary><b>📦 Pre-built Binaries (Recommended)</b></summary>
 
 Download the latest release for your platform from [GitHub Releases](https://github.com/termide/termide/releases):
 
 ```bash
 # Linux x86_64 (also works in WSL)
-wget https://github.com/termide/termide/releases/latest/download/termide-0.1.3-x86_64-unknown-linux-gnu.tar.gz
-tar xzf termide-0.1.3-x86_64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.1.4-x86_64-unknown-linux-gnu.tar.gz
+tar xzf termide-0.1.4-x86_64-unknown-linux-gnu.tar.gz
 ./termide
 
 # macOS Intel (x86_64)
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.1.3-x86_64-apple-darwin.tar.gz
-tar xzf termide-0.1.3-x86_64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.1.4-x86_64-apple-darwin.tar.gz
+tar xzf termide-0.1.4-x86_64-apple-darwin.tar.gz
 ./termide
 
 # macOS Apple Silicon (ARM64)
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.1.3-aarch64-apple-darwin.tar.gz
-tar xzf termide-0.1.3-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.1.4-aarch64-apple-darwin.tar.gz
+tar xzf termide-0.1.4-aarch64-apple-darwin.tar.gz
 ./termide
 
 # Linux ARM64 (Raspberry Pi, ARM servers)
-wget https://github.com/termide/termide/releases/latest/download/termide-0.1.3-aarch64-unknown-linux-gnu.tar.gz
-tar xzf termide-0.1.3-aarch64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.1.4-aarch64-unknown-linux-gnu.tar.gz
+tar xzf termide-0.1.4-aarch64-unknown-linux-gnu.tar.gz
 ./termide
 ```
 
-**Supported Platforms:**
-- Linux x86_64 (also works in WSL/WSL2)
-- Linux ARM64 (Raspberry Pi, ARM servers)
-- macOS Intel (x86_64)
-- macOS Apple Silicon (M1/M2/M3)
+</details>
 
-### Install from crates.io
+<details>
+<summary><b>🐧 Debian/Ubuntu (.deb)</b></summary>
+
+Download and install the `.deb` package from [GitHub Releases](https://github.com/termide/termide/releases):
+
+```bash
+# x86_64
+wget https://github.com/termide/termide/releases/download/0.1.4/termide_0.1.4_amd64.deb
+sudo dpkg -i termide_0.1.4_amd64.deb
+
+# ARM64
+wget https://github.com/termide/termide/releases/download/0.1.4/termide_0.1.4_arm64.deb
+sudo dpkg -i termide_0.1.4_arm64.deb
+```
+
+</details>
+
+<details>
+<summary><b>🎩 Fedora/RHEL/CentOS (.rpm)</b></summary>
+
+Download and install the `.rpm` package from [GitHub Releases](https://github.com/termide/termide/releases):
+
+```bash
+# x86_64
+wget https://github.com/termide/termide/releases/download/0.1.4/termide-0.1.4-1.x86_64.rpm
+sudo rpm -i termide-0.1.4-1.x86_64.rpm
+
+# ARM64
+wget https://github.com/termide/termide/releases/download/0.1.4/termide-0.1.4-1.aarch64.rpm
+sudo rpm -i termide-0.1.4-1.aarch64.rpm
+```
+
+</details>
+
+<details>
+<summary><b>🐧 Arch Linux (AUR)</b></summary>
+
+Install from the AUR using your favorite AUR helper:
+
+```bash
+# Build from source
+yay -S termide
+
+# Or install pre-built binary
+yay -S termide-bin
+```
+
+Or manually:
+
+```bash
+git clone https://aur.archlinux.org/termide.git
+cd termide
+makepkg -si
+```
+
+</details>
+
+<details>
+<summary><b>🍺 Homebrew (macOS/Linux)</b></summary>
+
+Install via Homebrew tap:
+
+```bash
+brew tap termide/termide
+brew install termide
+```
+
+</details>
+
+<details>
+<summary><b>❄️ NixOS/Nix (Flakes)</b></summary>
+
+Install using Nix flakes:
+
+```bash
+# Run without installing
+nix run github:termide/termide
+
+# Install to user profile
+nix profile install github:termide/termide
+
+# Or add to NixOS configuration.nix
+{
+  nixpkgs.overlays = [
+    (import (builtins.fetchTarball "https://github.com/termide/termide/archive/main.tar.gz")).overlays.default
+  ];
+  environment.systemPackages = [ pkgs.termide ];
+}
+```
+
+</details>
+
+<details>
+<summary><b>🦀 Cargo (from crates.io)</b></summary>
+
+Install using Rust's cargo:
 
 ```bash
 cargo install termide
 ```
 
-### Build from Source with Nix
+</details>
 
-```bash
-# Clone the repository
-git clone https://github.com/termide/termide.git
-cd termide
+<details>
+<summary><b>🔨 Build from Source (Cargo)</b></summary>
 
-# Enter development environment
-nix develop
-
-# Build the project
-cargo build --release
-
-# Run
-./target/release/termide
-```
-
-### Build from Source with Cargo
+Build from source using Cargo:
 
 ```bash
 # Clone the repository
@@ -97,6 +183,30 @@ cd termide
 # Build and run
 cargo run --release
 ```
+
+</details>
+
+<details>
+<summary><b>🔨 Build from Source (Nix)</b></summary>
+
+Build from source using Nix (for development):
+
+```bash
+# Clone the repository
+git clone https://github.com/termide/termide.git
+cd termide
+
+# Enter development environment (includes Rust toolchain and all dependencies)
+nix develop
+
+# Build the project
+cargo build --release
+
+# Run
+./target/release/termide
+```
+
+</details>
 
 ## Requirements
 

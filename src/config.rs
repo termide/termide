@@ -67,12 +67,36 @@ impl Default for Config {
 impl Config {
     /// Load configuration from file
     /// On first run, creates config file with default values
+    /// Auto-completes missing keys with default values
     pub fn load() -> Result<Self> {
         let config_path = Self::get_config_path()?;
 
         if config_path.exists() {
-            let content = std::fs::read_to_string(&config_path)?;
-            Ok(toml::from_str(&content)?)
+            // Read existing config file
+            let original_content = std::fs::read_to_string(&config_path)?;
+
+            // Deserialize config (missing fields will use defaults from serde)
+            let config: Self = toml::from_str(&original_content)?;
+
+            // Check if any config keys are missing from the original file
+            let required_keys = [
+                "theme",
+                "tab_size",
+                "language",
+                "resource_monitor_interval",
+                "min_panel_width",
+            ];
+
+            let needs_update = required_keys
+                .iter()
+                .any(|key| !original_content.contains(key));
+
+            // If any keys are missing, save the complete config
+            if needs_update {
+                let _ = config.save(); // Ignore save error
+            }
+
+            Ok(config)
         } else {
             // First run - create config file with default values
             let config = Self::default();

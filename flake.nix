@@ -62,6 +62,52 @@
 
       in
       {
+        packages = {
+          default = pkgs.rustPlatform.buildRustPackage {
+            pname = "termide";
+            version = "0.1.4";
+
+            src = ./.;
+
+            cargoLock = {
+              lockFile = ./Cargo.lock;
+            };
+
+            nativeBuildInputs = [ pkgs.pkg-config ];
+
+            buildInputs = [ pkgs.openssl ]
+              ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+                pkgs.darwin.apple_sdk.frameworks.Security
+                pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
+              ];
+
+            # Install help files and themes
+            postInstall = ''
+              mkdir -p $out/share/termide/{help,themes}
+              cp -r ${./help}/*.txt $out/share/termide/help/
+              cp -r ${./themes}/*.toml $out/share/termide/themes/
+            '';
+
+            meta = with pkgs.lib; {
+              description = "Cross-platform terminal IDE, file manager and virtual terminal";
+              homepage = "https://github.com/termide/termide";
+              license = licenses.mit;
+              maintainers = [ ];
+              mainProgram = "termide";
+              platforms = platforms.unix;
+            };
+          };
+
+          termide = self.packages.${system}.default;
+        };
+
+        apps = {
+          default = {
+            type = "app";
+            program = "${self.packages.${system}.default}/bin/termide";
+          };
+        };
+
         devShells.default = pkgs.mkShell {
           inherit nativeBuildInputs buildInputs;
 
@@ -73,5 +119,9 @@
           # Ensure tree-sitter uses native compiler, not mingw cross-compiler
           CC = "cc";
         };
-      });
+      }) // {
+        overlays.default = final: prev: {
+          termide = self.packages.${final.system}.default;
+        };
+      };
 }
