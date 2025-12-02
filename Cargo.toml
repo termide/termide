@@ -36,7 +36,6 @@ depends = "$auto"
 section = "utils"
 priority = "optional"
 assets = [
-    ["target/release/termide", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/termide/", "644"],
     ["LICENSE", "usr/share/doc/termide/", "644"],
     ["help/en.txt", "usr/share/termide/help/", "644"],
@@ -48,12 +47,12 @@ name = "termide"
 license = "MIT"
 summary = "Cross-platform terminal IDE, file manager and virtual terminal"
 assets = [
-    { source = "target/release/termide", dest = "/usr/bin/termide", mode = "755" },
     { source = "README.md", dest = "/usr/share/doc/termide/README.md", mode = "644", doc = true },
     { source = "LICENSE", dest = "/usr/share/doc/termide/LICENSE", mode = "644", doc = true },
     { source = "help/en.txt", dest = "/usr/share/termide/help/en.txt", mode = "644" },
     { source = "help/ru.txt", dest = "/usr/share/termide/help/ru.txt", mode = "644" },
 ]
+auto-req = "no"
 
 [package.metadata.generate-rpm.requires]
 
