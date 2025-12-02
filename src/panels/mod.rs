@@ -97,4 +97,10 @@ pub trait Panel: Any {
     fn is_welcome_panel(&self) -> bool {
         false
     }
+
+    /// Serialize panel to session data
+    /// Returns None for panels that shouldn't be saved (e.g., Welcome)
+    fn to_session_panel(&self) -> Option<crate::session::SessionPanel> {
+        None
+    }
 }

@@ -1986,4 +1986,11 @@ impl Panel for Editor {
         // Capture Escape when search is active to prevent panel closure
         self.search_state.is_some()
     }
+
+    fn to_session_panel(&self) -> Option<crate::session::SessionPanel> {
+        // Save editor with file path (None for unnamed buffers)
+        Some(crate::session::SessionPanel::Editor {
+            path: self.file_path().map(|p| p.to_path_buf()),
+        })
+    }
 }

@@ -837,6 +837,13 @@ impl Panel for FileManager {
         // Pending batch operations are checked in has_panels_requiring_confirmation()
         None
     }
+
+    fn to_session_panel(&self) -> Option<crate::session::SessionPanel> {
+        // Save file manager with current directory path
+        Some(crate::session::SessionPanel::FileManager {
+            path: self.current_path.clone(),
+        })
+    }
 }
 
 impl Default for FileManager {

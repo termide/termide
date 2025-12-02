@@ -153,6 +153,7 @@ impl App {
             let available_width = terminal_width.saturating_sub(fm_width);
 
             let _ = self.layout_manager.close_active_panel(available_width);
+            self.auto_save_session();
         }
 
         Ok(())
@@ -300,6 +301,37 @@ impl App {
             if self.state.dir_size_receiver.is_some() {
                 modal.advance_spinner();
             }
+        }
+    }
+
+    /// Save current session to file
+    fn save_session(&self) -> Result<()> {
+        let session = self.layout_manager.to_session();
+        session.save()?;
+        Ok(())
+    }
+
+    /// Load session from file and restore layout
+    pub fn load_session(&mut self) -> Result<()> {
+        let session = crate::session::Session::load()?;
+
+        // Get terminal dimensions for creating Terminal panels
+        let term_height = self.state.terminal.height.saturating_sub(3);
+        let term_width = self.state.terminal.width.saturating_sub(2);
+
+        // Restore layout from session
+        self.layout_manager =
+            crate::layout_manager::LayoutManager::from_session(session, term_height, term_width)?;
+
+        Ok(())
+    }
+
+    /// Auto-save session (ignores errors to not disrupt user experience)
+    pub fn auto_save_session(&self) {
+        if let Err(e) = self.save_session() {
+            // Log error but don't interrupt user workflow
+            // In a production app, you might want to log this to a file
+            eprintln!("Warning: Failed to auto-save session: {}", e);
         }
     }
 }

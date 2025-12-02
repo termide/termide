@@ -430,6 +430,11 @@ impl Perform for VtPerformer {
                 b'\r' => screen.carriage_return(),
                 b'\x08' => screen.backspace(),
                 b'\t' => screen.tab(),
+                b'\x07' => {
+                    // Bell character - forward to parent terminal
+                    print!("\x07");
+                    let _ = std::io::stdout().flush();
+                }
                 _ => {}
             }
         }
@@ -2317,6 +2322,13 @@ impl Panel for Terminal {
 
     fn get_working_directory(&self) -> Option<std::path::PathBuf> {
         Some(self.initial_cwd.clone())
+    }
+
+    fn to_session_panel(&self) -> Option<crate::session::SessionPanel> {
+        // Save terminal with initial working directory
+        Some(crate::session::SessionPanel::Terminal {
+            working_dir: self.initial_cwd.clone(),
+        })
     }
 }
 

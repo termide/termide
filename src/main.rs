@@ -11,6 +11,7 @@ mod keyboard;
 mod layout_manager;
 mod panels;
 mod rename_pattern;
+mod session;
 mod state;
 mod syntax_highlighter;
 mod system_monitor;
@@ -58,11 +59,15 @@ fn main() -> Result<()> {
     // Create application
     let mut app = App::new();
 
-    // Set file manager (always in separate column)
-    app.set_file_manager(Box::new(FileManager::new()));
+    // Try to load session, fallback to default layout on error
+    if let Err(_e) = app.load_session() {
+        // Session file doesn't exist or is corrupted - use default layout
+        // Set file manager (always in separate column)
+        app.set_file_manager(Box::new(FileManager::new()));
 
-    // Add welcome panel as first panel group
-    app.add_panel(Box::new(panels::welcome::Welcome::new()));
+        // Add welcome panel as first panel group
+        app.add_panel(Box::new(panels::welcome::Welcome::new()));
+    }
 
     // Run application
     let result = app.run(&mut terminal);

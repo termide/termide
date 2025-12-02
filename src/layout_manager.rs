@@ -674,6 +674,146 @@ impl LayoutManager {
             self.panel_groups[idx].width = Some(width);
         }
     }
+
+    /// Serialize current layout to Session
+    pub fn to_session(&self) -> crate::session::Session {
+        use crate::session::{Session, SessionPanelGroup};
+
+        // Serialize file_manager path
+        let file_manager_path = self
+            .file_manager
+            .as_ref()
+            .and_then(|fm| fm.get_working_directory());
+
+        // Serialize panel groups
+        let panel_groups: Vec<SessionPanelGroup> = self
+            .panel_groups
+            .iter()
+            .map(|group| {
+                let panels: Vec<_> = group
+                    .panels()
+                    .iter()
+                    .filter_map(|panel| panel.to_session_panel())
+                    .collect();
+
+                SessionPanelGroup {
+                    panels,
+                    expanded_index: group.expanded_index(),
+                    width: group.width,
+                }
+            })
+            .collect();
+
+        // Determine focused group index
+        let focused_group = match self.focus {
+            FocusTarget::FileManager => 0, // Default to first group if FM is focused
+            FocusTarget::Group(idx) => idx,
+        };
+
+        Session {
+            panel_groups,
+            focused_group,
+            file_manager_path,
+        }
+    }
+
+    /// Restore layout from Session
+    pub fn from_session(
+        session: crate::session::Session,
+        term_height: u16,
+        term_width: u16,
+    ) -> Result<Self> {
+        use crate::panels::debug::Debug;
+        use crate::panels::editor::Editor;
+        use crate::panels::file_manager::FileManager;
+        use crate::panels::terminal_pty::Terminal;
+        use crate::session::SessionPanel;
+
+        let mut layout = Self::new();
+
+        // Restore file_manager if it was present
+        if let Some(ref fm_path) = session.file_manager_path {
+            layout.set_file_manager(Box::new(FileManager::new_with_path(fm_path.clone())));
+        }
+
+        // Restore panel groups
+        for session_group in session.panel_groups {
+            // Skip empty groups
+            if session_group.panels.is_empty() {
+                continue;
+            }
+
+            // Create panels from session data
+            let mut panels: Vec<Box<dyn Panel>> = Vec::new();
+
+            for session_panel in session_group.panels {
+                let panel: Option<Box<dyn Panel>> = match session_panel {
+                    SessionPanel::FileManager { path } => {
+                        Some(Box::new(FileManager::new_with_path(path)))
+                    }
+                    SessionPanel::Editor { path } => {
+                        if let Some(file_path) = path {
+                            // Try to open file, skip if it fails (file might have been deleted)
+                            Editor::open_file(file_path)
+                                .ok()
+                                .map(|e| Box::new(e) as Box<dyn Panel>)
+                        } else {
+                            // Unnamed editor - don't restore (user doesn't expect this)
+                            None
+                        }
+                    }
+                    SessionPanel::Terminal { working_dir } => {
+                        // Create terminal with working directory
+                        Terminal::new_with_cwd(term_height, term_width, Some(working_dir))
+                            .ok()
+                            .map(|t| Box::new(t) as Box<dyn Panel>)
+                    }
+                    SessionPanel::Debug => Some(Box::new(Debug::new())),
+                };
+
+                if let Some(p) = panel {
+                    panels.push(p);
+                }
+            }
+
+            // Skip group if all panels failed to restore
+            if panels.is_empty() {
+                continue;
+            }
+
+            // Create panel group with first panel
+            let mut group = PanelGroup::new(panels.remove(0));
+
+            // Add remaining panels to group
+            for panel in panels {
+                group.add_panel(panel);
+            }
+
+            // Restore expanded index (clamp to valid range)
+            let expanded_idx = session_group
+                .expanded_index
+                .min(group.len().saturating_sub(1));
+            group.set_expanded(expanded_idx);
+
+            // Restore width
+            group.width = session_group.width;
+
+            layout.panel_groups.push(group);
+        }
+
+        // Restore focus (clamp to valid range)
+        let focused_group = session
+            .focused_group
+            .min(layout.panel_groups.len().saturating_sub(1));
+        layout.focus = if layout.file_manager.is_some() && focused_group == 0 {
+            // If FM exists and focus was 0, focus FM instead
+            FocusTarget::FileManager
+        } else {
+            FocusTarget::Group(focused_group)
+        };
+
+        Ok(layout)
+    }
 }
 
 impl Default for LayoutManager {

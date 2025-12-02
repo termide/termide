@@ -20,6 +20,7 @@ impl App {
 
         // Close active panel (LayoutManager handles active panel tracking)
         let _ = self.layout_manager.close_active_panel(available_width);
+        self.auto_save_session();
 
         // Reload file manager to update git statuses
         // This is needed for example when closing .gitignore editor

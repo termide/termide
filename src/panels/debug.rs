@@ -130,6 +130,11 @@ impl Panel for Debug {
     fn title(&self) -> String {
         "Log".to_string()
     }
+
+    fn to_session_panel(&self) -> Option<crate::session::SessionPanel> {
+        // Save debug panel (no state to persist)
+        Some(crate::session::SessionPanel::Debug)
+    }
 }
 
 impl Default for Debug {

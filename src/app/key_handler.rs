@@ -92,6 +92,7 @@ impl App {
             match Editor::open_file_with_config(file_path.clone(), self.state.editor_config()) {
                 Ok(editor_panel) => {
                     self.add_panel(Box::new(editor_panel));
+                    self.auto_save_session();
                     self.state
                         .log_success(format!("File '{}' opened in editor", filename));
                     self.state.set_info(t.editor_file_opened(filename));
@@ -402,6 +403,7 @@ impl App {
 
         if let Ok(terminal_panel) = Terminal::new_with_cwd(term_height, term_width, working_dir) {
             self.add_panel(Box::new(terminal_panel));
+            self.auto_save_session();
         }
         Ok(())
     }
@@ -418,6 +420,7 @@ impl App {
 
         let fm_panel = FileManager::new_with_path(working_dir);
         self.add_panel(Box::new(fm_panel));
+        self.auto_save_session();
         Ok(())
     }
 
@@ -426,6 +429,7 @@ impl App {
         self.close_welcome_panels();
         let editor_panel = Editor::with_config(self.state.editor_config());
         self.add_panel(Box::new(editor_panel));
+        self.auto_save_session();
         Ok(())
     }
 
@@ -434,6 +438,7 @@ impl App {
         self.close_welcome_panels();
         let debug_panel = Debug::new();
         self.add_panel(Box::new(debug_panel));
+        self.auto_save_session();
         Ok(())
     }
 
@@ -443,6 +448,7 @@ impl App {
         // For now, just create new
         let welcome = Welcome::new();
         self.add_panel(Box::new(welcome));
+        self.auto_save_session();
         Ok(())
     }
 
@@ -468,6 +474,7 @@ impl App {
         match Editor::open_file_with_config(config_path.clone(), self.state.editor_config()) {
             Ok(editor_panel) => {
                 self.add_panel(Box::new(editor_panel));
+                self.auto_save_session();
             }
             Err(e) => {
                 self.state
@@ -584,6 +591,7 @@ impl App {
 
         self.layout_manager
             .move_panel_to_prev_group(available_width)?;
+        self.auto_save_session();
         Ok(())
     }
 
@@ -599,6 +607,7 @@ impl App {
 
         self.layout_manager
             .move_panel_to_next_group(available_width)?;
+        self.auto_save_session();
         Ok(())
     }
 
@@ -718,6 +727,7 @@ impl App {
                 self.layout_manager.panel_groups[group_idx].width =
                     Some(corrected_width.clamp(20, 300));
             }
+            self.auto_save_session();
         }
         Ok(())
     }
@@ -829,6 +839,8 @@ impl App {
                     if let Err(e) = self.layout_manager.toggle_panel_stacking(available_width) {
                         self.state
                             .set_error(format!("Cannot toggle stacking: {}", e));
+                    } else {
+                        self.auto_save_session();
                     }
                     return Ok(Some(()));
                 }
@@ -857,6 +869,8 @@ impl App {
                         .move_panel_to_first_group(available_width)
                     {
                         self.state.set_error(format!("Cannot move panel: {}", e));
+                    } else {
+                        self.auto_save_session();
                     }
                     return Ok(Some(()));
                 }
@@ -875,6 +889,8 @@ impl App {
                         .move_panel_to_last_group(available_width)
                     {
                         self.state.set_error(format!("Cannot move panel: {}", e));
+                    } else {
+                        self.auto_save_session();
                     }
                     return Ok(Some(()));
                 }
