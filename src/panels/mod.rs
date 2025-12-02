@@ -8,6 +8,7 @@ use crate::state::AppState;
 pub mod debug;
 pub mod editor;
 pub mod file_manager;
+pub mod panel_group;
 pub mod terminal_pty;
 pub mod welcome;
 
@@ -95,79 +96,5 @@ pub trait Panel: Any {
     /// Welcome panel automatically closes when other panels are opened
     fn is_welcome_panel(&self) -> bool {
         false
-    }
-}
-
-/// Container for panels
-pub struct PanelContainer {
-    panels: Vec<Box<dyn Panel>>,
-    visible: Vec<bool>,
-}
-
-impl PanelContainer {
-    /// Create new panel container
-    pub fn new() -> Self {
-        Self {
-            panels: Vec::new(),
-            visible: Vec::new(),
-        }
-    }
-
-    /// Add panel
-    pub fn add_panel(&mut self, panel: Box<dyn Panel>) {
-        self.panels.push(panel);
-        self.visible.push(true); // Panel is visible by default
-    }
-
-    /// Get number of panels
-    pub fn count(&self) -> usize {
-        self.panels.len()
-    }
-
-    /// Get panel by index
-    #[allow(clippy::borrowed_box)]
-    pub fn get(&self, index: usize) -> Option<&Box<dyn Panel>> {
-        self.panels.get(index)
-    }
-
-    /// Get panel by index (mutable)
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut Box<dyn Panel>> {
-        self.panels.get_mut(index)
-    }
-
-    /// Close panel (remove from list)
-    pub fn close_panel(&mut self, index: usize) {
-        if index < self.panels.len() {
-            self.panels.remove(index);
-            self.visible.remove(index);
-        }
-    }
-
-    /// Swap two panels
-    pub fn swap_panels(&mut self, index1: usize, index2: usize) {
-        if index1 < self.panels.len() && index2 < self.panels.len() {
-            self.panels.swap(index1, index2);
-            self.visible.swap(index1, index2);
-        }
-    }
-
-    /// Get indices of all visible panels
-    pub fn visible_indices(&self) -> Vec<usize> {
-        self.visible
-            .iter()
-            .enumerate()
-            .filter_map(|(i, &visible)| if visible { Some(i) } else { None })
-            .collect()
-    }
-
-    /// Check if there are visible panels
-    pub fn has_visible_panels(&self) -> bool {
-        self.visible.iter().any(|&v| v)
-    }
-}
-
-impl Default for PanelContainer {
-    fn default() -> Self {
-        Self::new()
     }
 }

@@ -2,14 +2,26 @@
 
     Alt+M        Toggle menu
     Alt+H        Show this help
-    Alt+←/→      Switch between panels
-    Alt+1..9     Go to panel by number
-    Alt+X / Esc  Close current panel
     Alt+Q        Quit application
     Alt+F        Open file manager panel
     Alt+T        Open terminal panel
     Alt+E        Open editor panel
     Alt+P        Open config file in editor
+
+
+  PANEL MANAGEMENT
+
+    Alt+←/→         Switch between panel groups (horizontal)
+    Alt+↑/↓         Navigate panels within group (vertical)
+    Alt+PgUp        Move panel to previous group
+    Alt+PgDn        Move panel to next group
+    Alt+Home        Move panel to first group
+    Alt+End         Move panel to last group
+    Alt+Plus (=)    Increase active group width
+    Alt+Minus (-)   Decrease active group width
+    Alt+X / Esc     Close current panel
+    Alt+Delete      Close current panel
+    Alt+Backspace   Toggle panel stacking (merge/unstack)
 
 
   FILE MANAGER KEYS

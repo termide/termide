@@ -8,16 +8,16 @@ impl App {
     /// Handle deletion of files/directories
     pub(in crate::app) fn handle_delete_path(
         &mut self,
-        panel_index: usize,
+        _panel_index: usize, // obsolete with LayoutManager
         paths: Vec<PathBuf>,
         value: Box<dyn std::any::Any>,
     ) -> Result<()> {
         if let Some(confirmed) = value.downcast_ref::<bool>() {
             if *confirmed {
-                // Get FileManager panel and delete files/directories
-                if let Some(panel) = self.panels.get_mut(panel_index) {
+                // Get FileManager and delete files/directories
+                if let Some(fm_panel) = self.layout_manager.file_manager_mut() {
                     use std::any::Any;
-                    let panel_any: &mut dyn Any = &mut **panel;
+                    let panel_any: &mut dyn Any = &mut **fm_panel;
                     if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
                         let mut success_count = 0;
                         let mut error_count = 0;
@@ -79,11 +79,10 @@ impl App {
                         let _ = fm.load_directory();
                     } else {
                         self.state
-                            .log_error(format!("Panel {} is not FileManager", panel_index));
+                            .log_error("FileManager panel could not be accessed".to_string());
                     }
                 } else {
-                    self.state
-                        .log_error(format!("Panel with index {} not found", panel_index));
+                    self.state.log_error("FileManager not found".to_string());
                 }
             }
         }
@@ -93,17 +92,17 @@ impl App {
     /// Handle panel closure
     pub(in crate::app) fn handle_close_panel(
         &mut self,
-        panel_index: usize,
+        _panel_index: usize, // obsolete with LayoutManager
         value: Box<dyn std::any::Any>,
     ) -> Result<()> {
         if let Some(confirmed) = value.downcast_ref::<bool>() {
             if *confirmed {
-                // Terminate processes in panel (for terminal)
-                if let Some(panel) = self.panels.get_mut(panel_index) {
+                // Terminate processes in active panel (for terminal)
+                if let Some(panel) = self.layout_manager.active_panel_mut() {
                     panel.kill_processes();
                 }
-                // Close panel
-                self.close_panel_at_index(panel_index);
+                // Close active panel
+                self.close_panel_at_index(0); // panel_index is obsolete
             }
         }
         Ok(())

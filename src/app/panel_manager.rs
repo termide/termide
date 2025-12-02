@@ -7,107 +7,72 @@ use crate::panels::welcome::Welcome;
 
 impl App {
     /// Close panel by index and switch focus to next visible panel
-    pub(super) fn close_panel_at_index(&mut self, panel_index: usize) {
-        // Close panel
-        self.panels.close_panel(panel_index);
+    /// NOTE: panel_index parameter is now obsolete with LayoutManager, kept for compatibility
+    pub(super) fn close_panel_at_index(&mut self, _panel_index: usize) {
+        // Calculate available width for panel groups
+        let terminal_width = self.state.terminal.width;
+        let fm_width = if self.layout_manager.has_file_manager() {
+            crate::constants::DEFAULT_FM_WIDTH
+        } else {
+            0
+        };
+        let available_width = terminal_width.saturating_sub(fm_width);
 
-        // Reload file manager (panel 0) to update git statuses
+        // Close active panel (LayoutManager handles active panel tracking)
+        let _ = self.layout_manager.close_active_panel(available_width);
+
+        // Reload file manager to update git statuses
         // This is needed for example when closing .gitignore editor
-        if let Some(fm_panel) = self.panels.get_mut(0) {
+        if let Some(fm_panel) = self.layout_manager.file_manager_mut() {
             let _ = fm_panel.reload();
         }
 
         // Add Welcome panel if needed
-        // - In Single mode: when panels.count() == 0
-        // - In MultiPanel mode: when only FM remains (panels.count() == 1)
-        let should_add_welcome = match self.state.layout_mode {
-            crate::state::LayoutMode::Single => self.panels.count() == 0,
-            crate::state::LayoutMode::MultiPanel => {
-                // Check that only one panel (FM) remains without Welcome
-                if self.panels.count() == 1 {
-                    // Make sure remaining panel is not Welcome
-                    self.panels
-                        .get(0)
-                        .map(|p| !p.is_welcome_panel())
-                        .unwrap_or(true)
-                } else {
-                    false
-                }
-            }
-        };
+        // Check if no panel groups remain (all panels closed)
+        let should_add_welcome = self.layout_manager.panel_groups.is_empty();
 
         if should_add_welcome {
             let welcome = Welcome::new();
-            self.panels.add_panel(Box::new(welcome));
-            // Focus returns to file manager (panel 0) when welcome panel is added
-            self.state.active_panel = 0;
-            return;
+            self.add_panel(Box::new(welcome));
         }
 
-        // Find next visible panel
-        if self.panels.count() > 0 {
-            // Try next visible panel
-            let visible = self.panels.visible_indices();
-            if !visible.is_empty() {
-                // If closed panel was last, select previous visible
-                if panel_index >= self.panels.count() {
-                    self.state.active_panel = *visible.last().unwrap();
-                } else {
-                    // Select closest visible panel
-                    self.state.active_panel = visible
-                        .iter()
-                        .find(|&&i| i >= panel_index)
-                        .or_else(|| visible.last())
-                        .copied()
-                        .unwrap_or(0);
-                }
-            }
-        }
+        // Active panel tracking is handled by LayoutManager
+        // No need to manually update active_panel index
     }
 
-    /// Find directory of another FM panel (not current_panel_index)
+    /// Find directory of another FM panel
     ///
     /// Note: This method is kept for backwards compatibility.
-    /// Consider using `find_all_other_fm_panels()` for multi-panel support.
+    /// With LayoutManager, there's only one FileManager.
     #[allow(dead_code)]
-    pub(super) fn find_other_fm_directory(&self, current_panel_index: usize) -> Option<PathBuf> {
-        // Search for another FM panel
-        for i in 0..self.panels.count() {
-            if i != current_panel_index {
-                if let Some(panel) = self.panels.get(i) {
-                    // Check if panel is FileManager
-                    let panel_any: &dyn Any = &**panel;
-                    if panel_any.is::<FileManager>() {
-                        // Get working directory
-                        if let Some(dir) = panel.get_working_directory() {
-                            return Some(dir);
-                        }
-                    }
-                }
-            }
-        }
-
-        None
+    pub(super) fn find_other_fm_directory(&self) -> Option<PathBuf> {
+        // Get working directory from FileManager
+        self.layout_manager
+            .file_manager
+            .as_ref()
+            .and_then(|fm| fm.get_working_directory())
     }
 
-    /// Find all panels (except current_panel_index) that have working directories
+    /// Find all panels that have working directories
     /// Returns deduplicated and sorted list of paths from all panel types (FM, Terminal, Editor)
-    pub(super) fn find_all_other_panel_paths(
-        &self,
-        current_panel_index: usize,
-    ) -> Vec<crate::ui::modal::SelectOption> {
+    pub(super) fn find_all_other_panel_paths(&self) -> Vec<crate::ui::modal::SelectOption> {
         use std::collections::HashSet;
 
         let mut unique_paths: HashSet<PathBuf> = HashSet::new();
 
-        // Collect all unique paths from all panels (FM, Terminal, Editor)
-        for i in 0..self.panels.count() {
-            if i != current_panel_index {
-                if let Some(panel) = self.panels.get(i) {
-                    // Get working directory from any panel type
-                    if let Some(dir) = panel.get_working_directory() {
-                        unique_paths.insert(dir);
-                    }
+        // Collect all unique paths from FileManager
+        if let Some(fm) = &self.layout_manager.file_manager {
+            if let Some(dir) = fm.get_working_directory() {
+                unique_paths.insert(dir);
+            }
+        }
+
+        // Collect all unique paths from all panels in groups (Terminal, Editor, etc.)
+        for group in &self.layout_manager.panel_groups {
+            for panel in group.panels() {
+                // Get working directory from any panel type
+                if let Some(dir) = panel.get_working_directory() {
+                    unique_paths.insert(dir);
                 }
             }
         }
@@ -118,7 +83,7 @@ impl App {
             .map(|path| {
                 let path_str = path.display().to_string();
                 crate::ui::modal::SelectOption {
-                    panel_index: 0,          // Not used, set to 0
+                    panel_index: 0,          // Not used with LayoutManager
                     value: path_str.clone(), // Value is the path string
                     display: path_str,       // Display is also the path string
                 }
@@ -133,16 +98,15 @@ impl App {
 
     /// Refresh all FM panels that show specified directory
     pub(super) fn refresh_fm_panels(&mut self, directory: &std::path::Path) {
-        for i in 0..self.panels.count() {
-            if let Some(panel) = self.panels.get_mut(i) {
-                let panel_any: &mut dyn Any = &mut **panel;
-                if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
-                    // Check if FM working directory matches target
-                    let fm_dir = fm.get_current_directory();
-                    if fm_dir == directory {
-                        // Refresh directory contents
-                        let _ = fm.load_directory();
-                    }
+        // With LayoutManager, there's only one FileManager
+        if let Some(fm_panel) = self.layout_manager.file_manager_mut() {
+            let panel_any: &mut dyn Any = &mut **fm_panel;
+            if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
+                // Check if FM working directory matches target
+                let fm_dir = fm.get_current_directory();
+                if fm_dir == directory {
+                    // Refresh directory contents
+                    let _ = fm.load_directory();
                 }
             }
         }

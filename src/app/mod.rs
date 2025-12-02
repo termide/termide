@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use crate::{
     event::{Event, EventHandler},
-    panels::PanelContainer,
+    layout_manager::LayoutManager,
     state::{ActiveModal, AppState},
-    ui::render_layout,
+    ui::render_layout_with_accordion,
 };
 
 mod key_handler;
@@ -18,7 +18,7 @@ mod panel_manager;
 /// Main application
 pub struct App {
     state: AppState,
-    panels: PanelContainer,
+    layout_manager: LayoutManager,
     event_handler: EventHandler,
 }
 
@@ -26,8 +26,6 @@ impl App {
     /// Create a new application
     pub fn new() -> Self {
         let mut state = AppState::new();
-        // Set active panel to FileManager (panel 0) by default
-        state.active_panel = 0;
 
         // Initialize git watcher for automatic status updates
         match crate::git::create_git_watcher() {
@@ -55,16 +53,23 @@ impl App {
 
         Self {
             state,
-            panels: PanelContainer::new(),
+            layout_manager: LayoutManager::new(),
             event_handler: EventHandler::new(Duration::from_millis(
                 crate::constants::EVENT_HANDLER_INTERVAL_MS,
             )),
         }
     }
 
-    /// Add a panel
+    /// Add a panel (automatically stacks if width threshold is reached)
     pub fn add_panel(&mut self, panel: Box<dyn crate::panels::Panel>) {
-        self.panels.add_panel(panel);
+        let terminal_width = self.state.terminal.width;
+        let config = &self.state.config;
+        self.layout_manager.add_panel(panel, config, terminal_width);
+    }
+
+    /// Set the file manager panel
+    pub fn set_file_manager(&mut self, fm: Box<dyn crate::panels::Panel>) {
+        self.layout_manager.set_file_manager(fm);
     }
 
     /// Run the main application loop
@@ -85,6 +90,16 @@ impl App {
                 Event::Resize(width, height) => {
                     // Update terminal dimensions in state
                     self.state.update_terminal_size(width, height);
+
+                    // Пропорционально перераспределить ширины групп при изменении размера терминала
+                    let fm_width = if self.layout_manager.has_file_manager() {
+                        crate::constants::DEFAULT_FM_WIDTH
+                    } else {
+                        0
+                    };
+                    let available_width = width.saturating_sub(fm_width);
+                    self.layout_manager
+                        .redistribute_widths_proportionally(available_width);
                 }
                 Event::Tick => {
                     // Check channel for directory size calculation results
@@ -109,7 +124,7 @@ impl App {
 
             // Render UI after processing event
             terminal.draw(|frame| {
-                render_layout(frame, &mut self.state, &mut self.panels);
+                render_layout_with_accordion(frame, &mut self.state, &mut self.layout_manager);
             })?;
         }
 
@@ -118,41 +133,26 @@ impl App {
 
     /// Check and close panels that should auto-close
     fn check_auto_close_panels(&mut self) -> Result<()> {
-        // Collect panel indices to close
-        let mut to_close = Vec::new();
-
-        for i in 0..self.panels.count() {
-            if let Some(panel) = self.panels.get_mut(i) {
-                if panel.should_auto_close() {
-                    // Check if this panel can be closed
-                    if crate::ui::panel_helpers::can_close_panel(i, &self.state) {
-                        to_close.push(i);
-                    }
-                }
+        // Check if active panel should auto-close
+        let should_close = {
+            if let Some(panel) = self.layout_manager.active_panel_mut() {
+                panel.should_auto_close()
+            } else {
+                false
             }
-        }
+        };
 
-        // Close panels (in reverse order so indices don't shift)
-        for &index in to_close.iter().rev() {
-            self.panels.close_panel(index);
+        if should_close && self.layout_manager.can_close_active() {
+            // Calculate available width for panel groups
+            let terminal_width = self.state.terminal.width;
+            let fm_width = if self.layout_manager.has_file_manager() {
+                crate::constants::DEFAULT_FM_WIDTH
+            } else {
+                0
+            };
+            let available_width = terminal_width.saturating_sub(fm_width);
 
-            // If closed active panel, switch to next
-            if index == self.state.active_panel {
-                if self.panels.count() > 0 {
-                    let visible = self.panels.visible_indices();
-                    if !visible.is_empty() {
-                        self.state.active_panel = visible
-                            .iter()
-                            .find(|&&i| i >= index)
-                            .or_else(|| visible.last())
-                            .copied()
-                            .unwrap_or(0);
-                    }
-                }
-            } else if index < self.state.active_panel && self.state.active_panel > 0 {
-                // If closed panel to the left of active, shift index
-                self.state.active_panel -= 1;
-            }
+            let _ = self.layout_manager.close_active_panel(available_width);
         }
 
         Ok(())
@@ -184,17 +184,15 @@ impl App {
 
         // First, register all FileManager repositories with watcher (lazy registration)
         if let Some(watcher) = &mut self.state.git_watcher {
-            for i in 0..self.panels.count() {
-                if let Some(panel) = self.panels.get_mut(i) {
-                    if let Some(fm) =
-                        (&mut **panel as &mut dyn std::any::Any).downcast_mut::<FileManager>()
-                    {
-                        // Find repository root for this FileManager's current path
-                        if let Some(repo_root) = Self::find_git_repo_root(fm.current_path()) {
-                            // Only register if not already watching
-                            if !watcher.is_watching(&repo_root) {
-                                let _ = watcher.watch_repository(repo_root);
-                            }
+            for panel in self.layout_manager.iter_all_panels_mut() {
+                if let Some(fm) =
+                    (&mut **panel as &mut dyn std::any::Any).downcast_mut::<FileManager>()
+                {
+                    // Find repository root for this FileManager's current path
+                    if let Some(repo_root) = Self::find_git_repo_root(fm.current_path()) {
+                        // Only register if not already watching
+                        if !watcher.is_watching(&repo_root) {
+                            let _ = watcher.watch_repository(repo_root);
                         }
                     }
                 }
@@ -212,16 +210,14 @@ impl App {
         // Process collected updates
         for update in updates {
             // Update all FileManager panels showing this repository or its subdirectories
-            for i in 0..self.panels.count() {
-                if let Some(panel) = self.panels.get_mut(i) {
-                    // Try to downcast to FileManager
-                    if let Some(fm) =
-                        (&mut **panel as &mut dyn std::any::Any).downcast_mut::<FileManager>()
-                    {
-                        // Check if this panel is showing a path within the updated repository
-                        if fm.current_path().starts_with(&update.repo_path) {
-                            let _ = fm.update_git_status();
-                        }
+            for panel in self.layout_manager.iter_all_panels_mut() {
+                // Try to downcast to FileManager
+                if let Some(fm) =
+                    (&mut **panel as &mut dyn std::any::Any).downcast_mut::<FileManager>()
+                {
+                    // Check if this panel is showing a path within the updated repository
+                    if fm.current_path().starts_with(&update.repo_path) {
+                        let _ = fm.update_git_status();
                     }
                 }
             }
@@ -245,17 +241,15 @@ impl App {
 
         // Lazy registration: register all FileManager directories with watcher
         if let Some(watcher) = &mut self.state.fs_watcher {
-            for i in 0..self.panels.count() {
-                if let Some(panel) = self.panels.get_mut(i) {
-                    if let Some(fm) =
-                        (&mut **panel as &mut dyn std::any::Any).downcast_mut::<FileManager>()
-                    {
-                        let dir_path = fm.current_path().to_path_buf();
+            for panel in self.layout_manager.iter_all_panels_mut() {
+                if let Some(fm) =
+                    (&mut **panel as &mut dyn std::any::Any).downcast_mut::<FileManager>()
+                {
+                    let dir_path = fm.current_path().to_path_buf();
 
-                        // Only register if not already watching
-                        if !watcher.is_watching(&dir_path) {
-                            let _ = watcher.watch_directory(dir_path);
-                        }
+                    // Only register if not already watching
+                    if !watcher.is_watching(&dir_path) {
+                        let _ = watcher.watch_directory(dir_path);
                     }
                 }
             }
@@ -272,16 +266,14 @@ impl App {
         // Process collected updates
         for update in updates {
             // Update all FileManager panels showing this directory
-            for i in 0..self.panels.count() {
-                if let Some(panel) = self.panels.get_mut(i) {
-                    // Try to downcast to FileManager
-                    if let Some(fm) =
-                        (&mut **panel as &mut dyn std::any::Any).downcast_mut::<FileManager>()
-                    {
-                        // Check if this panel is showing the updated directory
-                        if fm.current_path() == update.dir_path {
-                            let _ = fm.load_directory();
-                        }
+            for panel in self.layout_manager.iter_all_panels_mut() {
+                // Try to downcast to FileManager
+                if let Some(fm) =
+                    (&mut **panel as &mut dyn std::any::Any).downcast_mut::<FileManager>()
+                {
+                    // Check if this panel is showing the updated directory
+                    if fm.current_path() == update.dir_path {
+                        let _ = fm.load_directory();
                     }
                 }
             }

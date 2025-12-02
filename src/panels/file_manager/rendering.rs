@@ -11,9 +11,10 @@ use crate::theme::Theme;
 impl FileManager {
     /// Get display title with path
     /// Truncates path from left if it doesn't fit in available width
-    pub(super) fn get_display_title(&self, available_width: u16, can_close: bool) -> String {
+    pub(super) fn get_display_title(&self, available_width: u16) -> String {
         let path_str = self.current_path.display().to_string();
-        let overhead = if can_close { 10 } else { 7 };
+        // Overhead for borders and padding (no [X] button for FileManager)
+        let overhead = 7;
         let max_path_len = available_width.saturating_sub(overhead) as usize;
         let char_count = path_str.chars().count();
 

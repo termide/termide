@@ -4,9 +4,16 @@ Welcome to the TermIDE documentation! This guide covers installation, usage, and
 
 ## Table of Contents
 
+### User Documentation
+
 - [Installation Guide](installation.md) - How to install TermIDE on your system
 - [Application Window Overview](ui.md) - Understanding the UI layout
 - [File Manager](file-manager.md) - File navigation and operations
 - [Terminal](terminal.md) - Using the integrated terminal
 - [Text Editor](editor.md) - Editing files with syntax highlighting
 - [Themes](themes.md) - Customizing appearance with themes
+
+### Developer Documentation
+
+- [Developer Guide](developer-guide.md) - Contributing to TermIDE development
+- [Architecture](architecture.md) - Technical architecture and design decisions

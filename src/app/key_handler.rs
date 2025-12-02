@@ -4,12 +4,13 @@ use std::path::PathBuf;
 
 use super::App;
 use crate::{
+    constants::DEFAULT_FM_WIDTH,
     i18n,
     panels::{
         debug::Debug, editor::Editor, file_manager::FileManager, terminal_pty::Terminal,
         welcome::Welcome,
     },
-    state::{ActiveModal, LayoutMode, PendingAction},
+    state::{ActiveModal, PendingAction},
     ui::menu::MENU_ITEM_COUNT,
 };
 
@@ -42,7 +43,7 @@ impl App {
 
         // Pass event to active panel and collect results
         let (file_to_open, modal_request, config_update, status_message) =
-            if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+            if let Some(panel) = self.layout_manager.active_panel_mut() {
                 panel.handle_key(key)?;
 
                 // Collect results from panel
@@ -90,9 +91,7 @@ impl App {
 
             match Editor::open_file_with_config(file_path.clone(), self.state.editor_config()) {
                 Ok(editor_panel) => {
-                    self.panels.add_panel(Box::new(editor_panel));
-                    let new_panel_index = self.panels.count().saturating_sub(1);
-                    self.state.set_active_panel(new_panel_index);
+                    self.add_panel(Box::new(editor_panel));
                     self.state
                         .log_success(format!("File '{}' opened in editor", filename));
                     self.state.set_info(t.editor_file_opened(filename));
@@ -108,7 +107,8 @@ impl App {
 
         // Handle modal window
         if let Some((mut action, mut modal)) = modal_request {
-            // Update panel_index in action
+            // Note: panel_index is kept for compatibility but not actively used with LayoutManager
+            // Active panel is tracked by LayoutManager (active group + expanded panel)
             match &mut action {
                 PendingAction::CreateFile { panel_index, .. }
                 | PendingAction::CreateDirectory { panel_index, .. }
@@ -119,7 +119,7 @@ impl App {
                 | PendingAction::ClosePanel { panel_index }
                 | PendingAction::CloseEditorWithSave { panel_index }
                 | PendingAction::OverwriteDecision { panel_index, .. } => {
-                    *panel_index = self.state.active_panel;
+                    *panel_index = 0; // Placeholder value, not used with LayoutManager
                 }
                 PendingAction::BatchFileOperation { .. }
                 | PendingAction::ContinueBatchOperation { .. }
@@ -130,7 +130,6 @@ impl App {
                 | PendingAction::PrevPanel
                 | PendingAction::QuitApplication => {
                     // These actions don't require panel_index update
-                    // since it's already set in BatchOperation or not used
                 }
             }
 
@@ -150,7 +149,7 @@ impl App {
                 } => {
                     if target_directory.is_none() && !sources.is_empty() {
                         // Find all unique paths from other panels (FM, Terminal, Editor)
-                        let options = self.find_all_other_panel_paths(self.state.active_panel);
+                        let options = self.find_all_other_panel_paths();
                         let unique_paths_count = options.len();
 
                         // Determine default directory based on available paths
@@ -229,27 +228,13 @@ impl App {
             // Handle navigation actions without modal window
             match action {
                 PendingAction::NextPanel => {
-                    // Find next FM panel (cyclically)
-                    let count = self.panels.count();
-                    for i in 1..=count {
-                        let idx = (self.state.active_panel + i) % count;
-                        if self.is_file_manager_panel(idx) {
-                            self.state.set_active_panel(idx);
-                            break;
-                        }
-                    }
+                    // Navigate to next group horizontally
+                    self.layout_manager.next_group();
                     return Ok(());
                 }
                 PendingAction::PrevPanel => {
-                    // Find previous FM panel (cyclically)
-                    let count = self.panels.count();
-                    for i in 1..=count {
-                        let idx = (self.state.active_panel + count - i) % count;
-                        if self.is_file_manager_panel(idx) {
-                            self.state.set_active_panel(idx);
-                            break;
-                        }
-                    }
+                    // Navigate to previous group horizontally
+                    self.layout_manager.prev_group();
                     return Ok(());
                 }
                 _ => {}
@@ -258,7 +243,7 @@ impl App {
             self.state.set_pending_action(action, modal);
 
             // Check if there's a channel receiver for directory size in panel
-            if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+            if let Some(panel) = self.layout_manager.active_panel_mut() {
                 // Try to get FileManager and take channel receiver
                 use crate::panels::file_manager::FileManager;
                 use std::any::Any;
@@ -352,14 +337,10 @@ impl App {
     }
 
     /// Handle panel close request with confirmation if needed
-    fn handle_close_panel_request(&mut self, panel_index: usize) -> Result<()> {
-        // Cannot close FM (panel 0) in MultiPanel mode
-        if panel_index == 0 && self.state.layout_mode == LayoutMode::MultiPanel {
-            return Ok(()); // Ignore
-        }
-
-        // Check if confirmation is required before closing
-        if let Some(panel) = self.panels.get(panel_index) {
+    /// NOTE: panel_index parameter is obsolete with LayoutManager
+    fn handle_close_panel_request(&mut self, _panel_index: usize) -> Result<()> {
+        // Check if confirmation is required before closing active panel
+        if let Some(panel) = self.layout_manager.active_panel_mut() {
             if let Some(_message) = panel.needs_close_confirmation() {
                 // Check if panel is editor
                 use std::any::Any;
@@ -378,7 +359,7 @@ impl App {
                             t.editor_cancel().to_string(),
                         ],
                     );
-                    let action = PendingAction::CloseEditorWithSave { panel_index };
+                    let action = PendingAction::CloseEditorWithSave { panel_index: 0 }; // placeholder
                     self.state
                         .set_pending_action(action, ActiveModal::Select(Box::new(modal)));
                     return Ok(());
@@ -386,7 +367,7 @@ impl App {
                     // For other panels show simple confirmation
                     let t = i18n::t();
                     let modal = crate::ui::modal::ConfirmModal::new(t.modal_yes(), &_message);
-                    let action = PendingAction::ClosePanel { panel_index };
+                    let action = PendingAction::ClosePanel { panel_index: 0 }; // placeholder
                     self.state
                         .set_pending_action(action, ActiveModal::Confirm(Box::new(modal)));
                     return Ok(());
@@ -394,32 +375,33 @@ impl App {
             }
         }
 
-        // Close panel without confirmation
-        self.close_panel_at_index(panel_index);
+        // Close active panel without confirmation
+        self.close_panel_at_index(0); // panel_index is obsolete, function uses active panel
         Ok(())
     }
 
     /// Create new terminal
     fn handle_new_terminal(&mut self) -> Result<()> {
         self.close_welcome_panels();
-        // Get directory from FM (panel 0)
-        let working_dir = self.panels.get(0).and_then(|p| p.get_working_directory());
+        // Get directory from FM
+        let working_dir = self
+            .layout_manager
+            .file_manager_mut()
+            .and_then(|p| p.get_working_directory());
 
         // Create new terminal
         let width = self.state.terminal.width;
         let height = self.state.terminal.height;
         let term_height = height.saturating_sub(3);
-        let term_width = if self.state.layout_mode == LayoutMode::MultiPanel {
-            let fm_width = self.state.layout_info.fm_width.unwrap_or(30);
+        let term_width = if self.layout_manager.has_file_manager() {
+            let fm_width = DEFAULT_FM_WIDTH;
             width.saturating_sub(fm_width).saturating_sub(2)
         } else {
             width.saturating_sub(2)
         };
 
         if let Ok(terminal_panel) = Terminal::new_with_cwd(term_height, term_width, working_dir) {
-            self.panels.add_panel(Box::new(terminal_panel));
-            let new_panel_index = self.panels.count().saturating_sub(1);
-            self.state.set_active_panel(new_panel_index);
+            self.add_panel(Box::new(terminal_panel));
         }
         Ok(())
     }
@@ -427,17 +409,15 @@ impl App {
     /// Create new file manager
     fn handle_new_file_manager(&mut self) -> Result<()> {
         self.close_welcome_panels();
-        // Get working directory from current panel
+        // Get working directory from current active panel
         let working_dir = self
-            .panels
-            .get(self.state.active_panel)
+            .layout_manager
+            .active_panel_mut()
             .and_then(|p| p.get_working_directory())
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
 
         let fm_panel = FileManager::new_with_path(working_dir);
-        self.panels.add_panel(Box::new(fm_panel));
-        let new_panel_index = self.panels.count().saturating_sub(1);
-        self.state.set_active_panel(new_panel_index);
+        self.add_panel(Box::new(fm_panel));
         Ok(())
     }
 
@@ -445,9 +425,7 @@ impl App {
     fn handle_new_editor(&mut self) -> Result<()> {
         self.close_welcome_panels();
         let editor_panel = Editor::with_config(self.state.editor_config());
-        self.panels.add_panel(Box::new(editor_panel));
-        let new_panel_index = self.panels.count().saturating_sub(1);
-        self.state.set_active_panel(new_panel_index);
+        self.add_panel(Box::new(editor_panel));
         Ok(())
     }
 
@@ -455,30 +433,16 @@ impl App {
     fn handle_new_debug(&mut self) -> Result<()> {
         self.close_welcome_panels();
         let debug_panel = Debug::new();
-        self.panels.add_panel(Box::new(debug_panel));
-        let new_panel_index = self.panels.count().saturating_sub(1);
-        self.state.set_active_panel(new_panel_index);
+        self.add_panel(Box::new(debug_panel));
         Ok(())
     }
 
     /// Open or switch to help panel (Welcome)
     fn handle_new_help(&mut self) -> Result<()> {
-        // Check if Welcome panel already exists
-        for i in 0..self.panels.count() {
-            if let Some(panel) = self.panels.get(i) {
-                if panel.is_welcome_panel() {
-                    // Already exists - just switch focus
-                    self.state.set_active_panel(i);
-                    return Ok(());
-                }
-            }
-        }
-
-        // No Welcome - create new
+        // TODO: Check if Welcome panel already exists in some group
+        // For now, just create new
         let welcome = Welcome::new();
-        self.panels.add_panel(Box::new(welcome));
-        let new_panel_index = self.panels.count().saturating_sub(1);
-        self.state.set_active_panel(new_panel_index);
+        self.add_panel(Box::new(welcome));
         Ok(())
     }
 
@@ -496,28 +460,14 @@ impl App {
             }
         };
 
-        // Check if config file is already open in some editor
-        for i in 0..self.panels.count() {
-            if let Some(panel) = self.panels.get(i) {
-                // Check if panel is editor with this file
-                use std::any::Any;
-                if let Some(editor) = (&**panel as &dyn Any).downcast_ref::<Editor>() {
-                    if editor.file_path() == Some(&config_path) {
-                        // File already open - just switch focus
-                        self.state.set_active_panel(i);
-                        return Ok(());
-                    }
-                }
-            }
-        }
+        // TODO: Check if config file is already open in some editor panel
+        // For now, just open it
 
         self.close_welcome_panels();
 
         match Editor::open_file_with_config(config_path.clone(), self.state.editor_config()) {
             Ok(editor_panel) => {
-                self.panels.add_panel(Box::new(editor_panel));
-                let new_panel_index = self.panels.count().saturating_sub(1);
-                self.state.set_active_panel(new_panel_index);
+                self.add_panel(Box::new(editor_panel));
             }
             Err(e) => {
                 self.state
@@ -528,38 +478,30 @@ impl App {
         Ok(())
     }
 
-    /// Check if panel is FileManager
-    fn is_file_manager_panel(&self, index: usize) -> bool {
-        if let Some(panel) = self.panels.get(index) {
-            use std::any::Any;
-            (&**panel as &dyn Any).is::<FileManager>()
-        } else {
-            false
-        }
-    }
-
     /// Check if any panel requires close confirmation (unsaved changes, running processes)
     fn has_panels_requiring_confirmation(&self) -> bool {
         // Check if any panel has unsaved changes or running processes
-        for i in 0..self.panels.count() {
-            if let Some(panel) = self.panels.get(i) {
-                if panel.needs_close_confirmation().is_some() {
-                    return true;
-                }
+        for panel in std::iter::once(&self.layout_manager.file_manager)
+            .flatten()
+            .chain(
+                self.layout_manager
+                    .panel_groups
+                    .iter()
+                    .flat_map(|g| g.panels().iter()),
+            )
+        {
+            if panel.needs_close_confirmation().is_some() {
+                return true;
             }
         }
 
         // Check if there's an active batch file operation
-        // If FileManager with pending batch operation is closed, the operation state is lost
         #[allow(clippy::collapsible_match)]
         if let Some(pending) = &self.state.pending_action {
             match pending {
-                PendingAction::BatchFileOperation { operation }
-                | PendingAction::ContinueBatchOperation { operation } => {
-                    // Check if the panel that owns this operation still exists
-                    if operation.panel_index < self.panels.count() {
-                        return true;
-                    }
+                PendingAction::BatchFileOperation { .. }
+                | PendingAction::ContinueBatchOperation { .. } => {
+                    return true;
                 }
                 _ => {}
             }
@@ -570,54 +512,213 @@ impl App {
 
     /// Close all Welcome panels (called before opening new panel)
     pub(super) fn close_welcome_panels(&mut self) {
-        // Collect welcome panel indices (in reverse order for correct removal)
-        let welcome_indices: Vec<usize> = (0..self.panels.count())
-            .filter(|&i| {
-                if let Some(panel) = self.panels.get(i) {
-                    panel.is_welcome_panel()
-                } else {
-                    false
+        // Iterate through all groups and close Welcome panels
+        // Use reverse iteration to avoid index shifting issues when removing
+        let mut groups_to_remove = Vec::new();
+
+        for group_idx in (0..self.layout_manager.panel_groups.len()).rev() {
+            if let Some(group) = self.layout_manager.panel_groups.get_mut(group_idx) {
+                // Find panels to remove in this group
+                let mut panels_to_remove = Vec::new();
+
+                for panel_idx in (0..group.len()).rev() {
+                    if let Some(panel) = group.panels().get(panel_idx) {
+                        if panel.is_welcome_panel() {
+                            panels_to_remove.push(panel_idx);
+                        }
+                    }
                 }
-            })
-            .collect();
 
-        // Remove in reverse order so indices don't shift
-        for index in welcome_indices.into_iter().rev() {
-            self.panels.close_panel(index);
+                // Remove the panels
+                for panel_idx in panels_to_remove {
+                    group.remove_panel(panel_idx);
+                }
+
+                // If group is now empty, mark it for removal
+                if group.is_empty() {
+                    groups_to_remove.push(group_idx);
+                }
+            }
         }
 
-        // Adjust active_panel if needed
-        if self.state.active_panel >= self.panels.count() && self.panels.count() > 0 {
-            self.state.set_active_panel(self.panels.count() - 1);
+        // Remove empty groups
+        let groups_were_removed = !groups_to_remove.is_empty();
+        for group_idx in groups_to_remove {
+            self.layout_manager.panel_groups.remove(group_idx);
+        }
+
+        // Adjust focus if needed
+        if let crate::layout_manager::FocusTarget::Group(idx) = self.layout_manager.focus {
+            if !self.layout_manager.panel_groups.is_empty()
+                && idx >= self.layout_manager.panel_groups.len()
+            {
+                self.layout_manager.focus = crate::layout_manager::FocusTarget::Group(
+                    self.layout_manager.panel_groups.len() - 1,
+                );
+            }
+        }
+
+        // Пропорционально перераспределить ширины после удаления групп
+        if groups_were_removed {
+            let terminal_width = self.state.terminal.width;
+            let fm_width = if self.layout_manager.has_file_manager() {
+                DEFAULT_FM_WIDTH
+            } else {
+                0
+            };
+            let available_width = terminal_width.saturating_sub(fm_width);
+            self.layout_manager
+                .redistribute_widths_proportionally(available_width);
         }
     }
 
-    /// Move panel left (swap with previous)
+    /// Move panel to previous group
     fn handle_swap_panel_left(&mut self) -> Result<()> {
-        let current = self.state.active_panel;
-        // FM (panel 0) is fixed, so swap is only possible if current > 1
-        if current > 1 {
-            self.panels.swap_panels(current, current - 1);
-            self.state.set_active_panel(current - 1);
-        }
+        let terminal_width = self.state.terminal.width;
+        let fm_width = if self.layout_manager.has_file_manager() {
+            DEFAULT_FM_WIDTH
+        } else {
+            0
+        };
+        let available_width = terminal_width.saturating_sub(fm_width);
+
+        self.layout_manager
+            .move_panel_to_prev_group(available_width)?;
         Ok(())
     }
 
-    /// Move panel right (swap with next)
+    /// Move panel to next group
     fn handle_swap_panel_right(&mut self) -> Result<()> {
-        let current = self.state.active_panel;
-        // FM (panel 0) is fixed
-        if current > 0 && current < self.panels.count() - 1 {
-            self.panels.swap_panels(current, current + 1);
-            self.state.set_active_panel(current + 1);
-        }
+        let terminal_width = self.state.terminal.width;
+        let fm_width = if self.layout_manager.has_file_manager() {
+            DEFAULT_FM_WIDTH
+        } else {
+            0
+        };
+        let available_width = terminal_width.saturating_sub(fm_width);
+
+        self.layout_manager
+            .move_panel_to_next_group(available_width)?;
         Ok(())
     }
 
-    /// Change active panel width
+    /// Change active group width
     fn handle_resize_panel(&mut self, delta: i16) -> Result<()> {
-        let current = self.state.active_panel;
-        self.state.adjust_panel_weight(current, delta);
+        use crate::layout_manager::FocusTarget;
+
+        // Игнорировать для FileManager
+        if matches!(self.layout_manager.focus, FocusTarget::FileManager) {
+            return Ok(());
+        }
+
+        if let Some(group_idx) = self.layout_manager.active_group_index() {
+            // Нельзя ресайзить если это единственная группа (некому адаптироваться)
+            if self.layout_manager.panel_groups.len() <= 1 {
+                return Ok(());
+            }
+
+            // Рассчитать доступную ширину для групп панелей
+            let terminal_width = self.state.terminal.width;
+            let fm_width = if self.layout_manager.has_file_manager() {
+                DEFAULT_FM_WIDTH
+            } else {
+                0
+            };
+            let available_width = terminal_width.saturating_sub(fm_width);
+
+            // Заморозить все auto-width группы перед ресайзом
+            let actual_widths = self.layout_manager.calculate_actual_widths(available_width);
+            for (idx, group) in self.layout_manager.panel_groups.iter_mut().enumerate() {
+                if group.width.is_none() {
+                    group.width = Some(actual_widths.get(idx).copied().unwrap_or(20));
+                }
+            }
+
+            // Получить текущую ширину активной группы (теперь гарантированно Some)
+            let current_width = self.layout_manager.panel_groups[group_idx].width.unwrap();
+
+            // Вычислить желаемую новую ширину активной группы
+            let desired_new_width = ((current_width as i16 + delta).clamp(20, 300)) as u16;
+            let actual_delta = desired_new_width as i16 - current_width as i16;
+
+            // Если delta = 0 (достигли границы), ничего не делаем
+            if actual_delta == 0 {
+                return Ok(());
+            }
+
+            // Собрать все остальные группы с их индексами и ширинами
+            let other_groups: Vec<(usize, u16)> = self
+                .layout_manager
+                .panel_groups
+                .iter()
+                .enumerate()
+                .filter(|(idx, _)| *idx != group_idx)
+                .map(|(idx, g)| (idx, g.width.unwrap()))
+                .collect();
+
+            // Рассчитать общую ширину остальных групп
+            let total_other_width: u16 = other_groups.iter().map(|(_, w)| *w).sum();
+
+            if total_other_width == 0 {
+                return Ok(()); // Защита от деления на 0
+            }
+
+            // Распределить -actual_delta пропорционально по остальным группам
+            let mut remaining_delta = -actual_delta;
+            let mut new_widths: Vec<(usize, u16)> = Vec::new();
+
+            for (i, &(idx, width)) in other_groups.iter().enumerate() {
+                let is_last = i == other_groups.len() - 1;
+
+                let delta_for_this = if is_last {
+                    // Последняя группа получает весь остаток для точной zero-sum
+                    remaining_delta
+                } else {
+                    // Пропорциональная доля от -actual_delta
+                    let proportion = width as f64 / total_other_width as f64;
+                    ((-actual_delta as f64) * proportion).round() as i16
+                };
+
+                let new_width = ((width as i16 + delta_for_this).clamp(20, 300)) as u16;
+                new_widths.push((idx, new_width));
+
+                // Вычесть использованное изменение из остатка
+                let actual_change = new_width as i16 - width as i16;
+                remaining_delta -= actual_change;
+            }
+
+            // Применить новую ширину к активной группе
+            self.layout_manager.panel_groups[group_idx].width = Some(desired_new_width);
+
+            // Применить новые ширины к остальным группам
+            for (idx, new_width) in new_widths {
+                self.layout_manager.panel_groups[idx].width = Some(new_width);
+            }
+
+            // Проверить и скорректировать баланс если clamping нарушил zero-sum
+            let total_new_width: u16 = self
+                .layout_manager
+                .panel_groups
+                .iter()
+                .map(|g| g.width.unwrap_or(20))
+                .sum();
+
+            if total_new_width != available_width {
+                // Clamping нарушил баланс - скорректировать активную группу
+                let other_widths_sum: u16 = self
+                    .layout_manager
+                    .panel_groups
+                    .iter()
+                    .enumerate()
+                    .filter(|(idx, _)| *idx != group_idx)
+                    .map(|(_, g)| g.width.unwrap_or(20))
+                    .sum();
+
+                let corrected_width = available_width.saturating_sub(other_widths_sum);
+                self.layout_manager.panel_groups[group_idx].width =
+                    Some(corrected_width.clamp(20, 300));
+            }
+        }
         Ok(())
     }
 
@@ -680,44 +781,55 @@ impl App {
                     }
                     return Ok(Some(()));
                 }
-                // Alt+X / Alt+Backspace - close panel
-                KeyCode::Char('x') | KeyCode::Char('X') | KeyCode::Backspace => {
-                    self.handle_close_panel_request(self.state.active_panel)?;
-                    return Ok(Some(()));
-                }
-                // Alt+Delete - close application
-                KeyCode::Delete => {
-                    if self.has_panels_requiring_confirmation() {
-                        let t = i18n::t();
-                        let modal = crate::ui::modal::ConfirmModal::new(
-                            t.modal_yes(),
-                            t.app_quit_confirm(),
-                        );
-                        self.state.set_pending_action(
-                            PendingAction::QuitApplication,
-                            ActiveModal::Confirm(Box::new(modal)),
-                        );
-                    } else {
-                        self.state.quit();
-                    }
+                // Alt+X / Alt+Delete - close panel
+                KeyCode::Char('x') | KeyCode::Char('X') | KeyCode::Delete => {
+                    self.handle_close_panel_request(0)?; // Parameter is unused - works with active panel
                     return Ok(Some(()));
                 }
                 // Alt+1..9 - go to panel by number
+                // TODO: Implement panel selection by number with LayoutManager
                 KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
-                    let panel_num = c.to_digit(10).unwrap() as usize;
-                    if panel_num <= self.panels.count() {
-                        self.state.set_active_panel(panel_num - 1);
-                    }
+                    let _panel_num = c.to_digit(10).unwrap() as usize;
+                    // TODO: Select group or panel within group by number
                     return Ok(Some(()));
                 }
-                // Alt+Left or Alt+, - go to previous panel
+                // Alt+Left or Alt+, - go to previous panel/group
                 KeyCode::Left | KeyCode::Char(',') | KeyCode::Char('<') => {
-                    self.state.prev_panel(self.panels.count());
+                    // Navigate to previous group
+                    self.layout_manager.prev_group();
                     return Ok(Some(()));
                 }
-                // Alt+Right or Alt+. - go to next panel
+                // Alt+Right or Alt+. - go to next panel/group
                 KeyCode::Right | KeyCode::Char('.') | KeyCode::Char('>') => {
-                    self.state.next_panel(self.panels.count());
+                    // Navigate to next group
+                    self.layout_manager.next_group();
+                    return Ok(Some(()));
+                }
+                // Alt+Up - go to previous panel in current group (vertical navigation)
+                KeyCode::Up => {
+                    self.layout_manager.prev_panel_in_group();
+                    return Ok(Some(()));
+                }
+                // Alt+Down - go to next panel in current group (vertical navigation)
+                KeyCode::Down => {
+                    self.layout_manager.next_panel_in_group();
+                    return Ok(Some(()));
+                }
+                // Alt+Backspace - toggle panel stacking (smart merge/unstack)
+                KeyCode::Backspace => {
+                    // Рассчитать доступную ширину для групп панелей
+                    let terminal_width = self.state.terminal.width;
+                    let fm_width = if self.layout_manager.has_file_manager() {
+                        DEFAULT_FM_WIDTH
+                    } else {
+                        0
+                    };
+                    let available_width = terminal_width.saturating_sub(fm_width);
+
+                    if let Err(e) = self.layout_manager.toggle_panel_stacking(available_width) {
+                        self.state
+                            .set_error(format!("Cannot toggle stacking: {}", e));
+                    }
                     return Ok(Some(()));
                 }
                 // Alt+PgUp - move panel left (swap)
@@ -728,6 +840,42 @@ impl App {
                 // Alt+PgDn - move panel right (swap)
                 KeyCode::PageDown => {
                     self.handle_swap_panel_right()?;
+                    return Ok(Some(()));
+                }
+                // Alt+Home - move panel to first group
+                KeyCode::Home => {
+                    let terminal_width = self.state.terminal.width;
+                    let fm_width = if self.layout_manager.has_file_manager() {
+                        DEFAULT_FM_WIDTH
+                    } else {
+                        0
+                    };
+                    let available_width = terminal_width.saturating_sub(fm_width);
+
+                    if let Err(e) = self
+                        .layout_manager
+                        .move_panel_to_first_group(available_width)
+                    {
+                        self.state.set_error(format!("Cannot move panel: {}", e));
+                    }
+                    return Ok(Some(()));
+                }
+                // Alt+End - move panel to last group
+                KeyCode::End => {
+                    let terminal_width = self.state.terminal.width;
+                    let fm_width = if self.layout_manager.has_file_manager() {
+                        DEFAULT_FM_WIDTH
+                    } else {
+                        0
+                    };
+                    let available_width = terminal_width.saturating_sub(fm_width);
+
+                    if let Err(e) = self
+                        .layout_manager
+                        .move_panel_to_last_group(available_width)
+                    {
+                        self.state.set_error(format!("Cannot move panel: {}", e));
+                    }
                     return Ok(Some(()));
                 }
                 // Alt+Minus - decrease panel width
@@ -749,12 +897,12 @@ impl App {
         // then Escape is passed to panel
         if key.code == KeyCode::Esc && key.modifiers.is_empty() {
             let captures = self
-                .panels
-                .get(self.state.active_panel)
+                .layout_manager
+                .active_panel_mut()
                 .map(|p| p.captures_escape())
                 .unwrap_or(false);
             if !captures {
-                self.handle_close_panel_request(self.state.active_panel)?;
+                self.handle_close_panel_request(0)?; // panel_index is obsolete
                 return Ok(Some(()));
             }
             // Otherwise Escape is passed to panel's handle_key

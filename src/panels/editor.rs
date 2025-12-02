@@ -4,7 +4,6 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Modifier, Style},
-    widgets::Widget,
 };
 use std::path::PathBuf;
 
@@ -1364,17 +1363,12 @@ impl Panel for Editor {
         &mut self,
         area: Rect,
         buf: &mut Buffer,
-        is_focused: bool,
-        panel_index: usize,
+        _is_focused: bool,
+        _panel_index: usize,
         state: &AppState,
     ) {
-        let title = self.title();
-        let block =
-            crate::ui::panel_helpers::create_panel_block(&title, is_focused, panel_index, state);
-        let inner = block.inner(area);
-        block.render(area, buf);
-
-        self.render_content(inner, buf, state.theme);
+        // Render editor content directly (accordion already drew border with title/buttons)
+        self.render_content(area, buf, state.theme);
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<()> {

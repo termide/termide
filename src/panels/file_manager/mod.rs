@@ -326,11 +326,12 @@ impl Panel for FileManager {
         area: Rect,
         buf: &mut Buffer,
         is_focused: bool,
-        panel_index: usize,
+        _panel_index: usize,
         state: &AppState,
     ) {
         // Automatically update scroll offset
-        let content_height = area.height.saturating_sub(2) as usize; // -2 for borders
+        // area is already the inner content area (accordion drew outer border)
+        let content_height = area.height as usize;
         self.visible_height = content_height; // Save for use in handle_key
 
         if self.selected >= self.scroll_offset + content_height {
@@ -339,25 +340,16 @@ impl Panel for FileManager {
             self.scroll_offset = self.selected;
         }
 
-        // Determine if this panel can be closed (for correct path width calculation)
-        let can_close = crate::ui::panel_helpers::can_close_panel(panel_index, state);
-
-        // Get display path taking into account panel width and [X] button presence
-        let display_title = self.get_display_title(area.width, can_close);
+        // Get display path taking into account panel width
+        let display_title = self.get_display_title(area.width);
         self.display_title = display_title.clone();
 
-        // Calculate available width for file names (subtract borders: 2 chars)
-        let content_width = area.width.saturating_sub(2) as usize;
+        // Calculate available width for file names
+        let content_width = area.width as usize;
         let items = self.get_items(content_height, content_width, state.theme, is_focused);
 
-        let block = crate::ui::panel_helpers::create_panel_block(
-            &display_title,
-            is_focused,
-            panel_index,
-            state,
-        );
-
-        let paragraph = Paragraph::new(items).block(block);
+        // Render file list content directly (accordion already drew border with title/buttons)
+        let paragraph = Paragraph::new(items);
 
         paragraph.render(area, buf);
     }

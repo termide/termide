@@ -4,7 +4,7 @@ use crate::theme::Theme;
 use crate::ui::modal::{
     ConfirmModal, ConflictModal, InfoModal, InputModal, OverwriteModal, SearchModal, SelectModal,
 };
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
@@ -57,8 +57,6 @@ pub struct BatchOperation {
     pub error_count: usize,
     /// Statistics: skipped
     pub skipped_count: usize,
-    /// File manager panel index
-    pub panel_index: usize,
 }
 
 impl BatchOperation {
@@ -67,7 +65,6 @@ impl BatchOperation {
         operation_type: BatchOperationType,
         sources: Vec<PathBuf>,
         destination: PathBuf,
-        panel_index: usize,
     ) -> Self {
         Self {
             operation_type,
@@ -80,7 +77,6 @@ impl BatchOperation {
             success_count: 0,
             error_count: 0,
             skipped_count: 0,
-            panel_index,
         }
     }
 
@@ -246,8 +242,6 @@ pub enum PendingAction {
 pub struct LayoutInfo {
     /// Layout mode
     pub mode: LayoutMode,
-    /// File manager width (Some(20) for MultiPanel, None for Single)
-    pub fm_width: Option<u16>,
     /// Number of main panels
     pub main_panels_count: usize,
     /// Width of one main panel
@@ -373,8 +367,6 @@ impl LoggingState {
 pub struct AppState {
     /// Should application quit
     pub should_quit: bool,
-    /// Active panel index
-    pub active_panel: usize,
     /// UI components state
     pub ui: UiState,
     /// Terminal state
@@ -403,8 +395,6 @@ pub struct AppState {
     pub theme: &'static Theme,
     /// Application configuration
     pub config: Config,
-    /// Panel weights for resize (panel_index -> weight, default 100)
-    pub panel_weights: HashMap<usize, u16>,
     /// System resource monitor (CPU, RAM)
     pub system_monitor: crate::system_monitor::SystemMonitor,
     /// Last time system resources were updated
@@ -432,7 +422,6 @@ impl AppState {
     pub fn with_config_and_theme(config: Config, theme: &'static Theme) -> Self {
         let layout_info = LayoutInfo {
             mode: LayoutMode::Single,
-            fm_width: None,
             main_panels_count: 1,
             main_panel_width: crate::constants::DEFAULT_MAIN_PANEL_WIDTH,
         };
@@ -445,7 +434,6 @@ impl AppState {
 
         let mut state = Self {
             should_quit: false,
-            active_panel: 0,
             ui: UiState::default(),
             terminal: TerminalState::default(),
             layout_mode: LayoutMode::Single,
@@ -460,7 +448,6 @@ impl AppState {
             fs_watcher: None,
             theme,
             config,
-            panel_weights: HashMap::new(),
             system_monitor: crate::system_monitor::SystemMonitor::new(),
             last_resource_update: std::time::Instant::now(),
         };
@@ -478,29 +465,6 @@ impl AppState {
     /// Request application quit
     pub fn quit(&mut self) {
         self.should_quit = true;
-    }
-
-    /// Set active panel
-    pub fn set_active_panel(&mut self, index: usize) {
-        self.active_panel = index;
-    }
-
-    /// Switch to next panel
-    pub fn next_panel(&mut self, panel_count: usize) {
-        if panel_count > 0 {
-            self.active_panel = (self.active_panel + 1) % panel_count;
-        }
-    }
-
-    /// Switch to previous panel
-    pub fn prev_panel(&mut self, panel_count: usize) {
-        if panel_count > 0 {
-            self.active_panel = if self.active_panel == 0 {
-                panel_count - 1
-            } else {
-                self.active_panel - 1
-            };
-        }
     }
 
     /// Open menu
@@ -580,7 +544,6 @@ impl AppState {
             // Single panel mode
             LayoutInfo {
                 mode: LayoutMode::Single,
-                fm_width: None,
                 main_panels_count: 1,
                 main_panel_width: width,
             }
@@ -589,7 +552,6 @@ impl AppState {
             // Use single panel
             LayoutInfo {
                 mode: LayoutMode::Single,
-                fm_width: None,
                 main_panels_count: 1,
                 main_panel_width: width,
             }
@@ -604,7 +566,6 @@ impl AppState {
 
             LayoutInfo {
                 mode: LayoutMode::MultiPanel,
-                fm_width: Some(crate::constants::DEFAULT_FM_WIDTH),
                 main_panels_count,
                 main_panel_width,
             }
@@ -697,18 +658,6 @@ impl AppState {
     /// Get log entries
     pub fn get_log_entries(&self) -> &VecDeque<LogEntry> {
         &self.logging.entries
-    }
-
-    /// Get panel weight (default 100)
-    pub fn get_panel_weight(&self, panel_index: usize) -> u16 {
-        *self.panel_weights.get(&panel_index).unwrap_or(&100)
-    }
-
-    /// Adjust panel weight (increase or decrease)
-    pub fn adjust_panel_weight(&mut self, panel_index: usize, delta: i16) {
-        let current_weight = self.get_panel_weight(panel_index);
-        let new_weight = (current_weight as i16 + delta).clamp(10, 500) as u16;
-        self.panel_weights.insert(panel_index, new_weight);
     }
 
     /// Create EditorConfig with settings from global config

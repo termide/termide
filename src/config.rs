@@ -24,6 +24,11 @@ pub struct Config {
     /// System resource monitor update interval in milliseconds (default: 1000ms)
     #[serde(default = "default_resource_monitor_interval")]
     pub resource_monitor_interval: u64,
+
+    /// Minimum panel width in characters (default: 80)
+    /// Panels narrower than this threshold will be stacked vertically
+    #[serde(default = "default_min_panel_width")]
+    pub min_panel_width: u16,
 }
 
 fn default_theme_name() -> String {
@@ -42,6 +47,10 @@ fn default_resource_monitor_interval() -> u64 {
     1000 // 1 second
 }
 
+fn default_min_panel_width() -> u16 {
+    80
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -50,6 +59,7 @@ impl Default for Config {
             language: default_language(),
             log_file_path: None,
             resource_monitor_interval: default_resource_monitor_interval(),
+            min_panel_width: default_min_panel_width(),
         }
     }
 }

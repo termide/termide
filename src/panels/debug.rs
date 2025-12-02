@@ -76,11 +76,12 @@ impl Panel for Debug {
         &mut self,
         area: Rect,
         buf: &mut Buffer,
-        is_focused: bool,
-        panel_index: usize,
+        _is_focused: bool,
+        _panel_index: usize,
         state: &AppState,
     ) {
-        let content_height = area.height.saturating_sub(2) as usize; // -2 for borders
+        // area is already the inner content area (accordion drew outer border)
+        let content_height = area.height as usize;
         let log_lines = self.get_log_lines(state, content_height);
 
         // Auto-scroll to last messages if not manually scrolled
@@ -89,13 +90,8 @@ impl Panel for Debug {
             self.scroll_offset = total_entries.saturating_sub(content_height);
         }
 
-        let entries_count = state.get_log_entries().len();
-        let title = format!("Log ({} entries) - /tmp/termide.log", entries_count);
-
-        let block =
-            crate::ui::panel_helpers::create_panel_block(&title, is_focused, panel_index, state);
-
-        let paragraph = Paragraph::new(log_lines).block(block);
+        // Render log content directly (accordion already drew border with title/buttons)
+        let paragraph = Paragraph::new(log_lines);
 
         paragraph.render(area, buf);
     }

@@ -8,6 +8,7 @@ mod fs_watcher;
 mod git;
 mod i18n;
 mod keyboard;
+mod layout_manager;
 mod panels;
 mod rename_pattern;
 mod state;
@@ -57,10 +58,10 @@ fn main() -> Result<()> {
     // Create application
     let mut app = App::new();
 
-    // Add startup panels:
-    // Panel 0: Smart file manager (cannot be closed in MultiPanel mode)
-    app.add_panel(Box::new(FileManager::new()));
-    // Panel 1: Welcome panel (will close when other panels are opened)
+    // Set file manager (always in separate column)
+    app.set_file_manager(Box::new(FileManager::new()));
+
+    // Add welcome panel as first panel group
     app.add_panel(Box::new(panels::welcome::Welcome::new()));
 
     // Run application

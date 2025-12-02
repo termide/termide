@@ -12,7 +12,7 @@ impl App {
     /// Handle editor closure with saving
     pub(in crate::app) fn handle_close_editor_with_save(
         &mut self,
-        panel_index: usize,
+        _panel_index: usize, // obsolete with LayoutManager
         value: Box<dyn std::any::Any>,
     ) -> Result<()> {
         if let Some(selected) = value.downcast_ref::<Vec<usize>>() {
@@ -25,7 +25,7 @@ impl App {
                 0 => {
                     // Save and close
                     self.state.log_info("Selected: Save and close editor");
-                    if let Some(panel) = self.panels.get_mut(panel_index) {
+                    if let Some(panel) = self.layout_manager.active_panel_mut() {
                         use std::any::Any;
                         let panel_any: &mut dyn Any = &mut **panel;
                         if let Some(editor) = panel_any.downcast_mut::<Editor>() {
@@ -47,7 +47,7 @@ impl App {
                                 let current_dir =
                                     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
                                 let action = PendingAction::SaveFileAs {
-                                    panel_index,
+                                    panel_index: 0, // placeholder, obsolete
                                     directory: current_dir,
                                 };
                                 self.state.set_pending_action(
@@ -61,12 +61,12 @@ impl App {
                         }
                     }
                     // Close panel after saving
-                    self.close_panel_at_index(panel_index);
+                    self.close_panel_at_index(0); // panel_index is obsolete
                 }
                 1 => {
                     // Close without saving
                     self.state.log_info("Selected: Close without saving");
-                    self.close_panel_at_index(panel_index);
+                    self.close_panel_at_index(0); // panel_index is obsolete
                 }
                 _ => {
                     // Cancel - do nothing
@@ -80,7 +80,7 @@ impl App {
     /// Handle file overwrite decision
     pub(in crate::app) fn handle_overwrite_decision(
         &mut self,
-        panel_index: usize,
+        _panel_index: usize, // obsolete with LayoutManager
         source: PathBuf,
         destination: PathBuf,
         is_move: bool,
@@ -129,10 +129,10 @@ impl App {
             };
 
             if should_proceed {
-                // Execute operation
-                if let Some(panel) = self.panels.get_mut(panel_index) {
+                // Execute operation using FileManager
+                if let Some(fm_panel) = self.layout_manager.file_manager_mut() {
                     use std::any::Any;
-                    let panel_any: &mut dyn Any = &mut **panel;
+                    let panel_any: &mut dyn Any = &mut **fm_panel;
                     if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
                         let result = if is_move {
                             fm.move_path(source.clone(), destination.clone())

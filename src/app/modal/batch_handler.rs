@@ -44,9 +44,9 @@ impl App {
             // target_directory not set, get string from InputModal
             if let Some(destination_str) = value.downcast_ref::<String>() {
                 // Get FileManager panel to determine base path
-                if let Some(panel) = self.panels.get_mut(panel_index) {
+                if let Some(fm_panel) = self.layout_manager.file_manager_mut() {
                     use std::any::Any;
-                    let panel_any: &mut dyn Any = &mut **panel;
+                    let panel_any: &mut dyn Any = &mut **fm_panel;
                     if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
                         let destination = PathBuf::from(destination_str);
 
@@ -72,12 +72,7 @@ impl App {
         };
 
         // Create and start batch operation
-        let batch_op = BatchOperation::new(
-            operation_type,
-            sources.clone(),
-            absolute_destination,
-            panel_index,
-        );
+        let batch_op = BatchOperation::new(operation_type, sources.clone(), absolute_destination);
 
         self.process_batch_operation(batch_op);
         Ok(())
@@ -150,9 +145,9 @@ impl App {
                         };
 
                         // Execute operation
-                        if let Some(panel) = self.panels.get_mut(operation.panel_index) {
+                        if let Some(fm_panel) = self.layout_manager.file_manager_mut() {
                             use std::any::Any;
-                            let panel_any: &mut dyn Any = &mut **panel;
+                            let panel_any: &mut dyn Any = &mut **fm_panel;
                             if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
                                 let result = match operation.operation_type {
                                     BatchOperationType::Copy => {
@@ -296,8 +291,8 @@ impl App {
             self.show_batch_results(&operation);
 
             // Clear selection and refresh panel
-            if let Some(panel) = self.panels.get_mut(operation.panel_index) {
-                let panel_any: &mut dyn Any = &mut **panel;
+            if let Some(fm_panel) = self.layout_manager.file_manager_mut() {
+                let panel_any: &mut dyn Any = &mut **fm_panel;
                 if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
                     if operation.success_count > 0 {
                         fm.clear_selection();
@@ -393,8 +388,8 @@ impl App {
         }
 
         // Execute operation
-        if let Some(panel) = self.panels.get_mut(operation.panel_index) {
-            let panel_any: &mut dyn Any = &mut **panel;
+        if let Some(fm_panel) = self.layout_manager.file_manager_mut() {
+            let panel_any: &mut dyn Any = &mut **fm_panel;
             if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
                 let result = match operation.operation_type {
                     BatchOperationType::Copy => fm.copy_path(source.clone(), final_dest.clone()),

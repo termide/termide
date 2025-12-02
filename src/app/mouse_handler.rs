@@ -1,10 +1,10 @@
 use anyhow::Result;
 use crossterm::event::{MouseButton, MouseEventKind};
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 use super::App;
 use crate::{
-    state::LayoutMode,
+    constants::DEFAULT_FM_WIDTH,
     ui::dropdown::{get_help_items, get_tools_items},
 };
 
@@ -74,7 +74,7 @@ impl App {
         let panel_area = self.get_active_panel_area();
 
         // Handle mouse event and collect results
-        let file_to_open = if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+        let file_to_open = if let Some(panel) = self.layout_manager.active_panel_mut() {
             panel.handle_mouse(mouse, panel_area)?;
             panel.take_file_to_open()
         } else {
@@ -97,9 +97,7 @@ impl App {
                 self.state.editor_config(),
             ) {
                 Ok(editor_panel) => {
-                    self.panels.add_panel(Box::new(editor_panel));
-                    let new_panel_index = self.panels.count().saturating_sub(1);
-                    self.state.set_active_panel(new_panel_index);
+                    self.add_panel(Box::new(editor_panel));
                     self.state
                         .log_success(format!("File '{}' opened in editor", filename));
                     self.state.set_info(t.editor_file_opened(filename));
@@ -121,261 +119,105 @@ impl App {
         &mut self,
         mouse: crossterm::event::MouseEvent,
     ) -> Result<()> {
-        let height = self.state.terminal.height;
-
-        // Check that cursor is in panel area (not menu and not status bar)
-        if mouse.row < 1 || mouse.row >= height - 1 {
-            return Ok(());
-        }
-
-        match self.state.layout_mode {
-            LayoutMode::Single => {
-                // In Single mode one panel - forward scroll to active
-                let panel_area = self.get_active_panel_area();
-                if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
-                    panel.handle_mouse(mouse, panel_area)?;
-                }
-            }
-            LayoutMode::MultiPanel => {
-                let fm_width = self.state.layout_info.fm_width.unwrap_or(30);
-                let width = self.state.terminal.width;
-
-                // Determine panel under cursor
-                if mouse.column < fm_width {
-                    // Cursor over FM (panel 0)
-                    let panel_area = Rect {
-                        x: 0,
-                        y: 1,
-                        width: fm_width,
-                        height: height.saturating_sub(2),
-                    };
-                    if let Some(panel) = self.panels.get_mut(0) {
-                        panel.handle_mouse(mouse, panel_area)?;
-                    }
-                } else {
-                    // Cursor over main panels
-                    let visible_main: Vec<usize> = self
-                        .panels
-                        .visible_indices()
-                        .into_iter()
-                        .filter(|&i| i > 0)
-                        .collect();
-
-                    if !visible_main.is_empty() {
-                        let main_area_width = width - fm_width;
-                        let panel_width = main_area_width / visible_main.len() as u16;
-
-                        for (chunk_idx, &panel_index) in visible_main.iter().enumerate() {
-                            let panel_x = fm_width + (chunk_idx as u16 * panel_width);
-
-                            if mouse.column >= panel_x && mouse.column < panel_x + panel_width {
-                                let panel_area = Rect {
-                                    x: panel_x,
-                                    y: 1,
-                                    width: panel_width,
-                                    height: height.saturating_sub(2),
-                                };
-                                if let Some(panel) = self.panels.get_mut(panel_index) {
-                                    panel.handle_mouse(mouse, panel_area)?;
-                                }
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
+        // TODO: Implement proper scroll forwarding with LayoutManager
+        // For now, forward to active panel
+        let panel_area = self.get_active_panel_area();
+        if let Some(panel) = self.layout_manager.active_panel_mut() {
+            panel.handle_mouse(mouse, panel_area)?;
         }
 
         Ok(())
     }
 
     /// Get active panel area
+    /// TODO: Calculate proper area based on LayoutManager's group layout
     fn get_active_panel_area(&self) -> Rect {
         let width = self.state.terminal.width;
         let height = self.state.terminal.height;
 
-        match self.state.layout_mode {
-            LayoutMode::Single => {
-                // In Single mode panel occupies full width
-                Rect {
-                    x: 0,
-                    y: 1,
-                    width,
-                    height: height.saturating_sub(2),
-                }
-            }
-            LayoutMode::MultiPanel => {
-                let fm_width = self.state.layout_info.fm_width.unwrap_or(30);
-                let active_index = self.state.active_panel;
-
-                if active_index == 0 {
-                    // FM panel on the left
-                    Rect {
-                        x: 0,
-                        y: 1,
-                        width: fm_width,
-                        height: height.saturating_sub(2),
-                    }
-                } else {
-                    // Main panels on the right
-                    let visible_main: Vec<usize> = self
-                        .panels
-                        .visible_indices()
-                        .into_iter()
-                        .filter(|&i| i > 0)
-                        .collect();
-
-                    if let Some(chunk_idx) = visible_main.iter().position(|&i| i == active_index) {
-                        let main_area_width = width - fm_width;
-                        let panel_width = main_area_width / visible_main.len() as u16;
-                        let panel_x = fm_width + (chunk_idx as u16 * panel_width);
-
-                        Rect {
-                            x: panel_x,
-                            y: 1,
-                            width: panel_width,
-                            height: height.saturating_sub(2),
-                        }
-                    } else {
-                        // Fallback
-                        Rect {
-                            x: fm_width,
-                            y: 1,
-                            width: width - fm_width,
-                            height: height.saturating_sub(2),
-                        }
-                    }
-                }
-            }
+        // TODO: Implement proper area calculation based on LayoutManager
+        // For now, return a reasonable default area
+        Rect {
+            x: 0,
+            y: 1,
+            width,
+            height: height.saturating_sub(2),
         }
     }
 
-    /// Handle click on panel [X] button
-    /// Returns true if panel was closed
+    /// Handle click on panel [X] button or [▶]/[▼] expand/collapse button
+    /// Returns true if a button was clicked
     fn handle_panel_close_click(&mut self, click_x: u16, click_y: u16) -> Result<bool> {
-        // Panel area: rows 1..(height-1), last row - status
-        let height = self.state.terminal.height;
+        let panel_rects = self.calculate_panel_rects();
 
-        // Check that click is in panel area
-        if click_y < 1 || click_y >= height - 1 {
-            return Ok(false);
-        }
-
-        match self.state.layout_mode {
-            LayoutMode::Single => {
-                // In Single mode one panel occupies full width
-                if self.panels.has_visible_panels() {
-                    let active_index = self.state.active_panel;
-
-                    if let Some(panel) = self.panels.get_mut(active_index) {
-                        let title = panel.title();
-                        let can_close =
-                            crate::ui::panel_helpers::can_close_panel(active_index, &self.state);
-
-                        // Check click on [X] of active panel
-                        if crate::ui::panel_helpers::is_click_on_close_button(
-                            click_x, click_y, 0, 1, &title, can_close,
-                        ) {
-                            self.panels.close_panel(active_index);
-
-                            // Switch to next visible panel
-                            if self.panels.count() > 0 {
-                                let visible = self.panels.visible_indices();
-                                if !visible.is_empty() {
-                                    if active_index >= self.panels.count() {
-                                        self.state.active_panel = *visible.last().unwrap();
-                                    } else {
-                                        self.state.active_panel = visible
-                                            .iter()
-                                            .find(|&&i| i >= active_index)
-                                            .or_else(|| visible.last())
-                                            .copied()
-                                            .unwrap_or(0);
-                                    }
-                                }
-                            }
-                            return Ok(true);
-                        }
-                    }
-                }
+        for (group_idx, panel_idx, rect, is_expanded) in panel_rects {
+            // Check if click is on this panel's top line
+            if click_y != rect.y {
+                continue;
             }
-            LayoutMode::MultiPanel => {
-                // In MultiPanel mode: FM on left (30 characters) + main panels on right
-                let fm_width = self.state.layout_info.fm_width.unwrap_or(30);
 
-                // Check click on [X] FM (panel 0)
-                if click_x < fm_width {
-                    if let Some(fm_panel) = self.panels.get_mut(0) {
-                        let title = fm_panel.title();
-                        let can_close = crate::ui::panel_helpers::can_close_panel(0, &self.state);
+            // Check if click is within the panel's horizontal bounds
+            if click_x < rect.x || click_x >= rect.x + rect.width {
+                continue;
+            }
 
-                        if crate::ui::panel_helpers::is_click_on_close_button(
-                            click_x, click_y, 0, 1, &title, can_close,
-                        ) {
-                            // FM cannot be closed in MultiPanel mode (can_close will be false)
-                            return Ok(false);
-                        }
-                    }
-                }
+            let relative_x = click_x - rect.x;
 
-                // Check click on [X] of main panels
-                let visible_main: Vec<usize> = self
-                    .panels
-                    .visible_indices()
-                    .into_iter()
-                    .filter(|&i| i > 0)
-                    .collect();
+            // Button format: ─[X][▶] Title ─── (collapsed)
+            //          or:   ┌[X][▼] Title ──┐ (expanded)
+            // [X] button: offsets 1-3
+            // [▶]/[▼] button: offsets 4-6
 
-                if !visible_main.is_empty() {
-                    let width = self.state.terminal.width;
-                    let main_area_width = width - fm_width;
-                    let panel_width = main_area_width / visible_main.len() as u16;
+            if (1..=3).contains(&relative_x) {
+                // Click on [X] button - close panel
+                if let Some(group) = self.layout_manager.panel_groups.get_mut(group_idx) {
+                    group.remove_panel(panel_idx);
 
-                    for (chunk_idx, &panel_index) in visible_main.iter().enumerate() {
-                        let panel_x = fm_width + (chunk_idx as u16 * panel_width);
-
-                        // Get panel information
-                        let (title, can_close) = if let Some(panel) =
-                            self.panels.get_mut(panel_index)
+                    // If group is now empty, remove it
+                    if group.is_empty() {
+                        self.layout_manager.panel_groups.remove(group_idx);
+                        // Adjust focus if needed
+                        if let crate::layout_manager::FocusTarget::Group(idx) =
+                            self.layout_manager.focus
                         {
-                            (
-                                panel.title(),
-                                crate::ui::panel_helpers::can_close_panel(panel_index, &self.state),
-                            )
-                        } else {
-                            continue;
-                        };
-
-                        if crate::ui::panel_helpers::is_click_on_close_button(
-                            click_x, click_y, panel_x, 1, &title, can_close,
-                        ) {
-                            // Close panel
-                            self.panels.close_panel(panel_index);
-
-                            // Switch to next visible panel
-                            if self.panels.count() > 0 {
-                                let visible = self.panels.visible_indices();
-                                if !visible.is_empty() {
-                                    if panel_index == self.state.active_panel {
-                                        // If closed active panel
-                                        self.state.active_panel = visible
-                                            .iter()
-                                            .find(|&&i| i >= panel_index)
-                                            .or_else(|| visible.last())
-                                            .copied()
-                                            .unwrap_or(0);
-                                    } else if panel_index < self.state.active_panel {
-                                        // If closed panel left of active, shift index
-                                        if self.state.active_panel > 0 {
-                                            self.state.active_panel -= 1;
-                                        }
-                                    }
-                                }
+                            if !self.layout_manager.panel_groups.is_empty()
+                                && idx >= self.layout_manager.panel_groups.len()
+                            {
+                                self.layout_manager.focus =
+                                    crate::layout_manager::FocusTarget::Group(
+                                        self.layout_manager.panel_groups.len() - 1,
+                                    );
                             }
-                            return Ok(true);
                         }
+                        // Пропорционально перераспределить ширины после удаления группы
+                        let terminal_width = self.state.terminal.width;
+                        let fm_width = if self.layout_manager.has_file_manager() {
+                            DEFAULT_FM_WIDTH
+                        } else {
+                            0
+                        };
+                        let available_width = terminal_width.saturating_sub(fm_width);
+                        self.layout_manager
+                            .redistribute_widths_proportionally(available_width);
                     }
                 }
+                return Ok(true);
+            } else if (4..=6).contains(&relative_x) {
+                // Click on [▶]/[▼] button - expand/collapse panel
+                if let Some(group) = self.layout_manager.panel_groups.get_mut(group_idx) {
+                    if is_expanded && group.len() > 1 {
+                        // Currently expanded - collapse by expanding next panel
+                        let next_idx = (panel_idx + 1) % group.len();
+                        group.set_expanded(next_idx);
+                    } else {
+                        // Currently collapsed - expand this panel
+                        group.set_expanded(panel_idx);
+                        // Also make this group active
+                        self.layout_manager.focus =
+                            crate::layout_manager::FocusTarget::Group(group_idx);
+                    }
+                }
+                return Ok(true);
             }
         }
 
@@ -384,52 +226,27 @@ impl App {
 
     /// Handle click on panel to switch focus
     fn handle_panel_focus_click(&mut self, click_x: u16, click_y: u16) -> Result<()> {
-        // Panel area: rows 1..(height-1), last row - status
-        let height = self.state.terminal.height;
+        let panel_rects = self.calculate_panel_rects();
 
-        // Check that click is in panel area
-        if click_y < 1 || click_y >= height - 1 {
-            return Ok(());
-        }
-
-        match self.state.layout_mode {
-            LayoutMode::Single => {
-                // In Single mode one panel, focus already on it
-                // Do nothing
-            }
-            LayoutMode::MultiPanel => {
-                // In MultiPanel mode: FM on left (30 characters) + main panels on right
-                let fm_width = self.state.layout_info.fm_width.unwrap_or(30);
-
-                // Check click on FM (panel 0)
-                if click_x < fm_width {
-                    self.state.set_active_panel(0);
-                    return Ok(());
-                }
-
-                // Check click on main panels
-                let visible_main: Vec<usize> = self
-                    .panels
-                    .visible_indices()
-                    .into_iter()
-                    .filter(|&i| i > 0)
-                    .collect();
-
-                if !visible_main.is_empty() {
-                    let width = self.state.terminal.width;
-                    let main_area_width = width - fm_width;
-                    let panel_width = main_area_width / visible_main.len() as u16;
-
-                    for (chunk_idx, &panel_index) in visible_main.iter().enumerate() {
-                        let panel_x_start = fm_width + (chunk_idx as u16 * panel_width);
-                        let panel_x_end = panel_x_start + panel_width;
-
-                        if click_x >= panel_x_start && click_x < panel_x_end {
-                            self.state.set_active_panel(panel_index);
-                            return Ok(());
-                        }
+        for (group_idx, panel_idx, rect, _is_expanded) in panel_rects {
+            // Check if click is within this panel's bounds
+            if click_x >= rect.x
+                && click_x < rect.x + rect.width
+                && click_y >= rect.y
+                && click_y < rect.y + rect.height
+            {
+                // Check if this is the FileManager (marked with group_idx = usize::MAX)
+                if group_idx == usize::MAX {
+                    self.layout_manager.focus = crate::layout_manager::FocusTarget::FileManager;
+                } else {
+                    // Click on a regular panel group - make it active
+                    self.layout_manager.focus =
+                        crate::layout_manager::FocusTarget::Group(group_idx);
+                    if let Some(group) = self.layout_manager.panel_groups.get_mut(group_idx) {
+                        group.set_expanded(panel_idx);
                     }
                 }
+                return Ok(());
             }
         }
 
@@ -479,5 +296,111 @@ impl App {
         }
 
         Ok(())
+    }
+
+    /// Calculate panel rectangles for mouse hit testing
+    /// Returns Vec<(group_idx, panel_idx, rect, is_expanded)>
+    fn calculate_panel_rects(&self) -> Vec<(usize, usize, Rect, bool)> {
+        let mut result = Vec::new();
+
+        let width = self.state.terminal.width;
+        let height = self.state.terminal.height;
+
+        // Main area: from row 1 to height-2 (excluding menu and status bar)
+        let main_area = Rect {
+            x: 0,
+            y: 1,
+            width,
+            height: height.saturating_sub(2),
+        };
+
+        // Calculate horizontal split: FM | Groups
+        let has_fm = self.layout_manager.has_file_manager();
+        let fm_width = if has_fm { DEFAULT_FM_WIDTH } else { 0 };
+
+        let horizontal_constraints = if has_fm {
+            vec![
+                Constraint::Length(fm_width),
+                Constraint::Min(0), // Groups area
+            ]
+        } else {
+            vec![Constraint::Min(0)] // Only groups
+        };
+
+        let horizontal_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(horizontal_constraints)
+            .split(main_area);
+
+        let chunk_offset = if has_fm { 1 } else { 0 };
+
+        // Add FileManager to click detection if it exists
+        if has_fm {
+            let fm_area = horizontal_chunks[0];
+            // FileManager uses special marker: group_idx = usize::MAX
+            // This lets handle_panel_focus_click() distinguish it from regular groups
+            result.push((usize::MAX, 0, fm_area, true));
+        }
+
+        // Calculate group areas
+        if !self.layout_manager.panel_groups.is_empty() {
+            let groups_area = horizontal_chunks[chunk_offset];
+
+            // Calculate horizontal constraints for groups (using widths)
+            // Группы могут иметь фиксированную ширину или auto-width
+            let group_constraints: Vec<Constraint> = self
+                .layout_manager
+                .panel_groups
+                .iter()
+                .map(|g| {
+                    let width = g.width.unwrap_or(groups_area.width);
+                    Constraint::Length(width.max(20))
+                })
+                .collect();
+
+            let group_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints(group_constraints)
+                .split(groups_area);
+
+            // Process each group
+            for (group_idx, group) in self.layout_manager.panel_groups.iter().enumerate() {
+                if group.is_empty() || group_chunks[group_idx].height == 0 {
+                    continue;
+                }
+
+                let group_area = group_chunks[group_idx];
+                let expanded_idx = group.expanded_index();
+
+                // Build vertical constraints for panels in group
+                let vertical_constraints: Vec<Constraint> = (0..group.len())
+                    .map(|i| {
+                        if i == expanded_idx {
+                            Constraint::Min(0) // Expanded panel
+                        } else {
+                            Constraint::Length(1) // Collapsed panel (1 line)
+                        }
+                    })
+                    .collect();
+
+                let vertical_chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints(vertical_constraints)
+                    .split(group_area);
+
+                // Add each panel's rect to results
+                for panel_idx in 0..group.len() {
+                    let is_expanded = panel_idx == expanded_idx;
+                    result.push((
+                        group_idx,
+                        panel_idx,
+                        vertical_chunks[panel_idx],
+                        is_expanded,
+                    ));
+                }
+            }
+        }
+
+        result
     }
 }

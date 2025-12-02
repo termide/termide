@@ -136,7 +136,7 @@ impl App {
 
                             // Get match info from active editor
                             let match_info =
-                                if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+                                if let Some(panel) = self.layout_manager.active_panel_mut() {
                                     use crate::panels::editor::Editor;
                                     use std::any::Any;
                                     if let Some(editor) =
@@ -174,7 +174,7 @@ impl App {
                         // Close modal only on cancellation
                         self.state.close_modal();
                         // Also close search state in editor
-                        if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+                        if let Some(panel) = self.layout_manager.active_panel_mut() {
                             use crate::panels::editor::Editor;
                             use std::any::Any;
                             if let Some(editor) =
@@ -198,7 +198,7 @@ impl App {
 
                             // Get match info from active editor
                             let match_info =
-                                if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+                                if let Some(panel) = self.layout_manager.active_panel_mut() {
                                     use crate::panels::editor::Editor;
                                     use std::any::Any;
                                     if let Some(editor) =
@@ -236,7 +236,7 @@ impl App {
                         // Close modal only on cancellation
                         self.state.close_modal();
                         // Also close search state in editor
-                        if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+                        if let Some(panel) = self.layout_manager.active_panel_mut() {
                             use crate::panels::editor::Editor;
                             use std::any::Any;
                             if let Some(editor) =
@@ -359,7 +359,7 @@ impl App {
 
                             // Get match info from active editor
                             let match_info =
-                                if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+                                if let Some(panel) = self.layout_manager.active_panel_mut() {
                                     use crate::panels::editor::Editor;
                                     use std::any::Any;
                                     if let Some(editor) =
@@ -389,7 +389,7 @@ impl App {
                         // Close modal only on cancellation
                         self.state.close_modal();
                         // Also close search state in editor
-                        if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+                        if let Some(panel) = self.layout_manager.active_panel_mut() {
                             use crate::panels::editor::Editor;
                             use std::any::Any;
                             if let Some(editor) =
@@ -413,7 +413,7 @@ impl App {
 
                             // Get match info from active editor
                             let match_info =
-                                if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+                                if let Some(panel) = self.layout_manager.active_panel_mut() {
                                     use crate::panels::editor::Editor;
                                     use std::any::Any;
                                     if let Some(editor) =
@@ -451,7 +451,7 @@ impl App {
                         // Close modal only on cancellation
                         self.state.close_modal();
                         // Also close search state in editor
-                        if let Some(panel) = self.panels.get_mut(self.state.active_panel) {
+                        if let Some(panel) = self.layout_manager.active_panel_mut() {
                             use crate::panels::editor::Editor;
                             use std::any::Any;
                             if let Some(editor) =
@@ -570,8 +570,7 @@ impl App {
 
         if let Some(query) = value.downcast_ref::<String>() {
             // Get active panel
-            let panel_index = self.state.active_panel;
-            if let Some(panel) = self.panels.get_mut(panel_index) {
+            if let Some(panel) = self.layout_manager.active_panel_mut() {
                 // Try to downcast to Editor
                 if let Some(editor) = (panel as &mut dyn std::any::Any).downcast_mut::<Editor>() {
                     // Start search (case insensitive by default)
@@ -592,8 +591,7 @@ impl App {
         use std::any::Any;
 
         // Get active panel (should be Editor)
-        let panel_index = self.state.active_panel;
-        if let Some(panel) = self.panels.get_mut(panel_index) {
+        if let Some(panel) = self.layout_manager.active_panel_mut() {
             if let Some(editor) = (&mut **panel as &mut dyn Any).downcast_mut::<Editor>() {
                 match replace_result.action {
                     ReplaceAction::Search => {
@@ -650,8 +648,7 @@ impl App {
         use std::any::Any;
 
         // Get active panel (should be Editor)
-        let panel_index = self.state.active_panel;
-        if let Some(panel) = self.panels.get_mut(panel_index) {
+        if let Some(panel) = self.layout_manager.active_panel_mut() {
             if let Some(editor) = (&mut **panel as &mut dyn Any).downcast_mut::<Editor>() {
                 match search_result.action {
                     SearchAction::Search => {

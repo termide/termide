@@ -1866,12 +1866,13 @@ impl Panel for Terminal {
         area: Rect,
         buf: &mut Buffer,
         is_focused: bool,
-        panel_index: usize,
+        _panel_index: usize,
         state: &AppState,
     ) {
         // Update size if changed
-        let new_rows = area.height.saturating_sub(2);
-        let new_cols = area.width.saturating_sub(2);
+        // area is already the inner content area (accordion drew outer border)
+        let new_rows = area.height;
+        let new_cols = area.width;
 
         if new_rows != self.size.rows || new_cols != self.size.cols {
             let _ = self.resize(new_rows, new_cols);
@@ -1882,31 +1883,14 @@ impl Panel for Terminal {
         let (display_lines, _cursor_pos, _cursor_shown) =
             self.get_display_lines(is_focused, state.theme);
 
-        // Create panel title considering process state
-        let panel_title = if self.is_alive() {
-            self.terminal_title.clone()
-        } else {
-            format!(
-                "{} [Process Exited - Press Tab to switch panel]",
-                self.terminal_title
-            )
-        };
-
-        let block = crate::ui::panel_helpers::create_panel_block(
-            &panel_title,
-            is_focused,
-            panel_index,
-            state,
-        );
-        let inner = block.inner(area);
-
-        let paragraph = Paragraph::new(display_lines).block(block);
+        // Render terminal content directly (accordion already drew border with title/buttons)
+        let paragraph = Paragraph::new(display_lines);
         paragraph.render(area, buf);
 
         // Replace Color::Reset and Color::White with theme colors
         // BUT don't touch cells with special attributes (visual cursors from applications)
-        for y in inner.top()..inner.bottom() {
-            for x in inner.left()..inner.right() {
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
                 if let Some(cell) = buf.cell_mut((x, y)) {
                     let current_style = cell.style();
 

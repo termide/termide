@@ -17,6 +17,7 @@ A cross-platform terminal-based IDE, file manager, and virtual terminal written 
 - **Smart File Manager** - Navigate and manage files with an intuitive TUI interface
 - **Integrated Virtual Terminal** - Run commands without leaving the IDE with full PTY support
 - **Multi-panel Layout** - Work with multiple files and terminals simultaneously
+- **Accordion Panel System** - Smart panel grouping with automatic stacking based on terminal width, vertical accordion layout within horizontal groups, one expanded panel per group with others collapsed to title bar, configurable minimum panel width threshold (80 characters)
 - **Cross-platform** - Works on Linux (x86_64, ARM64), macOS (Intel, Apple Silicon), and Windows (via WSL)
 - **Git Integration** - See file status and changes at a glance with color-coded indicators and automatic updates
 - **12 Built-in Themes** - Choose from popular themes like Dracula, Nord, Monokai, Solarized, and more
@@ -37,23 +38,23 @@ Download the latest release for your platform from [GitHub Releases](https://git
 
 ```bash
 # Linux x86_64 (also works in WSL)
-wget https://github.com/termide/termide/releases/latest/download/termide-0.1.2-x86_64-unknown-linux-gnu.tar.gz
-tar xzf termide-0.1.2-x86_64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.1.3-x86_64-unknown-linux-gnu.tar.gz
+tar xzf termide-0.1.3-x86_64-unknown-linux-gnu.tar.gz
 ./termide
 
 # macOS Intel (x86_64)
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.1.2-x86_64-apple-darwin.tar.gz
-tar xzf termide-0.1.2-x86_64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.1.3-x86_64-apple-darwin.tar.gz
+tar xzf termide-0.1.3-x86_64-apple-darwin.tar.gz
 ./termide
 
 # macOS Apple Silicon (ARM64)
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.1.2-aarch64-apple-darwin.tar.gz
-tar xzf termide-0.1.2-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.1.3-aarch64-apple-darwin.tar.gz
+tar xzf termide-0.1.3-aarch64-apple-darwin.tar.gz
 ./termide
 
 # Linux ARM64 (Raspberry Pi, ARM servers)
-wget https://github.com/termide/termide/releases/latest/download/termide-0.1.2-aarch64-unknown-linux-gnu.tar.gz
-tar xzf termide-0.1.2-aarch64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.1.3-aarch64-unknown-linux-gnu.tar.gz
+tar xzf termide-0.1.3-aarch64-unknown-linux-gnu.tar.gz
 ./termide
 ```
 
@@ -127,10 +128,14 @@ For detailed documentation, see:
 **Global:**
 - `Alt+M` - Toggle menu
 - `Alt+H` - Show help
-- `Alt+Q` / `Alt+Delete` - Quit application
-- `Alt+Left` / `Alt+Right` - Switch between panels
-- `Alt+1` to `Alt+9` - Go to panel by number
-- `Escape` / `Alt+X` - Close current panel
+- `Alt+Q` - Quit application
+- `Alt+Left` / `Alt+Right` - Switch between panel groups (horizontal navigation)
+- `Alt+Up` / `Alt+Down` - Navigate panels within group (vertical navigation)
+- `Alt+PgUp` / `Alt+PgDn` - Move panel to previous/next group
+- `Alt+Home` / `Alt+End` - Move panel to first/last group
+- `Alt+Plus (=)` / `Alt+Minus (-)` - Increase/decrease active group width
+- `Escape` / `Alt+X` / `Alt+Delete` - Close current panel
+- `Alt+Backspace` - Toggle panel stacking (merge single panel into adjacent group or unstack panel from group)
 
 **File Manager:**
 - `Enter` - Open file or enter directory
@@ -297,11 +302,7 @@ Contributions are welcome! Please feel free to submit issues and pull requests.
 
 ## License
 
-This project is dual-licensed under:
-- MIT License
-- Apache License 2.0
-
-You may choose either license for your use.
+This project is licensed under the MIT License.
 
 ## Acknowledgments
 

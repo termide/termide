@@ -100,14 +100,17 @@ The device name is automatically detected from the filesystem:
 | `Alt+P`           | Open configuration file in editor          |
 | `Alt+H`           | Open help window                           |
 | `Alt+Q`           | Close application                          |
-| `Alt+Delete`      | Close application                          |
-| `Escape`          | Close panel                                |
+| `Escape`          | Close panel / Close modal                  |
 | `Alt+X`           | Close panel                                |
-| `Alt+Backspace`   | Close panel                                |
-| `Alt+1` - `Alt+9` | Go to panel by number                      |
-| `Alt+Left`        | Go to previous panel (left)                |
-| `Alt+Right`       | Go to next panel (right)                   |
-| `Alt+PgDn`        | Move panel left (swap positions)           |
-| `Alt+PgUp`        | Move panel right (swap positions)          |
-| `Alt+Minus`       | Decrease panel width by 1 character        |
-| `Alt+Plus`        | Increase panel width by 1 character        |
+| `Alt+Delete`      | Close panel                                |
+| `Alt+Left`        | Go to previous panel group (horizontal)    |
+| `Alt+Right`       | Go to next panel group (horizontal)        |
+| `Alt+Up`          | Go to previous panel in group (vertical)   |
+| `Alt+Down`        | Go to next panel in group (vertical)       |
+| `Alt+PgUp`        | Move panel to previous group               |
+| `Alt+PgDn`        | Move panel to next group                   |
+| `Alt+Home`        | Move panel to first group                  |
+| `Alt+End`         | Move panel to last group                   |
+| `Alt+Plus (=)`    | Increase active group width                |
+| `Alt+Minus (-)`   | Decrease active group width                |
+| `Alt+Backspace`   | Toggle panel stacking (merge/unstack)      |
