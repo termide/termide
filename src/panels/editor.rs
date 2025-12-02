@@ -113,6 +113,10 @@ pub struct Editor {
     config_update: Option<crate::config::Config>,
     /// Status message to display to user
     status_message: Option<String>,
+    /// Git diff cache for this file (if in git repo)
+    git_diff_cache: Option<crate::git::GitDiffCache>,
+    /// Pending git diff update timestamp (for debounce)
+    git_diff_update_pending: Option<std::time::Instant>,
 }
 
 impl Editor {
@@ -139,6 +143,8 @@ impl Editor {
             modal_request: None,
             config_update: None,
             status_message: None,
+            git_diff_cache: None,
+            git_diff_update_pending: None,
         }
     }
 
@@ -202,6 +208,17 @@ impl Editor {
             highlight_cache.set_syntax_from_path(&path);
         }
 
+        // Initialize git diff cache (will be populated later via update_git_diff)
+        let mut git_diff_cache = None;
+
+        // Try to create git diff cache if file is in a git repository
+        // Note: we can't check config.show_git_diff here as we don't have access to global config
+        // This will be initialized properly when render is called with state
+        let mut cache = crate::git::GitDiffCache::new(path.clone());
+        if cache.update().is_ok() {
+            git_diff_cache = Some(cache);
+        }
+
         Ok(Self {
             config,
             buffer,
@@ -217,6 +234,8 @@ impl Editor {
             modal_request: None,
             config_update: None,
             status_message: None,
+            git_diff_cache,
+            git_diff_update_pending: None,
         })
     }
 
@@ -240,8 +259,10 @@ impl Editor {
             last_replace_with: None,
             cached_title: title,
             modal_request: None,
+            git_diff_cache: None,
             config_update: None,
             status_message: None,
+            git_diff_update_pending: None,
         }
     }
 
@@ -269,7 +290,52 @@ impl Editor {
         }
 
         self.buffer.save()?;
+
+        // Update git diff after successful save
+        self.update_git_diff();
+
         Ok(())
+    }
+
+    /// Update git diff cache for this file
+    pub fn update_git_diff(&mut self) {
+        if let Some(ref mut cache) = self.git_diff_cache {
+            let _ = cache.update();
+        } else if let Some(file_path) = self.file_path() {
+            // Try to create cache if file is now in git repo
+            let mut cache = crate::git::GitDiffCache::new(file_path.to_path_buf());
+            if cache.update().is_ok() {
+                self.git_diff_cache = Some(cache);
+            }
+        }
+    }
+
+    /// Schedule git diff update with debounce (300ms delay)
+    pub fn schedule_git_diff_update(&mut self) {
+        // Only schedule if we have a git diff cache
+        if self.git_diff_cache.is_some() {
+            self.git_diff_update_pending = Some(std::time::Instant::now());
+        }
+    }
+
+    /// Check and apply pending git diff update if debounce time has passed
+    pub fn check_pending_git_diff_update(&mut self) {
+        const DEBOUNCE_MS: u64 = 300;
+
+        if let Some(pending_time) = self.git_diff_update_pending {
+            if pending_time.elapsed().as_millis() >= DEBOUNCE_MS as u128 {
+                // Time has passed, perform update
+                self.git_diff_update_pending = None;
+
+                // Get current buffer content
+                let content = self.buffer.to_string();
+
+                // Update diff cache with current buffer
+                if let Some(ref mut cache) = self.git_diff_cache {
+                    let _ = cache.update_from_buffer(&content);
+                }
+            }
+        }
     }
 
     /// Get updated config (if config file was saved)
@@ -508,6 +574,9 @@ impl Editor {
                 // When deleting multiline selection, need to invalidate all lines after
                 self.highlight_cache
                     .invalidate_range(start.line, self.buffer.line_count());
+
+                // Schedule git diff update
+                self.schedule_git_diff_update();
             }
         }
         Ok(())
@@ -554,6 +623,9 @@ impl Editor {
                 // Single line paste
                 self.highlight_cache.invalidate_line(start_line);
             }
+
+            // Schedule git diff update
+            self.schedule_git_diff_update();
         }
         Ok(())
     }
@@ -610,6 +682,9 @@ impl Editor {
         self.highlight_cache
             .invalidate_range(start_line, self.buffer.line_count());
 
+        // Schedule git diff update
+        self.schedule_git_diff_update();
+
         Ok(())
     }
 
@@ -640,6 +715,9 @@ impl Editor {
         // Invalidate highlighting cache for changed line
         self.highlight_cache.invalidate_line(self.cursor.line);
 
+        // Schedule git diff update
+        self.schedule_git_diff_update();
+
         Ok(())
     }
 
@@ -660,6 +738,9 @@ impl Editor {
         // Invalidate all lines after inserting new line
         self.highlight_cache
             .invalidate_range(old_line, self.buffer.line_count());
+
+        // Schedule git diff update
+        self.schedule_git_diff_update();
 
         Ok(())
     }
@@ -682,6 +763,9 @@ impl Editor {
                 // Regular character deletion
                 self.highlight_cache.invalidate_line(new_cursor.line);
             }
+
+            // Schedule git diff update
+            self.schedule_git_diff_update();
         }
         Ok(())
     }
@@ -701,12 +785,21 @@ impl Editor {
                 // Regular character deletion
                 self.highlight_cache.invalidate_line(self.cursor.line);
             }
+
+            // Schedule git diff update
+            self.schedule_git_diff_update();
         }
         Ok(())
     }
 
     /// Render editor content
-    fn render_content(&mut self, area: Rect, buf: &mut Buffer, theme: &crate::theme::Theme) {
+    fn render_content(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        theme: &crate::theme::Theme,
+        config: &crate::config::Config,
+    ) {
         // Update viewport size (subtract space for line numbers)
         let line_number_width = 5; // "  123 "
         let content_width = area.width.saturating_sub(line_number_width) as usize;
@@ -781,14 +874,40 @@ impl Editor {
 
                         // Номер строки (только на первой визуальной строке)
                         if is_first_visual_row {
-                            let line_num = format!("{:>4} ", line_idx + 1);
+                            // Получить git статус для этой строки (если enabled)
+                            let (git_color, git_marker) = if config.show_git_diff {
+                                self.git_diff_cache
+                                    .as_ref()
+                                    .map(|cache| {
+                                        let status = cache.get_line_status(line_idx);
+                                        match status {
+                                            crate::git::LineStatus::Added => (theme.success, ' '),
+                                            crate::git::LineStatus::Modified => {
+                                                (theme.warning, ' ')
+                                            }
+                                            crate::git::LineStatus::DeletedAfter => {
+                                                (theme.error, '▼')
+                                            }
+                                            crate::git::LineStatus::Unchanged => {
+                                                (theme.disabled, ' ')
+                                            }
+                                        }
+                                    })
+                                    .unwrap_or((theme.disabled, ' '))
+                            } else {
+                                (theme.disabled, ' ')
+                            };
+
+                            let line_num_style = Style::default().fg(git_color);
+                            let line_num = format!("{:>4}{}", line_idx + 1, git_marker);
+
                             for (i, ch) in line_num.chars().enumerate() {
                                 if i < line_number_width as usize {
                                     let x = area.x + i as u16;
                                     let y = area.y + visual_row as u16;
                                     if let Some(cell) = buf.cell_mut((x, y)) {
                                         cell.set_char(ch);
-                                        cell.set_style(line_number_style);
+                                        cell.set_style(line_num_style);
                                     }
                                 }
                             }
@@ -957,15 +1076,35 @@ impl Editor {
                     text_style
                 };
 
-                // Номер строки
-                let line_num = format!("{:>4} ", line_idx + 1);
+                // Номер строки с git diff статусом
+                // Получить git статус для этой строки (если enabled в config)
+                let (git_color, git_marker) = if config.show_git_diff {
+                    self.git_diff_cache
+                        .as_ref()
+                        .map(|cache| {
+                            let status = cache.get_line_status(line_idx);
+                            match status {
+                                crate::git::LineStatus::Added => (theme.success, ' '),
+                                crate::git::LineStatus::Modified => (theme.warning, ' '),
+                                crate::git::LineStatus::DeletedAfter => (theme.error, '▼'),
+                                crate::git::LineStatus::Unchanged => (theme.disabled, ' '),
+                            }
+                        })
+                        .unwrap_or((theme.disabled, ' '))
+                } else {
+                    (theme.disabled, ' ')
+                };
+
+                let line_num_style = Style::default().fg(git_color);
+                let line_num = format!("{:>4}{}", line_idx + 1, git_marker);
+
                 for (i, ch) in line_num.chars().enumerate() {
                     if i < line_number_width as usize {
                         let x = area.x + i as u16;
                         let y = area.y + row as u16;
                         if let Some(cell) = buf.cell_mut((x, y)) {
                             cell.set_char(ch);
-                            cell.set_style(line_number_style);
+                            cell.set_style(line_num_style);
                         }
                     }
                 }
@@ -1313,6 +1452,9 @@ impl Editor {
             }
         }
 
+        // Schedule git diff update
+        self.schedule_git_diff_update();
+
         Ok(())
     }
 
@@ -1351,6 +1493,9 @@ impl Editor {
 
                 // Clear search state
                 self.search_state = None;
+
+                // Schedule git diff update
+                self.schedule_git_diff_update();
             }
         }
 
@@ -1368,7 +1513,7 @@ impl Panel for Editor {
         state: &AppState,
     ) {
         // Render editor content directly (accordion already drew border with title/buttons)
-        self.render_content(area, buf, state.theme);
+        self.render_content(area, buf, state.theme, &state.config);
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
@@ -1581,6 +1726,8 @@ impl Panel for Editor {
                         // Invalidate entire highlighting cache after undo
                         self.highlight_cache
                             .invalidate_range(0, self.buffer.line_count());
+                        // Schedule git diff update
+                        self.schedule_git_diff_update();
                     }
                 }
             }
@@ -1597,6 +1744,8 @@ impl Panel for Editor {
                         // Invalidate entire highlighting cache after redo
                         self.highlight_cache
                             .invalidate_range(0, self.buffer.line_count());
+                        // Schedule git diff update
+                        self.schedule_git_diff_update();
                     }
                 }
             }

@@ -346,7 +346,13 @@ impl Panel for FileManager {
 
         // Calculate available width for file names
         let content_width = area.width as usize;
-        let items = self.get_items(content_height, content_width, state.theme, is_focused);
+        let items = self.get_items(
+            content_height,
+            content_width,
+            state.theme,
+            is_focused,
+            state,
+        );
 
         // Render file list content directly (accordion already drew border with title/buttons)
         let paragraph = Paragraph::new(items);

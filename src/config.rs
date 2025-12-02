@@ -29,6 +29,14 @@ pub struct Config {
     /// Panels narrower than this threshold will be stacked vertically
     #[serde(default = "default_min_panel_width")]
     pub min_panel_width: u16,
+
+    /// Show git diff status colors on line numbers in editor (default: true)
+    #[serde(default = "default_show_git_diff")]
+    pub show_git_diff: bool,
+
+    /// Minimum file manager panel width to display size and time columns (default: 50)
+    #[serde(default = "default_fm_extended_view_width")]
+    pub fm_extended_view_width: usize,
 }
 
 fn default_theme_name() -> String {
@@ -51,6 +59,14 @@ fn default_min_panel_width() -> u16 {
     80
 }
 
+fn default_show_git_diff() -> bool {
+    true
+}
+
+fn default_fm_extended_view_width() -> usize {
+    50
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -60,6 +76,8 @@ impl Default for Config {
             log_file_path: None,
             resource_monitor_interval: default_resource_monitor_interval(),
             min_panel_width: default_min_panel_width(),
+            show_git_diff: default_show_git_diff(),
+            fm_extended_view_width: default_fm_extended_view_width(),
         }
     }
 }
@@ -85,6 +103,7 @@ impl Config {
                 "language",
                 "resource_monitor_interval",
                 "min_panel_width",
+                "fm_extended_view_width",
             ];
 
             let needs_update = required_keys

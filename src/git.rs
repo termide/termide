@@ -6,7 +6,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
+mod diff;
 mod watcher;
+
+pub use diff::{GitDiffCache, LineStatus};
 pub use watcher::{create_git_watcher, GitStatusUpdate, GitWatcher};
 
 /// Global flag for git availability on system

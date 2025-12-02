@@ -111,6 +111,9 @@ impl App {
                     // Check channel for filesystem update events
                     self.check_fs_update();
 
+                    // Check pending git diff updates (debounced)
+                    self.check_pending_git_diff_updates();
+
                     // Update system resource monitoring (CPU, RAM)
                     self.update_system_resources();
 
@@ -221,6 +224,19 @@ impl App {
                         let _ = fm.update_git_status();
                     }
                 }
+
+                // Try to downcast to Editor
+                use crate::panels::editor::Editor;
+                if let Some(editor) =
+                    (&mut **panel as &mut dyn std::any::Any).downcast_mut::<Editor>()
+                {
+                    // Check if this editor has a file in the updated repository
+                    if let Some(file_path) = editor.file_path() {
+                        if file_path.starts_with(&update.repo_path) {
+                            editor.update_git_diff();
+                        }
+                    }
+                }
             }
         }
     }
@@ -277,6 +293,33 @@ impl App {
                         let _ = fm.load_directory();
                     }
                 }
+
+                // Try to downcast to Editor
+                use crate::panels::editor::Editor;
+                if let Some(editor) =
+                    (&mut **panel as &mut dyn std::any::Any).downcast_mut::<Editor>()
+                {
+                    // Check if this editor has a file in the updated directory
+                    if let Some(file_path) = editor.file_path() {
+                        if file_path.parent() == Some(&update.dir_path) {
+                            // File in this directory might have changed - update git diff
+                            editor.update_git_diff();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Check and apply pending git diff updates (debounced)
+    fn check_pending_git_diff_updates(&mut self) {
+        use crate::panels::editor::Editor;
+
+        // Check all Editor panels for pending git diff updates
+        for panel in self.layout_manager.iter_all_panels_mut() {
+            if let Some(editor) = (&mut **panel as &mut dyn std::any::Any).downcast_mut::<Editor>()
+            {
+                editor.check_pending_git_diff_update();
             }
         }
     }

@@ -14,9 +14,6 @@ pub const KILOBYTE: u64 = 1024;
 pub const MEGABYTE: u64 = KILOBYTE * 1024;
 pub const GIGABYTE: u64 = MEGABYTE * 1024;
 
-/// Minimum file manager panel width to display size and time columns
-pub const MIN_WIDTH_FOR_EXTENDED_VIEW: usize = 70;
-
 /// Maximum file size to open in editor (100 MB)
 pub const MAX_EDITOR_FILE_SIZE: u64 = 100 * MEGABYTE;
 

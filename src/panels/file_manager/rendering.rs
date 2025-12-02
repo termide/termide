@@ -6,6 +6,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::{utils, FileManager};
 use crate::git::GitStatus;
+use crate::state::AppState;
 use crate::theme::Theme;
 
 impl FileManager {
@@ -43,6 +44,7 @@ impl FileManager {
         available_width: usize,
         theme: &Theme,
         is_focused: bool,
+        state: &AppState,
     ) -> Vec<Line<'_>> {
         let mut lines = Vec::new();
         let visible_start = self.scroll_offset;
@@ -55,7 +57,7 @@ impl FileManager {
         const SEPARATOR_WIDTH: usize = 3;
 
         // Determine whether to show extended view with columns
-        let show_extended = available_width >= crate::constants::MIN_WIDTH_FOR_EXTENDED_VIEW;
+        let show_extended = available_width >= state.config.fm_extended_view_width;
 
         for (i, entry) in self.entries.iter().enumerate() {
             if i < visible_start || i >= visible_end {
