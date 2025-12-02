@@ -45,23 +45,23 @@ Download the latest release for your platform from [GitHub Releases](https://git
 
 ```bash
 # Linux x86_64 (also works in WSL)
-wget https://github.com/termide/termide/releases/latest/download/termide-0.1.4-x86_64-unknown-linux-gnu.tar.gz
-tar xzf termide-0.1.4-x86_64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.1.5-x86_64-unknown-linux-gnu.tar.gz
+tar xzf termide-0.1.5-x86_64-unknown-linux-gnu.tar.gz
 ./termide
 
 # macOS Intel (x86_64)
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.1.4-x86_64-apple-darwin.tar.gz
-tar xzf termide-0.1.4-x86_64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.1.5-x86_64-apple-darwin.tar.gz
+tar xzf termide-0.1.5-x86_64-apple-darwin.tar.gz
 ./termide
 
 # macOS Apple Silicon (ARM64)
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.1.4-aarch64-apple-darwin.tar.gz
-tar xzf termide-0.1.4-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.1.5-aarch64-apple-darwin.tar.gz
+tar xzf termide-0.1.5-aarch64-apple-darwin.tar.gz
 ./termide
 
 # Linux ARM64 (Raspberry Pi, ARM servers)
-wget https://github.com/termide/termide/releases/latest/download/termide-0.1.4-aarch64-unknown-linux-gnu.tar.gz
-tar xzf termide-0.1.4-aarch64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.1.5-aarch64-unknown-linux-gnu.tar.gz
+tar xzf termide-0.1.5-aarch64-unknown-linux-gnu.tar.gz
 ./termide
 ```
 
@@ -74,12 +74,12 @@ Download and install the `.deb` package from [GitHub Releases](https://github.co
 
 ```bash
 # x86_64
-wget https://github.com/termide/termide/releases/download/0.1.4/termide_0.1.4_amd64.deb
-sudo dpkg -i termide_0.1.4_amd64.deb
+wget https://github.com/termide/termide/releases/download/0.1.5/termide_0.1.5_amd64.deb
+sudo dpkg -i termide_0.1.5_amd64.deb
 
 # ARM64
-wget https://github.com/termide/termide/releases/download/0.1.4/termide_0.1.4_arm64.deb
-sudo dpkg -i termide_0.1.4_arm64.deb
+wget https://github.com/termide/termide/releases/download/0.1.5/termide_0.1.5_arm64.deb
+sudo dpkg -i termide_0.1.5_arm64.deb
 ```
 
 </details>
@@ -91,12 +91,12 @@ Download and install the `.rpm` package from [GitHub Releases](https://github.co
 
 ```bash
 # x86_64
-wget https://github.com/termide/termide/releases/download/0.1.4/termide-0.1.4-1.x86_64.rpm
-sudo rpm -i termide-0.1.4-1.x86_64.rpm
+wget https://github.com/termide/termide/releases/download/0.1.5/termide-0.1.5-1.x86_64.rpm
+sudo rpm -i termide-0.1.5-1.x86_64.rpm
 
 # ARM64
-wget https://github.com/termide/termide/releases/download/0.1.4/termide-0.1.4-1.aarch64.rpm
-sudo rpm -i termide-0.1.4-1.aarch64.rpm
+wget https://github.com/termide/termide/releases/download/0.1.5/termide-0.1.5-1.aarch64.rpm
+sudo rpm -i termide-0.1.5-1.aarch64.rpm
 ```
 
 </details>
