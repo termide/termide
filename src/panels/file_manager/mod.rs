@@ -59,6 +59,8 @@ pub struct FileManager {
     drag_mode: Option<DragMode>,
     /// Set of items already processed during current drag (to avoid re-toggling)
     dragged_items: HashSet<usize>,
+    /// Name of directory we came from (for cursor restoration when going up)
+    previous_dir_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -102,6 +104,7 @@ impl FileManager {
             drag_start_index: None,
             drag_mode: None,
             dragged_items: HashSet::new(),
+            previous_dir_name: None,
         };
         let _ = fm.load_directory();
         fm
@@ -115,7 +118,11 @@ impl FileManager {
     /// Load the contents of the current directory
     pub fn load_directory(&mut self) -> Result<()> {
         // Save current file name to restore position
-        let current_name = self.entries.get(self.selected).map(|e| e.name.clone());
+        // Use previous_dir_name if navigating up, otherwise use current selection
+        let current_name = self
+            .previous_dir_name
+            .take()
+            .or_else(|| self.entries.get(self.selected).map(|e| e.name.clone()));
 
         self.entries.clear();
         self.selected = 0;
@@ -281,11 +288,16 @@ impl FileManager {
             }
 
             if entry.name == ".." {
+                // Save current directory name before going up
+                if let Some(dir_name) = self.current_path.file_name() {
+                    self.previous_dir_name = Some(dir_name.to_string_lossy().to_string());
+                }
                 if let Some(parent) = self.current_path.parent() {
                     self.current_path = parent.to_path_buf();
                     self.load_directory()?;
                 }
             } else if entry.is_dir {
+                self.previous_dir_name = None; // Clear when going down
                 self.current_path.push(&entry.name);
                 self.load_directory()?;
             } else {
@@ -438,6 +450,10 @@ impl Panel for FileManager {
             }
             (KeyCode::Backspace, _) => {
                 // Return to parent directory
+                // Save current directory name before going up
+                if let Some(dir_name) = self.current_path.file_name() {
+                    self.previous_dir_name = Some(dir_name.to_string_lossy().to_string());
+                }
                 if let Some(parent) = self.current_path.parent() {
                     self.current_path = parent.to_path_buf();
                     self.load_directory()?;

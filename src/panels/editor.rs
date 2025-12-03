@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
 };
 use std::path::PathBuf;
 
@@ -935,173 +935,232 @@ impl Editor {
                     let mut char_offset = 0;
                     let mut is_first_visual_row = true;
 
-                    while char_offset < line_len && visual_row < content_height {
-                        let chunk_end = (char_offset + content_width).min(line_len);
-
-                        // Номер строки (только на первой визуальной строке)
-                        if is_first_visual_row {
-                            // Получить git статус для этой строки (если enabled)
-                            let (git_color, git_marker) = if config.show_git_diff {
-                                self.git_diff_cache
-                                    .as_ref()
-                                    .map(|cache| {
-                                        let status = cache.get_line_status(line_idx);
-                                        match status {
-                                            crate::git::LineStatus::Added => (theme.success, ' '),
-                                            crate::git::LineStatus::Modified => {
-                                                (theme.warning, ' ')
-                                            }
-                                            crate::git::LineStatus::DeletedAfter => {
-                                                (theme.error, '▼')
-                                            }
-                                            crate::git::LineStatus::Unchanged => {
-                                                (theme.disabled, ' ')
-                                            }
-                                        }
-                                    })
-                                    .unwrap_or((theme.disabled, ' '))
-                            } else {
-                                (theme.disabled, ' ')
-                            };
-
-                            let line_num_style = Style::default().fg(git_color);
-                            let line_num = format!("{:>4}{}", line_idx + 1, git_marker);
-
-                            for (i, ch) in line_num.chars().enumerate() {
-                                if i < line_number_width as usize {
-                                    let x = area.x + i as u16;
-                                    let y = area.y + visual_row as u16;
-                                    if let Some(cell) = buf.cell_mut((x, y)) {
-                                        cell.set_char(ch);
-                                        cell.set_style(line_num_style);
+                    // Специальная обработка пустых строк
+                    if line_len == 0 {
+                        // Получить git статус для этой строки (если enabled)
+                        let (git_color, git_marker) = if config.show_git_diff {
+                            self.git_diff_cache
+                                .as_ref()
+                                .map(|cache| {
+                                    let status = cache.get_line_status(line_idx);
+                                    match status {
+                                        crate::git::LineStatus::Added => (theme.success, ' '),
+                                        crate::git::LineStatus::Modified => (theme.warning, ' '),
+                                        crate::git::LineStatus::DeletedAfter => (theme.error, '▼'),
+                                        crate::git::LineStatus::Unchanged => (theme.disabled, ' '),
                                     }
-                                }
-                            }
+                                })
+                                .unwrap_or((theme.disabled, ' '))
                         } else {
-                            // Пустое место вместо номера строки для продолжения
-                            for i in 0..line_number_width as usize {
+                            (theme.disabled, ' ')
+                        };
+
+                        // Отрисовать номер строки
+                        let line_num_style = Style::default().fg(git_color);
+                        let line_num = format!("{:>4}{}", line_idx + 1, git_marker);
+
+                        for (i, ch) in line_num.chars().enumerate() {
+                            if i < line_number_width as usize {
                                 let x = area.x + i as u16;
                                 let y = area.y + visual_row as u16;
                                 if let Some(cell) = buf.cell_mut((x, y)) {
-                                    cell.set_char(' ');
-                                    cell.set_style(line_number_style);
+                                    cell.set_char(ch);
+                                    cell.set_style(line_num_style);
                                 }
                             }
                         }
 
-                        // Получить сегменты подсветки
-                        let segments = if self.config.syntax_highlighting
-                            && self.highlight_cache.has_syntax()
-                        {
-                            self.highlight_cache.get_line_segments(line_idx, line_text)
-                        } else {
-                            &[(line_text.to_string(), style)][..]
-                        };
+                        // Заполнить остальную часть строки фоном (для курсора)
+                        for col in 0..content_width {
+                            let x = area.x + line_number_width + col as u16;
+                            let y = area.y + visual_row as u16;
 
-                        // Отрисовать символы этой визуальной строки
-                        let mut segment_char_idx = 0;
-                        let mut visual_col = 0;
+                            if x < area.x + area.width && y < area.y + area.height {
+                                if let Some(cell) = buf.cell_mut((x, y)) {
+                                    cell.set_char(' ');
+                                    cell.set_style(style); // Использует cursor_line_style если это строка курсора
+                                }
+                            }
+                        }
 
-                        for (segment_text, segment_style) in segments {
-                            for ch in segment_text.chars() {
-                                // Проверить, попадает ли символ в текущий чанк
-                                if segment_char_idx >= char_offset && segment_char_idx < chunk_end {
-                                    let x = area.x + line_number_width + visual_col as u16;
+                        // Проверить, находится ли курсор на этой пустой строке в колонке 0
+                        if is_cursor_line && self.cursor.column == 0 {
+                            cursor_viewport_pos = Some((visual_row, 0));
+                        }
+
+                        visual_row += 1;
+                        // Перейти к следующей строке
+                    } else {
+                        // Обработка непустых строк
+                        while char_offset < line_len && visual_row < content_height {
+                            let chunk_end = (char_offset + content_width).min(line_len);
+
+                            // Номер строки (только на первой визуальной строке)
+                            if is_first_visual_row {
+                                // Получить git статус для этой строки (если enabled)
+                                let (git_color, git_marker) = if config.show_git_diff {
+                                    self.git_diff_cache
+                                        .as_ref()
+                                        .map(|cache| {
+                                            let status = cache.get_line_status(line_idx);
+                                            match status {
+                                                crate::git::LineStatus::Added => {
+                                                    (theme.success, ' ')
+                                                }
+                                                crate::git::LineStatus::Modified => {
+                                                    (theme.warning, ' ')
+                                                }
+                                                crate::git::LineStatus::DeletedAfter => {
+                                                    (theme.error, '▼')
+                                                }
+                                                crate::git::LineStatus::Unchanged => {
+                                                    (theme.disabled, ' ')
+                                                }
+                                            }
+                                        })
+                                        .unwrap_or((theme.disabled, ' '))
+                                } else {
+                                    (theme.disabled, ' ')
+                                };
+
+                                let line_num_style = Style::default().fg(git_color);
+                                let line_num = format!("{:>4}{}", line_idx + 1, git_marker);
+
+                                for (i, ch) in line_num.chars().enumerate() {
+                                    if i < line_number_width as usize {
+                                        let x = area.x + i as u16;
+                                        let y = area.y + visual_row as u16;
+                                        if let Some(cell) = buf.cell_mut((x, y)) {
+                                            cell.set_char(ch);
+                                            cell.set_style(line_num_style);
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Пустое место вместо номера строки для продолжения
+                                for i in 0..line_number_width as usize {
+                                    let x = area.x + i as u16;
+                                    let y = area.y + visual_row as u16;
+                                    if let Some(cell) = buf.cell_mut((x, y)) {
+                                        cell.set_char(' ');
+                                        cell.set_style(line_number_style);
+                                    }
+                                }
+                            }
+
+                            // Получить сегменты подсветки
+                            let segments = if self.config.syntax_highlighting
+                                && self.highlight_cache.has_syntax()
+                            {
+                                self.highlight_cache.get_line_segments(line_idx, line_text)
+                            } else {
+                                &[(line_text.to_string(), style)][..]
+                            };
+
+                            // Отрисовать символы этой визуальной строки
+                            let mut segment_char_idx = 0;
+                            let mut visual_col = 0;
+
+                            for (segment_text, segment_style) in segments {
+                                for ch in segment_text.chars() {
+                                    // Проверить, попадает ли символ в текущий чанк
+                                    if segment_char_idx >= char_offset
+                                        && segment_char_idx < chunk_end
+                                    {
+                                        let x = area.x + line_number_width + visual_col as u16;
+                                        let y = area.y + visual_row as u16;
+
+                                        if x < area.x + area.width && y < area.y + area.height {
+                                            if let Some(cell) = buf.cell_mut((x, y)) {
+                                                cell.set_char(ch);
+
+                                                // Проверить, является ли это совпадением поиска
+                                                let match_idx = search_matches.iter().position(
+                                                    |(m_line, m_col, m_len)| {
+                                                        *m_line == line_idx
+                                                            && segment_char_idx >= *m_col
+                                                            && segment_char_idx < m_col + m_len
+                                                    },
+                                                );
+
+                                                // Проверить, находится ли символ в выделении
+                                                let is_selected =
+                                                    if let Some((sel_start, sel_end)) =
+                                                        &selection_range
+                                                    {
+                                                        let pos = crate::editor::Cursor::at(
+                                                            line_idx,
+                                                            segment_char_idx,
+                                                        );
+                                                        (pos.line > sel_start.line
+                                                            || (pos.line == sel_start.line
+                                                                && pos.column >= sel_start.column))
+                                                            && (pos.line < sel_end.line
+                                                                || (pos.line == sel_end.line
+                                                                    && pos.column < sel_end.column))
+                                                    } else {
+                                                        false
+                                                    };
+
+                                                // Определить финальный стиль
+                                                let final_style = if let Some(idx) = match_idx {
+                                                    if Some(idx) == current_match_idx {
+                                                        current_match_style
+                                                    } else {
+                                                        search_match_style
+                                                    }
+                                                } else if is_selected {
+                                                    selection_style
+                                                } else if is_cursor_line {
+                                                    segment_style.bg(theme.accented_bg)
+                                                } else {
+                                                    *segment_style
+                                                };
+                                                cell.set_style(final_style);
+                                            }
+                                        }
+
+                                        // Проверить позицию курсора
+                                        if is_cursor_line && self.cursor.column == segment_char_idx
+                                        {
+                                            cursor_viewport_pos = Some((visual_row, visual_col));
+                                        }
+
+                                        visual_col += 1;
+                                    }
+                                    segment_char_idx += 1;
+                                }
+                            }
+
+                            // Проверить курсор в конце строки
+                            if is_cursor_line
+                                && self.cursor.column >= char_offset
+                                && self.cursor.column <= chunk_end
+                                && (self.cursor.column == chunk_end
+                                    || (chunk_end == line_len && self.cursor.column >= line_len))
+                            {
+                                cursor_viewport_pos =
+                                    Some((visual_row, self.cursor.column - char_offset));
+                            }
+
+                            // Заполнить остаток строки фоном (для курсорной линии)
+                            if is_cursor_line {
+                                for col in visual_col..content_width {
+                                    let x = area.x + line_number_width + col as u16;
                                     let y = area.y + visual_row as u16;
 
                                     if x < area.x + area.width && y < area.y + area.height {
                                         if let Some(cell) = buf.cell_mut((x, y)) {
-                                            cell.set_char(ch);
-
-                                            // Проверить, является ли это совпадением поиска
-                                            let match_idx = search_matches.iter().position(
-                                                |(m_line, m_col, m_len)| {
-                                                    *m_line == line_idx
-                                                        && segment_char_idx >= *m_col
-                                                        && segment_char_idx < m_col + m_len
-                                                },
-                                            );
-
-                                            // Проверить, находится ли символ в выделении
-                                            let is_selected = if let Some((sel_start, sel_end)) =
-                                                &selection_range
-                                            {
-                                                let pos = crate::editor::Cursor::at(
-                                                    line_idx,
-                                                    segment_char_idx,
-                                                );
-                                                (pos.line > sel_start.line
-                                                    || (pos.line == sel_start.line
-                                                        && pos.column >= sel_start.column))
-                                                    && (pos.line < sel_end.line
-                                                        || (pos.line == sel_end.line
-                                                            && pos.column < sel_end.column))
-                                            } else {
-                                                false
-                                            };
-
-                                            // Определить финальный стиль
-                                            let final_style = if let Some(idx) = match_idx {
-                                                if Some(idx) == current_match_idx {
-                                                    current_match_style
-                                                } else {
-                                                    search_match_style
-                                                }
-                                            } else if is_selected {
-                                                selection_style
-                                            } else if is_cursor_line {
-                                                segment_style.bg(theme.accented_bg)
-                                            } else {
-                                                *segment_style
-                                            };
-                                            cell.set_style(final_style);
+                                            cell.set_char(' ');
+                                            cell.set_style(cursor_line_style);
                                         }
                                     }
-
-                                    // Проверить позицию курсора
-                                    if is_cursor_line && self.cursor.column == segment_char_idx {
-                                        cursor_viewport_pos = Some((visual_row, visual_col));
-                                    }
-
-                                    visual_col += 1;
-                                }
-                                segment_char_idx += 1;
-                            }
-                        }
-
-                        // Проверить курсор в конце строки
-                        if is_cursor_line
-                            && self.cursor.column >= char_offset
-                            && self.cursor.column <= chunk_end
-                            && (self.cursor.column == chunk_end
-                                || (chunk_end == line_len && self.cursor.column >= line_len))
-                        {
-                            cursor_viewport_pos =
-                                Some((visual_row, self.cursor.column - char_offset));
-                        }
-
-                        // Заполнить остаток строки фоном (для курсорной линии)
-                        if is_cursor_line {
-                            for col in visual_col..content_width {
-                                let x = area.x + line_number_width + col as u16;
-                                let y = area.y + visual_row as u16;
-
-                                if x < area.x + area.width && y < area.y + area.height {
-                                    if let Some(cell) = buf.cell_mut((x, y)) {
-                                        cell.set_char(' ');
-                                        cell.set_style(cursor_line_style);
-                                    }
                                 }
                             }
-                        }
 
-                        is_first_visual_row = false;
-                        char_offset = chunk_end;
-                        visual_row += 1;
-
-                        // Если строка пустая, выйти после одной итерации
-                        if line_len == 0 {
-                            break;
+                            is_first_visual_row = false;
+                            char_offset = chunk_end;
+                            visual_row += 1;
                         }
                     }
                 }
@@ -1116,10 +1175,19 @@ impl Editor {
 
                 if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
                     if let Some(cell) = buf.cell_mut((cursor_x, cursor_y)) {
+                        // Инверсия: swap fg и bg с fallback к theme цветам
+                        let current_fg = match cell.fg {
+                            Color::Reset => theme.fg,
+                            color => color,
+                        };
+                        let current_bg = match cell.bg {
+                            Color::Reset => theme.bg,
+                            color => color,
+                        };
                         cell.set_style(
                             Style::default()
-                                .bg(theme.selected_bg)
-                                .fg(theme.selected_fg)
+                                .bg(current_fg)
+                                .fg(current_bg)
                                 .add_modifier(Modifier::BOLD),
                         );
                     }
@@ -1289,10 +1357,19 @@ impl Editor {
 
                 if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
                     if let Some(cell) = buf.cell_mut((cursor_x, cursor_y)) {
+                        // Инверсия: swap fg и bg с fallback к theme цветам
+                        let current_fg = match cell.fg {
+                            Color::Reset => theme.fg,
+                            color => color,
+                        };
+                        let current_bg = match cell.bg {
+                            Color::Reset => theme.bg,
+                            color => color,
+                        };
                         cell.set_style(
                             Style::default()
-                                .bg(theme.selected_bg)
-                                .fg(theme.selected_fg)
+                                .bg(current_fg)
+                                .fg(current_bg)
                                 .add_modifier(Modifier::BOLD),
                         );
                     }

@@ -1802,7 +1802,7 @@ impl Terminal {
                     style = Style::default().fg(Color::Black).bg(Color::LightYellow);
                 }
 
-                // If this is cursor position and needs showing, use contrasting theme colors
+                // If this is cursor position and needs showing, use inverse colors
                 if show_cursor_now
                     && row_idx == actual_cursor_pos.0
                     && col_idx == actual_cursor_pos.1
@@ -1814,10 +1814,10 @@ impl Terminal {
                         current_style = None;
                     }
 
-                    // Use fixed contrasting theme colors (like in file manager)
+                    // Инверсия: swap fg и bg (reverse уже учтен в переменных fg/bg выше)
                     let cursor_style = Style::default()
-                        .bg(theme.selected_bg)
-                        .fg(theme.selected_fg)
+                        .bg(fg) // Swap: fg становится bg
+                        .fg(bg) // Swap: bg становится fg
                         .add_modifier(Modifier::BOLD);
 
                     let cursor_char = if cell.ch == ' ' || cell.ch == '\0' {
@@ -1850,9 +1850,10 @@ impl Terminal {
 
             // If line is empty, cursor is on it and needs showing, add cursor
             if show_cursor_now && spans.is_empty() && row_idx == actual_cursor_pos.0 {
+                // Инверсия: для пустой строки swap theme fg и bg
                 let cursor_style = Style::default()
-                    .bg(theme.selected_bg)
-                    .fg(theme.selected_fg)
+                    .bg(theme.fg) // Swap: theme fg становится bg
+                    .fg(theme.bg) // Swap: theme bg становится fg
                     .add_modifier(Modifier::BOLD);
                 spans.push(Span::styled(" ", cursor_style));
             }

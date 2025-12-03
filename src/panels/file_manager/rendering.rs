@@ -101,12 +101,25 @@ impl FileManager {
             let full_name = format!("{}{}", dir_prefix, name);
 
             let (bg_style, fg_style) = if is_cursor && is_focused {
-                // Show cursor only when panel is focused
-                let bg = Style::default()
-                    .bg(theme.selected_bg)
-                    .fg(theme.selected_fg)
+                // Вычислить нормальный fg_style для этой строки
+                let normal_fg_style = match entry.git_status {
+                    GitStatus::Ignored => Style::default()
+                        .fg(theme.disabled)
+                        .add_modifier(Modifier::DIM),
+                    GitStatus::Modified => Style::default().fg(theme.warning),
+                    GitStatus::Added => Style::default().fg(theme.success),
+                    GitStatus::Deleted => Style::default().fg(theme.error),
+                    GitStatus::Unmodified => Style::default().fg(theme.fg),
+                };
+
+                // Извлечь fg цвет и создать инверсный стиль курсора
+                let fg_color = normal_fg_style.fg.unwrap_or(theme.fg);
+                let cursor_style = Style::default()
+                    .bg(fg_color) // Swap: fg строки становится bg курсора
+                    .fg(theme.bg) // Swap: theme bg становится fg курсора
                     .add_modifier(Modifier::BOLD);
-                (bg, bg)
+
+                (cursor_style, cursor_style)
             } else {
                 let fg_style = match entry.git_status {
                     GitStatus::Ignored => Style::default()
