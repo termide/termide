@@ -523,7 +523,7 @@ impl Panel for FileManager {
                         .map(|p| p.display().to_string())
                         .collect::<Vec<_>>()
                         .join("\n");
-                    crate::clipboard::copy(text);
+                    let _ = crate::clipboard::copy(text);
                 }
             }
             // Ctrl+X - cut selected files to clipboard
@@ -535,54 +535,37 @@ impl Panel for FileManager {
                         .map(|p| p.display().to_string())
                         .collect::<Vec<_>>()
                         .join("\n");
-                    crate::clipboard::cut(text);
+                    let _ = crate::clipboard::cut(text);
                 }
             }
             // Ctrl+V - paste files from clipboard
             (KeyCode::Char('v'), KeyModifiers::CONTROL) => {
-                let (text, mode) = crate::clipboard::paste();
+                if let Some(text) = crate::clipboard::paste() {
+                    // Split text by newlines and convert to paths
+                    let files: Vec<std::path::PathBuf> = text
+                        .lines()
+                        .filter(|line| !line.is_empty())
+                        .map(std::path::PathBuf::from)
+                        .filter(|path| path.exists()) // Only existing paths
+                        .collect();
 
-                // Split text by newlines and convert to paths
-                let files: Vec<std::path::PathBuf> = text
-                    .lines()
-                    .filter(|line| !line.is_empty())
-                    .map(std::path::PathBuf::from)
-                    .filter(|path| path.exists()) // Only existing paths
-                    .collect();
+                    if !files.is_empty() {
+                        // Create confirmation modal
+                        let t = i18n::t();
+                        let message = t.fm_paste_confirm(
+                            files.len(),
+                            "Copy",
+                            &self.current_path.display().to_string(),
+                        );
 
-                if !files.is_empty() {
-                    // Create confirmation modal
-                    let t = i18n::t();
-                    let mode_str = if matches!(mode, crate::clipboard::ClipboardMode::Copy) {
-                        "Copy"
-                    } else {
-                        "Move"
-                    };
-                    let message = t.fm_paste_confirm(
-                        files.len(),
-                        mode_str,
-                        &self.current_path.display().to_string(),
-                    );
-
-                    let action = match mode {
-                        crate::clipboard::ClipboardMode::Copy => PendingAction::CopyPath {
+                        let action = PendingAction::CopyPath {
                             panel_index: 0,
                             sources: files,
                             target_directory: Some(self.current_path.clone()),
-                        },
-                        crate::clipboard::ClipboardMode::Cut => PendingAction::MovePath {
-                            panel_index: 0,
-                            sources: files,
-                            target_directory: Some(self.current_path.clone()),
-                        },
-                    };
+                        };
 
-                    let modal = crate::ui::modal::ConfirmModal::new("Confirm", &message);
-                    self.modal_request = Some((action, ActiveModal::Confirm(Box::new(modal))));
-
-                    // If it was a cut operation, clear the clipboard after execution
-                    if matches!(mode, crate::clipboard::ClipboardMode::Cut) {
-                        crate::clipboard::clear();
+                        let modal = crate::ui::modal::ConfirmModal::new("Confirm", &message);
+                        self.modal_request = Some((action, ActiveModal::Confirm(Box::new(modal))));
                     }
                 }
             }
@@ -844,8 +827,12 @@ impl Panel for FileManager {
         None
     }
 
-    fn to_session_panel(&self) -> Option<crate::session::SessionPanel> {
-        // Save file manager with current directory path
+    fn to_session_panel(
+        &mut self,
+        session_dir: &std::path::Path,
+    ) -> Option<crate::session::SessionPanel> {
+        let _ = session_dir; // Unused for FileManager panels
+                             // Save file manager with current directory path
         Some(crate::session::SessionPanel::FileManager {
             path: self.current_path.clone(),
         })

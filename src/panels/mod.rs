@@ -100,7 +100,14 @@ pub trait Panel: Any {
 
     /// Serialize panel to session data
     /// Returns None for panels that shouldn't be saved (e.g., Welcome)
-    fn to_session_panel(&self) -> Option<crate::session::SessionPanel> {
+    ///
+    /// # Parameters
+    /// - `session_dir`: Directory where session files are stored (for saving temporary buffers)
+    fn to_session_panel(
+        &mut self,
+        session_dir: &std::path::Path,
+    ) -> Option<crate::session::SessionPanel> {
+        let _ = session_dir; // Unused in default implementation
         None
     }
 }

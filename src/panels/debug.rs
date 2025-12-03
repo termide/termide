@@ -131,8 +131,12 @@ impl Panel for Debug {
         "Log".to_string()
     }
 
-    fn to_session_panel(&self) -> Option<crate::session::SessionPanel> {
-        // Save debug panel (no state to persist)
+    fn to_session_panel(
+        &mut self,
+        session_dir: &std::path::Path,
+    ) -> Option<crate::session::SessionPanel> {
+        let _ = session_dir; // Unused for Debug panels
+                             // Save debug panel (no state to persist)
         Some(crate::session::SessionPanel::Debug)
     }
 }

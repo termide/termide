@@ -1585,7 +1585,7 @@ impl Terminal {
         }
 
         // Use universal buffer (includes OSC 52)
-        crate::clipboard::copy(text);
+        let _ = crate::clipboard::copy(text);
 
         Ok(())
     }
@@ -1593,10 +1593,9 @@ impl Terminal {
     /// Paste text from clipboard to PTY with bracketed paste mode support
     fn paste_from_clipboard(&mut self) -> Result<()> {
         // Get text from clipboard
-        let (text, _mode) = crate::clipboard::paste();
-        if text.is_empty() {
+        let Some(text) = crate::clipboard::paste() else {
             return Ok(());
-        }
+        };
 
         // Check if bracketed paste mode is enabled
         let bracketed_paste = self
@@ -2324,8 +2323,12 @@ impl Panel for Terminal {
         Some(self.initial_cwd.clone())
     }
 
-    fn to_session_panel(&self) -> Option<crate::session::SessionPanel> {
-        // Save terminal with initial working directory
+    fn to_session_panel(
+        &mut self,
+        session_dir: &std::path::Path,
+    ) -> Option<crate::session::SessionPanel> {
+        let _ = session_dir; // Unused for Terminal panels
+                             // Save terminal with initial working directory
         Some(crate::session::SessionPanel::Terminal {
             working_dir: self.initial_cwd.clone(),
         })

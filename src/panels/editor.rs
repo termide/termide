@@ -31,7 +31,7 @@ impl Default for EditorConfig {
         Self {
             syntax_highlighting: true,
             read_only: false,
-            word_wrap: false,
+            word_wrap: true,
             tab_size: 4,
         }
     }
@@ -43,7 +43,7 @@ impl EditorConfig {
         Self {
             syntax_highlighting: true,
             read_only: true,
-            word_wrap: false,
+            word_wrap: true,
             tab_size: 4,
         }
     }
@@ -117,6 +117,8 @@ pub struct Editor {
     git_diff_cache: Option<crate::git::GitDiffCache>,
     /// Pending git diff update timestamp (for debounce)
     git_diff_update_pending: Option<std::time::Instant>,
+    /// Temporary file name for unsaved buffer (if this is a scratch buffer with unsaved content)
+    unsaved_buffer_file: Option<String>,
 }
 
 impl Editor {
@@ -145,6 +147,7 @@ impl Editor {
             status_message: None,
             git_diff_cache: None,
             git_diff_update_pending: None,
+            unsaved_buffer_file: None,
         }
     }
 
@@ -236,6 +239,7 @@ impl Editor {
             status_message: None,
             git_diff_cache,
             git_diff_update_pending: None,
+            unsaved_buffer_file: None,
         })
     }
 
@@ -263,6 +267,7 @@ impl Editor {
             config_update: None,
             status_message: None,
             git_diff_update_pending: None,
+            unsaved_buffer_file: None,
         }
     }
 
@@ -295,6 +300,18 @@ impl Editor {
         self.update_git_diff();
 
         Ok(())
+    }
+
+    /// Insert text at the beginning of the buffer (for restoring unsaved buffers)
+    pub fn insert_text(&mut self, text: &str) -> Result<()> {
+        let cursor_at_start = Cursor::new();
+        self.cursor = self.buffer.insert(&cursor_at_start, text)?;
+        Ok(())
+    }
+
+    /// Set the unsaved buffer filename (for session restoration)
+    pub fn set_unsaved_buffer_file(&mut self, filename: Option<String>) {
+        self.unsaved_buffer_file = filename;
     }
 
     /// Update git diff cache for this file
@@ -584,17 +601,64 @@ impl Editor {
 
     /// Copy selected text to clipboard
     fn copy_to_clipboard(&mut self) -> Result<()> {
-        if let Some(text) = self.get_selected_text() {
-            crate::clipboard::copy(text);
+        match self.get_selected_text() {
+            Some(text) => {
+                // Debug: show what we're trying to copy
+                let char_count = text.chars().count();
+                let preview = if char_count > 50 {
+                    let preview_text: String = text.chars().take(50).collect();
+                    format!("{}...", preview_text)
+                } else {
+                    text.clone()
+                };
+
+                match crate::clipboard::copy(text) {
+                    Ok(()) => {
+                        self.status_message = Some(format!(
+                            "Copied to clipboard: {:?} ({} chars)",
+                            preview, char_count
+                        ));
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Clipboard error: {}", e));
+                    }
+                }
+            }
+            None => {
+                self.status_message = Some("Nothing selected to copy".to_string());
+            }
         }
         Ok(())
     }
 
     /// Cut selected text to clipboard
     fn cut_to_clipboard(&mut self) -> Result<()> {
-        if let Some(text) = self.get_selected_text() {
-            crate::clipboard::copy(text);
-            self.delete_selection()?;
+        match self.get_selected_text() {
+            Some(text) => {
+                let char_count = text.chars().count();
+                let preview = if char_count > 50 {
+                    let preview_text: String = text.chars().take(50).collect();
+                    format!("{}...", preview_text)
+                } else {
+                    text.clone()
+                };
+
+                match crate::clipboard::copy(text) {
+                    Ok(()) => {
+                        self.delete_selection()?;
+                        self.status_message = Some(format!(
+                            "Cut to clipboard: {:?} ({} chars)",
+                            preview, char_count
+                        ));
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Clipboard error: {}", e));
+                    }
+                }
+            }
+            None => {
+                self.status_message = Some("Nothing selected to cut".to_string());
+            }
         }
         Ok(())
     }
@@ -607,25 +671,27 @@ impl Editor {
         // Delete selected text before pasting
         self.delete_selection()?;
 
-        let (text, _mode) = crate::clipboard::paste();
-        if !text.is_empty() {
-            let start_line = self.cursor.line;
-            let new_cursor = self.buffer.insert(&self.cursor, &text)?;
-            self.cursor = new_cursor;
-            self.clamp_cursor();
+        // Read from system clipboard via arboard
+        if let Some(text) = crate::clipboard::paste() {
+            if !text.is_empty() {
+                let start_line = self.cursor.line;
+                let new_cursor = self.buffer.insert(&self.cursor, &text)?;
+                self.cursor = new_cursor;
+                self.clamp_cursor();
 
-            // Invalidate highlighting cache
-            if text.contains('\n') {
-                // Multiline paste
-                self.highlight_cache
-                    .invalidate_range(start_line, self.buffer.line_count());
-            } else {
-                // Single line paste
-                self.highlight_cache.invalidate_line(start_line);
+                // Invalidate highlighting cache
+                if text.contains('\n') {
+                    // Multiline paste
+                    self.highlight_cache
+                        .invalidate_range(start_line, self.buffer.line_count());
+                } else {
+                    // Single line paste
+                    self.highlight_cache.invalidate_line(start_line);
+                }
+
+                // Schedule git diff update
+                self.schedule_git_diff_update();
             }
-
-            // Schedule git diff update
-            self.schedule_git_diff_update();
         }
         Ok(())
     }
@@ -869,7 +935,7 @@ impl Editor {
                     let mut char_offset = 0;
                     let mut is_first_visual_row = true;
 
-                    while char_offset <= line_len && visual_row < content_height {
+                    while char_offset < line_len && visual_row < content_height {
                         let chunk_end = (char_offset + content_width).min(line_len);
 
                         // Номер строки (только на первой визуальной строке)
@@ -1954,6 +2020,32 @@ impl Panel for Editor {
                 self.copy_to_clipboard()?;
             }
 
+            // NOTE: Ctrl+Shift+C/V and Ctrl+Insert may be intercepted by terminal emulators
+            // (gnome-terminal, konsole) before reaching the application. This is because:
+            // - Terminal emulators intercept these keys at the terminal layer
+            // - They copy their own selection buffer, not the application's selection
+            //
+            // Users have two options:
+            // 1. Use Ctrl+C/V (always works in application, copies to PRIMARY + CLIPBOARD)
+            // 2. Use Shift+Mouse to select text at terminal layer, then Ctrl+Shift+C
+            //
+            // These handlers work in terminals that don't intercept (alacritty, some configs).
+            // On Linux, we write to both CLIPBOARD and PRIMARY selections for compatibility.
+
+            // Ctrl+Shift+C - copy (terminal shortcut)
+            (KeyCode::Char('c'), mods)
+                if mods.contains(KeyModifiers::CONTROL) && mods.contains(KeyModifiers::SHIFT) =>
+            {
+                self.copy_to_clipboard()?;
+            }
+
+            // Ctrl+Shift+C - uppercase variant
+            (KeyCode::Char('C'), mods)
+                if mods.contains(KeyModifiers::CONTROL) && mods.contains(KeyModifiers::SHIFT) =>
+            {
+                self.copy_to_clipboard()?;
+            }
+
             // Ctrl+X - cut (only if not read-only)
             (KeyCode::Char('x'), KeyModifiers::CONTROL) => {
                 if !self.config.read_only {
@@ -1975,8 +2067,28 @@ impl Panel for Editor {
                 }
             }
 
-            // Shift+Insert - paste (only if not read-only)
+            // NOTE: Shift+Insert may be intercepted by terminal emulators (gnome-terminal)
+            // for terminal-layer paste from PRIMARY selection. This handler works in terminals
+            // that don't intercept. Users can always use Ctrl+V which works at app level.
             (KeyCode::Insert, KeyModifiers::SHIFT) => {
+                if !self.config.read_only {
+                    self.paste_from_clipboard()?;
+                }
+            }
+
+            // Ctrl+Shift+V - paste (terminal shortcut)
+            (KeyCode::Char('v'), mods)
+                if mods.contains(KeyModifiers::CONTROL) && mods.contains(KeyModifiers::SHIFT) =>
+            {
+                if !self.config.read_only {
+                    self.paste_from_clipboard()?;
+                }
+            }
+
+            // Ctrl+Shift+V - uppercase variant
+            (KeyCode::Char('V'), mods)
+                if mods.contains(KeyModifiers::CONTROL) && mods.contains(KeyModifiers::SHIFT) =>
+            {
                 if !self.config.read_only {
                     self.paste_from_clipboard()?;
                 }
@@ -2136,10 +2248,48 @@ impl Panel for Editor {
         self.search_state.is_some()
     }
 
-    fn to_session_panel(&self) -> Option<crate::session::SessionPanel> {
-        // Save editor with file path (None for unnamed buffers)
+    fn to_session_panel(
+        &mut self,
+        session_dir: &std::path::Path,
+    ) -> Option<crate::session::SessionPanel> {
+        let path = self.file_path().map(|p| p.to_path_buf());
+
+        // If buffer was unsaved but now has a path, clean up old temporary file
+        if path.is_some() && self.unsaved_buffer_file.is_some() {
+            if let Some(ref old_filename) = self.unsaved_buffer_file {
+                let _ = crate::session::cleanup_unsaved_buffer(session_dir, old_filename);
+            }
+            self.unsaved_buffer_file = None;
+        }
+
+        // For unsaved buffers without a file path, save content to temporary file
+        let unsaved_buffer_file = if path.is_none() {
+            // Reuse existing filename if available, generate new one only if needed
+            let filename = if let Some(ref existing) = self.unsaved_buffer_file {
+                existing.clone()
+            } else {
+                crate::session::generate_unsaved_filename()
+            };
+
+            // Get buffer content
+            let content = self.buffer.to_string();
+
+            // Save/update temporary file
+            if let Err(e) = crate::session::save_unsaved_buffer(session_dir, &filename, &content) {
+                eprintln!("Warning: Failed to save unsaved buffer: {}", e);
+                None
+            } else {
+                // Store filename for future reuse
+                self.unsaved_buffer_file = Some(filename.clone());
+                Some(filename)
+            }
+        } else {
+            None
+        };
+
         Some(crate::session::SessionPanel::Editor {
-            path: self.file_path().map(|p| p.to_path_buf()),
+            path,
+            unsaved_buffer_file,
         })
     }
 }

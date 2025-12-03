@@ -130,13 +130,33 @@ impl App {
     }
 
     /// Get active panel area
-    /// TODO: Calculate proper area based on LayoutManager's group layout
     fn get_active_panel_area(&self) -> Rect {
+        // Use calculate_panel_rects() to get all panel areas with proper layout calculation
+        let panel_rects = self.calculate_panel_rects();
+
+        // Find the active panel based on current focus
+        match self.layout_manager.focus {
+            crate::layout_manager::FocusTarget::FileManager => {
+                // Find FileManager rect (marked with group_idx = usize::MAX)
+                for (group_idx, _panel_idx, rect, _is_expanded) in panel_rects {
+                    if group_idx == usize::MAX {
+                        return rect;
+                    }
+                }
+            }
+            crate::layout_manager::FocusTarget::Group(focused_group_idx) => {
+                // Find expanded panel in the focused group
+                for (group_idx, _panel_idx, rect, is_expanded) in panel_rects {
+                    if group_idx == focused_group_idx && is_expanded {
+                        return rect;
+                    }
+                }
+            }
+        }
+
+        // Fallback: return full main area if active panel not found
         let width = self.state.terminal.width;
         let height = self.state.terminal.height;
-
-        // TODO: Implement proper area calculation based on LayoutManager
-        // For now, return a reasonable default area
         Rect {
             x: 0,
             y: 1,

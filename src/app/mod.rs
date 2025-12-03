@@ -20,6 +20,8 @@ pub struct App {
     state: AppState,
     layout_manager: LayoutManager,
     event_handler: EventHandler,
+    /// Project root directory (used for per-project session storage)
+    project_root: std::path::PathBuf,
 }
 
 impl App {
@@ -51,12 +53,25 @@ impl App {
             }
         }
 
+        // Get project root from current working directory
+        let project_root = std::env::current_dir().unwrap_or_else(|_| {
+            // Fallback to home directory if current_dir fails
+            dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"))
+        });
+
+        // Clean up old sessions (configurable retention period)
+        let retention_days = state.config.session_retention_days;
+        if let Err(e) = crate::session::cleanup_old_sessions(&project_root, retention_days) {
+            state.log_error(format!("Failed to cleanup old sessions: {}", e));
+        }
+
         Self {
             state,
             layout_manager: LayoutManager::new(),
             event_handler: EventHandler::new(Duration::from_millis(
                 crate::constants::EVENT_HANDLER_INTERVAL_MS,
             )),
+            project_root,
         }
     }
 
@@ -348,29 +363,48 @@ impl App {
     }
 
     /// Save current session to file
-    fn save_session(&self) -> Result<()> {
-        let session = self.layout_manager.to_session();
-        session.save()?;
+    fn save_session(&mut self) -> Result<()> {
+        // Get session directory for this project
+        let session_dir = crate::session::Session::get_session_dir(&self.project_root)?;
+
+        // Serialize layout to session (may save temporary buffers)
+        let session = self.layout_manager.to_session(&session_dir);
+
+        // Save session to file
+        session.save(&self.project_root)?;
         Ok(())
     }
 
     /// Load session from file and restore layout
     pub fn load_session(&mut self) -> Result<()> {
-        let session = crate::session::Session::load()?;
+        // Load session for this project
+        let session = crate::session::Session::load(&self.project_root)?;
+
+        // Get session directory for restoring temporary buffers
+        let session_dir = crate::session::Session::get_session_dir(&self.project_root)?;
 
         // Get terminal dimensions for creating Terminal panels
         let term_height = self.state.terminal.height.saturating_sub(3);
         let term_width = self.state.terminal.width.saturating_sub(2);
 
         // Restore layout from session
-        self.layout_manager =
-            crate::layout_manager::LayoutManager::from_session(session, term_height, term_width)?;
+        self.layout_manager = crate::layout_manager::LayoutManager::from_session(
+            session,
+            &session_dir,
+            term_height,
+            term_width,
+        )?;
+
+        // Clean up orphaned buffer files (not referenced in session anymore)
+        if let Err(e) = crate::session::cleanup_orphaned_buffers(&session_dir) {
+            eprintln!("Warning: Failed to cleanup orphaned buffers: {}", e);
+        }
 
         Ok(())
     }
 
     /// Auto-save session (ignores errors to not disrupt user experience)
-    pub fn auto_save_session(&self) {
+    pub fn auto_save_session(&mut self) {
         if let Err(e) = self.save_session() {
             // Log error but don't interrupt user workflow
             // In a production app, you might want to log this to a file

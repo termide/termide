@@ -37,6 +37,16 @@ pub struct Config {
     /// Minimum file manager panel width to display size and time columns (default: 50)
     #[serde(default = "default_fm_extended_view_width")]
     pub fm_extended_view_width: usize,
+
+    /// Session retention period in days (default: 30)
+    /// Sessions older than this will be automatically deleted on startup
+    #[serde(default = "default_session_retention_days")]
+    pub session_retention_days: u32,
+
+    /// Enable word wrap in editor (default: true)
+    /// When enabled, long lines are automatically wrapped to fit viewport width
+    #[serde(default = "default_word_wrap")]
+    pub word_wrap: bool,
 }
 
 fn default_theme_name() -> String {
@@ -67,6 +77,14 @@ fn default_fm_extended_view_width() -> usize {
     50
 }
 
+fn default_session_retention_days() -> u32 {
+    30 // 30 days
+}
+
+fn default_word_wrap() -> bool {
+    true // Enabled by default
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -78,6 +96,8 @@ impl Default for Config {
             min_panel_width: default_min_panel_width(),
             show_git_diff: default_show_git_diff(),
             fm_extended_view_width: default_fm_extended_view_width(),
+            session_retention_days: default_session_retention_days(),
+            word_wrap: default_word_wrap(),
         }
     }
 }

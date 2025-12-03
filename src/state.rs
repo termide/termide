@@ -664,6 +664,7 @@ impl AppState {
     pub fn editor_config(&self) -> crate::panels::editor::EditorConfig {
         let mut config = crate::panels::editor::EditorConfig::default();
         config.tab_size = self.config.tab_size;
+        config.word_wrap = self.config.word_wrap;
         config
     }
 }

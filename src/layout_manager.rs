@@ -676,7 +676,8 @@ impl LayoutManager {
     }
 
     /// Serialize current layout to Session
-    pub fn to_session(&self) -> crate::session::Session {
+    #[allow(clippy::wrong_self_convention)]
+    pub fn to_session(&mut self, session_dir: &std::path::Path) -> crate::session::Session {
         use crate::session::{Session, SessionPanelGroup};
 
         // Serialize file_manager path
@@ -688,12 +689,12 @@ impl LayoutManager {
         // Serialize panel groups
         let panel_groups: Vec<SessionPanelGroup> = self
             .panel_groups
-            .iter()
+            .iter_mut()
             .map(|group| {
                 let panels: Vec<_> = group
-                    .panels()
-                    .iter()
-                    .filter_map(|panel| panel.to_session_panel())
+                    .panels_mut()
+                    .iter_mut()
+                    .filter_map(|panel| panel.to_session_panel(session_dir))
                     .collect();
 
                 SessionPanelGroup {
@@ -720,6 +721,7 @@ impl LayoutManager {
     /// Restore layout from Session
     pub fn from_session(
         session: crate::session::Session,
+        session_dir: &std::path::Path,
         term_height: u16,
         term_width: u16,
     ) -> Result<Self> {
@@ -751,14 +753,43 @@ impl LayoutManager {
                     SessionPanel::FileManager { path } => {
                         Some(Box::new(FileManager::new_with_path(path)))
                     }
-                    SessionPanel::Editor { path } => {
+                    SessionPanel::Editor {
+                        path,
+                        unsaved_buffer_file,
+                    } => {
                         if let Some(file_path) = path {
                             // Try to open file, skip if it fails (file might have been deleted)
                             Editor::open_file(file_path)
                                 .ok()
                                 .map(|e| Box::new(e) as Box<dyn Panel>)
+                        } else if let Some(ref buffer_file) = unsaved_buffer_file {
+                            // Restore unsaved buffer from temporary file
+                            match crate::session::load_unsaved_buffer(session_dir, buffer_file) {
+                                Ok(content) => {
+                                    let mut editor = Editor::new();
+                                    // Insert content into buffer
+                                    if let Err(e) = editor.insert_text(&content) {
+                                        eprintln!(
+                                            "Warning: Failed to restore unsaved buffer content: {}",
+                                            e
+                                        );
+                                        None
+                                    } else {
+                                        // Store the buffer filename for later cleanup
+                                        editor.set_unsaved_buffer_file(Some(buffer_file.clone()));
+                                        Some(Box::new(editor) as Box<dyn Panel>)
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "Warning: Failed to load unsaved buffer {}: {}",
+                                        buffer_file, e
+                                    );
+                                    None
+                                }
+                            }
                         } else {
-                            // Unnamed editor - don't restore (user doesn't expect this)
+                            // Unnamed editor without saved buffer - don't restore
                             None
                         }
                     }
