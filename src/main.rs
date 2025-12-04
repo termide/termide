@@ -60,11 +60,11 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Get terminal size (might be useful later)
-    let _size = terminal.size()?;
+    // Get terminal size and use it to initialize app with correct dimensions
+    let size = terminal.size()?;
 
-    // Create application
-    let mut app = App::new();
+    // Create application with terminal size to ensure proper panel layout
+    let mut app = App::new_with_size(size.width, size.height);
 
     // Try to load session, fallback to default layout on error
     if let Err(_e) = app.load_session() {

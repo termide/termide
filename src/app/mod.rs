@@ -76,6 +76,15 @@ impl App {
         }
     }
 
+    /// Create a new application with specified terminal size
+    /// This is useful during initialization to set proper terminal dimensions
+    /// before creating panels
+    pub fn new_with_size(width: u16, height: u16) -> Self {
+        let mut app = Self::new();
+        app.state.update_terminal_size(width, height);
+        app
+    }
+
     /// Add a panel (automatically stacks if width threshold is reached)
     pub fn add_panel(&mut self, panel: Box<dyn crate::panels::Panel>) {
         let terminal_width = self.state.terminal.width;
