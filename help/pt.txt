@@ -1,0 +1,67 @@
+  TECLAS GLOBAIS
+
+    Alt+M        Alternar menu
+    Alt+H        Mostrar esta ajuda
+    Alt+Q        Sair da aplicação
+    Alt+F        Abrir painel do gerenciador de arquivos
+    Alt+T        Abrir painel do terminal
+    Alt+E        Abrir painel do editor
+    Alt+L        Abrir painel de log
+    Alt+P        Abrir arquivo de configuração no editor
+
+
+  GERENCIAMENTO DE PAINÉIS
+
+    Alt+←/→         Alternar entre grupos de painéis (horizontal)
+    Alt+↑/↓         Navegar painéis dentro do grupo (vertical)
+    Alt+W/S/A/D     Navegação estilo WASD (alternativa às setas)
+    Alt+PgUp        Mover painel para o grupo anterior
+    Alt+PgDn        Mover painel para o próximo grupo
+    Alt+Home        Mover painel para o primeiro grupo
+    Alt+End         Mover painel para o último grupo
+    Alt+Plus (=)    Aumentar largura do grupo ativo
+    Alt+Minus (-)   Diminuir largura do grupo ativo
+    Alt+X / Esc     Fechar painel atual
+    Alt+Delete      Fechar painel atual
+    Alt+Backspace   Alternar empilhamento de painéis (mesclar/desempilhar)
+
+
+  TECLAS DO GERENCIADOR DE ARQUIVOS
+
+    ↑↓           Navegar lista de arquivos
+    Enter        Abrir arquivo ou diretório
+    Backspace    Ir para o diretório pai
+    Home         Pular para o primeiro item
+    End          Pular para o último item
+    PgUp / PgDn  Rolar página para cima/baixo
+    Insert       Selecionar/desselecionar item
+    Space        Mostrar informações do arquivo
+    Ctrl+A       Selecionar todos os itens
+    F4           Abrir arquivo no editor
+    f / F        Criar novo arquivo
+    d / D / F7   Criar novo diretório
+    c / C / F5   Copiar itens selecionados
+    m / M / F6   Mover itens selecionados
+    F8 / Delete  Excluir itens selecionados
+    Ctrl+C       Copiar para a área de transferência
+    Ctrl+X       Recortar para a área de transferência
+    Ctrl+V       Colar da área de transferência
+
+
+  TECLAS DO EDITOR
+
+    Ctrl+S / F2  Salvar arquivo
+    Ctrl+C       Copiar para a área de transferência do sistema
+    Ctrl+V       Colar da área de transferência do sistema
+    Ctrl+X       Recortar para a área de transferência do sistema
+    Ctrl+Y       Refazer
+    Ctrl+Z       Desfazer
+    Ctrl+F       Buscar texto (modal interativo)
+    F3 / Shift+F3 Navegar correspondências de busca
+    Tab / Shift+Tab Navegar correspondências (quando a busca está ativa)
+    Ctrl+H       Substituir texto (modal interativo)
+    Ctrl+G       Ir para linha
+    Escape       Fechar busca/modal, ou fechar painel
+
+
+  Use as teclas de seta para rolar este texto de ajuda.

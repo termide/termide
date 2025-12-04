@@ -1,0 +1,67 @@
+  全局快捷键
+
+    Alt+M        切换菜单
+    Alt+H        显示此帮助
+    Alt+Q        退出应用程序
+    Alt+F        打开文件管理器面板
+    Alt+T        打开终端面板
+    Alt+E        打开编辑器面板
+    Alt+L        打开日志面板
+    Alt+P        在编辑器中打开配置文件
+
+
+  面板管理
+
+    Alt+←/→         在面板组之间切换（水平）
+    Alt+↑/↓         在组内导航面板（垂直）
+    Alt+W/S/A/D     WASD风格面板导航（箭头键的替代）
+    Alt+PgUp        将面板移至上一组
+    Alt+PgDn        将面板移至下一组
+    Alt+Home        将面板移至第一组
+    Alt+End         将面板移至最后一组
+    Alt+Plus (=)    增加活动组宽度
+    Alt+Minus (-)   减小活动组宽度
+    Alt+X / Esc     关闭当前面板
+    Alt+Delete      关闭当前面板
+    Alt+Backspace   切换面板堆叠（合并/取消堆叠）
+
+
+  文件管理器快捷键
+
+    ↑↓           浏览文件列表
+    Enter        打开文件或目录
+    Backspace    转到上级目录
+    Home         跳转到第一项
+    End          跳转到最后一项
+    PgUp / PgDn  向上/向下翻页
+    Insert       选择/取消选择项目
+    Space        显示文件信息
+    Ctrl+A       全选
+    F4           在编辑器中打开文件
+    f / F        创建新文件
+    d / D / F7   创建新目录
+    c / C / F5   复制选定项目
+    m / M / F6   移动选定项目
+    F8 / Delete  删除选定项目
+    Ctrl+C       复制到剪贴板
+    Ctrl+X       剪切到剪贴板
+    Ctrl+V       从剪贴板粘贴
+
+
+  编辑器快捷键
+
+    Ctrl+S / F2  保存文件
+    Ctrl+C       复制到系统剪贴板
+    Ctrl+V       从系统剪贴板粘贴
+    Ctrl+X       剪切到系统剪贴板
+    Ctrl+Y       重做
+    Ctrl+Z       撤销
+    Ctrl+F       查找文本（交互式对话框）
+    F3 / Shift+F3 导航搜索匹配
+    Tab / Shift+Tab 导航匹配（搜索激活时）
+    Ctrl+H       替换文本（交互式对话框）
+    Ctrl+G       转到行
+    Escape       关闭搜索/对话框，或关闭面板
+
+
+  使用箭头键滚动此帮助文本。

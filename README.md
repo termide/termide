@@ -26,7 +26,7 @@ A cross-platform terminal-based IDE, file manager, and virtual terminal written 
 - **Batch Operations** - Copy, move, and manage multiple files efficiently
 - **Search and Replace** - Interactive modals with live search preview, match counter, Tab/Shift+Tab navigation, replace counter feedback, and state preservation
 - **Powerful Editing** - Duplicate line/selection (Ctrl+D), configurable tab size, undo/redo (Ctrl+Z/Ctrl+Y), word wrap with accurate mouse selection
-- **Multi-language Support** - UI localization (English, Russian) with full Cyrillic keyboard layout support (case-preserving hotkey translation)
+- **Multi-language Support** - UI localization for 9 languages (English, Chinese, French, German, Hindi, Portuguese, Russian, Spanish, Thai) with full Cyrillic keyboard layout support (case-preserving hotkey translation)
 - **Clipboard System** - Reliable cut/copy/paste with persistent singleton for both CLIPBOARD and PRIMARY selections
 - **Robust Error Handling** - Graceful fallbacks for theme errors, file size limits (100 MB), and clear error messages
 - **Mouse Support** - Full mouse support for all panels and UI elements with panel close confirmation
@@ -307,7 +307,7 @@ theme = "default"
 # Tab size (number of spaces per tab)
 tab_size = 4
 
-# Language (auto, en, ru)
+# Language (auto, de, en, es, fr, hi, pt, ru, th, zh)
 # "auto" detects from environment variables (TERMIDE_LANG, LANG, LC_ALL)
 language = "auto"
 

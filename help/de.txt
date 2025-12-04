@@ -1,0 +1,67 @@
+  GLOBALE TASTEN
+
+    Alt+M        Menü umschalten
+    Alt+H        Diese Hilfe anzeigen
+    Alt+Q        Anwendung beenden
+    Alt+F        Dateimanager-Panel öffnen
+    Alt+T        Terminal-Panel öffnen
+    Alt+E        Editor-Panel öffnen
+    Alt+L        Log-Panel öffnen
+    Alt+P        Konfigurationsdatei im Editor öffnen
+
+
+  PANELVERWALTUNG
+
+    Alt+←/→         Zwischen Panelgruppen wechseln (horizontal)
+    Alt+↑/↓         Panels innerhalb der Gruppe navigieren (vertikal)
+    Alt+W/S/A/D     WASD-Navigation (Alternative zu Pfeiltasten)
+    Alt+PgUp        Panel zur vorherigen Gruppe verschieben
+    Alt+PgDn        Panel zur nächsten Gruppe verschieben
+    Alt+Home        Panel zur ersten Gruppe verschieben
+    Alt+End         Panel zur letzten Gruppe verschieben
+    Alt+Plus (=)    Breite der aktiven Gruppe erhöhen
+    Alt+Minus (-)   Breite der aktiven Gruppe verringern
+    Alt+X / Esc     Aktuelles Panel schließen
+    Alt+Delete      Aktuelles Panel schließen
+    Alt+Backspace   Panel-Stapeln umschalten (zusammenführen/trennen)
+
+
+  DATEIMANAGER-TASTEN
+
+    ↑↓           Dateiliste navigieren
+    Enter        Datei oder Verzeichnis öffnen
+    Backspace    Zum übergeordneten Verzeichnis wechseln
+    Home         Zum ersten Element springen
+    End          Zum letzten Element springen
+    PgUp / PgDn  Seite nach oben/unten scrollen
+    Insert       Element auswählen/abwählen
+    Space        Dateiinformationen anzeigen
+    Ctrl+A       Alle Elemente auswählen
+    F4           Datei im Editor öffnen
+    f / F        Neue Datei erstellen
+    d / D / F7   Neues Verzeichnis erstellen
+    c / C / F5   Ausgewählte Elemente kopieren
+    m / M / F6   Ausgewählte Elemente verschieben
+    F8 / Delete  Ausgewählte Elemente löschen
+    Ctrl+C       In Zwischenablage kopieren
+    Ctrl+X       In Zwischenablage ausschneiden
+    Ctrl+V       Aus Zwischenablage einfügen
+
+
+  EDITOR-TASTEN
+
+    Ctrl+S / F2  Datei speichern
+    Ctrl+C       In System-Zwischenablage kopieren
+    Ctrl+V       Aus System-Zwischenablage einfügen
+    Ctrl+X       In System-Zwischenablage ausschneiden
+    Ctrl+Y       Wiederholen
+    Ctrl+Z       Rückgängig
+    Ctrl+F       Text suchen (interaktives Modal)
+    F3 / Shift+F3 Durch Suchergebnisse navigieren
+    Tab / Shift+Tab Durch Treffer navigieren (bei aktiver Suche)
+    Ctrl+H       Text ersetzen (interaktives Modal)
+    Ctrl+G       Zur Zeile gehen
+    Escape       Suche/Modal schließen oder Panel schließen
+
+
+  Verwenden Sie die Pfeiltasten zum Scrollen dieser Hilfe.

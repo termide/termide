@@ -15,7 +15,7 @@ pub struct Config {
     #[serde(default = "default_tab_size")]
     pub tab_size: usize,
 
-    /// Interface language (en, ru, or auto for auto-detection)
+    /// Interface language (en, de, es, fr, hi, pt, ru, th, zh, or auto for auto-detection)
     #[serde(default = "default_language")]
     pub language: String,
 

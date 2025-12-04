@@ -1,0 +1,67 @@
+  TECLAS GLOBALES
+
+    Alt+M        Alternar menú
+    Alt+H        Mostrar esta ayuda
+    Alt+Q        Salir de la aplicación
+    Alt+F        Abrir panel de administrador de archivos
+    Alt+T        Abrir panel de terminal
+    Alt+E        Abrir panel de editor
+    Alt+L        Abrir panel de registro
+    Alt+P        Abrir archivo de configuración en el editor
+
+
+  GESTIÓN DE PANELES
+
+    Alt+←/→         Cambiar entre grupos de paneles (horizontal)
+    Alt+↑/↓         Navegar paneles dentro del grupo (vertical)
+    Alt+W/S/A/D     Navegación estilo WASD (alternativa a flechas)
+    Alt+PgUp        Mover panel al grupo anterior
+    Alt+PgDn        Mover panel al grupo siguiente
+    Alt+Home        Mover panel al primer grupo
+    Alt+End         Mover panel al último grupo
+    Alt+Plus (=)    Aumentar ancho del grupo activo
+    Alt+Minus (-)   Disminuir ancho del grupo activo
+    Alt+X / Esc     Cerrar panel actual
+    Alt+Delete      Cerrar panel actual
+    Alt+Backspace   Alternar apilamiento de paneles (combinar/separar)
+
+
+  TECLAS DEL ADMINISTRADOR DE ARCHIVOS
+
+    ↑↓           Navegar lista de archivos
+    Enter        Abrir archivo o directorio
+    Backspace    Ir al directorio padre
+    Home         Saltar al primer elemento
+    End          Saltar al último elemento
+    PgUp / PgDn  Desplazar página arriba/abajo
+    Insert       Seleccionar/deseleccionar elemento
+    Space        Mostrar información del archivo
+    Ctrl+A       Seleccionar todos los elementos
+    F4           Abrir archivo en el editor
+    f / F        Crear nuevo archivo
+    d / D / F7   Crear nuevo directorio
+    c / C / F5   Copiar elementos seleccionados
+    m / M / F6   Mover elementos seleccionados
+    F8 / Delete  Eliminar elementos seleccionados
+    Ctrl+C       Copiar al portapapeles
+    Ctrl+X       Cortar al portapapeles
+    Ctrl+V       Pegar desde el portapapeles
+
+
+  TECLAS DEL EDITOR
+
+    Ctrl+S / F2  Guardar archivo
+    Ctrl+C       Copiar al portapapeles del sistema
+    Ctrl+V       Pegar desde el portapapeles del sistema
+    Ctrl+X       Cortar al portapapeles del sistema
+    Ctrl+Y       Rehacer
+    Ctrl+Z       Deshacer
+    Ctrl+F       Buscar texto (modal interactivo)
+    F3 / Shift+F3 Navegar coincidencias de búsqueda
+    Tab / Shift+Tab Navegar coincidencias (cuando la búsqueda está activa)
+    Ctrl+H       Reemplazar texto (modal interactivo)
+    Ctrl+G       Ir a línea
+    Escape       Cerrar búsqueda/modal, o cerrar panel
+
+
+  Use las teclas de flecha para desplazar este texto de ayuda.

@@ -3,8 +3,15 @@
 
 use std::sync::OnceLock;
 
+pub mod de;
 pub mod en;
+pub mod es;
+pub mod fr;
+pub mod hi;
+pub mod pt;
 pub mod ru;
+pub mod th;
+pub mod zh;
 
 /// Global translation instance
 static TRANSLATION: OnceLock<Box<dyn Translation>> = OnceLock::new();
@@ -270,7 +277,14 @@ pub fn init_with_language(lang: &str) {
     };
 
     let translation: Box<dyn Translation> = match detected.as_str() {
+        "de" => Box::new(de::German),
+        "es" => Box::new(es::Spanish),
+        "fr" => Box::new(fr::French),
+        "hi" => Box::new(hi::Hindi),
+        "pt" => Box::new(pt::Portuguese),
         "ru" => Box::new(ru::Russian),
+        "th" => Box::new(th::Thai),
+        "zh" => Box::new(zh::Chinese),
         _ => Box::new(en::English),
     };
 

@@ -1,0 +1,67 @@
+  TOUCHES GLOBALES
+
+    Alt+M        Basculer le menu
+    Alt+H        Afficher cette aide
+    Alt+Q        Quitter l'application
+    Alt+F        Ouvrir le panneau gestionnaire de fichiers
+    Alt+T        Ouvrir le panneau terminal
+    Alt+E        Ouvrir le panneau éditeur
+    Alt+L        Ouvrir le panneau journal
+    Alt+P        Ouvrir le fichier de configuration dans l'éditeur
+
+
+  GESTION DES PANNEAUX
+
+    Alt+←/→         Basculer entre les groupes de panneaux (horizontal)
+    Alt+↑/↓         Naviguer dans les panneaux du groupe (vertical)
+    Alt+W/S/A/D     Navigation style WASD (alternative aux flèches)
+    Alt+PgUp        Déplacer le panneau vers le groupe précédent
+    Alt+PgDn        Déplacer le panneau vers le groupe suivant
+    Alt+Home        Déplacer le panneau vers le premier groupe
+    Alt+End         Déplacer le panneau vers le dernier groupe
+    Alt+Plus (=)    Augmenter la largeur du groupe actif
+    Alt+Minus (-)   Diminuer la largeur du groupe actif
+    Alt+X / Esc     Fermer le panneau actuel
+    Alt+Delete      Fermer le panneau actuel
+    Alt+Backspace   Basculer l'empilement des panneaux (fusionner/séparer)
+
+
+  TOUCHES DU GESTIONNAIRE DE FICHIERS
+
+    ↑↓           Naviguer dans la liste des fichiers
+    Enter        Ouvrir un fichier ou un répertoire
+    Backspace    Aller au répertoire parent
+    Home         Aller au premier élément
+    End          Aller au dernier élément
+    PgUp / PgDn  Faire défiler la page vers le haut/bas
+    Insert       Sélectionner/désélectionner un élément
+    Space        Afficher les informations du fichier
+    Ctrl+A       Sélectionner tous les éléments
+    F4           Ouvrir le fichier dans l'éditeur
+    f / F        Créer un nouveau fichier
+    d / D / F7   Créer un nouveau répertoire
+    c / C / F5   Copier les éléments sélectionnés
+    m / M / F6   Déplacer les éléments sélectionnés
+    F8 / Delete  Supprimer les éléments sélectionnés
+    Ctrl+C       Copier dans le presse-papiers
+    Ctrl+X       Couper dans le presse-papiers
+    Ctrl+V       Coller depuis le presse-papiers
+
+
+  TOUCHES DE L'ÉDITEUR
+
+    Ctrl+S / F2  Enregistrer le fichier
+    Ctrl+C       Copier dans le presse-papiers système
+    Ctrl+V       Coller depuis le presse-papiers système
+    Ctrl+X       Couper dans le presse-papiers système
+    Ctrl+Y       Refaire
+    Ctrl+Z       Annuler
+    Ctrl+F       Rechercher du texte (modal interactif)
+    F3 / Shift+F3 Naviguer dans les résultats de recherche
+    Tab / Shift+Tab Naviguer dans les correspondances (recherche active)
+    Ctrl+H       Remplacer du texte (modal interactif)
+    Ctrl+G       Aller à la ligne
+    Escape       Fermer recherche/modal, ou fermer le panneau
+
+
+  Utilisez les touches fléchées pour faire défiler ce texte d'aide.
