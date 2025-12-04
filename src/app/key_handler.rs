@@ -596,22 +596,58 @@ impl App {
         }
     }
 
-    /// Move panel to previous group
+    /// Alt+PageUp: move panel up in group, or move group left if at top
     fn handle_swap_panel_left(&mut self) -> Result<()> {
         let terminal_width = self.state.terminal.width;
+        let active_group_idx = self.layout_manager.focus;
 
-        self.layout_manager
-            .move_panel_to_prev_group(terminal_width)?;
+        if let Some(group) = self.layout_manager.panel_groups.get(active_group_idx) {
+            if group.len() == 1 {
+                // Одна панель в группе - перемещаем всю группу влево
+                self.layout_manager
+                    .move_panel_to_prev_group(terminal_width)?;
+            } else {
+                // Несколько панелей в группе
+                let expanded_idx = group.expanded_index();
+                if expanded_idx == 0 {
+                    // Панель самая верхняя - перемещаем группу влево
+                    self.layout_manager
+                        .move_panel_to_prev_group(terminal_width)?;
+                } else {
+                    // Перемещаем панель вверх внутри группы
+                    self.layout_manager.move_panel_up_in_group()?;
+                }
+            }
+        }
+
         self.auto_save_session();
         Ok(())
     }
 
-    /// Move panel to next group
+    /// Alt+PageDown: move panel down in group, or move group right if at bottom
     fn handle_swap_panel_right(&mut self) -> Result<()> {
         let terminal_width = self.state.terminal.width;
+        let active_group_idx = self.layout_manager.focus;
 
-        self.layout_manager
-            .move_panel_to_next_group(terminal_width)?;
+        if let Some(group) = self.layout_manager.panel_groups.get(active_group_idx) {
+            if group.len() == 1 {
+                // Одна панель в группе - перемещаем всю группу вправо
+                self.layout_manager
+                    .move_panel_to_next_group(terminal_width)?;
+            } else {
+                // Несколько панелей в группе
+                let expanded_idx = group.expanded_index();
+                if expanded_idx >= group.len() - 1 {
+                    // Панель самая нижняя - перемещаем группу вправо
+                    self.layout_manager
+                        .move_panel_to_next_group(terminal_width)?;
+                } else {
+                    // Перемещаем панель вниз внутри группы
+                    self.layout_manager.move_panel_down_in_group()?;
+                }
+            }
+        }
+
         self.auto_save_session();
         Ok(())
     }
@@ -937,31 +973,6 @@ impl App {
                 // Alt+Plus - increase panel width
                 KeyCode::Char('+') | KeyCode::Char('=') => {
                     self.handle_resize_panel(1)?;
-                    return Ok(Some(()));
-                }
-                // Alt+[ (Cyrillic: х/Х) - move panel up in current group
-                KeyCode::Char('[')
-                | KeyCode::Char('{')
-                | KeyCode::Char('х')
-                | KeyCode::Char('Х') => {
-                    if let Err(e) = self.layout_manager.move_panel_up_in_group() {
-                        self.state.set_error(format!("Cannot move panel up: {}", e));
-                    } else {
-                        self.auto_save_session();
-                    }
-                    return Ok(Some(()));
-                }
-                // Alt+] (Cyrillic: ъ/Ъ) - move panel down in current group
-                KeyCode::Char(']')
-                | KeyCode::Char('}')
-                | KeyCode::Char('ъ')
-                | KeyCode::Char('Ъ') => {
-                    if let Err(e) = self.layout_manager.move_panel_down_in_group() {
-                        self.state
-                            .set_error(format!("Cannot move panel down: {}", e));
-                    } else {
-                        self.auto_save_session();
-                    }
                     return Ok(Some(()));
                 }
                 _ => {}
