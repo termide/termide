@@ -117,6 +117,16 @@ impl App {
                     self.layout_manager
                         .redistribute_widths_proportionally(available_width);
                 }
+                Event::FocusLost => {
+                    // Save session on focus loss (with debounce)
+                    if self.state.should_save_session() {
+                        self.auto_save_session();
+                        self.state.update_last_session_save();
+                    }
+                }
+                Event::FocusGained => {
+                    // Currently no action needed on focus gain
+                }
                 Event::Tick => {
                     // Check channel for directory size calculation results
                     self.check_dir_size_update();

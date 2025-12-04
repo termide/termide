@@ -813,6 +813,9 @@ impl App {
                 }
                 // Alt+Q - quit
                 KeyCode::Char('q') | KeyCode::Char('Q') => {
+                    // Always save session before quit (ignore debounce for quit)
+                    self.auto_save_session();
+
                     if self.has_panels_requiring_confirmation() {
                         let t = i18n::t();
                         let modal = crate::ui::modal::ConfirmModal::new(
@@ -844,42 +847,82 @@ impl App {
                 KeyCode::Left | KeyCode::Char(',') | KeyCode::Char('<') => {
                     // Navigate to previous group
                     self.layout_manager.prev_group();
+                    // Save session on panel switch (with debounce)
+                    if self.state.should_save_session() {
+                        self.auto_save_session();
+                        self.state.update_last_session_save();
+                    }
                     return Ok(Some(()));
                 }
                 // Alt+Right or Alt+. - go to next panel/group
                 KeyCode::Right | KeyCode::Char('.') | KeyCode::Char('>') => {
                     // Navigate to next group
                     self.layout_manager.next_group();
+                    // Save session on panel switch (with debounce)
+                    if self.state.should_save_session() {
+                        self.auto_save_session();
+                        self.state.update_last_session_save();
+                    }
                     return Ok(Some(()));
                 }
                 // Alt+Up - go to previous panel in current group (vertical navigation)
                 KeyCode::Up => {
                     self.layout_manager.prev_panel_in_group();
+                    // Save session on panel switch (with debounce)
+                    if self.state.should_save_session() {
+                        self.auto_save_session();
+                        self.state.update_last_session_save();
+                    }
                     return Ok(Some(()));
                 }
                 // Alt+Down - go to next panel in current group (vertical navigation)
                 KeyCode::Down => {
                     self.layout_manager.next_panel_in_group();
+                    // Save session on panel switch (with debounce)
+                    if self.state.should_save_session() {
+                        self.auto_save_session();
+                        self.state.update_last_session_save();
+                    }
                     return Ok(Some(()));
                 }
                 // Alt+W - go to previous panel in group (alternative to Alt+Up)
                 KeyCode::Char('w') | KeyCode::Char('W') => {
                     self.layout_manager.prev_panel_in_group();
+                    // Save session on panel switch (with debounce)
+                    if self.state.should_save_session() {
+                        self.auto_save_session();
+                        self.state.update_last_session_save();
+                    }
                     return Ok(Some(()));
                 }
                 // Alt+S - go to next panel in group (alternative to Alt+Down)
                 KeyCode::Char('s') | KeyCode::Char('S') => {
                     self.layout_manager.next_panel_in_group();
+                    // Save session on panel switch (with debounce)
+                    if self.state.should_save_session() {
+                        self.auto_save_session();
+                        self.state.update_last_session_save();
+                    }
                     return Ok(Some(()));
                 }
                 // Alt+A - go to previous group (alternative to Alt+Left)
                 KeyCode::Char('a') | KeyCode::Char('A') => {
                     self.layout_manager.prev_group();
+                    // Save session on panel switch (with debounce)
+                    if self.state.should_save_session() {
+                        self.auto_save_session();
+                        self.state.update_last_session_save();
+                    }
                     return Ok(Some(()));
                 }
                 // Alt+D - go to next group (alternative to Alt+Right)
                 KeyCode::Char('d') | KeyCode::Char('D') => {
                     self.layout_manager.next_group();
+                    // Save session on panel switch (with debounce)
+                    if self.state.should_save_session() {
+                        self.auto_save_session();
+                        self.state.update_last_session_save();
+                    }
                     return Ok(Some(()));
                 }
                 // Alt+Backspace - toggle panel stacking (smart merge/unstack)

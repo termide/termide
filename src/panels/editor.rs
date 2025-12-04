@@ -2720,15 +2720,25 @@ impl Panel for Editor {
 
         // For unsaved buffers without a file path, save content to temporary file
         let unsaved_buffer_file = if path.is_none() {
+            // Get buffer content
+            let content = self.buffer.to_string();
+
+            // Don't save empty buffers - return None to skip this panel
+            if content.trim().is_empty() {
+                // Clean up temporary file if one existed
+                if let Some(ref old_filename) = self.unsaved_buffer_file {
+                    let _ = crate::session::cleanup_unsaved_buffer(session_dir, old_filename);
+                    self.unsaved_buffer_file = None;
+                }
+                return None;
+            }
+
             // Reuse existing filename if available, generate new one only if needed
             let filename = if let Some(ref existing) = self.unsaved_buffer_file {
                 existing.clone()
             } else {
                 crate::session::generate_unsaved_filename()
             };
-
-            // Get buffer content
-            let content = self.buffer.to_string();
 
             // Save/update temporary file
             if let Err(e) = crate::session::save_unsaved_buffer(session_dir, &filename, &content) {

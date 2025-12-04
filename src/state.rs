@@ -312,6 +312,8 @@ pub struct AppState {
     pub system_monitor: crate::system_monitor::SystemMonitor,
     /// Last time system resources were updated
     pub last_resource_update: std::time::Instant,
+    /// Last time session was saved (for debouncing autosave)
+    pub last_session_save: Option<std::time::Instant>,
 }
 
 impl Default for AppState {
@@ -366,6 +368,7 @@ impl AppState {
             config,
             system_monitor: crate::system_monitor::SystemMonitor::new(),
             last_resource_update: std::time::Instant::now(),
+            last_session_save: None,
         };
 
         crate::logger::info("Application started");
@@ -562,5 +565,21 @@ impl AppState {
         config.tab_size = self.config.tab_size;
         config.word_wrap = self.config.word_wrap;
         config
+    }
+
+    /// Check if enough time has passed since last session save (debounce check)
+    /// Returns true if we should save the session
+    pub fn should_save_session(&self) -> bool {
+        const DEBOUNCE_DURATION: std::time::Duration = std::time::Duration::from_secs(1);
+
+        match self.last_session_save {
+            None => true, // Never saved before
+            Some(last_save) => last_save.elapsed() >= DEBOUNCE_DURATION,
+        }
+    }
+
+    /// Update last session save timestamp
+    pub fn update_last_session_save(&mut self) {
+        self.last_session_save = Some(std::time::Instant::now());
     }
 }

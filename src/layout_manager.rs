@@ -766,18 +766,29 @@ impl LayoutManager {
                             // Restore unsaved buffer from temporary file
                             match crate::session::load_unsaved_buffer(session_dir, buffer_file) {
                                 Ok(content) => {
-                                    let mut editor = Editor::new();
-                                    // Insert content into buffer
-                                    if let Err(e) = editor.insert_text(&content) {
-                                        eprintln!(
-                                            "Warning: Failed to restore unsaved buffer content: {}",
-                                            e
+                                    // Don't restore empty buffers
+                                    if content.trim().is_empty() {
+                                        // Clean up the empty buffer file
+                                        let _ = crate::session::cleanup_unsaved_buffer(
+                                            session_dir,
+                                            buffer_file,
                                         );
                                         None
                                     } else {
-                                        // Store the buffer filename for later cleanup
-                                        editor.set_unsaved_buffer_file(Some(buffer_file.clone()));
-                                        Some(Box::new(editor) as Box<dyn Panel>)
+                                        let mut editor = Editor::new();
+                                        // Insert content into buffer
+                                        if let Err(e) = editor.insert_text(&content) {
+                                            eprintln!(
+                                                "Warning: Failed to restore unsaved buffer content: {}",
+                                                e
+                                            );
+                                            None
+                                        } else {
+                                            // Store the buffer filename for later cleanup
+                                            editor
+                                                .set_unsaved_buffer_file(Some(buffer_file.clone()));
+                                            Some(Box::new(editor) as Box<dyn Panel>)
+                                        }
                                     }
                                 }
                                 Err(e) => {
