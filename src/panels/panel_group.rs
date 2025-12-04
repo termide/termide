@@ -96,6 +96,52 @@ impl PanelGroup {
         self.panels.get_mut(self.expanded_index)
     }
 
+    /// Переместить панель вверх (поменять местами с предыдущей)
+    pub fn move_panel_up(&mut self, index: usize) -> anyhow::Result<()> {
+        // Проверить границы
+        if index == 0 || self.panels.is_empty() {
+            return Ok(()); // Уже в верхней позиции или пустая группа
+        }
+        if index >= self.panels.len() {
+            return Err(anyhow::anyhow!("Panel index out of bounds"));
+        }
+
+        // Поменять панели местами
+        self.panels.swap(index - 1, index);
+
+        // Обновить expanded_index
+        if self.expanded_index == index {
+            self.expanded_index = index - 1;
+        } else if self.expanded_index == index - 1 {
+            self.expanded_index = index;
+        }
+
+        Ok(())
+    }
+
+    /// Переместить панель вниз (поменять местами со следующей)
+    pub fn move_panel_down(&mut self, index: usize) -> anyhow::Result<()> {
+        // Проверить границы
+        if self.panels.is_empty() {
+            return Ok(()); // Пустая группа
+        }
+        if index >= self.panels.len() - 1 {
+            return Ok(()); // Уже в нижней позиции
+        }
+
+        // Поменять панели местами
+        self.panels.swap(index, index + 1);
+
+        // Обновить expanded_index
+        if self.expanded_index == index {
+            self.expanded_index = index + 1;
+        } else if self.expanded_index == index + 1 {
+            self.expanded_index = index;
+        }
+
+        Ok(())
+    }
+
     /// Забрать все панели из группы (опустошить группу)
     pub fn take_panels(self) -> Vec<Box<dyn Panel>> {
         self.panels

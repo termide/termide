@@ -939,6 +939,31 @@ impl App {
                     self.handle_resize_panel(1)?;
                     return Ok(Some(()));
                 }
+                // Alt+[ (Cyrillic: х/Х) - move panel up in current group
+                KeyCode::Char('[')
+                | KeyCode::Char('{')
+                | KeyCode::Char('х')
+                | KeyCode::Char('Х') => {
+                    if let Err(e) = self.layout_manager.move_panel_up_in_group() {
+                        self.state.set_error(format!("Cannot move panel up: {}", e));
+                    } else {
+                        self.auto_save_session();
+                    }
+                    return Ok(Some(()));
+                }
+                // Alt+] (Cyrillic: ъ/Ъ) - move panel down in current group
+                KeyCode::Char(']')
+                | KeyCode::Char('}')
+                | KeyCode::Char('ъ')
+                | KeyCode::Char('Ъ') => {
+                    if let Err(e) = self.layout_manager.move_panel_down_in_group() {
+                        self.state
+                            .set_error(format!("Cannot move panel down: {}", e));
+                    } else {
+                        self.auto_save_session();
+                    }
+                    return Ok(Some(()));
+                }
                 _ => {}
             }
         }

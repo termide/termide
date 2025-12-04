@@ -388,6 +388,30 @@ impl LayoutManager {
         }
     }
 
+    /// Переместить активную панель вверх в текущей группе
+    pub fn move_panel_up_in_group(&mut self) -> Result<()> {
+        let active_group_idx = self.focus;
+        let group = self
+            .panel_groups
+            .get_mut(active_group_idx)
+            .ok_or_else(|| anyhow!("No active group"))?;
+
+        let expanded_idx = group.expanded_index();
+        group.move_panel_up(expanded_idx)
+    }
+
+    /// Переместить активную панель вниз в текущей группе
+    pub fn move_panel_down_in_group(&mut self) -> Result<()> {
+        let active_group_idx = self.focus;
+        let group = self
+            .panel_groups
+            .get_mut(active_group_idx)
+            .ok_or_else(|| anyhow!("No active group"))?;
+
+        let expanded_idx = group.expanded_index();
+        group.move_panel_down(expanded_idx)
+    }
+
     /// Получить мутабельную ссылку на активную панель
     pub fn active_panel_mut(&mut self) -> Option<&mut Box<dyn Panel>> {
         self.panel_groups
