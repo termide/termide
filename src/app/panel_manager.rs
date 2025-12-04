@@ -10,6 +10,29 @@ impl App {
     /// Close panel by index and switch focus to next visible panel
     /// NOTE: panel_index parameter is now obsolete with LayoutManager, kept for compatibility
     pub(super) fn close_panel_at_index(&mut self, _panel_index: usize) {
+        // Before closing, cleanup temporary files if this is an unsaved editor
+        if let Some(panel) = self.layout_manager.active_panel_mut() {
+            let panel_any: &mut dyn Any = &mut **panel;
+            if let Some(editor) = panel_any.downcast_mut::<crate::panels::editor::Editor>() {
+                // Check if editor has a temporary unsaved buffer file
+                if let Some(filename) = editor.unsaved_buffer_file() {
+                    // Get session directory and delete the temporary file
+                    if let Ok(session_dir) =
+                        crate::session::Session::get_session_dir(&self.project_root)
+                    {
+                        if let Err(e) =
+                            crate::session::delete_unsaved_buffer(&session_dir, filename)
+                        {
+                            crate::logger::warn(format!(
+                                "Failed to delete unsaved buffer file: {}",
+                                e
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
         // Calculate available width for panel groups
         let terminal_width = self.state.terminal.width;
 

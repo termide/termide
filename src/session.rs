@@ -339,3 +339,17 @@ pub fn cleanup_orphaned_buffers(session_dir: &Path) -> Result<()> {
 
     Ok(())
 }
+
+/// Delete a temporary unsaved buffer file from the session directory
+/// This should be called when an editor with an unsaved buffer is closed without saving
+pub fn delete_unsaved_buffer(session_dir: &Path, filename: &str) -> Result<()> {
+    let temp_file = session_dir.join(filename);
+
+    // Only delete if the file exists
+    if temp_file.exists() {
+        fs::remove_file(&temp_file)
+            .with_context(|| format!("Failed to delete unsaved buffer file: {}", filename))?;
+    }
+
+    Ok(())
+}

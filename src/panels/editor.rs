@@ -208,6 +208,11 @@ impl Editor {
         self.buffer.file_path()
     }
 
+    /// Get unsaved buffer filename (if this is a temporary unsaved buffer)
+    pub fn unsaved_buffer_file(&self) -> Option<&str> {
+        self.unsaved_buffer_file.as_deref()
+    }
+
     /// Open file with default configuration
     #[allow(dead_code)]
     pub fn open_file(path: PathBuf) -> Result<Self> {
