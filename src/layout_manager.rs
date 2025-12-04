@@ -1,75 +1,42 @@
 use anyhow::{anyhow, Result};
 
 use crate::config::Config;
-use crate::constants::DEFAULT_FM_WIDTH;
 use crate::panels::panel_group::PanelGroup;
 use crate::panels::Panel;
 
-/// Цель фокуса: либо статический FileManager, либо группа панелей
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FocusTarget {
-    /// Фокус на статическом FileManager (левая колонка)
-    FileManager,
-    /// Фокус на группе панелей (индекс группы)
-    Group(usize),
-}
-
 /// Менеджер компоновки панелей с поддержкой аккордеона
 pub struct LayoutManager {
-    /// Файловый менеджер (всегда отдельно, не участвует в аккордеоне)
-    pub file_manager: Option<Box<dyn Panel>>,
-
     /// Группы панелей (горизонтальные колонки с вертикальным аккордеоном внутри)
     pub panel_groups: Vec<PanelGroup>,
 
-    /// Текущий фокус (FileManager или группа панелей)
-    pub focus: FocusTarget,
+    /// Текущий фокус (индекс активной группы)
+    pub focus: usize,
 }
 
 impl LayoutManager {
     /// Создать новый пустой менеджер
     pub fn new() -> Self {
         Self {
-            file_manager: None,
             panel_groups: Vec::new(),
-            focus: FocusTarget::Group(0),
+            focus: 0,
         }
-    }
-
-    /// Добавить файловый менеджер
-    pub fn set_file_manager(&mut self, fm: Box<dyn Panel>) {
-        self.file_manager = Some(fm);
-    }
-
-    /// Получить мутабельную ссылку на файловый менеджер
-    pub fn file_manager_mut(&mut self) -> Option<&mut Box<dyn Panel>> {
-        self.file_manager.as_mut()
     }
 
     /// Добавить панель с учётом автоматического стекирования
     pub fn add_panel(&mut self, panel: Box<dyn Panel>, config: &Config, terminal_width: u16) {
-        // Рассчитать доступную ширину для панелей
-        let fm_width = if self.file_manager.is_some() {
-            DEFAULT_FM_WIDTH
-        } else {
-            0
-        };
-        let available_width = terminal_width.saturating_sub(fm_width);
+        let available_width = terminal_width;
 
         if self.panel_groups.is_empty() {
             // Первая панель - создать новую группу с auto-width
             // Она займет всё доступное пространство при рендеринге
             let group = PanelGroup::new(panel);
             self.panel_groups.push(group);
-            self.focus = FocusTarget::Group(0);
+            self.focus = 0;
             return;
         }
 
-        // Получить индекс активной группы (если фокус на группе)
-        let active_group_idx = match self.focus {
-            FocusTarget::Group(idx) => idx,
-            FocusTarget::FileManager => 0, // Если фокус на FM, добавить в первую группу
-        };
+        // Получить индекс активной группы
+        let active_group_idx = self.focus;
 
         // Вычислить среднюю ширину после добавления новой группы
         // redistribute_widths_proportionally() распределит available_width между всеми группами
@@ -84,13 +51,13 @@ impl LayoutManager {
                 // Развернуть новую панель
                 active_group.set_expanded(active_group.len() - 1);
                 // Переключить фокус на эту группу
-                self.focus = FocusTarget::Group(active_group_idx);
+                self.focus = active_group_idx;
             }
         } else {
             // Создать новую группу горизонтально
             let new_group = PanelGroup::new(panel);
             self.panel_groups.push(new_group);
-            self.focus = FocusTarget::Group(self.panel_groups.len() - 1);
+            self.focus = self.panel_groups.len() - 1;
             // Установить фиксированные ширины для всех групп
             self.redistribute_widths_proportionally(available_width);
         }
@@ -106,12 +73,7 @@ impl LayoutManager {
     /// - If current panel is in a group WITH OTHERS (len > 1):
     ///   - Unstack current expanded panel into new group to the RIGHT
     pub fn toggle_panel_stacking(&mut self, available_width: u16) -> Result<()> {
-        let active_group_idx = match self.focus {
-            FocusTarget::Group(idx) => idx,
-            FocusTarget::FileManager => {
-                return Err(anyhow!("Cannot stack/unstack FileManager"));
-            }
-        };
+        let active_group_idx = self.focus;
 
         let group = self
             .panel_groups
@@ -162,7 +124,7 @@ impl LayoutManager {
         }
 
         // Update focus to left group
-        self.focus = FocusTarget::Group(left_group_idx);
+        self.focus = left_group_idx;
 
         // Пропорционально перераспределить ширины после удаления группы
         self.redistribute_widths_proportionally(available_width);
@@ -189,7 +151,7 @@ impl LayoutManager {
         }
 
         // Update focus to right group (now at current index)
-        self.focus = FocusTarget::Group(active_group_idx);
+        self.focus = active_group_idx;
 
         // Пропорционально перераспределить ширины после удаления группы
         self.redistribute_widths_proportionally(available_width);
@@ -222,7 +184,7 @@ impl LayoutManager {
         self.panel_groups.insert(active_group_idx + 1, new_group);
 
         // Move focus to new group
-        self.focus = FocusTarget::Group(active_group_idx + 1);
+        self.focus = active_group_idx + 1;
 
         // Пропорционально перераспределить ширины всех групп
         self.redistribute_widths_proportionally(available_width);
@@ -232,10 +194,7 @@ impl LayoutManager {
 
     /// Переместить панель в предыдущую группу
     pub fn move_panel_to_prev_group(&mut self, available_width: u16) -> Result<()> {
-        let group_idx = match self.focus {
-            FocusTarget::FileManager => return Err(anyhow!("Cannot move FileManager")),
-            FocusTarget::Group(idx) => idx,
-        };
+        let group_idx = self.focus;
 
         // Игнорировать если уже первая группа
         if group_idx == 0 {
@@ -245,7 +204,7 @@ impl LayoutManager {
         if self.panel_groups.get(group_idx).map(|g| g.len()) == Some(1) {
             // Панель одна в группе → поменять группы местами
             self.panel_groups.swap(group_idx - 1, group_idx);
-            self.focus = FocusTarget::Group(group_idx - 1);
+            self.focus = group_idx - 1;
         } else {
             // Панель не одна → извлечь и добавить в предыдущую группу
             let group = self.panel_groups.get_mut(group_idx).unwrap();
@@ -257,7 +216,7 @@ impl LayoutManager {
             prev_group.add_panel(panel);
             prev_group.set_expanded(prev_group.len() - 1);
 
-            self.focus = FocusTarget::Group(group_idx - 1);
+            self.focus = group_idx - 1;
 
             // Удалить пустую группу если осталась
             if self
@@ -277,10 +236,7 @@ impl LayoutManager {
 
     /// Переместить панель в следующую группу
     pub fn move_panel_to_next_group(&mut self, available_width: u16) -> Result<()> {
-        let group_idx = match self.focus {
-            FocusTarget::FileManager => return Err(anyhow!("Cannot move FileManager")),
-            FocusTarget::Group(idx) => idx,
-        };
+        let group_idx = self.focus;
 
         // Игнорировать если уже последняя группа
         if group_idx >= self.panel_groups.len().saturating_sub(1) {
@@ -290,7 +246,7 @@ impl LayoutManager {
         if self.panel_groups.get(group_idx).map(|g| g.len()) == Some(1) {
             // Панель одна в группе → поменять группы местами
             self.panel_groups.swap(group_idx, group_idx + 1);
-            self.focus = FocusTarget::Group(group_idx + 1);
+            self.focus = group_idx + 1;
         } else {
             // Панель не одна → извлечь и добавить в следующую группу
             let group = self.panel_groups.get_mut(group_idx).unwrap();
@@ -302,7 +258,7 @@ impl LayoutManager {
             next_group.add_panel(panel);
             next_group.set_expanded(next_group.len() - 1);
 
-            self.focus = FocusTarget::Group(group_idx + 1);
+            self.focus = group_idx + 1;
 
             // Удалить пустую группу если осталась
             if self
@@ -313,7 +269,7 @@ impl LayoutManager {
             {
                 self.panel_groups.remove(group_idx);
                 // Скорректировать фокус (группа сдвинулась назад)
-                self.focus = FocusTarget::Group(group_idx);
+                self.focus = group_idx;
                 // Пропорционально перераспределить ширины после удаления группы
                 self.redistribute_widths_proportionally(available_width);
             }
@@ -324,10 +280,7 @@ impl LayoutManager {
 
     /// Переместить панель в первую группу
     pub fn move_panel_to_first_group(&mut self, available_width: u16) -> Result<()> {
-        let group_idx = match self.focus {
-            FocusTarget::FileManager => return Err(anyhow!("Cannot move FileManager")),
-            FocusTarget::Group(idx) => idx,
-        };
+        let group_idx = self.focus;
 
         // Уже в первой группе
         if group_idx == 0 {
@@ -348,7 +301,7 @@ impl LayoutManager {
             .unwrap()
             .set_expanded(target_len - 1);
 
-        self.focus = FocusTarget::Group(0);
+        self.focus = 0;
 
         // Удалить пустую группу если панель была одна
         if is_alone {
@@ -362,10 +315,7 @@ impl LayoutManager {
 
     /// Переместить панель в последнюю группу
     pub fn move_panel_to_last_group(&mut self, available_width: u16) -> Result<()> {
-        let group_idx = match self.focus {
-            FocusTarget::FileManager => return Err(anyhow!("Cannot move FileManager")),
-            FocusTarget::Group(idx) => idx,
-        };
+        let group_idx = self.focus;
 
         let last_idx = self.panel_groups.len().saturating_sub(1);
 
@@ -399,111 +349,67 @@ impl LayoutManager {
             self.redistribute_widths_proportionally(available_width);
         }
 
-        self.focus = FocusTarget::Group(self.panel_groups.len().saturating_sub(1));
+        self.focus = self.panel_groups.len().saturating_sub(1);
 
         Ok(())
     }
 
     /// Переключиться на следующую группу (горизонтально)
-    /// Порядок: FileManager → Group(0) → Group(1) → ... → Group(0) ...
     pub fn next_group(&mut self) {
-        match self.focus {
-            FocusTarget::FileManager => {
-                // С FM переключиться на первую группу, если есть
-                if !self.panel_groups.is_empty() {
-                    self.focus = FocusTarget::Group(0);
-                }
-            }
-            FocusTarget::Group(idx) => {
-                if !self.panel_groups.is_empty() {
-                    let next_idx = (idx + 1) % self.panel_groups.len();
-                    self.focus = FocusTarget::Group(next_idx);
-                }
-            }
+        if !self.panel_groups.is_empty() {
+            let next_idx = (self.focus + 1) % self.panel_groups.len();
+            self.focus = next_idx;
         }
     }
 
     /// Переключиться на предыдущую группу (горизонтально)
-    /// Порядок: ... Group(1) → Group(0) → FileManager (если есть) → Group(последняя) ...
     pub fn prev_group(&mut self) {
-        match self.focus {
-            FocusTarget::FileManager => {
-                // С FM остаться на FM (это крайняя левая позиция)
-            }
-            FocusTarget::Group(idx) => {
-                if idx == 0 {
-                    // С первой группы переключиться на FM, если он есть
-                    if self.file_manager.is_some() {
-                        self.focus = FocusTarget::FileManager;
-                    } else if !self.panel_groups.is_empty() {
-                        // Если FM нет, перейти к последней группе (цикл)
-                        self.focus = FocusTarget::Group(self.panel_groups.len() - 1);
-                    }
-                } else if !self.panel_groups.is_empty() {
-                    self.focus = FocusTarget::Group(idx - 1);
-                }
+        if !self.panel_groups.is_empty() {
+            if self.focus == 0 {
+                // С первой группы перейти к последней группе (цикл)
+                self.focus = self.panel_groups.len() - 1;
+            } else {
+                self.focus -= 1;
             }
         }
     }
 
     /// Переключиться на следующую панель в текущей группе (вертикально)
-    /// Не работает если фокус на FileManager
     pub fn next_panel_in_group(&mut self) {
-        if let FocusTarget::Group(idx) = self.focus {
-            if let Some(group) = self.panel_groups.get_mut(idx) {
-                group.next_panel();
-            }
+        if let Some(group) = self.panel_groups.get_mut(self.focus) {
+            group.next_panel();
         }
     }
 
     /// Переключиться на предыдущую панель в текущей группе (вертикально)
-    /// Не работает если фокус на FileManager
     pub fn prev_panel_in_group(&mut self) {
-        if let FocusTarget::Group(idx) = self.focus {
-            if let Some(group) = self.panel_groups.get_mut(idx) {
-                group.prev_panel();
-            }
+        if let Some(group) = self.panel_groups.get_mut(self.focus) {
+            group.prev_panel();
         }
     }
 
     /// Получить мутабельную ссылку на активную панель
     pub fn active_panel_mut(&mut self) -> Option<&mut Box<dyn Panel>> {
-        match self.focus {
-            FocusTarget::FileManager => self.file_manager.as_mut(),
-            FocusTarget::Group(idx) => self
-                .panel_groups
-                .get_mut(idx)
-                .and_then(|group| group.expanded_panel_mut()),
-        }
+        self.panel_groups
+            .get_mut(self.focus)
+            .and_then(|group| group.expanded_panel_mut())
     }
 
     /// Получить индекс активной группы
-    /// Возвращает None если фокус на FileManager
     pub fn active_group_index(&self) -> Option<usize> {
-        match self.focus {
-            FocusTarget::FileManager => None,
-            FocusTarget::Group(idx) => Some(idx),
-        }
+        Some(self.focus)
     }
 
     /// Итератор по всем панелям (мутабельный)
-    /// Возвращает FM (если есть), затем все панели во всех группах
     pub fn iter_all_panels_mut(&mut self) -> impl Iterator<Item = &mut Box<dyn Panel>> {
-        self.file_manager.iter_mut().chain(
-            self.panel_groups
-                .iter_mut()
-                .flat_map(|g| g.panels_mut().iter_mut()),
-        )
+        self.panel_groups
+            .iter_mut()
+            .flat_map(|g| g.panels_mut().iter_mut())
     }
 
     /// Закрыть активную панель
     pub fn close_active_panel(&mut self, available_width: u16) -> Result<()> {
-        let active_group_idx = match self.focus {
-            FocusTarget::FileManager => {
-                return Err(anyhow!("Cannot close FileManager"));
-            }
-            FocusTarget::Group(idx) => idx,
-        };
+        let active_group_idx = self.focus;
 
         let group = self
             .panel_groups
@@ -517,18 +423,13 @@ impl LayoutManager {
             // Скорректировать focus
             if !self.panel_groups.is_empty() {
                 if active_group_idx >= self.panel_groups.len() {
-                    self.focus = FocusTarget::Group(self.panel_groups.len() - 1);
+                    self.focus = self.panel_groups.len() - 1;
                 } else {
-                    self.focus = FocusTarget::Group(active_group_idx);
+                    self.focus = active_group_idx;
                 }
             } else {
-                // Все группы удалены, переключить фокус на FM если он есть
-                if self.file_manager.is_some() {
-                    self.focus = FocusTarget::FileManager;
-                } else {
-                    // Нет ни FM, ни групп - установить фокус на Group(0) как начальное состояние
-                    self.focus = FocusTarget::Group(0);
-                }
+                // Нет групп - установить фокус на 0 как начальное состояние
+                self.focus = 0;
             }
 
             // Пропорционально перераспределить ширины оставшихся групп (группа была удалена)
@@ -547,11 +448,6 @@ impl LayoutManager {
     pub fn can_close_active(&self) -> bool {
         // Можно закрыть, если есть хотя бы одна группа с панелями
         !self.panel_groups.is_empty()
-    }
-
-    /// Проверить, есть ли файловый менеджер
-    pub fn has_file_manager(&self) -> bool {
-        self.file_manager.is_some()
     }
 
     /// Вычислить фактические ширины всех групп в текущий момент
@@ -680,12 +576,6 @@ impl LayoutManager {
     pub fn to_session(&mut self, session_dir: &std::path::Path) -> crate::session::Session {
         use crate::session::{Session, SessionPanelGroup};
 
-        // Serialize file_manager path
-        let file_manager_path = self
-            .file_manager
-            .as_ref()
-            .and_then(|fm| fm.get_working_directory());
-
         // Serialize panel groups
         let panel_groups: Vec<SessionPanelGroup> = self
             .panel_groups
@@ -705,16 +595,9 @@ impl LayoutManager {
             })
             .collect();
 
-        // Determine focused group index
-        let focused_group = match self.focus {
-            FocusTarget::FileManager => 0, // Default to first group if FM is focused
-            FocusTarget::Group(idx) => idx,
-        };
-
         Session {
             panel_groups,
-            focused_group,
-            file_manager_path,
+            focused_group: self.focus,
         }
     }
 
@@ -732,11 +615,6 @@ impl LayoutManager {
         use crate::session::SessionPanel;
 
         let mut layout = Self::new();
-
-        // Restore file_manager if it was present
-        if let Some(ref fm_path) = session.file_manager_path {
-            layout.set_file_manager(Box::new(FileManager::new_with_path(fm_path.clone())));
-        }
 
         // Restore panel groups
         for session_group in session.panel_groups {
@@ -844,15 +722,9 @@ impl LayoutManager {
         }
 
         // Restore focus (clamp to valid range)
-        let focused_group = session
+        layout.focus = session
             .focused_group
             .min(layout.panel_groups.len().saturating_sub(1));
-        layout.focus = if layout.file_manager.is_some() && focused_group == 0 {
-            // If FM exists and focus was 0, focus FM instead
-            FocusTarget::FileManager
-        } else {
-            FocusTarget::Group(focused_group)
-        };
 
         Ok(layout)
     }

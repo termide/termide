@@ -3,10 +3,7 @@ use crossterm::event::{MouseButton, MouseEventKind};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 use super::App;
-use crate::{
-    constants::DEFAULT_FM_WIDTH,
-    ui::dropdown::{get_help_items, get_tools_items},
-};
+use crate::ui::dropdown::{get_help_items, get_tools_items};
 
 impl App {
     /// Handle mouse event
@@ -132,22 +129,12 @@ impl App {
         let panel_rects = self.calculate_panel_rects();
 
         // Find the active panel based on current focus
-        match self.layout_manager.focus {
-            crate::layout_manager::FocusTarget::FileManager => {
-                // Find FileManager rect (marked with group_idx = usize::MAX)
-                for (group_idx, _panel_idx, rect, _is_expanded) in panel_rects {
-                    if group_idx == usize::MAX {
-                        return rect;
-                    }
-                }
-            }
-            crate::layout_manager::FocusTarget::Group(focused_group_idx) => {
-                // Find expanded panel in the focused group
-                for (group_idx, _panel_idx, rect, is_expanded) in panel_rects {
-                    if group_idx == focused_group_idx && is_expanded {
-                        return rect;
-                    }
-                }
+        let focused_group_idx = self.layout_manager.focus;
+
+        // Find expanded panel in the focused group
+        for (group_idx, _panel_idx, rect, is_expanded) in panel_rects {
+            if group_idx == focused_group_idx && is_expanded {
+                return rect;
             }
         }
 
@@ -192,7 +179,7 @@ impl App {
                 if let Some(group) = self.layout_manager.panel_groups.get_mut(group_idx) {
                     group.set_expanded(panel_idx);
                 }
-                self.layout_manager.focus = crate::layout_manager::FocusTarget::Group(group_idx);
+                self.layout_manager.focus = group_idx;
 
                 // Now use the same close logic as keyboard shortcut (with confirmation)
                 self.handle_close_panel_request(0)?;
@@ -208,8 +195,7 @@ impl App {
                         // Currently collapsed - expand this panel
                         group.set_expanded(panel_idx);
                         // Also make this group active
-                        self.layout_manager.focus =
-                            crate::layout_manager::FocusTarget::Group(group_idx);
+                        self.layout_manager.focus = group_idx;
                     }
                 }
                 return Ok(true);
@@ -230,16 +216,10 @@ impl App {
                 && click_y >= rect.y
                 && click_y < rect.y + rect.height
             {
-                // Check if this is the FileManager (marked with group_idx = usize::MAX)
-                if group_idx == usize::MAX {
-                    self.layout_manager.focus = crate::layout_manager::FocusTarget::FileManager;
-                } else {
-                    // Click on a regular panel group - make it active
-                    self.layout_manager.focus =
-                        crate::layout_manager::FocusTarget::Group(group_idx);
-                    if let Some(group) = self.layout_manager.panel_groups.get_mut(group_idx) {
-                        group.set_expanded(panel_idx);
-                    }
+                // Click on a panel group - make it active
+                self.layout_manager.focus = group_idx;
+                if let Some(group) = self.layout_manager.panel_groups.get_mut(group_idx) {
+                    group.set_expanded(panel_idx);
                 }
                 return Ok(());
             }
@@ -309,37 +289,9 @@ impl App {
             height: height.saturating_sub(2),
         };
 
-        // Calculate horizontal split: FM | Groups
-        let has_fm = self.layout_manager.has_file_manager();
-        let fm_width = if has_fm { DEFAULT_FM_WIDTH } else { 0 };
-
-        let horizontal_constraints = if has_fm {
-            vec![
-                Constraint::Length(fm_width),
-                Constraint::Min(0), // Groups area
-            ]
-        } else {
-            vec![Constraint::Min(0)] // Only groups
-        };
-
-        let horizontal_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints(horizontal_constraints)
-            .split(main_area);
-
-        let chunk_offset = if has_fm { 1 } else { 0 };
-
-        // Add FileManager to click detection if it exists
-        if has_fm {
-            let fm_area = horizontal_chunks[0];
-            // FileManager uses special marker: group_idx = usize::MAX
-            // This lets handle_panel_focus_click() distinguish it from regular groups
-            result.push((usize::MAX, 0, fm_area, true));
-        }
-
         // Calculate group areas
         if !self.layout_manager.panel_groups.is_empty() {
-            let groups_area = horizontal_chunks[chunk_offset];
+            let groups_area = main_area;
 
             // Calculate horizontal constraints for groups (using widths)
             // Группы могут иметь фиксированную ширину или auto-width

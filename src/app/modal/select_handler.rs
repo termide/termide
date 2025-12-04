@@ -130,7 +130,7 @@ impl App {
 
             if should_proceed {
                 // Execute operation using FileManager
-                if let Some(fm_panel) = self.layout_manager.file_manager_mut() {
+                if let Some(fm_panel) = self.get_first_file_manager_mut() {
                     use std::any::Any;
                     let panel_any: &mut dyn Any = &mut **fm_panel;
                     if let Some(fm) = panel_any.downcast_mut::<FileManager>() {

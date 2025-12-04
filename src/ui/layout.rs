@@ -7,8 +7,7 @@ use ratatui::{
 use std::any::Any;
 
 use crate::{
-    constants::DEFAULT_FM_WIDTH,
-    layout_manager::{FocusTarget, LayoutManager},
+    layout_manager::LayoutManager,
     panels::{editor::Editor, file_manager::FileManager, terminal_pty::Terminal},
     state::{ActiveModal, AppState},
 };
@@ -80,77 +79,14 @@ fn render_main_area_with_accordion(
     state: &mut AppState,
     layout_manager: &mut LayoutManager,
 ) {
-    if layout_manager.panel_groups.is_empty() && layout_manager.file_manager.is_none() {
+    if layout_manager.panel_groups.is_empty() {
         // No panels at all - do nothing
         return;
     }
 
-    // Check if we have FM
-    let has_fm = layout_manager.file_manager.is_some();
-    let fm_width = if has_fm { DEFAULT_FM_WIDTH } else { 0 };
-
-    if !has_fm && layout_manager.panel_groups.is_empty() {
-        return;
-    }
-
-    // Horizontal split: FM | Groups
-    let horizontal_constraints = if has_fm {
-        vec![
-            Constraint::Length(fm_width),
-            Constraint::Min(0), // Groups area
-        ]
-    } else {
-        vec![Constraint::Min(0)] // Only groups
-    };
-
-    let horizontal_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(horizontal_constraints)
-        .split(area);
-
-    let mut chunk_offset = 0;
-
-    // Render FM if present
-    if has_fm {
-        // Check if FM is focused
-        let is_focused = matches!(layout_manager.focus, FocusTarget::FileManager);
-
-        if let Some(fm) = layout_manager.file_manager_mut() {
-            let fm_area = horizontal_chunks[0];
-
-            // Create border with title (path) but no [X] button
-            let title = fm.title();
-            let style = if is_focused {
-                Style::default().fg(state.theme.accented_fg)
-            } else {
-                Style::default().fg(state.theme.disabled)
-            };
-
-            use ratatui::{text::Span, widgets::Borders};
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .border_style(style)
-                .title(Span::styled(format!(" {} ", title), style));
-
-            let inner = block.inner(fm_area);
-
-            use ratatui::widgets::Widget;
-            block.render(fm_area, frame.buffer_mut());
-
-            fm.render(
-                inner,
-                frame.buffer_mut(),
-                is_focused,
-                0, // FM always has index 0
-                state,
-            );
-        }
-        chunk_offset = 1;
-    }
-
     // Render panel groups
     if !layout_manager.panel_groups.is_empty() {
-        let groups_area = horizontal_chunks[chunk_offset];
+        let groups_area = area;
 
         // Calculate horizontal constraints for groups (distribute all space)
         // Группы могут иметь фиксированную ширину (width = Some(n)) или auto-width (width = None)

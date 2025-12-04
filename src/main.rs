@@ -69,11 +69,9 @@ fn main() -> Result<()> {
     // Try to load session, fallback to default layout on error
     if let Err(_e) = app.load_session() {
         // Session file doesn't exist or is corrupted - use default layout
-        // Set file manager (always in separate column)
-        app.set_file_manager(Box::new(FileManager::new()));
-
-        // Add welcome panel as first panel group
-        app.add_panel(Box::new(panels::welcome::Welcome::new()));
+        // Add two FileManager panels in a 50/50 split
+        app.add_panel(Box::new(FileManager::new()));
+        app.add_panel(Box::new(FileManager::new()));
     }
 
     // Run application

@@ -18,29 +18,39 @@ impl App {
         if let Some(name) = value.downcast_ref::<String>() {
             let t = i18n::t();
             // Get FileManager and create file
-            if let Some(fm_panel) = self.layout_manager.file_manager_mut() {
+            let result = if let Some(fm_panel) = self.get_first_file_manager_mut() {
                 // Use Any trait for downcast
                 use std::any::Any;
                 let panel_any: &mut dyn Any = &mut **fm_panel;
                 if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
-                    match fm.create_file(name.clone()) {
-                        Ok(_) => {
-                            crate::logger::info(format!("File created: {}", name));
-                            self.state.set_info(t.status_file_created(name));
-                            // Refresh directory contents
-                            let _ = fm.load_directory();
-                        }
-                        Err(e) => {
-                            crate::logger::error(format!("File creation error '{}': {}", name, e));
-                            self.state
-                                .set_error(t.status_error_create_file(&e.to_string()));
-                        }
+                    let result = fm.create_file(name.clone());
+                    if result.is_ok() {
+                        crate::logger::info(format!("File created: {}", name));
+                        // Refresh directory contents
+                        let _ = fm.load_directory();
                     }
+                    Some(result)
                 } else {
                     crate::logger::error("FileManager panel could not be accessed".to_string());
+                    None
                 }
             } else {
                 crate::logger::error("FileManager not found".to_string());
+                None
+            };
+
+            // Update status after FM borrow is dropped
+            if let Some(result) = result {
+                match result {
+                    Ok(_) => {
+                        self.state.set_info(t.status_file_created(name));
+                    }
+                    Err(e) => {
+                        crate::logger::error(format!("File creation error '{}': {}", name, e));
+                        self.state
+                            .set_error(t.status_error_create_file(&e.to_string()));
+                    }
+                }
             }
         }
         Ok(())
@@ -56,31 +66,38 @@ impl App {
         if let Some(name) = value.downcast_ref::<String>() {
             let t = i18n::t();
             // Get FileManager and create directory
-            if let Some(fm_panel) = self.layout_manager.file_manager_mut() {
+            let result = if let Some(fm_panel) = self.get_first_file_manager_mut() {
                 use std::any::Any;
                 let panel_any: &mut dyn Any = &mut **fm_panel;
                 if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
-                    match fm.create_directory(name.clone()) {
-                        Ok(_) => {
-                            crate::logger::info(format!("Directory created: {}", name));
-                            self.state.set_info(t.status_dir_created(name));
-                            // Refresh directory contents
-                            let _ = fm.load_directory();
-                        }
-                        Err(e) => {
-                            crate::logger::error(format!(
-                                "Directory creation error '{}': {}",
-                                name, e
-                            ));
-                            self.state
-                                .set_error(t.status_error_create_dir(&e.to_string()));
-                        }
+                    let result = fm.create_directory(name.clone());
+                    if result.is_ok() {
+                        crate::logger::info(format!("Directory created: {}", name));
+                        // Refresh directory contents
+                        let _ = fm.load_directory();
                     }
+                    Some(result)
                 } else {
                     crate::logger::error("FileManager panel could not be accessed".to_string());
+                    None
                 }
             } else {
                 crate::logger::error("FileManager not found".to_string());
+                None
+            };
+
+            // Update status after FM borrow is dropped
+            if let Some(result) = result {
+                match result {
+                    Ok(_) => {
+                        self.state.set_info(t.status_dir_created(name));
+                    }
+                    Err(e) => {
+                        crate::logger::error(format!("Directory creation error '{}': {}", name, e));
+                        self.state
+                            .set_error(t.status_error_create_dir(&e.to_string()));
+                    }
+                }
             }
         }
         Ok(())

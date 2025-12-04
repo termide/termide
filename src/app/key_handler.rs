@@ -4,7 +4,6 @@ use std::path::PathBuf;
 
 use super::App;
 use crate::{
-    constants::DEFAULT_FM_WIDTH,
     i18n,
     panels::{
         debug::Debug, editor::Editor, file_manager::FileManager, terminal_pty::Terminal,
@@ -384,22 +383,17 @@ impl App {
     fn handle_new_terminal(&mut self) -> Result<()> {
         crate::logger::debug("Opening new Terminal panel");
         self.close_welcome_panels();
-        // Get directory from FM
+        // Get working directory from current active panel
         let working_dir = self
             .layout_manager
-            .file_manager_mut()
+            .active_panel_mut()
             .and_then(|p| p.get_working_directory());
 
         // Create new terminal
         let width = self.state.terminal.width;
         let height = self.state.terminal.height;
         let term_height = height.saturating_sub(3);
-        let term_width = if self.layout_manager.has_file_manager() {
-            let fm_width = DEFAULT_FM_WIDTH;
-            width.saturating_sub(fm_width).saturating_sub(2)
-        } else {
-            width.saturating_sub(2)
-        };
+        let term_width = width.saturating_sub(2);
 
         if let Ok(terminal_panel) = Terminal::new_with_cwd(term_height, term_width, working_dir) {
             self.add_panel(Box::new(terminal_panel));
@@ -466,8 +460,7 @@ impl App {
                 if panel_any.is::<Debug>() {
                     // Found Debug panel - set it as expanded and focus the group
                     group.set_expanded(panel_idx);
-                    self.layout_manager.focus =
-                        crate::layout_manager::FocusTarget::Group(group_idx);
+                    self.layout_manager.focus = group_idx;
                     return true;
                 }
             }
@@ -524,14 +517,11 @@ impl App {
     /// Check if any panel requires close confirmation (unsaved changes, running processes)
     fn has_panels_requiring_confirmation(&self) -> bool {
         // Check if any panel has unsaved changes or running processes
-        for panel in std::iter::once(&self.layout_manager.file_manager)
-            .flatten()
-            .chain(
-                self.layout_manager
-                    .panel_groups
-                    .iter()
-                    .flat_map(|g| g.panels().iter()),
-            )
+        for panel in self
+            .layout_manager
+            .panel_groups
+            .iter()
+            .flat_map(|g| g.panels().iter())
         {
             if panel.needs_close_confirmation().is_some() {
                 return true;
@@ -592,42 +582,26 @@ impl App {
         }
 
         // Adjust focus if needed
-        if let crate::layout_manager::FocusTarget::Group(idx) = self.layout_manager.focus {
-            if !self.layout_manager.panel_groups.is_empty()
-                && idx >= self.layout_manager.panel_groups.len()
-            {
-                self.layout_manager.focus = crate::layout_manager::FocusTarget::Group(
-                    self.layout_manager.panel_groups.len() - 1,
-                );
-            }
+        if !self.layout_manager.panel_groups.is_empty()
+            && self.layout_manager.focus >= self.layout_manager.panel_groups.len()
+        {
+            self.layout_manager.focus = self.layout_manager.panel_groups.len() - 1;
         }
 
         // Пропорционально перераспределить ширины после удаления групп
         if groups_were_removed {
             let terminal_width = self.state.terminal.width;
-            let fm_width = if self.layout_manager.has_file_manager() {
-                DEFAULT_FM_WIDTH
-            } else {
-                0
-            };
-            let available_width = terminal_width.saturating_sub(fm_width);
             self.layout_manager
-                .redistribute_widths_proportionally(available_width);
+                .redistribute_widths_proportionally(terminal_width);
         }
     }
 
     /// Move panel to previous group
     fn handle_swap_panel_left(&mut self) -> Result<()> {
         let terminal_width = self.state.terminal.width;
-        let fm_width = if self.layout_manager.has_file_manager() {
-            DEFAULT_FM_WIDTH
-        } else {
-            0
-        };
-        let available_width = terminal_width.saturating_sub(fm_width);
 
         self.layout_manager
-            .move_panel_to_prev_group(available_width)?;
+            .move_panel_to_prev_group(terminal_width)?;
         self.auto_save_session();
         Ok(())
     }
@@ -635,28 +609,15 @@ impl App {
     /// Move panel to next group
     fn handle_swap_panel_right(&mut self) -> Result<()> {
         let terminal_width = self.state.terminal.width;
-        let fm_width = if self.layout_manager.has_file_manager() {
-            DEFAULT_FM_WIDTH
-        } else {
-            0
-        };
-        let available_width = terminal_width.saturating_sub(fm_width);
 
         self.layout_manager
-            .move_panel_to_next_group(available_width)?;
+            .move_panel_to_next_group(terminal_width)?;
         self.auto_save_session();
         Ok(())
     }
 
     /// Change active group width
     fn handle_resize_panel(&mut self, delta: i16) -> Result<()> {
-        use crate::layout_manager::FocusTarget;
-
-        // Игнорировать для FileManager
-        if matches!(self.layout_manager.focus, FocusTarget::FileManager) {
-            return Ok(());
-        }
-
         if let Some(group_idx) = self.layout_manager.active_group_index() {
             // Нельзя ресайзить если это единственная группа (некому адаптироваться)
             if self.layout_manager.panel_groups.len() <= 1 {
@@ -665,12 +626,7 @@ impl App {
 
             // Рассчитать доступную ширину для групп панелей
             let terminal_width = self.state.terminal.width;
-            let fm_width = if self.layout_manager.has_file_manager() {
-                DEFAULT_FM_WIDTH
-            } else {
-                0
-            };
-            let available_width = terminal_width.saturating_sub(fm_width);
+            let available_width = terminal_width;
 
             // Заморозить все auto-width группы перед ресайзом
             let actual_widths = self.layout_manager.calculate_actual_widths(available_width);
@@ -929,14 +885,8 @@ impl App {
                 KeyCode::Backspace => {
                     // Рассчитать доступную ширину для групп панелей
                     let terminal_width = self.state.terminal.width;
-                    let fm_width = if self.layout_manager.has_file_manager() {
-                        DEFAULT_FM_WIDTH
-                    } else {
-                        0
-                    };
-                    let available_width = terminal_width.saturating_sub(fm_width);
 
-                    if let Err(e) = self.layout_manager.toggle_panel_stacking(available_width) {
+                    if let Err(e) = self.layout_manager.toggle_panel_stacking(terminal_width) {
                         self.state
                             .set_error(format!("Cannot toggle stacking: {}", e));
                     } else {
@@ -957,16 +907,10 @@ impl App {
                 // Alt+Home - move panel to first group
                 KeyCode::Home => {
                     let terminal_width = self.state.terminal.width;
-                    let fm_width = if self.layout_manager.has_file_manager() {
-                        DEFAULT_FM_WIDTH
-                    } else {
-                        0
-                    };
-                    let available_width = terminal_width.saturating_sub(fm_width);
 
                     if let Err(e) = self
                         .layout_manager
-                        .move_panel_to_first_group(available_width)
+                        .move_panel_to_first_group(terminal_width)
                     {
                         self.state.set_error(format!("Cannot move panel: {}", e));
                     } else {
@@ -977,17 +921,8 @@ impl App {
                 // Alt+End - move panel to last group
                 KeyCode::End => {
                     let terminal_width = self.state.terminal.width;
-                    let fm_width = if self.layout_manager.has_file_manager() {
-                        DEFAULT_FM_WIDTH
-                    } else {
-                        0
-                    };
-                    let available_width = terminal_width.saturating_sub(fm_width);
 
-                    if let Err(e) = self
-                        .layout_manager
-                        .move_panel_to_last_group(available_width)
-                    {
+                    if let Err(e) = self.layout_manager.move_panel_to_last_group(terminal_width) {
                         self.state.set_error(format!("Cannot move panel: {}", e));
                     } else {
                         self.auto_save_session();

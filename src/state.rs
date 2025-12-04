@@ -476,12 +476,10 @@ impl AppState {
             }
         } else {
             // Multi-panel mode
-            // FM takes DEFAULT_FM_WIDTH characters on the left
-            let remaining_width = width - crate::constants::DEFAULT_FM_WIDTH;
             // Each main panel minimum MIN_MAIN_PANEL_WIDTH characters
             let main_panels_count =
-                (remaining_width / crate::constants::MIN_MAIN_PANEL_WIDTH).max(1) as usize;
-            let main_panel_width = remaining_width / main_panels_count as u16;
+                (width / crate::constants::MIN_MAIN_PANEL_WIDTH).max(1) as usize;
+            let main_panel_width = width / main_panels_count as u16;
 
             LayoutInfo {
                 mode: LayoutMode::MultiPanel,
@@ -497,16 +495,16 @@ impl AppState {
             LayoutMode::Single => "Single panel",
             LayoutMode::MultiPanel => {
                 match self.layout_info.main_panels_count {
-                    1 => "FM + 1 panel",
-                    2 => "FM + 2 panels",
-                    3 => "FM + 3 panels",
-                    4 => "FM + 4 panels",
-                    5 => "FM + 5 panels",
-                    6 => "FM + 6 panels",
-                    7 => "FM + 7 panels",
-                    8 => "FM + 8 panels",
-                    9 => "FM + 9 panels",
-                    _ => "FM + many panels", // For 10+ panels
+                    1 => "1 panel",
+                    2 => "2 panels",
+                    3 => "3 panels",
+                    4 => "4 panels",
+                    5 => "5 panels",
+                    6 => "6 panels",
+                    7 => "7 panels",
+                    8 => "8 panels",
+                    9 => "9 panels",
+                    _ => "Many panels", // For 10+ panels
                 }
             }
         }

@@ -9,17 +9,16 @@ TermIDE is a terminal-based IDE built with Rust using the `ratatui` TUI framewor
 ```
 ┌─────────────────────────────────────────────────────────┐
 │ Menu Bar     [CPU] [RAM] [Clock]                        │
-├──────────┬──────────────────────────────────────────────┤
-│          │  ┌[X][▼] Editor: main.rs ──────────────┐    │
-│          │  │                                      │    │
-│   File   │  │  fn main() {                         │    │
-│  Manager │  │      // code here                    │    │
-│  (Static)│  │  }                                   │    │
-│          │  │                                      │    │
-│          │  └──────────────────────────────────────┘    │
-│          │  ─[X][▶] Terminal: bash ──────────────────   │
-│          │  ─[X][▶] Log ──────────────────────────────  │
-├──────────┴──────────────────────────────────────────────┤
+├───────────────────┬─────────────────────────────────────┤
+│ ┌[X][▼] Files ──┐ │ ┌[X][▼] Editor: main.rs ──────────┐│
+│ │               │ │ │                                  ││
+│ │ src/          │ │ │  fn main() {                     ││
+│ │ tests/        │ │ │      // code here                ││
+│ │ Cargo.toml    │ │ │  }                               ││
+│ │               │ │ │                                  ││
+│ └───────────────┘ │ └──────────────────────────────────┘│
+│ ─[X][▶] Terminal─ │ ─[X][▶] Log ────────────────────────│
+├───────────────────┴─────────────────────────────────────┤
 │ Status: file.rs:42  Ln 10, Col 5        Disk: 83%      │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -35,9 +34,8 @@ TermIDE is a terminal-based IDE built with Rust using the `ratatui` TUI framewor
 The `LayoutManager` is the heart of the accordion layout system. It manages:
 
 **Components:**
-- `file_manager: Option<Box<dyn Panel>>` - Static left-side file manager (always visible)
 - `panel_groups: Vec<PanelGroup>` - Horizontal arrangement of panel groups
-- `focus: FocusTarget` - Current focus (FileManager or Group(index))
+- `focus: usize` - Current focus (index of active panel group)
 
 **Key Responsibilities:**
 - Adding panels with automatic stacking based on width threshold
@@ -47,14 +45,7 @@ The `LayoutManager` is the heart of the accordion layout system. It manages:
 - Closing panels and cleaning up empty groups
 
 **Focus Management:**
-```rust
-pub enum FocusTarget {
-    FileManager,     // Focus on static file manager
-    Group(usize),    // Focus on panel group at index
-}
-```
-
-Focus determines which panel receives keyboard/mouse input and is highlighted in the UI.
+Focus is a simple `usize` index indicating which panel group is currently active. The focused group receives keyboard/mouse input and is highlighted in the UI.
 
 #### 1.2 PanelGroup
 
@@ -270,19 +261,14 @@ Rendering flow:
 
 ```rust
 fn render_layout_with_accordion(frame, layout_manager, state) {
-    // 1. Calculate horizontal layout (FM + groups)
+    // 1. Calculate horizontal layout for all panel groups
     let horizontal_chunks = calculate_horizontal_layout();
 
-    // 2. Render FileManager (if present)
-    if has_fm {
-        render_file_manager(fm_area, ...);
-    }
-
-    // 3. Render panel groups
+    // 2. Render panel groups
     for group in groups {
         let vertical_chunks = calculate_vertical_layout(group);
 
-        // 4. Render each panel (expanded or collapsed)
+        // 3. Render each panel (expanded or collapsed)
         for panel in group {
             if is_expanded {
                 render_expanded_panel(panel, area, ...);
@@ -292,7 +278,7 @@ fn render_layout_with_accordion(frame, layout_manager, state) {
         }
     }
 
-    // 5. Render modal (if open)
+    // 4. Render modal (if open)
     if let Some(modal) = state.active_modal {
         render_modal(modal, ...);
     }
@@ -517,12 +503,7 @@ pub struct I18n {
    - Project workspaces
    - Recent files/directories
 
-4. **Split FileManager**
-   - Allow FileManager to be part of groups
-   - Multiple FileManagers
-   - Requires focus system refactoring
-
-5. **Network Panels**
+4. **Network Panels**
    - SSH terminal panels
    - Remote file browsers
    - Collaborative editing

@@ -15,73 +15,80 @@ impl App {
         if let Some(confirmed) = value.downcast_ref::<bool>() {
             if *confirmed {
                 // Get FileManager and delete files/directories
-                if let Some(fm_panel) = self.layout_manager.file_manager_mut() {
-                    use std::any::Any;
-                    let panel_any: &mut dyn Any = &mut **fm_panel;
-                    if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
-                        let mut success_count = 0;
-                        let mut error_count = 0;
-                        let total_count = paths.len();
+                let (success_count, error_count, total_count) = {
+                    if let Some(fm_panel) = self.get_first_file_manager_mut() {
+                        use std::any::Any;
+                        let panel_any: &mut dyn Any = &mut **fm_panel;
+                        if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
+                            let mut success_count = 0;
+                            let mut error_count = 0;
+                            let total_count = paths.len();
 
-                        // Delete each file/directory
-                        for path in &paths {
-                            let item_name =
-                                path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-                            let is_dir = path.is_dir();
+                            // Delete each file/directory
+                            for path in &paths {
+                                let item_name =
+                                    path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                                let is_dir = path.is_dir();
 
-                            crate::logger::info(format!(
-                                "Attempting to delete {}: {}",
-                                if is_dir { "directory" } else { "file" },
-                                item_name
-                            ));
+                                crate::logger::info(format!(
+                                    "Attempting to delete {}: {}",
+                                    if is_dir { "directory" } else { "file" },
+                                    item_name
+                                ));
 
-                            match fm.delete_path(path.clone()) {
-                                Ok(_) => {
-                                    crate::logger::info(format!(
-                                        "{} deleted: {}",
-                                        if is_dir { "Directory" } else { "File" },
-                                        item_name
-                                    ));
-                                    success_count += 1;
-                                }
-                                Err(e) => {
-                                    crate::logger::error(format!(
-                                        "Deletion error '{}': {}",
-                                        item_name, e
-                                    ));
-                                    error_count += 1;
+                                match fm.delete_path(path.clone()) {
+                                    Ok(_) => {
+                                        crate::logger::info(format!(
+                                            "{} deleted: {}",
+                                            if is_dir { "Directory" } else { "File" },
+                                            item_name
+                                        ));
+                                        success_count += 1;
+                                    }
+                                    Err(e) => {
+                                        crate::logger::error(format!(
+                                            "Deletion error '{}': {}",
+                                            item_name, e
+                                        ));
+                                        error_count += 1;
+                                    }
                                 }
                             }
-                        }
 
-                        // Show final message
-                        let t = i18n::t();
-                        if total_count == 1 {
-                            if success_count == 1 {
-                                self.state.set_info(t.status_item_deleted().to_string());
-                            } else {
-                                self.state.set_error(t.status_error_delete().to_string());
+                            // Clear selection after successful deletion
+                            if success_count > 0 {
+                                fm.clear_selection();
                             }
-                        } else if error_count == 0 {
-                            self.state.set_info(t.status_items_deleted(success_count));
+
+                            // Refresh directory contents
+                            let _ = fm.load_directory();
+
+                            (success_count, error_count, total_count)
                         } else {
-                            self.state.set_info(
-                                t.status_items_deleted_with_errors(success_count, error_count),
+                            crate::logger::error(
+                                "FileManager panel could not be accessed".to_string(),
                             );
+                            (0, 0, 0)
                         }
-
-                        // Clear selection after successful deletion
-                        if success_count > 0 {
-                            fm.clear_selection();
-                        }
-
-                        // Refresh directory contents
-                        let _ = fm.load_directory();
                     } else {
-                        crate::logger::error("FileManager panel could not be accessed".to_string());
+                        crate::logger::error("FileManager not found".to_string());
+                        (0, 0, 0)
                     }
+                };
+
+                // Show final message (now fm_panel is dropped, can access self.state)
+                let t = i18n::t();
+                if total_count == 1 {
+                    if success_count == 1 {
+                        self.state.set_info(t.status_item_deleted().to_string());
+                    } else {
+                        self.state.set_error(t.status_error_delete().to_string());
+                    }
+                } else if error_count == 0 {
+                    self.state.set_info(t.status_items_deleted(success_count));
                 } else {
-                    crate::logger::error("FileManager not found".to_string());
+                    self.state
+                        .set_info(t.status_items_deleted_with_errors(success_count, error_count));
                 }
             }
         }

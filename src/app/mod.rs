@@ -83,11 +83,6 @@ impl App {
         self.layout_manager.add_panel(panel, config, terminal_width);
     }
 
-    /// Set the file manager panel
-    pub fn set_file_manager(&mut self, fm: Box<dyn crate::panels::Panel>) {
-        self.layout_manager.set_file_manager(fm);
-    }
-
     /// Run the main application loop
     pub fn run<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> Result<()> {
         // Initialize terminal dimensions
@@ -108,14 +103,8 @@ impl App {
                     self.state.update_terminal_size(width, height);
 
                     // Пропорционально перераспределить ширины групп при изменении размера терминала
-                    let fm_width = if self.layout_manager.has_file_manager() {
-                        crate::constants::DEFAULT_FM_WIDTH
-                    } else {
-                        0
-                    };
-                    let available_width = width.saturating_sub(fm_width);
                     self.layout_manager
-                        .redistribute_widths_proportionally(available_width);
+                        .redistribute_widths_proportionally(width);
                 }
                 Event::FocusLost => {
                     // Save session on focus loss (with debounce)
@@ -174,14 +163,8 @@ impl App {
         if should_close && self.layout_manager.can_close_active() {
             // Calculate available width for panel groups
             let terminal_width = self.state.terminal.width;
-            let fm_width = if self.layout_manager.has_file_manager() {
-                crate::constants::DEFAULT_FM_WIDTH
-            } else {
-                0
-            };
-            let available_width = terminal_width.saturating_sub(fm_width);
 
-            let _ = self.layout_manager.close_active_panel(available_width);
+            let _ = self.layout_manager.close_active_panel(terminal_width);
             self.auto_save_session();
         }
 

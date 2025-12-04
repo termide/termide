@@ -1,8 +1,5 @@
 /// Application constants
 ///
-/// Default file manager width in multi-panel mode
-pub const DEFAULT_FM_WIDTH: u16 = 30;
-
 /// Number of spinner animation frames
 pub const SPINNER_FRAMES_COUNT: usize = 8;
 

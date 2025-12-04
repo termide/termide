@@ -11,8 +11,6 @@ pub struct Session {
     pub panel_groups: Vec<SessionPanelGroup>,
     /// Which group is currently focused (0-based index)
     pub focused_group: usize,
-    /// FileManager current path (if exists)
-    pub file_manager_path: Option<PathBuf>,
 }
 
 /// A group of panels (one vertical column)

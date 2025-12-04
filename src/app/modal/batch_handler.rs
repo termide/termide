@@ -44,7 +44,7 @@ impl App {
             // target_directory not set, get string from InputModal
             if let Some(destination_str) = value.downcast_ref::<String>() {
                 // Get FileManager panel to determine base path
-                if let Some(fm_panel) = self.layout_manager.file_manager_mut() {
+                if let Some(fm_panel) = self.get_first_file_manager_mut() {
                     use std::any::Any;
                     let panel_any: &mut dyn Any = &mut **fm_panel;
                     if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
@@ -143,7 +143,7 @@ impl App {
                         };
 
                         // Execute operation
-                        if let Some(fm_panel) = self.layout_manager.file_manager_mut() {
+                        if let Some(fm_panel) = self.get_first_file_manager_mut() {
                             use std::any::Any;
                             let panel_any: &mut dyn Any = &mut **fm_panel;
                             if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
@@ -287,7 +287,7 @@ impl App {
             self.show_batch_results(&operation);
 
             // Clear selection and refresh panel
-            if let Some(fm_panel) = self.layout_manager.file_manager_mut() {
+            if let Some(fm_panel) = self.get_first_file_manager_mut() {
                 let panel_any: &mut dyn Any = &mut **fm_panel;
                 if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
                     if operation.success_count > 0 {
@@ -383,7 +383,7 @@ impl App {
         }
 
         // Execute operation
-        if let Some(fm_panel) = self.layout_manager.file_manager_mut() {
+        if let Some(fm_panel) = self.get_first_file_manager_mut() {
             let panel_any: &mut dyn Any = &mut **fm_panel;
             if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
                 let result = match operation.operation_type {
