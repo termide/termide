@@ -25,10 +25,11 @@ A cross-platform terminal-based IDE, file manager, and virtual terminal written 
 - **System Resource Monitoring** - Real-time CPU, RAM, and disk usage indicators with device names and color-coded alerts
 - **Batch Operations** - Copy, move, and manage multiple files efficiently
 - **Search and Replace** - Interactive modals with live search preview, match counter, Tab/Shift+Tab navigation, replace counter feedback, and state preservation
-- **Powerful Editing** - Duplicate line/selection (Ctrl+D), configurable tab size, undo/redo support
-- **Multi-language Support** - UI localization (English, Russian) with proper keyboard layout support (including Cyrillic)
+- **Powerful Editing** - Duplicate line/selection (Ctrl+D), configurable tab size, undo/redo (Ctrl+Z/Ctrl+Y), word wrap with accurate mouse selection
+- **Multi-language Support** - UI localization (English, Russian) with full Cyrillic keyboard layout support (case-preserving hotkey translation)
+- **Clipboard System** - Reliable cut/copy/paste with persistent singleton for both CLIPBOARD and PRIMARY selections
 - **Robust Error Handling** - Graceful fallbacks for theme errors, file size limits (100 MB), and clear error messages
-- **Mouse Support** - Full mouse support for all panels and UI elements
+- **Mouse Support** - Full mouse support for all panels and UI elements with panel close confirmation
 
 ## Installation
 
@@ -45,23 +46,23 @@ Download the latest release for your platform from [GitHub Releases](https://git
 
 ```bash
 # Linux x86_64 (also works in WSL)
-wget https://github.com/termide/termide/releases/latest/download/termide-0.1.5-x86_64-unknown-linux-gnu.tar.gz
-tar xzf termide-0.1.5-x86_64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.2.0-x86_64-unknown-linux-gnu.tar.gz
+tar xzf termide-0.2.0-x86_64-unknown-linux-gnu.tar.gz
 ./termide
 
 # macOS Intel (x86_64)
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.1.5-x86_64-apple-darwin.tar.gz
-tar xzf termide-0.1.5-x86_64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.2.0-x86_64-apple-darwin.tar.gz
+tar xzf termide-0.2.0-x86_64-apple-darwin.tar.gz
 ./termide
 
 # macOS Apple Silicon (ARM64)
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.1.5-aarch64-apple-darwin.tar.gz
-tar xzf termide-0.1.5-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.2.0-aarch64-apple-darwin.tar.gz
+tar xzf termide-0.2.0-aarch64-apple-darwin.tar.gz
 ./termide
 
 # Linux ARM64 (Raspberry Pi, ARM servers)
-wget https://github.com/termide/termide/releases/latest/download/termide-0.1.5-aarch64-unknown-linux-gnu.tar.gz
-tar xzf termide-0.1.5-aarch64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.2.0-aarch64-unknown-linux-gnu.tar.gz
+tar xzf termide-0.2.0-aarch64-unknown-linux-gnu.tar.gz
 ./termide
 ```
 
@@ -74,12 +75,12 @@ Download and install the `.deb` package from [GitHub Releases](https://github.co
 
 ```bash
 # x86_64
-wget https://github.com/termide/termide/releases/download/0.1.5/termide_0.1.5_amd64.deb
-sudo dpkg -i termide_0.1.5_amd64.deb
+wget https://github.com/termide/termide/releases/download/0.2.0/termide_0.2.0_amd64.deb
+sudo dpkg -i termide_0.2.0_amd64.deb
 
 # ARM64
-wget https://github.com/termide/termide/releases/download/0.1.5/termide_0.1.5_arm64.deb
-sudo dpkg -i termide_0.1.5_arm64.deb
+wget https://github.com/termide/termide/releases/download/0.2.0/termide_0.2.0_arm64.deb
+sudo dpkg -i termide_0.2.0_arm64.deb
 ```
 
 </details>
@@ -91,12 +92,12 @@ Download and install the `.rpm` package from [GitHub Releases](https://github.co
 
 ```bash
 # x86_64
-wget https://github.com/termide/termide/releases/download/0.1.5/termide-0.1.5-1.x86_64.rpm
-sudo rpm -i termide-0.1.5-1.x86_64.rpm
+wget https://github.com/termide/termide/releases/download/0.2.0/termide-0.2.0-1.x86_64.rpm
+sudo rpm -i termide-0.2.0-1.x86_64.rpm
 
 # ARM64
-wget https://github.com/termide/termide/releases/download/0.1.5/termide-0.1.5-1.aarch64.rpm
-sudo rpm -i termide-0.1.5-1.aarch64.rpm
+wget https://github.com/termide/termide/releases/download/0.2.0/termide-0.2.0-1.aarch64.rpm
+sudo rpm -i termide-0.2.0-1.aarch64.rpm
 ```
 
 </details>
@@ -241,6 +242,7 @@ For detailed documentation, see:
 - `Alt+Q` - Quit application
 - `Alt+Left` / `Alt+Right` - Switch between panel groups (horizontal navigation)
 - `Alt+Up` / `Alt+Down` - Navigate panels within group (vertical navigation)
+- `Alt+W` / `Alt+S` / `Alt+A` / `Alt+D` - WASD-style panel navigation (alternative to arrows)
 - `Alt+PgUp` / `Alt+PgDn` - Move panel to previous/next group
 - `Alt+Home` / `Alt+End` - Move panel to first/last group
 - `Alt+Plus (=)` / `Alt+Minus (-)` - Increase/decrease active group width
@@ -274,6 +276,7 @@ For detailed documentation, see:
 - `Alt+F` - New file manager
 - `Alt+T` - New terminal
 - `Alt+E` - New editor
+- `Alt+L` - New debug log panel
 - `Alt+P` - Open configuration file in editor
 
 ## Configuration

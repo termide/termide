@@ -47,6 +47,12 @@ pub struct Config {
     /// When enabled, long lines are automatically wrapped to fit viewport width
     #[serde(default = "default_word_wrap")]
     pub word_wrap: bool,
+
+    /// Minimum log level (default: "info")
+    /// Possible values: "debug", "info", "warn", "error"
+    /// Logs below this level will not be recorded
+    #[serde(default = "default_min_log_level")]
+    pub min_log_level: String,
 }
 
 fn default_theme_name() -> String {
@@ -85,6 +91,10 @@ fn default_word_wrap() -> bool {
     true // Enabled by default
 }
 
+fn default_min_log_level() -> String {
+    "info".to_string()
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -98,6 +108,7 @@ impl Default for Config {
             fm_extended_view_width: default_fm_extended_view_width(),
             session_retention_days: default_session_retention_days(),
             word_wrap: default_word_wrap(),
+            min_log_level: default_min_log_level(),
         }
     }
 }

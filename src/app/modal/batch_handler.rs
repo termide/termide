@@ -57,13 +57,11 @@ impl App {
                             fm.get_current_directory().join(&destination)
                         }
                     } else {
-                        self.state
-                            .log_error(format!("Panel {} is not FileManager", panel_index));
+                        crate::logger::error(format!("Panel {} is not FileManager", panel_index));
                         return Ok(());
                     }
                 } else {
-                    self.state
-                        .log_error(format!("Panel with index {} not found", panel_index));
+                    crate::logger::error(format!("Panel with index {} not found", panel_index));
                     return Ok(());
                 }
             } else {
@@ -160,25 +158,23 @@ impl App {
 
                                 match result {
                                     Ok(_) => {
-                                        let t = i18n::t();
                                         let action_name = match operation.operation_type {
-                                            BatchOperationType::Copy => t.action_copied(),
-                                            BatchOperationType::Move => t.action_moved(),
+                                            BatchOperationType::Copy => "copied",
+                                            BatchOperationType::Move => "moved",
                                         };
-                                        self.state.log_success(format!(
-                                            "'{}' {}",
-                                            item_name, action_name
+                                        crate::logger::info(format!(
+                                            "File {}: {}",
+                                            action_name, item_name
                                         ));
                                         operation.increment_success();
                                     }
                                     Err(e) => {
-                                        let t = i18n::t();
                                         let action_name = match operation.operation_type {
-                                            BatchOperationType::Copy => t.action_copying(),
-                                            BatchOperationType::Move => t.action_moving(),
+                                            BatchOperationType::Copy => "copy",
+                                            BatchOperationType::Move => "move",
                                         };
-                                        self.state.log_error(format!(
-                                            "Ошибка {} '{}': {}",
+                                        crate::logger::error(format!(
+                                            "Failed to {} '{}': {}",
                                             action_name, item_name, e
                                         ));
                                         operation.increment_error();
@@ -374,8 +370,7 @@ impl App {
                 }
                 ConflictMode::SkipAll => {
                     // Skip file
-                    self.state
-                        .log_info(format!("'{}' пропущен (файл существует)", item_name));
+                    crate::logger::info(format!("'{}' пропущен (файл существует)", item_name));
                     operation.increment_skipped();
                     operation.advance();
                     self.process_batch_operation(operation);
@@ -403,8 +398,7 @@ impl App {
                             BatchOperationType::Copy => t.action_copied(),
                             BatchOperationType::Move => t.action_moved(),
                         };
-                        self.state
-                            .log_success(format!("'{}' {}", item_name, action_name));
+                        crate::logger::info(format!("'{}' {}", item_name, action_name));
                         operation.increment_success();
                     }
                     Err(e) => {
@@ -413,8 +407,10 @@ impl App {
                             BatchOperationType::Copy => t.action_copying(),
                             BatchOperationType::Move => t.action_moving(),
                         };
-                        self.state
-                            .log_error(format!("Ошибка {} '{}': {}", action_name, item_name, e));
+                        crate::logger::error(format!(
+                            "Ошибка {} '{}': {}",
+                            action_name, item_name, e
+                        ));
                         operation.increment_error();
                     }
                 }

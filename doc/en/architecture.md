@@ -18,7 +18,7 @@ TermIDE is a terminal-based IDE built with Rust using the `ratatui` TUI framewor
 │          │  │                                      │    │
 │          │  └──────────────────────────────────────┘    │
 │          │  ─[X][▶] Terminal: bash ──────────────────   │
-│          │  ─[X][▶] Debug ────────────────────────────  │
+│          │  ─[X][▶] Log ──────────────────────────────  │
 ├──────────┴──────────────────────────────────────────────┤
 │ Status: file.rs:42  Ln 10, Col 5        Disk: 83%      │
 └─────────────────────────────────────────────────────────┘
@@ -172,7 +172,7 @@ pub trait Panel {
 - ANSI color support
 - Resize handling
 
-**Debug** (`src/panels/debug.rs`)
+**Log** (`src/panels/debug.rs`)
 - Application state inspection
 - Log viewer
 - Panel information

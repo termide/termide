@@ -24,7 +24,7 @@ impl App {
             match selected[0] {
                 0 => {
                     // Save and close
-                    self.state.log_info("Selected: Save and close editor");
+                    crate::logger::info("Selected: Save and close editor");
                     if let Some(panel) = self.layout_manager.active_panel_mut() {
                         use std::any::Any;
                         let panel_any: &mut dyn Any = &mut **panel;
@@ -34,11 +34,11 @@ impl App {
                                 // File already has path - just save
                                 let t = i18n::t();
                                 if let Err(e) = editor.save() {
-                                    self.state.log_error(format!("Save error: {}", e));
+                                    crate::logger::error(format!("Save error: {}", e));
                                     self.state.set_error(t.status_error_save(&e.to_string()));
                                     return Ok(());
                                 }
-                                self.state.log_success("File saved before closing");
+                                crate::logger::info("File saved before closing");
                             } else {
                                 // Unnamed file - need to request name
                                 let t = i18n::t();
@@ -65,12 +65,12 @@ impl App {
                 }
                 1 => {
                     // Close without saving
-                    self.state.log_info("Selected: Close without saving");
+                    crate::logger::info("Selected: Close without saving");
                     self.close_panel_at_index(0); // panel_index is obsolete
                 }
                 _ => {
                     // Cancel - do nothing
-                    self.state.log_info("Selected: Cancel closing");
+                    crate::logger::info("Selected: Cancel closing");
                 }
             }
         }
@@ -148,8 +148,7 @@ impl App {
                                 } else {
                                     t.action_copied()
                                 };
-                                self.state
-                                    .log_success(format!("'{}' {}", item_name, action_name));
+                                crate::logger::info(format!("'{}' {}", item_name, action_name));
                                 self.state
                                     .set_info(t.status_item_actioned(item_name, action_name));
 
@@ -170,8 +169,7 @@ impl App {
                                 } else {
                                     t.action_copying()
                                 };
-                                self.state
-                                    .log_error(format!("Ошибка {}: {}", action_name, e));
+                                crate::logger::error(format!("Ошибка {}: {}", action_name, e));
                                 self.state
                                     .set_error(t.status_error_action(action_name, &e.to_string()));
                             }
@@ -180,8 +178,7 @@ impl App {
                 }
             } else {
                 let t = i18n::t();
-                self.state
-                    .log_info(format!("Operation '{}' skipped", item_name));
+                crate::logger::info(format!("Operation '{}' skipped", item_name));
                 self.state.set_info(t.status_operation_skipped(item_name));
             }
         }

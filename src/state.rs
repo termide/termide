@@ -4,9 +4,6 @@ use crate::theme::Theme;
 use crate::ui::modal::{
     ConfirmModal, ConflictModal, InfoModal, InputModal, OverwriteModal, SearchModal, SelectModal,
 };
-use std::collections::VecDeque;
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
@@ -249,25 +246,6 @@ pub struct LayoutInfo {
     pub main_panel_width: u16,
 }
 
-/// Debug log entry
-#[derive(Debug, Clone)]
-pub struct LogEntry {
-    /// Timestamp (monotonic time in milliseconds from start)
-    pub timestamp: u64,
-    /// Message level
-    pub level: LogLevel,
-    /// Message text
-    pub message: String,
-}
-
-/// Log level
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LogLevel {
-    Info,
-    Error,
-    Success,
-}
-
 /// UI components state
 #[derive(Debug, Default)]
 pub struct UiState {
@@ -299,69 +277,6 @@ impl Default for TerminalState {
     }
 }
 
-/// Logging system state
-#[derive(Debug)]
-pub struct LoggingState {
-    /// Debug log (last N messages)
-    pub entries: VecDeque<LogEntry>,
-    /// Maximum number of entries in log
-    pub max_entries: usize,
-    /// Application start time (for timestamp calculation)
-    pub start_time: std::time::Instant,
-    /// Log file path
-    pub file_path: PathBuf,
-}
-
-impl LoggingState {
-    /// Create new logging system
-    pub fn new(file_path: PathBuf, max_entries: usize) -> Self {
-        // Clear log file on startup
-        if let Ok(mut file) = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&file_path)
-        {
-            let _ = writeln!(file, "=== TermIDE Log Start ===");
-        }
-
-        Self {
-            entries: VecDeque::new(),
-            max_entries,
-            start_time: std::time::Instant::now(),
-            file_path,
-        }
-    }
-
-    /// Add entry to log
-    pub fn add_entry(&mut self, level: LogLevel, message: String) {
-        let timestamp = self.start_time.elapsed().as_millis() as u64;
-        let entry = LogEntry {
-            timestamp,
-            level,
-            message: message.clone(),
-        };
-
-        // Add to queue
-        self.entries.push_back(entry);
-
-        // Limit queue size
-        while self.entries.len() > self.max_entries {
-            self.entries.pop_front();
-        }
-
-        // Write to file
-        if let Ok(mut file) = OpenOptions::new().append(true).open(&self.file_path) {
-            let level_str = match level {
-                LogLevel::Info => "INFO",
-                LogLevel::Error => "ERROR",
-                LogLevel::Success => "SUCCESS",
-            };
-            let _ = writeln!(file, "[{}ms] {}: {}", timestamp, level_str, message);
-        }
-    }
-}
-
 /// Global application state
 #[derive(Debug)]
 pub struct AppState {
@@ -379,8 +294,6 @@ pub struct AppState {
     pub active_modal: Option<ActiveModal>,
     /// Action pending modal result
     pub pending_action: Option<PendingAction>,
-    /// Logging system
-    pub logging: LoggingState,
     /// Receiver channel for background directory size calculation results
     pub dir_size_receiver: Option<mpsc::Receiver<DirSizeResult>>,
     /// Receiver channel for git status update events
@@ -426,13 +339,17 @@ impl AppState {
             main_panel_width: crate::constants::DEFAULT_MAIN_PANEL_WIDTH,
         };
 
-        // Get log path from configuration
+        // Initialize global logger
         let log_file_path = config.get_log_file_path();
+        let min_log_level = crate::logger::LogLevel::from_str(&config.min_log_level)
+            .unwrap_or(crate::logger::LogLevel::Info);
+        crate::logger::init(
+            log_file_path,
+            crate::constants::MAX_LOG_ENTRIES,
+            min_log_level,
+        );
 
-        // Create logging system
-        let logging = LoggingState::new(log_file_path, crate::constants::MAX_LOG_ENTRIES);
-
-        let mut state = Self {
+        let state = Self {
             should_quit: false,
             ui: UiState::default(),
             terminal: TerminalState::default(),
@@ -440,7 +357,6 @@ impl AppState {
             layout_info,
             active_modal: None,
             pending_action: None,
-            logging,
             dir_size_receiver: None,
             git_watcher_receiver: None,
             git_watcher: None,
@@ -452,7 +368,7 @@ impl AppState {
             last_resource_update: std::time::Instant::now(),
         };
 
-        state.log_info("Application started");
+        crate::logger::info("Application started");
         state
     }
 
@@ -638,26 +554,6 @@ impl AppState {
     /// Clear status message
     pub fn clear_status(&mut self) {
         self.ui.status_message = None;
-    }
-
-    /// Log informational message
-    pub fn log_info(&mut self, message: impl Into<String>) {
-        self.logging.add_entry(LogLevel::Info, message.into());
-    }
-
-    /// Log error
-    pub fn log_error(&mut self, message: impl Into<String>) {
-        self.logging.add_entry(LogLevel::Error, message.into());
-    }
-
-    /// Log successful operation
-    pub fn log_success(&mut self, message: impl Into<String>) {
-        self.logging.add_entry(LogLevel::Success, message.into());
-    }
-
-    /// Get log entries
-    pub fn get_log_entries(&self) -> &VecDeque<LogEntry> {
-        &self.logging.entries
     }
 
     /// Create EditorConfig with settings from global config

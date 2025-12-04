@@ -158,6 +158,14 @@ impl Translation for English {
         "No matches"
     }
 
+    fn editor_deletion_marker(&self, count: usize) -> String {
+        if count == 1 {
+            format!("{} line deleted", count)
+        } else {
+            format!("{} lines deleted", count)
+        }
+    }
+
     // Terminal
     fn terminal_exit_confirm(&self) -> &str {
         "Process is still running. Close terminal?"
@@ -572,7 +580,7 @@ impl Translation for English {
     }
 
     fn menu_debug(&self) -> &str {
-        "Debug"
+        "Log"
     }
 
     fn menu_preferences(&self) -> &str {

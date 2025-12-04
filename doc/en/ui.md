@@ -35,7 +35,7 @@ Menu activation/deactivation and each item can be accessed by mouse click or [ke
 - `Files` opens a panel with file manager
 - `Terminal` opens a panel with terminal
 - `Editor` opens a panel with new file editor
-- `Debug` opens a debug panel
+- `Log` opens a log panel
 - `Preferences` opens configuration file in editor
 - `Help` opens help window
 - `Quit` exits the application
@@ -96,7 +96,7 @@ The device name is automatically detected from the filesystem:
 | `Alt+F`           | Open file manager panel                    |
 | `Alt+T`           | Open terminal panel                        |
 | `Alt+E`           | Open new file editor panel                 |
-| `Alt+D`           | Open debug panel                           |
+| `Alt+L`           | Open log panel                             |
 | `Alt+P`           | Open configuration file in editor          |
 | `Alt+H`           | Open help window                           |
 | `Alt+Q`           | Close application                          |
@@ -107,6 +107,7 @@ The device name is automatically detected from the filesystem:
 | `Alt+Right`       | Go to next panel group (horizontal)        |
 | `Alt+Up`          | Go to previous panel in group (vertical)   |
 | `Alt+Down`        | Go to next panel in group (vertical)       |
+| `Alt+W/S/A/D`     | WASD-style panel navigation (alternative to arrows) |
 | `Alt+PgUp`        | Move panel to previous group               |
 | `Alt+PgDn`        | Move panel to next group                   |
 | `Alt+Home`        | Move panel to first group                  |

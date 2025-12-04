@@ -29,7 +29,7 @@ impl App {
                                 path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
                             let is_dir = path.is_dir();
 
-                            self.state.log_info(format!(
+                            crate::logger::info(format!(
                                 "Attempting to delete {}: {}",
                                 if is_dir { "directory" } else { "file" },
                                 item_name
@@ -37,15 +37,15 @@ impl App {
 
                             match fm.delete_path(path.clone()) {
                                 Ok(_) => {
-                                    self.state.log_success(format!(
-                                        "{} '{}' deleted",
+                                    crate::logger::info(format!(
+                                        "{} deleted: {}",
                                         if is_dir { "Directory" } else { "File" },
                                         item_name
                                     ));
                                     success_count += 1;
                                 }
                                 Err(e) => {
-                                    self.state.log_error(format!(
+                                    crate::logger::error(format!(
                                         "Deletion error '{}': {}",
                                         item_name, e
                                     ));
@@ -78,11 +78,10 @@ impl App {
                         // Refresh directory contents
                         let _ = fm.load_directory();
                     } else {
-                        self.state
-                            .log_error("FileManager panel could not be accessed".to_string());
+                        crate::logger::error("FileManager panel could not be accessed".to_string());
                     }
                 } else {
-                    self.state.log_error("FileManager not found".to_string());
+                    crate::logger::error("FileManager not found".to_string());
                 }
             }
         }

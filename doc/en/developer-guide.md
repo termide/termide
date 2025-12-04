@@ -100,7 +100,7 @@ termide/
 │   │   ├── file_manager/     # File manager panel
 │   │   ├── editor.rs         # Text editor panel
 │   │   ├── terminal_pty.rs   # Terminal panel with PTY
-│   │   ├── debug.rs          # Debug information panel
+│   │   ├── debug.rs          # Log panel
 │   │   └── welcome.rs        # Welcome screen panel
 │   ├── state.rs               # Application state management
 │   ├── system_monitor.rs      # CPU/RAM monitoring
@@ -277,9 +277,9 @@ state.log_error(format!("Error: {}", error));
 state.log_debug("Debug message");
 ```
 
-### Debug Panel
+### Log Panel
 
-Open with `Alt+D`:
+Open with `Alt+L`:
 - Shows application state
 - Displays recent log entries
 - Shows panel information

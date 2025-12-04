@@ -17,8 +17,6 @@ impl App {
     ) -> Result<()> {
         if let Some(name) = value.downcast_ref::<String>() {
             let t = i18n::t();
-            self.state
-                .log_info(format!("Attempting to create file: {}", name));
             // Get FileManager and create file
             if let Some(fm_panel) = self.layout_manager.file_manager_mut() {
                 // Use Any trait for downcast
@@ -27,24 +25,22 @@ impl App {
                 if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
                     match fm.create_file(name.clone()) {
                         Ok(_) => {
-                            self.state.log_success(format!("File '{}' created", name));
+                            crate::logger::info(format!("File created: {}", name));
                             self.state.set_info(t.status_file_created(name));
                             // Refresh directory contents
                             let _ = fm.load_directory();
                         }
                         Err(e) => {
-                            self.state
-                                .log_error(format!("File creation error '{}': {}", name, e));
+                            crate::logger::error(format!("File creation error '{}': {}", name, e));
                             self.state
                                 .set_error(t.status_error_create_file(&e.to_string()));
                         }
                     }
                 } else {
-                    self.state
-                        .log_error("FileManager panel could not be accessed".to_string());
+                    crate::logger::error("FileManager panel could not be accessed".to_string());
                 }
             } else {
-                self.state.log_error("FileManager not found".to_string());
+                crate::logger::error("FileManager not found".to_string());
             }
         }
         Ok(())
@@ -59,8 +55,6 @@ impl App {
     ) -> Result<()> {
         if let Some(name) = value.downcast_ref::<String>() {
             let t = i18n::t();
-            self.state
-                .log_info(format!("Attempting to create directory: {}", name));
             // Get FileManager and create directory
             if let Some(fm_panel) = self.layout_manager.file_manager_mut() {
                 use std::any::Any;
@@ -68,25 +62,25 @@ impl App {
                 if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
                     match fm.create_directory(name.clone()) {
                         Ok(_) => {
-                            self.state
-                                .log_success(format!("Directory '{}' created", name));
+                            crate::logger::info(format!("Directory created: {}", name));
                             self.state.set_info(t.status_dir_created(name));
                             // Refresh directory contents
                             let _ = fm.load_directory();
                         }
                         Err(e) => {
-                            self.state
-                                .log_error(format!("Directory creation error '{}': {}", name, e));
+                            crate::logger::error(format!(
+                                "Directory creation error '{}': {}",
+                                name, e
+                            ));
                             self.state
                                 .set_error(t.status_error_create_dir(&e.to_string()));
                         }
                     }
                 } else {
-                    self.state
-                        .log_error("FileManager panel could not be accessed".to_string());
+                    crate::logger::error("FileManager panel could not be accessed".to_string());
                 }
             } else {
-                self.state.log_error("FileManager not found".to_string());
+                crate::logger::error("FileManager not found".to_string());
             }
         }
         Ok(())
@@ -101,8 +95,6 @@ impl App {
     ) -> Result<()> {
         if let Some(filename) = value.downcast_ref::<String>() {
             let t = i18n::t();
-            self.state
-                .log_info(format!("Attempting to save file: {}", filename));
             // Get active Editor panel and save file
             if let Some(panel) = self.layout_manager.active_panel_mut() {
                 use std::any::Any;
@@ -112,12 +104,11 @@ impl App {
                     let file_path = PathBuf::from(filename);
                     match editor.save_file_as(file_path.clone()) {
                         Ok(_) => {
-                            self.state.log_success(format!("File '{}' saved", filename));
+                            crate::logger::info(format!("File saved as: {}", filename));
                             self.state.set_info(t.status_file_saved(filename));
                         }
                         Err(e) => {
-                            self.state
-                                .log_error(format!("Save error '{}': {}", filename, e));
+                            crate::logger::error(format!("Save error '{}': {}", filename, e));
                             self.state.set_error(t.status_error_save(&e.to_string()));
                         }
                     }

@@ -171,6 +171,15 @@ impl Translation for Russian {
         "Нет совпадений"
     }
 
+    fn editor_deletion_marker(&self, count: usize) -> String {
+        let word = match count % 10 {
+            1 if count % 100 != 11 => "строка удалена",
+            2..=4 if count % 100 < 10 || count % 100 >= 20 => "строки удалены",
+            _ => "строк удалено",
+        };
+        format!("{} {}", count, word)
+    }
+
     // Terminal
     fn terminal_exit_confirm(&self) -> &str {
         "Процесс еще выполняется. Закрыть терминал?"
@@ -585,7 +594,7 @@ impl Translation for Russian {
     }
 
     fn menu_debug(&self) -> &str {
-        "Отладка"
+        "Журнал"
     }
 
     fn menu_preferences(&self) -> &str {

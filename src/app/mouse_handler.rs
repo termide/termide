@@ -89,8 +89,7 @@ impl App {
                 .and_then(|n| n.to_str())
                 .unwrap_or("?");
             let t = crate::i18n::t();
-            self.state
-                .log_info(format!("Attempting to open file: {}", filename));
+            crate::logger::info(format!("Attempting to open file: {}", filename));
 
             match crate::panels::editor::Editor::open_file_with_config(
                 file_path.clone(),
@@ -98,14 +97,12 @@ impl App {
             ) {
                 Ok(editor_panel) => {
                     self.add_panel(Box::new(editor_panel));
-                    self.state
-                        .log_success(format!("File '{}' opened in editor", filename));
+                    crate::logger::info(format!("File '{}' opened in editor", filename));
                     self.state.set_info(t.editor_file_opened(filename));
                 }
                 Err(e) => {
                     let error_msg = t.status_error_open_file(filename, &e.to_string());
-                    self.state
-                        .log_error(format!("Error opening '{}': {}", filename, e));
+                    crate::logger::error(format!("Error opening '{}': {}", filename, e));
                     self.state.set_error(error_msg);
                 }
             }
@@ -189,38 +186,16 @@ impl App {
             // [▶]/[▼] button: offsets 4-6
 
             if (1..=3).contains(&relative_x) {
-                // Click on [X] button - close panel
+                // Click on [X] button - close panel with confirmation if needed
+                crate::logger::debug("Panel close button [X] clicked");
+                // First, activate the clicked panel
                 if let Some(group) = self.layout_manager.panel_groups.get_mut(group_idx) {
-                    group.remove_panel(panel_idx);
-
-                    // If group is now empty, remove it
-                    if group.is_empty() {
-                        self.layout_manager.panel_groups.remove(group_idx);
-                        // Adjust focus if needed
-                        if let crate::layout_manager::FocusTarget::Group(idx) =
-                            self.layout_manager.focus
-                        {
-                            if !self.layout_manager.panel_groups.is_empty()
-                                && idx >= self.layout_manager.panel_groups.len()
-                            {
-                                self.layout_manager.focus =
-                                    crate::layout_manager::FocusTarget::Group(
-                                        self.layout_manager.panel_groups.len() - 1,
-                                    );
-                            }
-                        }
-                        // Пропорционально перераспределить ширины после удаления группы
-                        let terminal_width = self.state.terminal.width;
-                        let fm_width = if self.layout_manager.has_file_manager() {
-                            DEFAULT_FM_WIDTH
-                        } else {
-                            0
-                        };
-                        let available_width = terminal_width.saturating_sub(fm_width);
-                        self.layout_manager
-                            .redistribute_widths_proportionally(available_width);
-                    }
+                    group.set_expanded(panel_idx);
                 }
+                self.layout_manager.focus = crate::layout_manager::FocusTarget::Group(group_idx);
+
+                // Now use the same close logic as keyboard shortcut (with confirmation)
+                self.handle_close_panel_request(0)?;
                 return Ok(true);
             } else if (4..=6).contains(&relative_x) {
                 // Click on [▶]/[▼] button - expand/collapse panel

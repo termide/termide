@@ -117,6 +117,23 @@ Press `Ctrl+H` to open an interactive replace modal with two input fields:
 - **Hold + move**: Text selection
 - **Scroll wheel**: Scroll editor content
 
+**Note:** Mouse selection works correctly in word wrap mode, accounting for wrapped lines.
+
+## Word Wrap
+
+When word wrap is enabled (configurable in settings), long lines are automatically wrapped to fit the panel width. The editor properly handles:
+
+- **Cursor positioning**: Cursor navigation and display work correctly across wrapped lines
+- **Mouse selection**: Clicks and drags accurately select text even when lines span multiple visual rows
+- **Line numbers**: Displayed for logical lines, not visual rows
+- **Editing operations**: All editing commands (cut, copy, paste, undo/redo) work seamlessly with wrapped content
+
+Enable/disable word wrap in your configuration file (`~/.config/termide/config.toml`):
+```toml
+[editor]
+word_wrap = true  # or false
+```
+
 ## Status Bar Information
 
 When working in the editor, the status bar displays:

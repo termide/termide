@@ -224,6 +224,11 @@ impl FileManager {
                     });
                 }
             }
+        } else {
+            crate::logger::warn(format!(
+                "Failed to read directory: {}",
+                self.current_path.display()
+            ));
         }
 
         // Sort: directories first, then files

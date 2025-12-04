@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use regex::Regex;
 use similar::TextDiff;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -34,6 +34,8 @@ pub struct GitDiffCache {
     file_path: PathBuf,
     /// Map of line number (0-based) to status
     line_statuses: HashMap<usize, LineStatus>,
+    /// Map of line numbers to count of deleted lines after them (line_idx -> deletion_count)
+    deleted_after_lines: HashMap<usize, usize>,
     /// Timestamp when diff was last fetched
     last_updated: std::time::Instant,
     /// Original content from HEAD (for in-memory diff)
@@ -46,6 +48,7 @@ impl GitDiffCache {
         Self {
             file_path,
             line_statuses: HashMap::new(),
+            deleted_after_lines: HashMap::new(),
             last_updated: std::time::Instant::now(),
             original_content: None,
         }
@@ -53,15 +56,47 @@ impl GitDiffCache {
 
     /// Load original content from HEAD
     pub fn load_original_from_head(&mut self) -> Result<()> {
-        // Get file path relative to git root
+        // Convert absolute path to relative path from git root
+        let git_root_output = Command::new("git")
+            .arg("rev-parse")
+            .arg("--show-toplevel")
+            .output()
+            .context("Failed to get git root")?;
+
+        if !git_root_output.status.success() {
+            crate::logger::warn(format!(
+                "Failed to get git root for file: {}",
+                self.file_path.display()
+            ));
+            self.original_content = Some(String::new());
+            return Ok(());
+        }
+
+        let git_root = String::from_utf8(git_root_output.stdout)
+            .context("Failed to parse git root as UTF-8")?
+            .trim()
+            .to_string();
+        let git_root_path = std::path::Path::new(&git_root);
+
+        // Get relative path from git root
+        let relative_path = self
+            .file_path
+            .strip_prefix(git_root_path)
+            .context("File is not within git repository")?;
+
+        // Get file content from HEAD
         let output = Command::new("git")
             .arg("show")
-            .arg(format!("HEAD:{}", self.file_path.display()))
+            .arg(format!("HEAD:{}", relative_path.display()))
             .output()
             .context("Failed to execute git show")?;
 
         if !output.status.success() {
             // File might be new (not in HEAD yet)
+            crate::logger::debug(format!(
+                "File not in HEAD (new file): {}",
+                self.file_path.display()
+            ));
             self.original_content = Some(String::new());
             return Ok(());
         }
@@ -69,7 +104,13 @@ impl GitDiffCache {
         let content =
             String::from_utf8(output.stdout).context("Failed to parse git show output as UTF-8")?;
 
+        let content_len = content.len();
         self.original_content = Some(content);
+        crate::logger::debug(format!(
+            "Loaded {} bytes from HEAD for: {}",
+            content_len,
+            self.file_path.display()
+        ));
         Ok(())
     }
 
@@ -84,40 +125,53 @@ impl GitDiffCache {
 
         // Compute diff using similar crate
         let diff = TextDiff::from_lines(original.as_str(), current_content);
-        self.line_statuses = compute_line_statuses_from_textdiff(&diff);
+        let (statuses, deleted_after) = compute_line_statuses_from_textdiff(&diff);
+
+        // Use the computed results directly - they are the source of truth
+        // TextDiff compares HEAD with current buffer, which correctly handles:
+        // - Pure deletions (creates markers)
+        // - Modified line deletions (creates markers)
+        // - Restored lines via undo (removes markers)
+        self.line_statuses = statuses;
+        self.deleted_after_lines = deleted_after;
         self.last_updated = std::time::Instant::now();
 
         Ok(())
     }
 
-    /// Update git diff by running `git diff HEAD --unified=0 -- <file>`
+    /// Update git diff by comparing file on disk with HEAD
     pub fn update(&mut self) -> Result<()> {
-        // Run git diff against HEAD
-        let output = Command::new("git")
-            .arg("diff")
-            .arg("HEAD")
-            .arg("--unified=0")
-            .arg("--")
-            .arg(&self.file_path)
-            .output()
-            .context("Failed to execute git diff")?;
+        // Load original content from HEAD
+        self.load_original_from_head()?;
 
-        // If git command failed, file might not be in a repo or not tracked
-        if !output.status.success() {
-            self.line_statuses.clear();
-            return Ok(());
-        }
+        // If original content is empty (file not in HEAD or error), clear statuses
+        let original = match self.original_content.as_ref() {
+            Some(content) if !content.is_empty() => content,
+            _ => {
+                self.line_statuses.clear();
+                self.deleted_after_lines.clear();
+                return Ok(());
+            }
+        };
 
-        // Parse diff output
-        let diff_text =
-            String::from_utf8(output.stdout).context("Failed to parse git diff output as UTF-8")?;
+        // Read current file content from disk
+        let current_content = match std::fs::read_to_string(&self.file_path) {
+            Ok(content) => content,
+            Err(_) => {
+                // File might not exist or can't be read
+                self.line_statuses.clear();
+                self.deleted_after_lines.clear();
+                return Ok(());
+            }
+        };
 
-        let hunks = parse_diff_hunks(&diff_text)?;
-        self.line_statuses = compute_line_statuses(hunks);
+        // Use TextDiff for consistency with update_from_buffer()
+        let diff = TextDiff::from_lines(original.as_str(), &current_content);
+        let (statuses, deleted_after) = compute_line_statuses_from_textdiff(&diff);
+
+        self.line_statuses = statuses;
+        self.deleted_after_lines = deleted_after;
         self.last_updated = std::time::Instant::now();
-
-        // Also load original content for future in-memory diffs
-        let _ = self.load_original_from_head();
 
         Ok(())
     }
@@ -128,6 +182,16 @@ impl GitDiffCache {
             .get(&line)
             .copied()
             .unwrap_or(LineStatus::Unchanged)
+    }
+
+    /// Check if line has a deletion marker after it
+    pub fn has_deletion_marker(&self, line: usize) -> bool {
+        self.deleted_after_lines.contains_key(&line)
+    }
+
+    /// Get count of deleted lines after the given line
+    pub fn get_deletion_count(&self, line: usize) -> usize {
+        self.deleted_after_lines.get(&line).copied().unwrap_or(0)
     }
 
     /// Check if cache is stale (older than threshold)
@@ -171,8 +235,9 @@ fn parse_diff_hunks(diff_text: &str) -> Result<Vec<DiffHunk>> {
 }
 
 /// Compute line statuses from diff hunks
-fn compute_line_statuses(hunks: Vec<DiffHunk>) -> HashMap<usize, LineStatus> {
+fn compute_line_statuses(hunks: Vec<DiffHunk>) -> (HashMap<usize, LineStatus>, HashSet<usize>) {
     let mut statuses = HashMap::new();
+    let mut deleted_after = HashSet::new();
 
     for hunk in hunks {
         if hunk.old_count == 0 && hunk.new_count > 0 {
@@ -191,21 +256,22 @@ fn compute_line_statuses(hunks: Vec<DiffHunk>) -> HashMap<usize, LineStatus> {
             }
         } else if hunk.old_count > 0 && hunk.new_count == 0 {
             // Lines deleted
-            // Show marker on the line before deletion point
+            // Show deletion marker on the line before deletion point
             // If deleting at start of file (old_start == 1), mark line 0
             let marker_line = hunk.new_start.saturating_sub(1);
-            statuses.insert(marker_line, LineStatus::DeletedAfter);
+            deleted_after.insert(marker_line);
         }
     }
 
-    statuses
+    (statuses, deleted_after)
 }
 
 /// Compute line statuses from TextDiff (similar crate)
 fn compute_line_statuses_from_textdiff<'a>(
     diff: &TextDiff<'a, 'a, 'a, str>,
-) -> HashMap<usize, LineStatus> {
+) -> (HashMap<usize, LineStatus>, HashMap<usize, usize>) {
     let mut statuses = HashMap::new();
+    let mut deleted_after = HashMap::new();
     let mut new_line_idx = 0;
 
     for change in diff.iter_all_changes() {
@@ -222,20 +288,17 @@ fn compute_line_statuses_from_textdiff<'a>(
                 new_line_idx += 1;
             }
             ChangeTag::Delete => {
-                // Deleted line - mark the current position
-                // If we're at the beginning, mark line 0
-                // Otherwise mark the previous line
-                if new_line_idx > 0 {
-                    statuses.insert(new_line_idx - 1, LineStatus::DeletedAfter);
-                } else {
-                    statuses.insert(0, LineStatus::DeletedAfter);
-                }
+                // Delete tags will be processed in the second pass
+                // to distinguish between modifications and pure deletions
             }
         }
     }
 
-    // Second pass: identify modified lines
-    // A modified line is when we have Delete followed by Insert at same position
+    // Second pass: identify modified lines and count consecutive deletions
+    // Process Delete and Insert pairwise:
+    // - Delete immediately followed by Insert = Modification (1:1 pairing)
+    // - Consecutive Deletes NOT followed by Insert = Pure deletions (count them)
+    // - Insert NOT preceded by Delete = Pure addition (already handled in first pass)
     let changes: Vec<_> = diff.iter_all_changes().collect();
     let mut i = 0;
     let mut new_idx = 0;
@@ -249,46 +312,36 @@ fn compute_line_statuses_from_textdiff<'a>(
                 i += 1;
             }
             ChangeTag::Delete => {
-                // Check if next change is Insert (indicating modification)
-                let mut delete_count = 0;
-                let mut j = i;
-                while j < changes.len() && changes[j].tag() == ChangeTag::Delete {
-                    delete_count += 1;
-                    j += 1;
-                }
-
-                let mut insert_count = 0;
-                let mut k = j;
-                while k < changes.len() && changes[k].tag() == ChangeTag::Insert {
-                    insert_count += 1;
-                    k += 1;
-                }
-
-                if insert_count > 0 && delete_count > 0 {
-                    // This is a modification
-                    // Mark the inserted lines as Modified instead of Added
-                    for offset in 0..insert_count {
-                        statuses.insert(new_idx + offset, LineStatus::Modified);
-                    }
-                    new_idx += insert_count;
-                    i = k;
-                } else if insert_count > 0 {
-                    // Pure insertion (already marked as Added)
-                    new_idx += insert_count;
-                    i = k;
+                // Check if immediately followed by Insert (indicating modification)
+                if i + 1 < changes.len() && changes[i + 1].tag() == ChangeTag::Insert {
+                    // Modification: pair this Delete with the next Insert
+                    statuses.insert(new_idx, LineStatus::Modified);
+                    new_idx += 1;
+                    i += 2; // Skip both Delete and Insert
                 } else {
-                    // Pure deletion (already marked)
-                    i = j;
+                    // Count consecutive deletions
+                    let mut deletion_count = 0;
+                    while i < changes.len() && changes[i].tag() == ChangeTag::Delete {
+                        deletion_count += 1;
+                        i += 1;
+                    }
+
+                    // Place deletion marker after previous line with deletion count
+                    let marker_line_idx = if new_idx > 0 { new_idx - 1 } else { 0 };
+                    deleted_after.insert(marker_line_idx, deletion_count);
+
+                    // new_idx stays the same (no new lines added)
                 }
             }
             ChangeTag::Insert => {
+                // Pure insertion (already marked as Added in first pass)
                 new_idx += 1;
                 i += 1;
             }
         }
     }
 
-    statuses
+    (statuses, deleted_after)
 }
 
 #[cfg(test)]

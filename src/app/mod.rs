@@ -34,10 +34,10 @@ impl App {
             Ok((watcher, receiver)) => {
                 state.git_watcher = Some(watcher);
                 state.git_watcher_receiver = Some(receiver);
-                state.log_info("Git watcher initialized");
+                crate::logger::debug("Git watcher initialized");
             }
             Err(e) => {
-                state.log_error(format!("Failed to initialize git watcher: {}", e));
+                crate::logger::error(format!("Failed to initialize git watcher: {}", e));
             }
         }
 
@@ -46,23 +46,24 @@ impl App {
             Ok((watcher, receiver)) => {
                 state.fs_watcher = Some(watcher);
                 state.fs_watcher_receiver = Some(receiver);
-                state.log_info("FS watcher initialized");
+                crate::logger::debug("FS watcher initialized");
             }
             Err(e) => {
-                state.log_error(format!("Failed to initialize FS watcher: {}", e));
+                crate::logger::error(format!("Failed to initialize FS watcher: {}", e));
             }
         }
 
         // Get project root from current working directory
         let project_root = std::env::current_dir().unwrap_or_else(|_| {
             // Fallback to home directory if current_dir fails
+            crate::logger::warn("current_dir() failed, using home directory fallback");
             dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"))
         });
 
         // Clean up old sessions (configurable retention period)
         let retention_days = state.config.session_retention_days;
         if let Err(e) = crate::session::cleanup_old_sessions(&project_root, retention_days) {
-            state.log_error(format!("Failed to cleanup old sessions: {}", e));
+            crate::logger::warn(format!("Failed to cleanup old sessions: {}", e));
         }
 
         Self {
@@ -372,6 +373,7 @@ impl App {
 
         // Save session to file
         session.save(&self.project_root)?;
+        crate::logger::info("Session saved");
         Ok(())
     }
 
@@ -394,10 +396,11 @@ impl App {
             term_height,
             term_width,
         )?;
+        crate::logger::info("Session loaded");
 
         // Clean up orphaned buffer files (not referenced in session anymore)
         if let Err(e) = crate::session::cleanup_orphaned_buffers(&session_dir) {
-            eprintln!("Warning: Failed to cleanup orphaned buffers: {}", e);
+            crate::logger::warn(format!("Failed to cleanup orphaned buffers: {}", e));
         }
 
         Ok(())
@@ -407,8 +410,7 @@ impl App {
     pub fn auto_save_session(&mut self) {
         if let Err(e) = self.save_session() {
             // Log error but don't interrupt user workflow
-            // In a production app, you might want to log this to a file
-            eprintln!("Warning: Failed to auto-save session: {}", e);
+            crate::logger::error(format!("Failed to auto-save session: {}", e));
         }
     }
 }

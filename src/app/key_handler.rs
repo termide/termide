@@ -86,21 +86,18 @@ impl App {
                 .and_then(|n| n.to_str())
                 .unwrap_or("?");
             let t = i18n::t();
-            self.state
-                .log_info(format!("Attempting to open file: {}", filename));
+            crate::logger::info(format!("Attempting to open file: {}", filename));
 
             match Editor::open_file_with_config(file_path.clone(), self.state.editor_config()) {
                 Ok(editor_panel) => {
                     self.add_panel(Box::new(editor_panel));
                     self.auto_save_session();
-                    self.state
-                        .log_success(format!("File '{}' opened in editor", filename));
+                    crate::logger::info(format!("File '{}' opened in editor", filename));
                     self.state.set_info(t.editor_file_opened(filename));
                 }
                 Err(e) => {
                     let error_msg = t.status_error_open_file(filename, &e.to_string());
-                    self.state
-                        .log_error(format!("Error opening '{}': {}", filename, e));
+                    crate::logger::error(format!("Error opening '{}': {}", filename, e));
                     self.state.set_error(error_msg);
                 }
             }
@@ -339,10 +336,12 @@ impl App {
 
     /// Handle panel close request with confirmation if needed
     /// NOTE: panel_index parameter is obsolete with LayoutManager
-    fn handle_close_panel_request(&mut self, _panel_index: usize) -> Result<()> {
+    pub(crate) fn handle_close_panel_request(&mut self, _panel_index: usize) -> Result<()> {
+        crate::logger::debug("Panel close requested");
         // Check if confirmation is required before closing active panel
         if let Some(panel) = self.layout_manager.active_panel_mut() {
             if let Some(_message) = panel.needs_close_confirmation() {
+                crate::logger::warn("Close requested for panel with unsaved changes");
                 // Check if panel is editor
                 use std::any::Any;
                 let panel_any: &dyn Any = &**panel;
@@ -383,6 +382,7 @@ impl App {
 
     /// Create new terminal
     fn handle_new_terminal(&mut self) -> Result<()> {
+        crate::logger::debug("Opening new Terminal panel");
         self.close_welcome_panels();
         // Get directory from FM
         let working_dir = self
@@ -410,6 +410,7 @@ impl App {
 
     /// Create new file manager
     fn handle_new_file_manager(&mut self) -> Result<()> {
+        crate::logger::debug("Opening new FileManager panel");
         self.close_welcome_panels();
         // Get working directory from current active panel
         let working_dir = self
@@ -426,6 +427,7 @@ impl App {
 
     /// Create new editor
     fn handle_new_editor(&mut self) -> Result<()> {
+        crate::logger::debug("Opening new Editor panel");
         self.close_welcome_panels();
         let editor_panel = Editor::with_config(self.state.editor_config());
         self.add_panel(Box::new(editor_panel));
@@ -433,8 +435,16 @@ impl App {
         Ok(())
     }
 
-    /// Create new debug panel
+    /// Create new debug panel (singleton - only one instance allowed)
     fn handle_new_debug(&mut self) -> Result<()> {
+        // Check if Debug panel already exists and focus it
+        if self.focus_existing_debug_panel() {
+            crate::logger::debug("Switching focus to existing Log panel");
+            return Ok(());
+        }
+
+        // No existing Debug panel found, create new one
+        crate::logger::debug("Opening new Log panel");
         self.close_welcome_panels();
         let debug_panel = Debug::new();
         self.add_panel(Box::new(debug_panel));
@@ -442,8 +452,33 @@ impl App {
         Ok(())
     }
 
+    /// Find and focus existing Debug panel if it exists
+    /// Returns true if Debug panel was found and focused
+    fn focus_existing_debug_panel(&mut self) -> bool {
+        use crate::panels::debug::Debug;
+        use std::any::Any;
+
+        // Iterate through all panel groups
+        for (group_idx, group) in self.layout_manager.panel_groups.iter_mut().enumerate() {
+            // Check each panel in the group
+            for (panel_idx, panel) in group.panels().iter().enumerate() {
+                let panel_any: &dyn Any = &**panel;
+                if panel_any.is::<Debug>() {
+                    // Found Debug panel - set it as expanded and focus the group
+                    group.set_expanded(panel_idx);
+                    self.layout_manager.focus =
+                        crate::layout_manager::FocusTarget::Group(group_idx);
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     /// Open or switch to help panel (Welcome)
     fn handle_new_help(&mut self) -> Result<()> {
+        crate::logger::debug("Opening new Help/Welcome panel");
         // TODO: Check if Welcome panel already exists in some group
         // For now, just create new
         let welcome = Welcome::new();
@@ -460,6 +495,7 @@ impl App {
         let config_path = match Config::config_file_path() {
             Ok(path) => path,
             Err(e) => {
+                crate::logger::warn(format!("Failed to get config path: {}", e));
                 self.state
                     .set_error(format!("Failed to get config path: {}", e));
                 return Ok(());
@@ -519,6 +555,7 @@ impl App {
 
     /// Close all Welcome panels (called before opening new panel)
     pub(super) fn close_welcome_panels(&mut self) {
+        crate::logger::debug("Closing Welcome panel(s)");
         // Iterate through all groups and close Welcome panels
         // Use reverse iteration to avoid index shifting issues when removing
         let mut groups_to_remove = Vec::new();
@@ -759,8 +796,8 @@ impl App {
                     self.handle_new_editor()?;
                     return Ok(Some(()));
                 }
-                // Alt+D - open Debug
-                KeyCode::Char('d') | KeyCode::Char('D') => {
+                // Alt+L - open Debug (Log panel)
+                KeyCode::Char('l') | KeyCode::Char('L') => {
                     self.handle_new_debug()?;
                     return Ok(Some(()));
                 }
@@ -823,6 +860,26 @@ impl App {
                 // Alt+Down - go to next panel in current group (vertical navigation)
                 KeyCode::Down => {
                     self.layout_manager.next_panel_in_group();
+                    return Ok(Some(()));
+                }
+                // Alt+W - go to previous panel in group (alternative to Alt+Up)
+                KeyCode::Char('w') | KeyCode::Char('W') => {
+                    self.layout_manager.prev_panel_in_group();
+                    return Ok(Some(()));
+                }
+                // Alt+S - go to next panel in group (alternative to Alt+Down)
+                KeyCode::Char('s') | KeyCode::Char('S') => {
+                    self.layout_manager.next_panel_in_group();
+                    return Ok(Some(()));
+                }
+                // Alt+A - go to previous group (alternative to Alt+Left)
+                KeyCode::Char('a') | KeyCode::Char('A') => {
+                    self.layout_manager.prev_group();
+                    return Ok(Some(()));
+                }
+                // Alt+D - go to next group (alternative to Alt+Right)
+                KeyCode::Char('d') | KeyCode::Char('D') => {
+                    self.layout_manager.next_group();
                     return Ok(Some(()));
                 }
                 // Alt+Backspace - toggle panel stacking (smart merge/unstack)

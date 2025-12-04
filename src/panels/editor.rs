@@ -12,6 +12,7 @@ use crate::editor::{Cursor, HighlightCache, SearchState, Selection, TextBuffer, 
 use crate::state::AppState;
 use crate::state::{ActiveModal, PendingAction};
 use crate::syntax_highlighter;
+use crate::ui::modal::InputModal;
 
 /// Editor mode configuration
 #[derive(Debug, Clone)]
@@ -117,8 +118,46 @@ pub struct Editor {
     git_diff_cache: Option<crate::git::GitDiffCache>,
     /// Pending git diff update timestamp (for debounce)
     git_diff_update_pending: Option<std::time::Instant>,
+    /// Cached count of virtual lines (buffer lines + deletion markers) for viewport calculations
+    /// Updated during render to avoid recomputing during navigation
+    cached_virtual_line_count: usize,
     /// Temporary file name for unsaved buffer (if this is a scratch buffer with unsaved content)
     unsaved_buffer_file: Option<String>,
+}
+
+/// Git line rendering information
+struct GitLineInfo {
+    status_color: Color,
+    status_marker: char,
+}
+
+/// Virtual line representation for rendering
+/// Allows inserting visual-only lines (like deletion markers) between real buffer lines
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VirtualLine {
+    /// Real line from the buffer at given index (0-based)
+    Real(usize),
+    /// Visual deletion indicator after the given buffer line index
+    /// Parameters: (after_line_idx, deletion_count)
+    /// This is a visual-only line showing where content was deleted and how many lines
+    DeletionMarker(usize, usize),
+}
+
+impl VirtualLine {
+    /// Get the buffer line index if this is a Real line, None for DeletionMarker
+    #[allow(dead_code)]
+    fn buffer_line(&self) -> Option<usize> {
+        match self {
+            VirtualLine::Real(idx) => Some(*idx),
+            VirtualLine::DeletionMarker(_, _) => None,
+        }
+    }
+
+    /// Check if this is a deletion marker
+    #[allow(dead_code)]
+    fn is_deletion_marker(&self) -> bool {
+        matches!(self, VirtualLine::DeletionMarker(_, _))
+    }
 }
 
 impl Editor {
@@ -147,6 +186,7 @@ impl Editor {
             status_message: None,
             git_diff_cache: None,
             git_diff_update_pending: None,
+            cached_virtual_line_count: 0,
             unsaved_buffer_file: None,
         }
     }
@@ -185,6 +225,11 @@ impl Editor {
                     crate::constants::MAX_EDITOR_FILE_SIZE / crate::constants::MEGABYTE
                 ));
             }
+        } else {
+            crate::logger::warn(format!(
+                "File size check skipped (permission denied): {}",
+                path.display()
+            ));
         }
 
         let buffer = TextBuffer::from_file(&path)?;
@@ -198,6 +243,7 @@ impl Editor {
         // Check file access rights for auto-detection of read-only
         if let Ok(metadata) = std::fs::metadata(&path) {
             if metadata.permissions().readonly() {
+                crate::logger::warn(format!("File detected as read-only: {}", path.display()));
                 config.read_only = true;
             }
         }
@@ -239,6 +285,7 @@ impl Editor {
             status_message: None,
             git_diff_cache,
             git_diff_update_pending: None,
+            cached_virtual_line_count: 0,
             unsaved_buffer_file: None,
         })
     }
@@ -267,6 +314,7 @@ impl Editor {
             config_update: None,
             status_message: None,
             git_diff_update_pending: None,
+            cached_virtual_line_count: 0,
             unsaved_buffer_file: None,
         }
     }
@@ -278,15 +326,21 @@ impl Editor {
         // Check if this is a config file
         if let Some(path) = self.buffer.file_path() {
             if Config::is_config_file(path) {
+                let path_str = path.display().to_string();
                 // Validate config before saving
                 let content = self.buffer.to_string();
                 match Config::validate_content(&content) {
                     Ok(new_config) => {
                         // Save and set config update flag
                         self.buffer.save()?;
+                        crate::logger::info(format!("Config file saved: {}", path_str));
                         self.config_update = Some(new_config);
                     }
                     Err(e) => {
+                        crate::logger::error(format!(
+                            "Save failed - config validation error: {}",
+                            e
+                        ));
                         return Err(anyhow::anyhow!("Invalid config: {}", e));
                     }
                 }
@@ -295,6 +349,10 @@ impl Editor {
         }
 
         self.buffer.save()?;
+
+        if let Some(path) = self.buffer.file_path() {
+            crate::logger::info(format!("File saved: {}", path.display()));
+        }
 
         // Update git diff after successful save
         self.update_git_diff();
@@ -368,6 +426,7 @@ impl Editor {
     /// Save file as (Save As)
     pub fn save_file_as(&mut self, path: PathBuf) -> Result<()> {
         self.buffer.save_to(&path)?;
+        crate::logger::info(format!("File saved as: {}", path.display()));
 
         // Update title
         self.cached_title = path
@@ -484,8 +543,9 @@ impl Editor {
         let max_line = self.buffer.line_count().saturating_sub(1);
         self.cursor.move_down(page_size, max_line);
         self.clamp_cursor();
+        // Use cached virtual line count for viewport scroll (accounts for deletion markers)
         self.viewport
-            .scroll_down(page_size, self.buffer.line_count());
+            .scroll_down(page_size, self.cached_virtual_line_count);
     }
 
     /// Move cursor to start of document
@@ -499,7 +559,9 @@ impl Editor {
         let max_line = self.buffer.line_count().saturating_sub(1);
         let line_len = self.buffer.line_len_graphemes(max_line);
         self.cursor = Cursor::at(max_line, line_len);
-        self.viewport.scroll_to_bottom(self.buffer.line_count());
+        // Use cached virtual line count for viewport scroll
+        self.viewport
+            .scroll_to_bottom(self.cached_virtual_line_count);
     }
 
     /// Select all
@@ -858,6 +920,97 @@ impl Editor {
         Ok(())
     }
 
+    /// Get git diff information for a line (cached helper)
+    fn get_git_line_info(
+        &self,
+        line_idx: usize,
+        config: &crate::config::Config,
+        theme: &crate::theme::Theme,
+    ) -> GitLineInfo {
+        if !config.show_git_diff {
+            return GitLineInfo {
+                status_color: theme.disabled,
+                status_marker: ' ',
+            };
+        }
+
+        self.git_diff_cache
+            .as_ref()
+            .map(|cache| {
+                let status = cache.get_line_status(line_idx);
+
+                // Status marker and color
+                let (status_color, status_marker) = match status {
+                    crate::git::LineStatus::Added => (theme.success, ' '),
+                    crate::git::LineStatus::Modified => (theme.warning, ' '),
+                    crate::git::LineStatus::Unchanged => (theme.disabled, ' '),
+                    crate::git::LineStatus::DeletedAfter => (theme.disabled, ' '),
+                };
+
+                GitLineInfo {
+                    status_color,
+                    status_marker,
+                }
+            })
+            .unwrap_or(GitLineInfo {
+                status_color: theme.disabled,
+                status_marker: ' ',
+            })
+    }
+
+    /// Build list of virtual lines (real buffer lines + deletion marker lines)
+    /// Returns a Vec mapping visual row index to VirtualLine
+    fn build_virtual_lines(&self, config: &crate::config::Config) -> Vec<VirtualLine> {
+        let mut virtual_lines = Vec::new();
+        let buffer_line_count = self.buffer.line_count();
+
+        // If git diff is disabled or not available, just return real lines
+        if !config.show_git_diff || self.git_diff_cache.is_none() {
+            for line_idx in 0..buffer_line_count {
+                virtual_lines.push(VirtualLine::Real(line_idx));
+            }
+            return virtual_lines;
+        }
+
+        let git_diff = self.git_diff_cache.as_ref().unwrap();
+
+        // Interleave real lines with deletion markers
+        for line_idx in 0..buffer_line_count {
+            virtual_lines.push(VirtualLine::Real(line_idx));
+
+            // Check if there's a deletion marker after this line
+            if git_diff.has_deletion_marker(line_idx) {
+                let deletion_count = git_diff.get_deletion_count(line_idx);
+                virtual_lines.push(VirtualLine::DeletionMarker(line_idx, deletion_count));
+            }
+        }
+
+        virtual_lines
+    }
+
+    /// Get the total count of virtual lines (real buffer lines + deletion marker lines)
+    /// This is used for viewport calculations to account for deletion marker lines
+    fn virtual_line_count(&self, config: &crate::config::Config) -> usize {
+        if !config.show_git_diff || self.git_diff_cache.is_none() {
+            // No virtual lines, just return buffer line count
+            return self.buffer.line_count();
+        }
+
+        // Count buffer lines + deletion markers
+        let buffer_line_count = self.buffer.line_count();
+        let deletion_marker_count = self
+            .git_diff_cache
+            .as_ref()
+            .map(|cache| {
+                (0..buffer_line_count)
+                    .filter(|&idx| cache.has_deletion_marker(idx))
+                    .count()
+            })
+            .unwrap_or(0);
+
+        buffer_line_count + deletion_marker_count
+    }
+
     /// Render editor content
     fn render_content(
         &mut self,
@@ -867,15 +1020,19 @@ impl Editor {
         config: &crate::config::Config,
     ) {
         // Update viewport size (subtract space for line numbers)
-        let line_number_width = 5; // "  123 "
+        let line_number_width = 6; // "  123  " (line number + 2 git markers)
         let content_width = area.width.saturating_sub(line_number_width) as usize;
         let content_height = area.height as usize;
 
         self.viewport.resize(content_width, content_height);
 
-        // Ensure cursor is visible
+        // Compute and cache virtual line count for viewport calculations
+        let virtual_lines_total = self.virtual_line_count(config);
+        self.cached_virtual_line_count = virtual_lines_total;
+
+        // Ensure cursor is visible (using virtual line count to account for deletion markers)
         self.viewport
-            .ensure_cursor_visible(&self.cursor, self.buffer.line_count());
+            .ensure_cursor_visible(&self.cursor, virtual_lines_total);
 
         let text_style = Style::default().fg(theme.fg);
         let line_number_style = Style::default().fg(theme.disabled);
@@ -937,37 +1094,30 @@ impl Editor {
 
                     // Специальная обработка пустых строк
                     if line_len == 0 {
-                        // Получить git статус для этой строки (если enabled)
-                        let (git_color, git_marker) = if config.show_git_diff {
-                            self.git_diff_cache
-                                .as_ref()
-                                .map(|cache| {
-                                    let status = cache.get_line_status(line_idx);
-                                    match status {
-                                        crate::git::LineStatus::Added => (theme.success, ' '),
-                                        crate::git::LineStatus::Modified => (theme.warning, ' '),
-                                        crate::git::LineStatus::DeletedAfter => (theme.error, '▼'),
-                                        crate::git::LineStatus::Unchanged => (theme.disabled, ' '),
-                                    }
-                                })
-                                .unwrap_or((theme.disabled, ' '))
-                        } else {
-                            (theme.disabled, ' ')
-                        };
+                        // Получить git информацию для этой строки
+                        let git_info = self.get_git_line_info(line_idx, config, theme);
 
-                        // Отрисовать номер строки
-                        let line_num_style = Style::default().fg(git_color);
-                        let line_num = format!("{:>4}{}", line_idx + 1, git_marker);
+                        // Отрисовать номер строки (4 символа) + status marker (1 символ)
+                        let line_num_style = Style::default().fg(git_info.status_color);
+                        let line_num_part =
+                            format!("{:>4}{}", line_idx + 1, git_info.status_marker);
 
-                        for (i, ch) in line_num.chars().enumerate() {
-                            if i < line_number_width as usize {
-                                let x = area.x + i as u16;
-                                let y = area.y + visual_row as u16;
-                                if let Some(cell) = buf.cell_mut((x, y)) {
-                                    cell.set_char(ch);
-                                    cell.set_style(line_num_style);
-                                }
+                        for (i, ch) in line_num_part.chars().enumerate() {
+                            let x = area.x + i as u16;
+                            let y = area.y + visual_row as u16;
+                            if let Some(cell) = buf.cell_mut((x, y)) {
+                                cell.set_char(ch);
+                                cell.set_style(line_num_style);
                             }
+                        }
+
+                        // НЕ рисуем deletion marker здесь - он теперь на отдельной виртуальной строке
+                        // Рисуем пробел вместо старого deletion marker
+                        let x = area.x + 5;
+                        let y = area.y + visual_row as u16;
+                        if let Some(cell) = buf.cell_mut((x, y)) {
+                            cell.set_char(' ');
+                            cell.set_style(line_num_style);
                         }
 
                         // Заполнить остальную часть строки фоном (для курсора)
@@ -997,44 +1147,30 @@ impl Editor {
 
                             // Номер строки (только на первой визуальной строке)
                             if is_first_visual_row {
-                                // Получить git статус для этой строки (если enabled)
-                                let (git_color, git_marker) = if config.show_git_diff {
-                                    self.git_diff_cache
-                                        .as_ref()
-                                        .map(|cache| {
-                                            let status = cache.get_line_status(line_idx);
-                                            match status {
-                                                crate::git::LineStatus::Added => {
-                                                    (theme.success, ' ')
-                                                }
-                                                crate::git::LineStatus::Modified => {
-                                                    (theme.warning, ' ')
-                                                }
-                                                crate::git::LineStatus::DeletedAfter => {
-                                                    (theme.error, '▼')
-                                                }
-                                                crate::git::LineStatus::Unchanged => {
-                                                    (theme.disabled, ' ')
-                                                }
-                                            }
-                                        })
-                                        .unwrap_or((theme.disabled, ' '))
-                                } else {
-                                    (theme.disabled, ' ')
-                                };
+                                // Получить git информацию для этой строки
+                                let git_info = self.get_git_line_info(line_idx, config, theme);
 
-                                let line_num_style = Style::default().fg(git_color);
-                                let line_num = format!("{:>4}{}", line_idx + 1, git_marker);
+                                // Отрисовать номер строки (4 символа) + status marker (1 символ)
+                                let line_num_style = Style::default().fg(git_info.status_color);
+                                let line_num_part =
+                                    format!("{:>4}{}", line_idx + 1, git_info.status_marker);
 
-                                for (i, ch) in line_num.chars().enumerate() {
-                                    if i < line_number_width as usize {
-                                        let x = area.x + i as u16;
-                                        let y = area.y + visual_row as u16;
-                                        if let Some(cell) = buf.cell_mut((x, y)) {
-                                            cell.set_char(ch);
-                                            cell.set_style(line_num_style);
-                                        }
+                                for (i, ch) in line_num_part.chars().enumerate() {
+                                    let x = area.x + i as u16;
+                                    let y = area.y + visual_row as u16;
+                                    if let Some(cell) = buf.cell_mut((x, y)) {
+                                        cell.set_char(ch);
+                                        cell.set_style(line_num_style);
                                     }
+                                }
+
+                                // НЕ рисуем deletion marker здесь - он теперь на отдельной виртуальной строке
+                                // Рисуем пробел вместо старого deletion marker
+                                let x = area.x + 5;
+                                let y = area.y + visual_row as u16;
+                                if let Some(cell) = buf.cell_mut((x, y)) {
+                                    cell.set_char(' ');
+                                    cell.set_style(line_num_style);
                                 }
                             } else {
                                 // Пустое место вместо номера строки для продолжения
@@ -1165,6 +1301,85 @@ impl Editor {
                     }
                 }
 
+                // Проверить, есть ли deletion marker после этой строки
+                if config.show_git_diff && visual_row < content_height {
+                    if let Some(git_diff) = &self.git_diff_cache {
+                        if git_diff.has_deletion_marker(line_idx) {
+                            let deletion_count = git_diff.get_deletion_count(line_idx);
+
+                            // Отрисовать виртуальную строку с deletion marker, линией и текстом
+
+                            // Пустое место для номера строки (4 пробела)
+                            for i in 0..4 {
+                                let x = area.x + i as u16;
+                                let y = area.y + visual_row as u16;
+                                if let Some(cell) = buf.cell_mut((x, y)) {
+                                    cell.set_char(' ');
+                                    cell.set_style(Style::default().fg(theme.disabled));
+                                }
+                            }
+
+                            // Красный маркер ▶ (показывает что здесь было удаление)
+                            let marker_style = Style::default().fg(theme.error);
+                            let x = area.x + 4; // Позиция после пробелов
+                            let y = area.y + visual_row as u16;
+                            if let Some(cell) = buf.cell_mut((x, y)) {
+                                cell.set_char('▶');
+                                cell.set_style(marker_style);
+                            }
+
+                            // Пустое место после маркера
+                            let x = area.x + 5;
+                            let y = area.y + visual_row as u16;
+                            if let Some(cell) = buf.cell_mut((x, y)) {
+                                cell.set_char(' ');
+                                cell.set_style(Style::default().fg(theme.disabled));
+                            }
+
+                            // Content area - псевдографическая линия с текстом по центру
+                            let line_style = Style::default().fg(theme.disabled);
+                            let deletion_text = format!(
+                                " {} ",
+                                crate::i18n::t().editor_deletion_marker(deletion_count)
+                            );
+                            let text_len = deletion_text.chars().count();
+
+                            // Вычислить позицию для центрирования текста
+                            let text_start_col = if content_width > text_len {
+                                (content_width - text_len) / 2
+                            } else {
+                                0
+                            };
+
+                            for col in 0..content_width {
+                                let x = area.x + line_number_width + col as u16;
+                                let y = area.y + visual_row as u16;
+                                if x < area.x + area.width && y < area.y + area.height {
+                                    if let Some(cell) = buf.cell_mut((x, y)) {
+                                        // Проверить, находится ли эта позиция в области текста
+                                        if col >= text_start_col && col < text_start_col + text_len
+                                        {
+                                            // Отрисовать символ из текста
+                                            let text_idx = col - text_start_col;
+                                            if let Some(ch) = deletion_text.chars().nth(text_idx) {
+                                                cell.set_char(ch);
+                                            } else {
+                                                cell.set_char('─');
+                                            }
+                                        } else {
+                                            // Отрисовать линию
+                                            cell.set_char('─');
+                                        }
+                                        cell.set_style(line_style);
+                                    }
+                                }
+                            }
+
+                            visual_row += 1;
+                        }
+                    }
+                }
+
                 line_idx += 1;
             }
 
@@ -1194,184 +1409,287 @@ impl Editor {
                 }
             }
         } else {
-            // Обычный режим (без word wrap)
-            // Отрисовать видимые строки
-            for row in 0..content_height {
-                let line_idx = self.viewport.top_line + row;
+            // Обычный режим (без word wrap) - используем виртуальные строки
+            // Построить список виртуальных строк (real buffer lines + deletion markers)
+            let virtual_lines = self.build_virtual_lines(config);
 
-                if line_idx >= self.buffer.line_count() {
+            // Найти индекс первой виртуальной строки для viewport.top_line (buffer line index)
+            // viewport.top_line это buffer line index, нужно преобразовать в virtual line index
+            let start_virtual_idx = virtual_lines
+                .iter()
+                .position(|vline| matches!(vline, VirtualLine::Real(idx) if *idx >= self.viewport.top_line))
+                .unwrap_or(virtual_lines.len());
+
+            // Отрисовать видимые виртуальные строки
+            for row in 0..content_height {
+                let virtual_idx = start_virtual_idx + row;
+
+                if virtual_idx >= virtual_lines.len() {
                     break;
                 }
 
-                let is_cursor_line = line_idx == self.cursor.line;
-                let style = if is_cursor_line {
-                    cursor_line_style
-                } else {
-                    text_style
-                };
+                let virtual_line = virtual_lines[virtual_idx];
 
-                // Номер строки с git diff статусом
-                // Получить git статус для этой строки (если enabled в config)
-                let (git_color, git_marker) = if config.show_git_diff {
-                    self.git_diff_cache
-                        .as_ref()
-                        .map(|cache| {
-                            let status = cache.get_line_status(line_idx);
-                            match status {
-                                crate::git::LineStatus::Added => (theme.success, ' '),
-                                crate::git::LineStatus::Modified => (theme.warning, ' '),
-                                crate::git::LineStatus::DeletedAfter => (theme.error, '▼'),
-                                crate::git::LineStatus::Unchanged => (theme.disabled, ' '),
-                            }
-                        })
-                        .unwrap_or((theme.disabled, ' '))
-                } else {
-                    (theme.disabled, ' ')
-                };
-
-                let line_num_style = Style::default().fg(git_color);
-                let line_num = format!("{:>4}{}", line_idx + 1, git_marker);
-
-                for (i, ch) in line_num.chars().enumerate() {
-                    if i < line_number_width as usize {
-                        let x = area.x + i as u16;
-                        let y = area.y + row as u16;
-                        if let Some(cell) = buf.cell_mut((x, y)) {
-                            cell.set_char(ch);
-                            cell.set_style(line_num_style);
-                        }
-                    }
-                }
-
-                // Содержимое строки с подсветкой синтаксиса
-                if let Some(line_text) = self.buffer.line(line_idx) {
-                    // Убрать перевод строки в конце
-                    let line_text = line_text.trim_end_matches('\n');
-
-                    // Получить подсветку синтаксиса для строки (без клонирования)
-                    // Учитываем config.syntax_highlighting для отключения подсветки
-                    let segments =
-                        if self.config.syntax_highlighting && self.highlight_cache.has_syntax() {
-                            self.highlight_cache.get_line_segments(line_idx, line_text)
+                // Обработка в зависимости от типа виртуальной строки
+                match virtual_line {
+                    VirtualLine::Real(line_idx) => {
+                        // Обычная строка из буфера
+                        let is_cursor_line = line_idx == self.cursor.line;
+                        let style = if is_cursor_line {
+                            cursor_line_style
                         } else {
-                            // Для текста без подсветки используем временный массив
-                            &[(line_text.to_string(), style)][..]
+                            text_style
                         };
 
-                    // Отрисовать сегменты с подсветкой
-                    let mut col_offset = 0;
-                    for (segment_text, segment_style) in segments {
-                        for ch in segment_text.chars() {
-                            if col_offset >= self.viewport.left_column
-                                && col_offset < self.viewport.left_column + content_width
+                        // Номер строки с git diff статусом
+                        let git_info = self.get_git_line_info(line_idx, config, theme);
+
+                        // Отрисовать номер строки (4 символа) + status marker (1 символ)
+                        let line_num_style = Style::default().fg(git_info.status_color);
+                        let line_num_part =
+                            format!("{:>4}{}", line_idx + 1, git_info.status_marker);
+
+                        for (i, ch) in line_num_part.chars().enumerate() {
+                            let x = area.x + i as u16;
+                            let y = area.y + row as u16;
+                            if let Some(cell) = buf.cell_mut((x, y)) {
+                                cell.set_char(ch);
+                                cell.set_style(line_num_style);
+                            }
+                        }
+
+                        // НЕ рисуем deletion marker здесь - он теперь на отдельной виртуальной строке
+                        // Рисуем пробел вместо старого deletion marker
+                        let x = area.x + 5;
+                        let y = area.y + row as u16;
+                        if let Some(cell) = buf.cell_mut((x, y)) {
+                            cell.set_char(' ');
+                            cell.set_style(line_num_style);
+                        }
+
+                        // Содержимое строки с подсветкой синтаксиса
+                        if let Some(line_text) = self.buffer.line(line_idx) {
+                            // Убрать перевод строки в конце
+                            let line_text = line_text.trim_end_matches('\n');
+
+                            // Получить подсветку синтаксиса для строки (без клонирования)
+                            // Учитываем config.syntax_highlighting для отключения подсветки
+                            let segments = if self.config.syntax_highlighting
+                                && self.highlight_cache.has_syntax()
                             {
-                                let x = area.x
-                                    + line_number_width
-                                    + (col_offset - self.viewport.left_column) as u16;
-                                let y = area.y + row as u16;
+                                self.highlight_cache.get_line_segments(line_idx, line_text)
+                            } else {
+                                // Для текста без подсветки используем временный массив
+                                &[(line_text.to_string(), style)][..]
+                            };
 
-                                if x < area.x + area.width && y < area.y + area.height {
-                                    if let Some(cell) = buf.cell_mut((x, y)) {
-                                        cell.set_char(ch);
+                            // Отрисовать сегменты с подсветкой
+                            let mut col_offset = 0;
+                            for (segment_text, segment_style) in segments {
+                                for ch in segment_text.chars() {
+                                    if col_offset >= self.viewport.left_column
+                                        && col_offset < self.viewport.left_column + content_width
+                                    {
+                                        let x = area.x
+                                            + line_number_width
+                                            + (col_offset - self.viewport.left_column) as u16;
+                                        let y = area.y + row as u16;
 
-                                        // Проверить, является ли это совпадением поиска
-                                        let match_idx = search_matches.iter().position(
-                                            |(m_line, m_col, m_len)| {
-                                                *m_line == line_idx
-                                                    && col_offset >= *m_col
-                                                    && col_offset < m_col + m_len
-                                            },
-                                        );
+                                        if x < area.x + area.width && y < area.y + area.height {
+                                            if let Some(cell) = buf.cell_mut((x, y)) {
+                                                cell.set_char(ch);
 
-                                        // Проверить, находится ли символ в выделении
-                                        let is_selected =
-                                            if let Some((sel_start, sel_end)) = &selection_range {
-                                                let pos =
-                                                    crate::editor::Cursor::at(line_idx, col_offset);
-                                                (pos.line > sel_start.line
-                                                    || (pos.line == sel_start.line
-                                                        && pos.column >= sel_start.column))
-                                                    && (pos.line < sel_end.line
-                                                        || (pos.line == sel_end.line
-                                                            && pos.column < sel_end.column))
-                                            } else {
-                                                false
-                                            };
+                                                // Проверить, является ли это совпадением поиска
+                                                let match_idx = search_matches.iter().position(
+                                                    |(m_line, m_col, m_len)| {
+                                                        *m_line == line_idx
+                                                            && col_offset >= *m_col
+                                                            && col_offset < m_col + m_len
+                                                    },
+                                                );
 
-                                        // Определить финальный стиль с учетом подсветки, выделения, курсорной линии и совпадений
-                                        let final_style = if let Some(idx) = match_idx {
-                                            // Это совпадение поиска
-                                            if Some(idx) == current_match_idx {
-                                                // Текущее активное совпадение
-                                                current_match_style
-                                            } else {
-                                                // Обычное совпадение
-                                                search_match_style
+                                                // Проверить, находится ли символ в выделении
+                                                let is_selected =
+                                                    if let Some((sel_start, sel_end)) =
+                                                        &selection_range
+                                                    {
+                                                        let pos = crate::editor::Cursor::at(
+                                                            line_idx, col_offset,
+                                                        );
+                                                        (pos.line > sel_start.line
+                                                            || (pos.line == sel_start.line
+                                                                && pos.column >= sel_start.column))
+                                                            && (pos.line < sel_end.line
+                                                                || (pos.line == sel_end.line
+                                                                    && pos.column < sel_end.column))
+                                                    } else {
+                                                        false
+                                                    };
+
+                                                // Определить финальный стиль с учетом подсветки, выделения, курсорной линии и совпадений
+                                                let final_style = if let Some(idx) = match_idx {
+                                                    // Это совпадение поиска
+                                                    if Some(idx) == current_match_idx {
+                                                        // Текущее активное совпадение
+                                                        current_match_style
+                                                    } else {
+                                                        // Обычное совпадение
+                                                        search_match_style
+                                                    }
+                                                } else if is_selected {
+                                                    // Выделенный текст
+                                                    selection_style
+                                                } else if is_cursor_line {
+                                                    // Курсорная линия (но не совпадение и не выделение)
+                                                    segment_style.bg(theme.accented_bg)
+                                                } else {
+                                                    // Обычный текст
+                                                    *segment_style
+                                                };
+                                                cell.set_style(final_style);
                                             }
-                                        } else if is_selected {
-                                            // Выделенный текст
-                                            selection_style
-                                        } else if is_cursor_line {
-                                            // Курсорная линия (но не совпадение и не выделение)
-                                            segment_style.bg(theme.accented_bg)
-                                        } else {
-                                            // Обычный текст
-                                            *segment_style
-                                        };
-                                        cell.set_style(final_style);
+                                        }
+                                    }
+                                    col_offset += 1;
+                                }
+                            }
+
+                            // Заполнить остаток строки фоном (для курсорной линии)
+                            if is_cursor_line {
+                                let line_len = line_text.chars().count();
+                                for col in line_len..content_width {
+                                    if col >= self.viewport.left_column {
+                                        let x = area.x
+                                            + line_number_width
+                                            + (col - self.viewport.left_column) as u16;
+                                        let y = area.y + row as u16;
+
+                                        if x < area.x + area.width && y < area.y + area.height {
+                                            if let Some(cell) = buf.cell_mut((x, y)) {
+                                                cell.set_char(' ');
+                                                cell.set_style(cursor_line_style);
+                                            }
+                                        }
                                     }
                                 }
                             }
-                            col_offset += 1;
                         }
                     }
+                    VirtualLine::DeletionMarker(_after_line_idx, deletion_count) => {
+                        // Виртуальная строка - deletion marker
+                        // Отрисовать gutter с красным маркером ▶ и content с линией и текстом
 
-                    // Заполнить остаток строки фоном (для курсорной линии)
-                    if is_cursor_line {
-                        let line_len = line_text.chars().count();
-                        for col in line_len..content_width {
-                            if col >= self.viewport.left_column {
-                                let x = area.x
-                                    + line_number_width
-                                    + (col - self.viewport.left_column) as u16;
-                                let y = area.y + row as u16;
+                        // Пустое место для номера строки (4 пробела)
+                        for i in 0..4 {
+                            let x = area.x + i as u16;
+                            let y = area.y + row as u16;
+                            if let Some(cell) = buf.cell_mut((x, y)) {
+                                cell.set_char(' ');
+                                cell.set_style(Style::default().fg(theme.disabled));
+                            }
+                        }
 
-                                if x < area.x + area.width && y < area.y + area.height {
-                                    if let Some(cell) = buf.cell_mut((x, y)) {
-                                        cell.set_char(' ');
-                                        cell.set_style(cursor_line_style);
+                        // Красный маркер ▶ (показывает что здесь было удаление)
+                        let marker_style = Style::default().fg(theme.error);
+                        let x = area.x + 4; // Позиция после пробелов
+                        let y = area.y + row as u16;
+                        if let Some(cell) = buf.cell_mut((x, y)) {
+                            cell.set_char('▶');
+                            cell.set_style(marker_style);
+                        }
+
+                        // Пустое место после маркера
+                        let x = area.x + 5;
+                        let y = area.y + row as u16;
+                        if let Some(cell) = buf.cell_mut((x, y)) {
+                            cell.set_char(' ');
+                            cell.set_style(Style::default().fg(theme.disabled));
+                        }
+
+                        // Content area - псевдографическая линия с текстом по центру
+                        let line_style = Style::default().fg(theme.disabled);
+                        let deletion_text = format!(
+                            " {} ",
+                            crate::i18n::t().editor_deletion_marker(deletion_count)
+                        );
+                        let text_len = deletion_text.chars().count();
+
+                        // Вычислить позицию для центрирования текста
+                        let text_start_col = if content_width > text_len {
+                            (content_width - text_len) / 2
+                        } else {
+                            0
+                        };
+
+                        for col in 0..content_width {
+                            let x = area.x + line_number_width + col as u16;
+                            let y = area.y + row as u16;
+                            if x < area.x + area.width && y < area.y + area.height {
+                                if let Some(cell) = buf.cell_mut((x, y)) {
+                                    // Проверить, находится ли эта позиция в области текста
+                                    if col >= text_start_col && col < text_start_col + text_len {
+                                        // Отрисовать символ из текста
+                                        let text_idx = col - text_start_col;
+                                        if let Some(ch) = deletion_text.chars().nth(text_idx) {
+                                            cell.set_char(ch);
+                                        } else {
+                                            cell.set_char('─');
+                                        }
+                                    } else {
+                                        // Отрисовать линию
+                                        cell.set_char('─');
                                     }
+                                    cell.set_style(line_style);
                                 }
                             }
                         }
+
+                        // Пропускаем рендеринг контента для deletion marker
+                        continue;
                     }
                 }
             }
 
-            // Отрисовать курсор
-            if let Some((viewport_row, viewport_col)) =
-                self.viewport.cursor_to_viewport_pos(&self.cursor)
-            {
-                let cursor_x = area.x + line_number_width + viewport_col as u16;
-                let cursor_y = area.y + viewport_row as u16;
+            // Отрисовать курсор с учетом виртуальных строк
+            // Найти virtual line index для cursor.line
+            let cursor_virtual_idx = virtual_lines.iter().position(
+                |vline| matches!(vline, VirtualLine::Real(idx) if *idx == self.cursor.line),
+            );
 
-                if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
-                    if let Some(cell) = buf.cell_mut((cursor_x, cursor_y)) {
-                        // Инверсия: swap fg и bg с fallback к theme цветам
-                        let current_fg = match cell.fg {
-                            Color::Reset => theme.fg,
-                            color => color,
-                        };
-                        let current_bg = match cell.bg {
-                            Color::Reset => theme.bg,
-                            color => color,
-                        };
-                        cell.set_style(
-                            Style::default()
-                                .bg(current_fg)
-                                .fg(current_bg)
-                                .add_modifier(Modifier::BOLD),
-                        );
+            if let Some(cursor_virtual_idx) = cursor_virtual_idx {
+                // Вычислить viewport row с учетом deletion marker строк
+                if cursor_virtual_idx >= start_virtual_idx {
+                    let viewport_row = cursor_virtual_idx - start_virtual_idx;
+
+                    // Вычислить viewport col (с учетом horizontal scrolling)
+                    if self.cursor.column >= self.viewport.left_column {
+                        let viewport_col = self.cursor.column - self.viewport.left_column;
+
+                        let cursor_x = area.x + line_number_width + viewport_col as u16;
+                        let cursor_y = area.y + viewport_row as u16;
+
+                        if cursor_x < area.x + area.width
+                            && cursor_y < area.y + area.height
+                            && viewport_col < content_width
+                        {
+                            if let Some(cell) = buf.cell_mut((cursor_x, cursor_y)) {
+                                // Инверсия: swap fg и bg с fallback к theme цветам
+                                let current_fg = match cell.fg {
+                                    Color::Reset => theme.fg,
+                                    color => color,
+                                };
+                                let current_bg = match cell.bg {
+                                    Color::Reset => theme.bg,
+                                    color => color,
+                                };
+                                cell.set_style(
+                                    Style::default()
+                                        .bg(current_fg)
+                                        .fg(current_bg)
+                                        .add_modifier(Modifier::BOLD),
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -1644,6 +1962,58 @@ impl Editor {
 
         Ok(count)
     }
+
+    /// Convert visual row to buffer position accounting for word wrap
+    /// Returns (buffer_line, column_offset) for the given visual row
+    fn visual_row_to_buffer_position(
+        &self,
+        visual_row: usize,
+        content_width: usize,
+    ) -> (usize, usize) {
+        if content_width == 0 {
+            return (self.viewport.top_line + visual_row, 0);
+        }
+
+        let mut current_visual_row = 0;
+        let mut line_idx = self.viewport.top_line;
+
+        while line_idx < self.buffer.line_count() {
+            if let Some(line_text) = self.buffer.line(line_idx) {
+                let line_text = line_text.trim_end_matches('\n');
+                let chars: Vec<char> = line_text.chars().collect();
+                let line_len = chars.len();
+
+                // Calculate how many visual rows this line occupies
+                let visual_rows_for_line = if line_len == 0 {
+                    1 // Empty lines take 1 visual row
+                } else {
+                    // Number of chunks needed to display this line
+                    line_len.div_ceil(content_width)
+                };
+
+                // Check if target visual row is in this buffer line
+                if current_visual_row + visual_rows_for_line > visual_row {
+                    // Found the buffer line containing the target visual row
+                    let row_within_line = visual_row - current_visual_row;
+                    let column_offset = row_within_line * content_width;
+                    return (line_idx, column_offset);
+                }
+
+                current_visual_row += visual_rows_for_line;
+            } else {
+                // If line doesn't exist, treat as empty (1 visual row)
+                if current_visual_row >= visual_row {
+                    return (line_idx, 0);
+                }
+                current_visual_row += 1;
+            }
+
+            line_idx += 1;
+        }
+
+        // If we've exhausted all lines, return the last line
+        (self.buffer.line_count().saturating_sub(1), 0)
+    }
 }
 
 impl Panel for Editor {
@@ -1835,24 +2205,22 @@ impl Panel for Editor {
 
             // Ctrl+S - save (only if not read-only)
             (KeyCode::Char('s'), KeyModifiers::CONTROL) => {
-                if !self.config.read_only && self.buffer.file_path().is_some() {
-                    self.save()?;
-                }
-            }
-
-            // Ctrl+Shift+Z - redo (only if not read-only)
-            // With Shift the character becomes uppercase 'Z'
-            (KeyCode::Char('Z'), modifiers) if modifiers.contains(KeyModifiers::CONTROL) => {
                 if !self.config.read_only {
-                    // Close search mode when editing begins
-                    self.close_search();
+                    if self.buffer.file_path().is_some() {
+                        // File has path - save normally
+                        self.save()?;
+                    } else {
+                        // File has no path - open "Save As" dialog
+                        let directory = std::env::current_dir().unwrap_or_else(|_| {
+                            dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
+                        });
 
-                    if let Some(new_cursor) = self.buffer.redo()? {
-                        self.cursor = new_cursor;
-                        self.clamp_cursor();
-                        // Invalidate entire highlighting cache after redo
-                        self.highlight_cache
-                            .invalidate_range(0, self.buffer.line_count());
+                        let modal = InputModal::new("Save File As", "untitled.txt");
+                        let action = PendingAction::SaveFileAs {
+                            panel_index: 0, // will be updated in app.rs
+                            directory,
+                        };
+                        self.modal_request = Some((action, ActiveModal::Input(Box::new(modal))));
                     }
                 }
             }
@@ -2232,7 +2600,8 @@ impl Panel for Editor {
                 return Ok(());
             }
             MouseEventKind::ScrollDown => {
-                self.viewport.scroll_down(3, self.buffer.line_count());
+                // Use cached virtual line count for scroll
+                self.viewport.scroll_down(3, self.cached_virtual_line_count);
                 // Keep cursor in visible area so render doesn't reset scroll
                 if self.cursor.line < self.viewport.top_line {
                     self.cursor.line = self.viewport.top_line;
@@ -2252,7 +2621,7 @@ impl Panel for Editor {
         };
 
         // Check that event is inside content area
-        let line_number_width = 5u16;
+        let line_number_width = 6u16;
         let content_x = inner.x + line_number_width;
         let content_y = inner.y;
         let content_width = inner.width.saturating_sub(line_number_width);
@@ -2270,8 +2639,18 @@ impl Panel for Editor {
         let rel_x = (mouse.column - content_x) as usize;
         let rel_y = (mouse.row - content_y) as usize;
 
-        let buffer_line = self.viewport.top_line + rel_y;
-        let buffer_col = self.viewport.left_column + rel_x;
+        // In word wrap mode, visual rows don't correspond 1:1 with buffer lines
+        let (buffer_line, wrapped_offset) = if self.config.word_wrap {
+            self.visual_row_to_buffer_position(rel_y, content_width as usize)
+        } else {
+            (self.viewport.top_line + rel_y, 0)
+        };
+
+        let buffer_col = if self.config.word_wrap {
+            wrapped_offset + rel_x
+        } else {
+            self.viewport.left_column + rel_x
+        };
 
         // Clamp position to valid values
         let max_line = self.buffer.line_count().saturating_sub(1);
@@ -2293,9 +2672,9 @@ impl Panel for Editor {
                 if let Some(ref mut selection) = self.selection {
                     selection.active = self.cursor;
                 }
-                // Ensure cursor is visible during dragging
+                // Ensure cursor is visible during dragging (use cached virtual line count)
                 self.viewport
-                    .ensure_cursor_visible(&self.cursor, self.buffer.line_count());
+                    .ensure_cursor_visible(&self.cursor, self.cached_virtual_line_count);
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 // Finish selection

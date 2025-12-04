@@ -119,6 +119,27 @@ impl TextBuffer {
         Ok(())
     }
 
+    /// Check if buffer content differs from file on disk
+    fn is_content_modified(&self) -> Result<bool> {
+        // If no file path, use current modified flag
+        let Some(path) = &self.file_path else {
+            return Ok(self.modified);
+        };
+
+        // Try to read file content
+        match std::fs::read_to_string(path) {
+            Ok(file_content) => {
+                // Compare buffer content with file content
+                let buffer_content = self.rope.to_string();
+                Ok(buffer_content != file_content)
+            }
+            Err(_) => {
+                // If can't read file (deleted, permissions, etc.), keep current flag
+                Ok(self.modified)
+            }
+        }
+    }
+
     /// Get line count
     pub fn line_count(&self) -> usize {
         self.rope.len_lines()
@@ -338,7 +359,8 @@ impl TextBuffer {
     pub fn undo(&mut self) -> Result<Option<Cursor>> {
         if let Some(action) = self.history.undo() {
             let cursor = self.apply_action(&action)?;
-            self.modified = true;
+            // Check if buffer content actually differs from file
+            self.modified = self.is_content_modified()?;
             Ok(Some(cursor))
         } else {
             Ok(None)
@@ -349,7 +371,8 @@ impl TextBuffer {
     pub fn redo(&mut self) -> Result<Option<Cursor>> {
         if let Some(action) = self.history.redo() {
             let cursor = self.apply_action(&action)?;
-            self.modified = true;
+            // Check if buffer content actually differs from file
+            self.modified = self.is_content_modified()?;
             Ok(Some(cursor))
         } else {
             Ok(None)

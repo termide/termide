@@ -6,6 +6,7 @@
     Alt+F        Open file manager panel
     Alt+T        Open terminal panel
     Alt+E        Open editor panel
+    Alt+L        Open Log panel
     Alt+P        Open config file in editor
 
 
@@ -13,6 +14,7 @@
 
     Alt+←/→         Switch between panel groups (horizontal)
     Alt+↑/↓         Navigate panels within group (vertical)
+    Alt+W/S/A/D     WASD-style panel navigation (alternative to arrows)
     Alt+PgUp        Move panel to previous group
     Alt+PgDn        Move panel to next group
     Alt+Home        Move panel to first group
@@ -52,9 +54,8 @@
     Ctrl+C       Copy to system clipboard
     Ctrl+V       Paste from system clipboard
     Ctrl+X       Cut to system clipboard
-    Ctrl+Y       Paste (alternative)
+    Ctrl+Y       Redo
     Ctrl+Z       Undo
-    Ctrl+Shift+Z Redo
     Ctrl+F       Find text (interactive modal)
     F3 / Shift+F3 Navigate search matches
     Tab / Shift+Tab Navigate matches (when search active)

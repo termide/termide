@@ -56,6 +56,7 @@ pub trait Translation: Send + Sync {
     fn editor_replace_with_prompt(&self) -> &str;
     fn editor_search_match_info(&self, current: usize, total: usize) -> String;
     fn editor_search_no_matches(&self) -> &str;
+    fn editor_deletion_marker(&self, count: usize) -> String;
 
     // Terminal
     fn terminal_exit_confirm(&self) -> &str;

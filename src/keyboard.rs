@@ -10,43 +10,81 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 /// on the same physical key.
 pub fn cyrillic_to_latin(ch: char) -> char {
     match ch {
-        // Top row: ЙЦУКЕНГШЩЗХЪ → QWERTYUIOP[]
-        'й' | 'Й' => 'q',
-        'ц' | 'Ц' => 'w',
-        'у' | 'У' => 'e',
-        'к' | 'К' => 'r',
-        'е' | 'Е' => 't',
-        'н' | 'Н' => 'y',
-        'г' | 'Г' => 'u',
-        'ш' | 'Ш' => 'i',
-        'щ' | 'Щ' => 'o',
-        'з' | 'З' => 'p',
-        'х' | 'Х' => '[',
-        'ъ' | 'Ъ' => ']',
+        // Top row lowercase: йцукенгшщзхъ → qwertyuiop[]
+        'й' => 'q',
+        'ц' => 'w',
+        'у' => 'e',
+        'к' => 'r',
+        'е' => 't',
+        'н' => 'y',
+        'г' => 'u',
+        'ш' => 'i',
+        'щ' => 'o',
+        'з' => 'p',
+        'х' => '[',
+        'ъ' => ']',
 
-        // Middle row: ФЫВАПРОЛДЖЭ → ASDFGHJKL;'
-        'ф' | 'Ф' => 'a',
-        'ы' | 'Ы' => 's',
-        'в' | 'В' => 'd',
-        'а' | 'А' => 'f',
-        'п' | 'П' => 'g',
-        'р' | 'Р' => 'h',
-        'о' | 'О' => 'j',
-        'л' | 'Л' => 'k',
-        'д' | 'Д' => 'l',
-        'ж' | 'Ж' => ';',
-        'э' | 'Э' => '\'',
+        // Top row uppercase: ЙЦУКЕНГШЩЗХЪ → QWERTYUIOP[]
+        'Й' => 'Q',
+        'Ц' => 'W',
+        'У' => 'E',
+        'К' => 'R',
+        'Е' => 'T',
+        'Н' => 'Y',
+        'Г' => 'U',
+        'Ш' => 'I',
+        'Щ' => 'O',
+        'З' => 'P',
+        'Х' => '{',
+        'Ъ' => '}',
 
-        // Bottom row: ЯЧСМИТЬБЮ → ZXCVBNM,.
-        'я' | 'Я' => 'z',
-        'ч' | 'Ч' => 'x',
-        'с' | 'С' => 'c',
-        'м' | 'М' => 'v',
-        'и' | 'И' => 'b',
-        'т' | 'Т' => 'n',
-        'ь' | 'Ь' => 'm',
-        'б' | 'Б' => ',',
-        'ю' | 'Ю' => '.',
+        // Middle row lowercase: фывапролджэ → asdfghjkl;'
+        'ф' => 'a',
+        'ы' => 's',
+        'в' => 'd',
+        'а' => 'f',
+        'п' => 'g',
+        'р' => 'h',
+        'о' => 'j',
+        'л' => 'k',
+        'д' => 'l',
+        'ж' => ';',
+        'э' => '\'',
+
+        // Middle row uppercase: ФЫВАПРОЛДЖЭ → ASDFGHJKL:"
+        'Ф' => 'A',
+        'Ы' => 'S',
+        'В' => 'D',
+        'А' => 'F',
+        'П' => 'G',
+        'Р' => 'H',
+        'О' => 'J',
+        'Л' => 'K',
+        'Д' => 'L',
+        'Ж' => ':',
+        'Э' => '"',
+
+        // Bottom row lowercase: ячсмитьбю → zxcvbnm,.
+        'я' => 'z',
+        'ч' => 'x',
+        'с' => 'c',
+        'м' => 'v',
+        'и' => 'b',
+        'т' => 'n',
+        'ь' => 'm',
+        'б' => ',',
+        'ю' => '.',
+
+        // Bottom row uppercase: ЯЧСМИТЬБЮ → ZXCVBNM<>
+        'Я' => 'Z',
+        'Ч' => 'X',
+        'С' => 'C',
+        'М' => 'V',
+        'И' => 'B',
+        'Т' => 'N',
+        'Ь' => 'M',
+        'Б' => '<',
+        'Ю' => '>',
 
         // No change for other characters
         _ => ch,
@@ -80,10 +118,15 @@ mod tests {
 
     #[test]
     fn test_cyrillic_to_latin() {
+        // Lowercase
         assert_eq!(cyrillic_to_latin('й'), 'q');
-        assert_eq!(cyrillic_to_latin('Й'), 'q');
         assert_eq!(cyrillic_to_latin('ф'), 'a');
         assert_eq!(cyrillic_to_latin('я'), 'z');
+        // Uppercase preserves case
+        assert_eq!(cyrillic_to_latin('Й'), 'Q');
+        assert_eq!(cyrillic_to_latin('Ф'), 'A');
+        assert_eq!(cyrillic_to_latin('Я'), 'Z');
+        // Non-Cyrillic unchanged
         assert_eq!(cyrillic_to_latin('q'), 'q'); // Latin unchanged
         assert_eq!(cyrillic_to_latin('1'), '1'); // Numbers unchanged
     }

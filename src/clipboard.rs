@@ -1,8 +1,18 @@
 use arboard::Clipboard;
+use std::sync::{Mutex, OnceLock};
 
 // Linux-specific imports for PRIMARY selection support
 #[cfg(target_os = "linux")]
 use arboard::{GetExtLinux, LinuxClipboardKind, SetExtLinux};
+
+/// Global clipboard instance that persists for the application lifetime.
+/// This ensures clipboard data remains available after write operations.
+static CLIPBOARD: OnceLock<Mutex<Clipboard>> = OnceLock::new();
+
+/// Get or initialize the global clipboard instance
+fn get_clipboard() -> &'static Mutex<Clipboard> {
+    CLIPBOARD.get_or_init(|| Mutex::new(Clipboard::new().expect("Failed to initialize clipboard")))
+}
 
 /// Copy text to system clipboard
 ///
@@ -18,11 +28,13 @@ pub fn copy(text: String) -> Result<(), String> {
         return Err("Cannot copy empty text".to_string());
     }
 
-    let mut clipboard =
-        Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
-
     #[cfg(target_os = "linux")]
     {
+        // Use long-lived clipboard object for both CLIPBOARD and PRIMARY
+        let mut clipboard = get_clipboard()
+            .lock()
+            .map_err(|e| format!("Failed to lock clipboard: {}", e))?;
+
         // Copy to CLIPBOARD selection (Ctrl+C/V)
         clipboard
             .set()
@@ -30,7 +42,7 @@ pub fn copy(text: String) -> Result<(), String> {
             .text(text.clone())
             .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
 
-        // Copy to PRIMARY selection (middle-click/Shift+Insert)
+        // Copy to PRIMARY selection (middle-click/Shift+Insert) using same object
         // Ignore errors - PRIMARY may not be supported on some Wayland compositors
         let _ = clipboard
             .set()
@@ -40,6 +52,9 @@ pub fn copy(text: String) -> Result<(), String> {
 
     #[cfg(not(target_os = "linux"))]
     {
+        let mut clipboard = get_clipboard()
+            .lock()
+            .map_err(|e| format!("Failed to lock clipboard: {}", e))?;
         clipboard
             .set_text(text)
             .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
@@ -50,19 +65,20 @@ pub fn copy(text: String) -> Result<(), String> {
 
 /// Paste text from system clipboard
 ///
-/// On Linux, tries PRIMARY selection first (for middle-click paste support),
-/// then falls back to CLIPBOARD selection.
+/// On Linux, tries CLIPBOARD selection first (more reliable for Ctrl+C/X/V),
+/// then falls back to PRIMARY selection (for middle-click paste support).
 ///
 /// Returns None if clipboard is empty or inaccessible.
 pub fn paste() -> Option<String> {
-    let mut clipboard = Clipboard::new().ok()?;
+    let mut clipboard = get_clipboard().lock().ok()?;
 
     #[cfg(target_os = "linux")]
     {
-        // Try PRIMARY selection first (from middle-click copy or text selection)
+        // Try CLIPBOARD selection first (more reliable for Ctrl+C/X/V)
+        // PRIMARY selection can be cleared when text selection disappears after cut
         if let Ok(text) = clipboard
             .get()
-            .clipboard(LinuxClipboardKind::Primary)
+            .clipboard(LinuxClipboardKind::Clipboard)
             .text()
         {
             if !text.is_empty() {
@@ -70,10 +86,10 @@ pub fn paste() -> Option<String> {
             }
         }
 
-        // Fall back to CLIPBOARD selection
+        // Fall back to PRIMARY selection (for middle-click paste)
         clipboard
             .get()
-            .clipboard(LinuxClipboardKind::Clipboard)
+            .clipboard(LinuxClipboardKind::Primary)
             .text()
             .ok()
     }
