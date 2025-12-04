@@ -233,7 +233,7 @@ impl Translation for Russian {
     }
 
     fn help_version(&self) -> &str {
-        "0.1.5"
+        "0.3.0"
     }
 
     fn help_global_keys(&self) -> &str {

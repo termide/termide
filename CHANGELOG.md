@@ -5,6 +5,43 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-12-04
+
+### Added
+- Release management Claude Code skill for automated release workflow
+  - Pre-release quality checks (fmt, clippy, test, build)
+  - Multi-source change analysis (uncommitted, commits, file states)
+  - Interactive version selection with validation
+  - Automated version updates across 12+ files
+  - Auto-generated CHANGELOG entries from git history
+  - Post-update quality verification
+  - Conventional commit generation and git tag creation
+- XDG Base Directory Specification support
+  - Config: `~/.config/termide/` (or `$XDG_CONFIG_HOME/termide/`)
+  - Data: `~/.local/share/termide/` (or `$XDG_DATA_HOME/termide/`)
+  - Cache: `~/.cache/termide/` (or `$XDG_CACHE_HOME/termide/`)
+  - Proper cross-platform paths (Linux, macOS, Windows)
+- Automatic session persistence with configurable retention
+  - Sessions save automatically on focus loss (debounced)
+  - Auto-cleanup of sessions older than configured retention period (default: 30 days)
+  - Per-project session storage
+  - Unsaved buffer persistence across sessions
+- Comprehensive project documentation
+  - CHANGELOG.md with full version history (0.1.0 to 0.2.0)
+  - CONTRIBUTING.md with development guidelines
+  - Updated issue templates
+  - Revised security policy
+  - Contributor Covenant Code of Conduct
+
+### Changed
+- **BREAKING**: FileManager is now a regular closable panel
+  - Removed special fixed left panel handling
+  - FileManager can be closed, resized, and moved between groups
+  - Default initialization with 2 FileManager panels (50/50 layout)
+  - Simplified architecture (-350 lines of code)
+  - All panels are now first-class citizens with identical capabilities
+  - Existing sessions will load with default layout
+
 ## [0.2.0] - 2025-12-04
 
 ### Added
@@ -209,6 +246,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pre-commit hooks for code quality
 - Comprehensive test suite
 
+[0.3.0]: https://github.com/termide/termide/releases/tag/0.3.0
 [0.2.0]: https://github.com/termide/termide/releases/tag/0.2.0
 [0.1.5]: https://github.com/termide/termide/releases/tag/0.1.5
 [0.1.4]: https://github.com/termide/termide/releases/tag/0.1.4
