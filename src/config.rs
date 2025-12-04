@@ -1,5 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
 /// Application configuration
@@ -127,33 +129,33 @@ impl Config {
             // Deserialize config (missing fields will use defaults from serde)
             let config: Self = toml::from_str(&original_content)?;
 
-            // Check if any config keys are missing from the original file
-            let required_keys = [
-                "theme",
-                "tab_size",
-                "language",
-                "resource_monitor_interval",
-                "min_panel_width",
-                "fm_extended_view_width",
-            ];
+            // Serialize the config back to TOML to get normalized content
+            let normalized_content = toml::to_string_pretty(&config)?;
 
-            let needs_update = required_keys
-                .iter()
-                .any(|key| !original_content.contains(key));
+            // Compute hash of original content
+            let mut original_hasher = DefaultHasher::new();
+            original_content.hash(&mut original_hasher);
+            let original_hash = original_hasher.finish();
 
-            // If any keys are missing, save the complete config
-            if needs_update {
-                let _ = config.save(); // Ignore save error
+            // Compute hash of normalized content
+            let mut normalized_hasher = DefaultHasher::new();
+            normalized_content.hash(&mut normalized_hasher);
+            let normalized_hash = normalized_hasher.finish();
+
+            // If hashes differ, the config was auto-completed with default values
+            // Save the updated config to persist the changes
+            if original_hash != normalized_hash {
+                config.save()?;
             }
 
             Ok(config)
         } else {
             // First run - create config file with default values
             let config = Self::default();
-            let _ = config.save(); // Ignore save error
+            config.save()?;
 
             // Create themes directory
-            let _ = Self::ensure_themes_dir();
+            Self::ensure_themes_dir()?;
 
             Ok(config)
         }
