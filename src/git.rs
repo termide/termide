@@ -86,7 +86,7 @@ pub fn get_git_status(dir: &Path) -> Option<GitStatusCache> {
         .to_path_buf();
 
     // Get list of ignored files
-    let ignored = get_ignored_files(dir);
+    let ignored = get_ignored_files(&repo_root);
 
     // Get file statuses via git status
     let mut status_map = HashMap::new();
@@ -95,7 +95,7 @@ pub fn get_git_status(dir: &Path) -> Option<GitStatusCache> {
         .arg("status")
         .arg("--porcelain=v1")
         .arg("--ignored")
-        .current_dir(dir)
+        .current_dir(&repo_root)
         .output()
     {
         if output.status.success() {
@@ -133,14 +133,14 @@ pub fn get_git_status(dir: &Path) -> Option<GitStatusCache> {
 }
 
 /// Get list of ignored files
-fn get_ignored_files(dir: &Path) -> HashSet<PathBuf> {
+fn get_ignored_files(repo_root: &Path) -> HashSet<PathBuf> {
     let mut ignored = HashSet::new();
 
     if let Ok(output) = Command::new("git")
         .arg("status")
         .arg("--porcelain=v1")
         .arg("--ignored")
-        .current_dir(dir)
+        .current_dir(repo_root)
         .output()
     {
         if output.status.success() {
