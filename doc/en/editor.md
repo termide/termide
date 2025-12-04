@@ -5,6 +5,7 @@ The text editor panel provides a functional editor for working with text files w
 ## Key Features
 
 - **Syntax Highlighting**: Automatic highlighting for popular programming languages (Rust, Python, JavaScript, C/C++, Go, etc.)
+- **Git Diff Visualization**: Real-time visualization of changes compared to HEAD with color-coded line numbers (green for added, yellow for modified, red for deleted lines), deletion markers showing count of deleted lines
 - **Search and Replace**: Text search with case-sensitivity support and replacement of found matches
 - **Edit History**: Undo and Redo actions
 - **Clipboard**: Copy, cut, and paste via system clipboard
@@ -141,3 +142,54 @@ When working in the editor, the status bar displays:
 - Current cursor position (line:column)
 - Search information (number of matches)
 - File type (plain text / read-only)
+
+## Git Diff Visualization
+
+When editing files in a git repository with `show_git_diff` enabled, the editor displays real-time diff information compared to HEAD:
+
+### Line Number Colors
+
+Line numbers are color-coded to show the status compared to HEAD:
+
+- **Green** - Line was added (not in HEAD)
+- **Yellow** - Line was modified (changed from HEAD)
+- **Red marker (▶)** - Marks a deletion point (lines were deleted after this line)
+- **Default color** - Line unchanged from HEAD
+
+### Deletion Markers
+
+When lines are deleted, a virtual line is inserted to visualize the deletion:
+
+- Displays a horizontal line (`━`) spanning the editor width
+- Shows deletion marker character (`▶`) in the line number area with red color
+- Displays centered text: "N lines deleted" (e.g., "3 lines deleted")
+- Styled in gray/disabled color to distinguish from actual content
+- Does not affect line numbering (shows `▶` instead of a number)
+
+**Example:**
+```
+  42 | function calculateTotal() {
+ ▶   | ━━━━━━━ 5 lines deleted ━━━━━━━
+  43 |     return result;
+```
+
+### How It Works
+
+- **Automatic updates**: Diff updates when you save the file
+- **Real-time comparison**: Compares current buffer content with HEAD version
+- **Undo/Redo support**: Markers appear/disappear as you undo/redo deletions
+- **Works with editing**: All normal editing operations work seamlessly with diff visualization
+
+### Configuration
+
+Enable or disable git diff visualization in your configuration file (`~/.config/termide/config.toml`):
+
+```toml
+# Show git diff colors on line numbers (default: true)
+show_git_diff = true
+```
+
+**Notes:**
+- Only works when editing files within a git repository
+- Requires the file to exist in HEAD (new untracked files show all lines as added)
+- Virtual deletion marker lines are visual-only and don't affect the file content

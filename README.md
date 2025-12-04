@@ -302,6 +302,27 @@ language = "auto"
 # System resource monitor update interval in milliseconds (default: 1000)
 resource_monitor_interval = 1000
 
+# Minimum panel width for horizontal layout (default: 80)
+# Panels narrower than this will stack vertically
+min_panel_width = 80
+
+# Show git diff colors on line numbers in editor (default: true)
+show_git_diff = true
+
+# Enable word wrap in editor (default: true)
+word_wrap = true
+
+# Minimum log level: debug, info, warn, error (default: info)
+min_log_level = "info"
+
+# Session retention period in days (default: 30)
+# Sessions older than this will be automatically deleted on startup
+session_retention_days = 30
+
+# File manager extended view width (default: 50)
+# Minimum width to display size and time columns
+fm_extended_view_width = 50
+
 # Optional: Custom log file path
 # log_file_path = "/custom/path/to/termide.log"
 ```
