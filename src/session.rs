@@ -61,9 +61,9 @@ impl Session {
     /// Get the session directory for a specific project
     ///
     /// Creates nested subdirectories matching the project path.
-    /// Example: /home/user/project1 -> ~/.config/termide/sessions/home/user/project1/
+    /// Example: /home/user/project1 -> ~/.local/share/termide/sessions/home/user/project1/
     pub fn get_session_dir(project_root: &Path) -> Result<PathBuf> {
-        let config_dir = dirs::config_dir().context("Could not find config directory")?;
+        let data_dir = crate::xdg_dirs::get_data_dir()?;
 
         // Canonicalize the project path to handle symlinks and relative paths
         let canonical_project = project_root
@@ -75,10 +75,7 @@ impl Session {
             .strip_prefix("/")
             .unwrap_or(&canonical_project);
 
-        Ok(config_dir
-            .join("termide")
-            .join("sessions")
-            .join(relative_path))
+        Ok(data_dir.join("sessions").join(relative_path))
     }
 
     /// Get the path to the session.toml file for a specific project
@@ -171,8 +168,8 @@ pub fn cleanup_unsaved_buffer(session_dir: &Path, filename: &str) -> Result<()> 
 pub fn cleanup_old_sessions(current_project: &Path, retention_days: u32) -> Result<()> {
     use std::time::{Duration, SystemTime};
 
-    let config_dir = dirs::config_dir().context("Could not find config directory")?;
-    let sessions_dir = config_dir.join("termide").join("sessions");
+    let data_dir = crate::xdg_dirs::get_data_dir()?;
+    let sessions_dir = data_dir.join("sessions");
 
     if !sessions_dir.exists() {
         return Ok(()); // No sessions to clean up
@@ -250,12 +247,12 @@ fn walk_and_cleanup(
 
 /// Check if session directory corresponds to the given project path
 fn is_same_session(session_dir: &Path, project_path: &Path) -> bool {
-    let config_dir = match dirs::config_dir() {
-        Some(dir) => dir,
-        None => return false,
+    let data_dir = match crate::xdg_dirs::get_data_dir() {
+        Ok(dir) => dir,
+        Err(_) => return false,
     };
 
-    let sessions_base = config_dir.join("termide").join("sessions");
+    let sessions_base = data_dir.join("sessions");
 
     // Extract relative path from session directory
     let rel_path = match session_dir.strip_prefix(&sessions_base) {

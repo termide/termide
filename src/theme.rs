@@ -146,7 +146,9 @@ fn load_theme_from_toml(content: &str, name: &'static str) -> Theme {
 
 /// Get path to user themes directory
 fn get_themes_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|config_dir| config_dir.join("termide").join("themes"))
+    crate::xdg_dirs::get_config_dir()
+        .ok()
+        .map(|config_dir| config_dir.join("themes"))
 }
 
 /// Load theme from file

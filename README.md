@@ -281,15 +281,27 @@ For detailed documentation, see:
 
 ## Configuration
 
-Configuration file location:
-- Linux: `~/.config/termide/config.toml`
+TermIDE follows the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html) for file organization.
+
+**Configuration file location:**
+- Linux/BSD: `~/.config/termide/config.toml` (or `$XDG_CONFIG_HOME/termide/config.toml`)
 - macOS: `~/Library/Application Support/termide/config.toml`
 - Windows: `%APPDATA%\termide\config.toml`
+
+**Session data location:**
+- Linux/BSD: `~/.local/share/termide/sessions/` (or `$XDG_DATA_HOME/termide/sessions/`)
+- macOS: `~/Library/Application Support/termide/sessions/`
+- Windows: `%APPDATA%\termide\sessions\`
+
+**Log file location:**
+- Linux/BSD: `~/.cache/termide/termide.log` (or `$XDG_CACHE_HOME/termide/termide.log`)
+- macOS: `~/Library/Caches/termide/termide.log`
+- Windows: `%LOCALAPPDATA%\termide\cache\termide.log`
 
 ### Example Configuration
 
 ```toml
-# Theme name - choose from built-in themes or use a custom theme from ~/.config/termide/themes/
+# Theme name - choose from built-in themes or use a custom theme
 theme = "default"
 
 # Tab size (number of spaces per tab)

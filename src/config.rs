@@ -178,19 +178,14 @@ impl Config {
 
     /// Get path to config file
     fn get_config_path() -> Result<PathBuf> {
-        let config_dir =
-            dirs::config_dir().ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?;
-
-        Ok(config_dir.join("termide").join("config.toml"))
+        let config_dir = crate::xdg_dirs::get_config_dir()?;
+        Ok(config_dir.join("config.toml"))
     }
 
     /// Get path to config directory (for debugging)
     #[allow(dead_code)]
     pub fn get_config_dir() -> Result<PathBuf> {
-        let config_dir =
-            dirs::config_dir().ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?;
-
-        Ok(config_dir.join("termide"))
+        crate::xdg_dirs::get_config_dir()
     }
 
     /// Get path to themes directory
@@ -208,13 +203,15 @@ impl Config {
     }
 
     /// Get path to log file
-    /// If specified in config, use it; otherwise use temporary directory
+    /// If specified in config, use it; otherwise use XDG cache directory
     pub fn get_log_file_path(&self) -> PathBuf {
         if let Some(ref path) = self.log_file_path {
             PathBuf::from(path)
         } else {
-            // By default use temporary directory
-            std::env::temp_dir().join("termide.log")
+            // By default use XDG cache directory (~/.cache/termide on Linux)
+            crate::xdg_dirs::get_cache_dir()
+                .map(|dir| dir.join("termide.log"))
+                .unwrap_or_else(|_| std::env::temp_dir().join("termide.log"))
         }
     }
 

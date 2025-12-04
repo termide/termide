@@ -282,9 +282,9 @@ Use the [Bug Report template](.github/ISSUE_TEMPLATE/bug_report.md) when reporti
 - Relevant logs if available
 
 **Log locations:**
-- Linux: `~/.config/termide/termide.log`
-- macOS: `~/Library/Application Support/termide/termide.log`
-- Windows (WSL): `~/.config/termide/termide.log`
+- Linux: `~/.cache/termide/termide.log` (or `$XDG_CACHE_HOME/termide/termide.log`)
+- macOS: `~/Library/Caches/termide/termide.log`
+- Windows (WSL): `~/.cache/termide/termide.log`
 
 ### Feature Requests
 
@@ -368,6 +368,35 @@ string = "#a6e3a1"
 3. (Optional) Add a screenshot to `assets/screenshots/your-theme.png`
 4. Update the theme list in `README.md`
 5. Submit a pull request with the title: `feat: add [theme name] theme`
+
+## File Locations
+
+TermIDE follows the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html) for organizing application files:
+
+### Configuration
+**Linux/BSD:** `$XDG_CONFIG_HOME/termide/` (default: `~/.config/termide/`)
+**macOS:** `~/Library/Application Support/termide/`
+**Windows:** `%APPDATA%\termide\`
+
+Contains:
+- `config.toml` - Application configuration
+- `themes/` - User-defined color themes
+
+### Data
+**Linux/BSD:** `$XDG_DATA_HOME/termide/` (default: `~/.local/share/termide/`)
+**macOS:** `~/Library/Application Support/termide/`
+**Windows:** `%APPDATA%\termide\`
+
+Contains:
+- `sessions/` - Project session files and unsaved buffers
+
+### Cache
+**Linux/BSD:** `$XDG_CACHE_HOME/termide/` (default: `~/.cache/termide/`)
+**macOS:** `~/Library/Caches/termide/`
+**Windows:** `%LOCALAPPDATA%\termide\cache\`
+
+Contains:
+- `termide.log` - Application log file
 
 ## Development Resources
 
