@@ -196,7 +196,8 @@ impl TerminalScreen {
                 ch: ' ',
                 style: CellStyle::default(),
             };
-            self.alt_lines = std::collections::VecDeque::from(vec![vec![empty_cell; self.cols]; self.rows]);
+            self.alt_lines =
+                std::collections::VecDeque::from(vec![vec![empty_cell; self.cols]; self.rows]);
             self.cursor = (0, 0);
         }
     }
