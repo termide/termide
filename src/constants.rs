@@ -36,6 +36,40 @@ pub const DEFAULT_MAIN_PANEL_WIDTH: u16 = 80;
 #[allow(dead_code)]
 pub const SETTINGS_MODAL_WIDTH: u16 = 50;
 
+// ===== Modal constants =====
+
+/// Maximum modal width as percentage of screen width (default)
+pub const MODAL_MAX_WIDTH_PERCENTAGE_DEFAULT: f32 = 0.75;
+
+/// Maximum modal width as percentage of screen width (wide modals)
+pub const MODAL_MAX_WIDTH_PERCENTAGE_WIDE: f32 = 0.9;
+
+/// Minimum modal width (default)
+pub const MODAL_MIN_WIDTH_DEFAULT: u16 = 20;
+
+/// Minimum modal width (wide modals)
+pub const MODAL_MIN_WIDTH_WIDE: u16 = 30;
+
+/// Modal border width (1 on each side)
+#[allow(dead_code)]
+pub const MODAL_BORDER_WIDTH: u16 = 2;
+
+/// Modal padding (2 on each side)
+#[allow(dead_code)]
+pub const MODAL_PADDING: u16 = 4;
+
+/// Modal total width addition with border and padding
+pub const MODAL_PADDING_WITH_BORDER: u16 = 6; // 2 (border) + 4 (padding)
+
+/// Modal total width addition with double border and padding
+pub const MODAL_PADDING_WITH_DOUBLE_BORDER: u16 = 8; // 4 (borders) + 4 (padding)
+
+/// Spacing between modal buttons
+pub const MODAL_BUTTON_SPACING: u16 = 4;
+
+/// Minimum width for values in info modals
+pub const MODAL_MIN_VALUE_WIDTH: usize = 20;
+
 // ===== Performance and security constants =====
 
 /// Maximum recursion depth when copying directories

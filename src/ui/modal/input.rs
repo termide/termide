@@ -9,6 +9,10 @@ use ratatui::{
 };
 
 use super::{Modal, ModalResult};
+use crate::constants::{
+    MODAL_BUTTON_SPACING, MODAL_MAX_WIDTH_PERCENTAGE_DEFAULT, MODAL_MIN_WIDTH_DEFAULT,
+    MODAL_PADDING_WITH_DOUBLE_BORDER,
+};
 use crate::i18n;
 use crate::theme::Theme;
 use crate::ui::centered_rect_with_size;
@@ -95,15 +99,15 @@ impl InputModal {
             .max(buttons_width)
             .max(min_input_width);
 
-        // Add padding and borders:
-        // - 2 for outer block border
-        // - 2 for inner input field border
-        // - 4 for padding
-        let total_width = content_width + 8;
+        // Add padding and borders
+        let total_width = content_width + MODAL_PADDING_WITH_DOUBLE_BORDER;
 
         // Apply width constraints
-        let max_width = (screen_width as f32 * 0.75) as u16;
-        let width = total_width.max(20).min(max_width).min(screen_width);
+        let max_width = (screen_width as f32 * MODAL_MAX_WIDTH_PERCENTAGE_DEFAULT) as u16;
+        let width = total_width
+            .max(MODAL_MIN_WIDTH_DEFAULT)
+            .min(max_width)
+            .min(screen_width);
 
         // Calculate height:
         // 1 (top border) + prompt_lines + 3 (input with border) + 1 (buttons) + 1 (bottom border)
@@ -438,12 +442,12 @@ impl Modal for InputModal {
         let t = i18n::t();
         let ok_text = format!("[ {} ]", t.ui_ok());
         let cancel_text = format!("[ {} ]", t.ui_cancel());
-        let total_text_width = ok_text.len() + 4 + cancel_text.len(); // +4 for spacing
+        let total_text_width = ok_text.len() + MODAL_BUTTON_SPACING as usize + cancel_text.len();
 
         let start_col =
             buttons_area.x + (buttons_area.width.saturating_sub(total_text_width as u16)) / 2;
         let ok_end = start_col + ok_text.len() as u16;
-        let cancel_start = ok_end + 4; // 4 spaces between buttons
+        let cancel_start = ok_end + MODAL_BUTTON_SPACING;
         let cancel_end = cancel_start + cancel_text.len() as u16;
 
         // Determine which button was clicked

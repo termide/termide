@@ -10,7 +10,10 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 
 use super::{Modal, ModalResult};
-use crate::constants::{SPINNER_FRAMES, SPINNER_FRAMES_COUNT};
+use crate::constants::{
+    MODAL_MAX_WIDTH_PERCENTAGE_WIDE, MODAL_MIN_VALUE_WIDTH, MODAL_MIN_WIDTH_WIDE, SPINNER_FRAMES,
+    SPINNER_FRAMES_COUNT,
+};
 use crate::i18n;
 use crate::theme::Theme;
 use crate::ui::centered_rect_with_size;
@@ -156,10 +159,10 @@ impl InfoModal {
         // padding (4) + borders (2) + key + ": " (2) + value
         let content_width = 6 + max_key_len + 2 + max_value_len;
 
-        // Apply constraints: minimum 30, maximum 90% of screen width
-        let max_width = (screen_width as f32 * 0.9) as u16;
+        // Apply constraints
+        let max_width = (screen_width as f32 * MODAL_MAX_WIDTH_PERCENTAGE_WIDE) as u16;
         (content_width as u16)
-            .max(30)
+            .max(MODAL_MIN_WIDTH_WIDE)
             .min(max_width)
             .min(screen_width)
     }
@@ -186,7 +189,7 @@ impl Modal for InfoModal {
             .saturating_sub(6) // borders + padding
             .saturating_sub(max_key_len as u16)
             .saturating_sub(2) // ": "
-            .max(20) as usize; // minimum 20 chars for values
+            .max(MODAL_MIN_VALUE_WIDTH as u16) as usize;
 
         // Calculate total lines needed (with wrapping)
         let t = i18n::t();
