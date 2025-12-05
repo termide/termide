@@ -8,7 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Widget},
 };
 
-use super::{Modal, ModalResult};
+use super::{Modal, ModalResult, TextInputHandler};
 use crate::constants::{
     MODAL_BUTTON_SPACING, MODAL_MAX_WIDTH_PERCENTAGE_DEFAULT, MODAL_MIN_WIDTH_WIDE,
     MODAL_PADDING_WITH_DOUBLE_BORDER,
@@ -49,8 +49,7 @@ enum FocusArea {
 pub struct EditableSelectModal {
     title: String,
     prompt: String,
-    input: String,
-    cursor_pos: usize,
+    input_handler: TextInputHandler,
     options: Vec<SelectOption>,
     selected_index: usize,
     state: DropdownState,
@@ -72,14 +71,12 @@ impl EditableSelectModal {
         options: Vec<SelectOption>,
     ) -> Self {
         let default = default_value.into();
-        let cursor_pos = default.chars().count();
         let selected_index = 0;
 
         Self {
             title: title.into(),
             prompt: prompt.into(),
-            input: default.clone(),
-            cursor_pos,
+            input_handler: TextInputHandler::with_default(default.clone()),
             options,
             selected_index,
             state: DropdownState::Collapsed, // Always start collapsed
@@ -109,7 +106,7 @@ impl EditableSelectModal {
         };
 
         // 3. Input field width (reserve space for arrow)
-        let current_input_len = self.input.chars().count() as u16;
+        let current_input_len = self.input_handler.text().chars().count() as u16;
         let min_input_width = current_input_len + 20;
 
         // 4. Options list width (only in Expanded state)
@@ -243,15 +240,8 @@ impl Modal for EditableSelectModal {
             DropdownState::Expanded => "▲",
         };
 
-        let byte_pos = self
-            .input
-            .chars()
-            .take(self.cursor_pos)
-            .map(|c| c.len_utf8())
-            .sum::<usize>();
-
-        let text_before = &self.input[..byte_pos];
-        let text_after = &self.input[byte_pos..];
+        let text_before = self.input_handler.text_before_cursor();
+        let text_after = self.input_handler.text_after_cursor();
 
         // Calculate padding to push arrow to the right
         let text_len = (text_before.chars().count() + 1 + text_after.chars().count()) as u16;
@@ -374,8 +364,7 @@ impl Modal for EditableSelectModal {
             match self.state {
                 DropdownState::Expanded => {
                     // Collapse and rollback changes
-                    self.input = self.saved_input.clone();
-                    self.cursor_pos = self.input.chars().count();
+                    self.input_handler = TextInputHandler::with_default(self.saved_input.clone());
                     self.state = DropdownState::Collapsed;
                     self.focus = FocusArea::Input; // Return focus to input
                     return Ok(None);
@@ -395,7 +384,7 @@ impl Modal for EditableSelectModal {
                         match self.state {
                             DropdownState::Collapsed => {
                                 // Save current input for rollback
-                                self.saved_input = self.input.clone();
+                                self.saved_input = self.input_handler.text().to_string();
                                 self.state = DropdownState::Expanded;
                             }
                             DropdownState::Expanded => {
@@ -419,8 +408,9 @@ impl Modal for EditableSelectModal {
                                 {
                                     self.selected_index += 1;
                                     // Update input with selected value
-                                    self.input = self.options[self.selected_index].value.clone();
-                                    self.cursor_pos = self.input.chars().count();
+                                    self.input_handler = TextInputHandler::with_default(
+                                        self.options[self.selected_index].value.clone(),
+                                    );
                                 }
                                 Ok(None)
                             }
@@ -434,8 +424,9 @@ impl Modal for EditableSelectModal {
                         {
                             self.selected_index -= 1;
                             // Update input with selected value
-                            self.input = self.options[self.selected_index].value.clone();
-                            self.cursor_pos = self.input.chars().count();
+                            self.input_handler = TextInputHandler::with_default(
+                                self.options[self.selected_index].value.clone(),
+                            );
                         }
                         Ok(None)
                     }
@@ -443,17 +434,20 @@ impl Modal for EditableSelectModal {
                         match self.state {
                             DropdownState::Collapsed => {
                                 // Confirm current value
-                                if self.input.is_empty() {
+                                if self.input_handler.is_empty() {
                                     Ok(Some(ModalResult::Cancelled))
                                 } else {
-                                    Ok(Some(ModalResult::Confirmed(self.input.clone())))
+                                    Ok(Some(ModalResult::Confirmed(
+                                        self.input_handler.text().to_string(),
+                                    )))
                                 }
                             }
                             DropdownState::Expanded => {
                                 // Select from list and collapse
                                 if !self.options.is_empty() {
-                                    self.input = self.options[self.selected_index].value.clone();
-                                    self.cursor_pos = self.input.chars().count();
+                                    self.input_handler = TextInputHandler::with_default(
+                                        self.options[self.selected_index].value.clone(),
+                                    );
                                     self.state = DropdownState::Collapsed;
                                 }
                                 Ok(None)
@@ -465,61 +459,31 @@ impl Modal for EditableSelectModal {
                             return Ok(None);
                         }
                         // Allow typing
-                        let byte_pos = self
-                            .input
-                            .chars()
-                            .take(self.cursor_pos)
-                            .map(|c| c.len_utf8())
-                            .sum::<usize>();
-                        self.input.insert(byte_pos, c);
-                        self.cursor_pos += 1;
+                        self.input_handler.insert_char(c);
                         Ok(None)
                     }
                     KeyCode::Backspace => {
-                        if self.cursor_pos > 0 {
-                            let byte_pos = self
-                                .input
-                                .chars()
-                                .take(self.cursor_pos - 1)
-                                .map(|c| c.len_utf8())
-                                .sum::<usize>();
-                            self.input.remove(byte_pos);
-                            self.cursor_pos -= 1;
-                        }
+                        self.input_handler.backspace();
                         Ok(None)
                     }
                     KeyCode::Delete => {
-                        let char_count = self.input.chars().count();
-                        if self.cursor_pos < char_count {
-                            let byte_pos = self
-                                .input
-                                .chars()
-                                .take(self.cursor_pos)
-                                .map(|c| c.len_utf8())
-                                .sum::<usize>();
-                            self.input.remove(byte_pos);
-                        }
+                        self.input_handler.delete();
                         Ok(None)
                     }
                     KeyCode::Left => {
-                        if self.cursor_pos > 0 {
-                            self.cursor_pos -= 1;
-                        }
+                        self.input_handler.move_left();
                         Ok(None)
                     }
                     KeyCode::Right => {
-                        let char_count = self.input.chars().count();
-                        if self.cursor_pos < char_count {
-                            self.cursor_pos += 1;
-                        }
+                        self.input_handler.move_right();
                         Ok(None)
                     }
                     KeyCode::Home => {
-                        self.cursor_pos = 0;
+                        self.input_handler.move_home();
                         Ok(None)
                     }
                     KeyCode::End => {
-                        self.cursor_pos = self.input.chars().count();
+                        self.input_handler.move_end();
                         Ok(None)
                     }
                     _ => Ok(None),
@@ -546,10 +510,12 @@ impl Modal for EditableSelectModal {
                         // Execute selected button action
                         if self.selected_button == 0 {
                             // OK button
-                            if self.input.is_empty() {
+                            if self.input_handler.is_empty() {
                                 Ok(Some(ModalResult::Cancelled))
                             } else {
-                                Ok(Some(ModalResult::Confirmed(self.input.clone())))
+                                Ok(Some(ModalResult::Confirmed(
+                                    self.input_handler.text().to_string(),
+                                )))
                             }
                         } else {
                             // Cancel button
@@ -562,44 +528,19 @@ impl Modal for EditableSelectModal {
                         }
                         // Switch back to input and insert character
                         self.focus = FocusArea::Input;
-                        let byte_pos = self
-                            .input
-                            .chars()
-                            .take(self.cursor_pos)
-                            .map(|c| c.len_utf8())
-                            .sum::<usize>();
-                        self.input.insert(byte_pos, c);
-                        self.cursor_pos += 1;
+                        self.input_handler.insert_char(c);
                         Ok(None)
                     }
                     KeyCode::Backspace => {
                         // Switch back to input and delete character
                         self.focus = FocusArea::Input;
-                        if self.cursor_pos > 0 {
-                            let byte_pos = self
-                                .input
-                                .chars()
-                                .take(self.cursor_pos - 1)
-                                .map(|c| c.len_utf8())
-                                .sum::<usize>();
-                            self.input.remove(byte_pos);
-                            self.cursor_pos -= 1;
-                        }
+                        self.input_handler.backspace();
                         Ok(None)
                     }
                     KeyCode::Delete => {
                         // Switch back to input and delete character
                         self.focus = FocusArea::Input;
-                        let char_count = self.input.chars().count();
-                        if self.cursor_pos < char_count {
-                            let byte_pos = self
-                                .input
-                                .chars()
-                                .take(self.cursor_pos)
-                                .map(|c| c.len_utf8())
-                                .sum::<usize>();
-                            self.input.remove(byte_pos);
-                        }
+                        self.input_handler.delete();
                         Ok(None)
                     }
                     _ => Ok(None),
@@ -636,7 +577,7 @@ impl Modal for EditableSelectModal {
                     match self.state {
                         DropdownState::Collapsed => {
                             // Save current input for rollback
-                            self.saved_input = self.input.clone();
+                            self.saved_input = self.input_handler.text().to_string();
                             self.state = DropdownState::Expanded;
                         }
                         DropdownState::Expanded => {
@@ -677,10 +618,12 @@ impl Modal for EditableSelectModal {
                     self.focus = FocusArea::Buttons;
                     self.selected_button = 0;
                     // Execute OK action immediately
-                    if self.input.is_empty() {
+                    if self.input_handler.is_empty() {
                         return Ok(Some(ModalResult::Cancelled));
                     } else {
-                        return Ok(Some(ModalResult::Confirmed(self.input.clone())));
+                        return Ok(Some(ModalResult::Confirmed(
+                            self.input_handler.text().to_string(),
+                        )));
                     }
                 } else if mouse.column >= cancel_start && mouse.column < cancel_end {
                     // Cancel button clicked
