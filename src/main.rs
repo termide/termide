@@ -11,6 +11,7 @@ mod keyboard;
 mod layout_manager;
 mod logger;
 mod panels;
+mod path_utils;
 mod rename_pattern;
 mod session;
 mod state;

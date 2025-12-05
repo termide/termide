@@ -2,6 +2,7 @@ use anyhow::Result;
 
 use super::App;
 use crate::{
+    path_utils,
     state::ActiveModal,
     ui::modal::{Modal, ModalResult},
 };
@@ -94,18 +95,11 @@ impl App {
                             use crate::ui::modal::ConflictModal;
 
                             if let Some(source) = operation.current_source() {
-                                // Determine target path
-                                let final_dest = if operation.destination.is_dir() {
-                                    operation
-                                        .destination
-                                        .join(source.file_name().unwrap_or_default())
-                                } else if operation.sources.len() == 1 {
-                                    operation.destination.clone()
-                                } else {
-                                    operation
-                                        .destination
-                                        .join(source.file_name().unwrap_or_default())
-                                };
+                                let final_dest = path_utils::resolve_batch_destination_path(
+                                    source,
+                                    &operation.destination,
+                                    operation.sources.len() == 1,
+                                );
 
                                 let remaining_items = operation
                                     .sources

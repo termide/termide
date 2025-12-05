@@ -6,6 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use super::FileManager;
+use crate::path_utils;
 
 impl FileManager {
     /// Create a new file
@@ -40,12 +41,7 @@ impl FileManager {
         if source.is_dir() {
             self.copy_directory_recursive(&source, &destination)?;
         } else {
-            // If destination is a directory, copy file there with the same name
-            let dest_path = if destination.is_dir() {
-                destination.join(source.file_name().unwrap_or_default())
-            } else {
-                destination
-            };
+            let dest_path = path_utils::resolve_destination_path(&source, &destination);
             fs::copy(&source, &dest_path)?;
         }
         self.load_directory()?;
@@ -113,12 +109,7 @@ impl FileManager {
 
     /// Move file or directory
     pub fn move_path(&mut self, source: PathBuf, destination: PathBuf) -> Result<()> {
-        // If destination is a directory, add file name
-        let dest_path = if destination.is_dir() {
-            destination.join(source.file_name().unwrap_or_default())
-        } else {
-            destination
-        };
+        let dest_path = path_utils::resolve_destination_path(&source, &destination);
 
         // Try simple rename (works only within same filesystem)
         if fs::rename(&source, &dest_path).is_err() {

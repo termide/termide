@@ -5,6 +5,7 @@ use super::super::App;
 use crate::{
     i18n,
     panels::PanelExt,
+    path_utils,
     state::{ActiveModal, PendingAction},
 };
 
@@ -89,12 +90,7 @@ impl App {
 
             let item_name = source.file_name().and_then(|n| n.to_str()).unwrap_or("?");
 
-            // Determine final destination path
-            let final_dest = if destination.is_dir() {
-                destination.join(source.file_name().unwrap_or_default())
-            } else {
-                destination.clone()
-            };
+            let final_dest = path_utils::resolve_destination_path(&source, &destination);
 
             // Check overwrite conditions
             let should_proceed = match choice {
