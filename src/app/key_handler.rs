@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use super::App;
 use crate::{
-    i18n,
+    i18n, logger,
     panels::{
         debug::Debug, editor::Editor, file_manager::FileManager, terminal_pty::Terminal,
         welcome::Welcome, PanelExt,
@@ -18,6 +18,12 @@ impl App {
     pub(super) fn handle_key_event(&mut self, key: crossterm::event::KeyEvent) -> Result<()> {
         // Translate Cyrillic to Latin for hotkeys
         let key = crate::keyboard::translate_hotkey(key);
+
+        // Log key event for debugging
+        logger::debug(format!(
+            "Key event: code={:?}, modifiers={:?}",
+            key.code, key.modifiers
+        ));
 
         // Clear status message on any key press
         if self.state.ui.status_message.is_some() {

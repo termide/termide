@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use super::Panel;
 use crate::editor::{Cursor, HighlightCache, SearchState, Selection, TextBuffer, Viewport};
+use crate::logger;
 use crate::state::AppState;
 use crate::state::{ActiveModal, PendingAction};
 use crate::syntax_highlighter;
@@ -105,6 +106,8 @@ pub struct Editor {
     preferred_column: Option<usize>,
     /// Cached content width from last render (for visual line navigation)
     cached_content_width: usize,
+    /// Cached smart wrap setting from last render (for visual line navigation)
+    cached_use_smart_wrap: bool,
     /// File size in bytes (for determining whether to use smart features)
     file_size: u64,
     /// Cache of wrap points for each line (line_idx -> vec of char positions where to wrap)
@@ -160,6 +163,7 @@ impl Editor {
             unsaved_buffer_file: None,
             preferred_column: None,
             cached_content_width: 0,
+            cached_use_smart_wrap: false,
             file_size: 0,
             wrap_cache: std::collections::HashMap::new(),
         }
@@ -283,6 +287,7 @@ impl Editor {
             unsaved_buffer_file: None,
             preferred_column: None,
             cached_content_width: 0,
+            cached_use_smart_wrap: false,
             file_size,
             wrap_cache: std::collections::HashMap::new(),
         })
@@ -316,6 +321,7 @@ impl Editor {
             unsaved_buffer_file: None,
             preferred_column: None,
             cached_content_width: 0,
+            cached_use_smart_wrap: false,
             file_size: 0,
             wrap_cache: std::collections::HashMap::new(),
         }
@@ -525,20 +531,38 @@ impl Editor {
             // Clamp cursor column to line length
             let cursor_col = self.cursor.column.min(line_len);
 
-            // Which visual row within this physical line?
-            let current_visual_row = cursor_col / content_width;
+            // Get wrap points for this line
+            let (_visual_rows, wrap_points) = self.get_line_wrap_points(line_text, content_width);
+
+            // Find which visual row the cursor is on
+            let current_visual_row = wrap_points.iter().filter(|&&wp| wp <= cursor_col).count();
 
             if current_visual_row > 0 {
                 // We can move up within the same physical line
-                // Apply preferred column if possible
-                let target_col = self.preferred_column.unwrap_or(self.cursor.column);
                 let target_visual_row = current_visual_row - 1;
-                let visual_row_start = target_visual_row * content_width;
-                let visual_row_end = (visual_row_start + content_width).min(line_len);
+
+                // Calculate the visual row boundaries using actual wrap points
+                let visual_row_start = if target_visual_row == 0 {
+                    0
+                } else {
+                    wrap_points[target_visual_row - 1]
+                };
+                let visual_row_end = if target_visual_row < wrap_points.len() {
+                    wrap_points[target_visual_row]
+                } else {
+                    line_len
+                };
 
                 // Position cursor at preferred column within the target visual row
-                let new_col = (visual_row_start + (target_col % content_width))
-                    .min(visual_row_end.saturating_sub(1).max(visual_row_start));
+                let target_col = self.preferred_column.unwrap_or(self.cursor.column);
+                // Clamp target column to be within the target visual row
+                let new_col = if target_col < visual_row_start {
+                    visual_row_start
+                } else if target_col >= visual_row_end {
+                    visual_row_end.saturating_sub(1).max(visual_row_start)
+                } else {
+                    target_col
+                };
 
                 self.cursor.column = new_col;
                 return;
@@ -556,15 +580,31 @@ impl Editor {
                 let line_len = chars.len();
 
                 if line_len > 0 {
-                    // Calculate the last visual row of this line
-                    let last_visual_row = (line_len.saturating_sub(1)) / content_width;
-                    let visual_row_start = last_visual_row * content_width;
+                    // Get wrap points for the previous line
+                    let (visual_rows, wrap_points) =
+                        self.get_line_wrap_points(line_text, content_width);
+                    let last_visual_row = visual_rows - 1;
+
+                    // Calculate the last visual row boundaries
+                    let visual_row_start = if last_visual_row == 0 {
+                        0
+                    } else if last_visual_row - 1 < wrap_points.len() {
+                        wrap_points[last_visual_row - 1]
+                    } else {
+                        0
+                    };
                     let visual_row_end = line_len;
 
                     // Position cursor at preferred column within the last visual row
                     let target_col = self.preferred_column.unwrap_or(self.cursor.column);
-                    let new_col = (visual_row_start + (target_col % content_width))
-                        .min(visual_row_end.saturating_sub(1).max(visual_row_start));
+                    // Clamp target column to be within the last visual row
+                    let new_col = if target_col < visual_row_start {
+                        visual_row_start
+                    } else if target_col >= visual_row_end {
+                        visual_row_end.saturating_sub(1).max(visual_row_start)
+                    } else {
+                        target_col
+                    };
 
                     self.cursor.column = new_col;
                 } else {
@@ -602,24 +642,41 @@ impl Editor {
             // Clamp cursor column to line length
             let cursor_col = self.cursor.column.min(line_len);
 
-            // Which visual row within this physical line?
-            let current_visual_row = cursor_col / content_width;
-            let total_visual_rows = if line_len == 0 {
-                1
-            } else {
-                line_len.div_ceil(content_width)
-            };
+            // Get wrap points for this line
+            let (total_visual_rows, wrap_points) =
+                self.get_line_wrap_points(line_text, content_width);
+
+            // Find which visual row the cursor is on
+            let current_visual_row = wrap_points.iter().filter(|&&wp| wp <= cursor_col).count();
 
             if current_visual_row + 1 < total_visual_rows {
                 // We can move down within the same physical line
-                let target_col = self.preferred_column.unwrap_or(self.cursor.column);
                 let target_visual_row = current_visual_row + 1;
-                let visual_row_start = target_visual_row * content_width;
-                let visual_row_end = (visual_row_start + content_width).min(line_len);
+
+                // Calculate the visual row boundaries using actual wrap points
+                let visual_row_start = if target_visual_row == 0 {
+                    0
+                } else if target_visual_row - 1 < wrap_points.len() {
+                    wrap_points[target_visual_row - 1]
+                } else {
+                    0
+                };
+                let visual_row_end = if target_visual_row < wrap_points.len() {
+                    wrap_points[target_visual_row]
+                } else {
+                    line_len
+                };
 
                 // Position cursor at preferred column within the target visual row
-                let new_col = (visual_row_start + (target_col % content_width))
-                    .min(visual_row_end.saturating_sub(1).max(visual_row_start));
+                let target_col = self.preferred_column.unwrap_or(self.cursor.column);
+                // Clamp target column to be within the target visual row
+                let new_col = if target_col < visual_row_start {
+                    visual_row_start
+                } else if target_col >= visual_row_end {
+                    visual_row_end.saturating_sub(1).max(visual_row_start)
+                } else {
+                    target_col
+                };
 
                 self.cursor.column = new_col;
                 return;
@@ -638,11 +695,28 @@ impl Editor {
                 let line_len = chars.len();
 
                 if line_len > 0 {
+                    // Get wrap points for the next line
+                    let (_visual_rows, wrap_points) =
+                        self.get_line_wrap_points(line_text, content_width);
+
+                    // First visual row: from 0 to first wrap point (or line_len if no wrapping)
+                    let visual_row_start = 0;
+                    let visual_row_end = if !wrap_points.is_empty() {
+                        wrap_points[0]
+                    } else {
+                        line_len
+                    };
+
                     // Position cursor at preferred column within the first visual row
                     let target_col = self.preferred_column.unwrap_or(self.cursor.column);
-                    let visual_row_end = content_width.min(line_len);
-                    let new_col =
-                        (target_col % content_width).min(visual_row_end.saturating_sub(1));
+                    // Clamp target column to be within the first visual row
+                    let new_col = if target_col < visual_row_start {
+                        visual_row_start
+                    } else if target_col >= visual_row_end {
+                        visual_row_end.saturating_sub(1).max(visual_row_start)
+                    } else {
+                        target_col
+                    };
 
                     self.cursor.column = new_col;
                 } else {
@@ -718,11 +792,22 @@ impl Editor {
             // Clamp cursor column to line length
             let cursor_col = self.cursor.column.min(line_len);
 
-            // Which visual row within this physical line?
-            let current_visual_row = cursor_col / content_width;
+            // Get wrap points for this line
+            let (_visual_rows, wrap_points) = self.get_line_wrap_points(line_text, content_width);
+
+            // Find which visual row the cursor is on
+            let current_visual_row = wrap_points.iter().filter(|&&wp| wp <= cursor_col).count();
 
             // Move to start of current visual row
-            self.cursor.column = current_visual_row * content_width;
+            let visual_row_start = if current_visual_row == 0 {
+                0
+            } else if current_visual_row - 1 < wrap_points.len() {
+                wrap_points[current_visual_row - 1]
+            } else {
+                0
+            };
+
+            self.cursor.column = visual_row_start;
         } else {
             self.cursor.column = 0;
         }
@@ -750,12 +835,18 @@ impl Editor {
             // Clamp cursor column to line length
             let cursor_col = self.cursor.column.min(line_len);
 
-            // Which visual row within this physical line?
-            let current_visual_row = cursor_col / content_width;
+            // Get wrap points for this line
+            let (_visual_rows, wrap_points) = self.get_line_wrap_points(line_text, content_width);
+
+            // Find which visual row the cursor is on
+            let current_visual_row = wrap_points.iter().filter(|&&wp| wp <= cursor_col).count();
 
             // Calculate end of current visual row
-            let visual_row_start = current_visual_row * content_width;
-            let visual_row_end = (visual_row_start + content_width).min(line_len);
+            let visual_row_end = if current_visual_row < wrap_points.len() {
+                wrap_points[current_visual_row]
+            } else {
+                line_len
+            };
 
             // Move to end of current visual row
             self.cursor.column = visual_row_end;
@@ -806,8 +897,8 @@ impl Editor {
             }
         }
 
-        // Scroll viewport
-        self.viewport.scroll_up(page_size);
+        // Don't manually scroll viewport - let ensure_cursor_visible() handle it during rendering
+        // This is correct because the viewport needs to track visual rows, not buffer lines
     }
 
     /// Move cursor page down by visual lines (accounting for word wrap)
@@ -839,9 +930,8 @@ impl Editor {
             }
         }
 
-        // Scroll viewport
-        self.viewport
-            .scroll_down(page_size, self.cached_virtual_line_count);
+        // Don't manually scroll viewport - let ensure_cursor_visible() handle it during rendering
+        // This is correct because the viewport needs to track visual rows, not buffer lines
     }
 
     /// Move cursor to start of document
@@ -1284,15 +1374,33 @@ impl Editor {
         virtual_lines
     }
 
-    /// Get the total count of virtual lines (real buffer lines + deletion marker lines)
-    /// This is used for viewport calculations to account for deletion marker lines
+    /// Get the total count of virtual lines (real buffer lines + deletion marker lines + word wrap)
+    /// This is used for viewport calculations to account for deletion markers and word wrapping
     fn virtual_line_count(&self, config: &crate::config::Config) -> usize {
+        // If word wrap is enabled, count visual rows instead of buffer lines
+        if self.config.word_wrap && self.cached_content_width > 0 {
+            // Use calculate_total_visual_rows which accounts for word wrapping
+            let total_visual_rows = self.calculate_total_visual_rows(self.cached_content_width);
+
+            // Add deletion markers if git diff is shown
+            if config.show_git_diff {
+                if let Some(git_diff) = &self.git_diff_cache {
+                    let buffer_line_count = self.buffer.line_count();
+                    let deletion_marker_count = (0..buffer_line_count)
+                        .filter(|&idx| git_diff.has_deletion_marker(idx))
+                        .count();
+                    return total_visual_rows + deletion_marker_count;
+                }
+            }
+
+            return total_visual_rows;
+        }
+
+        // No word wrap - use old logic with buffer lines + deletion markers
         if !config.show_git_diff || self.git_diff_cache.is_none() {
-            // No virtual lines, just return buffer line count
             return self.buffer.line_count();
         }
 
-        // Count buffer lines + deletion markers
         let buffer_line_count = self.buffer.line_count();
         let deletion_marker_count = self
             .git_diff_cache
@@ -1326,6 +1434,9 @@ impl Editor {
         } else {
             0 // Set to 0 when word wrap is disabled to trigger fallback behavior
         };
+
+        // Initially set smart wrap to false (will be updated later if word wrap is enabled)
+        self.cached_use_smart_wrap = false;
 
         self.viewport.resize(content_width, content_height);
 
@@ -1388,6 +1499,8 @@ impl Editor {
 
             // Check if smart wrapping should be used
             let use_smart_wrap = self.should_use_smart_wrap(config);
+            // Cache it for cursor navigation methods
+            self.cached_use_smart_wrap = use_smart_wrap;
 
             let mut visual_row = 0;
             let mut line_idx = self.viewport.top_line;
@@ -2286,6 +2399,105 @@ impl Editor {
         Ok(count)
     }
 
+    /// Get wrap points for a line, accounting for smart wrapping setting
+    /// Returns (number of visual rows, vector of wrap points)
+    /// Wrap points are character positions where new visual lines start
+    fn get_line_wrap_points(&self, line_text: &str, content_width: usize) -> (usize, Vec<usize>) {
+        if content_width == 0 {
+            return (1, Vec::new());
+        }
+
+        let chars: Vec<char> = line_text.chars().collect();
+        let line_len = chars.len();
+
+        if line_len == 0 {
+            return (1, Vec::new());
+        }
+
+        if line_len <= content_width {
+            return (1, Vec::new()); // No wrapping needed
+        }
+
+        if self.cached_use_smart_wrap {
+            // Use smart wrapping from wrap.rs module
+            let wrap_points =
+                crate::editor::calculate_wrap_points_for_line(line_text, content_width);
+            let visual_rows = wrap_points.len() + 1; // +1 for the first line
+            (visual_rows, wrap_points)
+        } else {
+            // Use simple wrapping (hard break at content_width)
+            let visual_rows = line_len.div_ceil(content_width);
+            let mut wrap_points = Vec::new();
+            for i in 1..visual_rows {
+                wrap_points.push(i * content_width);
+            }
+            (visual_rows, wrap_points)
+        }
+    }
+
+    /// Calculate the visual row index for the cursor position
+    /// Returns the visual row index from viewport.top_line
+    /// This accounts for word wrapping - a single buffer line may span multiple visual rows
+    #[allow(dead_code)]
+    fn calculate_visual_row_for_cursor(&self, content_width: usize) -> usize {
+        if content_width == 0 || !self.config.word_wrap {
+            // No word wrap - visual row is just buffer line offset from top
+            return self.cursor.line.saturating_sub(self.viewport.top_line);
+        }
+
+        let mut visual_row = 0;
+        let mut line_idx = self.viewport.top_line;
+
+        // Count visual rows from viewport top to cursor line
+        while line_idx < self.cursor.line && line_idx < self.buffer.line_count() {
+            if let Some(line_text) = self.buffer.line(line_idx) {
+                let line_text = line_text.trim_end_matches('\n');
+                let (line_visual_rows, _) = self.get_line_wrap_points(line_text, content_width);
+                visual_row += line_visual_rows;
+            } else {
+                visual_row += 1; // Empty line = 1 visual row
+            }
+            line_idx += 1;
+        }
+
+        // Now add the visual row within the cursor's line
+        if let Some(line_text) = self.buffer.line(self.cursor.line) {
+            let line_text = line_text.trim_end_matches('\n');
+            let (_line_visual_rows, wrap_points) =
+                self.get_line_wrap_points(line_text, content_width);
+
+            // Find which visual row within this line the cursor is on
+            let cursor_col = self.cursor.column.min(line_text.chars().count());
+            let row_within_line = wrap_points.iter().filter(|&&wp| wp <= cursor_col).count();
+            visual_row += row_within_line;
+        }
+
+        visual_row
+    }
+
+    /// Calculate total number of visual rows in the entire buffer
+    /// This accounts for word wrapping - returns total visual rows across all lines
+    fn calculate_total_visual_rows(&self, content_width: usize) -> usize {
+        if content_width == 0 || !self.config.word_wrap {
+            // No word wrap - just return buffer line count
+            return self.buffer.line_count();
+        }
+
+        let mut total_visual_rows = 0;
+
+        for line_idx in 0..self.buffer.line_count() {
+            if let Some(line_text) = self.buffer.line(line_idx) {
+                let line_text = line_text.trim_end_matches('\n');
+                let (line_visual_rows, _) = self.get_line_wrap_points(line_text, content_width);
+                total_visual_rows += line_visual_rows;
+            } else {
+                total_visual_rows += 1; // Empty line = 1 visual row
+            }
+        }
+
+        total_visual_rows
+    }
+
     /// Convert visual row to buffer position accounting for word wrap
     /// Returns (buffer_line, column_offset) for the given visual row
     fn visual_row_to_buffer_position(
@@ -2303,22 +2515,25 @@ impl Editor {
         while line_idx < self.buffer.line_count() {
             if let Some(line_text) = self.buffer.line(line_idx) {
                 let line_text = line_text.trim_end_matches('\n');
-                let chars: Vec<char> = line_text.chars().collect();
-                let line_len = chars.len();
 
-                // Calculate how many visual rows this line occupies
-                let visual_rows_for_line = if line_len == 0 {
-                    1 // Empty lines take 1 visual row
-                } else {
-                    // Number of chunks needed to display this line
-                    line_len.div_ceil(content_width)
-                };
+                // Calculate how many visual rows this line occupies using actual wrap points
+                let (visual_rows_for_line, wrap_points) =
+                    self.get_line_wrap_points(line_text, content_width);
 
                 // Check if target visual row is in this buffer line
                 if current_visual_row + visual_rows_for_line > visual_row {
                     // Found the buffer line containing the target visual row
                     let row_within_line = visual_row - current_visual_row;
-                    let column_offset = row_within_line * content_width;
+
+                    // Calculate column offset using actual wrap points
+                    let column_offset = if row_within_line == 0 {
+                        0 // First visual line starts at column 0
+                    } else if row_within_line - 1 < wrap_points.len() {
+                        wrap_points[row_within_line - 1] // Use actual wrap point
+                    } else {
+                        0 // Shouldn't happen, but safe fallback
+                    };
+
                     return (line_idx, column_offset);
                 }
 
@@ -2466,42 +2681,66 @@ impl Panel for Editor {
                 self.move_cursor_right();
                 self.update_selection_active();
             }
-            (KeyCode::Home, KeyModifiers::SHIFT) => {
+            (KeyCode::Home, modifiers)
+                if modifiers.contains(KeyModifiers::SHIFT)
+                    && !modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                logger::debug("Shift+Home pressed - moving to line start with selection");
                 self.close_search();
                 self.start_or_extend_selection();
                 if self.config.word_wrap && self.cached_content_width > 0 {
+                    logger::debug("Using visual line start");
                     self.move_to_visual_line_start();
                 } else {
+                    logger::debug("Using physical line start");
                     self.move_to_line_start();
                 }
                 self.update_selection_active();
             }
-            (KeyCode::End, KeyModifiers::SHIFT) => {
+            (KeyCode::End, modifiers)
+                if modifiers.contains(KeyModifiers::SHIFT)
+                    && !modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                logger::debug("Shift+End pressed - moving to line end with selection");
                 self.close_search();
                 self.start_or_extend_selection();
                 if self.config.word_wrap && self.cached_content_width > 0 {
+                    logger::debug("Using visual line end");
                     self.move_to_visual_line_end();
                 } else {
+                    logger::debug("Using physical line end");
                     self.move_to_line_end();
                 }
                 self.update_selection_active();
             }
-            (KeyCode::PageUp, KeyModifiers::SHIFT) => {
+            (KeyCode::PageUp, modifiers)
+                if modifiers.contains(KeyModifiers::SHIFT)
+                    && !modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                logger::debug("Shift+PageUp pressed - paging up with selection");
                 self.close_search();
                 self.start_or_extend_selection();
                 if self.config.word_wrap && self.cached_content_width > 0 {
+                    logger::debug("Using visual page up");
                     self.page_up_visual();
                 } else {
+                    logger::debug("Using physical page up");
                     self.page_up();
                 }
                 self.update_selection_active();
             }
-            (KeyCode::PageDown, KeyModifiers::SHIFT) => {
+            (KeyCode::PageDown, modifiers)
+                if modifiers.contains(KeyModifiers::SHIFT)
+                    && !modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                logger::debug("Shift+PageDown pressed - paging down with selection");
                 self.close_search();
                 self.start_or_extend_selection();
                 if self.config.word_wrap && self.cached_content_width > 0 {
+                    logger::debug("Using visual page down");
                     self.page_down_visual();
                 } else {
+                    logger::debug("Using physical page down");
                     self.page_down();
                 }
                 self.update_selection_active();

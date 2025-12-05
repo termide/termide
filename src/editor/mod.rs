@@ -12,4 +12,4 @@ pub use highlighting::HighlightCache;
 pub use history::{Action, History};
 pub use search::SearchState;
 pub use viewport::Viewport;
-pub use wrap::calculate_wrap_point;
+pub use wrap::{calculate_wrap_point, calculate_wrap_points_for_line};
