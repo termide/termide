@@ -105,6 +105,59 @@ Files exceeding these thresholds should be analyzed for decomposition opportunit
 // widget/clickable.rs - Clickable trait implementation
 ```
 
+### Strategy 5: Single Type Per File
+**Definition**: Apply the "1 file = 1 structure" principle - each significant type gets its own file.
+
+**What to check**:
+- Files containing multiple public struct/enum/trait definitions
+- Large types (>100 LOC including impl) sharing a file
+- Unrelated types grouped in same file
+- Types that could evolve independently
+
+**When to apply**:
+- ✅ Multiple public types >50 LOC each
+- ✅ Any type >100 LOC (struct + impl)
+- ✅ Types from different domains in one file
+- ✅ File has 3+ type definitions
+
+**When NOT to apply (exceptions)**:
+- ❌ Error + ErrorKind pattern (tightly coupled)
+- ❌ Builder pattern (ConfigBuilder + Config)
+- ❌ Small private helpers (<30 LOC)
+- ❌ DTO families in same domain (<50 LOC each)
+- ❌ Enum variants (never split variants!)
+
+**Example**:
+```rust
+// panels.rs (600 LOC)
+// Contains: Terminal struct (250 LOC), TerminalConfig (80 LOC), Editor struct (270 LOC)
+
+// Decompose into:
+// panels/terminal.rs - Terminal struct + impl
+// panels/terminal_config.rs - TerminalConfig struct + Default impl
+// panels/editor.rs - Editor struct + impl
+
+// Alternatively, if types are complex:
+// panels/terminal/
+//   ├─ mod.rs - re-exports
+//   ├─ terminal.rs - Terminal struct
+//   └─ config.rs - TerminalConfig
+// panels/editor.rs - Editor struct
+```
+
+**Benefits of this strategy**:
+- Clear file-to-type mapping (easier navigation)
+- Types can evolve independently
+- Reduces merge conflicts
+- Self-documenting file structure
+
+**Integration with other strategies**:
+- Combine with Strategy 1 (Logical Grouping) for organizing extracted types
+- Use after Strategy 2 (Domain Boundaries) to further split domain modules
+- Apply alongside Strategy 4 when extracting impl blocks
+
+**Note**: This strategy is complementary to others. Use it in conjunction with file size analysis - it addresses "why" to split (one type per file) while other strategies address "how" to organize the split.
+
 ## Analysis Process
 
 ### Step 1: Identify Large Files
@@ -148,14 +201,44 @@ grep -c "^fn" file.rs       # All functions
 awk '/^impl/ {start=NR} /^}/ && start {if (NR-start > 50) print start":"NR-start" lines"; start=0}' file.rs
 ```
 
+### Step 2b: Analyze Type Multiplicity (for Strategy 5)
+
+For files with multiple types, check if "1 file = 1 structure" rule applies:
+
+```bash
+# Find all type definitions with visibility and line numbers
+grep -n "^\(pub \)\?\(struct\|enum\|trait\)" file.rs
+
+# Count types by visibility
+PUBLIC_TYPES=$(grep -c "^pub \(struct\|enum\|trait\)" file.rs)
+PRIVATE_TYPES=$(grep "^\(struct\|enum\|trait\) " file.rs | grep -v "^pub" | wc -l)
+
+# For each type, get name and approximate size
+for file in src/**/*.rs; do
+  echo "=== $file ==="
+  # List all struct/enum/trait names
+  grep "^\(pub \)\?\(struct\|enum\|trait\)" "$file" | sed 's/.*\(struct\|enum\|trait\) \([A-Za-z0-9_]*\).*/\2/'
+done
+
+# Detect exception patterns (Error + ErrorKind, Builder, etc.)
+grep -q "Error" file.rs && grep -q "ErrorKind" file.rs && echo "Error+ErrorKind pattern detected"
+grep -q "Builder" file.rs && grep "^pub struct.*[^Builder]$" file.rs && echo "Builder pattern detected"
+grep -c "Request\|Response" file.rs  # DTO family indicator
+```
+
 ### Step 3: Evaluate Decomposition Opportunities
 
-For each large file, apply all 4 strategies and evaluate:
+For each large file, apply all 5 strategies and evaluate:
 
-1. **Identify cohesive groups**: Look for clusters of related functions/types
-2. **Detect domain boundaries**: Identify distinct responsibilities
-3. **Separate abstraction levels**: Find public API vs internals
-4. **Find extractable impls**: Locate large impl blocks
+1. **Identify cohesive groups** (Strategy 1): Look for clusters of related functions/types
+2. **Detect domain boundaries** (Strategy 2): Identify distinct responsibilities
+3. **Separate abstraction levels** (Strategy 3): Find public API vs internals
+4. **Find extractable impls** (Strategy 4): Locate large impl blocks
+5. **Check type multiplicity** (Strategy 5): Count types per file, identify split candidates
+   - Files with 2+ public types >50 LOC → strong candidate
+   - Files with 3+ types of any visibility → evaluate for split
+   - Check for exception patterns before recommending split
+   - Consider type coupling (do types reference each other frequently?)
 
 ### Step 4: Assess Feasibility
 
@@ -348,14 +431,113 @@ cargo clippy -- -W clippy::module_inception
 cargo tree --duplicates
 ```
 
+## Exception Patterns for Strategy 5 (Single Type Per File)
+
+When applying "1 file = 1 structure" rule, recognize these legitimate multi-type patterns:
+
+### Exception 1: Error + ErrorKind Pattern
+**Pattern**: Error struct + ErrorKind enum that are always used together
+```rust
+// ✅ KEEP TOGETHER: error.rs
+pub enum ErrorKind { Io, Parse, Network }
+pub struct Error {
+    kind: ErrorKind,
+    message: String,
+}
+```
+**Detection**: File contains both "Error" and "ErrorKind" types, total <200 LOC
+
+### Exception 2: Builder Pattern
+**Pattern**: Builder struct + Target struct
+```rust
+// ✅ KEEP TOGETHER: config.rs
+pub struct Config { ... }
+pub struct ConfigBuilder { ... }
+impl ConfigBuilder {
+    pub fn build(self) -> Config { ... }
+}
+```
+**Detection**: File contains "Builder" suffix type + non-Builder type
+
+### Exception 3: Small Helper Types
+**Pattern**: Main public type + small private helpers
+```rust
+// ✅ KEEP TOGETHER: editor.rs
+pub struct Editor { ... }
+enum Mode { Normal, Insert }  // <20 LOC, private
+struct State { ... }           // <30 LOC, private helper
+```
+**Detection**: 1 large public type (>100 LOC) + multiple small private types (<30 LOC each)
+
+### Exception 4: DTO Families
+**Pattern**: Multiple data transfer objects in same API domain
+```rust
+// ✅ KEEP TOGETHER: api/users.rs
+pub struct CreateUserRequest { ... }  // 40 LOC
+pub struct UpdateUserRequest { ... }  // 35 LOC
+pub struct UserResponse { ... }        // 45 LOC
+```
+**Detection**: Multiple types with Request/Response/DTO suffixes, all <50 LOC, in api/ directory
+
+### Exception 5: Typestate Pattern
+**Pattern**: Main type + marker types for typestate
+```rust
+// ✅ KEEP TOGETHER: connection.rs
+pub struct Connection<S> { ... }
+pub struct Connected;
+pub struct Disconnected;
+```
+**Detection**: Generic type + multiple zero-sized marker types
+
+### Exception 6: Newtype Wrappers Collection
+**Pattern**: Multiple simple newtype wrappers
+```rust
+// ✅ KEEP TOGETHER: ids.rs
+pub struct UserId(pub u64);     // 3 LOC
+pub struct SessionId(String);   // 3 LOC
+pub struct TeamId(pub u64);     // 3 LOC
+```
+**Detection**: All types are single-field tuple structs <10 LOC each
+
+### Decision Matrix for Strategy 5
+
+| Condition | Action |
+|-----------|--------|
+| 2+ public types, each >80 LOC, unrelated domains | **MUST SPLIT** |
+| 3+ public types regardless of size | **SHOULD SPLIT** (check exceptions first) |
+| 1 large type (>100 LOC) + small private helpers (<30 LOC) | **KEEP TOGETHER** |
+| Error + ErrorKind pattern | **KEEP TOGETHER** (Exception 1) |
+| Builder pattern | **KEEP TOGETHER** (Exception 2) |
+| DTO family, all <50 LOC, same domain | **CAN GROUP** (Exception 4) |
+| Typestate pattern | **KEEP TOGETHER** (Exception 5) |
+| Collection of newtypes, all <10 LOC | **CAN GROUP** (Exception 6) |
+
+### Integration with Size-Based Analysis
+
+Strategy 5 (Single Type Per File) works in conjunction with file size thresholds:
+
+1. **File <200 LOC with 2-3 small types**: Apply exceptions liberally, likely keep together
+2. **File 200-500 LOC with 2 types**: Check if types are related (exceptions apply?)
+3. **File 500-1000 LOC with 2+ types**: Strong candidate for split unless clear exception
+4. **File >1000 LOC with 2+ types**: MUST split (use Strategy 1-4 to determine how)
+
+**Priority for Strategy 5**:
+- High priority: Files >400 LOC with 2+ unrelated public types
+- Medium priority: Files with 3+ types where at least one is >80 LOC
+- Low priority: Files with exception patterns (review but likely defer)
+- No action: Files with single type, or clear exception patterns <200 LOC
+
 ## Important Notes
 
-- **Focus ONLY on file size and decomposition strategies**
+- **Focus ONLY on file size, type multiplicity, and decomposition strategies**
 - Don't analyze SOLID principles, performance, or dead code (other analyzers handle this)
 - Be pragmatic: some large files are fine if they're cohesive
+- Apply "1 file = 1 structure" rule intelligently - recognize legitimate exceptions
+- Don't split enum variants into separate files (common anti-pattern!)
 - Consider developer experience: navigation, understanding, maintenance
 - Provide concrete migration steps, not just theory
 - Account for Rust module system: pub(crate), re-exports, visibility
+- When Strategy 5 applies, combine it with Strategy 1-4 to determine *how* to organize the split
 
 ## Tools Available
 

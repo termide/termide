@@ -4,7 +4,7 @@ Comprehensive Rust codebase analysis and refactoring system with parallel execut
 
 ## Overview
 
-This skill provides systematic refactoring for Rust projects following DRY, KISS, and SOLID principles. It analyzes code quality, identifies issues, prioritizes fixes, and executes refactoring with continuous validation.
+This skill provides systematic refactoring for Rust projects following DRY, KISS, and SOLID principles. It analyzes code quality, identifies issues, prioritizes fixes, and executes refactoring with continuous validation. Includes intelligent application of "1 file = 1 structure" principle for improved modularity.
 
 **Key Features**:
 - ⚡ **Parallel Analysis** - 3 independent analyzers run concurrently (60% faster)
@@ -12,6 +12,7 @@ This skill provides systematic refactoring for Rust projects following DRY, KISS
 - 🎯 **Interactive Prioritization** - User-driven execution plan
 - 🔄 **Safe Execution** - Incremental changes with rollback points
 - ✅ **Continuous Validation** - Tests + clippy after every change
+- 📁 **Smart Decomposition** - "1 file = 1 structure" with intelligent exceptions
 
 ## When to Use This Skill
 
@@ -27,6 +28,39 @@ Invoke `/rust-refactor` or `/rust-refactoring` when you want to:
 - Greenfield projects (no code to refactor yet)
 - Quick bug fixes (too heavyweight)
 - Projects that don't compile (fix compilation first)
+
+## Best Practice: "1 File = 1 Structure" Rule
+
+This skill enforces the **"1 file = 1 structure"** principle where appropriate:
+
+**The Rule**: Each significant type (struct, enum, trait) should ideally live in its own file.
+
+**Benefits**:
+- 🔍 Clear file-to-type mapping for easy navigation
+- 📦 Single responsibility per file
+- 🔄 Reduced merge conflicts
+- 🧪 Test structure mirrors source structure
+
+**Intelligent Application**:
+The skill recognizes legitimate exceptions and won't force splitting when types should stay together:
+- ✅ **Error + ErrorKind** pattern (tightly coupled types)
+- ✅ **Builder patterns** (ConfigBuilder + Config)
+- ✅ **Small helpers** (<30 LOC private types supporting main type)
+- ✅ **DTO families** (related Request/Response types in same API domain)
+- ✅ **Typestate patterns** (marker types for compile-time state)
+- ✅ **Newtype collections** (multiple simple wrapper types)
+
+**When Splitting is Required**:
+- 2+ public types >80 LOC each in unrelated domains → **MUST SPLIT**
+- File >1000 LOC with multiple types → **MUST SPLIT**
+- 3+ public types regardless of size → **SHOULD SPLIT** (check exceptions first)
+
+**Anti-Pattern to Avoid**:
+- ❌ **Never** split enum variants into separate files!
+- ❌ Don't split generated code
+- ❌ Don't split test helper utilities
+
+See `analyzers/file-decomposition-analyzer.md` for complete decision matrix and exception patterns.
 
 ## Prerequisites
 
@@ -157,7 +191,14 @@ Speedup: 40-50% via parallelization
    - Also identifies KISS violations
    - Output: JSON with abstraction opportunities
 
-**Output**: Consolidated diagnosis with 100-150 issues, module heatmap
+5. **File Decomposition Analyzer** (`analyzers/file-decomposition-analyzer.md`)
+   - Large files (>800 LOC) analysis
+   - Multi-type files (violating "1 file = 1 structure")
+   - 5 decomposition strategies (logical grouping, domain boundaries, abstraction levels, trait extraction, single type per file)
+   - Exception pattern recognition (Error+ErrorKind, Builder, DTO families, etc.)
+   - Output: JSON with decomposition opportunities and proposed structure
+
+**Output**: Consolidated diagnosis with 100-150 issues, module heatmap, decomposition plan
 
 **See**: `phases/2-diagnosis.md` for details
 
