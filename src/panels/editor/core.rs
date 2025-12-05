@@ -1960,6 +1960,31 @@ impl Editor {
         self.update_selection_active();
     }
 
+    /// Execute simple navigation (no visual/physical choice).
+    ///
+    /// Prepares for navigation and calls the movement function.
+    /// Use for movements that don't have visual/physical variants (e.g., Left, Right).
+    fn navigate_simple<F>(&mut self, movement_fn: F)
+    where
+        F: FnOnce(&mut Self),
+    {
+        self.prepare_for_navigation();
+        movement_fn(self);
+    }
+
+    /// Execute simple navigation with selection (no visual/physical choice).
+    ///
+    /// Prepares for navigation with selection, calls movement function, then updates selection.
+    /// Use for movements that don't have visual/physical variants (e.g., Shift+Left, Shift+Right).
+    fn navigate_with_selection_simple<F>(&mut self, movement_fn: F)
+    where
+        F: FnOnce(&mut Self),
+    {
+        self.prepare_for_navigation_with_selection();
+        movement_fn(self);
+        self.update_selection_active();
+    }
+
     // Word wrap methods moved to word_wrap module
 }
 
@@ -1989,12 +2014,10 @@ impl Panel for Editor {
                 self.navigate(Self::move_cursor_down_visual, Self::move_cursor_down);
             }
             (KeyCode::Left, KeyModifiers::NONE) => {
-                self.prepare_for_navigation();
-                self.move_cursor_left();
+                self.navigate_simple(Self::move_cursor_left);
             }
             (KeyCode::Right, KeyModifiers::NONE) => {
-                self.prepare_for_navigation();
-                self.move_cursor_right();
+                self.navigate_simple(Self::move_cursor_right);
             }
             (KeyCode::Home, KeyModifiers::NONE) => {
                 self.navigate(Self::move_to_visual_line_start, Self::move_to_line_start);
@@ -2009,12 +2032,10 @@ impl Panel for Editor {
                 self.navigate(Self::page_down_visual, Self::page_down);
             }
             (KeyCode::Home, KeyModifiers::CONTROL) => {
-                self.prepare_for_navigation();
-                self.move_to_document_start();
+                self.navigate_simple(Self::move_to_document_start);
             }
             (KeyCode::End, KeyModifiers::CONTROL) => {
-                self.prepare_for_navigation();
-                self.move_to_document_end();
+                self.navigate_simple(Self::move_to_document_end);
             }
 
             // Navigation with selection (Shift) - closes search
@@ -2025,14 +2046,10 @@ impl Panel for Editor {
                 self.navigate_with_selection(Self::move_cursor_down_visual, Self::move_cursor_down);
             }
             (KeyCode::Left, KeyModifiers::SHIFT) => {
-                self.prepare_for_navigation_with_selection();
-                self.move_cursor_left();
-                self.update_selection_active();
+                self.navigate_with_selection_simple(Self::move_cursor_left);
             }
             (KeyCode::Right, KeyModifiers::SHIFT) => {
-                self.prepare_for_navigation_with_selection();
-                self.move_cursor_right();
-                self.update_selection_active();
+                self.navigate_with_selection_simple(Self::move_cursor_right);
             }
             (KeyCode::Home, modifiers)
                 if modifiers.contains(KeyModifiers::SHIFT)
@@ -2066,17 +2083,13 @@ impl Panel for Editor {
                 if modifiers.contains(KeyModifiers::SHIFT)
                     && modifiers.contains(KeyModifiers::CONTROL) =>
             {
-                self.prepare_for_navigation_with_selection();
-                self.move_to_document_start();
-                self.update_selection_active();
+                self.navigate_with_selection_simple(Self::move_to_document_start);
             }
             (KeyCode::End, modifiers)
                 if modifiers.contains(KeyModifiers::SHIFT)
                     && modifiers.contains(KeyModifiers::CONTROL) =>
             {
-                self.prepare_for_navigation_with_selection();
-                self.move_to_document_end();
-                self.update_selection_active();
+                self.navigate_with_selection_simple(Self::move_to_document_end);
             }
 
             // Editing (only if not read-only)
