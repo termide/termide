@@ -55,6 +55,12 @@ pub struct Config {
     /// Logs below this level will not be recorded
     #[serde(default = "default_min_log_level")]
     pub min_log_level: String,
+
+    /// File size threshold in MB for enabling smart features (default: 5)
+    /// Files larger than this threshold will disable expensive features like
+    /// smart word wrapping to maintain performance
+    #[serde(default = "default_large_file_threshold_mb")]
+    pub large_file_threshold_mb: u64,
 }
 
 fn default_theme_name() -> String {
@@ -97,6 +103,10 @@ fn default_min_log_level() -> String {
     "info".to_string()
 }
 
+fn default_large_file_threshold_mb() -> u64 {
+    crate::constants::DEFAULT_LARGE_FILE_THRESHOLD_MB
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -111,6 +121,7 @@ impl Default for Config {
             session_retention_days: default_session_retention_days(),
             word_wrap: default_word_wrap(),
             min_log_level: default_min_log_level(),
+            large_file_threshold_mb: default_large_file_threshold_mb(),
         }
     }
 }

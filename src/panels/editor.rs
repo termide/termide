@@ -127,6 +127,12 @@ pub struct Editor {
     preferred_column: Option<usize>,
     /// Cached content width from last render (for visual line navigation)
     cached_content_width: usize,
+    /// File size in bytes (for determining whether to use smart features)
+    file_size: u64,
+    /// Cache of wrap points for each line (line_idx -> vec of char positions where to wrap)
+    /// Used for smart word wrapping to avoid recalculating on every render
+    #[allow(dead_code)]
+    wrap_cache: std::collections::HashMap<usize, Vec<usize>>,
 }
 
 /// Git line rendering information
@@ -194,6 +200,8 @@ impl Editor {
             unsaved_buffer_file: None,
             preferred_column: None,
             cached_content_width: 0,
+            file_size: 0,
+            wrap_cache: std::collections::HashMap::new(),
         }
     }
 
@@ -207,6 +215,32 @@ impl Editor {
     #[allow(dead_code)]
     pub fn has_syntax_highlighting(&self) -> bool {
         self.config.syntax_highlighting
+    }
+
+    /// Check if smart word wrapping should be used
+    ///
+    /// Smart wrapping is enabled when:
+    /// - Syntax highlighting is enabled
+    /// - File has a detected syntax/language
+    /// - File size is below the configured threshold
+    fn should_use_smart_wrap(&self, config: &crate::config::Config) -> bool {
+        // Check if syntax highlighting is enabled
+        if !self.config.syntax_highlighting {
+            return false;
+        }
+
+        // Check if a syntax language is detected
+        if !self.highlight_cache.has_syntax() {
+            return false;
+        }
+
+        // Check file size threshold
+        let threshold_bytes = config.large_file_threshold_mb * crate::constants::MEGABYTE;
+        if self.file_size > threshold_bytes {
+            return false;
+        }
+
+        true
     }
 
     /// Get file path
@@ -228,7 +262,7 @@ impl Editor {
     /// Open file with specified configuration
     pub fn open_file_with_config(path: PathBuf, mut config: EditorConfig) -> Result<Self> {
         // Check file size before loading
-        if let Ok(metadata) = std::fs::metadata(&path) {
+        let file_size = if let Ok(metadata) = std::fs::metadata(&path) {
             if metadata.is_file() && metadata.len() > crate::constants::MAX_EDITOR_FILE_SIZE {
                 return Err(anyhow::anyhow!(
                     "File is too large to open ({:.1} MB). Maximum allowed size is {} MB.",
@@ -236,12 +270,14 @@ impl Editor {
                     crate::constants::MAX_EDITOR_FILE_SIZE / crate::constants::MEGABYTE
                 ));
             }
+            metadata.len()
         } else {
             crate::logger::warn(format!(
                 "File size check skipped (permission denied): {}",
                 path.display()
             ));
-        }
+            0
+        };
 
         let buffer = TextBuffer::from_file(&path)?;
 
@@ -300,6 +336,8 @@ impl Editor {
             unsaved_buffer_file: None,
             preferred_column: None,
             cached_content_width: 0,
+            file_size,
+            wrap_cache: std::collections::HashMap::new(),
         })
     }
 
@@ -331,6 +369,8 @@ impl Editor {
             unsaved_buffer_file: None,
             preferred_column: None,
             cached_content_width: 0,
+            file_size: 0,
+            wrap_cache: std::collections::HashMap::new(),
         }
     }
 
@@ -1388,6 +1428,10 @@ impl Editor {
 
         if self.config.word_wrap && content_width > 0 {
             // Word wrap mode
+
+            // Check if smart wrapping should be used
+            let use_smart_wrap = self.should_use_smart_wrap(config);
+
             let mut visual_row = 0;
             let mut line_idx = self.viewport.top_line;
 
@@ -1459,7 +1503,19 @@ impl Editor {
                     } else {
                         // Обработка непустых строк
                         while char_offset < line_len && visual_row < content_height {
-                            let chunk_end = (char_offset + content_width).min(line_len);
+                            // Calculate wrap point (smart or simple)
+                            let chunk_end = if use_smart_wrap {
+                                // Smart wrapping: respect word boundaries
+                                crate::editor::calculate_wrap_point(
+                                    &chars,
+                                    char_offset,
+                                    content_width,
+                                    line_len,
+                                )
+                            } else {
+                                // Simple wrapping: hard break at content_width
+                                (char_offset + content_width).min(line_len)
+                            };
 
                             // Номер строки (только на первой визуальной строке)
                             if is_first_visual_row {

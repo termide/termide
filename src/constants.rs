@@ -14,6 +14,10 @@ pub const GIGABYTE: u64 = MEGABYTE * 1024;
 /// Maximum file size to open in editor (100 MB)
 pub const MAX_EDITOR_FILE_SIZE: u64 = 100 * MEGABYTE;
 
+/// Default file size threshold in MB for enabling smart features (5 MB)
+/// Used as default value for Config.large_file_threshold_mb
+pub const DEFAULT_LARGE_FILE_THRESHOLD_MB: u64 = 5;
+
 // ===== UI and layout constants =====
 
 /// Minimum terminal width for single panel mode
