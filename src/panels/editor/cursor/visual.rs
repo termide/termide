@@ -222,3 +222,79 @@ pub fn move_to_visual_line_end(
 
     0
 }
+
+/// Move cursor up by page_size visual lines.
+///
+/// Returns final cursor position after moving up by page_size steps or until top of document.
+pub fn page_up(
+    cursor: &Cursor,
+    buffer: &TextBuffer,
+    preferred_column: Option<usize>,
+    content_width: usize,
+    use_smart_wrap: bool,
+    page_size: usize,
+) -> Cursor {
+    let mut current_cursor = *cursor;
+
+    for _ in 0..page_size {
+        let prev_cursor = current_cursor;
+
+        if let Some(new_cursor) = move_up(
+            &current_cursor,
+            buffer,
+            preferred_column,
+            content_width,
+            use_smart_wrap,
+        ) {
+            current_cursor = new_cursor;
+        }
+
+        // Stop if we haven't moved (at top of document)
+        if current_cursor == prev_cursor {
+            break;
+        }
+    }
+
+    current_cursor
+}
+
+/// Move cursor down by page_size visual lines.
+///
+/// Returns final cursor position after moving down by page_size steps or until bottom of document.
+pub fn page_down(
+    cursor: &Cursor,
+    buffer: &TextBuffer,
+    preferred_column: Option<usize>,
+    content_width: usize,
+    use_smart_wrap: bool,
+    page_size: usize,
+) -> Cursor {
+    let mut current_cursor = *cursor;
+    let max_line = buffer.line_count().saturating_sub(1);
+
+    for _ in 0..page_size {
+        let prev_cursor = current_cursor;
+
+        if let Some(new_cursor) = move_down(
+            &current_cursor,
+            buffer,
+            preferred_column,
+            content_width,
+            use_smart_wrap,
+        ) {
+            current_cursor = new_cursor;
+        }
+
+        // Stop if we haven't moved (at bottom of document)
+        if current_cursor == prev_cursor {
+            break;
+        }
+
+        // Stop if we reached the last line
+        if current_cursor.line >= max_line {
+            break;
+        }
+    }
+
+    current_cursor
+}

@@ -590,20 +590,20 @@ impl Editor {
             return;
         }
 
-        let page_size = self.viewport.height;
-
-        // Move up by page_size visual lines
-        for _ in 0..page_size {
-            let prev_line = self.cursor.line;
-            let prev_col = self.cursor.column;
-
-            self.move_cursor_up_visual();
-
-            // Stop if we haven't moved (at top of document)
-            if self.cursor.line == prev_line && self.cursor.column == prev_col {
-                break;
-            }
+        // Save preferred column on first vertical movement
+        if self.preferred_column.is_none() {
+            self.preferred_column = Some(self.cursor.column);
         }
+
+        let page_size = self.viewport.height;
+        self.cursor = cursor::visual::page_up(
+            &self.cursor,
+            &self.buffer,
+            self.preferred_column,
+            self.cached_content_width,
+            self.cached_use_smart_wrap,
+            page_size,
+        );
 
         // Don't manually scroll viewport - let ensure_cursor_visible() handle it during rendering
         // This is correct because the viewport needs to track visual rows, not buffer lines
@@ -617,26 +617,20 @@ impl Editor {
             return;
         }
 
-        let page_size = self.viewport.height;
-        let max_line = self.buffer.line_count().saturating_sub(1);
-
-        // Move down by page_size visual lines
-        for _ in 0..page_size {
-            let prev_line = self.cursor.line;
-            let prev_col = self.cursor.column;
-
-            self.move_cursor_down_visual();
-
-            // Stop if we haven't moved (at bottom of document)
-            if self.cursor.line == prev_line && self.cursor.column == prev_col {
-                break;
-            }
-
-            // Stop if we reached the last line
-            if self.cursor.line >= max_line {
-                break;
-            }
+        // Save preferred column on first vertical movement
+        if self.preferred_column.is_none() {
+            self.preferred_column = Some(self.cursor.column);
         }
+
+        let page_size = self.viewport.height;
+        self.cursor = cursor::visual::page_down(
+            &self.cursor,
+            &self.buffer,
+            self.preferred_column,
+            self.cached_content_width,
+            self.cached_use_smart_wrap,
+            page_size,
+        );
 
         // Don't manually scroll viewport - let ensure_cursor_visible() handle it during rendering
         // This is correct because the viewport needs to track visual rows, not buffer lines
