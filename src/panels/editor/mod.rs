@@ -5,6 +5,7 @@
 pub mod clipboard;
 pub mod config;
 mod core;
+pub mod cursor;
 pub mod git;
 pub mod search;
 pub mod selection;
