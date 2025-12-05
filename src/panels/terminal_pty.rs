@@ -96,8 +96,8 @@ struct TerminalScreen {
     selection_start: Option<(usize, usize)>,
     /// Text selection end (row, col)
     selection_end: Option<(usize, usize)>,
-    /// History buffer (scrollback)
-    scrollback: Vec<Vec<Cell>>,
+    /// History buffer (scrollback) - VecDeque for O(1) push/pop at both ends
+    scrollback: std::collections::VecDeque<Vec<Cell>>,
     /// View offset (0 = current screen, >0 = viewing history)
     scroll_offset: usize,
     /// Maximum history size (number of lines)
@@ -161,7 +161,7 @@ impl TerminalScreen {
             bracketed_paste_mode: false,
             selection_start: None,
             selection_end: None,
-            scrollback: Vec::new(),
+            scrollback: std::collections::VecDeque::new(),
             scroll_offset: 0,
             max_scrollback: 10000,
             wrap_pending: false,
@@ -265,11 +265,11 @@ impl TerminalScreen {
         // For main buffer, save line to scrollback
         if !self.use_alt_screen {
             let top_line = self.lines[0].clone();
-            self.scrollback.push(top_line);
+            self.scrollback.push_back(top_line);
 
-            // Limit scrollback size
+            // Limit scrollback size - O(1) with VecDeque instead of O(n) with Vec::remove(0)
             if self.scrollback.len() > self.max_scrollback {
-                self.scrollback.remove(0);
+                self.scrollback.pop_front();
             }
         }
 

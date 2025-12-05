@@ -1423,6 +1423,16 @@ impl Editor {
         };
         let current_match_idx = self.search_state.as_ref().and_then(|s| s.current_match);
 
+        // Performance optimization: Create HashMap for O(1) search match lookups
+        // Maps (line, column) to match index for fast character-by-character highlighting
+        let mut search_match_map: std::collections::HashMap<(usize, usize), usize> =
+            std::collections::HashMap::with_capacity(search_matches.len() * 10);
+        for (idx, &(m_line, m_col, m_len)) in search_matches.iter().enumerate() {
+            for col in m_col..(m_col + m_len) {
+                search_match_map.insert((m_line, col), idx);
+            }
+        }
+
         // Variable to track cursor position in word wrap mode
         let mut cursor_viewport_pos: Option<(usize, usize)> = None;
 
@@ -1582,14 +1592,10 @@ impl Editor {
                                             if let Some(cell) = buf.cell_mut((x, y)) {
                                                 cell.set_char(ch);
 
-                                                // Проверить, является ли это совпадением поиска
-                                                let match_idx = search_matches.iter().position(
-                                                    |(m_line, m_col, m_len)| {
-                                                        *m_line == line_idx
-                                                            && segment_char_idx >= *m_col
-                                                            && segment_char_idx < m_col + m_len
-                                                    },
-                                                );
+                                                // Проверить, является ли это совпадением поиска (O(1) HashMap lookup)
+                                                let match_idx = search_match_map
+                                                    .get(&(line_idx, segment_char_idx))
+                                                    .copied();
 
                                                 // Проверить, находится ли символ в выделении
                                                 let is_selected =
@@ -1714,7 +1720,9 @@ impl Editor {
                                 " {} ",
                                 crate::i18n::t().editor_deletion_marker(deletion_count)
                             );
-                            let text_len = deletion_text.chars().count();
+                            // Performance optimization: Convert to Vec<char> once for O(1) indexing
+                            let deletion_chars: Vec<char> = deletion_text.chars().collect();
+                            let text_len = deletion_chars.len();
 
                             // Вычислить позицию для центрирования текста
                             let text_start_col = if content_width > text_len {
@@ -1731,13 +1739,13 @@ impl Editor {
                                         // Проверить, находится ли эта позиция в области текста
                                         if col >= text_start_col && col < text_start_col + text_len
                                         {
-                                            // Отрисовать символ из текста
+                                            // Отрисовать символ из текста (O(1) indexing)
                                             let text_idx = col - text_start_col;
-                                            if let Some(ch) = deletion_text.chars().nth(text_idx) {
-                                                cell.set_char(ch);
-                                            } else {
-                                                cell.set_char('─');
-                                            }
+                                            let ch = deletion_chars
+                                                .get(text_idx)
+                                                .copied()
+                                                .unwrap_or('─');
+                                            cell.set_char(ch);
                                         } else {
                                             // Отрисовать линию
                                             cell.set_char('─');
@@ -1871,14 +1879,10 @@ impl Editor {
                                             if let Some(cell) = buf.cell_mut((x, y)) {
                                                 cell.set_char(ch);
 
-                                                // Проверить, является ли это совпадением поиска
-                                                let match_idx = search_matches.iter().position(
-                                                    |(m_line, m_col, m_len)| {
-                                                        *m_line == line_idx
-                                                            && col_offset >= *m_col
-                                                            && col_offset < m_col + m_len
-                                                    },
-                                                );
+                                                // Проверить, является ли это совпадением поиска (O(1) HashMap lookup)
+                                                let match_idx = search_match_map
+                                                    .get(&(line_idx, col_offset))
+                                                    .copied();
 
                                                 // Проверить, находится ли символ в выделении
                                                 let is_selected =
@@ -1984,7 +1988,9 @@ impl Editor {
                             " {} ",
                             crate::i18n::t().editor_deletion_marker(deletion_count)
                         );
-                        let text_len = deletion_text.chars().count();
+                        // Performance optimization: Convert to Vec<char> once for O(1) indexing
+                        let deletion_chars: Vec<char> = deletion_text.chars().collect();
+                        let text_len = deletion_chars.len();
 
                         // Вычислить позицию для центрирования текста
                         let text_start_col = if content_width > text_len {
@@ -2000,13 +2006,11 @@ impl Editor {
                                 if let Some(cell) = buf.cell_mut((x, y)) {
                                     // Проверить, находится ли эта позиция в области текста
                                     if col >= text_start_col && col < text_start_col + text_len {
-                                        // Отрисовать символ из текста
+                                        // Отрисовать символ из текста (O(1) indexing)
                                         let text_idx = col - text_start_col;
-                                        if let Some(ch) = deletion_text.chars().nth(text_idx) {
-                                            cell.set_char(ch);
-                                        } else {
-                                            cell.set_char('─');
-                                        }
+                                        let ch =
+                                            deletion_chars.get(text_idx).copied().unwrap_or('─');
+                                        cell.set_char(ch);
                                     } else {
                                         // Отрисовать линию
                                         cell.set_char('─');
