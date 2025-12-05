@@ -418,6 +418,11 @@ impl Editor {
         }
     }
 
+    /// Check if visual movement should be used (word wrap enabled and width cached).
+    fn should_use_visual_movement(&self) -> bool {
+        self.config.word_wrap && self.cached_content_width > 0
+    }
+
     /// Move cursor up
     fn move_cursor_up(&mut self) {
         let maintain_preferred = cursor::physical::move_up(&mut self.cursor);
@@ -868,7 +873,7 @@ impl Editor {
     /// This is used for viewport calculations to account for deletion markers and word wrapping
     fn virtual_line_count(&self, config: &crate::config::Config) -> usize {
         // If word wrap is enabled, count visual rows instead of buffer lines
-        if self.config.word_wrap && self.cached_content_width > 0 {
+        if self.should_use_visual_movement() {
             // Use calculate_total_visual_rows which accounts for word wrapping
             let total_visual_rows = word_wrap::calculate_total_visual_rows(
                 &self.buffer,
@@ -1875,7 +1880,7 @@ impl Panel for Editor {
             (KeyCode::Up, KeyModifiers::NONE) => {
                 self.close_search();
                 self.selection = None;
-                if self.config.word_wrap && self.cached_content_width > 0 {
+                if self.should_use_visual_movement() {
                     self.move_cursor_up_visual();
                 } else {
                     self.move_cursor_up();
@@ -1884,7 +1889,7 @@ impl Panel for Editor {
             (KeyCode::Down, KeyModifiers::NONE) => {
                 self.close_search();
                 self.selection = None;
-                if self.config.word_wrap && self.cached_content_width > 0 {
+                if self.should_use_visual_movement() {
                     self.move_cursor_down_visual();
                 } else {
                     self.move_cursor_down();
@@ -1903,7 +1908,7 @@ impl Panel for Editor {
             (KeyCode::Home, KeyModifiers::NONE) => {
                 self.close_search();
                 self.selection = None;
-                if self.config.word_wrap && self.cached_content_width > 0 {
+                if self.should_use_visual_movement() {
                     self.move_to_visual_line_start();
                 } else {
                     self.move_to_line_start();
@@ -1912,7 +1917,7 @@ impl Panel for Editor {
             (KeyCode::End, KeyModifiers::NONE) => {
                 self.close_search();
                 self.selection = None;
-                if self.config.word_wrap && self.cached_content_width > 0 {
+                if self.should_use_visual_movement() {
                     self.move_to_visual_line_end();
                 } else {
                     self.move_to_line_end();
@@ -1921,7 +1926,7 @@ impl Panel for Editor {
             (KeyCode::PageUp, KeyModifiers::NONE) => {
                 self.close_search();
                 self.selection = None;
-                if self.config.word_wrap && self.cached_content_width > 0 {
+                if self.should_use_visual_movement() {
                     self.page_up_visual();
                 } else {
                     self.page_up();
@@ -1930,7 +1935,7 @@ impl Panel for Editor {
             (KeyCode::PageDown, KeyModifiers::NONE) => {
                 self.close_search();
                 self.selection = None;
-                if self.config.word_wrap && self.cached_content_width > 0 {
+                if self.should_use_visual_movement() {
                     self.page_down_visual();
                 } else {
                     self.page_down();
@@ -1951,7 +1956,7 @@ impl Panel for Editor {
             (KeyCode::Up, KeyModifiers::SHIFT) => {
                 self.close_search();
                 self.start_or_extend_selection();
-                if self.config.word_wrap && self.cached_content_width > 0 {
+                if self.should_use_visual_movement() {
                     self.move_cursor_up_visual();
                 } else {
                     self.move_cursor_up();
@@ -1961,7 +1966,7 @@ impl Panel for Editor {
             (KeyCode::Down, KeyModifiers::SHIFT) => {
                 self.close_search();
                 self.start_or_extend_selection();
-                if self.config.word_wrap && self.cached_content_width > 0 {
+                if self.should_use_visual_movement() {
                     self.move_cursor_down_visual();
                 } else {
                     self.move_cursor_down();
@@ -1987,7 +1992,7 @@ impl Panel for Editor {
                 logger::debug("Shift+Home pressed - moving to line start with selection");
                 self.close_search();
                 self.start_or_extend_selection();
-                if self.config.word_wrap && self.cached_content_width > 0 {
+                if self.should_use_visual_movement() {
                     logger::debug("Using visual line start");
                     self.move_to_visual_line_start();
                 } else {
@@ -2003,7 +2008,7 @@ impl Panel for Editor {
                 logger::debug("Shift+End pressed - moving to line end with selection");
                 self.close_search();
                 self.start_or_extend_selection();
-                if self.config.word_wrap && self.cached_content_width > 0 {
+                if self.should_use_visual_movement() {
                     logger::debug("Using visual line end");
                     self.move_to_visual_line_end();
                 } else {
@@ -2019,7 +2024,7 @@ impl Panel for Editor {
                 logger::debug("Shift+PageUp pressed - paging up with selection");
                 self.close_search();
                 self.start_or_extend_selection();
-                if self.config.word_wrap && self.cached_content_width > 0 {
+                if self.should_use_visual_movement() {
                     logger::debug("Using visual page up");
                     self.page_up_visual();
                 } else {
@@ -2035,7 +2040,7 @@ impl Panel for Editor {
                 logger::debug("Shift+PageDown pressed - paging down with selection");
                 self.close_search();
                 self.start_or_extend_selection();
-                if self.config.word_wrap && self.cached_content_width > 0 {
+                if self.should_use_visual_movement() {
                     logger::debug("Using visual page down");
                     self.page_down_visual();
                 } else {
