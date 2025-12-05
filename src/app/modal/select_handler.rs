@@ -88,7 +88,7 @@ impl App {
         if let Some(choice) = value.downcast_ref::<crate::ui::modal::OverwriteChoice>() {
             use crate::{i18n, ui::modal::OverwriteChoice};
 
-            let item_name = source.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+            let item_name = path_utils::get_file_name_str(&source);
 
             let final_dest = path_utils::resolve_destination_path(&source, &destination);
 

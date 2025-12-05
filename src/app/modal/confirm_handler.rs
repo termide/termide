@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 use super::super::App;
-use crate::{i18n, panels::PanelExt};
+use crate::{i18n, panels::PanelExt, path_utils};
 
 impl App {
     /// Handle deletion of files/directories
@@ -24,8 +24,7 @@ impl App {
 
                             // Delete each file/directory
                             for path in &paths {
-                                let item_name =
-                                    path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                                let item_name = path_utils::get_file_name_str(path);
                                 let is_dir = path.is_dir();
 
                                 crate::logger::info(format!(

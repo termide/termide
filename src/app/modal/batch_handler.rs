@@ -122,11 +122,7 @@ impl App {
                 ConflictResolution::Overwrite => {
                     // Overwrite this file - execute operation directly
                     if let Some(source) = operation.current_source().cloned() {
-                        let item_name = source
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("?")
-                            .to_string();
+                        let item_name = path_utils::get_file_name_string(&source);
 
                         let final_dest = path_utils::resolve_batch_destination_path(
                             &source,
@@ -198,11 +194,7 @@ impl App {
                 ConflictResolution::Rename => {
                     // Request rename pattern for single file
                     if let Some(source) = operation.current_source() {
-                        let original_name = source
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("?")
-                            .to_string();
+                        let original_name = path_utils::get_file_name_string(source);
 
                         // Get file metadata for preview
                         let metadata = source.metadata().ok();
@@ -230,11 +222,7 @@ impl App {
                 ConflictResolution::RenameAll => {
                     // Request rename pattern for all files
                     if let Some(source) = operation.current_source() {
-                        let original_name = source
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("?")
-                            .to_string();
+                        let original_name = path_utils::get_file_name_string(source);
 
                         // Get file metadata for preview
                         let metadata = source.metadata().ok();
@@ -303,11 +291,7 @@ impl App {
             return;
         };
 
-        let item_name = source
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("?")
-            .to_string();
+        let item_name = path_utils::get_file_name_string(&source);
 
         // Determine target path (considering rename pattern if set)
         let final_dest = if operation.rename_pattern.is_some() {
