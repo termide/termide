@@ -334,7 +334,9 @@ src/i18n/:
 
 ### Step 2.5: Generate Unified Diagnosis Report
 
-**Create comprehensive JSON**:
+**IMPORTANT**: Do NOT create any report files. Display all information directly to the user in the terminal.
+
+**Create comprehensive JSON** (for display only, not saved to file):
 ```json
 {
   "diagnosis_summary": {

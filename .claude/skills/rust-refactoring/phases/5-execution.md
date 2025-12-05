@@ -35,10 +35,7 @@ git checkout -b refactor-code-quality
 # Ensure clean working tree
 git status
 
-# Record baseline
-echo "Baseline metrics:" > refactor-log.txt
-find src -name "*.rs" -exec wc -l {} + | tail -1 >> refactor-log.txt
-cargo clippy 2>&1 | grep "warning:" | wc -l >> refactor-log.txt
+# Verify baseline metrics (displayed to user below)
 ```
 
 **Output to user**:
@@ -126,7 +123,7 @@ cargo test --all
 **Implementation**:
 ```bash
 # Get list of dead code warnings
-cargo check 2>&1 | grep "never used" > /tmp/dead-code.txt
+cargo check 2>&1 | grep "never used"
 
 # For each dead code item:
 # 1. Use Edit tool to remove the code

@@ -284,7 +284,9 @@ All issues: 62% (91/148)
 
 ### Step 6.7: Generate Final Report
 
-Create comprehensive refactoring report:
+**IMPORTANT**: Do NOT create any report files (no REFACTORING_REPORT.md or similar). Display all information directly to the user in the terminal only.
+
+Create comprehensive refactoring report (terminal output only):
 
 ```
 ╔════════════════════════════════════════════════════════════╗

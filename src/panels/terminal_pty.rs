@@ -64,10 +64,10 @@ pub struct Terminal {
 /// Terminal screen state
 #[derive(Clone)]
 struct TerminalScreen {
-    /// Main line buffer
-    lines: Vec<Vec<Cell>>,
+    /// Main line buffer - VecDeque for O(1) scroll operations
+    lines: std::collections::VecDeque<Vec<Cell>>,
     /// Alternate screen buffer (for TUI applications)
-    alt_lines: Vec<Vec<Cell>>,
+    alt_lines: std::collections::VecDeque<Vec<Cell>>,
     /// Alternate screen usage flag
     use_alt_screen: bool,
     /// Cursor position (row, col)
@@ -145,8 +145,8 @@ impl TerminalScreen {
         };
 
         Self {
-            lines: vec![vec![empty_cell; cols]; rows],
-            alt_lines: vec![vec![empty_cell; cols]; rows],
+            lines: std::collections::VecDeque::from(vec![vec![empty_cell; cols]; rows]),
+            alt_lines: std::collections::VecDeque::from(vec![vec![empty_cell; cols]; rows]),
             use_alt_screen: false,
             cursor: (0, 0),
             saved_cursor: None,
@@ -169,7 +169,7 @@ impl TerminalScreen {
     }
 
     /// Get mutable reference to active buffer
-    fn active_buffer_mut(&mut self) -> &mut Vec<Vec<Cell>> {
+    fn active_buffer_mut(&mut self) -> &mut std::collections::VecDeque<Vec<Cell>> {
         if self.use_alt_screen {
             &mut self.alt_lines
         } else {
@@ -178,7 +178,7 @@ impl TerminalScreen {
     }
 
     /// Get reference to active buffer
-    fn active_buffer(&self) -> &Vec<Vec<Cell>> {
+    fn active_buffer(&self) -> &std::collections::VecDeque<Vec<Cell>> {
         if self.use_alt_screen {
             &self.alt_lines
         } else {
@@ -196,7 +196,7 @@ impl TerminalScreen {
                 ch: ' ',
                 style: CellStyle::default(),
             };
-            self.alt_lines = vec![vec![empty_cell; self.cols]; self.rows];
+            self.alt_lines = std::collections::VecDeque::from(vec![vec![empty_cell; self.cols]; self.rows]);
             self.cursor = (0, 0);
         }
     }
@@ -274,12 +274,12 @@ impl TerminalScreen {
         }
 
         let buffer = self.active_buffer_mut();
-        buffer.remove(0);
+        buffer.pop_front(); // O(1) with VecDeque instead of O(n) with Vec::remove(0)
         let empty_cell = Cell {
             ch: ' ',
             style: CellStyle::default(),
         };
-        buffer.push(vec![empty_cell; cols]);
+        buffer.push_back(vec![empty_cell; cols]);
     }
 
     /// Scroll view up (into history)
@@ -343,7 +343,7 @@ impl TerminalScreen {
             style: CellStyle::default(),
         };
         let buffer = self.active_buffer_mut();
-        *buffer = vec![vec![empty_cell; cols]; rows];
+        *buffer = std::collections::VecDeque::from(vec![vec![empty_cell; cols]; rows]);
         // Cursor stays in place (standard ED 2 behavior)
     }
 
@@ -785,7 +785,7 @@ impl Perform for VtPerformer {
                         // Delete n lines from bottom
                         for _ in 0..n.min(rows - row) {
                             if buffer.len() > row {
-                                buffer.pop();
+                                buffer.pop_back();
                             }
                         }
                         // Insert n blank lines at cursor position
@@ -820,7 +820,7 @@ impl Perform for VtPerformer {
                         }
                         // Add n blank lines at bottom
                         while buffer.len() < rows {
-                            buffer.push(vec![empty_cell; cols]);
+                            buffer.push_back(vec![empty_cell; cols]);
                         }
                     }
                 }
@@ -842,9 +842,9 @@ impl Perform for VtPerformer {
                     let buffer = screen.active_buffer_mut();
                     for _ in 0..n.min(rows) {
                         if !buffer.is_empty() {
-                            buffer.remove(0);
+                            buffer.pop_front(); // O(1) with VecDeque
                         }
-                        buffer.push(vec![empty_cell; cols]);
+                        buffer.push_back(vec![empty_cell; cols]);
                     }
                 }
                 'T' => {
@@ -865,9 +865,9 @@ impl Perform for VtPerformer {
                     let buffer = screen.active_buffer_mut();
                     for _ in 0..n.min(rows) {
                         if buffer.len() >= rows {
-                            buffer.pop();
+                            buffer.pop_back();
                         }
-                        buffer.insert(0, vec![empty_cell; cols]);
+                        buffer.push_front(vec![empty_cell; cols]); // O(1) with VecDeque
                     }
                 }
                 'A' => {
@@ -1356,7 +1356,7 @@ impl Terminal {
                     }
                 }
 
-                screen.lines = new_lines;
+                screen.lines = new_lines.into();
                 screen.rows = new_rows;
                 screen.cols = new_cols;
 
@@ -1757,7 +1757,7 @@ impl Terminal {
             } else {
                 // Account for cursor_visible flag, which is controlled by application via ESC sequences
                 (
-                    buffer.clone(),
+                    buffer.iter().cloned().collect::<Vec<_>>(),
                     cursor_pos,
                     show_cursor && screen.cursor_visible,
                 )

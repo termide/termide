@@ -99,6 +99,8 @@ Maintainability = test_coverage_score
 
 ### Step 3.2: Generate Project Report Card
 
+**IMPORTANT**: Do NOT create any report files. Display all information directly to the user in the terminal.
+
 Present scores to user:
 
 ```

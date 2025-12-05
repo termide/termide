@@ -429,8 +429,9 @@ To update this skill:
 
 ## Implementation Notes
 
+- **No report files**: Do NOT create any report files (REFACTORING_REPORT.md, DIAGNOSIS_REPORT.md, etc.). All reports and analysis must be displayed directly in the terminal only
 - **Parallel execution**: Phase 2 launches 3 concurrent Task tools
-- **State persistence**: Uses JSON for structured data between phases
+- **State persistence**: Uses JSON for structured data between phases (terminal display only, not saved to files)
 - **Interactive checkpoints**: AskUserQuestion at Phases 3, 4, 6
 - **Safety-first**: Every change validated before proceeding
 - **Incremental commits**: Small, atomic commits with rollback capability

@@ -989,9 +989,11 @@ impl Editor {
                 if start.line == end.line {
                     // Single line
                     if let Some(line) = lines.get(start.line) {
-                        let chars: Vec<char> = line.chars().collect();
-                        let selected: String = chars[start.column..end.column.min(chars.len())]
-                            .iter()
+                        // Extract substring by character indices without allocating Vec<char>
+                        let selected: String = line
+                            .chars()
+                            .skip(start.column)
+                            .take(end.column.saturating_sub(start.column))
                             .collect();
                         return Some(selected);
                     }
@@ -1003,16 +1005,17 @@ impl Editor {
                             continue;
                         }
 
-                        let chars: Vec<char> = line.chars().collect();
                         if i == start.line {
-                            result.push_str(&chars[start.column..].iter().collect::<String>());
+                            // Extract from start.column to end without Vec<char>
+                            for ch in line.chars().skip(start.column) {
+                                result.push(ch);
+                            }
                             result.push('\n');
                         } else if i == end.line {
-                            result.push_str(
-                                &chars[..end.column.min(chars.len())]
-                                    .iter()
-                                    .collect::<String>(),
-                            );
+                            // Extract from beginning to end.column without Vec<char>
+                            for ch in line.chars().take(end.column) {
+                                result.push(ch);
+                            }
                         } else {
                             result.push_str(line);
                             result.push('\n');
