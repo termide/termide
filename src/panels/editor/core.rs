@@ -925,34 +925,9 @@ impl Editor {
         // Style for selected text
         let selection_style = Style::default().bg(theme.selected_bg).fg(theme.selected_fg);
 
-        // Pre-extract selection information
-        let selection_range = self.selection.as_ref().map(|s| (s.start(), s.end()));
-
-        // Pre-extract match information to avoid borrow checker issues
-        let search_matches: Vec<(usize, usize, usize)> = if let Some(ref search) = self.search_state
-        {
-            search
-                .matches
-                .iter()
-                .map(|c| (c.line, c.column, search.query.len()))
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let current_match_idx = self.search_state.as_ref().and_then(|s| s.current_match);
-
-        // Performance optimization: Create HashMap for O(1) search match lookups
-        // Maps (line, column) to match index for fast character-by-character highlighting
-        let mut search_match_map: std::collections::HashMap<(usize, usize), usize> =
-            std::collections::HashMap::with_capacity(search_matches.len() * 10);
-        for (idx, &(m_line, m_col, m_len)) in search_matches.iter().enumerate() {
-            for col in m_col..(m_col + m_len) {
-                search_match_map.insert((m_line, col), idx);
-            }
-        }
-
-        // Variable to track cursor position in word wrap mode
-        let mut cursor_viewport_pos: Option<(usize, usize)> = None;
+        // Prepare rendering context (search matches, selection, etc.)
+        let mut render_context =
+            rendering::context::RenderContext::prepare(&self.search_state, &self.selection);
 
         if self.config.word_wrap && content_width > 0 {
             // Word wrap mode
@@ -1030,7 +1005,7 @@ impl Editor {
 
                         // Проверить, находится ли курсор на этой пустой строке в колонке 0
                         if is_cursor_line && self.cursor.column == 0 {
-                            cursor_viewport_pos = Some((visual_row, 0));
+                            render_context.cursor_viewport_pos = Some((visual_row, 0));
                         }
 
                         visual_row += 1;
@@ -1122,44 +1097,18 @@ impl Editor {
                                             if let Some(cell) = buf.cell_mut((x, y)) {
                                                 cell.set_char(ch);
 
-                                                // Проверить, является ли это совпадением поиска (O(1) HashMap lookup)
-                                                let match_idx = search_match_map
-                                                    .get(&(line_idx, segment_char_idx))
-                                                    .copied();
-
-                                                // Проверить, находится ли символ в выделении
-                                                let is_selected =
-                                                    if let Some((sel_start, sel_end)) =
-                                                        &selection_range
-                                                    {
-                                                        let pos = crate::editor::Cursor::at(
-                                                            line_idx,
-                                                            segment_char_idx,
-                                                        );
-                                                        (pos.line > sel_start.line
-                                                            || (pos.line == sel_start.line
-                                                                && pos.column >= sel_start.column))
-                                                            && (pos.line < sel_end.line
-                                                                || (pos.line == sel_end.line
-                                                                    && pos.column < sel_end.column))
-                                                    } else {
-                                                        false
-                                                    };
-
-                                                // Определить финальный стиль
-                                                let final_style = if let Some(idx) = match_idx {
-                                                    if Some(idx) == current_match_idx {
-                                                        current_match_style
-                                                    } else {
-                                                        search_match_style
-                                                    }
-                                                } else if is_selected {
-                                                    selection_style
-                                                } else if is_cursor_line {
-                                                    segment_style.bg(theme.accented_bg)
-                                                } else {
-                                                    *segment_style
-                                                };
+                                                // Determine final style using highlight renderer
+                                                let final_style = rendering::highlight_renderer::determine_cell_style(
+                                                    line_idx,
+                                                    segment_char_idx,
+                                                    *segment_style,
+                                                    is_cursor_line,
+                                                    &render_context,
+                                                    search_match_style,
+                                                    current_match_style,
+                                                    selection_style,
+                                                    theme.accented_bg,
+                                                );
                                                 cell.set_style(final_style);
                                             }
                                         }
@@ -1167,7 +1116,8 @@ impl Editor {
                                         // Проверить позицию курсора
                                         if is_cursor_line && self.cursor.column == segment_char_idx
                                         {
-                                            cursor_viewport_pos = Some((visual_row, visual_col));
+                                            render_context.cursor_viewport_pos =
+                                                Some((visual_row, visual_col));
                                         }
 
                                         visual_col += 1;
@@ -1183,7 +1133,7 @@ impl Editor {
                                 && (self.cursor.column == chunk_end
                                     || (chunk_end == line_len && self.cursor.column >= line_len))
                             {
-                                cursor_viewport_pos =
+                                render_context.cursor_viewport_pos =
                                     Some((visual_row, self.cursor.column - char_offset));
                             }
 
@@ -1234,7 +1184,7 @@ impl Editor {
             }
 
             // Отрисовать курсор в режиме word wrap
-            if let Some((row, col)) = cursor_viewport_pos {
+            if let Some((row, col)) = render_context.cursor_viewport_pos {
                 let cursor_x = area.x + line_number_width + col as u16;
                 let cursor_y = area.y + row as u16;
                 rendering::cursor_renderer::render_cursor_at(buf, cursor_x, cursor_y, area, theme);
@@ -1336,49 +1286,18 @@ impl Editor {
                                             if let Some(cell) = buf.cell_mut((x, y)) {
                                                 cell.set_char(ch);
 
-                                                // Проверить, является ли это совпадением поиска (O(1) HashMap lookup)
-                                                let match_idx = search_match_map
-                                                    .get(&(line_idx, col_offset))
-                                                    .copied();
-
-                                                // Проверить, находится ли символ в выделении
-                                                let is_selected =
-                                                    if let Some((sel_start, sel_end)) =
-                                                        &selection_range
-                                                    {
-                                                        let pos = crate::editor::Cursor::at(
-                                                            line_idx, col_offset,
-                                                        );
-                                                        (pos.line > sel_start.line
-                                                            || (pos.line == sel_start.line
-                                                                && pos.column >= sel_start.column))
-                                                            && (pos.line < sel_end.line
-                                                                || (pos.line == sel_end.line
-                                                                    && pos.column < sel_end.column))
-                                                    } else {
-                                                        false
-                                                    };
-
-                                                // Определить финальный стиль с учетом подсветки, выделения, курсорной линии и совпадений
-                                                let final_style = if let Some(idx) = match_idx {
-                                                    // Это совпадение поиска
-                                                    if Some(idx) == current_match_idx {
-                                                        // Текущее активное совпадение
-                                                        current_match_style
-                                                    } else {
-                                                        // Обычное совпадение
-                                                        search_match_style
-                                                    }
-                                                } else if is_selected {
-                                                    // Выделенный текст
-                                                    selection_style
-                                                } else if is_cursor_line {
-                                                    // Курсорная линия (но не совпадение и не выделение)
-                                                    segment_style.bg(theme.accented_bg)
-                                                } else {
-                                                    // Обычный текст
-                                                    *segment_style
-                                                };
+                                                // Determine final style using highlight renderer
+                                                let final_style = rendering::highlight_renderer::determine_cell_style(
+                                                    line_idx,
+                                                    col_offset,
+                                                    *segment_style,
+                                                    is_cursor_line,
+                                                    &render_context,
+                                                    search_match_style,
+                                                    current_match_style,
+                                                    selection_style,
+                                                    theme.accented_bg,
+                                                );
                                                 cell.set_style(final_style);
                                             }
                                         }
