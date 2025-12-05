@@ -323,30 +323,9 @@ impl TextBuffer {
         self.modified
     }
 
-    /// Set modified flag
-    #[allow(dead_code)]
-    pub fn set_modified(&mut self, modified: bool) {
-        self.modified = modified;
-    }
-
     /// Get file path
     pub fn file_path(&self) -> Option<&Path> {
         self.file_path.as_deref()
-    }
-
-    /// Set file path
-    #[allow(dead_code)]
-    pub fn set_file_path<P: AsRef<Path>>(&mut self, path: P) {
-        self.file_path = Some(path.as_ref().to_path_buf());
-    }
-
-    /// Get file name
-    #[allow(dead_code)]
-    pub fn file_name(&self) -> Option<&str> {
-        self.file_path
-            .as_ref()
-            .and_then(|p| p.file_name())
-            .and_then(|n| n.to_str())
     }
 
     /// Get buffer contents as string

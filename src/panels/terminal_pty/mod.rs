@@ -1,6 +1,9 @@
 // Allow some clippy lints for VT100 implementation
 #![allow(clippy::needless_range_loop)]
 
+mod terminal_info;
+pub use terminal_info::TerminalInfo;
+
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use nix::sys::signal::{self, Signal};
@@ -24,13 +27,6 @@ use super::terminal::{Cell, CellStyle, MouseTrackingMode, TerminalScreen, VtPerf
 use super::Panel;
 use crate::panels::file_manager::DiskSpaceInfo;
 use crate::state::AppState;
-
-/// Terminal information for status bar
-pub struct TerminalInfo {
-    pub user_host: String,                 // user@host
-    pub cwd: String,                       // current directory
-    pub disk_space: Option<DiskSpaceInfo>, // disk information
-}
 
 /// Full-featured terminal with PTY
 pub struct Terminal {
