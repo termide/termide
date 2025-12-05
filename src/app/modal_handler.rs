@@ -2,6 +2,7 @@ use anyhow::Result;
 
 use super::App;
 use crate::{
+    panels::PanelExt,
     state::ActiveModal,
     ui::modal::{Modal, ModalResult},
 };
@@ -137,11 +138,7 @@ impl App {
                             // Get match info from active editor
                             let match_info =
                                 if let Some(panel) = self.layout_manager.active_panel_mut() {
-                                    use crate::panels::editor::Editor;
-                                    use std::any::Any;
-                                    if let Some(editor) =
-                                        (&mut **panel as &mut dyn Any).downcast_mut::<Editor>()
-                                    {
+                                    if let Some(editor) = panel.as_editor_mut() {
                                         editor.get_search_match_info()
                                     } else {
                                         None
@@ -175,11 +172,7 @@ impl App {
                         self.state.close_modal();
                         // Also close search state in editor
                         if let Some(panel) = self.layout_manager.active_panel_mut() {
-                            use crate::panels::editor::Editor;
-                            use std::any::Any;
-                            if let Some(editor) =
-                                (&mut **panel as &mut dyn Any).downcast_mut::<Editor>()
-                            {
+                            if let Some(editor) = panel.as_editor_mut() {
                                 editor.close_search();
                             }
                         }
@@ -199,11 +192,7 @@ impl App {
                             // Get match info from active editor
                             let match_info =
                                 if let Some(panel) = self.layout_manager.active_panel_mut() {
-                                    use crate::panels::editor::Editor;
-                                    use std::any::Any;
-                                    if let Some(editor) =
-                                        (&mut **panel as &mut dyn Any).downcast_mut::<Editor>()
-                                    {
+                                    if let Some(editor) = panel.as_editor_mut() {
                                         editor.get_search_match_info()
                                     } else {
                                         None
@@ -237,11 +226,7 @@ impl App {
                         self.state.close_modal();
                         // Also close search state in editor
                         if let Some(panel) = self.layout_manager.active_panel_mut() {
-                            use crate::panels::editor::Editor;
-                            use std::any::Any;
-                            if let Some(editor) =
-                                (&mut **panel as &mut dyn Any).downcast_mut::<Editor>()
-                            {
+                            if let Some(editor) = panel.as_editor_mut() {
                                 editor.close_search();
                             }
                         }
@@ -360,11 +345,7 @@ impl App {
                             // Get match info from active editor
                             let match_info =
                                 if let Some(panel) = self.layout_manager.active_panel_mut() {
-                                    use crate::panels::editor::Editor;
-                                    use std::any::Any;
-                                    if let Some(editor) =
-                                        (&mut **panel as &mut dyn Any).downcast_mut::<Editor>()
-                                    {
+                                    if let Some(editor) = panel.as_editor_mut() {
                                         editor.get_search_match_info()
                                     } else {
                                         None
@@ -390,11 +371,7 @@ impl App {
                         self.state.close_modal();
                         // Also close search state in editor
                         if let Some(panel) = self.layout_manager.active_panel_mut() {
-                            use crate::panels::editor::Editor;
-                            use std::any::Any;
-                            if let Some(editor) =
-                                (&mut **panel as &mut dyn Any).downcast_mut::<Editor>()
-                            {
+                            if let Some(editor) = panel.as_editor_mut() {
                                 editor.close_search();
                             }
                         }
@@ -414,11 +391,7 @@ impl App {
                             // Get match info from active editor
                             let match_info =
                                 if let Some(panel) = self.layout_manager.active_panel_mut() {
-                                    use crate::panels::editor::Editor;
-                                    use std::any::Any;
-                                    if let Some(editor) =
-                                        (&mut **panel as &mut dyn Any).downcast_mut::<Editor>()
-                                    {
+                                    if let Some(editor) = panel.as_editor_mut() {
                                         editor.get_search_match_info()
                                     } else {
                                         None
@@ -452,11 +425,7 @@ impl App {
                         self.state.close_modal();
                         // Also close search state in editor
                         if let Some(panel) = self.layout_manager.active_panel_mut() {
-                            use crate::panels::editor::Editor;
-                            use std::any::Any;
-                            if let Some(editor) =
-                                (&mut **panel as &mut dyn Any).downcast_mut::<Editor>()
-                            {
+                            if let Some(editor) = panel.as_editor_mut() {
                                 editor.close_search();
                             }
                         }
@@ -566,13 +535,11 @@ impl App {
 
     /// Handle search result
     fn handle_search(&mut self, value: Box<dyn std::any::Any>) -> Result<()> {
-        use crate::panels::editor::Editor;
-
         if let Some(query) = value.downcast_ref::<String>() {
             // Get active panel
             if let Some(panel) = self.layout_manager.active_panel_mut() {
                 // Try to downcast to Editor
-                if let Some(editor) = (panel as &mut dyn std::any::Any).downcast_mut::<Editor>() {
+                if let Some(editor) = panel.as_editor_mut() {
                     // Start search (case insensitive by default)
                     editor.start_search(query.clone(), false);
                 }
@@ -586,13 +553,11 @@ impl App {
         &mut self,
         replace_result: &crate::ui::modal::ReplaceModalResult,
     ) -> Result<()> {
-        use crate::panels::editor::Editor;
         use crate::ui::modal::ReplaceAction;
-        use std::any::Any;
 
         // Get active panel (should be Editor)
         if let Some(panel) = self.layout_manager.active_panel_mut() {
-            if let Some(editor) = (&mut **panel as &mut dyn Any).downcast_mut::<Editor>() {
+            if let Some(editor) = panel.as_editor_mut() {
                 match replace_result.action {
                     ReplaceAction::Search => {
                         // Perform new search/replace (or update existing)
@@ -643,13 +608,11 @@ impl App {
         &mut self,
         search_result: &crate::ui::modal::SearchModalResult,
     ) -> Result<()> {
-        use crate::panels::editor::Editor;
         use crate::ui::modal::SearchAction;
-        use std::any::Any;
 
         // Get active panel (should be Editor)
         if let Some(panel) = self.layout_manager.active_panel_mut() {
-            if let Some(editor) = (&mut **panel as &mut dyn Any).downcast_mut::<Editor>() {
+            if let Some(editor) = panel.as_editor_mut() {
                 match search_result.action {
                     SearchAction::Search => {
                         // Perform new search (or update existing)
