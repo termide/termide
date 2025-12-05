@@ -123,6 +123,10 @@ pub struct Editor {
     cached_virtual_line_count: usize,
     /// Temporary file name for unsaved buffer (if this is a scratch buffer with unsaved content)
     unsaved_buffer_file: Option<String>,
+    /// Preferred column for vertical navigation (maintains column across lines)
+    preferred_column: Option<usize>,
+    /// Cached content width from last render (for visual line navigation)
+    cached_content_width: usize,
 }
 
 /// Git line rendering information
@@ -188,6 +192,8 @@ impl Editor {
             git_diff_update_pending: None,
             cached_virtual_line_count: 0,
             unsaved_buffer_file: None,
+            preferred_column: None,
+            cached_content_width: 0,
         }
     }
 
@@ -292,6 +298,8 @@ impl Editor {
             git_diff_update_pending: None,
             cached_virtual_line_count: 0,
             unsaved_buffer_file: None,
+            preferred_column: None,
+            cached_content_width: 0,
         })
     }
 
@@ -321,6 +329,8 @@ impl Editor {
             git_diff_update_pending: None,
             cached_virtual_line_count: 0,
             unsaved_buffer_file: None,
+            preferred_column: None,
+            cached_content_width: 0,
         }
     }
 
@@ -504,8 +514,166 @@ impl Editor {
         self.clamp_cursor();
     }
 
+    /// Move cursor up by one visual line (accounting for word wrap)
+    fn move_cursor_up_visual(&mut self) {
+        if self.cached_content_width == 0 {
+            // No word wrap or width not set - fall back to physical line movement
+            self.move_cursor_up();
+            return;
+        }
+
+        // Save preferred column on first vertical movement
+        if self.preferred_column.is_none() {
+            self.preferred_column = Some(self.cursor.column);
+        }
+
+        let content_width = self.cached_content_width;
+
+        // Get current line text
+        if let Some(line_text) = self.buffer.line(self.cursor.line) {
+            let line_text = line_text.trim_end_matches('\n');
+            let chars: Vec<char> = line_text.chars().collect();
+            let line_len = chars.len();
+
+            // Clamp cursor column to line length
+            let cursor_col = self.cursor.column.min(line_len);
+
+            // Which visual row within this physical line?
+            let current_visual_row = cursor_col / content_width;
+
+            if current_visual_row > 0 {
+                // We can move up within the same physical line
+                // Apply preferred column if possible
+                let target_col = self.preferred_column.unwrap_or(self.cursor.column);
+                let target_visual_row = current_visual_row - 1;
+                let visual_row_start = target_visual_row * content_width;
+                let visual_row_end = (visual_row_start + content_width).min(line_len);
+
+                // Position cursor at preferred column within the target visual row
+                let new_col = (visual_row_start + (target_col % content_width))
+                    .min(visual_row_end.saturating_sub(1).max(visual_row_start));
+
+                self.cursor.column = new_col;
+                return;
+            }
+        }
+
+        // Need to move to previous physical line
+        if self.cursor.line > 0 {
+            self.cursor.line -= 1;
+
+            // Position at the last visual row of the previous line
+            if let Some(line_text) = self.buffer.line(self.cursor.line) {
+                let line_text = line_text.trim_end_matches('\n');
+                let chars: Vec<char> = line_text.chars().collect();
+                let line_len = chars.len();
+
+                if line_len > 0 {
+                    // Calculate the last visual row of this line
+                    let last_visual_row = (line_len.saturating_sub(1)) / content_width;
+                    let visual_row_start = last_visual_row * content_width;
+                    let visual_row_end = line_len;
+
+                    // Position cursor at preferred column within the last visual row
+                    let target_col = self.preferred_column.unwrap_or(self.cursor.column);
+                    let new_col = (visual_row_start + (target_col % content_width))
+                        .min(visual_row_end.saturating_sub(1).max(visual_row_start));
+
+                    self.cursor.column = new_col;
+                } else {
+                    self.cursor.column = 0;
+                }
+            } else {
+                self.cursor.column = 0;
+            }
+        }
+
+        self.clamp_cursor();
+    }
+
+    /// Move cursor down by one visual line (accounting for word wrap)
+    fn move_cursor_down_visual(&mut self) {
+        if self.cached_content_width == 0 {
+            // No word wrap or width not set - fall back to physical line movement
+            self.move_cursor_down();
+            return;
+        }
+
+        // Save preferred column on first vertical movement
+        if self.preferred_column.is_none() {
+            self.preferred_column = Some(self.cursor.column);
+        }
+
+        let content_width = self.cached_content_width;
+
+        // Get current line text
+        if let Some(line_text) = self.buffer.line(self.cursor.line) {
+            let line_text = line_text.trim_end_matches('\n');
+            let chars: Vec<char> = line_text.chars().collect();
+            let line_len = chars.len();
+
+            // Clamp cursor column to line length
+            let cursor_col = self.cursor.column.min(line_len);
+
+            // Which visual row within this physical line?
+            let current_visual_row = cursor_col / content_width;
+            let total_visual_rows = if line_len == 0 {
+                1
+            } else {
+                line_len.div_ceil(content_width)
+            };
+
+            if current_visual_row + 1 < total_visual_rows {
+                // We can move down within the same physical line
+                let target_col = self.preferred_column.unwrap_or(self.cursor.column);
+                let target_visual_row = current_visual_row + 1;
+                let visual_row_start = target_visual_row * content_width;
+                let visual_row_end = (visual_row_start + content_width).min(line_len);
+
+                // Position cursor at preferred column within the target visual row
+                let new_col = (visual_row_start + (target_col % content_width))
+                    .min(visual_row_end.saturating_sub(1).max(visual_row_start));
+
+                self.cursor.column = new_col;
+                return;
+            }
+        }
+
+        // Need to move to next physical line
+        let max_line = self.buffer.line_count().saturating_sub(1);
+        if self.cursor.line < max_line {
+            self.cursor.line += 1;
+
+            // Position at the first visual row of the next line
+            if let Some(line_text) = self.buffer.line(self.cursor.line) {
+                let line_text = line_text.trim_end_matches('\n');
+                let chars: Vec<char> = line_text.chars().collect();
+                let line_len = chars.len();
+
+                if line_len > 0 {
+                    // Position cursor at preferred column within the first visual row
+                    let target_col = self.preferred_column.unwrap_or(self.cursor.column);
+                    let visual_row_end = content_width.min(line_len);
+                    let new_col =
+                        (target_col % content_width).min(visual_row_end.saturating_sub(1));
+
+                    self.cursor.column = new_col;
+                } else {
+                    self.cursor.column = 0;
+                }
+            } else {
+                self.cursor.column = 0;
+            }
+        }
+
+        self.clamp_cursor();
+    }
+
     /// Move cursor left
     fn move_cursor_left(&mut self) {
+        // Reset preferred column on horizontal movement
+        self.preferred_column = None;
+
         self.cursor.move_left(1);
 
         // Clamp cursor to line length
@@ -517,6 +685,9 @@ impl Editor {
 
     /// Move cursor right
     fn move_cursor_right(&mut self) {
+        // Reset preferred column on horizontal movement
+        self.preferred_column = None;
+
         let line_len = self.buffer.line_len_graphemes(self.cursor.line);
         let max_line = self.buffer.line_count().saturating_sub(1);
         self.cursor.move_right(1, line_len, max_line);
@@ -525,13 +696,85 @@ impl Editor {
 
     /// Move cursor to start of line
     fn move_to_line_start(&mut self) {
+        // Reset preferred column on horizontal movement
+        self.preferred_column = None;
         self.cursor.column = 0;
     }
 
     /// Move cursor to end of line
     fn move_to_line_end(&mut self) {
+        // Reset preferred column on horizontal movement
+        self.preferred_column = None;
         let line_len = self.buffer.line_len_graphemes(self.cursor.line);
         self.cursor.column = line_len;
+    }
+
+    /// Move cursor to start of visual line (for wrapped lines)
+    fn move_to_visual_line_start(&mut self) {
+        // Reset preferred column on horizontal movement
+        self.preferred_column = None;
+
+        if self.cached_content_width == 0 {
+            // No word wrap - fall back to physical line start
+            self.move_to_line_start();
+            return;
+        }
+
+        let content_width = self.cached_content_width;
+
+        // Get current line text
+        if let Some(line_text) = self.buffer.line(self.cursor.line) {
+            let line_text = line_text.trim_end_matches('\n');
+            let chars: Vec<char> = line_text.chars().collect();
+            let line_len = chars.len();
+
+            // Clamp cursor column to line length
+            let cursor_col = self.cursor.column.min(line_len);
+
+            // Which visual row within this physical line?
+            let current_visual_row = cursor_col / content_width;
+
+            // Move to start of current visual row
+            self.cursor.column = current_visual_row * content_width;
+        } else {
+            self.cursor.column = 0;
+        }
+    }
+
+    /// Move cursor to end of visual line (for wrapped lines)
+    fn move_to_visual_line_end(&mut self) {
+        // Reset preferred column on horizontal movement
+        self.preferred_column = None;
+
+        if self.cached_content_width == 0 {
+            // No word wrap - fall back to physical line end
+            self.move_to_line_end();
+            return;
+        }
+
+        let content_width = self.cached_content_width;
+
+        // Get current line text
+        if let Some(line_text) = self.buffer.line(self.cursor.line) {
+            let line_text = line_text.trim_end_matches('\n');
+            let chars: Vec<char> = line_text.chars().collect();
+            let line_len = chars.len();
+
+            // Clamp cursor column to line length
+            let cursor_col = self.cursor.column.min(line_len);
+
+            // Which visual row within this physical line?
+            let current_visual_row = cursor_col / content_width;
+
+            // Calculate end of current visual row
+            let visual_row_start = current_visual_row * content_width;
+            let visual_row_end = (visual_row_start + content_width).min(line_len);
+
+            // Move to end of current visual row
+            self.cursor.column = visual_row_end;
+        } else {
+            self.cursor.column = 0;
+        }
     }
 
     /// Move cursor page up
@@ -549,6 +792,67 @@ impl Editor {
         self.cursor.move_down(page_size, max_line);
         self.clamp_cursor();
         // Use cached virtual line count for viewport scroll (accounts for deletion markers)
+        self.viewport
+            .scroll_down(page_size, self.cached_virtual_line_count);
+    }
+
+    /// Move cursor page up by visual lines (accounting for word wrap)
+    fn page_up_visual(&mut self) {
+        if self.cached_content_width == 0 {
+            // No word wrap - fall back to physical line movement
+            self.page_up();
+            return;
+        }
+
+        let page_size = self.viewport.height;
+
+        // Move up by page_size visual lines
+        for _ in 0..page_size {
+            let prev_line = self.cursor.line;
+            let prev_col = self.cursor.column;
+
+            self.move_cursor_up_visual();
+
+            // Stop if we haven't moved (at top of document)
+            if self.cursor.line == prev_line && self.cursor.column == prev_col {
+                break;
+            }
+        }
+
+        // Scroll viewport
+        self.viewport.scroll_up(page_size);
+    }
+
+    /// Move cursor page down by visual lines (accounting for word wrap)
+    fn page_down_visual(&mut self) {
+        if self.cached_content_width == 0 {
+            // No word wrap - fall back to physical line movement
+            self.page_down();
+            return;
+        }
+
+        let page_size = self.viewport.height;
+        let max_line = self.buffer.line_count().saturating_sub(1);
+
+        // Move down by page_size visual lines
+        for _ in 0..page_size {
+            let prev_line = self.cursor.line;
+            let prev_col = self.cursor.column;
+
+            self.move_cursor_down_visual();
+
+            // Stop if we haven't moved (at bottom of document)
+            if self.cursor.line == prev_line && self.cursor.column == prev_col {
+                break;
+            }
+
+            // Stop if we reached the last line
+            if self.cursor.line >= max_line {
+                break;
+            }
+        }
+
+        // Scroll viewport
         self.viewport
             .scroll_down(page_size, self.cached_virtual_line_count);
     }
@@ -1028,6 +1332,13 @@ impl Editor {
         let line_number_width = 6; // "  123  " (line number + 2 git markers)
         let content_width = area.width.saturating_sub(line_number_width) as usize;
         let content_height = area.height as usize;
+
+        // Cache content width for visual line navigation
+        self.cached_content_width = if self.config.word_wrap {
+            content_width
+        } else {
+            0 // Set to 0 when word wrap is disabled to trigger fallback behavior
+        };
 
         self.viewport.resize(content_width, content_height);
 
@@ -2019,6 +2330,60 @@ impl Editor {
         // If we've exhausted all lines, return the last line
         (self.buffer.line_count().saturating_sub(1), 0)
     }
+
+    /// Convert cursor position to visual position accounting for word wrap
+    /// Returns (visual_row, visual_column) for the current cursor position
+    /// visual_row is relative to top of buffer (line 0), not viewport
+    #[allow(dead_code)]
+    fn cursor_to_visual_position(&self, content_width: usize) -> (usize, usize) {
+        if content_width == 0 {
+            return (self.cursor.line, self.cursor.column);
+        }
+
+        let mut visual_row = 0;
+
+        // Count visual rows for all lines before cursor line
+        for line_idx in 0..self.cursor.line {
+            if let Some(line_text) = self.buffer.line(line_idx) {
+                let line_text = line_text.trim_end_matches('\n');
+                let chars: Vec<char> = line_text.chars().collect();
+                let line_len = chars.len();
+
+                // Calculate how many visual rows this line occupies
+                let visual_rows_for_line = if line_len == 0 {
+                    1 // Empty lines take 1 visual row
+                } else {
+                    line_len.div_ceil(content_width)
+                };
+
+                visual_row += visual_rows_for_line;
+            } else {
+                // Non-existent line treated as empty (1 visual row)
+                visual_row += 1;
+            }
+        }
+
+        // Calculate position within the cursor's line
+        if let Some(line_text) = self.buffer.line(self.cursor.line) {
+            let line_text = line_text.trim_end_matches('\n');
+            let chars: Vec<char> = line_text.chars().collect();
+
+            // Clamp cursor column to line length
+            let cursor_col = self.cursor.column.min(chars.len());
+
+            // Which visual row within this physical line?
+            let row_within_line = cursor_col / content_width;
+            visual_row += row_within_line;
+
+            // Which column within that visual row?
+            let visual_column = cursor_col % content_width;
+
+            (visual_row, visual_column)
+        } else {
+            // Cursor is on non-existent line
+            (visual_row, 0)
+        }
+    }
 }
 
 impl Panel for Editor {
@@ -2043,12 +2408,20 @@ impl Panel for Editor {
             (KeyCode::Up, KeyModifiers::NONE) => {
                 self.close_search();
                 self.selection = None;
-                self.move_cursor_up();
+                if self.config.word_wrap && self.cached_content_width > 0 {
+                    self.move_cursor_up_visual();
+                } else {
+                    self.move_cursor_up();
+                }
             }
             (KeyCode::Down, KeyModifiers::NONE) => {
                 self.close_search();
                 self.selection = None;
-                self.move_cursor_down();
+                if self.config.word_wrap && self.cached_content_width > 0 {
+                    self.move_cursor_down_visual();
+                } else {
+                    self.move_cursor_down();
+                }
             }
             (KeyCode::Left, KeyModifiers::NONE) => {
                 self.close_search();
@@ -2063,22 +2436,38 @@ impl Panel for Editor {
             (KeyCode::Home, KeyModifiers::NONE) => {
                 self.close_search();
                 self.selection = None;
-                self.move_to_line_start();
+                if self.config.word_wrap && self.cached_content_width > 0 {
+                    self.move_to_visual_line_start();
+                } else {
+                    self.move_to_line_start();
+                }
             }
             (KeyCode::End, KeyModifiers::NONE) => {
                 self.close_search();
                 self.selection = None;
-                self.move_to_line_end();
+                if self.config.word_wrap && self.cached_content_width > 0 {
+                    self.move_to_visual_line_end();
+                } else {
+                    self.move_to_line_end();
+                }
             }
             (KeyCode::PageUp, KeyModifiers::NONE) => {
                 self.close_search();
                 self.selection = None;
-                self.page_up();
+                if self.config.word_wrap && self.cached_content_width > 0 {
+                    self.page_up_visual();
+                } else {
+                    self.page_up();
+                }
             }
             (KeyCode::PageDown, KeyModifiers::NONE) => {
                 self.close_search();
                 self.selection = None;
-                self.page_down();
+                if self.config.word_wrap && self.cached_content_width > 0 {
+                    self.page_down_visual();
+                } else {
+                    self.page_down();
+                }
             }
             (KeyCode::Home, KeyModifiers::CONTROL) => {
                 self.close_search();
@@ -2095,13 +2484,21 @@ impl Panel for Editor {
             (KeyCode::Up, KeyModifiers::SHIFT) => {
                 self.close_search();
                 self.start_or_extend_selection();
-                self.move_cursor_up();
+                if self.config.word_wrap && self.cached_content_width > 0 {
+                    self.move_cursor_up_visual();
+                } else {
+                    self.move_cursor_up();
+                }
                 self.update_selection_active();
             }
             (KeyCode::Down, KeyModifiers::SHIFT) => {
                 self.close_search();
                 self.start_or_extend_selection();
-                self.move_cursor_down();
+                if self.config.word_wrap && self.cached_content_width > 0 {
+                    self.move_cursor_down_visual();
+                } else {
+                    self.move_cursor_down();
+                }
                 self.update_selection_active();
             }
             (KeyCode::Left, KeyModifiers::SHIFT) => {
@@ -2119,25 +2516,41 @@ impl Panel for Editor {
             (KeyCode::Home, KeyModifiers::SHIFT) => {
                 self.close_search();
                 self.start_or_extend_selection();
-                self.move_to_line_start();
+                if self.config.word_wrap && self.cached_content_width > 0 {
+                    self.move_to_visual_line_start();
+                } else {
+                    self.move_to_line_start();
+                }
                 self.update_selection_active();
             }
             (KeyCode::End, KeyModifiers::SHIFT) => {
                 self.close_search();
                 self.start_or_extend_selection();
-                self.move_to_line_end();
+                if self.config.word_wrap && self.cached_content_width > 0 {
+                    self.move_to_visual_line_end();
+                } else {
+                    self.move_to_line_end();
+                }
                 self.update_selection_active();
             }
             (KeyCode::PageUp, KeyModifiers::SHIFT) => {
                 self.close_search();
                 self.start_or_extend_selection();
-                self.page_up();
+                if self.config.word_wrap && self.cached_content_width > 0 {
+                    self.page_up_visual();
+                } else {
+                    self.page_up();
+                }
                 self.update_selection_active();
             }
             (KeyCode::PageDown, KeyModifiers::SHIFT) => {
                 self.close_search();
                 self.start_or_extend_selection();
-                self.page_down();
+                if self.config.word_wrap && self.cached_content_width > 0 {
+                    self.page_down_visual();
+                } else {
+                    self.page_down();
+                }
                 self.update_selection_active();
             }
             // Shift+Ctrl+Home/End - select to start/end of document - closes search
