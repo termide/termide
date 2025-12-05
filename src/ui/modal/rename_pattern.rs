@@ -12,6 +12,7 @@ use std::time::SystemTime;
 use super::{Modal, ModalResult};
 use crate::rename_pattern::RenamePattern;
 use crate::theme::Theme;
+use crate::ui::centered_rect_with_size;
 
 /// Focus area in the modal
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,30 +130,6 @@ impl RenamePatternModal {
             )),
         ]
     }
-
-    /// Create a centered rectangle
-    fn centered_rect(width: u16, height: u16, r: Rect) -> Rect {
-        let horizontal_margin = r.width.saturating_sub(width) / 2;
-        let vertical_margin = r.height.saturating_sub(height) / 2;
-
-        let popup_layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(vertical_margin),
-                Constraint::Length(height),
-                Constraint::Length(vertical_margin),
-            ])
-            .split(r);
-
-        Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(horizontal_margin),
-                Constraint::Length(width),
-                Constraint::Length(horizontal_margin),
-            ])
-            .split(popup_layout[1])[1]
-    }
 }
 
 impl Modal for RenamePatternModal {
@@ -166,7 +143,7 @@ impl Modal for RenamePatternModal {
         let modal_height = 14;
         let modal_width = 70;
 
-        let modal_area = Self::centered_rect(modal_width, modal_height, area);
+        let modal_area = centered_rect_with_size(modal_width, modal_height, area);
         Clear.render(modal_area, buf);
 
         // Create block with inverted colors

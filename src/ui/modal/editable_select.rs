@@ -10,6 +10,7 @@ use ratatui::{
 
 use super::{Modal, ModalResult};
 use crate::theme::Theme;
+use crate::ui::centered_rect_with_size;
 
 /// Select option for editable select modal
 #[derive(Debug, Clone)]
@@ -155,32 +156,6 @@ impl EditableSelectModal {
 
         (width, height)
     }
-
-    /// Create a centered rectangle with fixed size
-    fn centered_rect_with_size(width: u16, height: u16, r: Rect) -> Rect {
-        use ratatui::layout::{Constraint, Direction, Layout};
-
-        let horizontal_margin = r.width.saturating_sub(width) / 2;
-        let vertical_margin = r.height.saturating_sub(height) / 2;
-
-        let vertical_layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(vertical_margin),
-                Constraint::Length(height),
-                Constraint::Length(vertical_margin),
-            ])
-            .split(r);
-
-        Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(horizontal_margin),
-                Constraint::Length(width),
-                Constraint::Length(horizontal_margin),
-            ])
-            .split(vertical_layout[1])[1]
-    }
 }
 
 impl Modal for EditableSelectModal {
@@ -191,7 +166,7 @@ impl Modal for EditableSelectModal {
         let (modal_width, modal_height) = self.calculate_modal_size(area.width, area.height);
 
         // Create centered area
-        let modal_area = Self::centered_rect_with_size(modal_width, modal_height, area);
+        let modal_area = centered_rect_with_size(modal_width, modal_height, area);
 
         // Save modal area for mouse handling
         self.last_modal_area = Some(modal_area);

@@ -13,6 +13,7 @@ use super::{Modal, ModalResult};
 use crate::constants::{SPINNER_FRAMES, SPINNER_FRAMES_COUNT};
 use crate::i18n;
 use crate::theme::Theme;
+use crate::ui::centered_rect_with_size;
 
 /// Information modal window (closes on any key)
 #[derive(Debug)]
@@ -162,33 +163,6 @@ impl InfoModal {
             .min(max_width)
             .min(screen_width)
     }
-
-    /// Create a centered rectangle with fixed size
-    fn centered_rect_with_size(width: u16, height: u16, r: Rect) -> Rect {
-        use ratatui::layout::{Constraint, Direction, Layout};
-
-        // Calculate margins
-        let horizontal_margin = r.width.saturating_sub(width) / 2;
-        let vertical_margin = r.height.saturating_sub(height) / 2;
-
-        let vertical_layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(vertical_margin),
-                Constraint::Length(height),
-                Constraint::Length(vertical_margin),
-            ])
-            .split(r);
-
-        Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(horizontal_margin),
-                Constraint::Length(width),
-                Constraint::Length(horizontal_margin),
-            ])
-            .split(vertical_layout[1])[1]
-    }
 }
 
 impl Modal for InfoModal {
@@ -233,7 +207,7 @@ impl Modal for InfoModal {
         let modal_height = (total_data_lines + 5) as u16;
 
         // Create centered area with calculated dimensions
-        let modal_area = Self::centered_rect_with_size(modal_width, modal_height, area);
+        let modal_area = centered_rect_with_size(modal_width, modal_height, area);
 
         // Clear the area
         Clear.render(modal_area, buf);
