@@ -1985,6 +1985,24 @@ impl Editor {
         self.update_selection_active();
     }
 
+    /// Go to next search match, or open search modal if no active search.
+    fn search_next_or_open(&mut self) {
+        if self.search_state.is_some() {
+            self.search_next();
+        } else {
+            self.open_search_modal(true);
+        }
+    }
+
+    /// Go to previous search match, or open search modal if no active search.
+    fn search_prev_or_open(&mut self) {
+        if self.search_state.is_some() {
+            self.search_prev();
+        } else {
+            self.open_search_modal(true);
+        }
+    }
+
     // Word wrap methods moved to word_wrap module
 }
 
@@ -2157,20 +2175,12 @@ impl Panel for Editor {
 
             // F3 - next match (or open search if no active search)
             (KeyCode::F(3), KeyModifiers::NONE) => {
-                if self.search_state.is_some() {
-                    self.search_next();
-                } else {
-                    self.open_search_modal(true);
-                }
+                self.search_next_or_open();
             }
 
             // Shift+F3 - previous match (or open search if no active search)
             (KeyCode::F(3), KeyModifiers::SHIFT) => {
-                if self.search_state.is_some() {
-                    self.search_prev();
-                } else {
-                    self.open_search_modal(true);
-                }
+                self.search_prev_or_open();
             }
 
             // Esc - close search
