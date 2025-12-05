@@ -10,6 +10,7 @@ pub mod editor;
 pub mod file_manager;
 pub mod panel_ext;
 pub mod panel_group;
+pub mod terminal;
 pub mod terminal_pty;
 pub mod welcome;
 
