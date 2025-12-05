@@ -8,7 +8,7 @@ use ratatui::{
 use std::path::PathBuf;
 
 use super::super::Panel;
-use super::{config::*, git, word_wrap};
+use super::{clipboard, config::*, git, search, selection, text_editing, word_wrap};
 use crate::editor::{Cursor, HighlightCache, SearchState, Selection, TextBuffer, Viewport};
 use crate::logger;
 use crate::state::AppState;
@@ -895,164 +895,67 @@ impl Editor {
 
     /// Select all
     fn select_all(&mut self) {
-        let start = Cursor::at(0, 0);
-        let max_line = self.buffer.line_count().saturating_sub(1);
-        let line_len = self.buffer.line_len_graphemes(max_line);
-        let end = Cursor::at(max_line, line_len);
-        self.selection = Some(Selection::new(start, end));
-        self.cursor = end;
+        let (new_selection, new_cursor) = selection::select_all(&self.buffer);
+        self.selection = Some(new_selection);
+        self.cursor = new_cursor;
     }
 
     /// Start new selection or continue existing
     fn start_or_extend_selection(&mut self) {
-        if self.selection.is_none() {
-            self.selection = Some(Selection::new(self.cursor, self.cursor));
+        if let Some(new_selection) =
+            selection::start_or_extend_selection(self.selection.as_ref(), self.cursor)
+        {
+            self.selection = Some(new_selection);
         }
     }
 
     /// Update active point of selection (after cursor movement)
     fn update_selection_active(&mut self) {
-        if let Some(ref mut selection) = self.selection {
-            selection.active = self.cursor;
-        }
+        selection::update_selection_active(&mut self.selection, self.cursor);
     }
 
     /// Get selected text
     fn get_selected_text(&self) -> Option<String> {
-        if let Some(ref selection) = self.selection {
-            if !selection.is_empty() {
-                let start = selection.start();
-                let end = selection.end();
-
-                // Simple implementation - get all text and cut the needed fragment
-                // TODO: optimize for large selections
-                let full_text = self.buffer.text();
-                let lines: Vec<&str> = full_text.lines().collect();
-
-                if start.line == end.line {
-                    // Single line
-                    if let Some(line) = lines.get(start.line) {
-                        // Extract substring by character indices without allocating Vec<char>
-                        let selected: String = line
-                            .chars()
-                            .skip(start.column)
-                            .take(end.column.saturating_sub(start.column))
-                            .collect();
-                        return Some(selected);
-                    }
-                } else {
-                    // Multiple lines
-                    let mut result = String::new();
-                    for (i, line) in lines.iter().enumerate() {
-                        if i < start.line || i > end.line {
-                            continue;
-                        }
-
-                        if i == start.line {
-                            // Extract from start.column to end without Vec<char>
-                            for ch in line.chars().skip(start.column) {
-                                result.push(ch);
-                            }
-                            result.push('\n');
-                        } else if i == end.line {
-                            // Extract from beginning to end.column without Vec<char>
-                            for ch in line.chars().take(end.column) {
-                                result.push(ch);
-                            }
-                        } else {
-                            result.push_str(line);
-                            result.push('\n');
-                        }
-                    }
-                    return Some(result);
-                }
-            }
-        }
-        None
+        selection::get_selected_text(&self.buffer, self.selection.as_ref())
     }
 
     /// Delete selected text
     fn delete_selection(&mut self) -> Result<()> {
-        if let Some(ref selection) = self.selection {
-            if !selection.is_empty() {
-                let start = selection.start();
-                let end = selection.end();
-                self.buffer.delete_range(&start, &end)?;
-                self.cursor = start;
-                self.selection = None;
+        if let Some(new_cursor) =
+            selection::delete_selection(&mut self.buffer, self.selection.as_ref())?
+        {
+            self.cursor = new_cursor;
+            self.selection = None;
 
-                // Invalidate highlighting cache
-                // When deleting multiline selection, need to invalidate all lines after
-                self.highlight_cache
-                    .invalidate_range(start.line, self.buffer.line_count());
+            // Invalidate highlighting cache
+            selection::invalidate_cache_after_deletion(
+                &mut self.highlight_cache,
+                new_cursor.line,
+                self.buffer.line_count(),
+            );
 
-                // Schedule git diff update
-                self.schedule_git_diff_update();
-            }
+            // Schedule git diff update
+            self.schedule_git_diff_update();
         }
         Ok(())
     }
 
     /// Copy selected text to clipboard
     fn copy_to_clipboard(&mut self) -> Result<()> {
-        match self.get_selected_text() {
-            Some(text) => {
-                // Debug: show what we're trying to copy
-                let char_count = text.chars().count();
-                let preview = if char_count > 50 {
-                    let preview_text: String = text.chars().take(50).collect();
-                    format!("{}...", preview_text)
-                } else {
-                    text.clone()
-                };
-
-                match crate::clipboard::copy(text) {
-                    Ok(()) => {
-                        self.status_message = Some(format!(
-                            "Copied to clipboard: {:?} ({} chars)",
-                            preview, char_count
-                        ));
-                    }
-                    Err(e) => {
-                        self.status_message = Some(format!("Clipboard error: {}", e));
-                    }
-                }
-            }
-            None => {
-                self.status_message = Some("Nothing selected to copy".to_string());
-            }
-        }
+        let selected_text = self.get_selected_text();
+        let result = clipboard::copy_to_clipboard(selected_text);
+        self.status_message = Some(result.status_message);
         Ok(())
     }
 
     /// Cut selected text to clipboard
     fn cut_to_clipboard(&mut self) -> Result<()> {
-        match self.get_selected_text() {
-            Some(text) => {
-                let char_count = text.chars().count();
-                let preview = if char_count > 50 {
-                    let preview_text: String = text.chars().take(50).collect();
-                    format!("{}...", preview_text)
-                } else {
-                    text.clone()
-                };
+        let selected_text = self.get_selected_text();
+        let (result, should_delete) = clipboard::cut_to_clipboard(selected_text);
+        self.status_message = Some(result.status_message);
 
-                match crate::clipboard::copy(text) {
-                    Ok(()) => {
-                        self.delete_selection()?;
-                        self.status_message = Some(format!(
-                            "Cut to clipboard: {:?} ({} chars)",
-                            preview, char_count
-                        ));
-                    }
-                    Err(e) => {
-                        self.status_message = Some(format!("Clipboard error: {}", e));
-                    }
-                }
-            }
-            None => {
-                self.status_message = Some("Nothing selected to cut".to_string());
-            }
+        if should_delete {
+            self.delete_selection()?;
         }
         Ok(())
     }
@@ -1065,74 +968,33 @@ impl Editor {
         // Delete selected text before pasting
         self.delete_selection()?;
 
-        // Read from system clipboard via arboard
-        if let Some(text) = crate::clipboard::paste() {
-            if !text.is_empty() {
-                let start_line = self.cursor.line;
-                let new_cursor = self.buffer.insert(&self.cursor, &text)?;
-                self.cursor = new_cursor;
-                self.clamp_cursor();
+        // Paste from clipboard using clipboard module
+        if let Some((new_cursor, start_line, is_multiline)) =
+            clipboard::paste_from_clipboard(&mut self.buffer, &self.cursor)?
+        {
+            self.cursor = new_cursor;
+            self.clamp_cursor();
 
-                // Invalidate highlighting cache
-                if text.contains('\n') {
-                    // Multiline paste
-                    self.highlight_cache
-                        .invalidate_range(start_line, self.buffer.line_count());
-                } else {
-                    // Single line paste
-                    self.highlight_cache.invalidate_line(start_line);
-                }
-
-                // Schedule git diff update
-                self.schedule_git_diff_update();
+            // Invalidate highlighting cache
+            if is_multiline {
+                self.highlight_cache
+                    .invalidate_range(start_line, self.buffer.line_count());
+            } else {
+                self.highlight_cache.invalidate_line(start_line);
             }
+
+            // Schedule git diff update
+            self.schedule_git_diff_update();
         }
         Ok(())
     }
 
     /// Duplicate current line or selected lines
     fn duplicate_line(&mut self) -> Result<()> {
-        // Determine which lines to duplicate
-        let (start_line, end_line) = if let Some(ref selection) = self.selection {
-            let start = selection.start();
-            let end = selection.end();
-            (start.line, end.line)
-        } else {
-            (self.cursor.line, self.cursor.line)
-        };
+        let result =
+            text_editing::duplicate_line(&mut self.buffer, &self.cursor, self.selection.as_ref())?;
 
-        // Get all text and extract the lines to duplicate
-        let full_text = self.buffer.text();
-        let lines: Vec<&str> = full_text.lines().collect();
-
-        // Build text to duplicate
-        let mut text_to_duplicate = String::new();
-        for line_idx in start_line..=end_line {
-            if let Some(line) = lines.get(line_idx) {
-                text_to_duplicate.push_str(line);
-                if line_idx < end_line {
-                    text_to_duplicate.push('\n');
-                }
-            }
-        }
-
-        // Insert newline and duplicated text after the last line
-        text_to_duplicate.insert(0, '\n');
-
-        // Move cursor to end of last line to duplicate
-        let last_line_len = self.buffer.line_len_graphemes(end_line);
-        let insert_cursor = Cursor {
-            line: end_line,
-            column: last_line_len,
-        };
-
-        self.buffer.insert(&insert_cursor, &text_to_duplicate)?;
-
-        // Move cursor to the beginning of the first duplicated line
-        self.cursor = Cursor {
-            line: end_line + 1,
-            column: 0,
-        };
+        self.cursor = result.new_cursor;
         self.clamp_cursor();
 
         // Clear selection
@@ -1140,7 +1002,7 @@ impl Editor {
 
         // Invalidate highlighting cache
         self.highlight_cache
-            .invalidate_range(start_line, self.buffer.line_count());
+            .invalidate_range(result.start_line, self.buffer.line_count());
 
         // Schedule git diff update
         self.schedule_git_diff_update();
@@ -1167,13 +1029,12 @@ impl Editor {
         // Delete selected text before insertion
         self.delete_selection()?;
 
-        let text = ch.to_string();
-        let new_cursor = self.buffer.insert(&self.cursor, &text)?;
-        self.cursor = new_cursor;
+        let result = text_editing::insert_char(&mut self.buffer, &self.cursor, ch)?;
+        self.cursor = result.new_cursor;
         self.clamp_cursor();
 
         // Invalidate highlighting cache for changed line
-        self.highlight_cache.invalidate_line(self.cursor.line);
+        self.highlight_cache.invalidate_line(result.start_line);
 
         // Schedule git diff update
         self.schedule_git_diff_update();
@@ -1186,18 +1047,16 @@ impl Editor {
         // Close search mode when editing begins
         self.close_search();
 
-        let old_line = self.cursor.line;
-
         // Delete selected text before insertion
         self.delete_selection()?;
 
-        let new_cursor = self.buffer.insert(&self.cursor, "\n")?;
-        self.cursor = new_cursor;
+        let result = text_editing::insert_newline(&mut self.buffer, &self.cursor)?;
+        self.cursor = result.new_cursor;
         self.clamp_cursor();
 
         // Invalidate all lines after inserting new line
         self.highlight_cache
-            .invalidate_range(old_line, self.buffer.line_count());
+            .invalidate_range(result.start_line, self.buffer.line_count());
 
         // Schedule git diff update
         self.schedule_git_diff_update();
@@ -1207,21 +1066,18 @@ impl Editor {
 
     /// Delete character (backspace)
     fn backspace(&mut self) -> Result<()> {
-        let old_line = self.cursor.line;
-        let was_at_line_start = self.cursor.column == 0;
-
-        if let Some(new_cursor) = self.buffer.backspace(&self.cursor)? {
-            self.cursor = new_cursor;
+        if let Some(result) = text_editing::backspace(&mut self.buffer, &self.cursor)? {
+            self.cursor = result.new_cursor;
             self.clamp_cursor();
 
             // Invalidate highlighting cache
-            if was_at_line_start && old_line > 0 {
+            if result.is_multiline {
                 // Deleted newline - need to invalidate all lines after
                 self.highlight_cache
-                    .invalidate_range(new_cursor.line, self.buffer.line_count());
+                    .invalidate_range(result.start_line, self.buffer.line_count());
             } else {
                 // Regular character deletion
-                self.highlight_cache.invalidate_line(new_cursor.line);
+                self.highlight_cache.invalidate_line(result.start_line);
             }
 
             // Schedule git diff update
@@ -1232,18 +1088,15 @@ impl Editor {
 
     /// Delete character (delete)
     fn delete(&mut self) -> Result<()> {
-        let line_len = self.buffer.line_len_graphemes(self.cursor.line);
-        let was_at_line_end = self.cursor.column >= line_len;
-
-        if self.buffer.delete_char(&self.cursor)? {
+        if let Some(result) = text_editing::delete_char(&mut self.buffer, &self.cursor)? {
             // Invalidate highlighting cache
-            if was_at_line_end {
+            if result.is_multiline {
                 // Deleted newline - need to invalidate all lines after
                 self.highlight_cache
-                    .invalidate_range(self.cursor.line, self.buffer.line_count());
+                    .invalidate_range(result.start_line, self.buffer.line_count());
             } else {
                 // Regular character deletion
-                self.highlight_cache.invalidate_line(self.cursor.line);
+                self.highlight_cache.invalidate_line(result.start_line);
             }
 
             // Schedule git diff update
@@ -2035,84 +1888,52 @@ impl Editor {
 
     /// Start search
     pub fn start_search(&mut self, query: String, case_sensitive: bool) {
-        let mut search = SearchState::new(query, case_sensitive);
+        let mut search_state = SearchState::new(query, case_sensitive);
 
         // Perform search throughout document
-        self.perform_search(&mut search);
+        self.perform_search(&mut search_state);
 
         // Find closest match to current cursor
-        search.find_closest_match(&self.cursor);
+        search_state.find_closest_match(&self.cursor);
 
         // Move cursor to end of match and create selection
-        if let Some(match_cursor) = search.current_match_cursor() {
-            let query_len = search.query.chars().count();
-            let end_cursor = Cursor::at(match_cursor.line, match_cursor.column + query_len);
+        if let Some(match_cursor) = search_state.current_match_cursor() {
+            let query_len = search_state.query.chars().count();
+            let (selection, end_cursor) = search::get_match_selection(match_cursor, query_len);
             self.cursor = end_cursor;
-            self.selection = Some(Selection::new(*match_cursor, end_cursor));
+            self.selection = Some(selection);
         }
 
-        self.search_state = Some(search);
+        self.search_state = Some(search_state);
     }
 
     /// Perform search in document
-    fn perform_search(&self, search: &mut SearchState) {
-        search.matches.clear();
-
-        if search.query.is_empty() {
-            return;
-        }
-
-        let query = if search.case_sensitive {
-            search.query.clone()
-        } else {
-            search.query.to_lowercase()
-        };
-
-        // Search through all lines
-        for line_idx in 0..self.buffer.line_count() {
-            if let Some(line_text) = self.buffer.line(line_idx) {
-                let search_text = if search.case_sensitive {
-                    line_text.to_string()
-                } else {
-                    line_text.to_lowercase()
-                };
-
-                // Find all occurrences in line
-                let mut col = 0;
-                while let Some(pos) = search_text[col..].find(&query) {
-                    let match_col = col + pos;
-                    search.matches.push(Cursor {
-                        line: line_idx,
-                        column: match_col,
-                    });
-                    col = match_col + 1;
-                }
-            }
-        }
+    fn perform_search(&self, search_state: &mut SearchState) {
+        search::perform_search(&self.buffer, search_state);
     }
 
     /// Go to next match
     pub fn search_next(&mut self) {
-        if let Some(ref mut search) = self.search_state {
-            search.next_match();
-            if let Some(match_cursor) = search.current_match_cursor() {
-                let query_len = search.query.chars().count();
-                let end_cursor = Cursor::at(match_cursor.line, match_cursor.column + query_len);
+        if let Some(ref mut search_state) = self.search_state {
+            search_state.next_match();
+            if let Some(match_cursor) = search_state.current_match_cursor() {
+                let query_len = search_state.query.chars().count();
+                let (selection, end_cursor) = search::get_match_selection(match_cursor, query_len);
                 self.cursor = end_cursor;
-                self.selection = Some(Selection::new(*match_cursor, end_cursor));
+                self.selection = Some(selection);
             }
         }
     }
 
     /// Go to previous match
     pub fn search_prev(&mut self) {
-        if let Some(ref mut search) = self.search_state {
-            search.prev_match();
-            if let Some(match_cursor) = search.current_match_cursor() {
-                let query_len = search.query.chars().count();
-                let end_cursor = Cursor::at(match_cursor.line, match_cursor.column + query_len);
+        if let Some(ref mut search_state) = self.search_state {
+            search_state.prev_match();
+            if let Some(match_cursor) = search_state.current_match_cursor() {
+                let query_len = search_state.query.chars().count();
+                let (selection, end_cursor) = search::get_match_selection(match_cursor, query_len);
                 self.cursor = end_cursor;
-                self.selection = Some(Selection::new(*match_cursor, end_cursor));
+                self.selection = Some(selection);
             }
         }
     }
@@ -2146,23 +1967,23 @@ impl Editor {
 
     /// Start search with replace
     pub fn start_replace(&mut self, query: String, replace_with: String, case_sensitive: bool) {
-        let mut search = SearchState::new_with_replace(query, replace_with, case_sensitive);
+        let mut search_state = SearchState::new_with_replace(query, replace_with, case_sensitive);
 
         // Perform search throughout document
-        self.perform_search(&mut search);
+        self.perform_search(&mut search_state);
 
         // Find closest match to current cursor
-        search.find_closest_match(&self.cursor);
+        search_state.find_closest_match(&self.cursor);
 
         // Move cursor to first match and create selection
-        if let Some(match_cursor) = search.current_match_cursor() {
-            let query_len = search.query.chars().count();
-            let end_cursor = Cursor::at(match_cursor.line, match_cursor.column + query_len);
+        if let Some(match_cursor) = search_state.current_match_cursor() {
+            let query_len = search_state.query.chars().count();
+            let (selection, end_cursor) = search::get_match_selection(match_cursor, query_len);
             self.cursor = end_cursor;
-            self.selection = Some(Selection::new(*match_cursor, end_cursor));
+            self.selection = Some(selection);
         }
 
-        self.search_state = Some(search);
+        self.search_state = Some(search_state);
     }
 
     /// Update replace_with value in active search state without rebuilding search
@@ -2175,77 +1996,59 @@ impl Editor {
     /// Replace current match
     pub fn replace_current(&mut self) -> Result<()> {
         // Collect data from search_state
-        let (match_cursor, replace_with, query_len) = if let Some(ref search) = self.search_state {
-            if let (Some(replace_with), Some(idx)) = (&search.replace_with, search.current_match) {
-                if let Some(match_cursor) = search.matches.get(idx).cloned() {
-                    (match_cursor, replace_with.clone(), search.query.len())
+        let (match_cursor, replace_with, query_len) =
+            if let Some(ref search_state) = self.search_state {
+                if let (Some(replace_with), Some(idx)) =
+                    (&search_state.replace_with, search_state.current_match)
+                {
+                    if let Some(match_cursor) = search_state.matches.get(idx).cloned() {
+                        (match_cursor, replace_with.clone(), search_state.query.len())
+                    } else {
+                        return Ok(());
+                    }
                 } else {
                     return Ok(());
                 }
             } else {
                 return Ok(());
-            }
-        } else {
-            return Ok(());
-        };
+            };
 
-        // Delete old text
-        let end_cursor = Cursor {
-            line: match_cursor.line,
-            column: match_cursor.column + query_len,
-        };
-
-        // Select found text
-        self.selection = Some(Selection {
-            anchor: match_cursor,
-            active: end_cursor,
-        });
-
-        // Delete selected text
-        self.delete_selection()?;
-
-        // Insert new text
-        self.cursor = match_cursor;
-        self.buffer.insert(&self.cursor, &replace_with)?;
-        self.cursor.column += replace_with.len();
+        // Perform replacement
+        let result =
+            search::replace_at_position(&mut self.buffer, &match_cursor, query_len, &replace_with)?;
+        self.cursor = result.new_cursor;
 
         // Invalidate highlighting cache for changed line
-        self.highlight_cache.invalidate_line(match_cursor.line);
+        self.highlight_cache.invalidate_line(result.start_line);
 
         // Update search_state
-        if let Some(ref mut search) = self.search_state {
-            if let Some(idx) = search.current_match {
+        if let Some(ref mut search_state) = self.search_state {
+            if let Some(idx) = search_state.current_match {
                 // Remove this match from list
-                search.matches.remove(idx);
+                search_state.matches.remove(idx);
 
                 // Update positions of remaining matches on the same line after replacement point
-                let replacement_offset = replace_with.len() as isize - query_len as isize;
-                if replacement_offset != 0 {
-                    for match_pos in search.matches.iter_mut() {
-                        // Only update matches on same line that come after the replacement
-                        if match_pos.line == match_cursor.line
-                            && match_pos.column > match_cursor.column
-                        {
-                            // Adjust column position by the length difference
-                            match_pos.column =
-                                (match_pos.column as isize + replacement_offset).max(0) as usize;
-                        }
-                    }
-                }
+                search::update_match_positions_after_replace(
+                    &mut search_state.matches,
+                    &match_cursor,
+                    query_len,
+                    replace_with.len(),
+                );
 
                 // Update current match index
-                if search.matches.is_empty() {
-                    search.current_match = None;
-                } else if idx >= search.matches.len() {
-                    search.current_match = Some(search.matches.len() - 1);
+                if search_state.matches.is_empty() {
+                    search_state.current_match = None;
+                } else if idx >= search_state.matches.len() {
+                    search_state.current_match = Some(search_state.matches.len() - 1);
                 }
 
                 // Move cursor to next match and create selection
-                if let Some(match_cursor) = search.current_match_cursor() {
-                    let query_len = search.query.chars().count();
-                    let end_cursor = Cursor::at(match_cursor.line, match_cursor.column + query_len);
+                if let Some(match_cursor) = search_state.current_match_cursor() {
+                    let query_len = search_state.query.chars().count();
+                    let (selection, end_cursor) =
+                        search::get_match_selection(match_cursor, query_len);
                     self.cursor = end_cursor;
-                    self.selection = Some(Selection::new(*match_cursor, end_cursor));
+                    self.selection = Some(selection);
                 }
             }
         }
@@ -2258,35 +2061,19 @@ impl Editor {
 
     /// Replace all matches
     pub fn replace_all(&mut self) -> Result<usize> {
-        let mut count = 0;
+        let count = if let Some(ref search_state) = self.search_state.clone() {
+            if let Some(replace_with) = &search_state.replace_with {
+                // Perform all replacements
+                let count = search::replace_all_matches(
+                    &mut self.buffer,
+                    &search_state.matches,
+                    search_state.query.len(),
+                    replace_with,
+                )?;
 
-        if let Some(ref search) = self.search_state.clone() {
-            if let Some(replace_with) = &search.replace_with {
-                // Replace in reverse order to avoid position shifts
-                for match_cursor in search.matches.iter().rev() {
-                    // Delete old text
-                    let end_cursor = Cursor {
-                        line: match_cursor.line,
-                        column: match_cursor.column + search.query.len(),
-                    };
-
-                    // Select found text
-                    self.selection = Some(Selection {
-                        anchor: *match_cursor,
-                        active: end_cursor,
-                    });
-
-                    // Delete selected text
-                    self.delete_selection()?;
-
-                    // Insert new text
-                    self.cursor = *match_cursor;
-                    self.buffer.insert(&self.cursor, replace_with)?;
-
-                    // Invalidate highlighting cache
+                // Invalidate highlighting cache for all affected lines
+                for match_cursor in &search_state.matches {
                     self.highlight_cache.invalidate_line(match_cursor.line);
-
-                    count += 1;
                 }
 
                 // Clear search state
@@ -2294,8 +2081,14 @@ impl Editor {
 
                 // Schedule git diff update
                 self.schedule_git_diff_update();
+
+                count
+            } else {
+                0
             }
-        }
+        } else {
+            0
+        };
 
         Ok(count)
     }
