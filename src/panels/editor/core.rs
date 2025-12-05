@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
 };
 use std::path::PathBuf;
 
@@ -1297,26 +1297,7 @@ impl Editor {
             if let Some((row, col)) = cursor_viewport_pos {
                 let cursor_x = area.x + line_number_width + col as u16;
                 let cursor_y = area.y + row as u16;
-
-                if cursor_x < area.x + area.width && cursor_y < area.y + area.height {
-                    if let Some(cell) = buf.cell_mut((cursor_x, cursor_y)) {
-                        // Инверсия: swap fg и bg с fallback к theme цветам
-                        let current_fg = match cell.fg {
-                            Color::Reset => theme.fg,
-                            color => color,
-                        };
-                        let current_bg = match cell.bg {
-                            Color::Reset => theme.bg,
-                            color => color,
-                        };
-                        cell.set_style(
-                            Style::default()
-                                .bg(current_fg)
-                                .fg(current_bg)
-                                .add_modifier(Modifier::BOLD),
-                        );
-                    }
-                }
+                rendering::cursor_renderer::render_cursor_at(buf, cursor_x, cursor_y, area, theme);
             }
         } else {
             // Обычный режим (без word wrap) - используем виртуальные строки
@@ -1580,27 +1561,10 @@ impl Editor {
                         let cursor_x = area.x + line_number_width + viewport_col as u16;
                         let cursor_y = area.y + viewport_row as u16;
 
-                        if cursor_x < area.x + area.width
-                            && cursor_y < area.y + area.height
-                            && viewport_col < content_width
-                        {
-                            if let Some(cell) = buf.cell_mut((cursor_x, cursor_y)) {
-                                // Инверсия: swap fg и bg с fallback к theme цветам
-                                let current_fg = match cell.fg {
-                                    Color::Reset => theme.fg,
-                                    color => color,
-                                };
-                                let current_bg = match cell.bg {
-                                    Color::Reset => theme.bg,
-                                    color => color,
-                                };
-                                cell.set_style(
-                                    Style::default()
-                                        .bg(current_fg)
-                                        .fg(current_bg)
-                                        .add_modifier(Modifier::BOLD),
-                                );
-                            }
+                        if viewport_col < content_width {
+                            rendering::cursor_renderer::render_cursor_at(
+                                buf, cursor_x, cursor_y, area, theme,
+                            );
                         }
                     }
                 }

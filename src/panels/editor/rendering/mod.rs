@@ -4,6 +4,7 @@
 //! The main render logic remains in core.rs for now (Phase 4 extraction in progress).
 
 pub mod context;
+pub mod cursor_renderer;
 
 /// Width of the line number column (including git markers).
 ///
