@@ -107,7 +107,7 @@ struct TerminalScreen {
 }
 
 /// Screen cell
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 struct Cell {
     ch: char,
     style: CellStyle,
@@ -145,7 +145,7 @@ impl TerminalScreen {
         };
 
         Self {
-            lines: vec![vec![empty_cell.clone(); cols]; rows],
+            lines: vec![vec![empty_cell; cols]; rows],
             alt_lines: vec![vec![empty_cell; cols]; rows],
             use_alt_screen: false,
             cursor: (0, 0),
@@ -594,14 +594,14 @@ impl Perform for VtPerformer {
                             if row < buf_rows {
                                 let buf_cols = buffer[row].len();
                                 for i in col..buf_cols {
-                                    buffer[row][i] = empty_cell.clone();
+                                    buffer[row][i] = empty_cell;
                                 }
                             }
                             // Clear all lines below
                             for r in (row + 1)..buf_rows {
                                 let buf_cols = buffer[r].len();
                                 for c in 0..buf_cols {
-                                    buffer[r][c] = empty_cell.clone();
+                                    buffer[r][c] = empty_cell;
                                 }
                             }
                         }
@@ -614,24 +614,22 @@ impl Perform for VtPerformer {
                             for r in 0..row.min(buf_rows) {
                                 let buf_cols = buffer[r].len();
                                 for c in 0..buf_cols {
-                                    buffer[r][c] = empty_cell.clone();
+                                    buffer[r][c] = empty_cell;
                                 }
                             }
                             // Clear current line up to and including cursor
                             if row < buf_rows {
                                 let buf_cols = buffer[row].len();
                                 for i in 0..=col.min(buf_cols.saturating_sub(1)) {
-                                    buffer[row][i] = empty_cell.clone();
+                                    buffer[row][i] = empty_cell;
                                 }
                             }
                         }
                         2 => {
                             // Clear entire screen and move cursor to (0,0)
                             let buffer = screen.active_buffer_mut();
-                            for r in 0..buffer.len() {
-                                for c in 0..buffer[r].len() {
-                                    buffer[r][c] = empty_cell.clone();
-                                }
+                            for row in buffer.iter_mut() {
+                                row.fill(empty_cell);
                             }
                             // Move cursor to home position (compatibility with old behavior)
                             screen.cursor = (0, 0);
@@ -640,10 +638,8 @@ impl Perform for VtPerformer {
                             // Clear entire screen and scrollback
                             let is_alt = screen.use_alt_screen;
                             let buffer = screen.active_buffer_mut();
-                            for r in 0..buffer.len() {
-                                for c in 0..buffer[r].len() {
-                                    buffer[r][c] = empty_cell.clone();
-                                }
+                            for row in buffer.iter_mut() {
+                                row.fill(empty_cell);
                             }
                             // Clear scrollback only for main screen
                             if !is_alt {
@@ -675,19 +671,19 @@ impl Perform for VtPerformer {
                             0 => {
                                 // From cursor to end of line
                                 for i in col..buf_cols {
-                                    buffer[row][i] = empty_cell.clone();
+                                    buffer[row][i] = empty_cell;
                                 }
                             }
                             1 => {
                                 // From start of line to cursor (inclusive)
                                 for i in 0..=col.min(buf_cols.saturating_sub(1)) {
-                                    buffer[row][i] = empty_cell.clone();
+                                    buffer[row][i] = empty_cell;
                                 }
                             }
                             2 => {
                                 // Entire line
                                 for i in 0..buf_cols {
-                                    buffer[row][i] = empty_cell.clone();
+                                    buffer[row][i] = empty_cell;
                                 }
                             }
                             _ => {}
@@ -712,12 +708,12 @@ impl Perform for VtPerformer {
                     let buffer = screen.active_buffer_mut();
                     // Shift characters left from deleted position
                     for i in col..(cols - n) {
-                        buffer[row][i] = buffer[row][i + n].clone();
+                        buffer[row][i] = buffer[row][i + n];
                     }
 
                     // Fill freed space with blanks
                     for i in (cols - n)..cols {
-                        buffer[row][i] = empty_cell.clone();
+                        buffer[row][i] = empty_cell;
                     }
                 }
                 'X' => {
@@ -737,7 +733,7 @@ impl Perform for VtPerformer {
 
                     let buffer = screen.active_buffer_mut();
                     for i in col..(col + n).min(cols) {
-                        buffer[row][i] = empty_cell.clone();
+                        buffer[row][i] = empty_cell;
                     }
                 }
                 '@' => {
@@ -759,13 +755,13 @@ impl Perform for VtPerformer {
                     // Shift characters right
                     if col + n < cols {
                         for i in (col + n..cols).rev() {
-                            buffer[row][i] = buffer[row][i - n].clone();
+                            buffer[row][i] = buffer[row][i - n];
                         }
                     }
 
                     // Insert blanks at freed positions
                     for i in col..(col + n).min(cols) {
-                        buffer[row][i] = empty_cell.clone();
+                        buffer[row][i] = empty_cell;
                     }
                 }
                 'L' => {
@@ -794,7 +790,7 @@ impl Perform for VtPerformer {
                         }
                         // Insert n blank lines at cursor position
                         for _ in 0..n.min(rows - row) {
-                            buffer.insert(row, vec![empty_cell.clone(); cols]);
+                            buffer.insert(row, vec![empty_cell; cols]);
                         }
                     }
                 }
@@ -824,7 +820,7 @@ impl Perform for VtPerformer {
                         }
                         // Add n blank lines at bottom
                         while buffer.len() < rows {
-                            buffer.push(vec![empty_cell.clone(); cols]);
+                            buffer.push(vec![empty_cell; cols]);
                         }
                     }
                 }
@@ -848,7 +844,7 @@ impl Perform for VtPerformer {
                         if !buffer.is_empty() {
                             buffer.remove(0);
                         }
-                        buffer.push(vec![empty_cell.clone(); cols]);
+                        buffer.push(vec![empty_cell; cols]);
                     }
                 }
                 'T' => {
@@ -871,7 +867,7 @@ impl Perform for VtPerformer {
                         if buffer.len() >= rows {
                             buffer.pop();
                         }
-                        buffer.insert(0, vec![empty_cell.clone(); cols]);
+                        buffer.insert(0, vec![empty_cell; cols]);
                     }
                 }
                 'A' => {
@@ -1345,7 +1341,7 @@ impl Terminal {
                 };
 
                 // Create new buffer of needed size
-                let mut new_lines = vec![vec![empty_cell.clone(); new_cols]; new_rows];
+                let mut new_lines = vec![vec![empty_cell; new_cols]; new_rows];
 
                 // Copy old content
                 for (i, old_line) in old_lines.iter().enumerate() {
@@ -1356,7 +1352,7 @@ impl Terminal {
                         if j >= new_cols {
                             break;
                         }
-                        new_lines[i][j] = cell.clone();
+                        new_lines[i][j] = *cell;
                     }
                 }
 
@@ -2001,6 +1997,13 @@ impl Panel for Terminal {
             .expect("Terminal screen lock poisoned")
             .reset_scroll();
 
+        // Cache application_cursor_keys to avoid multiple lock acquisitions
+        let application_cursor_keys = self
+            .screen
+            .lock()
+            .expect("Terminal screen lock poisoned")
+            .application_cursor_keys;
+
         // Handle special keys
         match key.code {
             KeyCode::Char(c) => {
@@ -2040,48 +2043,28 @@ impl Panel for Terminal {
             }
             KeyCode::Left => {
                 // In Application Cursor Keys Mode send \x1bO instead of \x1b[
-                if self
-                    .screen
-                    .lock()
-                    .expect("Terminal screen lock poisoned")
-                    .application_cursor_keys
-                {
+                if application_cursor_keys {
                     self.send_input(b"\x1bOD")?;
                 } else {
                     self.send_input(b"\x1b[D")?;
                 }
             }
             KeyCode::Right => {
-                if self
-                    .screen
-                    .lock()
-                    .expect("Terminal screen lock poisoned")
-                    .application_cursor_keys
-                {
+                if application_cursor_keys {
                     self.send_input(b"\x1bOC")?;
                 } else {
                     self.send_input(b"\x1b[C")?;
                 }
             }
             KeyCode::Up => {
-                if self
-                    .screen
-                    .lock()
-                    .expect("Terminal screen lock poisoned")
-                    .application_cursor_keys
-                {
+                if application_cursor_keys {
                     self.send_input(b"\x1bOA")?;
                 } else {
                     self.send_input(b"\x1b[A")?;
                 }
             }
             KeyCode::Down => {
-                if self
-                    .screen
-                    .lock()
-                    .expect("Terminal screen lock poisoned")
-                    .application_cursor_keys
-                {
+                if application_cursor_keys {
                     self.send_input(b"\x1bOB")?;
                 } else {
                     self.send_input(b"\x1b[B")?;
@@ -2089,24 +2072,14 @@ impl Panel for Terminal {
             }
             KeyCode::Home => {
                 // In Application Cursor Keys Mode send \x1bO instead of \x1b[
-                if self
-                    .screen
-                    .lock()
-                    .expect("Terminal screen lock poisoned")
-                    .application_cursor_keys
-                {
+                if application_cursor_keys {
                     self.send_input(b"\x1bOH")?;
                 } else {
                     self.send_input(b"\x1b[H")?;
                 }
             }
             KeyCode::End => {
-                if self
-                    .screen
-                    .lock()
-                    .expect("Terminal screen lock poisoned")
-                    .application_cursor_keys
-                {
+                if application_cursor_keys {
                     self.send_input(b"\x1bOF")?;
                 } else {
                     self.send_input(b"\x1b[F")?;

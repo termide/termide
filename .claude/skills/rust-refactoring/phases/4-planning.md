@@ -142,23 +142,28 @@ If issues: Revert Batch 2, investigate
 
 ─────────────────────────────────────────────────
 
-BATCH 3: Architectural - FileManager Refactor (Day 2)
+BATCH 3: Architectural - FileManager Refactor + File Decomposition (Day 2)
 Risk: Medium | Rollback: Careful required
 
-│ Task 3.1 │ Extract FileSystem trait
+│ Task 3.1 │ Decompose large files (if prioritized)
+│          │ Example: Split editor/mod.rs (1847 LOC → 5 files)
+│          │ Strategy: Extract cursor.rs, selection.rs, render.rs, history.rs
+│          │ Note: May be done before or as part of SOLID fixes
+│
+│ Task 3.2 │ Extract FileSystem trait
 │          │ Create abstraction for filesystem ops
 │
-│ Task 3.2 │ Split FileManagerView from FileSystem
+│ Task 3.3 │ Split FileManagerView from FileSystem
 │          │ Separate UI concerns from business logic (SRP)
 │
-│ Task 3.3 │ Update all FileManager call sites
+│ Task 3.4 │ Update all FileManager call sites
 │          │ Migrate to new structure (24 locations)
 │
-│ Task 3.4 │ Add unit tests for FileSystem trait
+│ Task 3.5 │ Add unit tests for FileSystem trait
 │          │ Mock implementation for testing
 
-Effort: 8 hours (1 full day)
-Tests affected: ALL file_manager tests, integration tests
+Effort: 8-12 hours (1-1.5 days, depending on decomposition tasks)
+Tests affected: ALL file_manager tests, integration tests, decomposed modules
 Breaking change: Internal API only
 Rollback: Revert to Checkpoint 2
 
