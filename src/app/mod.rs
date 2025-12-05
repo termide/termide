@@ -5,6 +5,7 @@ use std::time::Duration;
 use crate::{
     event::{Event, EventHandler},
     layout_manager::LayoutManager,
+    panels::PanelExt,
     state::{ActiveModal, AppState},
     ui::render_layout_with_accordion,
 };
@@ -414,6 +415,26 @@ impl App {
             // Log error but don't interrupt user workflow
             crate::logger::error(format!("Failed to auto-save session: {}", e));
         }
+    }
+
+    // ===== Panel downcast helpers =====
+    // These helper methods reduce boilerplate for accessing specific panel types
+
+    /// Get mutable reference to active editor panel
+    /// Helper to avoid nested if-let chains: `if let Some(panel) = ... { if let Some(editor) = ... }`
+    fn active_editor_mut(&mut self) -> Option<&mut crate::panels::editor::Editor> {
+        self.layout_manager
+            .active_panel_mut()
+            .and_then(|panel| panel.as_editor_mut())
+    }
+
+    /// Get mutable reference to active file manager panel
+    /// Helper to avoid nested if-let chains: `if let Some(panel) = ... { if let Some(fm) = ... }`
+    #[allow(dead_code)]
+    fn active_file_manager_mut(&mut self) -> Option<&mut crate::panels::file_manager::FileManager> {
+        self.layout_manager
+            .active_panel_mut()
+            .and_then(|panel| panel.as_file_manager_mut())
     }
 }
 
