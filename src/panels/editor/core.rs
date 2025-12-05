@@ -1215,116 +1215,33 @@ impl Editor {
                 // Обработка в зависимости от типа виртуальной строки
                 match virtual_line {
                     git::VirtualLine::Real(line_idx) => {
-                        // Обычная строка из буфера
-                        let is_cursor_line = line_idx == self.cursor.line;
-                        let style = if is_cursor_line {
-                            cursor_line_style
-                        } else {
-                            text_style
-                        };
-
-                        // Номер строки с git diff статусом
-                        let git_info = git::get_git_line_info(
-                            line_idx,
-                            &self.git_diff_cache,
-                            config.show_git_diff,
-                            theme,
-                        );
-
-                        // Отрисовать номер строки (4 символа) + status marker (1 символ)
-                        let line_num_style = Style::default().fg(git_info.status_color);
-                        let line_num_part =
-                            format!("{:>4}{}", line_idx + 1, git_info.status_marker);
-
-                        for (i, ch) in line_num_part.chars().enumerate() {
-                            let x = area.x + i as u16;
-                            let y = area.y + row as u16;
-                            if let Some(cell) = buf.cell_mut((x, y)) {
-                                cell.set_char(ch);
-                                cell.set_style(line_num_style);
-                            }
-                        }
-
-                        // НЕ рисуем deletion marker здесь - он теперь на отдельной виртуальной строке
-                        // Рисуем пробел вместо старого deletion marker
-                        let x = area.x + 5;
-                        let y = area.y + row as u16;
-                        if let Some(cell) = buf.cell_mut((x, y)) {
-                            cell.set_char(' ');
-                            cell.set_style(line_num_style);
-                        }
-
-                        // Содержимое строки с подсветкой синтаксиса
+                        // Render real line in no-wrap mode
                         if let Some(line_text) = self.buffer.line(line_idx) {
-                            // Убрать перевод строки в конце
                             let line_text = line_text.trim_end_matches('\n');
+                            let is_cursor_line = line_idx == self.cursor.line;
 
-                            // Получить подсветку синтаксиса для строки (без клонирования)
-                            // Учитываем config.syntax_highlighting для отключения подсветки
-                            let segments = if self.config.syntax_highlighting
-                                && self.highlight_cache.has_syntax()
-                            {
-                                self.highlight_cache.get_line_segments(line_idx, line_text)
-                            } else {
-                                // Для текста без подсветки используем временный массив
-                                &[(line_text.to_string(), style)][..]
-                            };
-
-                            // Отрисовать сегменты с подсветкой
-                            let mut col_offset = 0;
-                            for (segment_text, segment_style) in segments {
-                                for ch in segment_text.chars() {
-                                    if col_offset >= self.viewport.left_column
-                                        && col_offset < self.viewport.left_column + content_width
-                                    {
-                                        let x = area.x
-                                            + line_number_width
-                                            + (col_offset - self.viewport.left_column) as u16;
-                                        let y = area.y + row as u16;
-
-                                        if x < area.x + area.width && y < area.y + area.height {
-                                            if let Some(cell) = buf.cell_mut((x, y)) {
-                                                cell.set_char(ch);
-
-                                                // Determine final style using highlight renderer
-                                                let final_style = rendering::highlight_renderer::determine_cell_style(
-                                                    line_idx,
-                                                    col_offset,
-                                                    *segment_style,
-                                                    is_cursor_line,
-                                                    &render_context,
-                                                    search_match_style,
-                                                    current_match_style,
-                                                    selection_style,
-                                                    theme.accented_bg,
-                                                );
-                                                cell.set_style(final_style);
-                                            }
-                                        }
-                                    }
-                                    col_offset += 1;
-                                }
-                            }
-
-                            // Заполнить остаток строки фоном (для курсорной линии)
-                            if is_cursor_line {
-                                let line_len = line_text.chars().count();
-                                for col in line_len..content_width {
-                                    if col >= self.viewport.left_column {
-                                        let x = area.x
-                                            + line_number_width
-                                            + (col - self.viewport.left_column) as u16;
-                                        let y = area.y + row as u16;
-
-                                        if x < area.x + area.width && y < area.y + area.height {
-                                            if let Some(cell) = buf.cell_mut((x, y)) {
-                                                cell.set_char(' ');
-                                                cell.set_style(cursor_line_style);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            rendering::line_rendering::render_line_no_wrap(
+                                buf,
+                                area,
+                                row,
+                                line_idx,
+                                line_text,
+                                is_cursor_line,
+                                text_style,
+                                cursor_line_style,
+                                &self.git_diff_cache,
+                                config.show_git_diff,
+                                theme,
+                                line_number_width,
+                                content_width,
+                                self.viewport.left_column,
+                                self.config.syntax_highlighting,
+                                &mut self.highlight_cache,
+                                &render_context,
+                                search_match_style,
+                                current_match_style,
+                                selection_style,
+                            );
                         }
                     }
                     git::VirtualLine::DeletionMarker(_after_line_idx, deletion_count) => {

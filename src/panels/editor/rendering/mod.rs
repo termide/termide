@@ -7,6 +7,7 @@ pub mod context;
 pub mod cursor_renderer;
 pub mod deletion_markers;
 pub mod highlight_renderer;
+pub mod line_rendering;
 
 /// Width of the line number column (including git markers).
 ///
