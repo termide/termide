@@ -215,3 +215,126 @@ fn fill_line_remainder(
         }
     }
 }
+
+/// Render editor content in no-wrap mode with virtual lines.
+///
+/// This is the main rendering function for no-wrap mode that handles:
+/// - Virtual lines (real lines + deletion markers)
+/// - Horizontal scrolling
+/// - Cursor positioning accounting for virtual lines
+#[allow(clippy::too_many_arguments)]
+pub fn render_content_no_wrap(
+    buf: &mut Buffer,
+    area: Rect,
+    buffer: &crate::editor::TextBuffer,
+    viewport: &crate::editor::Viewport,
+    cursor: &crate::editor::Cursor,
+    git_diff_cache: &Option<crate::git::GitDiffCache>,
+    show_git_diff: bool,
+    syntax_highlighting_enabled: bool,
+    highlight_cache: &mut HighlightCache,
+    render_context: &RenderContext,
+    theme: &crate::theme::Theme,
+    content_width: usize,
+    content_height: usize,
+    line_number_width: u16,
+    text_style: Style,
+    cursor_line_style: Style,
+    search_match_style: Style,
+    current_match_style: Style,
+    selection_style: Style,
+) {
+    // Build list of virtual lines (real buffer lines + deletion markers)
+    let virtual_lines =
+        crate::panels::editor::git::build_virtual_lines(buffer, git_diff_cache, show_git_diff);
+
+    // Find index of first virtual line for viewport.top_line
+    let start_virtual_idx = virtual_lines
+        .iter()
+        .position(|vline| {
+            matches!(vline, crate::panels::editor::git::VirtualLine::Real(idx) if *idx >= viewport.top_line)
+        })
+        .unwrap_or(virtual_lines.len());
+
+    // Render visible virtual lines
+    for row in 0..content_height {
+        let virtual_idx = start_virtual_idx + row;
+
+        if virtual_idx >= virtual_lines.len() {
+            break;
+        }
+
+        let virtual_line = virtual_lines[virtual_idx];
+
+        // Handle different types of virtual lines
+        match virtual_line {
+            crate::panels::editor::git::VirtualLine::Real(line_idx) => {
+                // Render real line
+                if let Some(line_text) = buffer.line(line_idx) {
+                    let line_text = line_text.trim_end_matches('\n');
+                    let is_cursor_line = line_idx == cursor.line;
+
+                    render_line_no_wrap(
+                        buf,
+                        area,
+                        row,
+                        line_idx,
+                        line_text,
+                        is_cursor_line,
+                        text_style,
+                        cursor_line_style,
+                        git_diff_cache,
+                        show_git_diff,
+                        theme,
+                        line_number_width,
+                        content_width,
+                        viewport.left_column,
+                        syntax_highlighting_enabled,
+                        highlight_cache,
+                        render_context,
+                        search_match_style,
+                        current_match_style,
+                        selection_style,
+                    );
+                }
+            }
+            crate::panels::editor::git::VirtualLine::DeletionMarker(
+                _after_line_idx,
+                deletion_count,
+            ) => {
+                // Render deletion marker virtual line
+                super::deletion_markers::render_deletion_marker(
+                    buf,
+                    area,
+                    row,
+                    deletion_count,
+                    theme,
+                    content_width,
+                    line_number_width,
+                );
+            }
+        }
+    }
+
+    // Render cursor accounting for virtual lines
+    let cursor_virtual_idx = virtual_lines.iter().position(|vline| {
+        matches!(vline, crate::panels::editor::git::VirtualLine::Real(idx) if *idx == cursor.line)
+    });
+
+    if let Some(cursor_virtual_idx) = cursor_virtual_idx {
+        if cursor_virtual_idx >= start_virtual_idx {
+            let viewport_row = cursor_virtual_idx - start_virtual_idx;
+
+            if cursor.column >= viewport.left_column {
+                let viewport_col = cursor.column - viewport.left_column;
+
+                let cursor_x = area.x + line_number_width + viewport_col as u16;
+                let cursor_y = area.y + viewport_row as u16;
+
+                if viewport_col < content_width {
+                    super::cursor_renderer::render_cursor_at(buf, cursor_x, cursor_y, area, theme);
+                }
+            }
+        }
+    }
+}

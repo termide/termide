@@ -1,10 +1,6 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    style::{Modifier, Style},
-};
+use ratatui::{buffer::Buffer, layout::Rect};
 use std::path::PathBuf;
 
 use super::super::Panel;
@@ -884,7 +880,6 @@ impl Editor {
         config: &crate::config::Config,
     ) {
         // Update viewport size (subtract space for line numbers)
-        let line_number_width = rendering::LINE_NUMBER_WIDTH as u16;
         let (content_width, content_height) =
             rendering::calculate_content_dimensions(area.width, area.height);
 
@@ -908,155 +903,33 @@ impl Editor {
         self.viewport
             .ensure_cursor_visible(&self.cursor, virtual_lines_total);
 
-        let text_style = Style::default().fg(theme.fg);
-        let line_number_style = Style::default().fg(theme.disabled);
-        let cursor_line_style = Style::default().bg(theme.accented_bg).fg(theme.fg);
-
-        // Style for found matches (using theme colors)
-        let search_match_style = Style::default()
-            .bg(theme.warning) // Warning color for search matches
-            .fg(theme.bg); // Contrasting text
-
-        let current_match_style = Style::default()
-            .bg(theme.accented_fg) // Accent color for current match
-            .fg(theme.bg) // Contrasting text
-            .add_modifier(Modifier::BOLD);
-
-        // Style for selected text
-        let selection_style = Style::default().bg(theme.selected_bg).fg(theme.selected_fg);
-
-        // Prepare rendering context (search matches, selection, etc.)
-        let mut render_context =
-            rendering::context::RenderContext::prepare(&self.search_state, &self.selection);
-
-        if self.config.word_wrap && content_width > 0 {
-            // Word wrap mode
-            let use_smart_wrap = self.should_use_smart_wrap(config);
-            self.cached_use_smart_wrap = use_smart_wrap;
-
-            rendering::wrap_rendering::render_content_word_wrap(
-                buf,
-                area,
-                &self.buffer,
-                &self.viewport,
-                &self.cursor,
-                &self.git_diff_cache,
-                config.show_git_diff,
-                self.config.syntax_highlighting,
-                &mut self.highlight_cache,
-                &mut render_context,
-                theme,
-                content_width,
-                content_height,
-                line_number_width,
-                use_smart_wrap,
-                text_style,
-                cursor_line_style,
-                line_number_style,
-                search_match_style,
-                current_match_style,
-                selection_style,
-            );
+        // Determine smart wrap setting
+        let use_smart_wrap = if self.config.word_wrap && content_width > 0 {
+            self.should_use_smart_wrap(config)
         } else {
-            // Обычный режим (без word wrap) - используем виртуальные строки
-            // Построить список виртуальных строк (real buffer lines + deletion markers)
-            let virtual_lines =
-                git::build_virtual_lines(&self.buffer, &self.git_diff_cache, config.show_git_diff);
+            false
+        };
+        self.cached_use_smart_wrap = use_smart_wrap;
 
-            // Найти индекс первой виртуальной строки для viewport.top_line (buffer line index)
-            // viewport.top_line это buffer line index, нужно преобразовать в virtual line index
-            let start_virtual_idx = virtual_lines
-                .iter()
-                .position(|vline| matches!(vline, git::VirtualLine::Real(idx) if *idx >= self.viewport.top_line))
-                .unwrap_or(virtual_lines.len());
-
-            // Отрисовать видимые виртуальные строки
-            for row in 0..content_height {
-                let virtual_idx = start_virtual_idx + row;
-
-                if virtual_idx >= virtual_lines.len() {
-                    break;
-                }
-
-                let virtual_line = virtual_lines[virtual_idx];
-
-                // Обработка в зависимости от типа виртуальной строки
-                match virtual_line {
-                    git::VirtualLine::Real(line_idx) => {
-                        // Render real line in no-wrap mode
-                        if let Some(line_text) = self.buffer.line(line_idx) {
-                            let line_text = line_text.trim_end_matches('\n');
-                            let is_cursor_line = line_idx == self.cursor.line;
-
-                            rendering::line_rendering::render_line_no_wrap(
-                                buf,
-                                area,
-                                row,
-                                line_idx,
-                                line_text,
-                                is_cursor_line,
-                                text_style,
-                                cursor_line_style,
-                                &self.git_diff_cache,
-                                config.show_git_diff,
-                                theme,
-                                line_number_width,
-                                content_width,
-                                self.viewport.left_column,
-                                self.config.syntax_highlighting,
-                                &mut self.highlight_cache,
-                                &render_context,
-                                search_match_style,
-                                current_match_style,
-                                selection_style,
-                            );
-                        }
-                    }
-                    git::VirtualLine::DeletionMarker(_after_line_idx, deletion_count) => {
-                        // Виртуальная строка - deletion marker
-                        rendering::deletion_markers::render_deletion_marker(
-                            buf,
-                            area,
-                            row,
-                            deletion_count,
-                            theme,
-                            content_width,
-                            line_number_width,
-                        );
-
-                        // Пропускаем рендеринг контента для deletion marker
-                        continue;
-                    }
-                }
-            }
-
-            // Отрисовать курсор с учетом виртуальных строк
-            // Найти virtual line index для cursor.line
-            let cursor_virtual_idx = virtual_lines.iter().position(
-                |vline| matches!(vline, git::VirtualLine::Real(idx) if *idx == self.cursor.line),
-            );
-
-            if let Some(cursor_virtual_idx) = cursor_virtual_idx {
-                // Вычислить viewport row с учетом deletion marker строк
-                if cursor_virtual_idx >= start_virtual_idx {
-                    let viewport_row = cursor_virtual_idx - start_virtual_idx;
-
-                    // Вычислить viewport col (с учетом horizontal scrolling)
-                    if self.cursor.column >= self.viewport.left_column {
-                        let viewport_col = self.cursor.column - self.viewport.left_column;
-
-                        let cursor_x = area.x + line_number_width + viewport_col as u16;
-                        let cursor_y = area.y + viewport_row as u16;
-
-                        if viewport_col < content_width {
-                            rendering::cursor_renderer::render_cursor_at(
-                                buf, cursor_x, cursor_y, area, theme,
-                            );
-                        }
-                    }
-                }
-            }
-        }
+        // Delegate to rendering orchestrator
+        rendering::render_editor_content(
+            buf,
+            area,
+            &self.buffer,
+            &self.viewport,
+            &self.cursor,
+            &self.git_diff_cache,
+            self.config.syntax_highlighting,
+            &mut self.highlight_cache,
+            &self.search_state,
+            &self.selection,
+            theme,
+            config.show_git_diff,
+            self.config.word_wrap,
+            use_smart_wrap,
+            content_width,
+            content_height,
+        );
     }
 
     /// Start search
