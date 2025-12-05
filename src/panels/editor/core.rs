@@ -381,29 +381,7 @@ impl Editor {
         let file_type = self
             .highlight_cache
             .current_syntax()
-            .map(|s| {
-                // Convert language name to readable format
-                match s {
-                    "rust" => "Rust",
-                    "python" => "Python",
-                    "go" => "Go",
-                    "javascript" => "JavaScript",
-                    "typescript" => "TypeScript",
-                    "tsx" => "TSX",
-                    "c" => "C",
-                    "cpp" => "C++",
-                    "java" => "Java",
-                    "ruby" => "Ruby",
-                    "html" => "HTML",
-                    "css" => "CSS",
-                    "json" => "JSON",
-                    "toml" => "TOML",
-                    "yaml" => "YAML",
-                    "bash" => "Bash",
-                    "markdown" => "Markdown",
-                    _ => s,
-                }
-            })
+            .map(Self::format_language_name)
             .unwrap_or("Plain Text")
             .to_string();
 
@@ -421,6 +399,30 @@ impl Editor {
     /// Check if visual movement should be used (word wrap enabled and width cached).
     fn should_use_visual_movement(&self) -> bool {
         self.config.word_wrap && self.cached_content_width > 0
+    }
+
+    /// Convert syntax language name to human-readable display name.
+    fn format_language_name(syntax_name: &str) -> &str {
+        match syntax_name {
+            "rust" => "Rust",
+            "python" => "Python",
+            "go" => "Go",
+            "javascript" => "JavaScript",
+            "typescript" => "TypeScript",
+            "tsx" => "TSX",
+            "c" => "C",
+            "cpp" => "C++",
+            "java" => "Java",
+            "ruby" => "Ruby",
+            "html" => "HTML",
+            "css" => "CSS",
+            "json" => "JSON",
+            "toml" => "TOML",
+            "yaml" => "YAML",
+            "bash" => "Bash",
+            "markdown" => "Markdown",
+            _ => syntax_name,
+        }
     }
 
     /// Move cursor up
@@ -743,16 +745,8 @@ impl Editor {
             self.cursor = new_cursor;
             self.clamp_cursor();
 
-            // Invalidate highlighting cache
-            if is_multiline {
-                self.highlight_cache
-                    .invalidate_range(start_line, self.buffer.line_count());
-            } else {
-                self.highlight_cache.invalidate_line(start_line);
-            }
-
-            // Schedule git diff update
-            self.schedule_git_diff_update();
+            // Invalidate highlighting cache and schedule git update
+            self.invalidate_cache_after_edit(start_line, is_multiline);
         }
         Ok(())
     }
@@ -768,12 +762,8 @@ impl Editor {
         // Clear selection
         self.selection = None;
 
-        // Invalidate highlighting cache
-        self.highlight_cache
-            .invalidate_range(result.start_line, self.buffer.line_count());
-
-        // Schedule git diff update
-        self.schedule_git_diff_update();
+        // Invalidate highlighting cache and schedule git update
+        self.invalidate_cache_after_edit(result.start_line, result.is_multiline);
 
         Ok(())
     }
@@ -795,11 +785,8 @@ impl Editor {
         self.cursor = result.new_cursor;
         self.clamp_cursor();
 
-        // Invalidate highlighting cache for changed line
-        self.highlight_cache.invalidate_line(result.start_line);
-
-        // Schedule git diff update
-        self.schedule_git_diff_update();
+        // Invalidate highlighting cache and schedule git update
+        self.invalidate_cache_after_edit(result.start_line, result.is_multiline);
 
         Ok(())
     }
@@ -816,12 +803,8 @@ impl Editor {
         self.cursor = result.new_cursor;
         self.clamp_cursor();
 
-        // Invalidate all lines after inserting new line
-        self.highlight_cache
-            .invalidate_range(result.start_line, self.buffer.line_count());
-
-        // Schedule git diff update
-        self.schedule_git_diff_update();
+        // Invalidate highlighting cache and schedule git update
+        self.invalidate_cache_after_edit(result.start_line, result.is_multiline);
 
         Ok(())
     }
@@ -832,18 +815,8 @@ impl Editor {
             self.cursor = result.new_cursor;
             self.clamp_cursor();
 
-            // Invalidate highlighting cache
-            if result.is_multiline {
-                // Deleted newline - need to invalidate all lines after
-                self.highlight_cache
-                    .invalidate_range(result.start_line, self.buffer.line_count());
-            } else {
-                // Regular character deletion
-                self.highlight_cache.invalidate_line(result.start_line);
-            }
-
-            // Schedule git diff update
-            self.schedule_git_diff_update();
+            // Invalidate highlighting cache and schedule git update
+            self.invalidate_cache_after_edit(result.start_line, result.is_multiline);
         }
         Ok(())
     }
@@ -851,18 +824,8 @@ impl Editor {
     /// Delete character (delete)
     fn delete(&mut self) -> Result<()> {
         if let Some(result) = text_editing::delete_char(&mut self.buffer, &self.cursor)? {
-            // Invalidate highlighting cache
-            if result.is_multiline {
-                // Deleted newline - need to invalidate all lines after
-                self.highlight_cache
-                    .invalidate_range(result.start_line, self.buffer.line_count());
-            } else {
-                // Regular character deletion
-                self.highlight_cache.invalidate_line(result.start_line);
-            }
-
-            // Schedule git diff update
-            self.schedule_git_diff_update();
+            // Invalidate highlighting cache and schedule git update
+            self.invalidate_cache_after_edit(result.start_line, result.is_multiline);
         }
         Ok(())
     }
@@ -1889,6 +1852,20 @@ impl Editor {
             delete_fn(self)?;
         }
         Ok(())
+    }
+
+    /// Invalidate syntax highlighting cache after text edit and schedule git diff update.
+    ///
+    /// If the edit is multiline, invalidates all lines from start_line to end of buffer.
+    /// Otherwise, invalidates only the single changed line.
+    fn invalidate_cache_after_edit(&mut self, start_line: usize, is_multiline: bool) {
+        if is_multiline {
+            self.highlight_cache
+                .invalidate_range(start_line, self.buffer.line_count());
+        } else {
+            self.highlight_cache.invalidate_line(start_line);
+        }
+        self.schedule_git_diff_update();
     }
 
     // Word wrap methods moved to word_wrap module
