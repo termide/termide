@@ -1868,6 +1868,64 @@ impl Editor {
         self.schedule_git_diff_update();
     }
 
+    /// Handle undo/redo operation with unified logic.
+    ///
+    /// Performs the specified buffer operation (undo or redo), updates cursor position,
+    /// invalidates cache, and schedules git diff update.
+    fn handle_undo_redo<F>(&mut self, operation: F) -> Result<()>
+    where
+        F: FnOnce(&mut TextBuffer) -> Result<Option<Cursor>>,
+    {
+        self.close_search();
+
+        if let Some(new_cursor) = operation(&mut self.buffer)? {
+            self.cursor = new_cursor;
+            self.clamp_cursor();
+            // Invalidate entire highlighting cache after undo/redo
+            self.highlight_cache
+                .invalidate_range(0, self.buffer.line_count());
+            // Schedule git diff update
+            self.schedule_git_diff_update();
+        }
+        Ok(())
+    }
+
+    /// Open search modal, optionally restoring and executing previous query.
+    ///
+    /// If active search exists, restores its state. Otherwise, if a previous query
+    /// exists and execute_search is true, executes it immediately.
+    fn open_search_modal(&mut self, execute_search: bool) {
+        use crate::ui::modal::SearchModal;
+        let mut search_modal = SearchModal::new("");
+
+        // Restore active search state if it exists
+        if let Some(ref search_state) = self.search_state {
+            search_modal.set_input(search_state.query.clone());
+            if let Some((current, total)) = self.get_search_match_info() {
+                search_modal.set_match_info(current, total);
+            }
+        }
+        // If there's a saved query but no active search
+        else if let Some(ref query) = self.last_search_query {
+            search_modal.set_input(query.clone());
+
+            if execute_search {
+                // Execute search immediately
+                self.start_search(query.clone(), false);
+
+                // Update match info in modal
+                if let Some((current, total)) = self.get_search_match_info() {
+                    search_modal.set_match_info(current, total);
+                }
+            }
+        }
+
+        self.modal_request = Some((
+            PendingAction::Search,
+            ActiveModal::Search(Box::new(search_modal)),
+        ));
+    }
+
     // Word wrap methods moved to word_wrap module
 }
 
@@ -2109,68 +2167,20 @@ impl Panel for Editor {
             // Ctrl+Z - undo (only if not read-only)
             (KeyCode::Char('z'), KeyModifiers::CONTROL) => {
                 if !self.config.read_only {
-                    // Close search mode when editing begins
-                    self.close_search();
-
-                    if let Some(new_cursor) = self.buffer.undo()? {
-                        self.cursor = new_cursor;
-                        self.clamp_cursor();
-                        // Invalidate entire highlighting cache after undo
-                        self.highlight_cache
-                            .invalidate_range(0, self.buffer.line_count());
-                        // Schedule git diff update
-                        self.schedule_git_diff_update();
-                    }
+                    self.handle_undo_redo(|buffer| buffer.undo())?;
                 }
             }
 
             // Ctrl+Y - redo (only if not read-only)
             (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
                 if !self.config.read_only {
-                    // Close search mode when editing begins
-                    self.close_search();
-
-                    if let Some(new_cursor) = self.buffer.redo()? {
-                        self.cursor = new_cursor;
-                        self.clamp_cursor();
-                        // Invalidate entire highlighting cache after redo
-                        self.highlight_cache
-                            .invalidate_range(0, self.buffer.line_count());
-                        // Schedule git diff update
-                        self.schedule_git_diff_update();
-                    }
+                    self.handle_undo_redo(|buffer| buffer.redo())?;
                 }
             }
 
             // Ctrl+F - search (show interactive search modal)
             (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
-                use crate::ui::modal::SearchModal;
-                let mut search_modal = SearchModal::new("");
-
-                // Restore previous search text and match info if search is already active
-                if let Some(ref search_state) = self.search_state {
-                    search_modal.set_input(search_state.query.clone());
-                    if let Some((current, total)) = self.get_search_match_info() {
-                        search_modal.set_match_info(current, total);
-                    }
-                }
-                // If there's a saved query but no active search - restore and execute search
-                else if let Some(ref query) = self.last_search_query {
-                    search_modal.set_input(query.clone());
-
-                    // Execute search immediately
-                    self.start_search(query.clone(), false);
-
-                    // Update match info in modal
-                    if let Some((current, total)) = self.get_search_match_info() {
-                        search_modal.set_match_info(current, total);
-                    }
-                }
-
-                self.modal_request = Some((
-                    PendingAction::Search,
-                    ActiveModal::Search(Box::new(search_modal)),
-                ));
+                self.open_search_modal(true);
             }
 
             // F3 - next match (or open search if no active search)
@@ -2178,34 +2188,7 @@ impl Panel for Editor {
                 if self.search_state.is_some() {
                     self.search_next();
                 } else {
-                    // Open search modal if no active search, restoring last query
-                    use crate::ui::modal::SearchModal;
-
-                    if let Some(ref query) = self.last_search_query {
-                        // Restore last query and immediately trigger search
-                        let mut search_modal = SearchModal::new("");
-                        search_modal.set_input(query.clone());
-
-                        // Execute search immediately
-                        self.start_search(query.clone(), false);
-
-                        // Update match info in modal
-                        if let Some((current, total)) = self.get_search_match_info() {
-                            search_modal.set_match_info(current, total);
-                        }
-
-                        self.modal_request = Some((
-                            PendingAction::Search,
-                            ActiveModal::Search(Box::new(search_modal)),
-                        ));
-                    } else {
-                        // No saved query - just open empty modal
-                        let search_modal = SearchModal::new("");
-                        self.modal_request = Some((
-                            PendingAction::Search,
-                            ActiveModal::Search(Box::new(search_modal)),
-                        ));
-                    }
+                    self.open_search_modal(true);
                 }
             }
 
@@ -2214,34 +2197,7 @@ impl Panel for Editor {
                 if self.search_state.is_some() {
                     self.search_prev();
                 } else {
-                    // Open search modal if no active search, restoring last query
-                    use crate::ui::modal::SearchModal;
-
-                    if let Some(ref query) = self.last_search_query {
-                        // Restore last query and immediately trigger search
-                        let mut search_modal = SearchModal::new("");
-                        search_modal.set_input(query.clone());
-
-                        // Execute search immediately
-                        self.start_search(query.clone(), false);
-
-                        // Update match info in modal
-                        if let Some((current, total)) = self.get_search_match_info() {
-                            search_modal.set_match_info(current, total);
-                        }
-
-                        self.modal_request = Some((
-                            PendingAction::Search,
-                            ActiveModal::Search(Box::new(search_modal)),
-                        ));
-                    } else {
-                        // No saved query - just open empty modal
-                        let search_modal = SearchModal::new("");
-                        self.modal_request = Some((
-                            PendingAction::Search,
-                            ActiveModal::Search(Box::new(search_modal)),
-                        ));
-                    }
+                    self.open_search_modal(true);
                 }
             }
 
