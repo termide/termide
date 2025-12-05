@@ -8,7 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
 
-use super::{Modal, ModalResult};
+use super::{Modal, ModalResult, TextInputHandler};
 use crate::constants::{
     MODAL_BUTTON_SPACING, MODAL_MAX_WIDTH_PERCENTAGE_DEFAULT, MODAL_MIN_WIDTH_DEFAULT,
     MODAL_PADDING_WITH_DOUBLE_BORDER,
@@ -29,8 +29,7 @@ enum FocusArea {
 pub struct InputModal {
     title: String,
     prompt: String,
-    input: String,
-    cursor_pos: usize,
+    input_handler: TextInputHandler,
     focus: FocusArea,
     selected_button: usize, // 0 = OK, 1 = Cancel
     last_buttons_area: Option<Rect>,
@@ -42,8 +41,7 @@ impl InputModal {
         Self {
             title: title.into(),
             prompt: prompt.into(),
-            input: String::new(),
-            cursor_pos: 0,
+            input_handler: TextInputHandler::new(),
             focus: FocusArea::Input,
             selected_button: 0, // OK button selected by default
             last_buttons_area: None,
@@ -56,13 +54,10 @@ impl InputModal {
         prompt: impl Into<String>,
         default: impl Into<String>,
     ) -> Self {
-        let default = default.into();
-        let cursor_pos = default.chars().count(); // Use character count, not bytes
         Self {
             title: title.into(),
             prompt: prompt.into(),
-            input: default,
-            cursor_pos,
+            input_handler: TextInputHandler::with_default(default),
             focus: FocusArea::Input,
             selected_button: 0, // OK button selected by default
             last_buttons_area: None,
@@ -90,7 +85,7 @@ impl InputModal {
 
         // 4. Input field width with room for at least 20 characters
         // Current input length + minimum 20 characters for input
-        let current_input_len = self.input.chars().count() as u16;
+        let current_input_len = self.input_handler.text().chars().count() as u16;
         let min_input_width = current_input_len + 20;
 
         // Take the maximum of all components
@@ -181,18 +176,16 @@ impl Modal for InputModal {
         }
 
         // Render input field
-        // Convert cursor position (in characters) to byte index
-        let byte_pos = self
-            .input
-            .chars()
-            .take(self.cursor_pos)
-            .map(|c| c.len_utf8())
-            .sum::<usize>();
-
         let input_line = Line::from(vec![
-            Span::styled(&self.input[..byte_pos], Style::default().fg(theme.bg)),
+            Span::styled(
+                self.input_handler.text_before_cursor(),
+                Style::default().fg(theme.bg),
+            ),
             Span::styled("█", Style::default().fg(theme.success)),
-            Span::styled(&self.input[byte_pos..], Style::default().fg(theme.bg)),
+            Span::styled(
+                self.input_handler.text_after_cursor(),
+                Style::default().fg(theme.bg),
+            ),
         ]);
 
         let input_paragraph = Paragraph::new(input_line)
@@ -255,74 +248,43 @@ impl Modal for InputModal {
                     }
                     KeyCode::Enter => {
                         // Confirm input (or cancel if empty)
-                        if self.input.is_empty() {
+                        if self.input_handler.is_empty() {
                             Ok(Some(ModalResult::Cancelled))
                         } else {
-                            Ok(Some(ModalResult::Confirmed(self.input.clone())))
+                            Ok(Some(ModalResult::Confirmed(
+                                self.input_handler.text().to_string(),
+                            )))
                         }
                     }
                     KeyCode::Char(c) => {
                         if key.modifiers.contains(KeyModifiers::CONTROL) {
                             return Ok(None);
                         }
-                        // Convert character position to byte index
-                        let byte_pos = self
-                            .input
-                            .chars()
-                            .take(self.cursor_pos)
-                            .map(|c| c.len_utf8())
-                            .sum::<usize>();
-                        self.input.insert(byte_pos, c);
-                        self.cursor_pos += 1;
+                        self.input_handler.insert_char(c);
                         Ok(None)
                     }
                     KeyCode::Backspace => {
-                        if self.cursor_pos > 0 {
-                            // Convert character position to byte index
-                            let byte_pos = self
-                                .input
-                                .chars()
-                                .take(self.cursor_pos - 1)
-                                .map(|c| c.len_utf8())
-                                .sum::<usize>();
-                            self.input.remove(byte_pos);
-                            self.cursor_pos -= 1;
-                        }
+                        self.input_handler.backspace();
                         Ok(None)
                     }
                     KeyCode::Delete => {
-                        let char_count = self.input.chars().count();
-                        if self.cursor_pos < char_count {
-                            // Convert character position to byte index
-                            let byte_pos = self
-                                .input
-                                .chars()
-                                .take(self.cursor_pos)
-                                .map(|c| c.len_utf8())
-                                .sum::<usize>();
-                            self.input.remove(byte_pos);
-                        }
+                        self.input_handler.delete();
                         Ok(None)
                     }
                     KeyCode::Left => {
-                        if self.cursor_pos > 0 {
-                            self.cursor_pos -= 1;
-                        }
+                        self.input_handler.move_left();
                         Ok(None)
                     }
                     KeyCode::Right => {
-                        let char_count = self.input.chars().count();
-                        if self.cursor_pos < char_count {
-                            self.cursor_pos += 1;
-                        }
+                        self.input_handler.move_right();
                         Ok(None)
                     }
                     KeyCode::Home => {
-                        self.cursor_pos = 0;
+                        self.input_handler.move_home();
                         Ok(None)
                     }
                     KeyCode::End => {
-                        self.cursor_pos = self.input.chars().count();
+                        self.input_handler.move_end();
                         Ok(None)
                     }
                     _ => Ok(None),
@@ -349,10 +311,12 @@ impl Modal for InputModal {
                         // Execute selected button action
                         if self.selected_button == 0 {
                             // OK button
-                            if self.input.is_empty() {
+                            if self.input_handler.is_empty() {
                                 Ok(Some(ModalResult::Cancelled))
                             } else {
-                                Ok(Some(ModalResult::Confirmed(self.input.clone())))
+                                Ok(Some(ModalResult::Confirmed(
+                                    self.input_handler.text().to_string(),
+                                )))
                             }
                         } else {
                             // Cancel button
@@ -365,44 +329,19 @@ impl Modal for InputModal {
                         }
                         // Switch back to input and insert character
                         self.focus = FocusArea::Input;
-                        let byte_pos = self
-                            .input
-                            .chars()
-                            .take(self.cursor_pos)
-                            .map(|c| c.len_utf8())
-                            .sum::<usize>();
-                        self.input.insert(byte_pos, c);
-                        self.cursor_pos += 1;
+                        self.input_handler.insert_char(c);
                         Ok(None)
                     }
                     KeyCode::Backspace => {
                         // Switch back to input and delete character
                         self.focus = FocusArea::Input;
-                        if self.cursor_pos > 0 {
-                            let byte_pos = self
-                                .input
-                                .chars()
-                                .take(self.cursor_pos - 1)
-                                .map(|c| c.len_utf8())
-                                .sum::<usize>();
-                            self.input.remove(byte_pos);
-                            self.cursor_pos -= 1;
-                        }
+                        self.input_handler.backspace();
                         Ok(None)
                     }
                     KeyCode::Delete => {
                         // Switch back to input and delete character
                         self.focus = FocusArea::Input;
-                        let char_count = self.input.chars().count();
-                        if self.cursor_pos < char_count {
-                            let byte_pos = self
-                                .input
-                                .chars()
-                                .take(self.cursor_pos)
-                                .map(|c| c.len_utf8())
-                                .sum::<usize>();
-                            self.input.remove(byte_pos);
-                        }
+                        self.input_handler.delete();
                         Ok(None)
                     }
                     _ => Ok(None),
@@ -456,10 +395,12 @@ impl Modal for InputModal {
             self.focus = FocusArea::Buttons;
             self.selected_button = 0;
             // Execute OK action immediately
-            if self.input.is_empty() {
+            if self.input_handler.is_empty() {
                 Ok(Some(ModalResult::Cancelled))
             } else {
-                Ok(Some(ModalResult::Confirmed(self.input.clone())))
+                Ok(Some(ModalResult::Confirmed(
+                    self.input_handler.text().to_string(),
+                )))
             }
         } else if mouse.column >= cancel_start && mouse.column < cancel_end {
             // Cancel button clicked
