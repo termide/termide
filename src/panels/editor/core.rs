@@ -931,264 +931,32 @@ impl Editor {
 
         if self.config.word_wrap && content_width > 0 {
             // Word wrap mode
-
-            // Check if smart wrapping should be used
             let use_smart_wrap = self.should_use_smart_wrap(config);
-            // Cache it for cursor navigation methods
             self.cached_use_smart_wrap = use_smart_wrap;
 
-            let mut visual_row = 0;
-            let mut line_idx = self.viewport.top_line;
-
-            while visual_row < content_height && line_idx < self.buffer.line_count() {
-                let is_cursor_line = line_idx == self.cursor.line;
-                let style = if is_cursor_line {
-                    cursor_line_style
-                } else {
-                    text_style
-                };
-
-                if let Some(line_text) = self.buffer.line(line_idx) {
-                    let line_text = line_text.trim_end_matches('\n');
-                    let chars: Vec<char> = line_text.chars().collect();
-                    let line_len = chars.len();
-
-                    // Разбить строку на визуальные строки по content_width
-                    let mut char_offset = 0;
-                    let mut is_first_visual_row = true;
-
-                    // Специальная обработка пустых строк
-                    if line_len == 0 {
-                        // Получить git информацию для этой строки
-                        let git_info = git::get_git_line_info(
-                            line_idx,
-                            &self.git_diff_cache,
-                            config.show_git_diff,
-                            theme,
-                        );
-
-                        // Отрисовать номер строки (4 символа) + status marker (1 символ)
-                        let line_num_style = Style::default().fg(git_info.status_color);
-                        let line_num_part =
-                            format!("{:>4}{}", line_idx + 1, git_info.status_marker);
-
-                        for (i, ch) in line_num_part.chars().enumerate() {
-                            let x = area.x + i as u16;
-                            let y = area.y + visual_row as u16;
-                            if let Some(cell) = buf.cell_mut((x, y)) {
-                                cell.set_char(ch);
-                                cell.set_style(line_num_style);
-                            }
-                        }
-
-                        // НЕ рисуем deletion marker здесь - он теперь на отдельной виртуальной строке
-                        // Рисуем пробел вместо старого deletion marker
-                        let x = area.x + 5;
-                        let y = area.y + visual_row as u16;
-                        if let Some(cell) = buf.cell_mut((x, y)) {
-                            cell.set_char(' ');
-                            cell.set_style(line_num_style);
-                        }
-
-                        // Заполнить остальную часть строки фоном (для курсора)
-                        for col in 0..content_width {
-                            let x = area.x + line_number_width + col as u16;
-                            let y = area.y + visual_row as u16;
-
-                            if x < area.x + area.width && y < area.y + area.height {
-                                if let Some(cell) = buf.cell_mut((x, y)) {
-                                    cell.set_char(' ');
-                                    cell.set_style(style); // Использует cursor_line_style если это строка курсора
-                                }
-                            }
-                        }
-
-                        // Проверить, находится ли курсор на этой пустой строке в колонке 0
-                        if is_cursor_line && self.cursor.column == 0 {
-                            render_context.cursor_viewport_pos = Some((visual_row, 0));
-                        }
-
-                        visual_row += 1;
-                        // Перейти к следующей строке
-                    } else {
-                        // Обработка непустых строк
-                        while char_offset < line_len && visual_row < content_height {
-                            // Calculate wrap point (smart or simple)
-                            let chunk_end = if use_smart_wrap {
-                                // Smart wrapping: respect word boundaries
-                                crate::editor::calculate_wrap_point(
-                                    &chars,
-                                    char_offset,
-                                    content_width,
-                                    line_len,
-                                )
-                            } else {
-                                // Simple wrapping: hard break at content_width
-                                (char_offset + content_width).min(line_len)
-                            };
-
-                            // Номер строки (только на первой визуальной строке)
-                            if is_first_visual_row {
-                                // Получить git информацию для этой строки
-                                let git_info = git::get_git_line_info(
-                                    line_idx,
-                                    &self.git_diff_cache,
-                                    config.show_git_diff,
-                                    theme,
-                                );
-
-                                // Отрисовать номер строки (4 символа) + status marker (1 символ)
-                                let line_num_style = Style::default().fg(git_info.status_color);
-                                let line_num_part =
-                                    format!("{:>4}{}", line_idx + 1, git_info.status_marker);
-
-                                for (i, ch) in line_num_part.chars().enumerate() {
-                                    let x = area.x + i as u16;
-                                    let y = area.y + visual_row as u16;
-                                    if let Some(cell) = buf.cell_mut((x, y)) {
-                                        cell.set_char(ch);
-                                        cell.set_style(line_num_style);
-                                    }
-                                }
-
-                                // НЕ рисуем deletion marker здесь - он теперь на отдельной виртуальной строке
-                                // Рисуем пробел вместо старого deletion marker
-                                let x = area.x + 5;
-                                let y = area.y + visual_row as u16;
-                                if let Some(cell) = buf.cell_mut((x, y)) {
-                                    cell.set_char(' ');
-                                    cell.set_style(line_num_style);
-                                }
-                            } else {
-                                // Пустое место вместо номера строки для продолжения
-                                for i in 0..line_number_width as usize {
-                                    let x = area.x + i as u16;
-                                    let y = area.y + visual_row as u16;
-                                    if let Some(cell) = buf.cell_mut((x, y)) {
-                                        cell.set_char(' ');
-                                        cell.set_style(line_number_style);
-                                    }
-                                }
-                            }
-
-                            // Получить сегменты подсветки
-                            let segments = if self.config.syntax_highlighting
-                                && self.highlight_cache.has_syntax()
-                            {
-                                self.highlight_cache.get_line_segments(line_idx, line_text)
-                            } else {
-                                &[(line_text.to_string(), style)][..]
-                            };
-
-                            // Отрисовать символы этой визуальной строки
-                            let mut segment_char_idx = 0;
-                            let mut visual_col = 0;
-
-                            for (segment_text, segment_style) in segments {
-                                for ch in segment_text.chars() {
-                                    // Проверить, попадает ли символ в текущий чанк
-                                    if segment_char_idx >= char_offset
-                                        && segment_char_idx < chunk_end
-                                    {
-                                        let x = area.x + line_number_width + visual_col as u16;
-                                        let y = area.y + visual_row as u16;
-
-                                        if x < area.x + area.width && y < area.y + area.height {
-                                            if let Some(cell) = buf.cell_mut((x, y)) {
-                                                cell.set_char(ch);
-
-                                                // Determine final style using highlight renderer
-                                                let final_style = rendering::highlight_renderer::determine_cell_style(
-                                                    line_idx,
-                                                    segment_char_idx,
-                                                    *segment_style,
-                                                    is_cursor_line,
-                                                    &render_context,
-                                                    search_match_style,
-                                                    current_match_style,
-                                                    selection_style,
-                                                    theme.accented_bg,
-                                                );
-                                                cell.set_style(final_style);
-                                            }
-                                        }
-
-                                        // Проверить позицию курсора
-                                        if is_cursor_line && self.cursor.column == segment_char_idx
-                                        {
-                                            render_context.cursor_viewport_pos =
-                                                Some((visual_row, visual_col));
-                                        }
-
-                                        visual_col += 1;
-                                    }
-                                    segment_char_idx += 1;
-                                }
-                            }
-
-                            // Проверить курсор в конце строки
-                            if is_cursor_line
-                                && self.cursor.column >= char_offset
-                                && self.cursor.column <= chunk_end
-                                && (self.cursor.column == chunk_end
-                                    || (chunk_end == line_len && self.cursor.column >= line_len))
-                            {
-                                render_context.cursor_viewport_pos =
-                                    Some((visual_row, self.cursor.column - char_offset));
-                            }
-
-                            // Заполнить остаток строки фоном (для курсорной линии)
-                            if is_cursor_line {
-                                for col in visual_col..content_width {
-                                    let x = area.x + line_number_width + col as u16;
-                                    let y = area.y + visual_row as u16;
-
-                                    if x < area.x + area.width && y < area.y + area.height {
-                                        if let Some(cell) = buf.cell_mut((x, y)) {
-                                            cell.set_char(' ');
-                                            cell.set_style(cursor_line_style);
-                                        }
-                                    }
-                                }
-                            }
-
-                            is_first_visual_row = false;
-                            char_offset = chunk_end;
-                            visual_row += 1;
-                        }
-                    }
-                }
-
-                // Проверить, есть ли deletion marker после этой строки
-                if config.show_git_diff && visual_row < content_height {
-                    if let Some(git_diff) = &self.git_diff_cache {
-                        if git_diff.has_deletion_marker(line_idx) {
-                            let deletion_count = git_diff.get_deletion_count(line_idx);
-
-                            rendering::deletion_markers::render_deletion_marker(
-                                buf,
-                                area,
-                                visual_row,
-                                deletion_count,
-                                theme,
-                                content_width,
-                                line_number_width,
-                            );
-
-                            visual_row += 1;
-                        }
-                    }
-                }
-
-                line_idx += 1;
-            }
-
-            // Отрисовать курсор в режиме word wrap
-            if let Some((row, col)) = render_context.cursor_viewport_pos {
-                let cursor_x = area.x + line_number_width + col as u16;
-                let cursor_y = area.y + row as u16;
-                rendering::cursor_renderer::render_cursor_at(buf, cursor_x, cursor_y, area, theme);
-            }
+            rendering::wrap_rendering::render_content_word_wrap(
+                buf,
+                area,
+                &self.buffer,
+                &self.viewport,
+                &self.cursor,
+                &self.git_diff_cache,
+                config.show_git_diff,
+                self.config.syntax_highlighting,
+                &mut self.highlight_cache,
+                &mut render_context,
+                theme,
+                content_width,
+                content_height,
+                line_number_width,
+                use_smart_wrap,
+                text_style,
+                cursor_line_style,
+                line_number_style,
+                search_match_style,
+                current_match_style,
+                selection_style,
+            );
         } else {
             // Обычный режим (без word wrap) - используем виртуальные строки
             // Построить список виртуальных строк (real buffer lines + deletion markers)
