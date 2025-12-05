@@ -1855,6 +1855,18 @@ impl Editor {
         Ok(count)
     }
 
+    /// Prepare for navigation: close search and clear selection.
+    fn prepare_for_navigation(&mut self) {
+        self.close_search();
+        self.selection = None;
+    }
+
+    /// Prepare for navigation with selection: close search and start/extend selection.
+    fn prepare_for_navigation_with_selection(&mut self) {
+        self.close_search();
+        self.start_or_extend_selection();
+    }
+
     // Word wrap methods moved to word_wrap module
 }
 
@@ -1878,8 +1890,7 @@ impl Panel for Editor {
         match (key.code, key.modifiers) {
             // Navigation (clears selection and closes search)
             (KeyCode::Up, KeyModifiers::NONE) => {
-                self.close_search();
-                self.selection = None;
+                self.prepare_for_navigation();
                 if self.should_use_visual_movement() {
                     self.move_cursor_up_visual();
                 } else {
@@ -1887,8 +1898,7 @@ impl Panel for Editor {
                 }
             }
             (KeyCode::Down, KeyModifiers::NONE) => {
-                self.close_search();
-                self.selection = None;
+                self.prepare_for_navigation();
                 if self.should_use_visual_movement() {
                     self.move_cursor_down_visual();
                 } else {
@@ -1896,18 +1906,15 @@ impl Panel for Editor {
                 }
             }
             (KeyCode::Left, KeyModifiers::NONE) => {
-                self.close_search();
-                self.selection = None;
+                self.prepare_for_navigation();
                 self.move_cursor_left();
             }
             (KeyCode::Right, KeyModifiers::NONE) => {
-                self.close_search();
-                self.selection = None;
+                self.prepare_for_navigation();
                 self.move_cursor_right();
             }
             (KeyCode::Home, KeyModifiers::NONE) => {
-                self.close_search();
-                self.selection = None;
+                self.prepare_for_navigation();
                 if self.should_use_visual_movement() {
                     self.move_to_visual_line_start();
                 } else {
@@ -1915,8 +1922,7 @@ impl Panel for Editor {
                 }
             }
             (KeyCode::End, KeyModifiers::NONE) => {
-                self.close_search();
-                self.selection = None;
+                self.prepare_for_navigation();
                 if self.should_use_visual_movement() {
                     self.move_to_visual_line_end();
                 } else {
@@ -1924,8 +1930,7 @@ impl Panel for Editor {
                 }
             }
             (KeyCode::PageUp, KeyModifiers::NONE) => {
-                self.close_search();
-                self.selection = None;
+                self.prepare_for_navigation();
                 if self.should_use_visual_movement() {
                     self.page_up_visual();
                 } else {
@@ -1933,8 +1938,7 @@ impl Panel for Editor {
                 }
             }
             (KeyCode::PageDown, KeyModifiers::NONE) => {
-                self.close_search();
-                self.selection = None;
+                self.prepare_for_navigation();
                 if self.should_use_visual_movement() {
                     self.page_down_visual();
                 } else {
@@ -1942,20 +1946,17 @@ impl Panel for Editor {
                 }
             }
             (KeyCode::Home, KeyModifiers::CONTROL) => {
-                self.close_search();
-                self.selection = None;
+                self.prepare_for_navigation();
                 self.move_to_document_start();
             }
             (KeyCode::End, KeyModifiers::CONTROL) => {
-                self.close_search();
-                self.selection = None;
+                self.prepare_for_navigation();
                 self.move_to_document_end();
             }
 
             // Navigation with selection (Shift) - closes search
             (KeyCode::Up, KeyModifiers::SHIFT) => {
-                self.close_search();
-                self.start_or_extend_selection();
+                self.prepare_for_navigation_with_selection();
                 if self.should_use_visual_movement() {
                     self.move_cursor_up_visual();
                 } else {
@@ -1964,8 +1965,7 @@ impl Panel for Editor {
                 self.update_selection_active();
             }
             (KeyCode::Down, KeyModifiers::SHIFT) => {
-                self.close_search();
-                self.start_or_extend_selection();
+                self.prepare_for_navigation_with_selection();
                 if self.should_use_visual_movement() {
                     self.move_cursor_down_visual();
                 } else {
@@ -1974,14 +1974,12 @@ impl Panel for Editor {
                 self.update_selection_active();
             }
             (KeyCode::Left, KeyModifiers::SHIFT) => {
-                self.close_search();
-                self.start_or_extend_selection();
+                self.prepare_for_navigation_with_selection();
                 self.move_cursor_left();
                 self.update_selection_active();
             }
             (KeyCode::Right, KeyModifiers::SHIFT) => {
-                self.close_search();
-                self.start_or_extend_selection();
+                self.prepare_for_navigation_with_selection();
                 self.move_cursor_right();
                 self.update_selection_active();
             }
@@ -1990,8 +1988,7 @@ impl Panel for Editor {
                     && !modifiers.contains(KeyModifiers::CONTROL) =>
             {
                 logger::debug("Shift+Home pressed - moving to line start with selection");
-                self.close_search();
-                self.start_or_extend_selection();
+                self.prepare_for_navigation_with_selection();
                 if self.should_use_visual_movement() {
                     logger::debug("Using visual line start");
                     self.move_to_visual_line_start();
@@ -2006,8 +2003,7 @@ impl Panel for Editor {
                     && !modifiers.contains(KeyModifiers::CONTROL) =>
             {
                 logger::debug("Shift+End pressed - moving to line end with selection");
-                self.close_search();
-                self.start_or_extend_selection();
+                self.prepare_for_navigation_with_selection();
                 if self.should_use_visual_movement() {
                     logger::debug("Using visual line end");
                     self.move_to_visual_line_end();
@@ -2022,8 +2018,7 @@ impl Panel for Editor {
                     && !modifiers.contains(KeyModifiers::CONTROL) =>
             {
                 logger::debug("Shift+PageUp pressed - paging up with selection");
-                self.close_search();
-                self.start_or_extend_selection();
+                self.prepare_for_navigation_with_selection();
                 if self.should_use_visual_movement() {
                     logger::debug("Using visual page up");
                     self.page_up_visual();
@@ -2038,8 +2033,7 @@ impl Panel for Editor {
                     && !modifiers.contains(KeyModifiers::CONTROL) =>
             {
                 logger::debug("Shift+PageDown pressed - paging down with selection");
-                self.close_search();
-                self.start_or_extend_selection();
+                self.prepare_for_navigation_with_selection();
                 if self.should_use_visual_movement() {
                     logger::debug("Using visual page down");
                     self.page_down_visual();
@@ -2054,8 +2048,7 @@ impl Panel for Editor {
                 if modifiers.contains(KeyModifiers::SHIFT)
                     && modifiers.contains(KeyModifiers::CONTROL) =>
             {
-                self.close_search();
-                self.start_or_extend_selection();
+                self.prepare_for_navigation_with_selection();
                 self.move_to_document_start();
                 self.update_selection_active();
             }
@@ -2063,8 +2056,7 @@ impl Panel for Editor {
                 if modifiers.contains(KeyModifiers::SHIFT)
                     && modifiers.contains(KeyModifiers::CONTROL) =>
             {
-                self.close_search();
-                self.start_or_extend_selection();
+                self.prepare_for_navigation_with_selection();
                 self.move_to_document_end();
                 self.update_selection_active();
             }
