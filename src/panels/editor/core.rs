@@ -8,7 +8,9 @@ use ratatui::{
 use std::path::PathBuf;
 
 use super::super::Panel;
-use super::{clipboard, config::*, cursor, git, search, selection, text_editing, word_wrap};
+use super::{
+    clipboard, config::*, cursor, git, rendering, search, selection, text_editing, word_wrap,
+};
 use crate::editor::{Cursor, HighlightCache, SearchState, Selection, TextBuffer, Viewport};
 use crate::logger;
 use crate::state::AppState;
@@ -923,9 +925,9 @@ impl Editor {
         config: &crate::config::Config,
     ) {
         // Update viewport size (subtract space for line numbers)
-        let line_number_width = 6; // "  123  " (line number + 2 git markers)
-        let content_width = area.width.saturating_sub(line_number_width) as usize;
-        let content_height = area.height as usize;
+        let line_number_width = rendering::LINE_NUMBER_WIDTH as u16;
+        let (content_width, content_height) =
+            rendering::calculate_content_dimensions(area.width, area.height);
 
         // Cache content width for visual line navigation
         self.cached_content_width = if self.config.word_wrap {
@@ -2534,7 +2536,7 @@ impl Panel for Editor {
         };
 
         // Check that event is inside content area
-        let line_number_width = 6u16;
+        let line_number_width = rendering::LINE_NUMBER_WIDTH as u16;
         let content_x = inner.x + line_number_width;
         let content_y = inner.y;
         let content_width = inner.width.saturating_sub(line_number_width);
