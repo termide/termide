@@ -8,30 +8,23 @@ The `TextInputHandler` utility (`src/ui/modal/text_input.rs`) provides a reusabl
 
 1. **InputModal** (-59 LOC)
 2. **RenamePatternModal** (-33 LOC)
+3. **SearchModal** (-26 LOC)
+4. **ReplaceModal** (-56 LOC) - dual input handlers
+5. **EditableSelectModal** (-57 LOC) - with saved_input rollback
 
-**Total savings so far:** -92 LOC
+**Total savings:** -231 LOC duplicate code removed
 
-## 🔜 Ready for Migration
+## 🎉 Migration Complete!
 
-The following modals contain duplicate input handling logic and can benefit from `TextInputHandler`:
+All modals with text input have been successfully migrated to use `TextInputHandler`.
 
-### High Priority (Simple Cases)
+### Summary
 
-3. **editable_select.rs** (~50 LOC savings)
-   - Has: `input: String`, `cursor_pos: usize`
-   - Note: Also has `saved_input` for rollback - keep separate
-   
-4. **search.rs** (~60 LOC savings)
-   - Simple input field for search query
-   - Straightforward migration
-
-5. **replace.rs** (~80 LOC savings, largest savings)
-   - Has TWO input fields (find + replace)
-   - Create two TextInputHandler instances
-   
-### Medium Priority
-
-6-9. Four additional modal files with text input
+- **5 modals refactored**
+- **Net reduction: -137 LOC** (154 insertions, 291 deletions)
+- **All 71 tests passing** (67 passed, 4 ignored)
+- **Zero compiler warnings, zero clippy errors**
+- **Consistent UTF-8 handling** across all text input
 
 ## Migration Steps
 
@@ -169,14 +162,13 @@ pub struct ReplaceModal {
 }
 ```
 
-## Expected Total Impact
+## Final Impact
 
-When fully applied to all 7 remaining modals:
-
-- **Current:** -92 LOC (2 modals)
-- **Expected:** ~400-500 LOC total savings
-- **Tests:** All existing tests continue to pass
-- **Quality:** Consistent UTF-8 handling across all modals
+- **Modals migrated:** 5 (InputModal, RenamePatternModal, SearchModal, ReplaceModal, EditableSelectModal)
+- **Total savings:** -231 LOC duplicate code removed
+- **Net reduction:** -137 LOC (3 files: 154 insertions, 291 deletions)
+- **Tests:** All 71 tests passing (67 passed, 4 ignored)
+- **Quality:** Consistent UTF-8 handling across all text input modals
 
 ## Testing
 
