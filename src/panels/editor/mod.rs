@@ -7,6 +7,7 @@ pub mod config;
 mod core;
 pub mod cursor;
 pub mod git;
+pub mod keyboard;
 pub mod rendering;
 pub mod search;
 pub mod selection;

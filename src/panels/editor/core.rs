@@ -1,11 +1,12 @@
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyEvent;
 use ratatui::{buffer::Buffer, layout::Rect};
 use std::path::PathBuf;
 
 use super::super::Panel;
 use super::{
-    clipboard, config::*, cursor, git, rendering, search, selection, text_editing, word_wrap,
+    clipboard, config::*, cursor, git, keyboard, rendering, search, selection, text_editing,
+    word_wrap,
 };
 use crate::editor::{Cursor, HighlightCache, SearchState, Selection, TextBuffer, Viewport};
 use crate::state::AppState;
@@ -30,7 +31,7 @@ pub struct Editor {
     /// Syntax highlighting cache
     highlight_cache: HighlightCache,
     /// Search state
-    search_state: Option<SearchState>,
+    pub(super) search_state: Option<SearchState>,
     /// Last search query (preserved when search is closed)
     last_search_query: Option<String>,
     /// Last replace find query (preserved when replace is closed)
@@ -44,7 +45,7 @@ pub struct Editor {
     /// Updated config after save (for applying in AppState)
     config_update: Option<crate::config::Config>,
     /// Status message to display to user
-    status_message: Option<String>,
+    pub(super) status_message: Option<String>,
     /// Git diff cache for this file (if in git repo)
     git_diff_cache: Option<crate::git::GitDiffCache>,
     /// Pending git diff update timestamp (for debounce)
@@ -431,7 +432,7 @@ impl Editor {
     }
 
     /// Move cursor up
-    fn move_cursor_up(&mut self) {
+    pub(super) fn move_cursor_up(&mut self) {
         let maintain_preferred = cursor::physical::move_up(&mut self.cursor);
         if !maintain_preferred {
             self.preferred_column = None;
@@ -440,7 +441,7 @@ impl Editor {
     }
 
     /// Move cursor down
-    fn move_cursor_down(&mut self) {
+    pub(super) fn move_cursor_down(&mut self) {
         let maintain_preferred = cursor::physical::move_down(&mut self.cursor, &self.buffer);
         if !maintain_preferred {
             self.preferred_column = None;
@@ -449,7 +450,7 @@ impl Editor {
     }
 
     /// Move cursor up by one visual line (accounting for word wrap)
-    fn move_cursor_up_visual(&mut self) {
+    pub(super) fn move_cursor_up_visual(&mut self) {
         if self.cached_content_width == 0 {
             // No word wrap or width not set - fall back to physical line movement
             self.move_cursor_up();
@@ -472,7 +473,7 @@ impl Editor {
     }
 
     /// Move cursor down by one visual line (accounting for word wrap)
-    fn move_cursor_down_visual(&mut self) {
+    pub(super) fn move_cursor_down_visual(&mut self) {
         if self.cached_content_width == 0 {
             // No word wrap or width not set - fall back to physical line movement
             self.move_cursor_down();
@@ -495,7 +496,7 @@ impl Editor {
     }
 
     /// Move cursor left
-    fn move_cursor_left(&mut self) {
+    pub(super) fn move_cursor_left(&mut self) {
         let maintain_preferred = cursor::physical::move_left(&mut self.cursor, &self.buffer);
         if !maintain_preferred {
             self.preferred_column = None;
@@ -503,7 +504,7 @@ impl Editor {
     }
 
     /// Move cursor right
-    fn move_cursor_right(&mut self) {
+    pub(super) fn move_cursor_right(&mut self) {
         let maintain_preferred = cursor::physical::move_right(&mut self.cursor, &self.buffer);
         if !maintain_preferred {
             self.preferred_column = None;
@@ -512,7 +513,7 @@ impl Editor {
     }
 
     /// Move cursor to start of line
-    fn move_to_line_start(&mut self) {
+    pub(super) fn move_to_line_start(&mut self) {
         let maintain_preferred = cursor::physical::move_to_line_start(&mut self.cursor);
         if !maintain_preferred {
             self.preferred_column = None;
@@ -520,7 +521,7 @@ impl Editor {
     }
 
     /// Move cursor to end of line
-    fn move_to_line_end(&mut self) {
+    pub(super) fn move_to_line_end(&mut self) {
         let maintain_preferred = cursor::physical::move_to_line_end(&mut self.cursor, &self.buffer);
         if !maintain_preferred {
             self.preferred_column = None;
@@ -528,7 +529,7 @@ impl Editor {
     }
 
     /// Move cursor to start of visual line (for wrapped lines)
-    fn move_to_visual_line_start(&mut self) {
+    pub(super) fn move_to_visual_line_start(&mut self) {
         // Reset preferred column on horizontal movement
         self.preferred_column = None;
 
@@ -547,7 +548,7 @@ impl Editor {
     }
 
     /// Move cursor to end of visual line (for wrapped lines)
-    fn move_to_visual_line_end(&mut self) {
+    pub(super) fn move_to_visual_line_end(&mut self) {
         // Reset preferred column on horizontal movement
         self.preferred_column = None;
 
@@ -566,7 +567,7 @@ impl Editor {
     }
 
     /// Move cursor page up
-    fn page_up(&mut self) {
+    pub(super) fn page_up(&mut self) {
         let page_size = self.viewport.height;
         let (should_scroll, scroll_amount) = cursor::jump::page_up(&mut self.cursor, page_size);
         self.clamp_cursor();
@@ -576,7 +577,7 @@ impl Editor {
     }
 
     /// Move cursor page down
-    fn page_down(&mut self) {
+    pub(super) fn page_down(&mut self) {
         let page_size = self.viewport.height;
         let (should_scroll, scroll_amount) =
             cursor::jump::page_down(&mut self.cursor, &self.buffer, page_size);
@@ -589,7 +590,7 @@ impl Editor {
     }
 
     /// Move cursor page up by visual lines (accounting for word wrap)
-    fn page_up_visual(&mut self) {
+    pub(super) fn page_up_visual(&mut self) {
         if self.cached_content_width == 0 {
             // No word wrap - fall back to physical line movement
             self.page_up();
@@ -613,7 +614,7 @@ impl Editor {
     }
 
     /// Move cursor page down by visual lines (accounting for word wrap)
-    fn page_down_visual(&mut self) {
+    pub(super) fn page_down_visual(&mut self) {
         if self.cached_content_width == 0 {
             // No word wrap - fall back to physical line movement
             self.page_down();
@@ -637,7 +638,7 @@ impl Editor {
     }
 
     /// Move cursor to start of document
-    fn move_to_document_start(&mut self) {
+    pub(super) fn move_to_document_start(&mut self) {
         let (new_cursor, should_scroll) = cursor::physical::move_to_document_start();
         self.cursor = new_cursor;
         if should_scroll {
@@ -646,7 +647,7 @@ impl Editor {
     }
 
     /// Move cursor to end of document
-    fn move_to_document_end(&mut self) {
+    pub(super) fn move_to_document_end(&mut self) {
         let (new_cursor, should_scroll) = cursor::physical::move_to_document_end(&self.buffer);
         self.cursor = new_cursor;
         if should_scroll {
@@ -657,7 +658,7 @@ impl Editor {
     }
 
     /// Select all
-    fn select_all(&mut self) {
+    pub(super) fn select_all(&mut self) {
         let (new_selection, new_cursor) = selection::select_all(&self.buffer);
         self.selection = Some(new_selection);
         self.cursor = new_cursor;
@@ -704,7 +705,7 @@ impl Editor {
     }
 
     /// Copy selected text to clipboard
-    fn copy_to_clipboard(&mut self) -> Result<()> {
+    pub(super) fn copy_to_clipboard(&mut self) -> Result<()> {
         let selected_text = self.get_selected_text();
         let result = clipboard::copy_to_clipboard(selected_text);
         self.status_message = Some(result.status_message);
@@ -712,7 +713,7 @@ impl Editor {
     }
 
     /// Cut selected text to clipboard
-    fn cut_to_clipboard(&mut self) -> Result<()> {
+    pub(super) fn cut_to_clipboard(&mut self) -> Result<()> {
         let selected_text = self.get_selected_text();
         let (result, should_delete) = clipboard::cut_to_clipboard(selected_text);
         self.status_message = Some(result.status_message);
@@ -724,7 +725,7 @@ impl Editor {
     }
 
     /// Paste from clipboard
-    fn paste_from_clipboard(&mut self) -> Result<()> {
+    pub(super) fn paste_from_clipboard(&mut self) -> Result<()> {
         // Close search mode when editing begins
         self.close_search();
 
@@ -745,7 +746,7 @@ impl Editor {
     }
 
     /// Duplicate current line or selected lines
-    fn duplicate_line(&mut self) -> Result<()> {
+    pub(super) fn duplicate_line(&mut self) -> Result<()> {
         let result =
             text_editing::duplicate_line(&mut self.buffer, &self.cursor, self.selection.as_ref())?;
 
@@ -767,7 +768,7 @@ impl Editor {
     }
 
     /// Insert character at cursor position
-    fn insert_char(&mut self, ch: char) -> Result<()> {
+    pub(super) fn insert_char(&mut self, ch: char) -> Result<()> {
         // Close search mode when editing begins
         self.close_search();
 
@@ -785,7 +786,7 @@ impl Editor {
     }
 
     /// Insert newline
-    fn insert_newline(&mut self) -> Result<()> {
+    pub(super) fn insert_newline(&mut self) -> Result<()> {
         // Close search mode when editing begins
         self.close_search();
 
@@ -803,7 +804,7 @@ impl Editor {
     }
 
     /// Delete character (backspace)
-    fn backspace(&mut self) -> Result<()> {
+    pub(super) fn backspace(&mut self) -> Result<()> {
         if let Some(result) = text_editing::backspace(&mut self.buffer, &self.cursor)? {
             self.cursor = result.new_cursor;
             self.clamp_cursor();
@@ -815,7 +816,7 @@ impl Editor {
     }
 
     /// Delete character (delete)
-    fn delete(&mut self) -> Result<()> {
+    pub(super) fn delete(&mut self) -> Result<()> {
         if let Some(result) = text_editing::delete_char(&mut self.buffer, &self.cursor)? {
             // Invalidate highlighting cache and schedule git update
             self.invalidate_cache_after_edit(result.start_line, result.is_multiline);
@@ -1155,7 +1156,7 @@ impl Editor {
     ///
     /// If selection exists and is not empty, deletes the selection.
     /// Otherwise, clears selection and performs the specified delete operation.
-    fn handle_delete_key<F>(&mut self, delete_fn: F) -> Result<()>
+    pub(super) fn handle_delete_key<F>(&mut self, delete_fn: F) -> Result<()>
     where
         F: FnOnce(&mut Self) -> Result<()>,
     {
@@ -1193,7 +1194,7 @@ impl Editor {
     ///
     /// Performs the specified buffer operation (undo or redo), updates cursor position,
     /// invalidates cache, and schedules git diff update.
-    fn handle_undo_redo<F>(&mut self, operation: F) -> Result<()>
+    pub(super) fn handle_undo_redo<F>(&mut self, operation: F) -> Result<()>
     where
         F: FnOnce(&mut TextBuffer) -> Result<Option<Cursor>>,
     {
@@ -1215,7 +1216,7 @@ impl Editor {
     ///
     /// If active search exists, restores its state. Otherwise, if a previous query
     /// exists and execute_search is true, executes it immediately.
-    fn open_search_modal(&mut self, execute_search: bool) {
+    pub(super) fn open_search_modal(&mut self, execute_search: bool) {
         use crate::ui::modal::SearchModal;
         let mut search_modal = SearchModal::new("");
 
@@ -1251,7 +1252,7 @@ impl Editor {
     ///
     /// Prepares for navigation, then calls visual_fn if word wrap is enabled,
     /// otherwise calls physical_fn.
-    fn navigate<FV, FP>(&mut self, visual_fn: FV, physical_fn: FP)
+    pub(super) fn navigate<FV, FP>(&mut self, visual_fn: FV, physical_fn: FP)
     where
         FV: FnOnce(&mut Self),
         FP: FnOnce(&mut Self),
@@ -1268,7 +1269,7 @@ impl Editor {
     ///
     /// Prepares for navigation with selection, calls visual_fn if word wrap enabled,
     /// otherwise calls physical_fn, then updates selection.
-    fn navigate_with_selection<FV, FP>(&mut self, visual_fn: FV, physical_fn: FP)
+    pub(super) fn navigate_with_selection<FV, FP>(&mut self, visual_fn: FV, physical_fn: FP)
     where
         FV: FnOnce(&mut Self),
         FP: FnOnce(&mut Self),
@@ -1286,7 +1287,7 @@ impl Editor {
     ///
     /// Prepares for navigation and calls the movement function.
     /// Use for movements that don't have visual/physical variants (e.g., Left, Right).
-    fn navigate_simple<F>(&mut self, movement_fn: F)
+    pub(super) fn navigate_simple<F>(&mut self, movement_fn: F)
     where
         F: FnOnce(&mut Self),
     {
@@ -1298,7 +1299,7 @@ impl Editor {
     ///
     /// Prepares for navigation with selection, calls movement function, then updates selection.
     /// Use for movements that don't have visual/physical variants (e.g., Shift+Left, Shift+Right).
-    fn navigate_with_selection_simple<F>(&mut self, movement_fn: F)
+    pub(super) fn navigate_with_selection_simple<F>(&mut self, movement_fn: F)
     where
         F: FnOnce(&mut Self),
     {
@@ -1308,7 +1309,7 @@ impl Editor {
     }
 
     /// Go to next search match, or open search modal if no active search.
-    fn search_next_or_open(&mut self) {
+    pub(super) fn search_next_or_open(&mut self) {
         if self.search_state.is_some() {
             self.search_next();
         } else {
@@ -1317,12 +1318,67 @@ impl Editor {
     }
 
     /// Go to previous search match, or open search modal if no active search.
-    fn search_prev_or_open(&mut self) {
+    pub(super) fn search_prev_or_open(&mut self) {
         if self.search_state.is_some() {
             self.search_prev();
         } else {
             self.open_search_modal(true);
         }
+    }
+
+    /// Handle save command - either save to existing path or open "Save As" modal
+    pub(super) fn handle_save(&mut self) -> Result<()> {
+        if self.buffer.file_path().is_some() {
+            // File has path - save normally
+            self.save()
+        } else {
+            // File has no path - open "Save As" dialog
+            self.handle_save_as()
+        }
+    }
+
+    /// Open "Save As" modal for saving file with a new name
+    pub(super) fn handle_save_as(&mut self) -> Result<()> {
+        let directory = std::env::current_dir()
+            .unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")));
+
+        let modal = InputModal::new("Save File As", "untitled.txt");
+        let action = PendingAction::SaveFileAs {
+            panel_index: 0, // will be updated in app.rs
+            directory,
+        };
+        self.modal_request = Some((action, ActiveModal::Input(Box::new(modal))));
+        Ok(())
+    }
+
+    /// Open replace modal with previous find/replace text restored
+    pub(super) fn handle_start_replace(&mut self) {
+        use crate::ui::modal::ReplaceModal;
+        let mut replace_modal = ReplaceModal::new();
+
+        // Restore previous find/replace text if available
+        if let Some(ref find) = self.last_replace_find {
+            replace_modal.set_find_input(find.clone());
+        }
+        if let Some(ref replace) = self.last_replace_with {
+            replace_modal.set_replace_input(replace.clone());
+        }
+
+        // If there's saved find text - execute search immediately
+        if let Some(ref find) = self.last_replace_find {
+            let replace_with = self.last_replace_with.clone().unwrap_or_default();
+            self.start_replace(find.clone(), replace_with, false);
+
+            // Update match info in modal
+            if let Some((current, total)) = self.get_search_match_info() {
+                replace_modal.set_match_info(current, total);
+            }
+        }
+
+        self.modal_request = Some((
+            PendingAction::Replace,
+            ActiveModal::Replace(Box::new(replace_modal)),
+        ));
     }
 
     // Word wrap methods moved to word_wrap module
@@ -1345,345 +1401,15 @@ impl Panel for Editor {
         // Translate Cyrillic to Latin for hotkeys
         let key = crate::keyboard::translate_hotkey(key);
 
-        match (key.code, key.modifiers) {
-            // Navigation (clears selection and closes search)
-            (KeyCode::Up, KeyModifiers::NONE) => {
-                self.navigate(Self::move_cursor_up_visual, Self::move_cursor_up);
-            }
-            (KeyCode::Down, KeyModifiers::NONE) => {
-                self.navigate(Self::move_cursor_down_visual, Self::move_cursor_down);
-            }
-            (KeyCode::Left, KeyModifiers::NONE) => {
-                self.navigate_simple(Self::move_cursor_left);
-            }
-            (KeyCode::Right, KeyModifiers::NONE) => {
-                self.navigate_simple(Self::move_cursor_right);
-            }
-            (KeyCode::Home, KeyModifiers::NONE) => {
-                self.navigate(Self::move_to_visual_line_start, Self::move_to_line_start);
-            }
-            (KeyCode::End, KeyModifiers::NONE) => {
-                self.navigate(Self::move_to_visual_line_end, Self::move_to_line_end);
-            }
-            (KeyCode::PageUp, KeyModifiers::NONE) => {
-                self.navigate(Self::page_up_visual, Self::page_up);
-            }
-            (KeyCode::PageDown, KeyModifiers::NONE) => {
-                self.navigate(Self::page_down_visual, Self::page_down);
-            }
-            (KeyCode::Home, KeyModifiers::CONTROL) => {
-                self.navigate_simple(Self::move_to_document_start);
-            }
-            (KeyCode::End, KeyModifiers::CONTROL) => {
-                self.navigate_simple(Self::move_to_document_end);
-            }
+        // Parse key event to command
+        let command = keyboard::EditorCommand::from_key_event(
+            key,
+            self.config.read_only,
+            self.search_state.is_some(),
+        );
 
-            // Navigation with selection (Shift) - closes search
-            (KeyCode::Up, KeyModifiers::SHIFT) => {
-                self.navigate_with_selection(Self::move_cursor_up_visual, Self::move_cursor_up);
-            }
-            (KeyCode::Down, KeyModifiers::SHIFT) => {
-                self.navigate_with_selection(Self::move_cursor_down_visual, Self::move_cursor_down);
-            }
-            (KeyCode::Left, KeyModifiers::SHIFT) => {
-                self.navigate_with_selection_simple(Self::move_cursor_left);
-            }
-            (KeyCode::Right, KeyModifiers::SHIFT) => {
-                self.navigate_with_selection_simple(Self::move_cursor_right);
-            }
-            (KeyCode::Home, modifiers)
-                if modifiers.contains(KeyModifiers::SHIFT)
-                    && !modifiers.contains(KeyModifiers::CONTROL) =>
-            {
-                self.navigate_with_selection(
-                    Self::move_to_visual_line_start,
-                    Self::move_to_line_start,
-                );
-            }
-            (KeyCode::End, modifiers)
-                if modifiers.contains(KeyModifiers::SHIFT)
-                    && !modifiers.contains(KeyModifiers::CONTROL) =>
-            {
-                self.navigate_with_selection(Self::move_to_visual_line_end, Self::move_to_line_end);
-            }
-            (KeyCode::PageUp, modifiers)
-                if modifiers.contains(KeyModifiers::SHIFT)
-                    && !modifiers.contains(KeyModifiers::CONTROL) =>
-            {
-                self.navigate_with_selection(Self::page_up_visual, Self::page_up);
-            }
-            (KeyCode::PageDown, modifiers)
-                if modifiers.contains(KeyModifiers::SHIFT)
-                    && !modifiers.contains(KeyModifiers::CONTROL) =>
-            {
-                self.navigate_with_selection(Self::page_down_visual, Self::page_down);
-            }
-            // Shift+Ctrl+Home/End - select to start/end of document - closes search
-            (KeyCode::Home, modifiers)
-                if modifiers.contains(KeyModifiers::SHIFT)
-                    && modifiers.contains(KeyModifiers::CONTROL) =>
-            {
-                self.navigate_with_selection_simple(Self::move_to_document_start);
-            }
-            (KeyCode::End, modifiers)
-                if modifiers.contains(KeyModifiers::SHIFT)
-                    && modifiers.contains(KeyModifiers::CONTROL) =>
-            {
-                self.navigate_with_selection_simple(Self::move_to_document_end);
-            }
-
-            // Editing (only if not read-only)
-            (KeyCode::Char(ch), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
-                if !self.config.read_only {
-                    self.insert_char(ch)?;
-                }
-            }
-            (KeyCode::Enter, KeyModifiers::NONE) => {
-                if !self.config.read_only {
-                    self.insert_newline()?;
-                }
-            }
-            (KeyCode::Backspace, KeyModifiers::NONE) => {
-                if !self.config.read_only {
-                    self.handle_delete_key(|editor| editor.backspace())?;
-                }
-            }
-            (KeyCode::Delete, KeyModifiers::NONE) => {
-                if !self.config.read_only {
-                    self.handle_delete_key(|editor| editor.delete())?;
-                }
-            }
-
-            // Ctrl+S - save (only if not read-only)
-            (KeyCode::Char('s'), KeyModifiers::CONTROL) => {
-                if !self.config.read_only {
-                    if self.buffer.file_path().is_some() {
-                        // File has path - save normally
-                        self.save()?;
-                    } else {
-                        // File has no path - open "Save As" dialog
-                        let directory = std::env::current_dir().unwrap_or_else(|_| {
-                            dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
-                        });
-
-                        let modal = InputModal::new("Save File As", "untitled.txt");
-                        let action = PendingAction::SaveFileAs {
-                            panel_index: 0, // will be updated in app.rs
-                            directory,
-                        };
-                        self.modal_request = Some((action, ActiveModal::Input(Box::new(modal))));
-                    }
-                }
-            }
-
-            // Ctrl+Z - undo (only if not read-only)
-            (KeyCode::Char('z'), KeyModifiers::CONTROL) => {
-                if !self.config.read_only {
-                    self.handle_undo_redo(|buffer| buffer.undo())?;
-                }
-            }
-
-            // Ctrl+Y - redo (only if not read-only)
-            (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
-                if !self.config.read_only {
-                    self.handle_undo_redo(|buffer| buffer.redo())?;
-                }
-            }
-
-            // Ctrl+F - search (show interactive search modal)
-            (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
-                self.open_search_modal(true);
-            }
-
-            // F3 - next match (or open search if no active search)
-            (KeyCode::F(3), KeyModifiers::NONE) => {
-                self.search_next_or_open();
-            }
-
-            // Shift+F3 - previous match (or open search if no active search)
-            (KeyCode::F(3), KeyModifiers::SHIFT) => {
-                self.search_prev_or_open();
-            }
-
-            // Esc - close search
-            (KeyCode::Esc, KeyModifiers::NONE) => {
-                if self.search_state.is_some() {
-                    self.close_search();
-                }
-            }
-
-            // Tab - next match (synonym for F3 when search is active)
-            (KeyCode::Tab, KeyModifiers::NONE) => {
-                if self.search_state.is_some() {
-                    self.search_next();
-                }
-            }
-
-            // Shift+Tab - previous match (synonym for Shift+F3 when search is active)
-            (KeyCode::BackTab, _) => {
-                if self.search_state.is_some() {
-                    self.search_prev();
-                }
-            }
-
-            // Ctrl+H - text replacement (only if not read-only)
-            (KeyCode::Char('h'), KeyModifiers::CONTROL) => {
-                if !self.config.read_only {
-                    use crate::ui::modal::ReplaceModal;
-                    let mut replace_modal = ReplaceModal::new();
-
-                    // Restore previous find/replace text if available
-                    if let Some(ref find) = self.last_replace_find {
-                        replace_modal.set_find_input(find.clone());
-                    }
-                    if let Some(ref replace) = self.last_replace_with {
-                        replace_modal.set_replace_input(replace.clone());
-                    }
-
-                    // If there's saved find text - execute search immediately
-                    if let Some(ref find) = self.last_replace_find {
-                        let replace_with = self.last_replace_with.clone().unwrap_or_default();
-                        self.start_replace(find.clone(), replace_with, false);
-
-                        // Update match info in modal
-                        if let Some((current, total)) = self.get_search_match_info() {
-                            replace_modal.set_match_info(current, total);
-                        }
-                    }
-
-                    self.modal_request = Some((
-                        PendingAction::Replace,
-                        ActiveModal::Replace(Box::new(replace_modal)),
-                    ));
-                }
-            }
-
-            // Ctrl+Alt+R - replace all matches (only if not read-only)
-            // Must be BEFORE Ctrl+R for correct pattern matching
-            (KeyCode::Char('r'), modifiers)
-                if modifiers.contains(KeyModifiers::CONTROL)
-                    && modifiers.contains(KeyModifiers::ALT) =>
-            {
-                if !self.config.read_only {
-                    if let Ok(count) = self.replace_all() {
-                        self.status_message = Some(format!(
-                            "Replaced {} occurrence{}",
-                            count,
-                            if count == 1 { "" } else { "s" }
-                        ));
-                    }
-                }
-            }
-
-            // Ctrl+R - replace current match (only if not read-only)
-            (KeyCode::Char('r'), KeyModifiers::CONTROL) => {
-                if !self.config.read_only {
-                    if let Err(e) = self.replace_current() {
-                        eprintln!("Replace error: {}", e);
-                    }
-                }
-            }
-
-            // Ctrl+A - select all
-            (KeyCode::Char('a'), KeyModifiers::CONTROL) => {
-                self.select_all();
-            }
-
-            // Ctrl+C - copy
-            (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                self.copy_to_clipboard()?;
-            }
-
-            // Ctrl+D - duplicate line
-            (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
-                if !self.config.read_only {
-                    self.duplicate_line()?;
-                }
-            }
-
-            // Ctrl+Insert - copy
-            (KeyCode::Insert, KeyModifiers::CONTROL) => {
-                self.copy_to_clipboard()?;
-            }
-
-            // NOTE: Ctrl+Shift+C/V and Ctrl+Insert may be intercepted by terminal emulators
-            // (gnome-terminal, konsole) before reaching the application. This is because:
-            // - Terminal emulators intercept these keys at the terminal layer
-            // - They copy their own selection buffer, not the application's selection
-            //
-            // Users have two options:
-            // 1. Use Ctrl+C/V (always works in application, copies to PRIMARY + CLIPBOARD)
-            // 2. Use Shift+Mouse to select text at terminal layer, then Ctrl+Shift+C
-            //
-            // These handlers work in terminals that don't intercept (alacritty, some configs).
-            // On Linux, we write to both CLIPBOARD and PRIMARY selections for compatibility.
-
-            // Ctrl+Shift+C - copy (terminal shortcut)
-            (KeyCode::Char('c'), mods)
-                if mods.contains(KeyModifiers::CONTROL) && mods.contains(KeyModifiers::SHIFT) =>
-            {
-                self.copy_to_clipboard()?;
-            }
-
-            // Ctrl+Shift+C - uppercase variant
-            (KeyCode::Char('C'), mods)
-                if mods.contains(KeyModifiers::CONTROL) && mods.contains(KeyModifiers::SHIFT) =>
-            {
-                self.copy_to_clipboard()?;
-            }
-
-            // Ctrl+X - cut (only if not read-only)
-            (KeyCode::Char('x'), KeyModifiers::CONTROL) => {
-                if !self.config.read_only {
-                    self.cut_to_clipboard()?;
-                }
-            }
-
-            // Shift+Delete - cut (only if not read-only)
-            (KeyCode::Delete, KeyModifiers::SHIFT) => {
-                if !self.config.read_only {
-                    self.cut_to_clipboard()?;
-                }
-            }
-
-            // Ctrl+V - paste (only if not read-only)
-            (KeyCode::Char('v'), KeyModifiers::CONTROL) => {
-                if !self.config.read_only {
-                    self.paste_from_clipboard()?;
-                }
-            }
-
-            // NOTE: Shift+Insert may be intercepted by terminal emulators (gnome-terminal)
-            // for terminal-layer paste from PRIMARY selection. This handler works in terminals
-            // that don't intercept. Users can always use Ctrl+V which works at app level.
-            (KeyCode::Insert, KeyModifiers::SHIFT) => {
-                if !self.config.read_only {
-                    self.paste_from_clipboard()?;
-                }
-            }
-
-            // Ctrl+Shift+V - paste (terminal shortcut)
-            (KeyCode::Char('v'), mods)
-                if mods.contains(KeyModifiers::CONTROL) && mods.contains(KeyModifiers::SHIFT) =>
-            {
-                if !self.config.read_only {
-                    self.paste_from_clipboard()?;
-                }
-            }
-
-            // Ctrl+Shift+V - uppercase variant
-            (KeyCode::Char('V'), mods)
-                if mods.contains(KeyModifiers::CONTROL) && mods.contains(KeyModifiers::SHIFT) =>
-            {
-                if !self.config.read_only {
-                    self.paste_from_clipboard()?;
-                }
-            }
-
-            _ => {}
-        }
-
-        Ok(())
+        // Execute command
+        command.execute(self)
     }
 
     fn title(&self) -> String {
