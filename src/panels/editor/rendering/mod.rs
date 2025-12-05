@@ -3,6 +3,8 @@
 //! This module provides rendering-related functions and constants.
 //! The main render logic remains in core.rs for now (Phase 4 extraction in progress).
 
+pub mod context;
+
 /// Width of the line number column (including git markers).
 ///
 /// Format: "  123  " (2 spaces + 3 digits + 2 git markers)
