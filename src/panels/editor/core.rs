@@ -1867,6 +1867,30 @@ impl Editor {
         self.start_or_extend_selection();
     }
 
+    /// Handle backspace/delete key with selection awareness.
+    ///
+    /// If selection exists and is not empty, deletes the selection.
+    /// Otherwise, clears selection and performs the specified delete operation.
+    fn handle_delete_key<F>(&mut self, delete_fn: F) -> Result<()>
+    where
+        F: FnOnce(&mut Self) -> Result<()>,
+    {
+        self.close_search();
+
+        if self
+            .selection
+            .as_ref()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)
+        {
+            self.delete_selection()?;
+        } else {
+            self.selection = None;
+            delete_fn(self)?;
+        }
+        Ok(())
+    }
+
     // Word wrap methods moved to word_wrap module
 }
 
@@ -2074,38 +2098,12 @@ impl Panel for Editor {
             }
             (KeyCode::Backspace, KeyModifiers::NONE) => {
                 if !self.config.read_only {
-                    // Close search mode when editing begins
-                    self.close_search();
-
-                    if self
-                        .selection
-                        .as_ref()
-                        .map(|s| !s.is_empty())
-                        .unwrap_or(false)
-                    {
-                        self.delete_selection()?;
-                    } else {
-                        self.selection = None;
-                        self.backspace()?;
-                    }
+                    self.handle_delete_key(|editor| editor.backspace())?;
                 }
             }
             (KeyCode::Delete, KeyModifiers::NONE) => {
                 if !self.config.read_only {
-                    // Close search mode when editing begins
-                    self.close_search();
-
-                    if self
-                        .selection
-                        .as_ref()
-                        .map(|s| !s.is_empty())
-                        .unwrap_or(false)
-                    {
-                        self.delete_selection()?;
-                    } else {
-                        self.selection = None;
-                        self.delete()?;
-                    }
+                    self.handle_delete_key(|editor| editor.delete())?;
                 }
             }
 
