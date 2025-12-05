@@ -48,28 +48,6 @@ impl EditorConfig {
             tab_size: 4,
         }
     }
-
-    /// Create configuration without syntax highlighting
-    #[allow(dead_code)]
-    pub fn no_highlighting() -> Self {
-        Self {
-            syntax_highlighting: false,
-            read_only: false,
-            word_wrap: false,
-            tab_size: 4,
-        }
-    }
-
-    /// Create configuration with line wrapping enabled
-    #[allow(dead_code)]
-    pub fn with_word_wrap() -> Self {
-        Self {
-            syntax_highlighting: true,
-            read_only: false,
-            word_wrap: true,
-            tab_size: 4,
-        }
-    }
 }
 
 /// Editor information for status bar
@@ -153,26 +131,8 @@ enum VirtualLine {
     DeletionMarker(usize, usize),
 }
 
-impl VirtualLine {
-    /// Get the buffer line index if this is a Real line, None for DeletionMarker
-    #[allow(dead_code)]
-    fn buffer_line(&self) -> Option<usize> {
-        match self {
-            VirtualLine::Real(idx) => Some(*idx),
-            VirtualLine::DeletionMarker(_, _) => None,
-        }
-    }
-
-    /// Check if this is a deletion marker
-    #[allow(dead_code)]
-    fn is_deletion_marker(&self) -> bool {
-        matches!(self, VirtualLine::DeletionMarker(_, _))
-    }
-}
-
 impl Editor {
     /// Create new empty editor with default configuration
-    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::with_config(EditorConfig::default())
     }
@@ -203,18 +163,6 @@ impl Editor {
             file_size: 0,
             wrap_cache: std::collections::HashMap::new(),
         }
-    }
-
-    /// Check if editor is read-only
-    #[allow(dead_code)]
-    pub fn is_read_only(&self) -> bool {
-        self.config.read_only
-    }
-
-    /// Check if syntax highlighting is enabled
-    #[allow(dead_code)]
-    pub fn has_syntax_highlighting(&self) -> bool {
-        self.config.syntax_highlighting
     }
 
     /// Check if smart word wrapping should be used
@@ -254,7 +202,6 @@ impl Editor {
     }
 
     /// Open file with default configuration
-    #[allow(dead_code)]
     pub fn open_file(path: PathBuf) -> Result<Self> {
         Self::open_file_with_config(path, EditorConfig::default())
     }
@@ -2389,60 +2336,6 @@ impl Editor {
 
         // If we've exhausted all lines, return the last line
         (self.buffer.line_count().saturating_sub(1), 0)
-    }
-
-    /// Convert cursor position to visual position accounting for word wrap
-    /// Returns (visual_row, visual_column) for the current cursor position
-    /// visual_row is relative to top of buffer (line 0), not viewport
-    #[allow(dead_code)]
-    fn cursor_to_visual_position(&self, content_width: usize) -> (usize, usize) {
-        if content_width == 0 {
-            return (self.cursor.line, self.cursor.column);
-        }
-
-        let mut visual_row = 0;
-
-        // Count visual rows for all lines before cursor line
-        for line_idx in 0..self.cursor.line {
-            if let Some(line_text) = self.buffer.line(line_idx) {
-                let line_text = line_text.trim_end_matches('\n');
-                let chars: Vec<char> = line_text.chars().collect();
-                let line_len = chars.len();
-
-                // Calculate how many visual rows this line occupies
-                let visual_rows_for_line = if line_len == 0 {
-                    1 // Empty lines take 1 visual row
-                } else {
-                    line_len.div_ceil(content_width)
-                };
-
-                visual_row += visual_rows_for_line;
-            } else {
-                // Non-existent line treated as empty (1 visual row)
-                visual_row += 1;
-            }
-        }
-
-        // Calculate position within the cursor's line
-        if let Some(line_text) = self.buffer.line(self.cursor.line) {
-            let line_text = line_text.trim_end_matches('\n');
-            let chars: Vec<char> = line_text.chars().collect();
-
-            // Clamp cursor column to line length
-            let cursor_col = self.cursor.column.min(chars.len());
-
-            // Which visual row within this physical line?
-            let row_within_line = cursor_col / content_width;
-            visual_row += row_within_line;
-
-            // Which column within that visual row?
-            let visual_column = cursor_col % content_width;
-
-            (visual_row, visual_column)
-        } else {
-            // Cursor is on non-existent line
-            (visual_row, 0)
-        }
     }
 }
 

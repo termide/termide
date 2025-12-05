@@ -429,26 +429,6 @@ impl AppState {
         }
     }
 
-    /// Move to next item in dropdown
-    #[allow(dead_code)]
-    pub fn next_dropdown_item(&mut self, item_count: usize) {
-        if item_count > 0 {
-            self.ui.selected_dropdown_item = (self.ui.selected_dropdown_item + 1) % item_count;
-        }
-    }
-
-    /// Move to previous item in dropdown
-    #[allow(dead_code)]
-    pub fn prev_dropdown_item(&mut self, item_count: usize) {
-        if item_count > 0 {
-            self.ui.selected_dropdown_item = if self.ui.selected_dropdown_item == 0 {
-                item_count - 1
-            } else {
-                self.ui.selected_dropdown_item - 1
-            };
-        }
-    }
-
     /// Update terminal dimensions
     pub fn update_terminal_size(&mut self, width: u16, height: u16) {
         self.terminal.width = width;
@@ -523,12 +503,6 @@ impl AppState {
     /// Get mutable reference to active modal window
     pub fn get_active_modal_mut(&mut self) -> Option<&mut ActiveModal> {
         self.active_modal.as_mut()
-    }
-
-    /// Get reference to active modal window
-    #[allow(dead_code)]
-    pub fn get_active_modal(&self) -> Option<&ActiveModal> {
-        self.active_modal.as_ref()
     }
 
     /// Set pending action and open modal window
