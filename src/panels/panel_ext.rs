@@ -1,6 +1,8 @@
 use std::any::Any;
 
-use super::{editor::Editor, file_manager::FileManager, terminal_pty::Terminal, Panel};
+use super::{
+    debug::Debug, editor::Editor, file_manager::FileManager, terminal_pty::Terminal, Panel,
+};
 
 /// Extension trait for convenient downcasting of Panel trait objects
 pub trait PanelExt {
@@ -24,6 +26,13 @@ pub trait PanelExt {
     /// Downcast to Terminal (mutable)
     #[allow(dead_code)] // May be used in future
     fn as_terminal_mut(&mut self) -> Option<&mut Terminal>;
+
+    /// Downcast to Debug (immutable)
+    #[allow(dead_code)] // May be used in future
+    fn as_debug(&self) -> Option<&Debug>;
+
+    /// Check if panel is a Debug panel
+    fn is_debug(&self) -> bool;
 }
 
 impl PanelExt for dyn Panel {
@@ -50,6 +59,14 @@ impl PanelExt for dyn Panel {
     fn as_terminal_mut(&mut self) -> Option<&mut Terminal> {
         (self as &mut dyn Any).downcast_mut::<Terminal>()
     }
+
+    fn as_debug(&self) -> Option<&Debug> {
+        (self as &dyn Any).downcast_ref::<Debug>()
+    }
+
+    fn is_debug(&self) -> bool {
+        (self as &dyn Any).is::<Debug>()
+    }
 }
 
 impl PanelExt for Box<dyn Panel> {
@@ -75,5 +92,13 @@ impl PanelExt for Box<dyn Panel> {
 
     fn as_terminal_mut(&mut self) -> Option<&mut Terminal> {
         (&mut **self as &mut dyn Any).downcast_mut::<Terminal>()
+    }
+
+    fn as_debug(&self) -> Option<&Debug> {
+        (&**self as &dyn Any).downcast_ref::<Debug>()
+    }
+
+    fn is_debug(&self) -> bool {
+        (&**self as &dyn Any).is::<Debug>()
     }
 }

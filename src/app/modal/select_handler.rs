@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use super::super::App;
 use crate::{
     i18n,
-    panels::editor::Editor,
+    panels::PanelExt,
     state::{ActiveModal, PendingAction},
 };
 
@@ -26,9 +26,7 @@ impl App {
                     // Save and close
                     crate::logger::info("Selected: Save and close editor");
                     if let Some(panel) = self.layout_manager.active_panel_mut() {
-                        use std::any::Any;
-                        let panel_any: &mut dyn Any = &mut **panel;
-                        if let Some(editor) = panel_any.downcast_mut::<Editor>() {
+                        if let Some(editor) = panel.as_editor_mut() {
                             // Try to save
                             if editor.has_file_path() {
                                 // File already has path - just save
@@ -87,7 +85,7 @@ impl App {
         value: Box<dyn std::any::Any>,
     ) -> Result<()> {
         if let Some(choice) = value.downcast_ref::<crate::ui::modal::OverwriteChoice>() {
-            use crate::{i18n, panels::file_manager::FileManager, ui::modal::OverwriteChoice};
+            use crate::{i18n, ui::modal::OverwriteChoice};
 
             let item_name = source.file_name().and_then(|n| n.to_str()).unwrap_or("?");
 
@@ -131,9 +129,7 @@ impl App {
             if should_proceed {
                 // Execute operation using FileManager
                 if let Some(fm_panel) = self.get_first_file_manager_mut() {
-                    use std::any::Any;
-                    let panel_any: &mut dyn Any = &mut **fm_panel;
-                    if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
+                    if let Some(fm) = fm_panel.as_file_manager_mut() {
                         let result = if is_move {
                             fm.move_path(source.clone(), destination.clone())
                         } else {

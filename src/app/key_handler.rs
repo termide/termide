@@ -7,7 +7,7 @@ use crate::{
     i18n,
     panels::{
         debug::Debug, editor::Editor, file_manager::FileManager, terminal_pty::Terminal,
-        welcome::Welcome,
+        welcome::Welcome, PanelExt,
     },
     state::{ActiveModal, PendingAction},
     ui::menu::MENU_ITEM_COUNT,
@@ -51,9 +51,7 @@ impl App {
 
                 // Check config update and status message (only for Editor)
                 let (config_update, status_message) = {
-                    use crate::panels::editor::Editor;
-                    use std::any::Any;
-                    if let Some(editor) = (&mut **panel as &mut dyn Any).downcast_mut::<Editor>() {
+                    if let Some(editor) = panel.as_editor_mut() {
                         (editor.take_config_update(), editor.take_status_message())
                     } else {
                         (None, None)
@@ -242,10 +240,8 @@ impl App {
             // Check if there's a channel receiver for directory size in panel
             if let Some(panel) = self.layout_manager.active_panel_mut() {
                 // Try to get FileManager and take channel receiver
-                use crate::panels::file_manager::FileManager;
-                use std::any::Any;
 
-                if let Some(fm) = (&mut **panel as &mut dyn Any).downcast_mut::<FileManager>() {
+                if let Some(fm) = panel.as_file_manager_mut() {
                     if let Some(rx) = fm.dir_size_receiver.take() {
                         self.state.dir_size_receiver = Some(rx);
                     }
@@ -342,10 +338,7 @@ impl App {
             if let Some(_message) = panel.needs_close_confirmation() {
                 crate::logger::warn("Close requested for panel with unsaved changes");
                 // Check if panel is editor
-                use std::any::Any;
-                let panel_any: &dyn Any = &**panel;
-
-                if panel_any.is::<Editor>() {
+                if panel.as_editor().is_some() {
                     // For editor show window with three options
                     use crate::ui::modal::SelectModal;
                     let t = i18n::t();
@@ -449,15 +442,11 @@ impl App {
     /// Find and focus existing Debug panel if it exists
     /// Returns true if Debug panel was found and focused
     fn focus_existing_debug_panel(&mut self) -> bool {
-        use crate::panels::debug::Debug;
-        use std::any::Any;
-
         // Iterate through all panel groups
         for (group_idx, group) in self.layout_manager.panel_groups.iter_mut().enumerate() {
             // Check each panel in the group
             for (panel_idx, panel) in group.panels().iter().enumerate() {
-                let panel_any: &dyn Any = &**panel;
-                if panel_any.is::<Debug>() {
+                if panel.is_debug() {
                     // Found Debug panel - set it as expanded and focus the group
                     group.set_expanded(panel_idx);
                     self.layout_manager.focus = group_idx;
