@@ -7,7 +7,8 @@ use ratatui::{
 };
 use std::path::PathBuf;
 
-use super::Panel;
+use super::super::Panel;
+use super::{config::*, git, word_wrap};
 use crate::editor::{Cursor, HighlightCache, SearchState, Selection, TextBuffer, Viewport};
 use crate::logger;
 use crate::state::AppState;
@@ -15,53 +16,7 @@ use crate::state::{ActiveModal, PendingAction};
 use crate::syntax_highlighter;
 use crate::ui::modal::InputModal;
 
-/// Editor mode configuration
-#[derive(Debug, Clone)]
-pub struct EditorConfig {
-    /// Whether syntax highlighting is enabled
-    pub syntax_highlighting: bool,
-    /// Read-only mode
-    pub read_only: bool,
-    /// Automatic line wrapping by window width
-    pub word_wrap: bool,
-    /// Tab size (number of spaces)
-    pub tab_size: usize,
-}
-
-impl Default for EditorConfig {
-    fn default() -> Self {
-        Self {
-            syntax_highlighting: true,
-            read_only: false,
-            word_wrap: true,
-            tab_size: 4,
-        }
-    }
-}
-
-impl EditorConfig {
-    /// Create configuration for view mode (without editing)
-    pub fn view_only() -> Self {
-        Self {
-            syntax_highlighting: true,
-            read_only: true,
-            word_wrap: true,
-            tab_size: 4,
-        }
-    }
-}
-
-/// Editor information for status bar
-#[derive(Debug, Clone)]
-pub struct EditorInfo {
-    pub line: usize,               // Current line (1-based)
-    pub column: usize,             // Current column (1-based)
-    pub tab_size: usize,           // Tab size
-    pub encoding: String,          // Encoding (UTF-8)
-    pub file_type: String,         // File type / syntax language
-    pub read_only: bool,           // Read-only mode
-    pub syntax_highlighting: bool, // Syntax highlighting enabled
-}
+// EditorConfig and EditorInfo moved to config module
 
 /// Editor panel with syntax highlighting
 pub struct Editor {
@@ -115,24 +70,7 @@ pub struct Editor {
     #[allow(dead_code)]
     wrap_cache: std::collections::HashMap<usize, Vec<usize>>,
 }
-
-/// Git line rendering information
-struct GitLineInfo {
-    status_color: Color,
-    status_marker: char,
-}
-
-/// Virtual line representation for rendering
-/// Allows inserting visual-only lines (like deletion markers) between real buffer lines
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum VirtualLine {
-    /// Real line from the buffer at given index (0-based)
-    Real(usize),
-    /// Visual deletion indicator after the given buffer line index
-    /// Parameters: (after_line_idx, deletion_count)
-    /// This is a visual-only line showing where content was deleted and how many lines
-    DeletionMarker(usize, usize),
-}
+// GitLineInfo and VirtualLine moved to git module
 
 impl Editor {
     /// Create new empty editor with default configuration
@@ -382,42 +320,26 @@ impl Editor {
 
     /// Update git diff cache for this file
     pub fn update_git_diff(&mut self) {
-        if let Some(ref mut cache) = self.git_diff_cache {
-            let _ = cache.update();
-        } else if let Some(file_path) = self.file_path() {
-            // Try to create cache if file is now in git repo
-            let mut cache = crate::git::GitDiffCache::new(file_path.to_path_buf());
-            if cache.update().is_ok() {
-                self.git_diff_cache = Some(cache);
-            }
-        }
+        let file_path = self.file_path().map(|p| p.to_path_buf());
+        git::update_git_diff(&mut self.git_diff_cache, file_path.as_deref());
     }
 
     /// Schedule git diff update with debounce (300ms delay)
     pub fn schedule_git_diff_update(&mut self) {
-        // Only schedule if we have a git diff cache
-        if self.git_diff_cache.is_some() {
-            self.git_diff_update_pending = Some(std::time::Instant::now());
+        if let Some(instant) = git::schedule_git_diff_update(&self.git_diff_cache) {
+            self.git_diff_update_pending = Some(instant);
         }
     }
 
     /// Check and apply pending git diff update if debounce time has passed
     pub fn check_pending_git_diff_update(&mut self) {
-        const DEBOUNCE_MS: u64 = 300;
-
-        if let Some(pending_time) = self.git_diff_update_pending {
-            if pending_time.elapsed().as_millis() >= DEBOUNCE_MS as u128 {
-                // Time has passed, perform update
-                self.git_diff_update_pending = None;
-
-                // Get current buffer content
-                let content = self.buffer.to_string();
-
-                // Update diff cache with current buffer
-                if let Some(ref mut cache) = self.git_diff_cache {
-                    let _ = cache.update_from_buffer(&content);
-                }
-            }
+        let (updated, new_pending) = git::check_pending_git_diff_update(
+            self.git_diff_update_pending,
+            &mut self.git_diff_cache,
+            &self.buffer,
+        );
+        if updated {
+            self.git_diff_update_pending = new_pending;
         }
     }
 
@@ -532,7 +454,11 @@ impl Editor {
             let cursor_col = self.cursor.column.min(line_len);
 
             // Get wrap points for this line
-            let (_visual_rows, wrap_points) = self.get_line_wrap_points(line_text, content_width);
+            let (_visual_rows, wrap_points) = word_wrap::get_line_wrap_points(
+                line_text,
+                content_width,
+                self.cached_use_smart_wrap,
+            );
 
             // Find which visual row the cursor is on
             let current_visual_row = wrap_points.iter().filter(|&&wp| wp <= cursor_col).count();
@@ -581,8 +507,11 @@ impl Editor {
 
                 if line_len > 0 {
                     // Get wrap points for the previous line
-                    let (visual_rows, wrap_points) =
-                        self.get_line_wrap_points(line_text, content_width);
+                    let (visual_rows, wrap_points) = word_wrap::get_line_wrap_points(
+                        line_text,
+                        content_width,
+                        self.cached_use_smart_wrap,
+                    );
                     let last_visual_row = visual_rows - 1;
 
                     // Calculate the last visual row boundaries
@@ -643,8 +572,11 @@ impl Editor {
             let cursor_col = self.cursor.column.min(line_len);
 
             // Get wrap points for this line
-            let (total_visual_rows, wrap_points) =
-                self.get_line_wrap_points(line_text, content_width);
+            let (total_visual_rows, wrap_points) = word_wrap::get_line_wrap_points(
+                line_text,
+                content_width,
+                self.cached_use_smart_wrap,
+            );
 
             // Find which visual row the cursor is on
             let current_visual_row = wrap_points.iter().filter(|&&wp| wp <= cursor_col).count();
@@ -696,8 +628,11 @@ impl Editor {
 
                 if line_len > 0 {
                     // Get wrap points for the next line
-                    let (_visual_rows, wrap_points) =
-                        self.get_line_wrap_points(line_text, content_width);
+                    let (_visual_rows, wrap_points) = word_wrap::get_line_wrap_points(
+                        line_text,
+                        content_width,
+                        self.cached_use_smart_wrap,
+                    );
 
                     // First visual row: from 0 to first wrap point (or line_len if no wrapping)
                     let visual_row_start = 0;
@@ -793,7 +728,11 @@ impl Editor {
             let cursor_col = self.cursor.column.min(line_len);
 
             // Get wrap points for this line
-            let (_visual_rows, wrap_points) = self.get_line_wrap_points(line_text, content_width);
+            let (_visual_rows, wrap_points) = word_wrap::get_line_wrap_points(
+                line_text,
+                content_width,
+                self.cached_use_smart_wrap,
+            );
 
             // Find which visual row the cursor is on
             let current_visual_row = wrap_points.iter().filter(|&&wp| wp <= cursor_col).count();
@@ -836,7 +775,11 @@ impl Editor {
             let cursor_col = self.cursor.column.min(line_len);
 
             // Get wrap points for this line
-            let (_visual_rows, wrap_points) = self.get_line_wrap_points(line_text, content_width);
+            let (_visual_rows, wrap_points) = word_wrap::get_line_wrap_points(
+                line_text,
+                content_width,
+                self.cached_use_smart_wrap,
+            );
 
             // Find which visual row the cursor is on
             let current_visual_row = wrap_points.iter().filter(|&&wp| wp <= cursor_col).count();
@@ -1309,73 +1252,7 @@ impl Editor {
         Ok(())
     }
 
-    /// Get git diff information for a line (cached helper)
-    fn get_git_line_info(
-        &self,
-        line_idx: usize,
-        config: &crate::config::Config,
-        theme: &crate::theme::Theme,
-    ) -> GitLineInfo {
-        if !config.show_git_diff {
-            return GitLineInfo {
-                status_color: theme.disabled,
-                status_marker: ' ',
-            };
-        }
-
-        self.git_diff_cache
-            .as_ref()
-            .map(|cache| {
-                let status = cache.get_line_status(line_idx);
-
-                // Status marker and color
-                let (status_color, status_marker) = match status {
-                    crate::git::LineStatus::Added => (theme.success, ' '),
-                    crate::git::LineStatus::Modified => (theme.warning, ' '),
-                    crate::git::LineStatus::Unchanged => (theme.disabled, ' '),
-                    crate::git::LineStatus::DeletedAfter => (theme.disabled, ' '),
-                };
-
-                GitLineInfo {
-                    status_color,
-                    status_marker,
-                }
-            })
-            .unwrap_or(GitLineInfo {
-                status_color: theme.disabled,
-                status_marker: ' ',
-            })
-    }
-
-    /// Build list of virtual lines (real buffer lines + deletion marker lines)
-    /// Returns a Vec mapping visual row index to VirtualLine
-    fn build_virtual_lines(&self, config: &crate::config::Config) -> Vec<VirtualLine> {
-        let mut virtual_lines = Vec::new();
-        let buffer_line_count = self.buffer.line_count();
-
-        // If git diff is disabled or not available, just return real lines
-        if !config.show_git_diff || self.git_diff_cache.is_none() {
-            for line_idx in 0..buffer_line_count {
-                virtual_lines.push(VirtualLine::Real(line_idx));
-            }
-            return virtual_lines;
-        }
-
-        let git_diff = self.git_diff_cache.as_ref().unwrap();
-
-        // Interleave real lines with deletion markers
-        for line_idx in 0..buffer_line_count {
-            virtual_lines.push(VirtualLine::Real(line_idx));
-
-            // Check if there's a deletion marker after this line
-            if git_diff.has_deletion_marker(line_idx) {
-                let deletion_count = git_diff.get_deletion_count(line_idx);
-                virtual_lines.push(VirtualLine::DeletionMarker(line_idx, deletion_count));
-            }
-        }
-
-        virtual_lines
-    }
+    // Git methods moved to git module
 
     /// Get the total count of virtual lines (real buffer lines + deletion marker lines + word wrap)
     /// This is used for viewport calculations to account for deletion markers and word wrapping
@@ -1383,7 +1260,12 @@ impl Editor {
         // If word wrap is enabled, count visual rows instead of buffer lines
         if self.config.word_wrap && self.cached_content_width > 0 {
             // Use calculate_total_visual_rows which accounts for word wrapping
-            let total_visual_rows = self.calculate_total_visual_rows(self.cached_content_width);
+            let total_visual_rows = word_wrap::calculate_total_visual_rows(
+                &self.buffer,
+                self.cached_content_width,
+                self.config.word_wrap,
+                self.cached_use_smart_wrap,
+            );
 
             // Add deletion markers if git diff is shown
             if config.show_git_diff {
@@ -1528,7 +1410,12 @@ impl Editor {
                     // Специальная обработка пустых строк
                     if line_len == 0 {
                         // Получить git информацию для этой строки
-                        let git_info = self.get_git_line_info(line_idx, config, theme);
+                        let git_info = git::get_git_line_info(
+                            line_idx,
+                            &self.git_diff_cache,
+                            config.show_git_diff,
+                            theme,
+                        );
 
                         // Отрисовать номер строки (4 символа) + status marker (1 символ)
                         let line_num_style = Style::default().fg(git_info.status_color);
@@ -1593,7 +1480,12 @@ impl Editor {
                             // Номер строки (только на первой визуальной строке)
                             if is_first_visual_row {
                                 // Получить git информацию для этой строки
-                                let git_info = self.get_git_line_info(line_idx, config, theme);
+                                let git_info = git::get_git_line_info(
+                                    line_idx,
+                                    &self.git_diff_cache,
+                                    config.show_git_diff,
+                                    theme,
+                                );
 
                                 // Отрисовать номер строки (4 символа) + status marker (1 символ)
                                 let line_num_style = Style::default().fg(git_info.status_color);
@@ -1854,13 +1746,14 @@ impl Editor {
         } else {
             // Обычный режим (без word wrap) - используем виртуальные строки
             // Построить список виртуальных строк (real buffer lines + deletion markers)
-            let virtual_lines = self.build_virtual_lines(config);
+            let virtual_lines =
+                git::build_virtual_lines(&self.buffer, &self.git_diff_cache, config.show_git_diff);
 
             // Найти индекс первой виртуальной строки для viewport.top_line (buffer line index)
             // viewport.top_line это buffer line index, нужно преобразовать в virtual line index
             let start_virtual_idx = virtual_lines
                 .iter()
-                .position(|vline| matches!(vline, VirtualLine::Real(idx) if *idx >= self.viewport.top_line))
+                .position(|vline| matches!(vline, git::VirtualLine::Real(idx) if *idx >= self.viewport.top_line))
                 .unwrap_or(virtual_lines.len());
 
             // Отрисовать видимые виртуальные строки
@@ -1875,7 +1768,7 @@ impl Editor {
 
                 // Обработка в зависимости от типа виртуальной строки
                 match virtual_line {
-                    VirtualLine::Real(line_idx) => {
+                    git::VirtualLine::Real(line_idx) => {
                         // Обычная строка из буфера
                         let is_cursor_line = line_idx == self.cursor.line;
                         let style = if is_cursor_line {
@@ -1885,7 +1778,12 @@ impl Editor {
                         };
 
                         // Номер строки с git diff статусом
-                        let git_info = self.get_git_line_info(line_idx, config, theme);
+                        let git_info = git::get_git_line_info(
+                            line_idx,
+                            &self.git_diff_cache,
+                            config.show_git_diff,
+                            theme,
+                        );
 
                         // Отрисовать номер строки (4 символа) + status marker (1 символ)
                         let line_num_style = Style::default().fg(git_info.status_color);
@@ -2014,7 +1912,7 @@ impl Editor {
                             }
                         }
                     }
-                    VirtualLine::DeletionMarker(_after_line_idx, deletion_count) => {
+                    git::VirtualLine::DeletionMarker(_after_line_idx, deletion_count) => {
                         // Виртуальная строка - deletion marker
                         // Отрисовать gutter с красным маркером ▶ и content с линией и текстом
 
@@ -2092,7 +1990,7 @@ impl Editor {
             // Отрисовать курсор с учетом виртуальных строк
             // Найти virtual line index для cursor.line
             let cursor_virtual_idx = virtual_lines.iter().position(
-                |vline| matches!(vline, VirtualLine::Real(idx) if *idx == self.cursor.line),
+                |vline| matches!(vline, git::VirtualLine::Real(idx) if *idx == self.cursor.line),
             );
 
             if let Some(cursor_virtual_idx) = cursor_virtual_idx {
@@ -2402,159 +2300,7 @@ impl Editor {
         Ok(count)
     }
 
-    /// Get wrap points for a line, accounting for smart wrapping setting
-    /// Returns (number of visual rows, vector of wrap points)
-    /// Wrap points are character positions where new visual lines start
-    fn get_line_wrap_points(&self, line_text: &str, content_width: usize) -> (usize, Vec<usize>) {
-        if content_width == 0 {
-            return (1, Vec::new());
-        }
-
-        let chars: Vec<char> = line_text.chars().collect();
-        let line_len = chars.len();
-
-        if line_len == 0 {
-            return (1, Vec::new());
-        }
-
-        if line_len <= content_width {
-            return (1, Vec::new()); // No wrapping needed
-        }
-
-        if self.cached_use_smart_wrap {
-            // Use smart wrapping from wrap.rs module
-            let wrap_points =
-                crate::editor::calculate_wrap_points_for_line(line_text, content_width);
-            let visual_rows = wrap_points.len() + 1; // +1 for the first line
-            (visual_rows, wrap_points)
-        } else {
-            // Use simple wrapping (hard break at content_width)
-            let visual_rows = line_len.div_ceil(content_width);
-            let mut wrap_points = Vec::new();
-            for i in 1..visual_rows {
-                wrap_points.push(i * content_width);
-            }
-            (visual_rows, wrap_points)
-        }
-    }
-
-    /// Calculate the visual row index for the cursor position
-    /// Returns the visual row index from viewport.top_line
-    /// This accounts for word wrapping - a single buffer line may span multiple visual rows
-    #[allow(dead_code)]
-    fn calculate_visual_row_for_cursor(&self, content_width: usize) -> usize {
-        if content_width == 0 || !self.config.word_wrap {
-            // No word wrap - visual row is just buffer line offset from top
-            return self.cursor.line.saturating_sub(self.viewport.top_line);
-        }
-
-        let mut visual_row = 0;
-        let mut line_idx = self.viewport.top_line;
-
-        // Count visual rows from viewport top to cursor line
-        while line_idx < self.cursor.line && line_idx < self.buffer.line_count() {
-            if let Some(line_text) = self.buffer.line(line_idx) {
-                let line_text = line_text.trim_end_matches('\n');
-                let (line_visual_rows, _) = self.get_line_wrap_points(line_text, content_width);
-                visual_row += line_visual_rows;
-            } else {
-                visual_row += 1; // Empty line = 1 visual row
-            }
-            line_idx += 1;
-        }
-
-        // Now add the visual row within the cursor's line
-        if let Some(line_text) = self.buffer.line(self.cursor.line) {
-            let line_text = line_text.trim_end_matches('\n');
-            let (_line_visual_rows, wrap_points) =
-                self.get_line_wrap_points(line_text, content_width);
-
-            // Find which visual row within this line the cursor is on
-            let cursor_col = self.cursor.column.min(line_text.chars().count());
-            let row_within_line = wrap_points.iter().filter(|&&wp| wp <= cursor_col).count();
-            visual_row += row_within_line;
-        }
-
-        visual_row
-    }
-
-    /// Calculate total number of visual rows in the entire buffer
-    /// This accounts for word wrapping - returns total visual rows across all lines
-    fn calculate_total_visual_rows(&self, content_width: usize) -> usize {
-        if content_width == 0 || !self.config.word_wrap {
-            // No word wrap - just return buffer line count
-            return self.buffer.line_count();
-        }
-
-        let mut total_visual_rows = 0;
-
-        for line_idx in 0..self.buffer.line_count() {
-            if let Some(line_text) = self.buffer.line(line_idx) {
-                let line_text = line_text.trim_end_matches('\n');
-                let (line_visual_rows, _) = self.get_line_wrap_points(line_text, content_width);
-                total_visual_rows += line_visual_rows;
-            } else {
-                total_visual_rows += 1; // Empty line = 1 visual row
-            }
-        }
-
-        total_visual_rows
-    }
-
-    /// Convert visual row to buffer position accounting for word wrap
-    /// Returns (buffer_line, column_offset) for the given visual row
-    fn visual_row_to_buffer_position(
-        &self,
-        visual_row: usize,
-        content_width: usize,
-    ) -> (usize, usize) {
-        if content_width == 0 {
-            return (self.viewport.top_line + visual_row, 0);
-        }
-
-        let mut current_visual_row = 0;
-        let mut line_idx = self.viewport.top_line;
-
-        while line_idx < self.buffer.line_count() {
-            if let Some(line_text) = self.buffer.line(line_idx) {
-                let line_text = line_text.trim_end_matches('\n');
-
-                // Calculate how many visual rows this line occupies using actual wrap points
-                let (visual_rows_for_line, wrap_points) =
-                    self.get_line_wrap_points(line_text, content_width);
-
-                // Check if target visual row is in this buffer line
-                if current_visual_row + visual_rows_for_line > visual_row {
-                    // Found the buffer line containing the target visual row
-                    let row_within_line = visual_row - current_visual_row;
-
-                    // Calculate column offset using actual wrap points
-                    let column_offset = if row_within_line == 0 {
-                        0 // First visual line starts at column 0
-                    } else if row_within_line - 1 < wrap_points.len() {
-                        wrap_points[row_within_line - 1] // Use actual wrap point
-                    } else {
-                        0 // Shouldn't happen, but safe fallback
-                    };
-
-                    return (line_idx, column_offset);
-                }
-
-                current_visual_row += visual_rows_for_line;
-            } else {
-                // If line doesn't exist, treat as empty (1 visual row)
-                if current_visual_row >= visual_row {
-                    return (line_idx, 0);
-                }
-                current_visual_row += 1;
-            }
-
-            line_idx += 1;
-        }
-
-        // If we've exhausted all lines, return the last line
-        (self.buffer.line_count().saturating_sub(1), 0)
-    }
+    // Word wrap methods moved to word_wrap module
 }
 
 impl Panel for Editor {
@@ -3254,7 +3000,13 @@ impl Panel for Editor {
 
         // In word wrap mode, visual rows don't correspond 1:1 with buffer lines
         let (buffer_line, wrapped_offset) = if self.config.word_wrap {
-            self.visual_row_to_buffer_position(rel_y, content_width as usize)
+            word_wrap::visual_row_to_buffer_position(
+                &self.buffer,
+                rel_y,
+                self.viewport.top_line,
+                content_width as usize,
+                self.cached_use_smart_wrap,
+            )
         } else {
             (self.viewport.top_line + rel_y, 0)
         };
