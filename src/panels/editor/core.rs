@@ -1215,75 +1215,15 @@ impl Editor {
                         if git_diff.has_deletion_marker(line_idx) {
                             let deletion_count = git_diff.get_deletion_count(line_idx);
 
-                            // Отрисовать виртуальную строку с deletion marker, линией и текстом
-
-                            // Пустое место для номера строки (4 пробела)
-                            for i in 0..4 {
-                                let x = area.x + i as u16;
-                                let y = area.y + visual_row as u16;
-                                if let Some(cell) = buf.cell_mut((x, y)) {
-                                    cell.set_char(' ');
-                                    cell.set_style(Style::default().fg(theme.disabled));
-                                }
-                            }
-
-                            // Красный маркер ▶ (показывает что здесь было удаление)
-                            let marker_style = Style::default().fg(theme.error);
-                            let x = area.x + 4; // Позиция после пробелов
-                            let y = area.y + visual_row as u16;
-                            if let Some(cell) = buf.cell_mut((x, y)) {
-                                cell.set_char('▶');
-                                cell.set_style(marker_style);
-                            }
-
-                            // Пустое место после маркера
-                            let x = area.x + 5;
-                            let y = area.y + visual_row as u16;
-                            if let Some(cell) = buf.cell_mut((x, y)) {
-                                cell.set_char(' ');
-                                cell.set_style(Style::default().fg(theme.disabled));
-                            }
-
-                            // Content area - псевдографическая линия с текстом по центру
-                            let line_style = Style::default().fg(theme.disabled);
-                            let deletion_text = format!(
-                                " {} ",
-                                crate::i18n::t().editor_deletion_marker(deletion_count)
+                            rendering::deletion_markers::render_deletion_marker(
+                                buf,
+                                area,
+                                visual_row,
+                                deletion_count,
+                                theme,
+                                content_width,
+                                line_number_width,
                             );
-                            // Performance optimization: Convert to Vec<char> once for O(1) indexing
-                            let deletion_chars: Vec<char> = deletion_text.chars().collect();
-                            let text_len = deletion_chars.len();
-
-                            // Вычислить позицию для центрирования текста
-                            let text_start_col = if content_width > text_len {
-                                (content_width - text_len) / 2
-                            } else {
-                                0
-                            };
-
-                            for col in 0..content_width {
-                                let x = area.x + line_number_width + col as u16;
-                                let y = area.y + visual_row as u16;
-                                if x < area.x + area.width && y < area.y + area.height {
-                                    if let Some(cell) = buf.cell_mut((x, y)) {
-                                        // Проверить, находится ли эта позиция в области текста
-                                        if col >= text_start_col && col < text_start_col + text_len
-                                        {
-                                            // Отрисовать символ из текста (O(1) indexing)
-                                            let text_idx = col - text_start_col;
-                                            let ch = deletion_chars
-                                                .get(text_idx)
-                                                .copied()
-                                                .unwrap_or('─');
-                                            cell.set_char(ch);
-                                        } else {
-                                            // Отрисовать линию
-                                            cell.set_char('─');
-                                        }
-                                        cell.set_style(line_style);
-                                    }
-                                }
-                            }
 
                             visual_row += 1;
                         }
@@ -1470,72 +1410,15 @@ impl Editor {
                     }
                     git::VirtualLine::DeletionMarker(_after_line_idx, deletion_count) => {
                         // Виртуальная строка - deletion marker
-                        // Отрисовать gutter с красным маркером ▶ и content с линией и текстом
-
-                        // Пустое место для номера строки (4 пробела)
-                        for i in 0..4 {
-                            let x = area.x + i as u16;
-                            let y = area.y + row as u16;
-                            if let Some(cell) = buf.cell_mut((x, y)) {
-                                cell.set_char(' ');
-                                cell.set_style(Style::default().fg(theme.disabled));
-                            }
-                        }
-
-                        // Красный маркер ▶ (показывает что здесь было удаление)
-                        let marker_style = Style::default().fg(theme.error);
-                        let x = area.x + 4; // Позиция после пробелов
-                        let y = area.y + row as u16;
-                        if let Some(cell) = buf.cell_mut((x, y)) {
-                            cell.set_char('▶');
-                            cell.set_style(marker_style);
-                        }
-
-                        // Пустое место после маркера
-                        let x = area.x + 5;
-                        let y = area.y + row as u16;
-                        if let Some(cell) = buf.cell_mut((x, y)) {
-                            cell.set_char(' ');
-                            cell.set_style(Style::default().fg(theme.disabled));
-                        }
-
-                        // Content area - псевдографическая линия с текстом по центру
-                        let line_style = Style::default().fg(theme.disabled);
-                        let deletion_text = format!(
-                            " {} ",
-                            crate::i18n::t().editor_deletion_marker(deletion_count)
+                        rendering::deletion_markers::render_deletion_marker(
+                            buf,
+                            area,
+                            row,
+                            deletion_count,
+                            theme,
+                            content_width,
+                            line_number_width,
                         );
-                        // Performance optimization: Convert to Vec<char> once for O(1) indexing
-                        let deletion_chars: Vec<char> = deletion_text.chars().collect();
-                        let text_len = deletion_chars.len();
-
-                        // Вычислить позицию для центрирования текста
-                        let text_start_col = if content_width > text_len {
-                            (content_width - text_len) / 2
-                        } else {
-                            0
-                        };
-
-                        for col in 0..content_width {
-                            let x = area.x + line_number_width + col as u16;
-                            let y = area.y + row as u16;
-                            if x < area.x + area.width && y < area.y + area.height {
-                                if let Some(cell) = buf.cell_mut((x, y)) {
-                                    // Проверить, находится ли эта позиция в области текста
-                                    if col >= text_start_col && col < text_start_col + text_len {
-                                        // Отрисовать символ из текста (O(1) indexing)
-                                        let text_idx = col - text_start_col;
-                                        let ch =
-                                            deletion_chars.get(text_idx).copied().unwrap_or('─');
-                                        cell.set_char(ch);
-                                    } else {
-                                        // Отрисовать линию
-                                        cell.set_char('─');
-                                    }
-                                    cell.set_style(line_style);
-                                }
-                            }
-                        }
 
                         // Пропускаем рендеринг контента для deletion marker
                         continue;
