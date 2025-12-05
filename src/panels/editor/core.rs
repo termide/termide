@@ -400,6 +400,16 @@ impl Editor {
         self.config.word_wrap && self.cached_content_width > 0
     }
 
+    /// Ensure preferred column is set for vertical navigation.
+    ///
+    /// Sets preferred_column to current column if not already set.
+    /// Used by visual movement methods to maintain column across wrapped lines.
+    fn ensure_preferred_column(&mut self) {
+        if self.preferred_column.is_none() {
+            self.preferred_column = Some(self.cursor.column);
+        }
+    }
+
     /// Convert syntax language name to human-readable display name.
     fn format_language_name(syntax_name: &str) -> &str {
         match syntax_name {
@@ -450,10 +460,7 @@ impl Editor {
             return;
         }
 
-        // Save preferred column on first vertical movement
-        if self.preferred_column.is_none() {
-            self.preferred_column = Some(self.cursor.column);
-        }
+        self.ensure_preferred_column();
 
         if let Some(new_cursor) = cursor::visual::move_up(
             &self.cursor,
@@ -476,10 +483,7 @@ impl Editor {
             return;
         }
 
-        // Save preferred column on first vertical movement
-        if self.preferred_column.is_none() {
-            self.preferred_column = Some(self.cursor.column);
-        }
+        self.ensure_preferred_column();
 
         if let Some(new_cursor) = cursor::visual::move_down(
             &self.cursor,
@@ -596,10 +600,7 @@ impl Editor {
             return;
         }
 
-        // Save preferred column on first vertical movement
-        if self.preferred_column.is_none() {
-            self.preferred_column = Some(self.cursor.column);
-        }
+        self.ensure_preferred_column();
 
         let page_size = self.viewport.height;
         self.cursor = cursor::visual::page_up(
@@ -623,10 +624,7 @@ impl Editor {
             return;
         }
 
-        // Save preferred column on first vertical movement
-        if self.preferred_column.is_none() {
-            self.preferred_column = Some(self.cursor.column);
-        }
+        self.ensure_preferred_column();
 
         let page_size = self.viewport.height;
         self.cursor = cursor::visual::page_down(
