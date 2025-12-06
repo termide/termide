@@ -55,6 +55,12 @@ pub struct Config {
     /// Logs below this level will not be recorded
     #[serde(default = "default_min_log_level")]
     pub min_log_level: String,
+
+    /// File size threshold in MB for enabling smart features (default: 5)
+    /// Files larger than this threshold will disable expensive features like
+    /// smart word wrapping to maintain performance
+    #[serde(default = "default_large_file_threshold_mb")]
+    pub large_file_threshold_mb: u64,
 }
 
 fn default_theme_name() -> String {
@@ -97,6 +103,10 @@ fn default_min_log_level() -> String {
     "info".to_string()
 }
 
+fn default_large_file_threshold_mb() -> u64 {
+    crate::constants::DEFAULT_LARGE_FILE_THRESHOLD_MB
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -111,6 +121,7 @@ impl Default for Config {
             session_retention_days: default_session_retention_days(),
             word_wrap: default_word_wrap(),
             min_log_level: default_min_log_level(),
+            large_file_threshold_mb: default_large_file_threshold_mb(),
         }
     }
 }
@@ -201,20 +212,6 @@ impl Config {
         }
         Ok(())
     }
-
-    /// Get path to log file
-    /// If specified in config, use it; otherwise use XDG cache directory
-    pub fn get_log_file_path(&self) -> PathBuf {
-        if let Some(ref path) = self.log_file_path {
-            PathBuf::from(path)
-        } else {
-            // By default use XDG cache directory (~/.cache/termide on Linux)
-            crate::xdg_dirs::get_cache_dir()
-                .map(|dir| dir.join("termide.log"))
-                .unwrap_or_else(|_| std::env::temp_dir().join("termide.log"))
-        }
-    }
-
     /// Get path to config file (public version)
     pub fn config_file_path() -> Result<PathBuf> {
         Self::get_config_path()

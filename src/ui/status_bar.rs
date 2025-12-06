@@ -12,9 +12,10 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::i18n;
 use crate::panels::editor::EditorInfo;
-use crate::panels::file_manager::{DiskSpaceInfo, FileInfo};
+use crate::panels::file_manager::FileInfo;
 use crate::panels::terminal_pty::TerminalInfo;
 use crate::state::AppState;
+use crate::system_monitor::DiskSpaceInfo;
 
 /// Status bar at the bottom of screen
 pub struct StatusBar;
@@ -61,8 +62,8 @@ impl StatusBar {
 
         let mut current_x = x;
         for span in line.spans {
-            let content = span.content.to_string();
-            for ch in content.chars() {
+            // Use span.content directly without allocating String
+            for ch in span.content.chars() {
                 if current_x >= area.right() {
                     break;
                 }

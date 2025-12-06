@@ -57,18 +57,6 @@ impl Cursor {
     pub fn clamp_column(&mut self, max_column: usize) {
         self.column = min(self.column, max_column);
     }
-
-    /// Compare positions (for selection)
-    #[allow(dead_code)]
-    pub fn is_before(&self, other: &Cursor) -> bool {
-        self.line < other.line || (self.line == other.line && self.column < other.column)
-    }
-
-    /// Compare positions
-    #[allow(dead_code)]
-    pub fn is_after(&self, other: &Cursor) -> bool {
-        self.line > other.line || (self.line == other.line && self.column > other.column)
-    }
 }
 
 impl Default for Cursor {
@@ -122,18 +110,12 @@ impl Selection {
         self.anchor == self.active
     }
 
-    /// Check if selection contains given position
-    #[allow(dead_code)]
+    /// Check if selection contains given position (test-only)
+    #[cfg(test)]
     pub fn contains(&self, cursor: &Cursor) -> bool {
         let start = self.start();
         let end = self.end();
         cursor >= &start && cursor <= &end
-    }
-
-    /// Update active point
-    #[allow(dead_code)]
-    pub fn update_active(&mut self, new_active: Cursor) {
-        self.active = new_active;
     }
 }
 

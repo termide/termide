@@ -9,8 +9,13 @@ use ratatui::{
 };
 
 use super::{Modal, ModalResult};
+use crate::constants::{
+    MODAL_BUTTON_SPACING, MODAL_MAX_WIDTH_PERCENTAGE_DEFAULT, MODAL_MIN_WIDTH_DEFAULT,
+    MODAL_PADDING_WITH_BORDER,
+};
 use crate::i18n;
 use crate::theme::Theme;
+use crate::ui::centered_rect_with_size;
 
 /// Confirmation modal window (Yes/No)
 #[derive(Debug)]
@@ -51,43 +56,15 @@ impl ConfirmModal {
         // Take the maximum of all components
         let content_width = title_width.max(message_max_line_width).max(buttons_width);
 
-        // Add padding and borders:
-        // - 2 for border (1 on each side)
-        // - 4 for padding (2 on each side for readability)
-        let total_width = content_width + 6;
+        // Add padding and borders
+        let total_width = content_width + MODAL_PADDING_WITH_BORDER;
 
-        // Apply constraints:
-        // - Minimum 20 characters
-        // - Maximum 75% of screen width
-        let max_width = (screen_width as f32 * 0.75) as u16;
-        total_width.max(20).min(max_width).min(screen_width)
-    }
-
-    /// Create a centered rectangle with fixed size
-    fn centered_rect_with_size(width: u16, height: u16, r: Rect) -> Rect {
-        use ratatui::layout::{Constraint, Direction, Layout};
-
-        // Calculate margins
-        let horizontal_margin = r.width.saturating_sub(width) / 2;
-        let vertical_margin = r.height.saturating_sub(height) / 2;
-
-        let vertical_layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(vertical_margin),
-                Constraint::Length(height),
-                Constraint::Length(vertical_margin),
-            ])
-            .split(r);
-
-        Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(horizontal_margin),
-                Constraint::Length(width),
-                Constraint::Length(horizontal_margin),
-            ])
-            .split(vertical_layout[1])[1]
+        // Apply constraints
+        let max_width = (screen_width as f32 * MODAL_MAX_WIDTH_PERCENTAGE_DEFAULT) as u16;
+        total_width
+            .max(MODAL_MIN_WIDTH_DEFAULT)
+            .min(max_width)
+            .min(screen_width)
     }
 }
 
@@ -104,7 +81,7 @@ impl Modal for ConfirmModal {
         let modal_width = self.calculate_modal_width(area.width);
 
         // Create centered area with calculated dimensions
-        let modal_area = Self::centered_rect_with_size(modal_width, modal_height, area);
+        let modal_area = centered_rect_with_size(modal_width, modal_height, area);
 
         // Clear the area
         Clear.render(modal_area, buf);
@@ -217,12 +194,12 @@ impl Modal for ConfirmModal {
         let t = i18n::t();
         let yes_text = format!("[ {} ]", t.ui_yes());
         let no_text = format!("[ {} ]", t.ui_no());
-        let total_text_width = yes_text.len() + 4 + no_text.len(); // +4 for spacing
+        let total_text_width = yes_text.len() + MODAL_BUTTON_SPACING as usize + no_text.len();
 
         let start_col =
             buttons_area.x + (buttons_area.width.saturating_sub(total_text_width as u16)) / 2;
         let yes_end = start_col + yes_text.len() as u16;
-        let no_start = yes_end + 4; // 4 spaces between buttons
+        let no_start = yes_end + MODAL_BUTTON_SPACING;
         let no_end = no_start + no_text.len() as u16;
 
         // Determine which button was clicked

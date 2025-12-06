@@ -2,10 +2,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 use super::super::App;
-use crate::{
-    i18n,
-    panels::{editor::Editor, file_manager::FileManager},
-};
+use crate::{i18n, panels::PanelExt};
 
 impl App {
     /// Handle file creation
@@ -19,10 +16,7 @@ impl App {
             let t = i18n::t();
             // Get FileManager and create file
             let result = if let Some(fm_panel) = self.get_first_file_manager_mut() {
-                // Use Any trait for downcast
-                use std::any::Any;
-                let panel_any: &mut dyn Any = &mut **fm_panel;
-                if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
+                if let Some(fm) = fm_panel.as_file_manager_mut() {
                     let result = fm.create_file(name.clone());
                     if result.is_ok() {
                         crate::logger::info(format!("File created: {}", name));
@@ -67,9 +61,7 @@ impl App {
             let t = i18n::t();
             // Get FileManager and create directory
             let result = if let Some(fm_panel) = self.get_first_file_manager_mut() {
-                use std::any::Any;
-                let panel_any: &mut dyn Any = &mut **fm_panel;
-                if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
+                if let Some(fm) = fm_panel.as_file_manager_mut() {
                     let result = fm.create_directory(name.clone());
                     if result.is_ok() {
                         crate::logger::info(format!("Directory created: {}", name));
@@ -114,9 +106,7 @@ impl App {
             let t = i18n::t();
             // Get active Editor panel and save file
             if let Some(panel) = self.layout_manager.active_panel_mut() {
-                use std::any::Any;
-                let panel_any: &mut dyn Any = &mut **panel;
-                if let Some(editor) = panel_any.downcast_mut::<Editor>() {
+                if let Some(editor) = panel.as_editor_mut() {
                     // User enters path - parse it directly
                     let file_path = PathBuf::from(filename);
                     match editor.save_file_as(file_path.clone()) {

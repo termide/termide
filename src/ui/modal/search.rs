@@ -8,7 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Widget},
 };
 
-use super::{Modal, ModalResult};
+use super::{Modal, ModalResult, TextInputHandler};
 use crate::theme::Theme;
 
 /// Search modal result
@@ -40,8 +40,7 @@ enum FocusArea {
 /// Interactive search modal with live preview and navigation
 #[derive(Debug)]
 pub struct SearchModal {
-    input: String,
-    cursor_pos: usize,
+    input_handler: TextInputHandler,
     focus: FocusArea,
     selected_button: usize, // 0 = Previous, 1 = Next
     /// Match count display (e.g. "3 of 12")
@@ -55,8 +54,7 @@ impl SearchModal {
     /// Create new search modal
     pub fn new(_prompt: impl Into<String>) -> Self {
         Self {
-            input: String::new(),
-            cursor_pos: 0,
+            input_handler: TextInputHandler::new(),
             focus: FocusArea::Input,
             selected_button: 1, // Next button selected by default
             match_info: None,
@@ -72,8 +70,7 @@ impl SearchModal {
 
     /// Set initial input text (e.g., from previous search)
     pub fn set_input(&mut self, text: String) {
-        self.cursor_pos = text.chars().count();
-        self.input = text;
+        self.input_handler = TextInputHandler::with_default(text);
     }
 
     /// Calculate modal size
@@ -173,11 +170,12 @@ impl Modal for SearchModal {
         };
 
         // Draw input text
-        let visible_input = if self.input.len() as u16 > input_width {
-            let start = self.input.len().saturating_sub(input_width as usize);
-            &self.input[start..]
+        let input_text = self.input_handler.text();
+        let visible_input = if input_text.len() as u16 > input_width {
+            let start = input_text.len().saturating_sub(input_width as usize);
+            &input_text[start..]
         } else {
-            &self.input
+            input_text
         };
 
         buf.set_string(input_x, input_area.y, visible_input, input_style);
@@ -268,27 +266,27 @@ impl Modal for SearchModal {
                 // Tab - move to buttons / trigger next
                 (KeyCode::Tab, KeyModifiers::NONE) => {
                     // Trigger next search
-                    if !self.input.is_empty() {
+                    if !self.input_handler.is_empty() {
                         return Ok(Some(ModalResult::Confirmed(SearchModalResult {
-                            query: self.input.clone(),
+                            query: self.input_handler.text().to_string(),
                             action: SearchAction::Next,
                         })));
                     }
                 }
                 // Shift+Tab - trigger previous
                 (KeyCode::BackTab, _) => {
-                    if !self.input.is_empty() {
+                    if !self.input_handler.is_empty() {
                         return Ok(Some(ModalResult::Confirmed(SearchModalResult {
-                            query: self.input.clone(),
+                            query: self.input_handler.text().to_string(),
                             action: SearchAction::Previous,
                         })));
                     }
                 }
                 // Enter - close modal with selection
                 (KeyCode::Enter, KeyModifiers::NONE) => {
-                    if !self.input.is_empty() {
+                    if !self.input_handler.is_empty() {
                         return Ok(Some(ModalResult::Confirmed(SearchModalResult {
-                            query: self.input.clone(),
+                            query: self.input_handler.text().to_string(),
                             action: SearchAction::CloseWithSelection,
                         })));
                     }
@@ -299,36 +297,29 @@ impl Modal for SearchModal {
                 }
                 // F3 - next match
                 (KeyCode::F(3), KeyModifiers::NONE) => {
-                    if !self.input.is_empty() {
+                    if !self.input_handler.is_empty() {
                         return Ok(Some(ModalResult::Confirmed(SearchModalResult {
-                            query: self.input.clone(),
+                            query: self.input_handler.text().to_string(),
                             action: SearchAction::Next,
                         })));
                     }
                 }
                 // Shift+F3 - previous match
                 (KeyCode::F(3), KeyModifiers::SHIFT) => {
-                    if !self.input.is_empty() {
+                    if !self.input_handler.is_empty() {
                         return Ok(Some(ModalResult::Confirmed(SearchModalResult {
-                            query: self.input.clone(),
+                            query: self.input_handler.text().to_string(),
                             action: SearchAction::Previous,
                         })));
                     }
                 }
                 // Backspace - delete character
                 (KeyCode::Backspace, KeyModifiers::NONE) => {
-                    if self.cursor_pos > 0 {
-                        let chars: Vec<char> = self.input.chars().collect();
-                        self.input = chars[..self.cursor_pos - 1]
-                            .iter()
-                            .chain(chars[self.cursor_pos..].iter())
-                            .collect();
-                        self.cursor_pos -= 1;
-
+                    if self.input_handler.backspace() {
                         // Trigger live search
-                        if !self.input.is_empty() {
+                        if !self.input_handler.is_empty() {
                             return Ok(Some(ModalResult::Confirmed(SearchModalResult {
-                                query: self.input.clone(),
+                                query: self.input_handler.text().to_string(),
                                 action: SearchAction::Search,
                             })));
                         }
@@ -336,17 +327,11 @@ impl Modal for SearchModal {
                 }
                 // Delete - delete character at cursor
                 (KeyCode::Delete, KeyModifiers::NONE) => {
-                    let chars: Vec<char> = self.input.chars().collect();
-                    if self.cursor_pos < chars.len() {
-                        self.input = chars[..self.cursor_pos]
-                            .iter()
-                            .chain(chars[self.cursor_pos + 1..].iter())
-                            .collect();
-
+                    if self.input_handler.delete() {
                         // Trigger live search
-                        if !self.input.is_empty() {
+                        if !self.input_handler.is_empty() {
                             return Ok(Some(ModalResult::Confirmed(SearchModalResult {
-                                query: self.input.clone(),
+                                query: self.input_handler.text().to_string(),
                                 action: SearchAction::Search,
                             })));
                         }
@@ -354,38 +339,27 @@ impl Modal for SearchModal {
                 }
                 // Left - move cursor left
                 (KeyCode::Left, KeyModifiers::NONE) => {
-                    if self.cursor_pos > 0 {
-                        self.cursor_pos -= 1;
-                    }
+                    self.input_handler.move_left();
                 }
                 // Right - move cursor right
                 (KeyCode::Right, KeyModifiers::NONE) => {
-                    let chars_len = self.input.chars().count();
-                    if self.cursor_pos < chars_len {
-                        self.cursor_pos += 1;
-                    }
+                    self.input_handler.move_right();
                 }
                 // Home - move to start
                 (KeyCode::Home, KeyModifiers::NONE) => {
-                    self.cursor_pos = 0;
+                    self.input_handler.move_home();
                 }
                 // End - move to end
                 (KeyCode::End, KeyModifiers::NONE) => {
-                    self.cursor_pos = self.input.chars().count();
+                    self.input_handler.move_end();
                 }
                 // Character input - insert character and trigger live search
                 (KeyCode::Char(ch), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
-                    let chars: Vec<char> = self.input.chars().collect();
-                    self.input = chars[..self.cursor_pos]
-                        .iter()
-                        .chain(std::iter::once(&ch))
-                        .chain(chars[self.cursor_pos..].iter())
-                        .collect();
-                    self.cursor_pos += 1;
+                    self.input_handler.insert_char(ch);
 
                     // Trigger live search
                     return Ok(Some(ModalResult::Confirmed(SearchModalResult {
-                        query: self.input.clone(),
+                        query: self.input_handler.text().to_string(),
                         action: SearchAction::Search,
                     })));
                 }
@@ -427,13 +401,13 @@ impl Modal for SearchModal {
         for (area, idx) in &self.last_button_areas {
             if click_pos.0 >= area.x && click_pos.0 < area.x + area.width && click_pos.1 == area.y {
                 // Trigger corresponding action
-                if !self.input.is_empty() {
+                if !self.input_handler.is_empty() {
                     let action = match idx {
                         0 => SearchAction::Previous,
                         _ => SearchAction::Next,
                     };
                     return Ok(Some(ModalResult::Confirmed(SearchModalResult {
-                        query: self.input.clone(),
+                        query: self.input_handler.text().to_string(),
                         action,
                     })));
                 }

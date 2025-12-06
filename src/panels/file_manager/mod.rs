@@ -5,7 +5,7 @@ mod rendering;
 mod selection;
 mod utils;
 
-pub use file_info::{DiskSpaceInfo, FileInfo};
+pub use file_info::FileInfo;
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -17,8 +17,8 @@ use std::sync::mpsc;
 
 use super::Panel;
 use crate::git::{get_git_status, GitStatus, GitStatusCache};
-use crate::i18n;
 use crate::state::AppState;
+use crate::{i18n, path_utils};
 
 use crate::state::{ActiveModal, DirSizeResult, PendingAction};
 use crate::ui::modal::{ConfirmModal, InputModal};
@@ -518,7 +518,7 @@ impl Panel for FileManager {
 
                 let t = i18n::t();
                 let title = if paths.len() == 1 {
-                    let file_name = paths[0].file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                    let file_name = path_utils::get_file_name_str(&paths[0]);
                     t.modal_delete_single_title(file_name)
                 } else {
                     t.modal_delete_multiple_title(paths.len())
@@ -602,7 +602,7 @@ impl Panel for FileManager {
 
                 let t = i18n::t();
                 let message = if paths.len() == 1 {
-                    let name = paths[0].file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                    let name = path_utils::get_file_name_str(&paths[0]);
                     t.fm_copy_prompt(name)
                 } else {
                     format!("Copy {} items to:", paths.len())
@@ -625,7 +625,7 @@ impl Panel for FileManager {
 
                 let t = i18n::t();
                 let (message, default_dest) = if paths.len() == 1 {
-                    let name = paths[0].file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                    let name = path_utils::get_file_name_str(&paths[0]);
                     (t.fm_move_prompt(name), name.to_string())
                 } else {
                     (

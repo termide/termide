@@ -3,15 +3,9 @@
 
 use std::sync::OnceLock;
 
-pub mod de;
-pub mod en;
-pub mod es;
-pub mod fr;
-pub mod hi;
-pub mod pt;
-pub mod ru;
-pub mod th;
-pub mod zh;
+// TOML-based translation system
+pub mod loader;
+pub mod runtime;
 
 /// Global translation instance
 static TRANSLATION: OnceLock<Box<dyn Translation>> = OnceLock::new();
@@ -276,17 +270,15 @@ pub fn init_with_language(lang: &str) {
         lang.to_string()
     };
 
-    let translation: Box<dyn Translation> = match detected.as_str() {
-        "de" => Box::new(de::German),
-        "es" => Box::new(es::Spanish),
-        "fr" => Box::new(fr::French),
-        "hi" => Box::new(hi::Hindi),
-        "pt" => Box::new(pt::Portuguese),
-        "ru" => Box::new(ru::Russian),
-        "th" => Box::new(th::Thai),
-        "zh" => Box::new(zh::Chinese),
-        _ => Box::new(en::English),
-    };
+    // Load translations from TOML files via runtime system
+    let translation: Box<dyn Translation> = runtime::RuntimeTranslation::new(&detected)
+        .or_else(|e| {
+            eprintln!("Warning: Failed to load translations for '{}': {}", detected, e);
+            eprintln!("Falling back to English");
+            runtime::RuntimeTranslation::new("en")
+        })
+        .map(|rt| Box::new(rt) as Box<dyn Translation>)
+        .expect("Failed to load any translations, including English fallback. This is a critical error.");
 
     let _ = TRANSLATION.set(translation);
     let _ = CURRENT_LANGUAGE.set(detected);
@@ -329,7 +321,7 @@ pub fn t() -> &'static dyn Translation {
     TRANSLATION
         .get()
         .map(|b| b.as_ref())
-        .unwrap_or(&en::English)
+        .expect("Translation system not initialized. Call i18n::init() first.")
 }
 
 /// Get the current language code ("en", "ru", etc.)

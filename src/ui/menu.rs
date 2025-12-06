@@ -150,17 +150,3 @@ pub fn render_menu(frame: &mut Frame, area: Rect, state: &AppState) {
 
     frame.render_widget(menu, area);
 }
-
-/// Get X coordinate of menu item for dropdown positioning
-#[allow(dead_code)]
-pub fn get_menu_item_x(index: usize) -> u16 {
-    let menu_items = get_menu_items();
-    let mut x = 1_u16;
-    for (i, item) in menu_items.iter().enumerate() {
-        if i == index {
-            return x;
-        }
-        x += item.len() as u16 + 2; // +2 for spaces
-    }
-    x
-}

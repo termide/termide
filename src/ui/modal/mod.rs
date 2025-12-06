@@ -14,6 +14,7 @@ pub mod rename_pattern;
 pub mod replace;
 pub mod search;
 pub mod select;
+pub mod text_input;
 
 pub use confirm::ConfirmModal;
 pub use conflict::{ConflictModal, ConflictResolution};
@@ -25,6 +26,7 @@ pub use rename_pattern::RenamePatternModal;
 pub use replace::{ReplaceAction, ReplaceModal, ReplaceModalResult};
 pub use search::{SearchAction, SearchModal, SearchModalResult};
 pub use select::SelectModal;
+pub use text_input::TextInputHandler;
 
 /// Modal window result
 #[derive(Debug, Clone)]

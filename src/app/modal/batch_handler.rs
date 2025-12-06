@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use super::super::App;
 use crate::{
     i18n,
-    panels::file_manager::FileManager,
+    panels::PanelExt,
+    path_utils,
     state::{ActiveModal, BatchOperation, BatchOperationType, ConflictMode, PendingAction},
     ui::modal::ConflictModal,
 };
@@ -45,9 +46,7 @@ impl App {
             if let Some(destination_str) = value.downcast_ref::<String>() {
                 // Get FileManager panel to determine base path
                 if let Some(fm_panel) = self.get_first_file_manager_mut() {
-                    use std::any::Any;
-                    let panel_any: &mut dyn Any = &mut **fm_panel;
-                    if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
+                    if let Some(fm) = fm_panel.as_file_manager_mut() {
                         let destination = PathBuf::from(destination_str);
 
                         // If path is relative, make it absolute
@@ -123,30 +122,17 @@ impl App {
                 ConflictResolution::Overwrite => {
                     // Overwrite this file - execute operation directly
                     if let Some(source) = operation.current_source().cloned() {
-                        let item_name = source
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("?")
-                            .to_string();
+                        let item_name = path_utils::get_file_name_string(&source);
 
-                        // Determine target path
-                        let final_dest = if operation.destination.is_dir() {
-                            operation
-                                .destination
-                                .join(source.file_name().unwrap_or_default())
-                        } else if operation.sources.len() == 1 {
-                            operation.destination.clone()
-                        } else {
-                            operation
-                                .destination
-                                .join(source.file_name().unwrap_or_default())
-                        };
+                        let final_dest = path_utils::resolve_batch_destination_path(
+                            &source,
+                            &operation.destination,
+                            operation.sources.len() == 1,
+                        );
 
                         // Execute operation
                         if let Some(fm_panel) = self.get_first_file_manager_mut() {
-                            use std::any::Any;
-                            let panel_any: &mut dyn Any = &mut **fm_panel;
-                            if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
+                            if let Some(fm) = fm_panel.as_file_manager_mut() {
                                 let result = match operation.operation_type {
                                     BatchOperationType::Copy => {
                                         fm.copy_path(source.clone(), final_dest.clone())
@@ -208,11 +194,7 @@ impl App {
                 ConflictResolution::Rename => {
                     // Request rename pattern for single file
                     if let Some(source) = operation.current_source() {
-                        let original_name = source
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("?")
-                            .to_string();
+                        let original_name = path_utils::get_file_name_string(source);
 
                         // Get file metadata for preview
                         let metadata = source.metadata().ok();
@@ -240,11 +222,7 @@ impl App {
                 ConflictResolution::RenameAll => {
                     // Request rename pattern for all files
                     if let Some(source) = operation.current_source() {
-                        let original_name = source
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("?")
-                            .to_string();
+                        let original_name = path_utils::get_file_name_string(source);
 
                         // Get file metadata for preview
                         let metadata = source.metadata().ok();
@@ -279,8 +257,6 @@ impl App {
 
     /// Handle batch file operation (copy/move)
     pub(in crate::app) fn process_batch_operation(&mut self, mut operation: BatchOperation) {
-        use std::any::Any;
-
         // Check if operation is complete
         if operation.is_complete() {
             // Show final results
@@ -288,8 +264,7 @@ impl App {
 
             // Clear selection and refresh panel
             if let Some(fm_panel) = self.get_first_file_manager_mut() {
-                let panel_any: &mut dyn Any = &mut **fm_panel;
-                if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
+                if let Some(fm) = fm_panel.as_file_manager_mut() {
                     if operation.success_count > 0 {
                         fm.clear_selection();
                     }
@@ -316,11 +291,7 @@ impl App {
             return;
         };
 
-        let item_name = source
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("?")
-            .to_string();
+        let item_name = path_utils::get_file_name_string(&source);
 
         // Determine target path (considering rename pattern if set)
         let final_dest = if operation.rename_pattern.is_some() {
@@ -333,24 +304,14 @@ impl App {
             let pattern = operation.rename_pattern.as_ref().unwrap();
             let new_name = pattern.apply(&item_name, counter, created, modified);
 
-            if operation.destination.is_dir() {
-                operation.destination.join(&new_name)
-            } else {
-                operation.destination.with_file_name(&new_name)
-            }
+            path_utils::resolve_rename_destination_path(&operation.destination, &new_name)
         } else {
             // Standard logic without renaming
-            if operation.destination.is_dir() {
-                operation
-                    .destination
-                    .join(source.file_name().unwrap_or_default())
-            } else if operation.sources.len() == 1 {
-                operation.destination.clone()
-            } else {
-                operation
-                    .destination
-                    .join(source.file_name().unwrap_or_default())
-            }
+            path_utils::resolve_batch_destination_path(
+                &source,
+                &operation.destination,
+                operation.sources.len() == 1,
+            )
         };
 
         // Check conflict
@@ -384,8 +345,7 @@ impl App {
 
         // Execute operation
         if let Some(fm_panel) = self.get_first_file_manager_mut() {
-            let panel_any: &mut dyn Any = &mut **fm_panel;
-            if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
+            if let Some(fm) = fm_panel.as_file_manager_mut() {
                 let result = match operation.operation_type {
                     BatchOperationType::Copy => fm.copy_path(source.clone(), final_dest.clone()),
                     BatchOperationType::Move => fm.move_path(source.clone(), final_dest.clone()),
@@ -486,11 +446,10 @@ impl App {
                     let new_name = pattern.apply(&original_name, counter, created, modified);
 
                     // Create new destination path with new name
-                    let new_dest = if operation.destination.is_dir() {
-                        operation.destination.join(&new_name)
-                    } else {
-                        operation.destination.with_file_name(&new_name)
-                    };
+                    let new_dest = path_utils::resolve_rename_destination_path(
+                        &operation.destination,
+                        &new_name,
+                    );
 
                     // Check that new path doesn't conflict
                     if new_dest.exists() {

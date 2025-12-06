@@ -35,10 +35,7 @@ git checkout -b refactor-code-quality
 # Ensure clean working tree
 git status
 
-# Record baseline
-echo "Baseline metrics:" > refactor-log.txt
-find src -name "*.rs" -exec wc -l {} + | tail -1 >> refactor-log.txt
-cargo clippy 2>&1 | grep "warning:" | wc -l >> refactor-log.txt
+# Verify baseline metrics (displayed to user below)
 ```
 
 **Output to user**:
@@ -126,7 +123,7 @@ cargo test --all
 **Implementation**:
 ```bash
 # Get list of dead code warnings
-cargo check 2>&1 | grep "never used" > /tmp/dead-code.txt
+cargo check 2>&1 | grep "never used"
 
 # For each dead code item:
 # 1. Use Edit tool to remove the code
@@ -318,8 +315,8 @@ cargo bench 2>&1 | tee /tmp/bench-after-batch2.txt
 ╚════════════════════════════════════════════════════════════╝
 
 Risk: Medium-High
-Tasks: 4
-Estimated: 8 hours
+Tasks: 4-5 (includes optional file decomposition)
+Estimated: 8-12 hours (depending on decomposition scope)
 ```
 
 ### Critical Pre-Batch Steps
@@ -335,6 +332,152 @@ cargo test --all -- --test-threads=1
 # Verify all tests pass
 echo "Tests must be 100% passing before proceeding"
 ```
+
+### Task 3.0: File Decomposition (if applicable)
+
+**When to do this**: If file decomposition opportunities were identified in Phase 2 and prioritized in Phase 3.
+
+**Example**: Decompose src/editor/mod.rs (1847 LOC → 5 files)
+
+**Strategy**: Logical grouping - extract cursor, selection, rendering, and history logic
+
+**Step-by-step process**:
+
+```bash
+# Step 1: Create subdirectory for decomposed modules
+mkdir -p src/editor/
+
+# Step 2: Identify extraction targets
+# Read the large file and identify logical boundaries
+# Look for:
+# - Groups of related functions
+# - Large impl blocks
+# - Distinct responsibilities (cursor vs rendering vs history)
+
+# Step 3: Extract first module (e.g., cursor logic)
+# Create src/editor/cursor.rs with cursor-related code
+# Update imports in original file
+# Add pub mod cursor; to mod.rs
+
+# Step 4: Verify after each extraction
+cargo check
+cargo test editor::cursor
+
+# Step 5: Repeat for each module
+# - src/editor/selection.rs (selection management)
+# - src/editor/render.rs (rendering logic)
+# - src/editor/history.rs (undo/redo)
+
+# Step 6: Update main mod.rs with re-exports
+# pub mod cursor;
+# pub mod selection;
+# pub mod render;
+# pub mod history;
+#
+# pub use cursor::*;
+# pub use selection::*;
+# // etc.
+
+# Step 7: Update imports in dependent files
+grep -r "use.*editor::" src/ | # Find all editor imports
+# Update paths if needed (usually re-exports make this transparent)
+```
+
+**Example decomposition**:
+
+```rust
+// Before: src/editor/mod.rs (1847 LOC)
+pub struct Editor {
+    buffer: Buffer,
+    cursor: CursorState,
+    selection: Option<Selection>,
+    history: Vec<HistoryEntry>,
+    // ...
+}
+
+impl Editor {
+    // 400 LOC of cursor operations
+    pub fn move_cursor_up(&mut self) { ... }
+    pub fn move_cursor_down(&mut self) { ... }
+    // ...
+
+    // 350 LOC of selection operations
+    pub fn start_selection(&mut self) { ... }
+    pub fn extend_selection(&mut self) { ... }
+    // ...
+
+    // 450 LOC of rendering
+    pub fn render(&self) -> Vec<Line> { ... }
+    // ...
+
+    // 450 LOC of history/undo
+    pub fn undo(&mut self) { ... }
+    pub fn redo(&mut self) { ... }
+    // ...
+}
+
+// After: src/editor/mod.rs (200 LOC)
+pub mod cursor;
+pub mod selection;
+pub mod render;
+pub mod history;
+
+pub use cursor::CursorOps;
+pub use selection::SelectionOps;
+pub use render::Renderer;
+pub use history::History;
+
+pub struct Editor {
+    buffer: Buffer,
+    cursor: cursor::CursorState,
+    selection: Option<selection::Selection>,
+    history: history::History,
+}
+
+// Core impl only (orchestration)
+impl Editor {
+    pub fn new() -> Self { ... }
+    // Delegates to specialized modules
+}
+
+// src/editor/cursor.rs (400 LOC)
+pub struct CursorState { ... }
+pub trait CursorOps {
+    fn move_cursor_up(&mut self);
+    fn move_cursor_down(&mut self);
+    // ...
+}
+impl CursorOps for super::Editor { ... }
+
+// Similar for selection.rs, render.rs, history.rs
+```
+
+**Testing**:
+```bash
+# After each file extraction:
+cargo check  # Ensure it compiles
+cargo test editor  # Run all editor tests
+cargo test --all  # Ensure nothing broke elsewhere
+
+# Verify imports work correctly
+grep -r "use.*editor" src/ | # Check all uses still work
+```
+
+**Benefits**:
+- Reduces cognitive load (200 LOC vs 1847 LOC per file)
+- Improves code navigation and findability
+- Enables parallel development
+- Often reveals SRP violations (helps with subsequent SOLID fixes)
+
+**Estimated effort**: 2-4 hours depending on file complexity
+
+**Rollback**: If decomposition introduces issues:
+```bash
+git reset --hard checkpoint-before-batch3
+# Decomposition can be deferred to later batch or skipped
+```
+
+---
 
 ### Task 3.1: Extract FileSystem Trait
 

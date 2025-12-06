@@ -9,9 +9,10 @@ use ratatui::{
 };
 use std::time::SystemTime;
 
-use super::{Modal, ModalResult};
+use super::{Modal, ModalResult, TextInputHandler};
 use crate::rename_pattern::RenamePattern;
 use crate::theme::Theme;
+use crate::ui::centered_rect_with_size;
 
 /// Focus area in the modal
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,8 +26,7 @@ enum FocusArea {
 pub struct RenamePatternModal {
     title: String,
     original_name: String,
-    input: String,
-    cursor_position: usize,
+    input_handler: TextInputHandler,
     created: Option<SystemTime>,
     modified: Option<SystemTime>,
     focus: FocusArea,
@@ -46,8 +46,7 @@ impl RenamePatternModal {
         Self {
             title: title.to_string(),
             original_name: original_name.to_string(),
-            input: default.to_string(),
-            cursor_position: default.chars().count(),
+            input_handler: TextInputHandler::with_default(default),
             created,
             modified,
             focus: FocusArea::Input,
@@ -58,57 +57,23 @@ impl RenamePatternModal {
 
     /// Get result preview
     fn get_preview(&self) -> String {
-        if self.input.is_empty() {
+        if self.input_handler.is_empty() {
             return String::new();
         }
 
-        let pattern = RenamePattern::new(self.input.clone());
+        let pattern = RenamePattern::new(self.input_handler.text().to_string());
         pattern.apply(&self.original_name, 1, self.created, self.modified)
     }
 
     /// Check result validity
     fn is_valid(&self) -> bool {
-        if self.input.is_empty() {
+        if self.input_handler.is_empty() {
             return false;
         }
 
-        let pattern = RenamePattern::new(self.input.clone());
+        let pattern = RenamePattern::new(self.input_handler.text().to_string());
         let result = pattern.preview(&self.original_name);
         pattern.is_valid_result(&result)
-    }
-
-    /// Get byte index for cursor position (character-based)
-    fn byte_index(&self) -> usize {
-        self.input
-            .char_indices()
-            .nth(self.cursor_position)
-            .map(|(idx, _)| idx)
-            .unwrap_or(self.input.len())
-    }
-
-    /// Insert character at cursor position
-    fn insert_char(&mut self, c: char) {
-        let byte_idx = self.byte_index();
-        self.input.insert(byte_idx, c);
-        self.cursor_position += 1;
-    }
-
-    /// Delete character before cursor
-    fn delete_char(&mut self) {
-        if self.cursor_position > 0 {
-            self.cursor_position -= 1;
-            let byte_idx = self.byte_index();
-            self.input.remove(byte_idx);
-        }
-    }
-
-    /// Delete character under cursor
-    fn delete_char_forward(&mut self) {
-        let char_count = self.input.chars().count();
-        if self.cursor_position < char_count {
-            let byte_idx = self.byte_index();
-            self.input.remove(byte_idx);
-        }
     }
 
     fn get_help_lines(&self, theme: &Theme) -> Vec<Line<'static>> {
@@ -129,30 +94,6 @@ impl RenamePatternModal {
             )),
         ]
     }
-
-    /// Create a centered rectangle
-    fn centered_rect(width: u16, height: u16, r: Rect) -> Rect {
-        let horizontal_margin = r.width.saturating_sub(width) / 2;
-        let vertical_margin = r.height.saturating_sub(height) / 2;
-
-        let popup_layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(vertical_margin),
-                Constraint::Length(height),
-                Constraint::Length(vertical_margin),
-            ])
-            .split(r);
-
-        Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(horizontal_margin),
-                Constraint::Length(width),
-                Constraint::Length(horizontal_margin),
-            ])
-            .split(popup_layout[1])[1]
-    }
 }
 
 impl Modal for RenamePatternModal {
@@ -166,7 +107,7 @@ impl Modal for RenamePatternModal {
         let modal_height = 14;
         let modal_width = 70;
 
-        let modal_area = Self::centered_rect(modal_width, modal_height, area);
+        let modal_area = centered_rect_with_size(modal_width, modal_height, area);
         Clear.render(modal_area, buf);
 
         // Create block with inverted colors
@@ -210,13 +151,15 @@ impl Modal for RenamePatternModal {
         let input_area = input_block.inner(chunks[1]);
         input_block.render(chunks[1], buf);
 
-        let input_text = Paragraph::new(self.input.as_str()).style(Style::default().fg(theme.bg));
+        let input_text =
+            Paragraph::new(self.input_handler.text()).style(Style::default().fg(theme.bg));
         input_text.render(input_area, buf);
 
-        // Cursor (cursor_position is character index, not byte index)
-        let char_count = self.input.chars().count();
-        if self.cursor_position <= char_count {
-            let cursor_x = input_area.x + self.cursor_position as u16;
+        // Cursor
+        let cursor_pos = self.input_handler.cursor_pos();
+        let char_count = self.input_handler.text().chars().count();
+        if cursor_pos <= char_count {
+            let cursor_x = input_area.x + cursor_pos as u16;
             if cursor_x < input_area.right() {
                 buf[(cursor_x, input_area.y)].set_style(Style::default().bg(theme.fg).fg(theme.bg));
             }
@@ -292,56 +235,52 @@ impl Modal for RenamePatternModal {
                     }
                     KeyCode::Enter | KeyCode::Tab => {
                         if self.is_valid() {
-                            Ok(Some(ModalResult::Confirmed(self.input.clone())))
+                            Ok(Some(ModalResult::Confirmed(
+                                self.input_handler.text().to_string(),
+                            )))
                         } else {
                             Ok(None)
                         }
                     }
                     KeyCode::Left => {
-                        if self.cursor_position > 0 {
-                            self.cursor_position -= 1;
-                        }
+                        self.input_handler.move_left();
                         Ok(None)
                     }
                     KeyCode::Right => {
-                        let char_count = self.input.chars().count();
-                        if self.cursor_position < char_count {
-                            self.cursor_position += 1;
-                        }
+                        self.input_handler.move_right();
                         Ok(None)
                     }
                     KeyCode::Home => {
-                        self.cursor_position = 0;
+                        self.input_handler.move_home();
                         Ok(None)
                     }
                     KeyCode::End => {
-                        self.cursor_position = self.input.chars().count();
+                        self.input_handler.move_end();
                         Ok(None)
                     }
                     KeyCode::Backspace => {
-                        self.delete_char();
+                        self.input_handler.backspace();
                         Ok(None)
                     }
                     KeyCode::Delete => {
-                        self.delete_char_forward();
+                        self.input_handler.delete();
                         Ok(None)
                     }
                     KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        self.cursor_position = 0;
+                        self.input_handler.move_home();
                         Ok(None)
                     }
                     KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        self.cursor_position = self.input.chars().count();
+                        self.input_handler.move_end();
                         Ok(None)
                     }
                     KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        self.input.clear();
-                        self.cursor_position = 0;
+                        self.input_handler.clear();
                         Ok(None)
                     }
                     KeyCode::Char(c) => {
                         if !key.modifiers.contains(KeyModifiers::CONTROL) {
-                            self.insert_char(c);
+                            self.input_handler.insert_char(c);
                         }
                         Ok(None)
                     }
@@ -370,7 +309,9 @@ impl Modal for RenamePatternModal {
                         if self.selected_button == 0 {
                             // Continue button
                             if self.is_valid() {
-                                Ok(Some(ModalResult::Confirmed(self.input.clone())))
+                                Ok(Some(ModalResult::Confirmed(
+                                    self.input_handler.text().to_string(),
+                                )))
                             } else {
                                 Ok(None)
                             }
@@ -383,20 +324,20 @@ impl Modal for RenamePatternModal {
                         if !key.modifiers.contains(KeyModifiers::CONTROL) {
                             // Switch back to input and insert character
                             self.focus = FocusArea::Input;
-                            self.insert_char(c);
+                            self.input_handler.insert_char(c);
                         }
                         Ok(None)
                     }
                     KeyCode::Backspace => {
                         // Switch back to input and delete character
                         self.focus = FocusArea::Input;
-                        self.delete_char();
+                        self.input_handler.backspace();
                         Ok(None)
                     }
                     KeyCode::Delete => {
                         // Switch back to input and delete character forward
                         self.focus = FocusArea::Input;
-                        self.delete_char_forward();
+                        self.input_handler.delete();
                         Ok(None)
                     }
                     _ => Ok(None),
@@ -450,7 +391,9 @@ impl Modal for RenamePatternModal {
             self.selected_button = 0;
             // Execute Continue action
             if self.is_valid() {
-                Ok(Some(ModalResult::Confirmed(self.input.clone())))
+                Ok(Some(ModalResult::Confirmed(
+                    self.input_handler.text().to_string(),
+                )))
             } else {
                 Ok(None)
             }

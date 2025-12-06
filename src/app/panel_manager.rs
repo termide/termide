@@ -1,10 +1,7 @@
-use std::any::Any;
 use std::path::PathBuf;
 
 use super::App;
-use crate::panels::file_manager::FileManager;
-use crate::panels::welcome::Welcome;
-use crate::panels::Panel;
+use crate::panels::{welcome::Welcome, Panel, PanelExt};
 
 impl App {
     /// Close panel by index and switch focus to next visible panel
@@ -12,8 +9,7 @@ impl App {
     pub(super) fn close_panel_at_index(&mut self, _panel_index: usize) {
         // Before closing, cleanup temporary files if this is an unsaved editor
         if let Some(panel) = self.layout_manager.active_panel_mut() {
-            let panel_any: &mut dyn Any = &mut **panel;
-            if let Some(editor) = panel_any.downcast_mut::<crate::panels::editor::Editor>() {
+            if let Some(editor) = panel.as_editor_mut() {
                 // Check if editor has a temporary unsaved buffer file
                 if let Some(filename) = editor.unsaved_buffer_file() {
                     // Get session directory and delete the temporary file
@@ -44,8 +40,7 @@ impl App {
         // This is needed for example when closing .gitignore editor
         for group in &mut self.layout_manager.panel_groups {
             for panel in group.panels_mut() {
-                let panel_any: &mut dyn Any = &mut **panel;
-                if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
+                if let Some(fm) = panel.as_file_manager_mut() {
                     let _ = fm.reload();
                 }
             }
@@ -105,8 +100,7 @@ impl App {
         // Refresh all FileManager panels showing this directory
         for group in &mut self.layout_manager.panel_groups {
             for panel in group.panels_mut() {
-                let panel_any: &mut dyn Any = &mut **panel;
-                if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
+                if let Some(fm) = panel.as_file_manager_mut() {
                     // Check if FM working directory matches target
                     let fm_dir = fm.get_current_directory();
                     if fm_dir == directory {
@@ -122,8 +116,7 @@ impl App {
     pub(super) fn get_first_file_manager_mut(&mut self) -> Option<&mut Box<dyn Panel>> {
         for group in &mut self.layout_manager.panel_groups {
             for panel in group.panels_mut() {
-                let panel_any: &dyn Any = &**panel;
-                if panel_any.is::<FileManager>() {
+                if panel.as_file_manager().is_some() {
                     return Some(panel);
                 }
             }

@@ -8,7 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Widget},
 };
 
-use super::{Modal, ModalResult};
+use super::{Modal, ModalResult, TextInputHandler};
 use crate::theme::Theme;
 
 /// Replace modal result
@@ -45,10 +45,8 @@ enum FocusArea {
 /// Interactive replace modal with live preview and navigation
 #[derive(Debug)]
 pub struct ReplaceModal {
-    find_input: String,
-    find_cursor_pos: usize,
-    replace_input: String,
-    replace_cursor_pos: usize,
+    find_input_handler: TextInputHandler,
+    replace_input_handler: TextInputHandler,
     focus: FocusArea,
     selected_button: usize, // 0 = Replace, 1 = Replace All, 2 = Previous, 3 = Next
     /// Match count display (e.g. "3 of 12")
@@ -62,10 +60,8 @@ impl ReplaceModal {
     /// Create new replace modal
     pub fn new() -> Self {
         Self {
-            find_input: String::new(),
-            find_cursor_pos: 0,
-            replace_input: String::new(),
-            replace_cursor_pos: 0,
+            find_input_handler: TextInputHandler::new(),
+            replace_input_handler: TextInputHandler::new(),
             focus: FocusArea::FindInput,
             selected_button: 3, // Next button selected by default
             match_info: None,
@@ -81,14 +77,12 @@ impl ReplaceModal {
 
     /// Set initial find text (e.g., from previous replace)
     pub fn set_find_input(&mut self, text: String) {
-        self.find_cursor_pos = text.chars().count();
-        self.find_input = text;
+        self.find_input_handler = TextInputHandler::with_default(text);
     }
 
     /// Set initial replace text (e.g., from previous replace)
     pub fn set_replace_input(&mut self, text: String) {
-        self.replace_cursor_pos = text.chars().count();
-        self.replace_input = text;
+        self.replace_input_handler = TextInputHandler::with_default(text);
     }
 
     /// Calculate modal size
@@ -199,14 +193,14 @@ impl Modal for ReplaceModal {
         };
 
         // Draw find input text
-        let visible_find = if self.find_input.len() as u16 > find_input_width {
-            let start = self
-                .find_input
+        let find_input_text = self.find_input_handler.text();
+        let visible_find = if find_input_text.len() as u16 > find_input_width {
+            let start = find_input_text
                 .len()
                 .saturating_sub(find_input_width as usize);
-            &self.find_input[start..]
+            &find_input_text[start..]
         } else {
-            &self.find_input
+            find_input_text
         };
 
         buf.set_string(find_input_x, find_area.y, visible_find, find_input_style);
@@ -248,14 +242,14 @@ impl Modal for ReplaceModal {
         };
 
         // Draw replace input text
-        let visible_replace = if self.replace_input.len() as u16 > replace_input_width {
-            let start = self
-                .replace_input
+        let replace_input_text = self.replace_input_handler.text();
+        let visible_replace = if replace_input_text.len() as u16 > replace_input_width {
+            let start = replace_input_text
                 .len()
                 .saturating_sub(replace_input_width as usize);
-            &self.replace_input[start..]
+            &replace_input_text[start..]
         } else {
-            &self.replace_input
+            replace_input_text
         };
 
         buf.set_string(
@@ -385,7 +379,7 @@ impl Modal for ReplaceModal {
         for (area, idx) in &self.last_button_areas {
             if click_pos.0 >= area.x && click_pos.0 < area.x + area.width && click_pos.1 == area.y {
                 // Trigger corresponding action
-                if !self.find_input.is_empty() {
+                if !self.find_input_handler.is_empty() {
                     let action = match idx {
                         0 => ReplaceAction::Replace,
                         1 => ReplaceAction::ReplaceAll,
@@ -393,8 +387,8 @@ impl Modal for ReplaceModal {
                         _ => ReplaceAction::Next,
                     };
                     return Ok(Some(ModalResult::Confirmed(ReplaceModalResult {
-                        find_query: self.find_input.clone(),
-                        replace_with: self.replace_input.clone(),
+                        find_query: self.find_input_handler.text().to_string(),
+                        replace_with: self.replace_input_handler.text().to_string(),
                         action,
                     })));
                 }
@@ -413,11 +407,11 @@ impl ReplaceModal {
         match (key.code, key.modifiers) {
             // Tab - move to replace input / trigger next
             (KeyCode::Tab, KeyModifiers::NONE) => {
-                if !self.find_input.is_empty() {
+                if !self.find_input_handler.is_empty() {
                     // If there's text, navigate to next match
                     return Ok(Some(ModalResult::Confirmed(ReplaceModalResult {
-                        find_query: self.find_input.clone(),
-                        replace_with: self.replace_input.clone(),
+                        find_query: self.find_input_handler.text().to_string(),
+                        replace_with: self.replace_input_handler.text().to_string(),
                         action: ReplaceAction::Next,
                     })));
                 } else {
@@ -427,20 +421,20 @@ impl ReplaceModal {
             }
             // Shift+Tab - trigger previous
             (KeyCode::BackTab, _) => {
-                if !self.find_input.is_empty() {
+                if !self.find_input_handler.is_empty() {
                     return Ok(Some(ModalResult::Confirmed(ReplaceModalResult {
-                        find_query: self.find_input.clone(),
-                        replace_with: self.replace_input.clone(),
+                        find_query: self.find_input_handler.text().to_string(),
+                        replace_with: self.replace_input_handler.text().to_string(),
                         action: ReplaceAction::Previous,
                     })));
                 }
             }
             // Enter - replace current and move to next
             (KeyCode::Enter, KeyModifiers::NONE) => {
-                if !self.find_input.is_empty() {
+                if !self.find_input_handler.is_empty() {
                     return Ok(Some(ModalResult::Confirmed(ReplaceModalResult {
-                        find_query: self.find_input.clone(),
-                        replace_with: self.replace_input.clone(),
+                        find_query: self.find_input_handler.text().to_string(),
+                        replace_with: self.replace_input_handler.text().to_string(),
                         action: ReplaceAction::Replace,
                     })));
                 }
@@ -451,30 +445,30 @@ impl ReplaceModal {
             }
             // F3 - next match
             (KeyCode::F(3), KeyModifiers::NONE) => {
-                if !self.find_input.is_empty() {
+                if !self.find_input_handler.is_empty() {
                     return Ok(Some(ModalResult::Confirmed(ReplaceModalResult {
-                        find_query: self.find_input.clone(),
-                        replace_with: self.replace_input.clone(),
+                        find_query: self.find_input_handler.text().to_string(),
+                        replace_with: self.replace_input_handler.text().to_string(),
                         action: ReplaceAction::Next,
                     })));
                 }
             }
             // Shift+F3 - previous match
             (KeyCode::F(3), KeyModifiers::SHIFT) => {
-                if !self.find_input.is_empty() {
+                if !self.find_input_handler.is_empty() {
                     return Ok(Some(ModalResult::Confirmed(ReplaceModalResult {
-                        find_query: self.find_input.clone(),
-                        replace_with: self.replace_input.clone(),
+                        find_query: self.find_input_handler.text().to_string(),
+                        replace_with: self.replace_input_handler.text().to_string(),
                         action: ReplaceAction::Previous,
                     })));
                 }
             }
             // Ctrl+R - replace current
             (KeyCode::Char('r'), KeyModifiers::CONTROL) => {
-                if !self.find_input.is_empty() {
+                if !self.find_input_handler.is_empty() {
                     return Ok(Some(ModalResult::Confirmed(ReplaceModalResult {
-                        find_query: self.find_input.clone(),
-                        replace_with: self.replace_input.clone(),
+                        find_query: self.find_input_handler.text().to_string(),
+                        replace_with: self.replace_input_handler.text().to_string(),
                         action: ReplaceAction::Replace,
                     })));
                 }
@@ -484,29 +478,22 @@ impl ReplaceModal {
                 if modifiers.contains(KeyModifiers::CONTROL)
                     && modifiers.contains(KeyModifiers::ALT) =>
             {
-                if !self.find_input.is_empty() {
+                if !self.find_input_handler.is_empty() {
                     return Ok(Some(ModalResult::Confirmed(ReplaceModalResult {
-                        find_query: self.find_input.clone(),
-                        replace_with: self.replace_input.clone(),
+                        find_query: self.find_input_handler.text().to_string(),
+                        replace_with: self.replace_input_handler.text().to_string(),
                         action: ReplaceAction::ReplaceAll,
                     })));
                 }
             }
             // Backspace - delete character
             (KeyCode::Backspace, KeyModifiers::NONE) => {
-                if self.find_cursor_pos > 0 {
-                    let chars: Vec<char> = self.find_input.chars().collect();
-                    self.find_input = chars[..self.find_cursor_pos - 1]
-                        .iter()
-                        .chain(chars[self.find_cursor_pos..].iter())
-                        .collect();
-                    self.find_cursor_pos -= 1;
-
+                if self.find_input_handler.backspace() {
                     // Trigger live search
-                    if !self.find_input.is_empty() {
+                    if !self.find_input_handler.is_empty() {
                         return Ok(Some(ModalResult::Confirmed(ReplaceModalResult {
-                            find_query: self.find_input.clone(),
-                            replace_with: self.replace_input.clone(),
+                            find_query: self.find_input_handler.text().to_string(),
+                            replace_with: self.replace_input_handler.text().to_string(),
                             action: ReplaceAction::Search,
                         })));
                     }
@@ -514,18 +501,12 @@ impl ReplaceModal {
             }
             // Delete - delete character at cursor
             (KeyCode::Delete, KeyModifiers::NONE) => {
-                let chars: Vec<char> = self.find_input.chars().collect();
-                if self.find_cursor_pos < chars.len() {
-                    self.find_input = chars[..self.find_cursor_pos]
-                        .iter()
-                        .chain(chars[self.find_cursor_pos + 1..].iter())
-                        .collect();
-
+                if self.find_input_handler.delete() {
                     // Trigger live search
-                    if !self.find_input.is_empty() {
+                    if !self.find_input_handler.is_empty() {
                         return Ok(Some(ModalResult::Confirmed(ReplaceModalResult {
-                            find_query: self.find_input.clone(),
-                            replace_with: self.replace_input.clone(),
+                            find_query: self.find_input_handler.text().to_string(),
+                            replace_with: self.replace_input_handler.text().to_string(),
                             action: ReplaceAction::Search,
                         })));
                     }
@@ -533,24 +514,19 @@ impl ReplaceModal {
             }
             // Left - move cursor left
             (KeyCode::Left, KeyModifiers::NONE) => {
-                if self.find_cursor_pos > 0 {
-                    self.find_cursor_pos -= 1;
-                }
+                self.find_input_handler.move_left();
             }
             // Right - move cursor right
             (KeyCode::Right, KeyModifiers::NONE) => {
-                let chars_len = self.find_input.chars().count();
-                if self.find_cursor_pos < chars_len {
-                    self.find_cursor_pos += 1;
-                }
+                self.find_input_handler.move_right();
             }
             // Home - move to start
             (KeyCode::Home, KeyModifiers::NONE) => {
-                self.find_cursor_pos = 0;
+                self.find_input_handler.move_home();
             }
             // End - move to end
             (KeyCode::End, KeyModifiers::NONE) => {
-                self.find_cursor_pos = self.find_input.chars().count();
+                self.find_input_handler.move_end();
             }
             // Down - move to replace input
             (KeyCode::Down, KeyModifiers::NONE) => {
@@ -558,18 +534,12 @@ impl ReplaceModal {
             }
             // Character input - insert character and trigger live search
             (KeyCode::Char(ch), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
-                let chars: Vec<char> = self.find_input.chars().collect();
-                self.find_input = chars[..self.find_cursor_pos]
-                    .iter()
-                    .chain(std::iter::once(&ch))
-                    .chain(chars[self.find_cursor_pos..].iter())
-                    .collect();
-                self.find_cursor_pos += 1;
+                self.find_input_handler.insert_char(ch);
 
                 // Trigger live search
                 return Ok(Some(ModalResult::Confirmed(ReplaceModalResult {
-                    find_query: self.find_input.clone(),
-                    replace_with: self.replace_input.clone(),
+                    find_query: self.find_input_handler.text().to_string(),
+                    replace_with: self.replace_input_handler.text().to_string(),
                     action: ReplaceAction::Search,
                 })));
             }
@@ -594,10 +564,10 @@ impl ReplaceModal {
             }
             // Enter - replace current
             (KeyCode::Enter, KeyModifiers::NONE) => {
-                if !self.find_input.is_empty() {
+                if !self.find_input_handler.is_empty() {
                     return Ok(Some(ModalResult::Confirmed(ReplaceModalResult {
-                        find_query: self.find_input.clone(),
-                        replace_with: self.replace_input.clone(),
+                        find_query: self.find_input_handler.text().to_string(),
+                        replace_with: self.replace_input_handler.text().to_string(),
                         action: ReplaceAction::Replace,
                     })));
                 }
@@ -608,30 +578,30 @@ impl ReplaceModal {
             }
             // F3 - next match
             (KeyCode::F(3), KeyModifiers::NONE) => {
-                if !self.find_input.is_empty() {
+                if !self.find_input_handler.is_empty() {
                     return Ok(Some(ModalResult::Confirmed(ReplaceModalResult {
-                        find_query: self.find_input.clone(),
-                        replace_with: self.replace_input.clone(),
+                        find_query: self.find_input_handler.text().to_string(),
+                        replace_with: self.replace_input_handler.text().to_string(),
                         action: ReplaceAction::Next,
                     })));
                 }
             }
             // Shift+F3 - previous match
             (KeyCode::F(3), KeyModifiers::SHIFT) => {
-                if !self.find_input.is_empty() {
+                if !self.find_input_handler.is_empty() {
                     return Ok(Some(ModalResult::Confirmed(ReplaceModalResult {
-                        find_query: self.find_input.clone(),
-                        replace_with: self.replace_input.clone(),
+                        find_query: self.find_input_handler.text().to_string(),
+                        replace_with: self.replace_input_handler.text().to_string(),
                         action: ReplaceAction::Previous,
                     })));
                 }
             }
             // Ctrl+R - replace current
             (KeyCode::Char('r'), KeyModifiers::CONTROL) => {
-                if !self.find_input.is_empty() {
+                if !self.find_input_handler.is_empty() {
                     return Ok(Some(ModalResult::Confirmed(ReplaceModalResult {
-                        find_query: self.find_input.clone(),
-                        replace_with: self.replace_input.clone(),
+                        find_query: self.find_input_handler.text().to_string(),
+                        replace_with: self.replace_input_handler.text().to_string(),
                         action: ReplaceAction::Replace,
                     })));
                 }
@@ -641,55 +611,37 @@ impl ReplaceModal {
                 if modifiers.contains(KeyModifiers::CONTROL)
                     && modifiers.contains(KeyModifiers::ALT) =>
             {
-                if !self.find_input.is_empty() {
+                if !self.find_input_handler.is_empty() {
                     return Ok(Some(ModalResult::Confirmed(ReplaceModalResult {
-                        find_query: self.find_input.clone(),
-                        replace_with: self.replace_input.clone(),
+                        find_query: self.find_input_handler.text().to_string(),
+                        replace_with: self.replace_input_handler.text().to_string(),
                         action: ReplaceAction::ReplaceAll,
                     })));
                 }
             }
             // Backspace - delete character
             (KeyCode::Backspace, KeyModifiers::NONE) => {
-                if self.replace_cursor_pos > 0 {
-                    let chars: Vec<char> = self.replace_input.chars().collect();
-                    self.replace_input = chars[..self.replace_cursor_pos - 1]
-                        .iter()
-                        .chain(chars[self.replace_cursor_pos..].iter())
-                        .collect();
-                    self.replace_cursor_pos -= 1;
-                }
+                self.replace_input_handler.backspace();
             }
             // Delete - delete character at cursor
             (KeyCode::Delete, KeyModifiers::NONE) => {
-                let chars: Vec<char> = self.replace_input.chars().collect();
-                if self.replace_cursor_pos < chars.len() {
-                    self.replace_input = chars[..self.replace_cursor_pos]
-                        .iter()
-                        .chain(chars[self.replace_cursor_pos + 1..].iter())
-                        .collect();
-                }
+                self.replace_input_handler.delete();
             }
             // Left - move cursor left
             (KeyCode::Left, KeyModifiers::NONE) => {
-                if self.replace_cursor_pos > 0 {
-                    self.replace_cursor_pos -= 1;
-                }
+                self.replace_input_handler.move_left();
             }
             // Right - move cursor right
             (KeyCode::Right, KeyModifiers::NONE) => {
-                let chars_len = self.replace_input.chars().count();
-                if self.replace_cursor_pos < chars_len {
-                    self.replace_cursor_pos += 1;
-                }
+                self.replace_input_handler.move_right();
             }
             // Home - move to start
             (KeyCode::Home, KeyModifiers::NONE) => {
-                self.replace_cursor_pos = 0;
+                self.replace_input_handler.move_home();
             }
             // End - move to end
             (KeyCode::End, KeyModifiers::NONE) => {
-                self.replace_cursor_pos = self.replace_input.chars().count();
+                self.replace_input_handler.move_end();
             }
             // Up - move back to find input
             (KeyCode::Up, KeyModifiers::NONE) => {
@@ -701,13 +653,7 @@ impl ReplaceModal {
             }
             // Character input - insert character (no live search trigger)
             (KeyCode::Char(ch), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
-                let chars: Vec<char> = self.replace_input.chars().collect();
-                self.replace_input = chars[..self.replace_cursor_pos]
-                    .iter()
-                    .chain(std::iter::once(&ch))
-                    .chain(chars[self.replace_cursor_pos..].iter())
-                    .collect();
-                self.replace_cursor_pos += 1;
+                self.replace_input_handler.insert_char(ch);
             }
             _ => {}
         }
@@ -730,7 +676,7 @@ impl ReplaceModal {
                 self.focus = FocusArea::ReplaceInput;
             }
             KeyCode::Enter => {
-                if !self.find_input.is_empty() {
+                if !self.find_input_handler.is_empty() {
                     let action = match self.selected_button {
                         0 => ReplaceAction::Replace,
                         1 => ReplaceAction::ReplaceAll,
@@ -738,8 +684,8 @@ impl ReplaceModal {
                         _ => ReplaceAction::Next,
                     };
                     return Ok(Some(ModalResult::Confirmed(ReplaceModalResult {
-                        find_query: self.find_input.clone(),
-                        replace_with: self.replace_input.clone(),
+                        find_query: self.find_input_handler.text().to_string(),
+                        replace_with: self.replace_input_handler.text().to_string(),
                         action,
                     })));
                 }

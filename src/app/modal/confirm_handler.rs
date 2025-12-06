@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 use super::super::App;
-use crate::{i18n, panels::file_manager::FileManager};
+use crate::{i18n, panels::PanelExt, path_utils};
 
 impl App {
     /// Handle deletion of files/directories
@@ -17,17 +17,14 @@ impl App {
                 // Get FileManager and delete files/directories
                 let (success_count, error_count, total_count) = {
                     if let Some(fm_panel) = self.get_first_file_manager_mut() {
-                        use std::any::Any;
-                        let panel_any: &mut dyn Any = &mut **fm_panel;
-                        if let Some(fm) = panel_any.downcast_mut::<FileManager>() {
+                        if let Some(fm) = fm_panel.as_file_manager_mut() {
                             let mut success_count = 0;
                             let mut error_count = 0;
                             let total_count = paths.len();
 
                             // Delete each file/directory
                             for path in &paths {
-                                let item_name =
-                                    path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                                let item_name = path_utils::get_file_name_str(path);
                                 let is_dir = path.is_dir();
 
                                 crate::logger::info(format!(
