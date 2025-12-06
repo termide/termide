@@ -399,11 +399,38 @@ impl Editor {
 
     /// Ensure preferred column is set for vertical navigation.
     ///
-    /// Sets preferred_column to current column if not already set.
+    /// Sets preferred_column to visual offset within current visual row if not already set.
     /// Used by visual movement methods to maintain column across wrapped lines.
     fn ensure_preferred_column(&mut self) {
         if self.preferred_column.is_none() {
-            self.preferred_column = Some(self.cursor.column);
+            // Calculate visual offset (position within current visual row)
+            let visual_offset = if self.cached_content_width > 0 {
+                if let Some(line_text) = self.buffer.line(self.cursor.line) {
+                    let line_text = line_text.trim_end_matches('\n');
+                    let line_len = line_text.chars().count();
+                    let cursor_col = self.cursor.column.min(line_len);
+                    let (_visual_rows, wrap_points) = word_wrap::get_line_wrap_points(
+                        line_text,
+                        self.cached_content_width,
+                        self.cached_use_smart_wrap,
+                    );
+                    let current_visual_row =
+                        wrap_points.iter().filter(|&&wp| wp <= cursor_col).count();
+                    let visual_row_start = if current_visual_row == 0 {
+                        0
+                    } else if current_visual_row - 1 < wrap_points.len() {
+                        wrap_points[current_visual_row - 1]
+                    } else {
+                        0
+                    };
+                    cursor_col.saturating_sub(visual_row_start)
+                } else {
+                    self.cursor.column
+                }
+            } else {
+                self.cursor.column
+            };
+            self.preferred_column = Some(visual_offset);
         }
     }
 
@@ -452,7 +479,6 @@ impl Editor {
     /// Move cursor up by one visual line (accounting for word wrap)
     pub(super) fn move_cursor_up_visual(&mut self) {
         if self.cached_content_width == 0 {
-            // No word wrap or width not set - fall back to physical line movement
             self.move_cursor_up();
             return;
         }
@@ -475,7 +501,6 @@ impl Editor {
     /// Move cursor down by one visual line (accounting for word wrap)
     pub(super) fn move_cursor_down_visual(&mut self) {
         if self.cached_content_width == 0 {
-            // No word wrap or width not set - fall back to physical line movement
             self.move_cursor_down();
             return;
         }
@@ -690,6 +715,7 @@ impl Editor {
         {
             self.cursor = new_cursor;
             self.selection = None;
+            self.preferred_column = None; // Reset preferred column on text edit
 
             // Invalidate highlighting cache
             selection::invalidate_cache_after_deletion(
@@ -737,6 +763,7 @@ impl Editor {
             clipboard::paste_from_clipboard(&mut self.buffer, &self.cursor)?
         {
             self.cursor = new_cursor;
+            self.preferred_column = None; // Reset preferred column on text edit
             self.clamp_cursor();
 
             // Invalidate highlighting cache and schedule git update
@@ -751,6 +778,7 @@ impl Editor {
             text_editing::duplicate_line(&mut self.buffer, &self.cursor, self.selection.as_ref())?;
 
         self.cursor = result.new_cursor;
+        self.preferred_column = None; // Reset preferred column on text edit
         self.clamp_cursor();
 
         // Clear selection
@@ -777,6 +805,7 @@ impl Editor {
 
         let result = text_editing::insert_char(&mut self.buffer, &self.cursor, ch)?;
         self.cursor = result.new_cursor;
+        self.preferred_column = None;
         self.clamp_cursor();
 
         // Invalidate highlighting cache and schedule git update
@@ -795,6 +824,7 @@ impl Editor {
 
         let result = text_editing::insert_newline(&mut self.buffer, &self.cursor)?;
         self.cursor = result.new_cursor;
+        self.preferred_column = None; // Reset preferred column on text edit
         self.clamp_cursor();
 
         // Invalidate highlighting cache and schedule git update
@@ -807,6 +837,7 @@ impl Editor {
     pub(super) fn backspace(&mut self) -> Result<()> {
         if let Some(result) = text_editing::backspace(&mut self.buffer, &self.cursor)? {
             self.cursor = result.new_cursor;
+            self.preferred_column = None; // Reset preferred column on text edit
             self.clamp_cursor();
 
             // Invalidate highlighting cache and schedule git update
@@ -818,13 +849,79 @@ impl Editor {
     /// Delete character (delete)
     pub(super) fn delete(&mut self) -> Result<()> {
         if let Some(result) = text_editing::delete_char(&mut self.buffer, &self.cursor)? {
-            // Invalidate highlighting cache and schedule git update
+            self.preferred_column = None; // Reset preferred column on text edit
+                                          // Invalidate highlighting cache and schedule git update
             self.invalidate_cache_after_edit(result.start_line, result.is_multiline);
         }
         Ok(())
     }
 
     // Git methods moved to git module
+
+    /// Ensure cursor is visible when word wrap is enabled.
+    /// This is more complex than the standard ensure_cursor_visible because we need
+    /// to work with visual rows, not physical lines.
+    fn ensure_cursor_visible_word_wrap(&mut self, content_height: usize) {
+        if content_height == 0 || self.cached_content_width == 0 {
+            return;
+        }
+
+        // First, handle the case where cursor is above viewport (physical line check)
+        if self.cursor.line < self.viewport.top_line {
+            self.viewport.top_line = self.cursor.line;
+        }
+
+        // Calculate the visual row of the cursor relative to viewport.top_line
+        let cursor_visual_row = word_wrap::calculate_visual_row_for_cursor(
+            &self.buffer,
+            self.cursor.line,
+            self.cursor.column,
+            self.viewport.top_line,
+            self.cached_content_width,
+            self.config.word_wrap,
+            self.cached_use_smart_wrap,
+        );
+
+        // If cursor is below the visible area, scroll down
+        if cursor_visual_row >= content_height {
+            // We need to increase top_line until cursor fits in view
+            // Iterate: increase top_line and recalculate cursor_visual_row
+            while self.viewport.top_line < self.cursor.line {
+                self.viewport.top_line += 1;
+
+                let new_visual_row = word_wrap::calculate_visual_row_for_cursor(
+                    &self.buffer,
+                    self.cursor.line,
+                    self.cursor.column,
+                    self.viewport.top_line,
+                    self.cached_content_width,
+                    self.config.word_wrap,
+                    self.cached_use_smart_wrap,
+                );
+
+                // Stop when cursor is at the bottom of viewport
+                if new_visual_row < content_height {
+                    break;
+                }
+            }
+
+            // Edge case: cursor line itself is longer than viewport height
+            // In this case, ensure the visual row containing cursor is visible
+            if self.viewport.top_line == self.cursor.line {
+                // The cursor is on a line that starts at top_line
+                // But the cursor column might be on a wrapped visual row
+                // We've already done what we can - the line is at the top
+            }
+        }
+
+        // Also handle horizontal scroll for non-word-wrap scenarios
+        // (word wrap shouldn't need horizontal scroll, but just in case)
+        if self.cursor.column < self.viewport.left_column {
+            self.viewport.left_column = self.cursor.column;
+        } else if self.cursor.column >= self.viewport.right_column() {
+            self.viewport.left_column = self.cursor.column.saturating_sub(self.viewport.width - 1);
+        }
+    }
 
     /// Get the total count of virtual lines (real buffer lines + deletion marker lines + word wrap)
     /// This is used for viewport calculations to account for deletion markers and word wrapping
@@ -896,21 +993,27 @@ impl Editor {
 
         self.viewport.resize(content_width, content_height);
 
-        // Compute and cache virtual line count for viewport calculations
-        let virtual_lines_total = self.virtual_line_count(config);
-        self.cached_virtual_line_count = virtual_lines_total;
-
-        // Ensure cursor is visible (using virtual line count to account for deletion markers)
-        self.viewport
-            .ensure_cursor_visible(&self.cursor, virtual_lines_total);
-
-        // Determine smart wrap setting
+        // Determine smart wrap setting early (needed for ensure_cursor_visible_word_wrap)
         let use_smart_wrap = if self.config.word_wrap && content_width > 0 {
             self.should_use_smart_wrap(config)
         } else {
             false
         };
         self.cached_use_smart_wrap = use_smart_wrap;
+
+        // Compute and cache virtual line count for viewport calculations
+        let virtual_lines_total = self.virtual_line_count(config);
+        self.cached_virtual_line_count = virtual_lines_total;
+
+        // Ensure cursor is visible
+        if self.config.word_wrap && content_width > 0 {
+            // Word wrap mode: use visual row-aware scrolling
+            self.ensure_cursor_visible_word_wrap(content_height);
+        } else {
+            // Standard mode: use physical line scrolling
+            self.viewport
+                .ensure_cursor_visible(&self.cursor, virtual_lines_total);
+        }
 
         // Delegate to rendering orchestrator
         rendering::render_editor_content(

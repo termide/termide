@@ -111,6 +111,45 @@ impl Debug {
         Self { scroll_offset: 0 }
     }
 
+    /// Calculate the entry offset needed to show the last messages that fit in height.
+    /// Returns the entry index to start from for auto-scroll.
+    fn calculate_autoscroll_offset(&self, width: usize, height: usize) -> usize {
+        let entries = crate::logger::get_entries();
+        if entries.is_empty() || height == 0 {
+            return 0;
+        }
+
+        // Prefix width: "[HH:MM:SS] LEVEL " = 11 + 5 + 1 = 17 characters
+        const PREFIX_WIDTH: usize = 17;
+        let message_width = if width > PREFIX_WIDTH {
+            width.saturating_sub(PREFIX_WIDTH)
+        } else {
+            width
+        };
+
+        // Calculate visual lines for each entry
+        let mut visual_lines_per_entry: Vec<usize> = Vec::with_capacity(entries.len());
+        for entry in entries.iter() {
+            let wrapped = wrap_message_with_indent(&entry.message, message_width, 0);
+            visual_lines_per_entry.push(wrapped.len());
+        }
+
+        // Find the first entry such that all entries from it to the end fit in height
+        // Go backwards from the end, accumulating visual lines
+        let mut accumulated = 0;
+        let mut start_idx = entries.len();
+
+        for (idx, &lines) in visual_lines_per_entry.iter().enumerate().rev() {
+            if accumulated + lines > height {
+                break;
+            }
+            accumulated += lines;
+            start_idx = idx;
+        }
+
+        start_idx
+    }
+
     /// Get log lines for display with word wrapping
     fn get_log_lines(&self, state: &AppState, height: usize, width: usize) -> Vec<Line<'static>> {
         let entries = crate::logger::get_entries();
@@ -206,13 +245,14 @@ impl Panel for Debug {
         // area is already the inner content area (accordion drew outer border)
         let content_height = area.height as usize;
         let content_width = area.width as usize;
-        let log_lines = self.get_log_lines(state, content_height, content_width);
 
         // Auto-scroll to last messages if not manually scrolled
-        let total_entries = crate::logger::get_entries().len();
-        if total_entries > content_height && self.scroll_offset == 0 {
-            self.scroll_offset = total_entries.saturating_sub(content_height);
+        // Must happen BEFORE get_log_lines() so the correct offset is used
+        if self.scroll_offset == 0 {
+            self.scroll_offset = self.calculate_autoscroll_offset(content_width, content_height);
         }
+
+        let log_lines = self.get_log_lines(state, content_height, content_width);
 
         // Render log content directly (accordion already drew border with title/buttons)
         // No need for .wrap() since we manually wrap in get_log_lines()

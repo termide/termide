@@ -212,20 +212,6 @@ impl Config {
         }
         Ok(())
     }
-
-    /// Get path to log file
-    /// If specified in config, use it; otherwise use XDG cache directory
-    pub fn get_log_file_path(&self) -> PathBuf {
-        if let Some(ref path) = self.log_file_path {
-            PathBuf::from(path)
-        } else {
-            // By default use XDG cache directory (~/.cache/termide on Linux)
-            crate::xdg_dirs::get_cache_dir()
-                .map(|dir| dir.join("termide.log"))
-                .unwrap_or_else(|_| std::env::temp_dir().join("termide.log"))
-        }
-    }
-
     /// Get path to config file (public version)
     pub fn config_file_path() -> Result<PathBuf> {
         Self::get_config_path()

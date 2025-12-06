@@ -341,17 +341,10 @@ impl AppState {
             main_panel_width: crate::constants::DEFAULT_MAIN_PANEL_WIDTH,
         };
 
-        // Initialize global logger
-        let log_file_path = config.get_log_file_path();
-        let min_log_level = crate::logger::LogLevel::from_str(&config.min_log_level)
-            .unwrap_or(crate::logger::LogLevel::Info);
-        crate::logger::init(
-            log_file_path,
-            crate::constants::MAX_LOG_ENTRIES,
-            min_log_level,
-        );
+        // Note: Logger is initialized in App::new() after project_root is known,
+        // so logs go to session directory
 
-        let state = Self {
+        Self {
             should_quit: false,
             ui: UiState::default(),
             terminal: TerminalState::default(),
@@ -369,10 +362,7 @@ impl AppState {
             system_monitor: crate::system_monitor::SystemMonitor::new(),
             last_resource_update: std::time::Instant::now(),
             last_session_save: None,
-        };
-
-        crate::logger::info("Application started");
-        state
+        }
     }
 
     /// Set new theme and update config

@@ -123,6 +123,51 @@ pub fn generate_unsaved_filename() -> String {
     format!("unsaved-{}-{:03}.txt", now.format("%Y%m%d-%H%M%S"), millis)
 }
 
+/// Generate a unique filename for session log
+///
+/// Format: session-YYYYMMDD-HHMMSS-MSC.log
+/// Example: session-20251206-143022-456.log
+pub fn generate_log_filename() -> String {
+    let now = Local::now();
+    let millis = now.timestamp_subsec_millis();
+    format!("session-{}-{:03}.log", now.format("%Y%m%d-%H%M%S"), millis)
+}
+
+/// Cleanup old log files in session directory
+///
+/// Removes log files (session-*.log) that haven't been modified for more than 24 hours.
+/// Uses modification time (not creation time) so active long-running sessions keep their logs.
+pub fn cleanup_old_logs(session_dir: &Path) -> Result<()> {
+    if !session_dir.exists() {
+        return Ok(());
+    }
+
+    let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(24 * 60 * 60);
+
+    let entries = match fs::read_dir(session_dir) {
+        Ok(entries) => entries,
+        Err(_) => return Ok(()),
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+            if filename.starts_with("session-") && filename.ends_with(".log") {
+                if let Ok(metadata) = path.metadata() {
+                    // Check last modification time - active sessions keep updating their logs
+                    if let Ok(modified) = metadata.modified() {
+                        if modified < cutoff {
+                            let _ = fs::remove_file(&path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Save unsaved buffer content to a temporary file
 pub fn save_unsaved_buffer(session_dir: &Path, filename: &str, content: &str) -> Result<()> {
     let buffer_path = session_dir.join(filename);

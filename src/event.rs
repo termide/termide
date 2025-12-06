@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crossterm::event::{self, Event as CrosstermEvent, KeyEvent, MouseEvent};
+use crossterm::event::{self, Event as CrosstermEvent, KeyEvent, KeyEventKind, MouseEvent};
 use std::time::Duration;
 
 /// Application event
@@ -34,7 +34,10 @@ impl EventHandler {
     pub fn next(&self) -> Result<Event> {
         if event::poll(self.tick_rate)? {
             match event::read()? {
-                CrosstermEvent::Key(key) => Ok(Event::Key(key)),
+                // With kitty keyboard protocol, we receive Press, Release, and Repeat events.
+                // Only handle Press events to avoid duplicate actions.
+                CrosstermEvent::Key(key) if key.kind == KeyEventKind::Press => Ok(Event::Key(key)),
+                CrosstermEvent::Key(_) => Ok(Event::Tick), // Ignore Release and Repeat
                 CrosstermEvent::Mouse(mouse) => Ok(Event::Mouse(mouse)),
                 CrosstermEvent::Resize(width, height) => Ok(Event::Resize(width, height)),
                 CrosstermEvent::FocusLost => Ok(Event::FocusLost),

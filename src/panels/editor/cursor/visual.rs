@@ -28,24 +28,24 @@ fn get_visual_row_bounds(
     (start, end)
 }
 
-/// Clamp column to visual row bounds, respecting preferred column.
-fn clamp_to_visual_row(
+/// Calculate column position within visual row bounds.
+///
+/// `preferred_col` is the visual offset (position within a visual row, 0-based).
+/// Returns absolute column = visual_row_start + preferred_col, clamped to row bounds.
+fn column_in_visual_row(
     preferred_col: usize,
     visual_row_start: usize,
     visual_row_end: usize,
 ) -> usize {
-    if preferred_col < visual_row_start {
-        visual_row_start
-    } else if preferred_col >= visual_row_end {
-        visual_row_end.saturating_sub(1).max(visual_row_start)
-    } else {
-        preferred_col
-    }
+    let visual_row_width = visual_row_end.saturating_sub(visual_row_start);
+    let offset = preferred_col.min(visual_row_width.saturating_sub(1));
+    visual_row_start + offset
 }
 
 /// Move cursor up by one visual line.
 ///
 /// Returns new cursor position if movement occurred, None otherwise.
+/// `preferred_column` is the visual offset within a visual row (0-based).
 pub fn move_up(
     cursor: &Cursor,
     buffer: &TextBuffer,
@@ -53,7 +53,22 @@ pub fn move_up(
     content_width: usize,
     use_smart_wrap: bool,
 ) -> Option<Cursor> {
-    let preferred_col = preferred_column.unwrap_or(cursor.column);
+    // Calculate visual offset from current position if not provided
+    let visual_offset = preferred_column.unwrap_or_else(|| {
+        if let Some(line_text) = buffer.line(cursor.line) {
+            let line_text = line_text.trim_end_matches('\n');
+            let line_len = line_text.chars().count();
+            let cursor_col = cursor.column.min(line_len);
+            let (_visual_rows, wrap_points) =
+                word_wrap::get_line_wrap_points(line_text, content_width, use_smart_wrap);
+            let current_visual_row = wrap_points.iter().filter(|&&wp| wp <= cursor_col).count();
+            let (visual_row_start, _) =
+                get_visual_row_bounds(current_visual_row, &wrap_points, line_len);
+            cursor_col.saturating_sub(visual_row_start)
+        } else {
+            cursor.column
+        }
+    });
 
     // Try to move within current line first
     if let Some(line_text) = buffer.line(cursor.line) {
@@ -71,7 +86,7 @@ pub fn move_up(
             let target_visual_row = current_visual_row - 1;
             let (visual_row_start, visual_row_end) =
                 get_visual_row_bounds(target_visual_row, &wrap_points, line_len);
-            let new_col = clamp_to_visual_row(preferred_col, visual_row_start, visual_row_end);
+            let new_col = column_in_visual_row(visual_offset, visual_row_start, visual_row_end);
             return Some(Cursor::at(cursor.line, new_col));
         }
     }
@@ -94,7 +109,7 @@ pub fn move_up(
 
             let (visual_row_start, visual_row_end) =
                 get_visual_row_bounds(last_visual_row, &wrap_points, line_len);
-            let new_col = clamp_to_visual_row(preferred_col, visual_row_start, visual_row_end);
+            let new_col = column_in_visual_row(visual_offset, visual_row_start, visual_row_end);
             return Some(Cursor::at(new_line, new_col));
         }
     }
@@ -105,6 +120,7 @@ pub fn move_up(
 /// Move cursor down by one visual line.
 ///
 /// Returns new cursor position if movement occurred, None otherwise.
+/// `preferred_column` is the visual offset within a visual row (0-based).
 pub fn move_down(
     cursor: &Cursor,
     buffer: &TextBuffer,
@@ -112,7 +128,22 @@ pub fn move_down(
     content_width: usize,
     use_smart_wrap: bool,
 ) -> Option<Cursor> {
-    let preferred_col = preferred_column.unwrap_or(cursor.column);
+    // Calculate visual offset from current position if not provided
+    let visual_offset = preferred_column.unwrap_or_else(|| {
+        if let Some(line_text) = buffer.line(cursor.line) {
+            let line_text = line_text.trim_end_matches('\n');
+            let line_len = line_text.chars().count();
+            let cursor_col = cursor.column.min(line_len);
+            let (_visual_rows, wrap_points) =
+                word_wrap::get_line_wrap_points(line_text, content_width, use_smart_wrap);
+            let current_visual_row = wrap_points.iter().filter(|&&wp| wp <= cursor_col).count();
+            let (visual_row_start, _) =
+                get_visual_row_bounds(current_visual_row, &wrap_points, line_len);
+            cursor_col.saturating_sub(visual_row_start)
+        } else {
+            cursor.column
+        }
+    });
 
     // Try to move within current line first
     if let Some(line_text) = buffer.line(cursor.line) {
@@ -130,7 +161,7 @@ pub fn move_down(
             let target_visual_row = current_visual_row + 1;
             let (visual_row_start, visual_row_end) =
                 get_visual_row_bounds(target_visual_row, &wrap_points, line_len);
-            let new_col = clamp_to_visual_row(preferred_col, visual_row_start, visual_row_end);
+            let new_col = column_in_visual_row(visual_offset, visual_row_start, visual_row_end);
             return Some(Cursor::at(cursor.line, new_col));
         }
     }
@@ -158,7 +189,7 @@ pub fn move_down(
                 line_len
             };
 
-            let new_col = clamp_to_visual_row(preferred_col, 0, visual_row_end);
+            let new_col = column_in_visual_row(visual_offset, 0, visual_row_end);
             return Some(Cursor::at(new_line, new_col));
         }
     }
@@ -217,7 +248,15 @@ pub fn move_to_visual_line_end(
 
         // Get end of this visual row
         let (_, visual_row_end) = get_visual_row_bounds(current_visual_row, &wrap_points, line_len);
-        return visual_row_end;
+
+        // For non-last visual rows, visual_row_end is the wrap point (first char of next row),
+        // so we need to return the position before it
+        let is_last_visual_row = current_visual_row >= wrap_points.len();
+        if is_last_visual_row {
+            return visual_row_end; // Last visual row — end of physical line
+        } else {
+            return visual_row_end.saturating_sub(1); // Before wrap point
+        }
     }
 
     0

@@ -1,6 +1,6 @@
 use chrono::Local;
 use std::collections::VecDeque;
-use std::fs::OpenOptions;
+use std::fs::{self, OpenOptions};
 use std::io::Write as IoWrite;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
@@ -64,6 +64,11 @@ struct Logger {
 impl Logger {
     /// Create new logger instance
     fn new(file_path: PathBuf, max_entries: usize, min_level: LogLevel) -> Self {
+        // Create parent directory if it doesn't exist
+        if let Some(parent) = file_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+
         // Clear log file on startup
         if let Ok(mut file) = OpenOptions::new()
             .write(true)
@@ -104,8 +109,12 @@ impl Logger {
             self.entries.pop_front();
         }
 
-        // Write to file
-        if let Ok(mut file) = OpenOptions::new().append(true).open(&self.file_path) {
+        // Write to file (create if deleted)
+        if let Ok(mut file) = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&self.file_path)
+        {
             let _ = writeln!(file, "[{}] {}: {}", timestamp, level.to_str(), message);
         }
     }

@@ -30,12 +30,42 @@ impl App {
     pub fn new() -> Self {
         let mut state = AppState::new();
 
+        // Get project root from current working directory
+        let project_root = std::env::current_dir().unwrap_or_else(|_| {
+            // Fallback to home directory if current_dir fails
+            dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"))
+        });
+
+        // Initialize logger in session directory (before other initializations that log)
+        // Use config override if specified, otherwise use session directory with unique filename
+        let log_file_path = if let Some(ref path) = state.config.log_file_path {
+            std::path::PathBuf::from(path)
+        } else {
+            crate::session::Session::get_session_dir(&project_root)
+                .map(|dir| {
+                    // Cleanup old log files (older than 24 hours)
+                    let _ = crate::session::cleanup_old_logs(&dir);
+                    dir.join(crate::session::generate_log_filename())
+                })
+                .unwrap_or_else(|_| {
+                    std::env::temp_dir().join(crate::session::generate_log_filename())
+                })
+        };
+        let min_log_level = crate::logger::LogLevel::from_str(&state.config.min_log_level)
+            .unwrap_or(crate::logger::LogLevel::Info);
+        crate::logger::init(
+            log_file_path,
+            crate::constants::MAX_LOG_ENTRIES,
+            min_log_level,
+        );
+        crate::logger::info("Application started");
+
         // Initialize git watcher for automatic status updates
         match crate::git::create_git_watcher() {
             Ok((watcher, receiver)) => {
                 state.git_watcher = Some(watcher);
                 state.git_watcher_receiver = Some(receiver);
-                crate::logger::debug("Git watcher initialized");
+                crate::logger::info("Git watcher initialized");
             }
             Err(e) => {
                 crate::logger::error(format!("Failed to initialize git watcher: {}", e));
@@ -47,19 +77,12 @@ impl App {
             Ok((watcher, receiver)) => {
                 state.fs_watcher = Some(watcher);
                 state.fs_watcher_receiver = Some(receiver);
-                crate::logger::debug("FS watcher initialized");
+                crate::logger::info("FS watcher initialized");
             }
             Err(e) => {
                 crate::logger::error(format!("Failed to initialize FS watcher: {}", e));
             }
         }
-
-        // Get project root from current working directory
-        let project_root = std::env::current_dir().unwrap_or_else(|_| {
-            // Fallback to home directory if current_dir fails
-            crate::logger::warn("current_dir() failed, using home directory fallback");
-            dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"))
-        });
 
         // Clean up old sessions (configurable retention period)
         let retention_days = state.config.session_retention_days;
