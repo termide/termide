@@ -61,8 +61,8 @@ impl StatusBar {
 
         let mut current_x = x;
         for span in line.spans {
-            let content = span.content.to_string();
-            for ch in content.chars() {
+            // Use span.content directly without allocating String
+            for ch in span.content.chars() {
                 if current_x >= area.right() {
                     break;
                 }
