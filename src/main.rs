@@ -23,9 +23,15 @@ mod xdg_dirs;
 
 use anyhow::Result;
 use crossterm::{
-    event::{DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture},
+    event::{
+        DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture,
+        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    },
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{
+        disable_raw_mode, enable_raw_mode, supports_keyboard_enhancement, EnterAlternateScreen,
+        LeaveAlternateScreen,
+    },
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
@@ -52,12 +58,29 @@ fn main() -> Result<()> {
     // Initialize terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
+
+    // Check if terminal supports enhanced keyboard protocol (kitty protocol)
+    // This enables proper Alt+Cyrillic handling in modern terminals like Ghostty, Kitty, WezTerm
+    let keyboard_enhanced = supports_keyboard_enhancement().unwrap_or(false);
+
     execute!(
         stdout,
         EnterAlternateScreen,
         EnableMouseCapture,
         EnableFocusChange
     )?;
+
+    if keyboard_enhanced {
+        execute!(
+            stdout,
+            PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+            )
+        )?;
+    }
+
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -80,6 +103,9 @@ fn main() -> Result<()> {
 
     // Restore terminal
     disable_raw_mode()?;
+    if keyboard_enhanced {
+        let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
+    }
     execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,
