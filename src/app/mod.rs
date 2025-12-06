@@ -421,6 +421,7 @@ impl App {
             &session_dir,
             term_height,
             term_width,
+            self.state.editor_config(),
         )?;
         crate::logger::info("Session loaded");
 

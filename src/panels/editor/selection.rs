@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 
-use crate::editor::{Cursor, HighlightCache, Selection, TextBuffer};
+use crate::editor::{is_word_boundary, Cursor, HighlightCache, Selection, TextBuffer};
 
 /// Select all text in the buffer.
 ///
@@ -121,4 +121,45 @@ pub fn invalidate_cache_after_deletion(
     buffer_line_count: usize,
 ) {
     highlight_cache.invalidate_range(deletion_start_line, buffer_line_count);
+}
+
+/// Select word at cursor position.
+///
+/// Finds word boundaries around the cursor and returns selection covering the word.
+/// Word boundaries are non-alphanumeric characters (spaces, punctuation, etc.).
+/// Returns (new_selection, new_cursor_position) where cursor is at the end of the word.
+pub fn select_word(buffer: &TextBuffer, cursor: &Cursor) -> Option<(Selection, Cursor)> {
+    let line_text = buffer.line(cursor.line)?;
+    if line_text.is_empty() {
+        return None;
+    }
+
+    let chars: Vec<char> = line_text.chars().collect();
+    let char_count = chars.len();
+
+    // Clamp column to valid range
+    let col = cursor.column.min(char_count.saturating_sub(1));
+
+    // If cursor is at a word boundary character, don't select anything
+    if col < char_count && is_word_boundary(chars[col]) {
+        return None;
+    }
+
+    // Find word start (go backwards until word boundary)
+    let mut start_col = col;
+    while start_col > 0 && !is_word_boundary(chars[start_col - 1]) {
+        start_col -= 1;
+    }
+
+    // Find word end (go forwards until word boundary or end of line)
+    let mut end_col = col;
+    while end_col < char_count && !is_word_boundary(chars[end_col]) {
+        end_col += 1;
+    }
+
+    // Create selection
+    let start = Cursor::at(cursor.line, start_col);
+    let end = Cursor::at(cursor.line, end_col);
+
+    Some((Selection::new(start, end), end))
 }

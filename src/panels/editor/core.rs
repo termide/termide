@@ -67,11 +67,18 @@ pub struct Editor {
     /// Used for smart word wrapping to avoid recalculating on every render
     #[allow(dead_code)]
     wrap_cache: std::collections::HashMap<usize, Vec<usize>>,
+    /// Last click time for double-click detection
+    last_click_time: Option<std::time::Instant>,
+    /// Last click position (line, column) for double-click detection
+    last_click_position: Option<(usize, usize)>,
+    /// Skip next MouseUp event (after double-click word selection)
+    skip_next_mouse_up: bool,
 }
 // GitLineInfo and VirtualLine moved to git module
 
 impl Editor {
     /// Create new empty editor with default configuration
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::with_config(EditorConfig::default())
     }
@@ -102,27 +109,20 @@ impl Editor {
             cached_use_smart_wrap: false,
             file_size: 0,
             wrap_cache: std::collections::HashMap::new(),
+            last_click_time: None,
+            last_click_position: None,
+            skip_next_mouse_up: false,
         }
     }
 
     /// Check if smart word wrapping should be used
     ///
     /// Smart wrapping is enabled when:
-    /// - Syntax highlighting is enabled
-    /// - File has a detected syntax/language
     /// - File size is below the configured threshold
+    ///
+    /// Smart wrap works for both code files (with syntax) and plain text files.
     fn should_use_smart_wrap(&self, config: &crate::config::Config) -> bool {
-        // Check if syntax highlighting is enabled
-        if !self.config.syntax_highlighting {
-            return false;
-        }
-
-        // Check if a syntax language is detected
-        if !self.highlight_cache.has_syntax() {
-            return false;
-        }
-
-        // Check file size threshold
+        // Check file size threshold (for performance)
         let threshold_bytes = config.large_file_threshold_mb * crate::constants::MEGABYTE;
         if self.file_size > threshold_bytes {
             return false;
@@ -142,6 +142,7 @@ impl Editor {
     }
 
     /// Open file with default configuration
+    #[allow(dead_code)]
     pub fn open_file(path: PathBuf) -> Result<Self> {
         Self::open_file_with_config(path, EditorConfig::default())
     }
@@ -226,6 +227,9 @@ impl Editor {
             cached_use_smart_wrap: false,
             file_size,
             wrap_cache: std::collections::HashMap::new(),
+            last_click_time: None,
+            last_click_position: None,
+            skip_next_mouse_up: false,
         })
     }
 
@@ -260,6 +264,9 @@ impl Editor {
             cached_use_smart_wrap: false,
             file_size: 0,
             wrap_cache: std::collections::HashMap::new(),
+            last_click_time: None,
+            last_click_position: None,
+            skip_next_mouse_up: false,
         }
     }
 
@@ -1638,9 +1645,40 @@ impl Panel for Editor {
             MouseEventKind::Down(MouseButton::Left) => {
                 // Close search mode on click
                 self.close_search();
-                // Start selection - set cursor and begin selection
-                self.cursor = Cursor::at(target_line, target_col);
-                self.selection = Some(Selection::new(self.cursor, self.cursor));
+
+                // Check for double-click (same position within 500ms)
+                let now = std::time::Instant::now();
+                let is_double_click = if let (Some(last_time), Some((last_line, last_col))) =
+                    (self.last_click_time, self.last_click_position)
+                {
+                    let elapsed = now.duration_since(last_time);
+                    elapsed.as_millis() < 500 && last_line == target_line && last_col == target_col
+                } else {
+                    false
+                };
+
+                if is_double_click {
+                    // Double-click: select word at cursor
+                    let temp_cursor = Cursor::at(target_line, target_col);
+                    if let Some((new_selection, new_cursor)) =
+                        selection::select_word(&self.buffer, &temp_cursor)
+                    {
+                        self.selection = Some(new_selection);
+                        self.cursor = new_cursor;
+                        // Skip the upcoming MouseUp event to preserve word selection
+                        self.skip_next_mouse_up = true;
+                    }
+                    // Reset click tracking to prevent triple-click from being detected as double
+                    self.last_click_time = None;
+                    self.last_click_position = None;
+                } else {
+                    // Single click: start selection
+                    self.cursor = Cursor::at(target_line, target_col);
+                    self.selection = Some(Selection::new(self.cursor, self.cursor));
+                    // Update click tracking
+                    self.last_click_time = Some(now);
+                    self.last_click_position = Some((target_line, target_col));
+                }
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 // Continue selection - update active point
@@ -1653,6 +1691,11 @@ impl Panel for Editor {
                     .ensure_cursor_visible(&self.cursor, self.cached_virtual_line_count);
             }
             MouseEventKind::Up(MouseButton::Left) => {
+                // Skip MouseUp after double-click word selection
+                if self.skip_next_mouse_up {
+                    self.skip_next_mouse_up = false;
+                    return Ok(());
+                }
                 // Finish selection
                 self.cursor = Cursor::at(target_line, target_col);
                 if let Some(ref mut selection) = self.selection {

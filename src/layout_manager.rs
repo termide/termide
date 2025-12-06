@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 
 use crate::config::Config;
+use crate::panels::editor::EditorConfig;
 use crate::panels::panel_group::PanelGroup;
 use crate::panels::Panel;
 
@@ -631,6 +632,7 @@ impl LayoutManager {
         session_dir: &std::path::Path,
         term_height: u16,
         term_width: u16,
+        editor_config: EditorConfig,
     ) -> Result<Self> {
         use crate::panels::debug::Debug;
         use crate::panels::editor::Editor;
@@ -661,7 +663,7 @@ impl LayoutManager {
                     } => {
                         if let Some(file_path) = path {
                             // Try to open file, skip if it fails (file might have been deleted)
-                            Editor::open_file(file_path)
+                            Editor::open_file_with_config(file_path, editor_config.clone())
                                 .ok()
                                 .map(|e| Box::new(e) as Box<dyn Panel>)
                         } else if let Some(ref buffer_file) = unsaved_buffer_file {
@@ -677,7 +679,7 @@ impl LayoutManager {
                                         );
                                         None
                                     } else {
-                                        let mut editor = Editor::new();
+                                        let mut editor = Editor::with_config(editor_config.clone());
                                         // Insert content into buffer
                                         if let Err(e) = editor.insert_text(&content) {
                                             eprintln!(

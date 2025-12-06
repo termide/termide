@@ -98,8 +98,7 @@ pub fn calculate_wrap_points_for_line(line_text: &str, max_width: usize) -> Vec<
 /// Check if a character is a word boundary
 ///
 /// Word boundaries are non-alphanumeric characters (spaces, punctuation, etc.)
-/// This is used internally by the wrapping algorithm.
-#[allow(dead_code)]
+/// This is used by the wrapping algorithm and word selection.
 pub fn is_word_boundary(c: char) -> bool {
     !c.is_alphanumeric()
 }
