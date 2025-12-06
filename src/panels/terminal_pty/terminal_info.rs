@@ -1,4 +1,4 @@
-use crate::panels::file_manager::DiskSpaceInfo;
+use crate::system_monitor::DiskSpaceInfo;
 
 /// Terminal information for status bar
 pub struct TerminalInfo {

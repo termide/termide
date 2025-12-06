@@ -25,8 +25,8 @@ use vte::Parser;
 use super::terminal::{Cell, CellStyle, MouseTrackingMode, TerminalScreen, VtPerformer};
 
 use super::Panel;
-use crate::panels::file_manager::DiskSpaceInfo;
 use crate::state::AppState;
+use crate::system_monitor::DiskSpaceInfo;
 
 /// Full-featured terminal with PTY
 pub struct Terminal {

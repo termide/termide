@@ -95,3 +95,67 @@ pub enum RamUnit {
     Gigabytes,
     Megabytes,
 }
+
+/// Disk space information
+#[derive(Clone, Debug)]
+pub struct DiskSpaceInfo {
+    pub device: Option<String>, // Device name (e.g., "NVME0N1", "SDA1")
+    pub available: u64,
+    pub total: u64,
+}
+
+impl DiskSpaceInfo {
+    /// Get disk usage percentage (0-100)
+    /// Returns percentage of USED space (not available)
+    pub fn usage_percent(&self) -> u8 {
+        if self.total > 0 {
+            let used = self.total.saturating_sub(self.available);
+            ((used * 100) / self.total).min(100) as u8
+        } else {
+            0
+        }
+    }
+
+    /// Format disk information: "NVME0N1P2 386/467Гб (83%)"
+    pub fn format_space(&self) -> String {
+        let t = crate::i18n::t();
+
+        // Calculate used space and percentage
+        let used = self.total.saturating_sub(self.available);
+        let percent = if self.total > 0 {
+            ((used * 100) / self.total).min(100)
+        } else {
+            0
+        };
+
+        // Convert to GB (rounded to nearest integer)
+        let used_gb = (used as f64 / 1_073_741_824.0).round() as u64;
+        let total_gb = (self.total as f64 / 1_073_741_824.0).round() as u64;
+
+        if let Some(device) = &self.device {
+            // Extract device name from path like "/dev/nvme0n1p2" -> "NVME0N1P2"
+            let device_name = device
+                .strip_prefix("/dev/")
+                .unwrap_or(device)
+                .to_uppercase();
+
+            format!(
+                "{} {}/{}{} ({}%)",
+                device_name,
+                used_gb,
+                total_gb,
+                t.size_gigabytes(),
+                percent
+            )
+        } else {
+            // Fallback to old format if device name is not available
+            format!(
+                "{}/{}{} ({}%)",
+                used_gb,
+                total_gb,
+                t.size_gigabytes(),
+                percent
+            )
+        }
+    }
+}

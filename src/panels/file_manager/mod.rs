@@ -5,7 +5,7 @@ mod rendering;
 mod selection;
 mod utils;
 
-pub use file_info::{DiskSpaceInfo, FileInfo};
+pub use file_info::FileInfo;
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};

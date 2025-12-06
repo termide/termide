@@ -12,9 +12,10 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::i18n;
 use crate::panels::editor::EditorInfo;
-use crate::panels::file_manager::{DiskSpaceInfo, FileInfo};
+use crate::panels::file_manager::FileInfo;
 use crate::panels::terminal_pty::TerminalInfo;
 use crate::state::AppState;
+use crate::system_monitor::DiskSpaceInfo;
 
 /// Status bar at the bottom of screen
 pub struct StatusBar;
