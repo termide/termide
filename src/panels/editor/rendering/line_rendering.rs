@@ -4,6 +4,8 @@
 //! when word wrap is disabled. Handles horizontal scrolling and syntax highlighting.
 
 use ratatui::{buffer::Buffer, layout::Rect, style::Style};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use super::{context::RenderContext, highlight_renderer};
 use crate::{editor::HighlightCache, panels::editor::git};
@@ -155,21 +157,33 @@ fn render_line_content_horizontal_scroll(
     };
 
     // Render segments with horizontal scrolling
+    // Using graphemes instead of chars to properly handle combining characters (Hindi, etc.)
     let mut col_offset = 0;
+    let mut grapheme_idx = 0; // Grapheme index for selection/search matching
     for (segment_text, segment_style) in segments {
-        for ch in segment_text.chars() {
+        for grapheme in segment_text.graphemes(true) {
+            // Get display width of grapheme cluster
+            let grapheme_width = grapheme.width();
+
+            // Skip zero-width graphemes
+            if grapheme_width == 0 {
+                grapheme_idx += 1;
+                continue;
+            }
+
             if col_offset >= left_column && col_offset < left_column + content_width {
                 let x = area.x + line_number_width + (col_offset - left_column) as u16;
                 let y = area.y + row as u16;
 
                 if x < area.x + area.width && y < area.y + area.height {
                     if let Some(cell) = buf.cell_mut((x, y)) {
-                        cell.set_char(ch);
+                        // Use set_symbol for proper grapheme cluster handling
+                        cell.set_symbol(grapheme);
 
                         // Determine final style using highlight renderer
                         let final_style = highlight_renderer::determine_cell_style(
                             line_idx,
-                            col_offset,
+                            grapheme_idx,
                             *segment_style,
                             is_cursor_line,
                             render_context,
@@ -182,7 +196,8 @@ fn render_line_content_horizontal_scroll(
                     }
                 }
             }
-            col_offset += 1;
+            col_offset += grapheme_width;
+            grapheme_idx += 1;
         }
     }
 }
@@ -199,9 +214,10 @@ fn fill_line_remainder(
     left_column: usize,
     cursor_line_style: Style,
 ) {
-    let line_len = line_text.chars().count();
+    // Use display width for CJK characters
+    let line_display_width = line_text.width();
 
-    for col in line_len..content_width {
+    for col in line_display_width..content_width {
         if col >= left_column {
             let x = area.x + line_number_width + (col - left_column) as u16;
             let y = area.y + row as u16;

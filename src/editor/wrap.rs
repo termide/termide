@@ -4,43 +4,74 @@
 //! word boundaries when possible, falling back to hard breaks for words wider
 //! than the viewport.
 
-/// Calculate the optimal wrap point for a line segment
+use unicode_width::UnicodeWidthStr;
+
+/// Calculate the optimal wrap point for a line segment using graphemes
 ///
 /// This function tries to find a word boundary (non-alphanumeric character)
 /// to break the line at, but will force a break at max_width if:
 /// - No word boundary is found (single long word)
 /// - The word would be wider than the viewport
 ///
+/// Uses display width and grapheme clusters for proper Unicode handling
+/// (CJK characters, combining characters like Hindi vowel signs, etc.)
+///
 /// # Arguments
-/// * `chars` - The line characters to wrap
-/// * `start` - Starting position in the char array
-/// * `max_width` - Maximum width before wrapping (content width)
-/// * `line_len` - Total length of the line
+/// * `graphemes` - The line grapheme clusters to wrap
+/// * `start` - Starting position in the grapheme array
+/// * `max_width` - Maximum display width before wrapping (content width)
+/// * `line_len` - Total length of the line (grapheme count)
 ///
 /// # Returns
-/// The index where the line should be wrapped
+/// The grapheme index where the line should be wrapped
 pub fn calculate_wrap_point(
-    chars: &[char],
+    graphemes: &[&str],
     start: usize,
     max_width: usize,
     line_len: usize,
 ) -> usize {
-    let ideal_end = (start + max_width).min(line_len);
+    if start >= line_len {
+        return line_len;
+    }
 
-    // If we're at or past the end of the line, no wrapping needed
+    // Find the grapheme index where display width exceeds max_width
+    let mut display_width = 0;
+    let mut ideal_end = start;
+
+    for (i, grapheme) in graphemes
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(line_len - start)
+    {
+        let grapheme_width = grapheme.width();
+
+        if display_width + grapheme_width > max_width {
+            ideal_end = i;
+            break;
+        }
+
+        display_width += grapheme_width;
+        ideal_end = i + 1;
+    }
+
+    // If we reached end of line, no wrapping needed
     if ideal_end >= line_len {
         return line_len;
     }
 
-    // If the next character after ideal_end is a word boundary, we can break there
-    if ideal_end < line_len && !chars[ideal_end].is_alphanumeric() {
+    // Check if grapheme is a word boundary (first char is non-alphanumeric)
+    let is_boundary = |g: &str| g.chars().next().is_none_or(|c| !c.is_alphanumeric());
+
+    // If the grapheme at ideal_end is a word boundary, we can break there
+    if ideal_end < line_len && is_boundary(graphemes[ideal_end]) {
         return ideal_end + 1;
     }
 
     // Search backwards from ideal_end for a word boundary
     for i in (start..ideal_end).rev() {
-        if !chars[i].is_alphanumeric() {
-            // Found a boundary - wrap after this character
+        if is_boundary(graphemes[i]) {
+            // Found a boundary - wrap after this grapheme
             // But avoid wrapping right after start (would create empty visual line)
             if i > start {
                 return i + 1;
@@ -49,8 +80,8 @@ pub fn calculate_wrap_point(
     }
 
     // No word boundary found - this means we have a single long word
-    // Force break at max_width to prevent horizontal overflow
-    ideal_end
+    // Force break at ideal_end to prevent horizontal overflow
+    ideal_end.max(start + 1) // Ensure at least one grapheme is included
 }
 
 /// Calculate all wrap points for a line
@@ -58,37 +89,42 @@ pub fn calculate_wrap_point(
 /// Returns a vector of indices where the line should be wrapped.
 /// Each index represents the start of a new visual line.
 ///
+/// Uses display width and grapheme clusters for proper Unicode handling.
+///
 /// # Arguments
 /// * `line_text` - The text of the line
-/// * `max_width` - Maximum width before wrapping (content width)
+/// * `max_width` - Maximum display width before wrapping (content width)
 ///
 /// # Returns
-/// Vector of wrap points (character indices). Empty if line doesn't need wrapping.
+/// Vector of wrap points (grapheme indices). Empty if line doesn't need wrapping.
 #[allow(dead_code)]
 pub fn calculate_wrap_points_for_line(line_text: &str, max_width: usize) -> Vec<usize> {
-    let chars: Vec<char> = line_text.chars().collect();
-    let line_len = chars.len();
+    use unicode_segmentation::UnicodeSegmentation;
 
-    if line_len <= max_width {
+    let graphemes: Vec<&str> = line_text.graphemes(true).collect();
+    let line_len = graphemes.len();
+
+    // Check display width, not grapheme count
+    if line_text.width() <= max_width {
         return Vec::new(); // No wrapping needed
     }
 
     let mut wrap_points = Vec::new();
-    let mut char_offset = 0;
+    let mut grapheme_offset = 0;
 
-    while char_offset < line_len {
-        let chunk_end = calculate_wrap_point(&chars, char_offset, max_width, line_len);
+    while grapheme_offset < line_len {
+        let chunk_end = calculate_wrap_point(&graphemes, grapheme_offset, max_width, line_len);
 
         // Only add wrap point if we're not at the start
-        if char_offset > 0 {
-            wrap_points.push(char_offset);
+        if grapheme_offset > 0 {
+            wrap_points.push(grapheme_offset);
         }
 
-        char_offset = chunk_end;
+        grapheme_offset = chunk_end;
 
         // Safety: prevent infinite loop
-        if chunk_end == char_offset && char_offset < line_len {
-            char_offset += 1;
+        if chunk_end == grapheme_offset && grapheme_offset < line_len {
+            grapheme_offset += 1;
         }
     }
 
@@ -155,21 +191,25 @@ mod tests {
 
     #[test]
     fn test_calculate_wrap_point_basic() {
+        use unicode_segmentation::UnicodeSegmentation;
+
         let text = "hello world test";
-        let chars: Vec<char> = text.chars().collect();
+        let graphemes: Vec<&str> = text.graphemes(true).collect();
 
         // Should wrap after "hello "
-        let wrap_point = calculate_wrap_point(&chars, 0, 10, chars.len());
+        let wrap_point = calculate_wrap_point(&graphemes, 0, 10, graphemes.len());
         assert_eq!(wrap_point, 6); // After space
     }
 
     #[test]
     fn test_calculate_wrap_point_long_word() {
+        use unicode_segmentation::UnicodeSegmentation;
+
         let text = "verylongword";
-        let chars: Vec<char> = text.chars().collect();
+        let graphemes: Vec<&str> = text.graphemes(true).collect();
 
         // Should force break at max_width
-        let wrap_point = calculate_wrap_point(&chars, 0, 5, chars.len());
+        let wrap_point = calculate_wrap_point(&graphemes, 0, 5, graphemes.len());
         assert_eq!(wrap_point, 5);
     }
 

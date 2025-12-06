@@ -4,6 +4,8 @@
 //! handling line breaking, syntax highlighting, and visual row management.
 
 use ratatui::{buffer::Buffer, layout::Rect, style::Style};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use super::{context::RenderContext, cursor_renderer, deletion_markers, highlight_renderer};
 use crate::{
@@ -55,10 +57,10 @@ pub fn render_content_word_wrap(
 
         if let Some(line_text) = buffer.line(line_idx) {
             let line_text = line_text.trim_end_matches('\n');
-            let chars: Vec<char> = line_text.chars().collect();
-            let line_len = chars.len();
+            let graphemes: Vec<&str> = line_text.graphemes(true).collect();
+            let line_len = graphemes.len();
 
-            let mut char_offset = 0;
+            let mut grapheme_offset = 0;
             let mut is_first_visual_row = true;
 
             // Special handling for empty lines
@@ -81,16 +83,17 @@ pub fn render_content_word_wrap(
                 visual_row += 1;
             } else {
                 // Handle non-empty lines with wrapping
-                while char_offset < line_len && visual_row < content_height {
+                while grapheme_offset < line_len && visual_row < content_height {
                     let chunk_end = if use_smart_wrap {
                         crate::editor::calculate_wrap_point(
-                            &chars,
-                            char_offset,
+                            &graphemes,
+                            grapheme_offset,
                             content_width,
                             line_len,
                         )
                     } else {
-                        (char_offset + content_width).min(line_len)
+                        // Simple wrap: calculate based on display width
+                        calculate_simple_wrap_point(&graphemes, grapheme_offset, content_width)
                     };
 
                     render_visual_line(
@@ -99,7 +102,7 @@ pub fn render_content_word_wrap(
                         visual_row,
                         line_idx,
                         line_text,
-                        char_offset,
+                        grapheme_offset,
                         chunk_end,
                         line_len,
                         is_first_visual_row,
@@ -122,7 +125,7 @@ pub fn render_content_word_wrap(
                     );
 
                     is_first_visual_row = false;
-                    char_offset = chunk_end;
+                    grapheme_offset = chunk_end;
                     visual_row += 1;
                 }
             }
@@ -286,23 +289,34 @@ fn render_visual_line(
         &[(line_text.to_string(), style)][..]
     };
 
-    // Render characters for this visual line
-    let mut segment_char_idx = 0;
+    // Render graphemes for this visual line
+    // Using graphemes instead of chars to properly handle combining characters (Hindi, etc.)
+    let mut grapheme_idx = 0;
     let mut visual_col = 0;
 
     for (segment_text, segment_style) in segments {
-        for ch in segment_text.chars() {
-            if segment_char_idx >= char_offset && segment_char_idx < chunk_end {
+        for grapheme in segment_text.graphemes(true) {
+            if grapheme_idx >= char_offset && grapheme_idx < chunk_end {
+                // Get display width of grapheme cluster
+                let grapheme_width = grapheme.width();
+
+                // Skip zero-width graphemes (shouldn't happen with proper grapheme iteration)
+                if grapheme_width == 0 {
+                    grapheme_idx += 1;
+                    continue;
+                }
+
                 let x = area.x + line_number_width + visual_col as u16;
                 let y = area.y + visual_row as u16;
 
                 if x < area.x + area.width && y < area.y + area.height {
                     if let Some(cell) = buf.cell_mut((x, y)) {
-                        cell.set_char(ch);
+                        // Use set_symbol for proper grapheme cluster handling
+                        cell.set_symbol(grapheme);
 
                         let final_style = highlight_renderer::determine_cell_style(
                             line_idx,
-                            segment_char_idx,
+                            grapheme_idx,
                             *segment_style,
                             is_cursor_line,
                             render_context,
@@ -316,13 +330,13 @@ fn render_visual_line(
                 }
 
                 // Track cursor position
-                if is_cursor_line && cursor.column == segment_char_idx {
+                if is_cursor_line && cursor.column == grapheme_idx {
                     render_context.cursor_viewport_pos = Some((visual_row, visual_col));
                 }
 
-                visual_col += 1;
+                visual_col += grapheme_width;
             }
-            segment_char_idx += 1;
+            grapheme_idx += 1;
         }
     }
 
@@ -349,4 +363,21 @@ fn render_visual_line(
             }
         }
     }
+}
+
+/// Calculate simple wrap point based on display width (no word boundary detection)
+fn calculate_simple_wrap_point(graphemes: &[&str], start: usize, max_width: usize) -> usize {
+    let mut display_width = 0;
+
+    for (i, grapheme) in graphemes.iter().enumerate().skip(start) {
+        let grapheme_width = grapheme.width();
+
+        if display_width + grapheme_width > max_width {
+            return i;
+        }
+
+        display_width += grapheme_width;
+    }
+
+    graphemes.len()
 }
