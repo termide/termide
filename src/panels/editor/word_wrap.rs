@@ -38,7 +38,7 @@ pub fn get_line_wrap_points(
     } else {
         // Use simple wrapping (hard break at content_width)
         let visual_rows = line_len.div_ceil(content_width);
-        let mut wrap_points = Vec::new();
+        let mut wrap_points = Vec::with_capacity(visual_rows.saturating_sub(1));
         for i in 1..visual_rows {
             wrap_points.push(i * content_width);
         }

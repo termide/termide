@@ -90,8 +90,8 @@ impl FileManager {
             return Vec::new();
         }
 
-        // Collect paths of selected items
-        let mut paths = Vec::new();
+        // Collect paths of selected items (pre-allocate capacity for efficiency)
+        let mut paths = Vec::with_capacity(self.selected_items.len());
         for &idx in &self.selected_items {
             if let Some(entry) = self.entries.get(idx) {
                 if entry.name != ".." {

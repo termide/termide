@@ -647,8 +647,8 @@ impl LayoutManager {
                 continue;
             }
 
-            // Create panels from session data
-            let mut panels: Vec<Box<dyn Panel>> = Vec::new();
+            // Create panels from session data (pre-allocate capacity)
+            let mut panels: Vec<Box<dyn Panel>> = Vec::with_capacity(session_group.panels.len());
 
             for session_panel in session_group.panels {
                 let panel: Option<Box<dyn Panel>> = match session_panel {
