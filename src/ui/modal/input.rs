@@ -152,12 +152,18 @@ impl Modal for InputModal {
             self.prompt.lines().count().max(1) as u16
         };
 
-        let mut constraints = Vec::new();
-        if prompt_lines > 0 {
-            constraints.push(Constraint::Length(prompt_lines)); // Prompt (if exists)
-        }
-        constraints.push(Constraint::Length(3)); // Input
-        constraints.push(Constraint::Length(1)); // Buttons
+        let constraints = if prompt_lines > 0 {
+            vec![
+                Constraint::Length(prompt_lines), // Prompt
+                Constraint::Length(3),            // Input
+                Constraint::Length(1),            // Buttons
+            ]
+        } else {
+            vec![
+                Constraint::Length(3), // Input
+                Constraint::Length(1), // Buttons
+            ]
+        };
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)

@@ -200,22 +200,36 @@ impl Modal for EditableSelectModal {
             self.prompt.lines().count().max(1) as u16
         };
 
-        let mut constraints = Vec::new();
+        let has_prompt = prompt_lines > 0;
+        let has_list = self.state == DropdownState::Expanded && !self.options.is_empty();
+        let list_height = if has_list {
+            self.options.len().min(6) as u16 + 3
+        } else {
+            0
+        };
 
-        // Add prompt only if not empty
-        if prompt_lines > 0 {
-            constraints.push(Constraint::Length(prompt_lines)); // Prompt
-        }
-
-        constraints.push(Constraint::Length(3)); // Input field
-
-        // Add list only in Expanded state
-        if self.state == DropdownState::Expanded && !self.options.is_empty() {
-            let list_height = self.options.len().min(6) as u16 + 3;
-            constraints.push(Constraint::Length(list_height));
-        }
-
-        constraints.push(Constraint::Length(1)); // Buttons
+        let constraints = match (has_prompt, has_list) {
+            (true, true) => vec![
+                Constraint::Length(prompt_lines), // Prompt
+                Constraint::Length(3),            // Input
+                Constraint::Length(list_height),  // List
+                Constraint::Length(1),            // Buttons
+            ],
+            (true, false) => vec![
+                Constraint::Length(prompt_lines), // Prompt
+                Constraint::Length(3),            // Input
+                Constraint::Length(1),            // Buttons
+            ],
+            (false, true) => vec![
+                Constraint::Length(3),           // Input
+                Constraint::Length(list_height), // List
+                Constraint::Length(1),           // Buttons
+            ],
+            (false, false) => vec![
+                Constraint::Length(3), // Input
+                Constraint::Length(1), // Buttons
+            ],
+        };
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
