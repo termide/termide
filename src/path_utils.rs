@@ -105,6 +105,35 @@ pub fn resolve_rename_destination_path(destination: &Path, new_name: &str) -> Pa
     }
 }
 
+/// Extract file name from path as string slice
+///
+/// Returns "?" if the path has no file name or it's not valid UTF-8.
+///
+/// # Examples
+/// ```ignore
+/// let name = get_file_name_str(Path::new("/home/user/file.txt"));
+/// // Result: "file.txt"
+///
+/// let name = get_file_name_str(Path::new("/home/user/"));
+/// // Result: "user"
+/// ```
+pub fn get_file_name_str(path: &Path) -> &str {
+    path.file_name().and_then(|n| n.to_str()).unwrap_or("?")
+}
+
+/// Extract file name from path as String
+///
+/// Returns "?" if the path has no file name or it's not valid UTF-8.
+///
+/// # Examples
+/// ```ignore
+/// let name = get_file_name_string(Path::new("/home/user/file.txt"));
+/// // Result: String::from("file.txt")
+/// ```
+pub fn get_file_name_string(path: &Path) -> String {
+    get_file_name_str(path).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,33 +193,4 @@ mod tests {
         let result = dest.with_file_name(new_name);
         assert_eq!(result, PathBuf::from("/tmp/newfile.txt"));
     }
-}
-
-/// Extract file name from path as string slice
-///
-/// Returns "?" if the path has no file name or it's not valid UTF-8.
-///
-/// # Examples
-/// ```ignore
-/// let name = get_file_name_str(Path::new("/home/user/file.txt"));
-/// // Result: "file.txt"
-///
-/// let name = get_file_name_str(Path::new("/home/user/"));
-/// // Result: "user"
-/// ```
-pub fn get_file_name_str(path: &Path) -> &str {
-    path.file_name().and_then(|n| n.to_str()).unwrap_or("?")
-}
-
-/// Extract file name from path as String
-///
-/// Returns "?" if the path has no file name or it's not valid UTF-8.
-///
-/// # Examples
-/// ```ignore
-/// let name = get_file_name_string(Path::new("/home/user/file.txt"));
-/// // Result: String::from("file.txt")
-/// ```
-pub fn get_file_name_string(path: &Path) -> String {
-    get_file_name_str(path).to_string()
 }

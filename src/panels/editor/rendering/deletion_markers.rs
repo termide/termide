@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn test_render_deletion_content() {
         // Initialize i18n for translation functions
-        let _ = crate::i18n::init_with_language("en");
+        crate::i18n::init_with_language("en");
 
         let theme = create_test_theme();
         let mut buf = Buffer::empty(Rect::new(0, 0, 30, 10));
@@ -207,7 +207,7 @@ mod tests {
     #[test]
     fn test_render_deletion_marker_full() {
         // Initialize i18n for translation functions
-        let _ = crate::i18n::init_with_language("en");
+        crate::i18n::init_with_language("en");
 
         let theme = create_test_theme();
         let mut buf = Buffer::empty(Rect::new(0, 0, 30, 10));
