@@ -186,6 +186,27 @@ impl FileManager {
             }
         }
 
+        // Fill remaining space with empty lines (with separators in extended mode)
+        if show_extended && lines.len() < height {
+            let name_column_width = available_width.saturating_sub(
+                SEPARATOR_WIDTH + SIZE_COLUMN_WIDTH + SEPARATOR_WIDTH + TIME_COLUMN_WIDTH,
+            );
+            let empty_name = " ".repeat(name_column_width);
+            let empty_size = " ".repeat(SIZE_COLUMN_WIDTH);
+            let empty_time = " ".repeat(TIME_COLUMN_WIDTH);
+            let separator_style = Style::default().fg(theme.disabled);
+
+            for _ in lines.len()..height {
+                lines.push(Line::from(vec![
+                    Span::raw(empty_name.clone()),
+                    Span::styled(SEPARATOR, separator_style),
+                    Span::raw(empty_size.clone()),
+                    Span::styled(SEPARATOR, separator_style),
+                    Span::raw(empty_time.clone()),
+                ]));
+            }
+        }
+
         lines
     }
 }

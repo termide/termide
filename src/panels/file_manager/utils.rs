@@ -176,6 +176,10 @@ pub fn get_group_name(gid: u32) -> String {
 pub fn format_modified_time(time: Option<SystemTime>) -> String {
     time.and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
         .and_then(|d| chrono::DateTime::from_timestamp(d.as_secs() as i64, 0))
-        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+        .map(|dt| {
+            dt.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        })
         .unwrap_or_else(|| "                   ".to_string())
 }

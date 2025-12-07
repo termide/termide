@@ -60,7 +60,11 @@ impl FileManager {
             .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
             .map(|d| {
                 chrono::DateTime::from_timestamp(d.as_secs() as i64, 0)
-                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                    .map(|dt| {
+                        dt.with_timezone(&chrono::Local)
+                            .format("%Y-%m-%d %H:%M:%S")
+                            .to_string()
+                    })
                     .unwrap_or_else(|| "Unknown".to_string())
             })
             .unwrap_or_else(|| "Unknown".to_string());
@@ -121,7 +125,11 @@ impl FileManager {
                     .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
                     .map(|d| {
                         chrono::DateTime::from_timestamp(d.as_secs() as i64, 0)
-                            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                            .map(|dt| {
+                                dt.with_timezone(&chrono::Local)
+                                    .format("%Y-%m-%d %H:%M:%S")
+                                    .to_string()
+                            })
                             .unwrap_or_else(|| "Unknown".to_string())
                     })
                     .unwrap_or_else(|| "Unknown".to_string());
@@ -132,7 +140,11 @@ impl FileManager {
                     .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
                     .map(|d| {
                         chrono::DateTime::from_timestamp(d.as_secs() as i64, 0)
-                            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                            .map(|dt| {
+                                dt.with_timezone(&chrono::Local)
+                                    .format("%Y-%m-%d %H:%M:%S")
+                                    .to_string()
+                            })
                             .unwrap_or_else(|| "Unknown".to_string())
                     })
                     .unwrap_or_else(|| "Unknown".to_string());
