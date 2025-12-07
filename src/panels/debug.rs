@@ -292,6 +292,21 @@ impl Panel for Debug {
         Ok(())
     }
 
+    fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent, _area: Rect) -> Result<()> {
+        use crossterm::event::MouseEventKind;
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                self.scroll_offset = self.scroll_offset.saturating_sub(3);
+            }
+            MouseEventKind::ScrollDown => {
+                self.scroll_offset = self.scroll_offset.saturating_add(3);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn title(&self) -> String {
         "Log".to_string()
     }

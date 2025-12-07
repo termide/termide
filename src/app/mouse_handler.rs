@@ -113,11 +113,27 @@ impl App {
         &mut self,
         mouse: crossterm::event::MouseEvent,
     ) -> Result<()> {
-        // TODO: Implement proper scroll forwarding with LayoutManager
-        // For now, forward to active panel
-        let panel_area = self.get_active_panel_area();
-        if let Some(panel) = self.layout_manager.active_panel_mut() {
-            panel.handle_mouse(mouse, panel_area)?;
+        let panel_rects = self.calculate_panel_rects();
+
+        for (group_idx, _panel_idx, rect, is_expanded) in panel_rects {
+            // Skip collapsed panels
+            if !is_expanded {
+                continue;
+            }
+
+            // Check if mouse is within this panel's area
+            if mouse.column >= rect.x
+                && mouse.column < rect.x + rect.width
+                && mouse.row >= rect.y
+                && mouse.row < rect.y + rect.height
+            {
+                if let Some(group) = self.layout_manager.panel_groups.get_mut(group_idx) {
+                    if let Some(panel) = group.expanded_panel_mut() {
+                        panel.handle_mouse(mouse, rect)?;
+                    }
+                }
+                break;
+            }
         }
 
         Ok(())
