@@ -64,6 +64,8 @@ pub struct FileManager {
     /// Currently watched root path (repo_root for git, or directory itself for non-git)
     /// Used for reference counting when navigating between directories
     watched_root: Option<PathBuf>,
+    /// Whether the watched root is a git repository (cached to avoid repeated filesystem checks)
+    is_watched_root_git_repo: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -109,6 +111,7 @@ impl FileManager {
             dragged_items: HashSet::new(),
             previous_dir_name: None,
             watched_root: None,
+            is_watched_root_git_repo: false,
         };
         let _ = fm.load_directory();
         fm
@@ -124,9 +127,15 @@ impl FileManager {
         self.watched_root.as_ref()
     }
 
-    /// Set the watched root path
-    pub fn set_watched_root(&mut self, root: Option<PathBuf>) {
+    /// Set the watched root path and whether it's a git repository
+    pub fn set_watched_root(&mut self, root: Option<PathBuf>, is_git_repo: bool) {
         self.watched_root = root;
+        self.is_watched_root_git_repo = is_git_repo;
+    }
+
+    /// Check if the watched root is a git repository (cached value)
+    pub fn is_watched_root_git_repo(&self) -> bool {
+        self.is_watched_root_git_repo
     }
 
     /// Take the watched root (for cleanup when closing)
@@ -136,6 +145,10 @@ impl FileManager {
 
     /// Load the contents of the current directory
     pub fn load_directory(&mut self) -> Result<()> {
+        // Invalidate watched_root when navigating to a new directory
+        // This triggers re-registration with fs_watcher in check_fs_update()
+        self.watched_root = None;
+        self.is_watched_root_git_repo = false;
         self.load_directory_inner(false)
     }
 

@@ -77,6 +77,9 @@ pub struct Editor {
     file_mtime: Option<std::time::SystemTime>,
     /// Flag: file was modified externally
     external_change_detected: bool,
+    /// Cached git repository root for this file (to avoid repeated filesystem lookups)
+    /// None = not cached, Some(None) = no repo, Some(Some(path)) = repo found
+    cached_repo_root: Option<Option<PathBuf>>,
 }
 // GitLineInfo and VirtualLine moved to git module
 
@@ -118,6 +121,7 @@ impl Editor {
             skip_next_mouse_up: false,
             file_mtime: None,
             external_change_detected: false,
+            cached_repo_root: None,
         }
     }
 
@@ -140,6 +144,28 @@ impl Editor {
     /// Get file path
     pub fn file_path(&self) -> Option<&std::path::Path> {
         self.buffer.file_path()
+    }
+
+    /// Get cached git repository root (returns None if not yet cached)
+    pub fn cached_repo_root(&self) -> Option<Option<&PathBuf>> {
+        self.cached_repo_root.as_ref().map(|opt| opt.as_ref())
+    }
+
+    /// Get or compute git repository root for this file
+    /// Returns Some(path) if in a git repo, None otherwise
+    pub fn get_or_compute_repo_root(&mut self) -> Option<&PathBuf> {
+        if self.cached_repo_root.is_none() {
+            // Compute and cache
+            let repo_root = self.file_path().and_then(crate::git::find_repo_root);
+            self.cached_repo_root = Some(repo_root);
+        }
+        self.cached_repo_root.as_ref().and_then(|opt| opt.as_ref())
+    }
+
+    /// Invalidate cached repo root (call when file path changes)
+    #[allow(dead_code)]
+    pub fn invalidate_repo_root_cache(&mut self) {
+        self.cached_repo_root = None;
     }
 
     /// Get unsaved buffer filename (if this is a temporary unsaved buffer)
@@ -238,6 +264,7 @@ impl Editor {
             skip_next_mouse_up: false,
             file_mtime,
             external_change_detected: false,
+            cached_repo_root: None,
         })
     }
 
@@ -277,6 +304,7 @@ impl Editor {
             skip_next_mouse_up: false,
             file_mtime: None,
             external_change_detected: false,
+            cached_repo_root: None,
         }
     }
 

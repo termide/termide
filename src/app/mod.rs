@@ -234,20 +234,19 @@ impl App {
 
     /// Check channel for git status update events
     fn check_git_status_update(&mut self) {
-        use crate::git::find_repo_root;
         use crate::panels::editor::Editor;
 
         // Lazy registration: register Editor file repositories with GitWatcher
+        // Uses cached repo root to avoid filesystem lookups on every tick
         if let Some(watcher) = &mut self.state.git_watcher {
             for panel in self.layout_manager.iter_all_panels_mut() {
                 if let Some(editor) =
                     (&mut **panel as &mut dyn std::any::Any).downcast_mut::<Editor>()
                 {
-                    if let Some(file_path) = editor.file_path() {
-                        if let Some(repo_root) = find_repo_root(file_path) {
-                            if !watcher.is_watching(&repo_root) {
-                                let _ = watcher.watch_repository(repo_root);
-                            }
+                    // Use cached repo root (computes once, then reuses)
+                    if let Some(repo_root) = editor.get_or_compute_repo_root() {
+                        if !watcher.is_watching(repo_root) {
+                            let _ = watcher.watch_repository(repo_root.clone());
                         }
                     }
                 }
@@ -295,62 +294,63 @@ impl App {
                 if let Some(fm) =
                     (&mut **panel as &mut dyn std::any::Any).downcast_mut::<FileManager>()
                 {
+                    // Skip if already watching (optimization: avoid find_repo_root on every tick)
+                    if fm.watched_root().is_some() {
+                        continue;
+                    }
+
                     let current_path = fm.current_path();
 
-                    // Determine the new watched root
-                    let new_root =
-                        find_repo_root(current_path).unwrap_or_else(|| current_path.to_path_buf());
+                    // Determine the new watched root (only called once per directory change)
+                    let repo_root = find_repo_root(current_path);
+                    let is_git_repo = repo_root.is_some();
+                    let new_root = repo_root.unwrap_or_else(|| current_path.to_path_buf());
 
-                    // Check if watched root changed (navigation between repos/dirs)
-                    let root_changed = fm.watched_root().map(|r| r != &new_root).unwrap_or(true);
-
-                    if root_changed {
-                        // Unwatch old root if exists
-                        if let Some(old_root) = fm.watched_root() {
-                            if find_repo_root(old_root).is_some() {
-                                watcher.unwatch_repository(old_root);
-                            } else {
-                                watcher.unwatch_directory(old_root);
-                            }
+                    // Watch new root
+                    if is_git_repo {
+                        // Git repository: watch recursively from repo root
+                        if !watcher.is_watching_repo(&new_root) {
+                            let _ = watcher.watch_repository(new_root.clone());
                         }
-
-                        // Watch new root
-                        if find_repo_root(current_path).is_some() {
-                            // Git repository: watch recursively from repo root
-                            if !watcher.is_watching_repo(&new_root) {
-                                let _ = watcher.watch_repository(new_root.clone());
-                            }
-                        } else {
-                            // Non-git directory: watch non-recursively
-                            if !watcher.is_watching_dir(&new_root) {
-                                let _ = watcher.watch_directory(new_root.clone());
-                            }
+                    } else {
+                        // Non-git directory: watch non-recursively
+                        if !watcher.is_watching_dir(&new_root) {
+                            let _ = watcher.watch_directory(new_root.clone());
                         }
-
-                        fm.set_watched_root(Some(new_root));
                     }
+
+                    fm.set_watched_root(Some(new_root), is_git_repo);
                 }
             }
 
-            // Also register directories for Editor files
+            // Also register directories for Editor files (using cached repo root)
             use crate::panels::editor::Editor;
             for panel in self.layout_manager.iter_all_panels_mut() {
                 if let Some(editor) =
                     (&mut **panel as &mut dyn std::any::Any).downcast_mut::<Editor>()
                 {
-                    if let Some(file_path) = editor.file_path() {
-                        if let Some(parent_dir) = file_path.parent() {
-                            // Determine watched root for file's directory
-                            let watched_root = find_repo_root(parent_dir)
-                                .unwrap_or_else(|| parent_dir.to_path_buf());
+                    // Skip if repo root is already cached
+                    if editor.cached_repo_root().is_some() {
+                        // Use cached value to check if watching
+                        if let Some(Some(repo_root)) = editor.cached_repo_root() {
+                            if !watcher.is_watching_repo(repo_root) {
+                                let _ = watcher.watch_repository(repo_root.clone());
+                            }
+                        }
+                        continue;
+                    }
 
-                            // Register if not already watching
-                            if find_repo_root(parent_dir).is_some() {
-                                if !watcher.is_watching_repo(&watched_root) {
-                                    let _ = watcher.watch_repository(watched_root);
-                                }
-                            } else if !watcher.is_watching_dir(&watched_root) {
-                                let _ = watcher.watch_directory(watched_root);
+                    // Compute and cache repo root
+                    if let Some(repo_root) = editor.get_or_compute_repo_root() {
+                        if !watcher.is_watching_repo(repo_root) {
+                            let _ = watcher.watch_repository(repo_root.clone());
+                        }
+                    } else if let Some(file_path) = editor.file_path() {
+                        // No git repo - watch parent directory
+                        if let Some(parent_dir) = file_path.parent() {
+                            let dir = parent_dir.to_path_buf();
+                            if !watcher.is_watching_dir(&dir) {
+                                let _ = watcher.watch_directory(dir);
                             }
                         }
                     }
@@ -380,10 +380,7 @@ impl App {
                     // For git repos: reload on any change within current directory tree
                     // (needed for git status color updates)
                     // For non-git dirs: reload only for direct children
-                    let is_in_git_repo = fm
-                        .watched_root()
-                        .map(|root| find_repo_root(root).is_some())
-                        .unwrap_or(false);
+                    let is_in_git_repo = fm.is_watched_root_git_repo();
 
                     let should_reload = if is_in_git_repo {
                         // Git repo: any change within current directory tree updates git status
@@ -451,12 +448,24 @@ impl App {
     }
 
     /// Update spinner in Info modal if it's open
+    /// Throttled to 125ms (8 FPS) to reduce unnecessary redraws
     fn update_info_modal_spinner(&mut self) {
+        const SPINNER_INTERVAL: std::time::Duration = std::time::Duration::from_millis(125);
+
         if let Some(ActiveModal::Info(ref mut modal)) = self.state.active_modal {
             // Update spinner only if calculation is still ongoing
             if self.state.dir_size_receiver.is_some() {
-                modal.advance_spinner();
-                self.state.needs_redraw = true;
+                // Throttle spinner updates
+                let should_update = self
+                    .state
+                    .last_spinner_update
+                    .is_none_or(|t| t.elapsed() >= SPINNER_INTERVAL);
+
+                if should_update {
+                    modal.advance_spinner();
+                    self.state.last_spinner_update = Some(std::time::Instant::now());
+                    self.state.needs_redraw = true;
+                }
             }
         }
     }

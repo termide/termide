@@ -320,6 +320,8 @@ pub struct AppState {
     pub last_session_save: Option<std::time::Instant>,
     /// Flag indicating UI needs to be redrawn (for CPU optimization)
     pub needs_redraw: bool,
+    /// Last time spinner was updated (for throttling spinner animation)
+    pub last_spinner_update: Option<std::time::Instant>,
 }
 
 impl Default for AppState {
@@ -369,6 +371,7 @@ impl AppState {
             last_resource_update: std::time::Instant::now(),
             last_session_save: None,
             needs_redraw: true, // Initial draw needed
+            last_spinner_update: None,
         }
     }
 
