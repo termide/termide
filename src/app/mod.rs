@@ -405,7 +405,7 @@ impl App {
                     };
 
                     if should_reload {
-                        let _ = fm.load_directory();
+                        let _ = fm.reload_directory();
                     }
                 }
 

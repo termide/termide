@@ -136,6 +136,16 @@ impl FileManager {
 
     /// Load the contents of the current directory
     pub fn load_directory(&mut self) -> Result<()> {
+        self.load_directory_inner(false)
+    }
+
+    /// Reload directory preserving selection
+    pub fn reload_directory(&mut self) -> Result<()> {
+        self.load_directory_inner(true)
+    }
+
+    /// Internal method to load directory with optional selection preservation
+    fn load_directory_inner(&mut self, preserve_selection: bool) -> Result<()> {
         // Save current file name and index to restore position
         // Use previous_dir_name if navigating up, otherwise use current selection
         let current_name = self
@@ -145,10 +155,20 @@ impl FileManager {
         let previous_index = self.selected;
         let previous_scroll_offset = self.scroll_offset;
 
+        // Save names of selected files if we need to restore selection
+        let selected_names: HashSet<String> = if preserve_selection {
+            self.selected_items
+                .iter()
+                .filter_map(|&idx| self.entries.get(idx).map(|e| e.name.clone()))
+                .collect()
+        } else {
+            HashSet::new()
+        };
+
         self.entries.clear();
         self.selected = 0;
         self.scroll_offset = 0;
-        // Clear selection when changing directory
+        // Clear selection indices (will restore by names if preserve_selection)
         self.selected_items.clear();
         // Clear drag state
         self.drag_start_index = None;
@@ -258,6 +278,15 @@ impl FileManager {
             (false, true) => std::cmp::Ordering::Greater,
             _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
         });
+
+        // Restore selection by file names
+        if !selected_names.is_empty() {
+            for (idx, entry) in self.entries.iter().enumerate() {
+                if selected_names.contains(&entry.name) {
+                    self.selected_items.insert(idx);
+                }
+            }
+        }
 
         // Restore cursor position
         if let Some(name) = current_name {
@@ -426,7 +455,7 @@ impl Panel for FileManager {
             }
             // Ctrl+R - refresh file list
             (KeyCode::Char('r'), KeyModifiers::CONTROL) => {
-                self.load_directory()?;
+                self.reload_directory()?;
             }
             // Insert - toggle selection of current item and move down
             (KeyCode::Insert, KeyModifiers::NONE) => {
@@ -876,8 +905,8 @@ impl Panel for FileManager {
     }
 
     fn reload(&mut self) -> Result<()> {
-        // Reload directory contents (update git statuses)
-        self.load_directory()
+        // Reload directory contents (preserving selection)
+        self.reload_directory()
     }
 
     fn needs_close_confirmation(&self) -> Option<String> {

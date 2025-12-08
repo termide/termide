@@ -141,6 +141,15 @@ impl FileManager {
                 fg_style
             };
 
+            // Переопределить fg_style для выделенных файлов (если не курсор)
+            let fg_style = if is_selected && !(is_cursor && is_focused) {
+                Style::default()
+                    .fg(theme.accented_fg)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                fg_style
+            };
+
             let icon_style = fg_style;
 
             if show_extended {

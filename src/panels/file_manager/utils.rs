@@ -55,7 +55,7 @@ pub fn get_icon(entry: &FileEntry) -> &'static str {
 /// Returns 1 character
 pub fn get_attribute(entry: &FileEntry, is_selected: bool) -> &'static str {
     if is_selected {
-        return "✓";
+        return "+";
     }
 
     // Executable has priority over read-only (but not for directories)

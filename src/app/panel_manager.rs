@@ -120,8 +120,8 @@ impl App {
                     // Check if FM working directory matches target
                     let fm_dir = fm.get_current_directory();
                     if fm_dir == directory {
-                        // Refresh directory contents
-                        let _ = fm.load_directory();
+                        // Refresh directory contents (preserving selection)
+                        let _ = fm.reload_directory();
                     }
                 }
             }
