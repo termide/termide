@@ -24,10 +24,10 @@ pub struct GitWatcher {
 
 impl GitWatcher {
     /// Create a new GitWatcher that sends events through the provided channel
-    /// Debounces events to minimum 300ms intervals
+    /// Debounces events to minimum 1000ms intervals
     pub fn new(tx: Sender<GitStatusUpdate>) -> anyhow::Result<Self> {
         let debouncer = new_debouncer(
-            Duration::from_millis(100),
+            Duration::from_millis(1000),
             move |result: notify_debouncer_mini::DebounceEventResult| {
                 if let Ok(events) = result {
                     for event in events {

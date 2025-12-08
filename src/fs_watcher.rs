@@ -32,10 +32,10 @@ pub struct FileSystemWatcher {
 
 impl FileSystemWatcher {
     /// Create a new FileSystemWatcher that sends events through the provided channel
-    /// Debounces events to 1 second intervals
+    /// Debounces events to 300ms intervals
     pub fn new(tx: Sender<DirectoryUpdate>) -> anyhow::Result<Self> {
         let debouncer = new_debouncer(
-            Duration::from_secs(1),
+            Duration::from_millis(300),
             move |result: notify_debouncer_mini::DebounceEventResult| {
                 if let Ok(events) = result {
                     for event in events {
