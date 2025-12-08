@@ -113,6 +113,16 @@ pub fn render_expanded_panel(
     let inner = block.inner(area);
     block.render(area, buf);
 
+    // Очистить внутреннюю область перед рендерингом содержимого
+    // Это предотвращает визуальные артефакты от предыдущего содержимого
+    let clear_style = Style::default().bg(state.theme.bg);
+    for y in inner.y..inner.y + inner.height {
+        for x in inner.x..inner.x + inner.width {
+            buf[(x, y)].reset();
+            buf[(x, y)].set_style(clear_style);
+        }
+    }
+
     // Рендерим содержимое панели внутри блока
     panel.render(inner, buf, is_focused, panel_index, state);
 }
