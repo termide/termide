@@ -272,6 +272,27 @@ impl FileManager {
             ));
         }
 
+        // Add virtual entries for deleted files (tracked by git but removed from filesystem)
+        if let Some(cache) = &self.git_status_cache {
+            for deleted_name in cache.get_deleted_files() {
+                // Skip if already in entries (shouldn't happen, but safety check)
+                if self.entries.iter().any(|e| e.name == deleted_name) {
+                    continue;
+                }
+                self.entries.push(FileEntry {
+                    name: deleted_name,
+                    is_dir: false, // Assume file (git doesn't track empty dirs)
+                    is_hidden: false,
+                    is_symlink: false,
+                    is_executable: false,
+                    is_readonly: false, // Don't show "R" attribute for deleted
+                    git_status: GitStatus::Deleted,
+                    size: None,
+                    modified: None,
+                });
+            }
+        }
+
         // Sort: directories first, then files
         self.entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
             (true, false) => std::cmp::Ordering::Less,
@@ -312,35 +333,6 @@ impl FileManager {
                 self.adjust_scroll_offset(self.visible_height);
             }
             // If visible_height == 0, render() will recalculate on first draw
-        }
-
-        Ok(())
-    }
-
-    /// Update git status for current directory without reloading entire directory
-    pub fn update_git_status(&mut self) -> Result<()> {
-        // Refresh git status cache
-        self.git_status_cache = get_git_status(&self.current_path);
-
-        // Update git_status for each entry (except "..")
-        for entry in &mut self.entries {
-            if entry.name == ".." {
-                continue;
-            }
-
-            entry.git_status = if entry.is_dir {
-                // For directories: check recursively for nested changes
-                self.git_status_cache
-                    .as_ref()
-                    .map(|cache| cache.get_directory_status(&entry.name))
-                    .unwrap_or(GitStatus::Unmodified)
-            } else {
-                // For files: use direct status
-                self.git_status_cache
-                    .as_ref()
-                    .map(|cache| cache.get_status(&entry.name))
-                    .unwrap_or(GitStatus::Unmodified)
-            };
         }
 
         Ok(())

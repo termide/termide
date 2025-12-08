@@ -290,6 +290,23 @@ impl GitStatusCache {
 
         GitStatus::Unmodified
     }
+
+    /// Get list of deleted files in the current directory (for virtual entries)
+    pub fn get_deleted_files(&self) -> Vec<String> {
+        self.status_map
+            .iter()
+            .filter(|(path, status)| {
+                // Only Deleted status
+                **status == GitStatus::Deleted
+                    // Only files in current directory (not nested)
+                    && path.parent().map(|p| p == self.relative_path).unwrap_or(
+                        // If no parent, only match if relative_path is empty (repo root)
+                        self.relative_path.as_os_str().is_empty(),
+                    )
+            })
+            .filter_map(|(path, _)| path.file_name()?.to_str().map(String::from))
+            .collect()
+    }
 }
 
 /// Git repository status information

@@ -39,6 +39,17 @@ impl FileSystemWatcher {
             move |result: notify_debouncer_mini::DebounceEventResult| {
                 if let Ok(events) = result {
                     for event in events {
+                        // Skip .git directory events to avoid feedback loop
+                        // (GitWatcher separately handles .git for git status updates)
+                        if event
+                            .path
+                            .to_str()
+                            .map(|s| s.contains("/.git/") || s.ends_with("/.git"))
+                            .unwrap_or(false)
+                        {
+                            continue;
+                        }
+
                         // Send the changed path directly
                         // The watched_root will be determined by the receiver
                         // based on which watcher triggered the event

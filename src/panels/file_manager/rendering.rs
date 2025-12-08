@@ -150,7 +150,20 @@ impl FileManager {
                 fg_style
             };
 
-            let icon_style = fg_style;
+            // Icon style: same as fg_style but without CROSSED_OUT for deleted files
+            let icon_style = if entry.git_status == GitStatus::Deleted {
+                Style::default().fg(theme.error)
+            } else {
+                fg_style
+            };
+
+            // Name style: add CROSSED_OUT only for deleted files (strikethrough only on name)
+            let name_style = if entry.git_status == GitStatus::Deleted && !(is_cursor && is_focused)
+            {
+                fg_style.add_modifier(Modifier::CROSSED_OUT)
+            } else {
+                fg_style
+            };
 
             if show_extended {
                 // Extended mode with columns
@@ -172,7 +185,7 @@ impl FileManager {
                     Span::styled(attr, attr_style),
                     Span::styled(icon, icon_style),
                     Span::styled(" ", bg_style),
-                    Span::styled(full_name, fg_style),
+                    Span::styled(full_name, name_style),
                     Span::styled(padding, bg_style),
                     Span::styled(SEPARATOR, bg_style.fg(theme.disabled)),
                     Span::styled(size_str, fg_style),
@@ -189,7 +202,7 @@ impl FileManager {
                     Span::styled(attr, attr_style),
                     Span::styled(icon, icon_style),
                     Span::styled(" ", bg_style),
-                    Span::styled(full_name, fg_style),
+                    Span::styled(full_name, name_style),
                     Span::styled(padding, bg_style),
                 ]));
             }

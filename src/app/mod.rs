@@ -226,19 +226,20 @@ impl App {
 
     /// Check channel for git status update events
     fn check_git_status_update(&mut self) {
-        use crate::panels::file_manager::FileManager;
+        use crate::git::find_repo_root;
+        use crate::panels::editor::Editor;
 
-        // First, register all FileManager repositories with watcher (lazy registration)
+        // Lazy registration: register Editor file repositories with GitWatcher
         if let Some(watcher) = &mut self.state.git_watcher {
             for panel in self.layout_manager.iter_all_panels_mut() {
-                if let Some(fm) =
-                    (&mut **panel as &mut dyn std::any::Any).downcast_mut::<FileManager>()
+                if let Some(editor) =
+                    (&mut **panel as &mut dyn std::any::Any).downcast_mut::<Editor>()
                 {
-                    // Find repository root for this FileManager's current path
-                    if let Some(repo_root) = Self::find_git_repo_root(fm.current_path()) {
-                        // Only register if not already watching
-                        if !watcher.is_watching(&repo_root) {
-                            let _ = watcher.watch_repository(repo_root);
+                    if let Some(file_path) = editor.file_path() {
+                        if let Some(repo_root) = find_repo_root(file_path) {
+                            if !watcher.is_watching(&repo_root) {
+                                let _ = watcher.watch_repository(repo_root);
+                            }
                         }
                     }
                 }
@@ -253,26 +254,14 @@ impl App {
             }
         }
 
-        // Process collected updates
+        // Process collected updates - only Editor panels
+        // FileManager: НЕ вызываем update_git_status() автоматически
+        // Git status обновляется только при Ctrl+R или навигации
         for update in updates {
-            // Update all FileManager panels showing this repository or its subdirectories
             for panel in self.layout_manager.iter_all_panels_mut() {
-                // Try to downcast to FileManager
-                if let Some(fm) =
-                    (&mut **panel as &mut dyn std::any::Any).downcast_mut::<FileManager>()
-                {
-                    // Check if this panel is showing a path within the updated repository
-                    if fm.current_path().starts_with(&update.repo_path) {
-                        let _ = fm.update_git_status();
-                    }
-                }
-
-                // Try to downcast to Editor
-                use crate::panels::editor::Editor;
                 if let Some(editor) =
                     (&mut **panel as &mut dyn std::any::Any).downcast_mut::<Editor>()
                 {
-                    // Check if this editor has a file in the updated repository
                     if let Some(file_path) = editor.file_path() {
                         if file_path.starts_with(&update.repo_path) {
                             editor.update_git_diff();
@@ -280,17 +269,6 @@ impl App {
                     }
                 }
             }
-        }
-    }
-
-    /// Find git repository root by walking up from a path
-    fn find_git_repo_root(path: &std::path::Path) -> Option<std::path::PathBuf> {
-        let mut current = path;
-        loop {
-            if current.join(".git").exists() {
-                return Some(current.to_path_buf());
-            }
-            current = current.parent()?;
         }
     }
 
