@@ -14,9 +14,9 @@ impl App {
     ) -> Result<()> {
         if let Some(name) = value.downcast_ref::<String>() {
             let t = i18n::t();
-            // Get FileManager and create file
-            let result = if let Some(fm_panel) = self.get_first_file_manager_mut() {
-                if let Some(fm) = fm_panel.as_file_manager_mut() {
+            // Get active FileManager and create file
+            let result = if let Some(panel) = self.layout_manager.active_panel_mut() {
+                if let Some(fm) = panel.as_file_manager_mut() {
                     let result = fm.create_file(name.clone());
                     if result.is_ok() {
                         crate::logger::info(format!("File created: {}", name));
@@ -59,9 +59,9 @@ impl App {
     ) -> Result<()> {
         if let Some(name) = value.downcast_ref::<String>() {
             let t = i18n::t();
-            // Get FileManager and create directory
-            let result = if let Some(fm_panel) = self.get_first_file_manager_mut() {
-                if let Some(fm) = fm_panel.as_file_manager_mut() {
+            // Get active FileManager and create directory
+            let result = if let Some(panel) = self.layout_manager.active_panel_mut() {
+                if let Some(fm) = panel.as_file_manager_mut() {
                     let result = fm.create_directory(name.clone());
                     if result.is_ok() {
                         crate::logger::info(format!("Directory created: {}", name));

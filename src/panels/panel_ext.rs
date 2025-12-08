@@ -14,6 +14,7 @@ pub trait PanelExt {
     fn as_editor_mut(&mut self) -> Option<&mut Editor>;
 
     /// Downcast to FileManager (immutable)
+    #[allow(dead_code)] // May be used in future
     fn as_file_manager(&self) -> Option<&FileManager>;
 
     /// Downcast to FileManager (mutable)

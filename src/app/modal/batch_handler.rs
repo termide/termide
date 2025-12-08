@@ -44,9 +44,9 @@ impl App {
         } else {
             // target_directory not set, get string from InputModal
             if let Some(destination_str) = value.downcast_ref::<String>() {
-                // Get FileManager panel to determine base path
-                if let Some(fm_panel) = self.get_first_file_manager_mut() {
-                    if let Some(fm) = fm_panel.as_file_manager_mut() {
+                // Get active FileManager panel to determine base path
+                if let Some(panel) = self.layout_manager.active_panel_mut() {
+                    if let Some(fm) = panel.as_file_manager_mut() {
                         let destination = PathBuf::from(destination_str);
 
                         // If path is relative, make it absolute
@@ -131,8 +131,8 @@ impl App {
                         );
 
                         // Execute operation
-                        if let Some(fm_panel) = self.get_first_file_manager_mut() {
-                            if let Some(fm) = fm_panel.as_file_manager_mut() {
+                        if let Some(panel) = self.layout_manager.active_panel_mut() {
+                            if let Some(fm) = panel.as_file_manager_mut() {
                                 let result = match operation.operation_type {
                                     BatchOperationType::Copy => {
                                         fm.copy_path(source.clone(), final_dest.clone())
@@ -262,9 +262,9 @@ impl App {
             // Show final results
             self.show_batch_results(&operation);
 
-            // Clear selection and refresh panel
-            if let Some(fm_panel) = self.get_first_file_manager_mut() {
-                if let Some(fm) = fm_panel.as_file_manager_mut() {
+            // Clear selection and refresh active panel
+            if let Some(panel) = self.layout_manager.active_panel_mut() {
+                if let Some(fm) = panel.as_file_manager_mut() {
                     if operation.success_count > 0 {
                         fm.clear_selection();
                     }
@@ -344,8 +344,8 @@ impl App {
         }
 
         // Execute operation
-        if let Some(fm_panel) = self.get_first_file_manager_mut() {
-            if let Some(fm) = fm_panel.as_file_manager_mut() {
+        if let Some(panel) = self.layout_manager.active_panel_mut() {
+            if let Some(fm) = panel.as_file_manager_mut() {
                 let result = match operation.operation_type {
                     BatchOperationType::Copy => fm.copy_path(source.clone(), final_dest.clone()),
                     BatchOperationType::Move => fm.move_path(source.clone(), final_dest.clone()),

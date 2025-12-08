@@ -14,10 +14,10 @@ impl App {
     ) -> Result<()> {
         if let Some(confirmed) = value.downcast_ref::<bool>() {
             if *confirmed {
-                // Get FileManager and delete files/directories
+                // Get active FileManager and delete files/directories
                 let (success_count, error_count, total_count) = {
-                    if let Some(fm_panel) = self.get_first_file_manager_mut() {
-                        if let Some(fm) = fm_panel.as_file_manager_mut() {
+                    if let Some(panel) = self.layout_manager.active_panel_mut() {
+                        if let Some(fm) = panel.as_file_manager_mut() {
                             let mut success_count = 0;
                             let mut error_count = 0;
                             let total_count = paths.len();

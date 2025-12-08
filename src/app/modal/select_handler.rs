@@ -233,9 +233,9 @@ impl App {
             };
 
             if should_proceed {
-                // Execute operation using FileManager
-                if let Some(fm_panel) = self.get_first_file_manager_mut() {
-                    if let Some(fm) = fm_panel.as_file_manager_mut() {
+                // Execute operation using active FileManager
+                if let Some(panel) = self.layout_manager.active_panel_mut() {
+                    if let Some(fm) = panel.as_file_manager_mut() {
                         let result = if is_move {
                             fm.move_path(source.clone(), destination.clone())
                         } else {

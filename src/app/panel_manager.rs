@@ -127,16 +127,4 @@ impl App {
             }
         }
     }
-
-    /// Get mutable reference to first FileManager panel found in any group
-    pub(super) fn get_first_file_manager_mut(&mut self) -> Option<&mut Box<dyn Panel>> {
-        for group in &mut self.layout_manager.panel_groups {
-            for panel in group.panels_mut() {
-                if panel.as_file_manager().is_some() {
-                    return Some(panel);
-                }
-            }
-        }
-        None
-    }
 }
