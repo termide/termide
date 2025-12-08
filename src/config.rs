@@ -4,57 +4,63 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
-/// Application configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Application configuration with nested sections
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
+    /// General application settings
+    #[serde(default)]
+    pub general: GeneralSettings,
+
+    /// Editor settings
+    #[serde(default)]
+    pub editor: EditorSettings,
+
+    /// File manager settings
+    #[serde(default)]
+    pub file_manager: FileManagerSettings,
+
+    /// Logging settings
+    #[serde(default)]
+    pub logging: LoggingSettings,
+}
+
+/// General application settings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneralSettings {
     /// Selected theme name
     #[serde(default = "default_theme_name")]
     pub theme: String,
 
-    /// Tab size (number of spaces)
-    #[serde(default = "default_tab_size")]
-    pub tab_size: usize,
-
     /// Interface language (en, de, es, fr, hi, pt, ru, th, zh, or auto for auto-detection)
     #[serde(default = "default_language")]
     pub language: String,
-
-    /// Log file path (if not specified, temporary directory is used)
-    #[serde(default)]
-    pub log_file_path: Option<String>,
-
-    /// System resource monitor update interval in milliseconds (default: 1000ms)
-    #[serde(default = "default_resource_monitor_interval")]
-    pub resource_monitor_interval: u64,
 
     /// Minimum panel width in characters (default: 80)
     /// Panels narrower than this threshold will be stacked vertically
     #[serde(default = "default_min_panel_width")]
     pub min_panel_width: u16,
 
-    /// Show git diff status colors on line numbers in editor (default: true)
-    #[serde(default = "default_show_git_diff")]
-    pub show_git_diff: bool,
-
-    /// Minimum file manager panel width to display size and time columns (default: 50)
-    #[serde(default = "default_fm_extended_view_width")]
-    pub fm_extended_view_width: usize,
-
     /// Session retention period in days (default: 30)
     /// Sessions older than this will be automatically deleted on startup
     #[serde(default = "default_session_retention_days")]
     pub session_retention_days: u32,
+}
+
+/// Editor settings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditorSettings {
+    /// Tab size (number of spaces)
+    #[serde(default = "default_tab_size")]
+    pub tab_size: usize,
+
+    /// Show git diff status colors on line numbers in editor (default: true)
+    #[serde(default = "default_show_git_diff")]
+    pub show_git_diff: bool,
 
     /// Enable word wrap in editor (default: true)
     /// When enabled, long lines are automatically wrapped to fit viewport width
     #[serde(default = "default_word_wrap")]
     pub word_wrap: bool,
-
-    /// Minimum log level (default: "info")
-    /// Possible values: "debug", "info", "warn", "error"
-    /// Logs below this level will not be recorded
-    #[serde(default = "default_min_log_level")]
-    pub min_log_level: String,
 
     /// File size threshold in MB for enabling smart features (default: 5)
     /// Files larger than this threshold will disable expensive features like
@@ -63,65 +69,170 @@ pub struct Config {
     pub large_file_threshold_mb: u64,
 }
 
-fn default_theme_name() -> String {
-    "default".to_string()
+/// File manager settings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileManagerSettings {
+    /// Minimum file manager panel width to display size and time columns (default: 50)
+    #[serde(default = "default_extended_view_width")]
+    pub extended_view_width: usize,
 }
 
-fn default_tab_size() -> usize {
-    4
+/// Logging settings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoggingSettings {
+    /// Log file path (if not specified, temporary directory is used)
+    #[serde(default)]
+    pub file_path: Option<String>,
+
+    /// Minimum log level (default: "info")
+    /// Possible values: "debug", "info", "warn", "error"
+    /// Logs below this level will not be recorded
+    #[serde(default = "default_min_level")]
+    pub min_level: String,
+
+    /// System resource monitor update interval in milliseconds (default: 1000ms)
+    #[serde(default = "default_resource_monitor_interval")]
+    pub resource_monitor_interval: u64,
+}
+
+// Default value functions
+fn default_theme_name() -> String {
+    "default".to_string()
 }
 
 fn default_language() -> String {
     "auto".to_string()
 }
 
-fn default_resource_monitor_interval() -> u64 {
-    1000 // 1 second
-}
-
 fn default_min_panel_width() -> u16 {
     80
+}
+
+fn default_session_retention_days() -> u32 {
+    30
+}
+
+fn default_tab_size() -> usize {
+    4
 }
 
 fn default_show_git_diff() -> bool {
     true
 }
 
-fn default_fm_extended_view_width() -> usize {
-    50
-}
-
-fn default_session_retention_days() -> u32 {
-    30 // 30 days
-}
-
 fn default_word_wrap() -> bool {
-    true // Enabled by default
-}
-
-fn default_min_log_level() -> String {
-    "info".to_string()
+    true
 }
 
 fn default_large_file_threshold_mb() -> u64 {
     crate::constants::DEFAULT_LARGE_FILE_THRESHOLD_MB
 }
 
-impl Default for Config {
+fn default_extended_view_width() -> usize {
+    50
+}
+
+fn default_min_level() -> String {
+    "info".to_string()
+}
+
+fn default_resource_monitor_interval() -> u64 {
+    1000
+}
+
+// Default implementations for nested structs
+impl Default for GeneralSettings {
     fn default() -> Self {
         Self {
             theme: default_theme_name(),
-            tab_size: default_tab_size(),
             language: default_language(),
-            log_file_path: None,
-            resource_monitor_interval: default_resource_monitor_interval(),
             min_panel_width: default_min_panel_width(),
-            show_git_diff: default_show_git_diff(),
-            fm_extended_view_width: default_fm_extended_view_width(),
             session_retention_days: default_session_retention_days(),
+        }
+    }
+}
+
+impl Default for EditorSettings {
+    fn default() -> Self {
+        Self {
+            tab_size: default_tab_size(),
+            show_git_diff: default_show_git_diff(),
             word_wrap: default_word_wrap(),
-            min_log_level: default_min_log_level(),
             large_file_threshold_mb: default_large_file_threshold_mb(),
+        }
+    }
+}
+
+impl Default for FileManagerSettings {
+    fn default() -> Self {
+        Self {
+            extended_view_width: default_extended_view_width(),
+        }
+    }
+}
+
+impl Default for LoggingSettings {
+    fn default() -> Self {
+        Self {
+            file_path: None,
+            min_level: default_min_level(),
+            resource_monitor_interval: default_resource_monitor_interval(),
+        }
+    }
+}
+
+/// Legacy flat config format for migration
+#[derive(Debug, Clone, Deserialize)]
+struct LegacyConfig {
+    #[serde(default = "default_theme_name")]
+    theme: String,
+    #[serde(default = "default_tab_size")]
+    tab_size: usize,
+    #[serde(default = "default_language")]
+    language: String,
+    #[serde(default)]
+    log_file_path: Option<String>,
+    #[serde(default = "default_resource_monitor_interval")]
+    resource_monitor_interval: u64,
+    #[serde(default = "default_min_panel_width")]
+    min_panel_width: u16,
+    #[serde(default = "default_show_git_diff")]
+    show_git_diff: bool,
+    #[serde(default = "default_extended_view_width")]
+    fm_extended_view_width: usize,
+    #[serde(default = "default_session_retention_days")]
+    session_retention_days: u32,
+    #[serde(default = "default_word_wrap")]
+    word_wrap: bool,
+    #[serde(default = "default_min_level")]
+    min_log_level: String,
+    #[serde(default = "default_large_file_threshold_mb")]
+    large_file_threshold_mb: u64,
+}
+
+impl From<LegacyConfig> for Config {
+    fn from(legacy: LegacyConfig) -> Self {
+        Self {
+            general: GeneralSettings {
+                theme: legacy.theme,
+                language: legacy.language,
+                min_panel_width: legacy.min_panel_width,
+                session_retention_days: legacy.session_retention_days,
+            },
+            editor: EditorSettings {
+                tab_size: legacy.tab_size,
+                show_git_diff: legacy.show_git_diff,
+                word_wrap: legacy.word_wrap,
+                large_file_threshold_mb: legacy.large_file_threshold_mb,
+            },
+            file_manager: FileManagerSettings {
+                extended_view_width: legacy.fm_extended_view_width,
+            },
+            logging: LoggingSettings {
+                file_path: legacy.log_file_path,
+                min_level: legacy.min_log_level,
+                resource_monitor_interval: legacy.resource_monitor_interval,
+            },
         }
     }
 }
@@ -130,15 +241,25 @@ impl Config {
     /// Load configuration from file
     /// On first run, creates config file with default values
     /// Auto-completes missing keys with default values
+    /// Supports migration from legacy flat format
     pub fn load() -> Result<Self> {
         let config_path = Self::get_config_path()?;
 
         if config_path.exists() {
-            // Read existing config file
             let original_content = std::fs::read_to_string(&config_path)?;
 
-            // Deserialize config (missing fields will use defaults from serde)
-            let config: Self = toml::from_str(&original_content)?;
+            // Try parsing as new structured format first
+            let config: Self = match toml::from_str(&original_content) {
+                Ok(config) => config,
+                Err(_) => {
+                    // Try parsing as legacy flat format
+                    let legacy: LegacyConfig = toml::from_str(&original_content)?;
+                    let config: Config = legacy.into();
+                    // Save in new format
+                    config.save()?;
+                    return Ok(config);
+                }
+            };
 
             // Serialize the config back to TOML to get normalized content
             let normalized_content = toml::to_string_pretty(&config)?;
@@ -212,6 +333,7 @@ impl Config {
         }
         Ok(())
     }
+
     /// Get path to config file (public version)
     pub fn config_file_path() -> Result<PathBuf> {
         Self::get_config_path()

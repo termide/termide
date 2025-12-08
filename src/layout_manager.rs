@@ -45,7 +45,7 @@ impl LayoutManager {
         let num_groups_after_split = self.panel_groups.len() + 1;
         let new_width_if_split = available_width / num_groups_after_split as u16;
 
-        if new_width_if_split < config.min_panel_width {
+        if new_width_if_split < config.general.min_panel_width {
             // Автостекирование: добавить в текущую группу вертикально
             if let Some(active_group) = self.panel_groups.get_mut(active_group_idx) {
                 active_group.add_panel(panel);

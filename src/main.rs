@@ -44,7 +44,7 @@ fn main() -> Result<()> {
     let config = config::Config::load().unwrap_or_default();
 
     // Initialize translation system with language from config
-    i18n::init_with_language(&config.language);
+    i18n::init_with_language(&config.general.language);
 
     // Check for git on the system
     let git_available = git::check_git_available();

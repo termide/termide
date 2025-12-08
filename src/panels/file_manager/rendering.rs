@@ -57,7 +57,7 @@ impl FileManager {
         const SEPARATOR_WIDTH: usize = 3;
 
         // Determine whether to show extended view with columns
-        let show_extended = available_width >= state.config.fm_extended_view_width;
+        let show_extended = available_width >= state.config.file_manager.extended_view_width;
 
         for (i, entry) in self.entries.iter().enumerate() {
             if i < visible_start || i >= visible_end {

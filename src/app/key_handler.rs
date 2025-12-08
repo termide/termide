@@ -72,7 +72,7 @@ impl App {
         // Apply config update if present
         if let Some(new_config) = config_update {
             self.state.config = new_config.clone();
-            self.state.set_theme(&new_config.theme);
+            self.state.set_theme(&new_config.general.theme);
             self.state.set_info("Config saved and applied".to_string());
         }
 

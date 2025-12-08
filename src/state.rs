@@ -333,7 +333,7 @@ impl AppState {
             eprintln!("Warning: Could not load config: {}. Using defaults.", e);
             Config::default()
         });
-        let theme = Theme::get_by_name(&config.theme);
+        let theme = Theme::get_by_name(&config.general.theme);
         Self::with_config_and_theme(config, theme)
     }
 
@@ -372,7 +372,7 @@ impl AppState {
     /// Set new theme and update config
     pub fn set_theme(&mut self, theme_name: &str) {
         self.theme = Theme::get_by_name(theme_name);
-        self.config.theme = theme_name.to_string();
+        self.config.general.theme = theme_name.to_string();
     }
 
     /// Request application quit
@@ -528,8 +528,8 @@ impl AppState {
     /// Create EditorConfig with settings from global config
     pub fn editor_config(&self) -> crate::panels::editor::EditorConfig {
         let mut config = crate::panels::editor::EditorConfig::default();
-        config.tab_size = self.config.tab_size;
-        config.word_wrap = self.config.word_wrap;
+        config.tab_size = self.config.editor.tab_size;
+        config.word_wrap = self.config.editor.word_wrap;
         config
     }
 

@@ -38,7 +38,7 @@ impl App {
 
         // Initialize logger in session directory (before other initializations that log)
         // Use config override if specified, otherwise use session directory with unique filename
-        let log_file_path = if let Some(ref path) = state.config.log_file_path {
+        let log_file_path = if let Some(ref path) = state.config.logging.file_path {
             std::path::PathBuf::from(path)
         } else {
             crate::session::Session::get_session_dir(&project_root)
@@ -51,7 +51,7 @@ impl App {
                     std::env::temp_dir().join(crate::session::generate_log_filename())
                 })
         };
-        let min_log_level = crate::logger::LogLevel::from_str(&state.config.min_log_level)
+        let min_log_level = crate::logger::LogLevel::from_str(&state.config.logging.min_level)
             .unwrap_or(crate::logger::LogLevel::Info);
         crate::logger::init(
             log_file_path,
@@ -85,7 +85,7 @@ impl App {
         }
 
         // Clean up old sessions (configurable retention period)
-        let retention_days = state.config.session_retention_days;
+        let retention_days = state.config.general.session_retention_days;
         if let Err(e) = crate::session::cleanup_old_sessions(&project_root, retention_days) {
             crate::logger::warn(format!("Failed to cleanup old sessions: {}", e));
         }
@@ -439,7 +439,7 @@ impl App {
     /// Respects the configured update interval
     fn update_system_resources(&mut self) {
         let interval =
-            std::time::Duration::from_millis(self.state.config.resource_monitor_interval);
+            std::time::Duration::from_millis(self.state.config.logging.resource_monitor_interval);
         let elapsed = self.state.last_resource_update.elapsed();
 
         if elapsed >= interval {

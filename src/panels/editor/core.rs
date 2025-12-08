@@ -129,7 +129,7 @@ impl Editor {
     /// Smart wrap works for both code files (with syntax) and plain text files.
     fn should_use_smart_wrap(&self, config: &crate::config::Config) -> bool {
         // Check file size threshold (for performance)
-        let threshold_bytes = config.large_file_threshold_mb * crate::constants::MEGABYTE;
+        let threshold_bytes = config.editor.large_file_threshold_mb * crate::constants::MEGABYTE;
         if self.file_size > threshold_bytes {
             return false;
         }
@@ -567,7 +567,7 @@ impl Editor {
             &self.search_state,
             &self.selection,
             state.theme,
-            state.config.show_git_diff,
+            state.config.editor.show_git_diff,
             self.config.word_wrap,
             use_smart_wrap,
             content_width,
@@ -1120,7 +1120,7 @@ impl Editor {
             );
 
             // Add deletion markers if git diff is shown
-            if config.show_git_diff {
+            if config.editor.show_git_diff {
                 if let Some(git_diff) = &self.git_diff_cache {
                     let buffer_line_count = self.buffer.line_count();
                     let deletion_marker_count = (0..buffer_line_count)
@@ -1134,7 +1134,7 @@ impl Editor {
         }
 
         // No word wrap - use old logic with buffer lines + deletion markers
-        if !config.show_git_diff || self.git_diff_cache.is_none() {
+        if !config.editor.show_git_diff || self.git_diff_cache.is_none() {
             return self.buffer.line_count();
         }
 
@@ -1211,7 +1211,7 @@ impl Editor {
             &self.search_state,
             &self.selection,
             theme,
-            config.show_git_diff,
+            config.editor.show_git_diff,
             self.config.word_wrap,
             use_smart_wrap,
             content_width,
