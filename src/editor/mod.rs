@@ -8,7 +8,7 @@ mod wrap;
 
 pub use buffer::TextBuffer;
 pub use cursor::{Cursor, Selection};
-pub use highlighting::HighlightCache;
+pub use highlighting::{HighlightCache, LineHighlighter};
 pub use history::{Action, History};
 pub use search::SearchState;
 pub use viewport::Viewport;

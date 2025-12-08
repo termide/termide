@@ -8,6 +8,7 @@ use crate::state::AppState;
 pub mod debug;
 pub mod editor;
 pub mod file_manager;
+pub mod log_viewer;
 pub mod panel_ext;
 pub mod panel_group;
 pub mod terminal;

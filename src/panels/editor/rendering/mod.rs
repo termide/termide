@@ -38,7 +38,7 @@ pub fn calculate_content_dimensions(area_width: u16, area_height: u16) -> (usize
 /// - Selects appropriate rendering mode (word wrap vs no wrap)
 /// - Delegates to specialized rendering functions
 #[allow(clippy::too_many_arguments)]
-pub fn render_editor_content(
+pub fn render_editor_content<H: crate::editor::LineHighlighter>(
     buf: &mut Buffer,
     area: Rect,
     buffer: &crate::editor::TextBuffer,
@@ -46,7 +46,7 @@ pub fn render_editor_content(
     cursor: &crate::editor::Cursor,
     git_diff_cache: &Option<crate::git::GitDiffCache>,
     syntax_highlighting_enabled: bool,
-    highlight_cache: &mut crate::editor::HighlightCache,
+    highlight_cache: &mut H,
     search_state: &Option<crate::editor::SearchState>,
     selection: &Option<crate::editor::Selection>,
     theme: &crate::theme::Theme,

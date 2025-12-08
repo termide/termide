@@ -72,7 +72,7 @@ struct TomlTheme {
 }
 
 /// Application theme
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Theme {
     #[allow(dead_code)]
     pub name: &'static str,

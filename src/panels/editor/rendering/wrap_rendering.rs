@@ -9,7 +9,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::{context::RenderContext, cursor_renderer, deletion_markers, highlight_renderer};
 use crate::{
-    editor::{HighlightCache, TextBuffer},
+    editor::{LineHighlighter, TextBuffer},
     panels::editor::git,
 };
 
@@ -21,7 +21,7 @@ use crate::{
 /// - Git diff markers and line numbers
 /// - Cursor positioning tracking
 #[allow(clippy::too_many_arguments)] // Complex rendering requires many parameters
-pub fn render_content_word_wrap(
+pub fn render_content_word_wrap<H: LineHighlighter>(
     buf: &mut Buffer,
     area: Rect,
     buffer: &TextBuffer,
@@ -30,7 +30,7 @@ pub fn render_content_word_wrap(
     git_diff_cache: &Option<crate::git::GitDiffCache>,
     show_git_diff: bool,
     syntax_highlighting_enabled: bool,
-    highlight_cache: &mut HighlightCache,
+    highlight_cache: &mut H,
     render_context: &mut RenderContext,
     theme: &crate::theme::Theme,
     content_width: usize,
@@ -222,7 +222,7 @@ fn render_empty_line(
 
 /// Render a single visual line (wrapped segment) in word wrap mode.
 #[allow(clippy::too_many_arguments)]
-fn render_visual_line(
+fn render_visual_line<H: LineHighlighter>(
     buf: &mut Buffer,
     area: Rect,
     visual_row: usize,
@@ -236,7 +236,7 @@ fn render_visual_line(
     git_diff_cache: &Option<crate::git::GitDiffCache>,
     show_git_diff: bool,
     syntax_highlighting_enabled: bool,
-    highlight_cache: &mut HighlightCache,
+    highlight_cache: &mut H,
     render_context: &mut RenderContext,
     theme: &crate::theme::Theme,
     content_width: usize,

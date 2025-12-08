@@ -399,6 +399,95 @@ impl Editor {
         }
     }
 
+    // ===== LogViewer support methods =====
+
+    /// Get immutable reference to buffer.
+    pub fn buffer(&self) -> &TextBuffer {
+        &self.buffer
+    }
+
+    /// Get mutable reference to buffer.
+    pub fn buffer_mut(&mut self) -> &mut TextBuffer {
+        &mut self.buffer
+    }
+
+    /// Get immutable reference to viewport.
+    pub fn viewport(&self) -> &Viewport {
+        &self.viewport
+    }
+
+    /// Get mutable reference to viewport.
+    pub fn viewport_mut(&mut self) -> &mut Viewport {
+        &mut self.viewport
+    }
+
+    /// Set cursor to specific line (for log viewer scroll-to-end).
+    pub fn set_cursor_line(&mut self, line: usize) {
+        self.cursor.line = line.min(self.buffer.line_count().saturating_sub(1));
+        self.cursor.column = 0;
+    }
+
+    /// Render with custom highlighter (for LogViewer).
+    pub fn render_with_highlighter<H: crate::editor::LineHighlighter>(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        _is_focused: bool,
+        state: &AppState,
+        highlighter: &mut H,
+    ) {
+        // Update viewport size
+        let (content_width, content_height) =
+            rendering::calculate_content_dimensions(area.width, area.height);
+
+        self.cached_content_width = if self.config.word_wrap {
+            content_width
+        } else {
+            0
+        };
+        self.cached_use_smart_wrap = false;
+
+        self.viewport.resize(content_width, content_height);
+
+        let use_smart_wrap = if self.config.word_wrap && content_width > 0 {
+            self.should_use_smart_wrap(&state.config)
+        } else {
+            false
+        };
+        self.cached_use_smart_wrap = use_smart_wrap;
+
+        let virtual_lines_total = self.virtual_line_count(&state.config);
+        self.cached_virtual_line_count = virtual_lines_total;
+
+        // Ensure cursor is visible
+        if self.config.word_wrap && content_width > 0 {
+            self.ensure_cursor_visible_word_wrap(content_height);
+        } else {
+            self.viewport
+                .ensure_cursor_visible(&self.cursor, virtual_lines_total);
+        }
+
+        // Render with custom highlighter
+        rendering::render_editor_content(
+            buf,
+            area,
+            &self.buffer,
+            &self.viewport,
+            &self.cursor,
+            &self.git_diff_cache,
+            self.config.syntax_highlighting,
+            highlighter,
+            &self.search_state,
+            &self.selection,
+            state.theme,
+            state.config.show_git_diff,
+            self.config.word_wrap,
+            use_smart_wrap,
+            content_width,
+            content_height,
+        );
+    }
+
     /// Check if visual movement should be used (word wrap enabled and width cached).
     fn should_use_visual_movement(&self) -> bool {
         self.config.word_wrap && self.cached_content_width > 0

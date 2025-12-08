@@ -6,7 +6,7 @@ use super::App;
 use crate::{
     i18n, logger,
     panels::{
-        debug::Debug, editor::Editor, file_manager::FileManager, terminal_pty::Terminal,
+        editor::Editor, file_manager::FileManager, log_viewer::LogViewer, terminal_pty::Terminal,
         welcome::Welcome, PanelExt,
     },
     state::{ActiveModal, PendingAction},
@@ -439,8 +439,8 @@ impl App {
         // No existing Debug panel found, create new one
         crate::logger::debug("Opening new Log panel");
         self.close_welcome_panels();
-        let debug_panel = Debug::new();
-        self.add_panel(Box::new(debug_panel));
+        let log_panel = LogViewer::new(self.state.theme);
+        self.add_panel(Box::new(log_panel));
         self.auto_save_session();
         Ok(())
     }
@@ -452,7 +452,7 @@ impl App {
         for (group_idx, group) in self.layout_manager.panel_groups.iter_mut().enumerate() {
             // Check each panel in the group
             for (panel_idx, panel) in group.panels().iter().enumerate() {
-                if panel.is_debug() {
+                if panel.is_log_viewer() {
                     // Found Debug panel - set it as expanded and focus the group
                     group.set_expanded(panel_idx);
                     self.layout_manager.focus = group_idx;

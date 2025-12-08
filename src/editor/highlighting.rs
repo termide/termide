@@ -4,6 +4,23 @@ use tree_sitter_highlight::{HighlightEvent, Highlighter};
 
 use crate::syntax_highlighter::TreeSitterHighlighter;
 
+/// Trait for line-based syntax highlighting
+/// Allows custom highlighters (e.g., for log files) to integrate with Editor
+pub trait LineHighlighter: Send + Sync {
+    /// Get highlighted segments for a line (with caching)
+    fn get_line_segments(&mut self, line_idx: usize, line_text: &str) -> &[(String, Style)];
+
+    /// Invalidate cache from given line to end (called when text changes)
+    fn invalidate_from(&mut self, line: usize);
+
+    /// Invalidate entire cache
+    #[allow(dead_code)]
+    fn invalidate_all(&mut self);
+
+    /// Check if syntax highlighting is active
+    fn has_syntax(&self) -> bool;
+}
+
 /// Maximum highlight cache size (lines)
 const MAX_CACHE_SIZE: usize = 1000;
 
@@ -214,5 +231,28 @@ impl HighlightCache {
     /// Get current syntax
     pub fn current_syntax(&self) -> Option<&str> {
         self.language.as_deref()
+    }
+}
+
+impl LineHighlighter for HighlightCache {
+    fn get_line_segments(&mut self, line_idx: usize, line_text: &str) -> &[(String, Style)] {
+        HighlightCache::get_line_segments(self, line_idx, line_text)
+    }
+
+    fn invalidate_from(&mut self, line: usize) {
+        // Invalidate from given line to end of cache
+        let lines_to_remove: Vec<usize> =
+            self.lines.keys().filter(|&&l| l >= line).copied().collect();
+        for line_idx in lines_to_remove {
+            self.lines.remove(&line_idx);
+        }
+    }
+
+    fn invalidate_all(&mut self) {
+        HighlightCache::invalidate_all(self);
+    }
+
+    fn has_syntax(&self) -> bool {
+        HighlightCache::has_syntax(self)
     }
 }

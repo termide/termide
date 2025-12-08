@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{

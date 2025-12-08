@@ -8,7 +8,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use super::{context::RenderContext, highlight_renderer};
-use crate::{editor::HighlightCache, panels::editor::git};
+use crate::{editor::LineHighlighter, panels::editor::git};
 
 /// Render a single line in no-wrap mode.
 ///
@@ -18,7 +18,7 @@ use crate::{editor::HighlightCache, panels::editor::git};
 /// - Search matches, selection, and cursor line styling
 /// - Background fill for cursor line
 #[allow(clippy::too_many_arguments)] // Complex rendering requires many parameters
-pub fn render_line_no_wrap(
+pub fn render_line_no_wrap<H: LineHighlighter>(
     buf: &mut Buffer,
     area: Rect,
     row: usize,
@@ -34,7 +34,7 @@ pub fn render_line_no_wrap(
     content_width: usize,
     left_column: usize,
     syntax_highlighting_enabled: bool,
-    highlight_cache: &mut HighlightCache,
+    highlight_cache: &mut H,
     render_context: &RenderContext,
     search_match_style: Style,
     current_match_style: Style,
@@ -129,7 +129,7 @@ fn render_line_gutter(
 
 /// Render line content with horizontal scrolling.
 #[allow(clippy::too_many_arguments)]
-fn render_line_content_horizontal_scroll(
+fn render_line_content_horizontal_scroll<H: LineHighlighter>(
     buf: &mut Buffer,
     area: Rect,
     row: usize,
@@ -141,7 +141,7 @@ fn render_line_content_horizontal_scroll(
     content_width: usize,
     left_column: usize,
     syntax_highlighting_enabled: bool,
-    highlight_cache: &mut HighlightCache,
+    highlight_cache: &mut H,
     render_context: &RenderContext,
     search_match_style: Style,
     current_match_style: Style,
@@ -239,7 +239,7 @@ fn fill_line_remainder(
 /// - Horizontal scrolling
 /// - Cursor positioning accounting for virtual lines
 #[allow(clippy::too_many_arguments)]
-pub fn render_content_no_wrap(
+pub fn render_content_no_wrap<H: LineHighlighter>(
     buf: &mut Buffer,
     area: Rect,
     buffer: &crate::editor::TextBuffer,
@@ -248,7 +248,7 @@ pub fn render_content_no_wrap(
     git_diff_cache: &Option<crate::git::GitDiffCache>,
     show_git_diff: bool,
     syntax_highlighting_enabled: bool,
-    highlight_cache: &mut HighlightCache,
+    highlight_cache: &mut H,
     render_context: &RenderContext,
     theme: &crate::theme::Theme,
     content_width: usize,

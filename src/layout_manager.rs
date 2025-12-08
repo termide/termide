@@ -634,9 +634,9 @@ impl LayoutManager {
         term_width: u16,
         editor_config: EditorConfig,
     ) -> Result<Self> {
-        use crate::panels::debug::Debug;
         use crate::panels::editor::Editor;
         use crate::panels::file_manager::FileManager;
+        use crate::panels::log_viewer::LogViewer;
         use crate::panels::terminal_pty::Terminal;
         use crate::session::SessionPanel;
 
@@ -714,7 +714,7 @@ impl LayoutManager {
                             .ok()
                             .map(|t| Box::new(t) as Box<dyn Panel>)
                     }
-                    SessionPanel::Debug => Some(Box::new(Debug::new())),
+                    SessionPanel::Debug => Some(Box::new(LogViewer::default())),
                 };
 
                 if let Some(p) = panel {

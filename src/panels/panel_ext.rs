@@ -1,7 +1,7 @@
 use std::any::Any;
 
 use super::{
-    debug::Debug, editor::Editor, file_manager::FileManager, terminal_pty::Terminal, Panel,
+    editor::Editor, file_manager::FileManager, log_viewer::LogViewer, terminal_pty::Terminal, Panel,
 };
 
 /// Extension trait for convenient downcasting of Panel trait objects
@@ -27,12 +27,12 @@ pub trait PanelExt {
     #[allow(dead_code)] // May be used in future
     fn as_terminal_mut(&mut self) -> Option<&mut Terminal>;
 
-    /// Downcast to Debug (immutable)
+    /// Downcast to LogViewer (immutable)
     #[allow(dead_code)] // May be used in future
-    fn as_debug(&self) -> Option<&Debug>;
+    fn as_log_viewer(&self) -> Option<&LogViewer>;
 
-    /// Check if panel is a Debug panel
-    fn is_debug(&self) -> bool;
+    /// Check if panel is a LogViewer panel
+    fn is_log_viewer(&self) -> bool;
 }
 
 impl PanelExt for dyn Panel {
@@ -60,12 +60,12 @@ impl PanelExt for dyn Panel {
         (self as &mut dyn Any).downcast_mut::<Terminal>()
     }
 
-    fn as_debug(&self) -> Option<&Debug> {
-        (self as &dyn Any).downcast_ref::<Debug>()
+    fn as_log_viewer(&self) -> Option<&LogViewer> {
+        (self as &dyn Any).downcast_ref::<LogViewer>()
     }
 
-    fn is_debug(&self) -> bool {
-        (self as &dyn Any).is::<Debug>()
+    fn is_log_viewer(&self) -> bool {
+        (self as &dyn Any).is::<LogViewer>()
     }
 }
 
@@ -94,11 +94,11 @@ impl PanelExt for Box<dyn Panel> {
         (&mut **self as &mut dyn Any).downcast_mut::<Terminal>()
     }
 
-    fn as_debug(&self) -> Option<&Debug> {
-        (&**self as &dyn Any).downcast_ref::<Debug>()
+    fn as_log_viewer(&self) -> Option<&LogViewer> {
+        (&**self as &dyn Any).downcast_ref::<LogViewer>()
     }
 
-    fn is_debug(&self) -> bool {
-        (&**self as &dyn Any).is::<Debug>()
+    fn is_log_viewer(&self) -> bool {
+        (&**self as &dyn Any).is::<LogViewer>()
     }
 }
