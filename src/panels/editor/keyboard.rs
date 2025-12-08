@@ -46,6 +46,9 @@ pub enum EditorCommand {
 
     // Text editing
     InsertChar(char),
+    InsertTab,
+    IndentLines,
+    UnindentLines,
     InsertNewline,
     Backspace,
     Delete,
@@ -102,7 +105,13 @@ impl EditorCommand {
     /// * `key` - The key event to parse (should already be translated via translate_hotkey)
     /// * `read_only` - Whether the editor is in read-only mode
     /// * `has_search` - Whether there's an active search
-    pub fn from_key_event(key: KeyEvent, read_only: bool, has_search: bool) -> Self {
+    /// * `has_selection` - Whether there's an active text selection
+    pub fn from_key_event(
+        key: KeyEvent,
+        read_only: bool,
+        has_search: bool,
+        has_selection: bool,
+    ) -> Self {
         match (key.code, key.modifiers) {
             // Navigation (clears selection and closes search)
             (KeyCode::Up, KeyModifiers::NONE) => Self::MoveCursorUp,
@@ -199,11 +208,14 @@ impl EditorCommand {
             // Esc - close search
             (KeyCode::Esc, KeyModifiers::NONE) if has_search => Self::CloseSearch,
 
-            // Tab - next match (when search is active)
+            // Tab - next match (when search is active), indent lines (with selection), or insert tab
             (KeyCode::Tab, KeyModifiers::NONE) if has_search => Self::SearchNext,
+            (KeyCode::Tab, KeyModifiers::NONE) if !read_only && has_selection => Self::IndentLines,
+            (KeyCode::Tab, KeyModifiers::NONE) if !read_only => Self::InsertTab,
 
-            // Shift+Tab - previous match (when search is active)
+            // Shift+Tab - previous match (when search is active), or unindent lines
             (KeyCode::BackTab, _) if has_search => Self::SearchPrev,
+            (KeyCode::BackTab, _) if !read_only => Self::UnindentLines,
 
             // Ctrl+H - text replacement (only if not read-only)
             (KeyCode::Char('h'), KeyModifiers::CONTROL) if !read_only => Self::StartReplace,
@@ -418,6 +430,9 @@ impl EditorCommand {
 
             // Text editing
             Self::InsertChar(ch) => editor.insert_char(ch),
+            Self::InsertTab => editor.insert_tab(),
+            Self::IndentLines => editor.indent_lines(),
+            Self::UnindentLines => editor.unindent_lines(),
             Self::InsertNewline => editor.insert_newline(),
             Self::Backspace => editor.handle_delete_key(|e| e.backspace()),
             Self::Delete => editor.handle_delete_key(|e| e.delete()),

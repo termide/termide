@@ -997,6 +997,142 @@ impl Editor {
         Ok(())
     }
 
+    /// Insert tab (spaces based on tab_size config)
+    pub(super) fn insert_tab(&mut self) -> Result<()> {
+        // Close search mode when editing begins
+        self.close_search();
+
+        // Delete selected text before insertion
+        self.delete_selection()?;
+
+        // Insert tab_size spaces
+        let spaces = " ".repeat(self.config.tab_size);
+        for ch in spaces.chars() {
+            let result = text_editing::insert_char(&mut self.buffer, &self.cursor, ch)?;
+            self.cursor = result.new_cursor;
+        }
+
+        self.preferred_column = None;
+        self.clamp_cursor();
+
+        // Invalidate highlighting cache and schedule git update
+        self.invalidate_cache_after_edit(self.cursor.line, false);
+
+        Ok(())
+    }
+
+    /// Indent selected lines (or current line if no selection)
+    pub(super) fn indent_lines(&mut self) -> Result<()> {
+        // Close search mode when editing begins
+        self.close_search();
+
+        let tab_size = self.config.tab_size;
+        let indent = " ".repeat(tab_size);
+
+        // Get line range from selection or current cursor
+        let (start_line, end_line) = if let Some(ref sel) = self.selection {
+            (sel.start().line, sel.end().line)
+        } else {
+            (self.cursor.line, self.cursor.line)
+        };
+
+        // Insert indent at the beginning of each line (iterate in reverse to avoid index shifts)
+        for line_idx in (start_line..=end_line).rev() {
+            let cursor_at_start = Cursor::at(line_idx, 0);
+            self.buffer.insert(&cursor_at_start, &indent)?;
+        }
+
+        // Update cursor position
+        self.cursor.column += tab_size;
+
+        // Update selection positions if present
+        if let Some(ref mut sel) = self.selection {
+            sel.anchor.column += tab_size;
+            sel.active.column += tab_size;
+        }
+
+        self.preferred_column = None;
+        self.clamp_cursor();
+
+        // Invalidate highlighting cache and schedule git update
+        self.invalidate_cache_after_edit(start_line, true);
+        self.schedule_git_diff_update();
+
+        Ok(())
+    }
+
+    /// Unindent selected lines (or current line if no selection)
+    pub(super) fn unindent_lines(&mut self) -> Result<()> {
+        // Close search mode when editing begins
+        self.close_search();
+
+        let tab_size = self.config.tab_size;
+
+        // Get line range from selection or current cursor
+        let (start_line, end_line) = if let Some(ref sel) = self.selection {
+            (sel.start().line, sel.end().line)
+        } else {
+            (self.cursor.line, self.cursor.line)
+        };
+
+        // Track how many spaces were removed from each line for cursor adjustment
+        let mut cursor_line_spaces_removed = 0;
+        let mut anchor_line_spaces_removed = 0;
+        let mut active_line_spaces_removed = 0;
+
+        // Remove up to tab_size spaces from the beginning of each line
+        for line_idx in (start_line..=end_line).rev() {
+            if let Some(line) = self.buffer.line(line_idx) {
+                // Count leading spaces (up to tab_size)
+                let spaces_to_remove = line
+                    .chars()
+                    .take(tab_size)
+                    .take_while(|c| *c == ' ')
+                    .count();
+
+                if spaces_to_remove > 0 {
+                    let start = Cursor::at(line_idx, 0);
+                    let end = Cursor::at(line_idx, spaces_to_remove);
+                    self.buffer.delete_range(&start, &end)?;
+
+                    // Track spaces removed for cursor/selection adjustment
+                    if line_idx == self.cursor.line {
+                        cursor_line_spaces_removed = spaces_to_remove;
+                    }
+                    if let Some(ref sel) = self.selection {
+                        if line_idx == sel.anchor.line {
+                            anchor_line_spaces_removed = spaces_to_remove;
+                        }
+                        if line_idx == sel.active.line {
+                            active_line_spaces_removed = spaces_to_remove;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Update cursor position (subtract removed spaces, but don't go below 0)
+        self.cursor.column = self
+            .cursor
+            .column
+            .saturating_sub(cursor_line_spaces_removed);
+
+        // Update selection positions if present
+        if let Some(ref mut sel) = self.selection {
+            sel.anchor.column = sel.anchor.column.saturating_sub(anchor_line_spaces_removed);
+            sel.active.column = sel.active.column.saturating_sub(active_line_spaces_removed);
+        }
+
+        self.preferred_column = None;
+        self.clamp_cursor();
+
+        // Invalidate highlighting cache and schedule git update
+        self.invalidate_cache_after_edit(start_line, true);
+        self.schedule_git_diff_update();
+
+        Ok(())
+    }
+
     /// Insert newline
     pub(super) fn insert_newline(&mut self) -> Result<()> {
         // Close search mode when editing begins
@@ -1692,6 +1828,7 @@ impl Panel for Editor {
             key,
             self.config.read_only,
             self.search_state.is_some(),
+            self.selection.is_some(),
         );
 
         // Execute command
