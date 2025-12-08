@@ -388,11 +388,21 @@ impl App {
                     let current = fm.current_path();
                     let changed_parent = update.changed_path.parent();
 
-                    // Reload if:
-                    // 1. The changed path's parent is our current directory (file in current dir changed)
-                    // 2. The changed path IS our current directory (directory itself renamed/deleted)
-                    let should_reload =
-                        changed_parent == Some(current) || update.changed_path == current;
+                    // For git repos: reload on any change within current directory tree
+                    // (needed for git status color updates)
+                    // For non-git dirs: reload only for direct children
+                    let is_in_git_repo = fm
+                        .watched_root()
+                        .map(|root| find_repo_root(root).is_some())
+                        .unwrap_or(false);
+
+                    let should_reload = if is_in_git_repo {
+                        // Git repo: any change within current directory tree updates git status
+                        update.changed_path.starts_with(current)
+                    } else {
+                        // Non-git: only direct children or current dir itself
+                        changed_parent == Some(current) || update.changed_path == current
+                    };
 
                     if should_reload {
                         let _ = fm.load_directory();
