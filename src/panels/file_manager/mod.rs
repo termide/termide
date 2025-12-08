@@ -117,12 +117,13 @@ impl FileManager {
 
     /// Load the contents of the current directory
     pub fn load_directory(&mut self) -> Result<()> {
-        // Save current file name to restore position
+        // Save current file name and index to restore position
         // Use previous_dir_name if navigating up, otherwise use current selection
         let current_name = self
             .previous_dir_name
             .take()
             .or_else(|| self.entries.get(self.selected).map(|e| e.name.clone()));
+        let previous_index = self.selected;
 
         self.entries.clear();
         self.selected = 0;
@@ -238,13 +239,17 @@ impl FileManager {
             _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
         });
 
-        // Restore cursor position if a file with that name exists
+        // Restore cursor position
         if let Some(name) = current_name {
             if let Some(pos) = self.entries.iter().position(|e| e.name == name) {
+                // Found file by name - restore to its position
                 self.selected = pos;
-                // Update scroll_offset if needed
-                self.adjust_scroll_offset(20); // 20 - approximate visible area height
+            } else if !self.entries.is_empty() {
+                // File not found (deleted) - use previous index or last available
+                self.selected = previous_index.min(self.entries.len() - 1);
             }
+            // Update scroll_offset if needed
+            self.adjust_scroll_offset(20); // 20 - approximate visible area height
         }
 
         Ok(())
