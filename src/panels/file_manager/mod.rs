@@ -61,6 +61,9 @@ pub struct FileManager {
     dragged_items: HashSet<usize>,
     /// Name of directory we came from (for cursor restoration when going up)
     previous_dir_name: Option<String>,
+    /// Currently watched root path (repo_root for git, or directory itself for non-git)
+    /// Used for reference counting when navigating between directories
+    watched_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +108,7 @@ impl FileManager {
             drag_mode: None,
             dragged_items: HashSet::new(),
             previous_dir_name: None,
+            watched_root: None,
         };
         let _ = fm.load_directory();
         fm
@@ -113,6 +117,21 @@ impl FileManager {
     /// Get the current directory
     pub fn get_current_directory(&self) -> PathBuf {
         self.current_path.clone()
+    }
+
+    /// Get the currently watched root path
+    pub fn watched_root(&self) -> Option<&PathBuf> {
+        self.watched_root.as_ref()
+    }
+
+    /// Set the watched root path
+    pub fn set_watched_root(&mut self, root: Option<PathBuf>) {
+        self.watched_root = root;
+    }
+
+    /// Take the watched root (for cleanup when closing)
+    pub fn take_watched_root(&mut self) -> Option<PathBuf> {
+        self.watched_root.take()
     }
 
     /// Load the contents of the current directory

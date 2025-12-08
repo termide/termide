@@ -30,6 +30,18 @@ pub enum GitStatus {
     Ignored,
 }
 
+/// Find git repository root by walking up from a path
+/// Returns None if the path is not inside a git repository
+pub fn find_repo_root(path: &Path) -> Option<PathBuf> {
+    let mut current = path;
+    loop {
+        if current.join(".git").exists() {
+            return Some(current.to_path_buf());
+        }
+        current = current.parent()?;
+    }
+}
+
 /// Check if git is available on system
 pub fn check_git_available() -> bool {
     *GIT_AVAILABLE.get_or_init(|| {

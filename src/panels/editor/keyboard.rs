@@ -58,6 +58,10 @@ pub enum EditorCommand {
     Save,
     #[allow(dead_code)] // Included for completeness, triggered by Save when no file path exists
     SaveAs,
+    /// Force save (ignore external changes)
+    ForceSave,
+    /// Reload file from disk (discard local changes)
+    ReloadFromDisk,
 
     // Selection
     SelectAll,
@@ -160,6 +164,22 @@ impl EditorCommand {
 
             // Ctrl+S - save (only if not read-only)
             (KeyCode::Char('s'), KeyModifiers::CONTROL) if !read_only => Self::Save,
+
+            // Ctrl+Shift+S - force save (ignore external changes, only if not read-only)
+            (KeyCode::Char('S'), mods)
+                if !read_only
+                    && mods.contains(KeyModifiers::CONTROL)
+                    && mods.contains(KeyModifiers::SHIFT) =>
+            {
+                Self::ForceSave
+            }
+
+            // Ctrl+Shift+R - reload from disk
+            (KeyCode::Char('R'), mods)
+                if mods.contains(KeyModifiers::CONTROL) && mods.contains(KeyModifiers::SHIFT) =>
+            {
+                Self::ReloadFromDisk
+            }
 
             // Ctrl+Z - undo (only if not read-only)
             (KeyCode::Char('z'), KeyModifiers::CONTROL) if !read_only => Self::Undo,
@@ -411,6 +431,22 @@ impl EditorCommand {
             Self::SaveAs => {
                 // This shouldn't be reached from key parsing, but included for completeness
                 editor.handle_save_as()
+            }
+            Self::ForceSave => {
+                if let Err(e) = editor.force_save() {
+                    editor.status_message = Some(format!("Force save failed: {}", e));
+                } else {
+                    editor.status_message = Some("File force saved".to_string());
+                }
+                Ok(())
+            }
+            Self::ReloadFromDisk => {
+                if let Err(e) = editor.reload_from_disk() {
+                    editor.status_message = Some(format!("Reload failed: {}", e));
+                } else {
+                    editor.status_message = Some("File reloaded from disk".to_string());
+                }
+                Ok(())
             }
 
             // Selection

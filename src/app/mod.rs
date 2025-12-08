@@ -296,19 +296,49 @@ impl App {
 
     /// Check channel for filesystem update events
     fn check_fs_update(&mut self) {
+        use crate::git::find_repo_root;
         use crate::panels::file_manager::FileManager;
 
         // Lazy registration: register all FileManager directories with watcher
+        // Also handle watch/unwatch when navigating between repositories
         if let Some(watcher) = &mut self.state.fs_watcher {
             for panel in self.layout_manager.iter_all_panels_mut() {
                 if let Some(fm) =
                     (&mut **panel as &mut dyn std::any::Any).downcast_mut::<FileManager>()
                 {
-                    let dir_path = fm.current_path().to_path_buf();
+                    let current_path = fm.current_path();
 
-                    // Only register if not already watching
-                    if !watcher.is_watching(&dir_path) {
-                        let _ = watcher.watch_directory(dir_path);
+                    // Determine the new watched root
+                    let new_root =
+                        find_repo_root(current_path).unwrap_or_else(|| current_path.to_path_buf());
+
+                    // Check if watched root changed (navigation between repos/dirs)
+                    let root_changed = fm.watched_root().map(|r| r != &new_root).unwrap_or(true);
+
+                    if root_changed {
+                        // Unwatch old root if exists
+                        if let Some(old_root) = fm.watched_root() {
+                            if find_repo_root(old_root).is_some() {
+                                watcher.unwatch_repository(old_root);
+                            } else {
+                                watcher.unwatch_directory(old_root);
+                            }
+                        }
+
+                        // Watch new root
+                        if find_repo_root(current_path).is_some() {
+                            // Git repository: watch recursively from repo root
+                            if !watcher.is_watching_repo(&new_root) {
+                                let _ = watcher.watch_repository(new_root.clone());
+                            }
+                        } else {
+                            // Non-git directory: watch non-recursively
+                            if !watcher.is_watching_dir(&new_root) {
+                                let _ = watcher.watch_directory(new_root.clone());
+                            }
+                        }
+
+                        fm.set_watched_root(Some(new_root));
                     }
                 }
             }
@@ -330,8 +360,16 @@ impl App {
                 if let Some(fm) =
                     (&mut **panel as &mut dyn std::any::Any).downcast_mut::<FileManager>()
                 {
-                    // Check if this panel is showing the updated directory
-                    if fm.current_path() == update.dir_path {
+                    let current = fm.current_path();
+                    let changed_parent = update.changed_path.parent();
+
+                    // Reload if:
+                    // 1. The changed path's parent is our current directory (file in current dir changed)
+                    // 2. The changed path IS our current directory (directory itself renamed/deleted)
+                    let should_reload =
+                        changed_parent == Some(current) || update.changed_path == current;
+
+                    if should_reload {
                         let _ = fm.load_directory();
                     }
                 }
@@ -341,11 +379,17 @@ impl App {
                 if let Some(editor) =
                     (&mut **panel as &mut dyn std::any::Any).downcast_mut::<Editor>()
                 {
-                    // Check if this editor has a file in the updated directory
+                    // Check if this editor's file was changed
                     if let Some(file_path) = editor.file_path() {
-                        if file_path.parent() == Some(&update.dir_path) {
-                            // File in this directory might have changed - update git diff
+                        // Check for exact file match or directory containing the file
+                        let file_changed = update.changed_path == file_path
+                            || update.changed_path.parent() == file_path.parent();
+
+                        if file_changed {
+                            // File might have changed - update git diff
                             editor.update_git_diff();
+                            // Check for external modification
+                            editor.check_external_modification();
                         }
                     }
                 }

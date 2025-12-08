@@ -73,6 +73,10 @@ pub struct Editor {
     last_click_position: Option<(usize, usize)>,
     /// Skip next MouseUp event (after double-click word selection)
     skip_next_mouse_up: bool,
+    /// File modification time at load/save (for detecting external changes)
+    file_mtime: Option<std::time::SystemTime>,
+    /// Flag: file was modified externally
+    external_change_detected: bool,
 }
 // GitLineInfo and VirtualLine moved to git module
 
@@ -112,6 +116,8 @@ impl Editor {
             last_click_time: None,
             last_click_position: None,
             skip_next_mouse_up: false,
+            file_mtime: None,
+            external_change_detected: false,
         }
     }
 
@@ -149,8 +155,8 @@ impl Editor {
 
     /// Open file with specified configuration
     pub fn open_file_with_config(path: PathBuf, mut config: EditorConfig) -> Result<Self> {
-        // Check file size before loading
-        let file_size = if let Ok(metadata) = std::fs::metadata(&path) {
+        // Check file size before loading and get modification time
+        let (file_size, file_mtime) = if let Ok(metadata) = std::fs::metadata(&path) {
             if metadata.is_file() && metadata.len() > crate::constants::MAX_EDITOR_FILE_SIZE {
                 return Err(anyhow::anyhow!(
                     "File is too large to open ({:.1} MB). Maximum allowed size is {} MB.",
@@ -158,13 +164,13 @@ impl Editor {
                     crate::constants::MAX_EDITOR_FILE_SIZE / crate::constants::MEGABYTE
                 ));
             }
-            metadata.len()
+            (metadata.len(), metadata.modified().ok())
         } else {
             crate::logger::warn(format!(
                 "File size check skipped (permission denied): {}",
                 path.display()
             ));
-            0
+            (0, None)
         };
 
         let buffer = TextBuffer::from_file(&path)?;
@@ -230,6 +236,8 @@ impl Editor {
             last_click_time: None,
             last_click_position: None,
             skip_next_mouse_up: false,
+            file_mtime,
+            external_change_detected: false,
         })
     }
 
@@ -267,16 +275,26 @@ impl Editor {
             last_click_time: None,
             last_click_position: None,
             skip_next_mouse_up: false,
+            file_mtime: None,
+            external_change_detected: false,
         }
     }
 
     /// Save file
+    /// Returns error if file was modified externally (use force_save() to override)
     pub fn save(&mut self) -> Result<()> {
         use crate::config::Config;
 
+        // Check for external modification conflict
+        if self.external_change_detected {
+            return Err(anyhow::anyhow!(
+                "File was modified on disk. Use force save (Ctrl+Shift+S) to overwrite or reload (Ctrl+Shift+R) to discard changes."
+            ));
+        }
+
         // Check if this is a config file
-        if let Some(path) = self.buffer.file_path() {
-            if Config::is_config_file(path) {
+        if let Some(path) = self.buffer.file_path().map(|p| p.to_path_buf()) {
+            if Config::is_config_file(&path) {
                 let path_str = path.display().to_string();
                 // Validate config before saving
                 let content = self.buffer.to_string();
@@ -286,6 +304,11 @@ impl Editor {
                         self.buffer.save()?;
                         crate::logger::info(format!("Config file saved: {}", path_str));
                         self.config_update = Some(new_config);
+                        // Update file modification time after successful save
+                        self.file_mtime = std::fs::metadata(&path)
+                            .ok()
+                            .and_then(|m| m.modified().ok());
+                        self.external_change_detected = false;
                     }
                     Err(e) => {
                         crate::logger::error(format!(
@@ -303,6 +326,9 @@ impl Editor {
 
         if let Some(path) = self.buffer.file_path() {
             crate::logger::info(format!("File saved: {}", path.display()));
+            // Update file modification time after successful save
+            self.file_mtime = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
+            self.external_change_detected = false;
         }
 
         // Update git diff after successful save
@@ -346,6 +372,63 @@ impl Editor {
         if updated {
             self.git_diff_update_pending = new_pending;
         }
+    }
+
+    /// Check if the file was modified externally (outside of this editor)
+    pub fn check_external_modification(&mut self) {
+        if let Some(file_path) = self.buffer.file_path() {
+            if let Ok(metadata) = std::fs::metadata(file_path) {
+                if let Ok(current_mtime) = metadata.modified() {
+                    if let Some(saved_mtime) = self.file_mtime {
+                        if current_mtime > saved_mtime {
+                            self.external_change_detected = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Check if external modification was detected
+    #[allow(dead_code)]
+    pub fn has_external_change(&self) -> bool {
+        self.external_change_detected
+    }
+
+    /// Clear external change flag (after user acknowledged or reloaded)
+    #[allow(dead_code)]
+    pub fn clear_external_change(&mut self) {
+        self.external_change_detected = false;
+    }
+
+    /// Reload file from disk (discards local changes)
+    pub fn reload_from_disk(&mut self) -> Result<()> {
+        if let Some(path) = self.buffer.file_path().map(|p| p.to_path_buf()) {
+            // Re-read the file
+            self.buffer = crate::editor::TextBuffer::from_file(&path)?;
+
+            // Update modification time
+            self.file_mtime = std::fs::metadata(&path)
+                .ok()
+                .and_then(|m| m.modified().ok());
+            self.external_change_detected = false;
+
+            // Reset cursor and selection
+            self.cursor = crate::editor::Cursor::new();
+            self.selection = None;
+
+            // Update git diff
+            self.update_git_diff();
+
+            crate::logger::info(format!("File reloaded from disk: {}", path.display()));
+        }
+        Ok(())
+    }
+
+    /// Force save (ignore external changes)
+    pub fn force_save(&mut self) -> Result<()> {
+        self.external_change_detected = false;
+        self.save()
     }
 
     /// Get updated config (if config file was saved)
@@ -1614,6 +1697,13 @@ impl Panel for Editor {
     fn title(&self) -> String {
         let modified = if self.buffer.is_modified() { "*" } else { "" };
 
+        // Add external change indicator
+        let external_change = if self.external_change_detected {
+            " [changed on disk]"
+        } else {
+            ""
+        };
+
         // Add search information if active
         let search_info = if let Some(ref search) = self.search_state {
             if search.is_active() {
@@ -1632,7 +1722,10 @@ impl Panel for Editor {
             String::new()
         };
 
-        format!("{}{}{}", self.cached_title, modified, search_info)
+        format!(
+            "{}{}{}{}",
+            self.cached_title, modified, external_change, search_info
+        )
     }
 
     fn needs_close_confirmation(&self) -> Option<String> {

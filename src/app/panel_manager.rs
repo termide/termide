@@ -29,6 +29,22 @@ impl App {
             }
         }
 
+        // Before closing, unwatch filesystem if this is a FileManager panel
+        if let Some(panel) = self.layout_manager.active_panel_mut() {
+            if let Some(fm) = panel.as_file_manager_mut() {
+                // Unwatch the filesystem root for this FileManager
+                if let Some(watched_root) = fm.take_watched_root() {
+                    if let Some(watcher) = &mut self.state.fs_watcher {
+                        if crate::git::find_repo_root(&watched_root).is_some() {
+                            watcher.unwatch_repository(&watched_root);
+                        } else {
+                            watcher.unwatch_directory(&watched_root);
+                        }
+                    }
+                }
+            }
+        }
+
         // Calculate available width for panel groups
         let terminal_width = self.state.terminal.width;
 
