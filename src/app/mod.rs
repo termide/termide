@@ -264,17 +264,26 @@ impl App {
         // Process collected updates - only Editor panels
         // FileManager: НЕ вызываем update_git_status() автоматически
         // Git status обновляется только при Ctrl+R или навигации
+        //
+        // IMPORTANT: Deduplicate to avoid O(updates × editors) git commands.
+        // Previously each update triggered update_git_diff for all matching editors,
+        // causing 5 updates × 3 editors = 15 calls (30 git commands).
+        // Now we collect unique repo paths and update each editor at most once.
         if !updates.is_empty() {
-            for update in updates {
-                for panel in self.layout_manager.iter_all_panels_mut() {
-                    if let Some(editor) =
-                        (&mut **panel as &mut dyn std::any::Any).downcast_mut::<Editor>()
-                    {
-                        if let Some(file_path) = editor.file_path() {
-                            if file_path.starts_with(&update.repo_path) {
-                                editor.update_git_diff();
-                                self.state.needs_redraw = true;
-                            }
+            // Collect unique repo paths
+            let repo_paths: std::collections::HashSet<_> =
+                updates.iter().map(|u| &u.repo_path).collect();
+
+            // Update each editor at most once
+            for panel in self.layout_manager.iter_all_panels_mut() {
+                if let Some(editor) =
+                    (&mut **panel as &mut dyn std::any::Any).downcast_mut::<Editor>()
+                {
+                    if let Some(file_path) = editor.file_path() {
+                        // Check if any updated repo contains this file
+                        if repo_paths.iter().any(|repo| file_path.starts_with(*repo)) {
+                            editor.update_git_diff();
+                            self.state.needs_redraw = true;
                         }
                     }
                 }
