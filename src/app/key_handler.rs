@@ -151,21 +151,22 @@ impl App {
                     ..
                 } => {
                     if target_directory.is_none() && !sources.is_empty() {
+                        // Get source directory to exclude from default selection
+                        let source_dir = sources[0].parent().map(|p| p.to_path_buf());
+                        let source_dir_str = source_dir.as_ref().map(|p| p.display().to_string());
+
                         // Find all unique paths from other panels (FM, Terminal, Editor)
                         let options = self.find_all_other_panel_paths();
                         let unique_paths_count = options.len();
 
-                        // Determine default directory based on available paths
-                        let default_dir = if !options.is_empty() {
-                            // Use first option as default (parse value back to PathBuf)
-                            std::path::PathBuf::from(&options[0].value)
-                        } else {
-                            // Use parent directory of first source
-                            sources[0]
-                                .parent()
-                                .map(|p| p.to_path_buf())
-                                .unwrap_or_else(|| std::path::PathBuf::from("/"))
-                        };
+                        // Filter out source directory for default selection
+                        // (source dir stays in options list, just not selected as default)
+                        let default_dir = options
+                            .iter()
+                            .find(|opt| source_dir_str.as_ref() != Some(&opt.value))
+                            .map(|opt| std::path::PathBuf::from(&opt.value))
+                            .or_else(|| source_dir.clone())
+                            .unwrap_or_else(|| std::path::PathBuf::from("/"));
 
                         *target_directory = Some(default_dir.clone());
 
