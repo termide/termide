@@ -318,6 +318,8 @@ pub struct AppState {
     pub last_resource_update: std::time::Instant,
     /// Last time session was saved (for debouncing autosave)
     pub last_session_save: Option<std::time::Instant>,
+    /// Flag indicating UI needs to be redrawn (for CPU optimization)
+    pub needs_redraw: bool,
 }
 
 impl Default for AppState {
@@ -366,6 +368,7 @@ impl AppState {
             system_monitor: crate::system_monitor::SystemMonitor::new(),
             last_resource_update: std::time::Instant::now(),
             last_session_save: None,
+            needs_redraw: true, // Initial draw needed
         }
     }
 

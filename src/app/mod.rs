@@ -127,9 +127,11 @@ impl App {
             match self.event_handler.next()? {
                 Event::Key(key) => {
                     self.handle_key_event(key)?;
+                    self.state.needs_redraw = true;
                 }
                 Event::Mouse(mouse) => {
                     self.handle_mouse_event(mouse)?;
+                    self.state.needs_redraw = true;
                 }
                 Event::Resize(width, height) => {
                     // Update terminal dimensions in state
@@ -138,6 +140,7 @@ impl App {
                     // Пропорционально перераспределить ширины групп при изменении размера терминала
                     self.layout_manager
                         .redistribute_widths_proportionally(width);
+                    self.state.needs_redraw = true;
                 }
                 Event::FocusLost => {
                     // Save session on focus loss (with debounce)
@@ -147,7 +150,8 @@ impl App {
                     }
                 }
                 Event::FocusGained => {
-                    // Currently no action needed on focus gain
+                    // Redraw on focus gain to refresh display
+                    self.state.needs_redraw = true;
                 }
                 Event::Tick => {
                     // Check channel for directory size calculation results
@@ -173,10 +177,13 @@ impl App {
             // Check and close panels that should auto-close
             self.check_auto_close_panels()?;
 
-            // Render UI after processing event
-            terminal.draw(|frame| {
-                render_layout_with_accordion(frame, &mut self.state, &mut self.layout_manager);
-            })?;
+            // Render UI only when needed (reduces idle CPU from 24fps to near-zero)
+            if self.state.needs_redraw {
+                terminal.draw(|frame| {
+                    render_layout_with_accordion(frame, &mut self.state, &mut self.layout_manager);
+                })?;
+                self.state.needs_redraw = false;
+            }
         }
 
         Ok(())
@@ -216,6 +223,7 @@ impl App {
                     let t = crate::i18n::t();
                     let formatted_size = FileManager::format_size_static(result.size);
                     modal.update_value(t.file_info_size(), formatted_size);
+                    self.state.needs_redraw = true;
                 }
 
                 // Clear channel
@@ -257,14 +265,17 @@ impl App {
         // Process collected updates - only Editor panels
         // FileManager: НЕ вызываем update_git_status() автоматически
         // Git status обновляется только при Ctrl+R или навигации
-        for update in updates {
-            for panel in self.layout_manager.iter_all_panels_mut() {
-                if let Some(editor) =
-                    (&mut **panel as &mut dyn std::any::Any).downcast_mut::<Editor>()
-                {
-                    if let Some(file_path) = editor.file_path() {
-                        if file_path.starts_with(&update.repo_path) {
-                            editor.update_git_diff();
+        if !updates.is_empty() {
+            for update in updates {
+                for panel in self.layout_manager.iter_all_panels_mut() {
+                    if let Some(editor) =
+                        (&mut **panel as &mut dyn std::any::Any).downcast_mut::<Editor>()
+                    {
+                        if let Some(file_path) = editor.file_path() {
+                            if file_path.starts_with(&update.repo_path) {
+                                editor.update_git_diff();
+                                self.state.needs_redraw = true;
+                            }
                         }
                     }
                 }
@@ -384,6 +395,7 @@ impl App {
 
                     if should_reload {
                         let _ = fm.reload_directory();
+                        self.state.needs_redraw = true;
                     }
                 }
 
@@ -403,6 +415,7 @@ impl App {
                             editor.update_git_diff();
                             // Check for external modification
                             editor.check_external_modification();
+                            self.state.needs_redraw = true;
                         }
                     }
                 }
@@ -433,6 +446,7 @@ impl App {
         if elapsed >= interval {
             self.state.system_monitor.update();
             self.state.last_resource_update = std::time::Instant::now();
+            self.state.needs_redraw = true;
         }
     }
 
@@ -442,6 +456,7 @@ impl App {
             // Update spinner only if calculation is still ongoing
             if self.state.dir_size_receiver.is_some() {
                 modal.advance_spinner();
+                self.state.needs_redraw = true;
             }
         }
     }
