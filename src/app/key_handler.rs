@@ -119,6 +119,8 @@ impl App {
                 | PendingAction::SaveFileAs { panel_index, .. }
                 | PendingAction::ClosePanel { panel_index }
                 | PendingAction::CloseEditorWithSave { panel_index }
+                | PendingAction::CloseEditorExternal { panel_index }
+                | PendingAction::CloseEditorConflict { panel_index }
                 | PendingAction::OverwriteDecision { panel_index, .. } => {
                     *panel_index = 0; // Placeholder value, not used with LayoutManager
                 }
@@ -342,25 +344,61 @@ impl App {
         // Check if confirmation is required before closing active panel
         if let Some(panel) = self.layout_manager.active_panel_mut() {
             if let Some(_message) = panel.needs_close_confirmation() {
-                crate::logger::warn("Close requested for panel with unsaved changes");
+                crate::logger::warn("Close requested for panel requiring confirmation");
                 // Check if panel is editor
-                if panel.as_editor().is_some() {
-                    // For editor show window with three options
+                if let Some(editor) = panel.as_editor() {
                     use crate::ui::modal::SelectModal;
                     let t = i18n::t();
-                    let modal = SelectModal::single(
-                        t.editor_close_unsaved(),
-                        t.editor_close_unsaved_question(),
-                        vec![
-                            t.editor_save_and_close().to_string(),
-                            t.editor_close_without_saving().to_string(),
-                            t.editor_cancel().to_string(),
-                        ],
-                    );
-                    let action = PendingAction::CloseEditorWithSave { panel_index: 0 }; // placeholder
-                    self.state
-                        .set_pending_action(action, ActiveModal::Select(Box::new(modal)));
-                    return Ok(());
+                    let is_modified = editor.buffer_is_modified();
+                    let has_external = editor.has_external_change();
+
+                    if is_modified && has_external {
+                        // Conflict: both local and external changes
+                        let modal = SelectModal::single(
+                            t.editor_close_conflict(),
+                            t.editor_close_conflict_question(),
+                            vec![
+                                t.editor_overwrite_disk().to_string(),
+                                t.editor_reload_from_disk().to_string(),
+                                t.editor_cancel().to_string(),
+                            ],
+                        );
+                        let action = PendingAction::CloseEditorConflict { panel_index: 0 };
+                        self.state
+                            .set_pending_action(action, ActiveModal::Select(Box::new(modal)));
+                        return Ok(());
+                    } else if is_modified {
+                        // Only local changes - existing dialog
+                        let modal = SelectModal::single(
+                            t.editor_close_unsaved(),
+                            t.editor_close_unsaved_question(),
+                            vec![
+                                t.editor_save_and_close().to_string(),
+                                t.editor_close_without_saving().to_string(),
+                                t.editor_cancel().to_string(),
+                            ],
+                        );
+                        let action = PendingAction::CloseEditorWithSave { panel_index: 0 };
+                        self.state
+                            .set_pending_action(action, ActiveModal::Select(Box::new(modal)));
+                        return Ok(());
+                    } else if has_external {
+                        // Only external changes
+                        let modal = SelectModal::single(
+                            t.editor_close_external(),
+                            t.editor_close_external_question(),
+                            vec![
+                                t.editor_overwrite_disk().to_string(),
+                                t.editor_keep_disk_close().to_string(),
+                                t.editor_reload_into_editor().to_string(),
+                                t.editor_cancel().to_string(),
+                            ],
+                        );
+                        let action = PendingAction::CloseEditorExternal { panel_index: 0 };
+                        self.state
+                            .set_pending_action(action, ActiveModal::Select(Box::new(modal)));
+                        return Ok(());
+                    }
                 } else {
                     // For other panels show simple confirmation
                     let t = i18n::t();

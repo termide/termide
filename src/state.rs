@@ -204,6 +204,10 @@ pub enum PendingAction {
     ClosePanel { panel_index: usize },
     /// Close editor with choice: save, don't save, cancel
     CloseEditorWithSave { panel_index: usize },
+    /// Close editor with external changes (file changed on disk)
+    CloseEditorExternal { panel_index: usize },
+    /// Close editor with conflict (local changes + external changes)
+    CloseEditorConflict { panel_index: usize },
     /// File overwrite decision when copying/moving
     #[allow(dead_code)]
     OverwriteDecision {

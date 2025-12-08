@@ -342,6 +342,31 @@ impl App {
                     }
                 }
             }
+
+            // Also register directories for Editor files
+            use crate::panels::editor::Editor;
+            for panel in self.layout_manager.iter_all_panels_mut() {
+                if let Some(editor) =
+                    (&mut **panel as &mut dyn std::any::Any).downcast_mut::<Editor>()
+                {
+                    if let Some(file_path) = editor.file_path() {
+                        if let Some(parent_dir) = file_path.parent() {
+                            // Determine watched root for file's directory
+                            let watched_root = find_repo_root(parent_dir)
+                                .unwrap_or_else(|| parent_dir.to_path_buf());
+
+                            // Register if not already watching
+                            if find_repo_root(parent_dir).is_some() {
+                                if !watcher.is_watching_repo(&watched_root) {
+                                    let _ = watcher.watch_repository(watched_root);
+                                }
+                            } else if !watcher.is_watching_dir(&watched_root) {
+                                let _ = watcher.watch_directory(watched_root);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Collect all pending updates first to avoid borrowing conflicts

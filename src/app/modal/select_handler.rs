@@ -76,6 +76,116 @@ impl App {
         Ok(())
     }
 
+    /// Handle editor closure with external changes (file changed on disk)
+    pub(in crate::app) fn handle_close_editor_external(
+        &mut self,
+        _panel_index: usize, // obsolete with LayoutManager
+        value: Box<dyn std::any::Any>,
+    ) -> Result<()> {
+        if let Some(selected) = value.downcast_ref::<Vec<usize>>() {
+            if selected.is_empty() {
+                // Cancel or Esc - do nothing
+                return Ok(());
+            }
+
+            match selected[0] {
+                0 => {
+                    // Overwrite disk with current content
+                    crate::logger::info("Selected: Overwrite disk with current content");
+                    if let Some(panel) = self.layout_manager.active_panel_mut() {
+                        if let Some(editor) = panel.as_editor_mut() {
+                            let t = i18n::t();
+                            if let Err(e) = editor.force_save() {
+                                crate::logger::error(format!("Force save error: {}", e));
+                                self.state.set_error(t.status_error_save(&e.to_string()));
+                                return Ok(());
+                            }
+                        }
+                    }
+                    self.close_panel_at_index(0);
+                }
+                1 => {
+                    // Keep disk version (just close)
+                    crate::logger::info("Selected: Keep disk version, close editor");
+                    self.close_panel_at_index(0);
+                }
+                2 => {
+                    // Reload into editor (don't close)
+                    crate::logger::info("Selected: Reload file into editor");
+                    if let Some(panel) = self.layout_manager.active_panel_mut() {
+                        if let Some(editor) = panel.as_editor_mut() {
+                            let t = i18n::t();
+                            if let Err(e) = editor.reload_from_disk() {
+                                crate::logger::error(format!("Reload error: {}", e));
+                                self.state.set_error(t.status_error_reload(&e.to_string()));
+                            } else {
+                                self.state.set_info(t.status_file_reloaded().to_string());
+                            }
+                        }
+                    }
+                    // Don't close - user wants to continue editing
+                }
+                _ => {
+                    // Cancel - do nothing
+                    crate::logger::info("Selected: Cancel closing");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Handle editor closure with conflict (local + external changes)
+    pub(in crate::app) fn handle_close_editor_conflict(
+        &mut self,
+        _panel_index: usize, // obsolete with LayoutManager
+        value: Box<dyn std::any::Any>,
+    ) -> Result<()> {
+        if let Some(selected) = value.downcast_ref::<Vec<usize>>() {
+            if selected.is_empty() {
+                // Cancel or Esc - do nothing
+                return Ok(());
+            }
+
+            match selected[0] {
+                0 => {
+                    // Overwrite disk with my changes
+                    crate::logger::info("Selected: Overwrite disk with local changes");
+                    if let Some(panel) = self.layout_manager.active_panel_mut() {
+                        if let Some(editor) = panel.as_editor_mut() {
+                            let t = i18n::t();
+                            if let Err(e) = editor.force_save() {
+                                crate::logger::error(format!("Force save error: {}", e));
+                                self.state.set_error(t.status_error_save(&e.to_string()));
+                                return Ok(());
+                            }
+                        }
+                    }
+                    self.close_panel_at_index(0);
+                }
+                1 => {
+                    // Reload from disk (discard local changes)
+                    crate::logger::info("Selected: Reload from disk, discard local changes");
+                    if let Some(panel) = self.layout_manager.active_panel_mut() {
+                        if let Some(editor) = panel.as_editor_mut() {
+                            let t = i18n::t();
+                            if let Err(e) = editor.reload_from_disk() {
+                                crate::logger::error(format!("Reload error: {}", e));
+                                self.state.set_error(t.status_error_reload(&e.to_string()));
+                                return Ok(());
+                            }
+                        }
+                    }
+                    self.close_panel_at_index(0);
+                }
+                _ => {
+                    // Cancel - do nothing
+                    crate::logger::info("Selected: Cancel closing");
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Handle file overwrite decision
     pub(in crate::app) fn handle_overwrite_decision(
         &mut self,

@@ -47,6 +47,16 @@ pub trait Translation: Send + Sync {
     fn editor_save_and_close(&self) -> &str;
     fn editor_close_without_saving(&self) -> &str;
     fn editor_cancel(&self) -> &str;
+    // External changes dialog
+    fn editor_close_external(&self) -> &str;
+    fn editor_close_external_question(&self) -> &str;
+    fn editor_overwrite_disk(&self) -> &str;
+    fn editor_keep_disk_close(&self) -> &str;
+    fn editor_reload_into_editor(&self) -> &str;
+    // Conflict dialog
+    fn editor_close_conflict(&self) -> &str;
+    fn editor_close_conflict_question(&self) -> &str;
+    fn editor_reload_from_disk(&self) -> &str;
     fn editor_save_error(&self, error: &str) -> String;
     fn editor_saved(&self, path: &str) -> String;
     fn editor_file_opened(&self, filename: &str) -> String;
@@ -145,6 +155,8 @@ pub trait Translation: Send + Sync {
     fn status_items_deleted_with_errors(&self, success: usize, errors: usize) -> String;
     fn status_file_saved(&self, name: &str) -> String;
     fn status_error_save(&self, error: &str) -> String;
+    fn status_file_reloaded(&self) -> &str;
+    fn status_error_reload(&self, error: &str) -> String;
     fn status_error_open_file(&self, name: &str, error: &str) -> String;
     fn status_item_actioned(&self, name: &str, action: &str) -> String;
     fn status_error_action(&self, action: &str, error: &str) -> String;

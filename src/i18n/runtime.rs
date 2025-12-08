@@ -174,6 +174,38 @@ impl Translation for RuntimeTranslation {
         self.get_string("editor_cancel")
     }
 
+    fn editor_close_external(&self) -> &str {
+        self.get_string("editor_close_external")
+    }
+
+    fn editor_close_external_question(&self) -> &str {
+        self.get_string("editor_close_external_question")
+    }
+
+    fn editor_overwrite_disk(&self) -> &str {
+        self.get_string("editor_overwrite_disk")
+    }
+
+    fn editor_keep_disk_close(&self) -> &str {
+        self.get_string("editor_keep_disk_close")
+    }
+
+    fn editor_reload_into_editor(&self) -> &str {
+        self.get_string("editor_reload_into_editor")
+    }
+
+    fn editor_close_conflict(&self) -> &str {
+        self.get_string("editor_close_conflict")
+    }
+
+    fn editor_close_conflict_question(&self) -> &str {
+        self.get_string("editor_close_conflict_question")
+    }
+
+    fn editor_reload_from_disk(&self) -> &str {
+        self.get_string("editor_reload_from_disk")
+    }
+
     fn editor_save_error(&self, error: &str) -> String {
         self.format("editor_save_error", &[("error", error)])
     }
@@ -504,6 +536,14 @@ impl Translation for RuntimeTranslation {
 
     fn status_error_save(&self, error: &str) -> String {
         self.format("status_error_save", &[("error", error)])
+    }
+
+    fn status_file_reloaded(&self) -> &str {
+        self.get_string("status_file_reloaded")
+    }
+
+    fn status_error_reload(&self, error: &str) -> String {
+        self.format("status_error_reload", &[("error", error)])
     }
 
     fn status_error_open_file(&self, name: &str, error: &str) -> String {

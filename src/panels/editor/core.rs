@@ -390,9 +390,13 @@ impl Editor {
     }
 
     /// Check if external modification was detected
-    #[allow(dead_code)]
     pub fn has_external_change(&self) -> bool {
         self.external_change_detected
+    }
+
+    /// Check if buffer has unsaved modifications
+    pub fn buffer_is_modified(&self) -> bool {
+        self.buffer.is_modified()
     }
 
     /// Clear external change flag (after user acknowledged or reloaded)
@@ -1731,6 +1735,8 @@ impl Panel for Editor {
     fn needs_close_confirmation(&self) -> Option<String> {
         if self.buffer.is_modified() {
             Some("File has unsaved changes. Close anyway?".to_string())
+        } else if self.external_change_detected {
+            Some("File changed on disk. Close anyway?".to_string())
         } else {
             None
         }

@@ -390,6 +390,12 @@ impl App {
                 crate::state::PendingAction::CloseEditorWithSave { panel_index } => {
                     self.handle_close_editor_with_save(panel_index, value)?;
                 }
+                crate::state::PendingAction::CloseEditorExternal { panel_index } => {
+                    self.handle_close_editor_external(panel_index, value)?;
+                }
+                crate::state::PendingAction::CloseEditorConflict { panel_index } => {
+                    self.handle_close_editor_conflict(panel_index, value)?;
+                }
                 crate::state::PendingAction::OverwriteDecision {
                     panel_index,
                     source,
