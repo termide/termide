@@ -149,9 +149,9 @@ impl FileManager {
                 let padding_len = max_name_len.saturating_sub(name_width);
                 let padding = " ".repeat(padding_len);
 
-                // Format size (or spaces for directories and "..")
+                // Format size (or spaces for directories and ".."), right-aligned
                 let size_str = if let Some(size) = entry.size {
-                    format!("{:<10}", utils::format_size(size))
+                    format!("{:>10}", utils::format_size(size))
                 } else {
                     "          ".to_string()
                 };

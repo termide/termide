@@ -82,24 +82,24 @@ pub fn truncate_name(name: &str, max_len: usize) -> String {
     }
 }
 
-/// Format file size in human-readable format
+/// Format file size in human-readable format (rounded to whole units)
 pub fn format_size(bytes: u64) -> String {
     let t = crate::i18n::t();
     if bytes >= GIGABYTE {
         format!(
-            "{:.2} {}",
+            "{:.0} {}",
             bytes as f64 / GIGABYTE as f64,
             t.size_gigabytes()
         )
     } else if bytes >= MEGABYTE {
         format!(
-            "{:.2} {}",
+            "{:.0} {}",
             bytes as f64 / MEGABYTE as f64,
             t.size_megabytes()
         )
     } else if bytes >= KILOBYTE {
         format!(
-            "{:.2} {}",
+            "{:.0} {}",
             bytes as f64 / KILOBYTE as f64,
             t.size_kilobytes()
         )
