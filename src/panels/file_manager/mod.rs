@@ -124,6 +124,7 @@ impl FileManager {
             .take()
             .or_else(|| self.entries.get(self.selected).map(|e| e.name.clone()));
         let previous_index = self.selected;
+        let previous_scroll_offset = self.scroll_offset;
 
         self.entries.clear();
         self.selected = 0;
@@ -248,8 +249,21 @@ impl FileManager {
                 // File not found (deleted) - use previous index or last available
                 self.selected = previous_index.min(self.entries.len() - 1);
             }
-            // Update scroll_offset if needed
-            self.adjust_scroll_offset(20); // 20 - approximate visible area height
+
+            // Restore scroll_offset using real visible_height
+            if self.visible_height > 0 {
+                // If all items fit on screen - no scroll needed
+                if self.entries.len() <= self.visible_height {
+                    self.scroll_offset = 0;
+                } else {
+                    // Restore previous offset if still valid
+                    let max_scroll = self.entries.len().saturating_sub(self.visible_height);
+                    self.scroll_offset = previous_scroll_offset.min(max_scroll);
+                }
+                // Ensure cursor is visible
+                self.adjust_scroll_offset(self.visible_height);
+            }
+            // If visible_height == 0, render() will recalculate on first draw
         }
 
         Ok(())
