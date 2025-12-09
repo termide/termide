@@ -4,6 +4,72 @@ use similar::TextDiff;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::mpsc;
+
+/// Result of async git diff load operation
+#[derive(Debug)]
+pub struct GitDiffAsyncResult {
+    /// File path this result is for
+    pub file_path: PathBuf,
+    /// Original content from HEAD (None if error or file not in HEAD)
+    pub original_content: Option<String>,
+}
+
+/// Load original content from HEAD in a background thread
+/// Returns a receiver that will receive the result
+pub fn load_original_async(file_path: PathBuf) -> mpsc::Receiver<GitDiffAsyncResult> {
+    let (tx, rx) = mpsc::channel();
+
+    std::thread::spawn(move || {
+        let original_content = load_original_from_head_sync(&file_path);
+        let _ = tx.send(GitDiffAsyncResult {
+            file_path,
+            original_content,
+        });
+    });
+
+    rx
+}
+
+/// Synchronous function to load original content from HEAD
+/// Extracted for use in background thread
+fn load_original_from_head_sync(file_path: &std::path::Path) -> Option<String> {
+    // Get git root
+    let git_root_output = Command::new("git")
+        .arg("rev-parse")
+        .arg("--show-toplevel")
+        .current_dir(file_path.parent().unwrap_or(std::path::Path::new("/")))
+        .output()
+        .ok()?;
+
+    if !git_root_output.status.success() {
+        return None;
+    }
+
+    let git_root = String::from_utf8(git_root_output.stdout)
+        .ok()?
+        .trim()
+        .to_string();
+    let git_root_path = std::path::Path::new(&git_root);
+
+    // Get relative path
+    let relative_path = file_path.strip_prefix(git_root_path).ok()?;
+
+    // Get content from HEAD
+    let output = Command::new("git")
+        .arg("show")
+        .arg(format!("HEAD:{}", relative_path.display()))
+        .current_dir(&git_root)
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        // File not in HEAD (new file)
+        return Some(String::new());
+    }
+
+    String::from_utf8(output.stdout).ok()
+}
 
 /// Git diff status for a line in a file
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -198,6 +264,41 @@ impl GitDiffCache {
     #[allow(dead_code)]
     pub fn is_stale(&self, threshold: std::time::Duration) -> bool {
         self.last_updated.elapsed() > threshold
+    }
+
+    /// Apply async result and recompute diff
+    /// Called when background thread completes loading original content
+    pub fn apply_async_result(&mut self, result: GitDiffAsyncResult) {
+        // Store original content
+        self.original_content = result.original_content;
+
+        // Recompute diff if we have original content
+        let original = match self.original_content.as_ref() {
+            Some(content) if !content.is_empty() => content,
+            _ => {
+                self.line_statuses.clear();
+                self.deleted_after_lines.clear();
+                return;
+            }
+        };
+
+        // Read current file content from disk
+        let current_content = match std::fs::read_to_string(&self.file_path) {
+            Ok(content) => content,
+            Err(_) => {
+                self.line_statuses.clear();
+                self.deleted_after_lines.clear();
+                return;
+            }
+        };
+
+        // Compute diff
+        let diff = TextDiff::from_lines(original.as_str(), &current_content);
+        let (statuses, deleted_after) = compute_line_statuses_from_textdiff(&diff);
+
+        self.line_statuses = statuses;
+        self.deleted_after_lines = deleted_after;
+        self.last_updated = std::time::Instant::now();
     }
 }
 

@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 mod diff;
 mod watcher;
 
-pub use diff::{GitDiffCache, LineStatus};
+pub use diff::{load_original_async, GitDiffAsyncResult, GitDiffCache, LineStatus};
 pub use watcher::{create_git_watcher, GitStatusUpdate, GitWatcher};
 
 /// Global flag for git availability on system
@@ -237,6 +237,27 @@ impl GitStatusCache {
             self.relative_path.join(file_name)
         };
         self.ignored_files.contains(&full_path)
+    }
+
+    /// Check if path (relative to repo root) is ignored or inside an ignored directory
+    pub fn is_path_in_ignored(&self, relative_path: &Path) -> bool {
+        let path_str = relative_path.to_string_lossy();
+
+        self.ignored_files.iter().any(|ignored| {
+            let ignored_str = ignored.to_string_lossy();
+            // Normalize: remove trailing slash for comparison
+            // (git status outputs "target/" but we need to match "target/debug/foo")
+            let ignored_normalized = ignored_str.trim_end_matches('/');
+
+            // Exact match (file or directory name)
+            if path_str == ignored_normalized {
+                return true;
+            }
+
+            // Check if path is inside ignored directory
+            let prefix = format!("{}/", ignored_normalized);
+            path_str.starts_with(&prefix)
+        })
     }
 
     /// Check if directory contains any changes recursively

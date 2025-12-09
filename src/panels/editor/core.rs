@@ -80,6 +80,8 @@ pub struct Editor {
     /// Cached git repository root for this file (to avoid repeated filesystem lookups)
     /// None = not cached, Some(None) = no repo, Some(Some(path)) = repo found
     cached_repo_root: Option<Option<PathBuf>>,
+    /// Receiver for async git diff result (non-blocking load from HEAD)
+    git_diff_receiver: Option<std::sync::mpsc::Receiver<crate::git::GitDiffAsyncResult>>,
 }
 // GitLineInfo and VirtualLine moved to git module
 
@@ -122,6 +124,7 @@ impl Editor {
             file_mtime: None,
             external_change_detected: false,
             cached_repo_root: None,
+            git_diff_receiver: None,
         }
     }
 
@@ -265,6 +268,7 @@ impl Editor {
             file_mtime,
             external_change_detected: false,
             cached_repo_root: None,
+            git_diff_receiver: None,
         })
     }
 
@@ -305,6 +309,7 @@ impl Editor {
             file_mtime: None,
             external_change_detected: false,
             cached_repo_root: None,
+            git_diff_receiver: None,
         }
     }
 
@@ -377,10 +382,24 @@ impl Editor {
         self.unsaved_buffer_file = filename;
     }
 
-    /// Update git diff cache for this file
+    /// Update git diff cache for this file (async - non-blocking)
+    ///
+    /// Spawns a background thread to load original content from HEAD.
+    /// The result will be applied on next tick via check_git_diff_receiver().
     pub fn update_git_diff(&mut self) {
+        // Clone file path to avoid borrow conflict with git_diff_cache
         let file_path = self.file_path().map(|p| p.to_path_buf());
-        git::update_git_diff(&mut self.git_diff_cache, file_path.as_deref());
+        if let Some(rx) = git::update_git_diff_async(&mut self.git_diff_cache, file_path.as_deref())
+        {
+            self.git_diff_receiver = Some(rx);
+        }
+    }
+
+    /// Check and apply async git diff result if ready (called on each tick)
+    ///
+    /// Returns true if result was applied and needs_redraw should be set.
+    pub fn check_git_diff_receiver(&mut self) -> bool {
+        git::check_git_diff_receiver(&mut self.git_diff_receiver, &mut self.git_diff_cache)
     }
 
     /// Schedule git diff update with debounce (300ms delay)

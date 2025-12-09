@@ -393,7 +393,9 @@ impl App {
 
                     let should_reload = if is_in_git_repo {
                         // Git repo: any change within current directory tree updates git status
+                        // But skip gitignored paths (like target/) to avoid unnecessary reloads
                         update.changed_path.starts_with(current)
+                            && !fm.is_path_ignored(&update.changed_path)
                     } else {
                         // Non-git: only direct children or current dir itself
                         changed_parent == Some(current) || update.changed_path == current
@@ -429,15 +431,20 @@ impl App {
         }
     }
 
-    /// Check and apply pending git diff updates (debounced)
+    /// Check and apply pending git diff updates (debounced) and async git diff results
     fn check_pending_git_diff_updates(&mut self) {
         use crate::panels::editor::Editor;
 
-        // Check all Editor panels for pending git diff updates
+        // Check all Editor panels for pending git diff updates and async results
         for panel in self.layout_manager.iter_all_panels_mut() {
             if let Some(editor) = (&mut **panel as &mut dyn std::any::Any).downcast_mut::<Editor>()
             {
+                // Check debounced buffer updates
                 editor.check_pending_git_diff_update();
+                // Check async git diff results (from background thread)
+                if editor.check_git_diff_receiver() {
+                    self.state.needs_redraw = true;
+                }
             }
         }
     }

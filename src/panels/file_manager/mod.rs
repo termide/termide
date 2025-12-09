@@ -66,6 +66,8 @@ pub struct FileManager {
     watched_root: Option<PathBuf>,
     /// Whether the watched root is a git repository (cached to avoid repeated filesystem checks)
     is_watched_root_git_repo: bool,
+    /// Last reload time for debouncing rapid reload_directory() calls
+    last_reload_time: Option<std::time::Instant>,
 }
 
 #[derive(Debug, Clone)]
@@ -112,6 +114,7 @@ impl FileManager {
             previous_dir_name: None,
             watched_root: None,
             is_watched_root_git_repo: false,
+            last_reload_time: None,
         };
         let _ = fm.load_directory();
         fm
@@ -138,6 +141,29 @@ impl FileManager {
         self.is_watched_root_git_repo
     }
 
+    /// Check if absolute path is in a gitignored directory
+    /// Uses cached git_status_cache to avoid spawning git processes
+    pub fn is_path_ignored(&self, absolute_path: &std::path::Path) -> bool {
+        // Need repo root (watched_root) and git_status_cache
+        let repo_root = match self.watched_root.as_ref() {
+            Some(root) => root,
+            None => return false,
+        };
+        let cache = match self.git_status_cache.as_ref() {
+            Some(cache) => cache,
+            None => return false,
+        };
+
+        // Convert absolute path to repo-relative
+        let relative_path = match absolute_path.strip_prefix(repo_root) {
+            Ok(rel) => rel,
+            Err(_) => return false,
+        };
+
+        // Check if this relative path is ignored
+        cache.is_path_in_ignored(relative_path)
+    }
+
     /// Take the watched root (for cleanup when closing)
     pub fn take_watched_root(&mut self) -> Option<PathBuf> {
         self.watched_root.take()
@@ -152,8 +178,19 @@ impl FileManager {
         self.load_directory_inner(false)
     }
 
-    /// Reload directory preserving selection
+    /// Reload directory preserving selection (with debounce to prevent rapid reloads)
     pub fn reload_directory(&mut self) -> Result<()> {
+        const RELOAD_DEBOUNCE_MS: u128 = 300;
+
+        // Debounce: skip if last reload was too recent
+        let now = std::time::Instant::now();
+        if let Some(last) = self.last_reload_time {
+            if now.duration_since(last).as_millis() < RELOAD_DEBOUNCE_MS {
+                return Ok(()); // Skip rapid reloads
+            }
+        }
+        self.last_reload_time = Some(now);
+
         self.load_directory_inner(true)
     }
 

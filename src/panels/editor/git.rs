@@ -4,9 +4,10 @@
 //! including line status markers, deletion markers, and diff cache management.
 
 use ratatui::style::Color;
+use std::sync::mpsc;
 
 use crate::editor::TextBuffer;
-use crate::git::{GitDiffCache, LineStatus};
+use crate::git::{load_original_async, GitDiffAsyncResult, GitDiffCache, LineStatus};
 
 /// Git line status information for rendering
 pub struct GitLineInfo {
@@ -28,20 +29,56 @@ pub enum VirtualLine {
     DeletionMarker(usize, usize),
 }
 
-/// Update git diff cache by reloading from disk.
+/// Start async git diff update by spawning background thread.
 ///
-/// Creates a new cache if file is now in a git repo but wasn't before.
-pub fn update_git_diff(
+/// Creates a new cache if needed and returns a receiver for the async result.
+/// The caller should store this receiver and poll it on each tick.
+pub fn update_git_diff_async(
     git_diff_cache: &mut Option<GitDiffCache>,
     file_path: Option<&std::path::Path>,
-) {
-    if let Some(ref mut cache) = git_diff_cache {
-        let _ = cache.update();
-    } else if let Some(file_path) = file_path {
-        // Try to create cache if file is now in git repo
-        let mut cache = GitDiffCache::new(file_path.to_path_buf());
-        if cache.update().is_ok() {
-            *git_diff_cache = Some(cache);
+) -> Option<mpsc::Receiver<GitDiffAsyncResult>> {
+    let file_path = file_path?;
+
+    // Ensure cache exists
+    if git_diff_cache.is_none() {
+        *git_diff_cache = Some(GitDiffCache::new(file_path.to_path_buf()));
+    }
+
+    // Spawn async load in background thread
+    Some(load_original_async(file_path.to_path_buf()))
+}
+
+/// Check async git diff receiver and apply result if ready.
+///
+/// Returns true if result was applied, false otherwise.
+pub fn check_git_diff_receiver(
+    receiver: &mut Option<mpsc::Receiver<GitDiffAsyncResult>>,
+    git_diff_cache: &mut Option<GitDiffCache>,
+) -> bool {
+    let rx = match receiver {
+        Some(rx) => rx,
+        None => return false,
+    };
+
+    // Try to receive result without blocking
+    match rx.try_recv() {
+        Ok(result) => {
+            // Apply result to cache
+            if let Some(cache) = git_diff_cache {
+                cache.apply_async_result(result);
+            }
+            // Clear receiver
+            *receiver = None;
+            true
+        }
+        Err(mpsc::TryRecvError::Empty) => {
+            // Not ready yet
+            false
+        }
+        Err(mpsc::TryRecvError::Disconnected) => {
+            // Thread finished without sending (shouldn't happen)
+            *receiver = None;
+            false
         }
     }
 }
