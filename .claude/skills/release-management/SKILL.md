@@ -606,8 +606,7 @@ This will trigger GitHub Actions workflow which will:
 2. Build cross-platform binaries (Linux x86/ARM, macOS x86/ARM)
 3. Build .deb packages (Debian/Ubuntu)
 4. Build .rpm packages (Fedora/RHEL)
-5. Publish to crates.io
-6. Create GitHub Release with all artifacts
+5. Create GitHub Release with all artifacts
 
 Expected workflow duration: ~15-20 minutes
 
@@ -652,7 +651,6 @@ Show comprehensive release summary:
 🔗 Links:
 - Release: https://github.com/termide/termide/releases/tag/0.3.0
 - CI/CD Status: https://github.com/termide/termide/actions
-- Crates.io: https://crates.io/crates/termide
 
 ⏱️  GitHub Actions Workflow:
 The release workflow is now running. Expected completion: 15-20 minutes.
@@ -663,8 +661,7 @@ Workflow steps:
 3. ⏳ Build binaries (4 platforms)
 4. ⏳ Build .deb packages
 5. ⏳ Build .rpm packages
-6. ⏳ Publish to crates.io
-7. ⏳ Create GitHub Release
+6. ⏳ Create GitHub Release
 
 You can monitor progress at:
 https://github.com/termide/termide/actions/workflows/release.yml

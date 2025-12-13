@@ -1,6 +1,5 @@
 # TermIDE
 
-[![Crates.io](https://img.shields.io/crates/v/termide.svg)](https://crates.io/crates/termide)
 [![GitHub Release](https://img.shields.io/github/v/release/termide/termide)](https://github.com/termide/termide/releases)
 [![CI](https://github.com/termide/termide/actions/workflows/release.yml/badge.svg)](https://github.com/termide/termide/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
@@ -156,17 +155,6 @@ nix profile install github:termide/termide
   ];
   environment.systemPackages = [ pkgs.termide ];
 }
-```
-
-</details>
-
-<details>
-<summary><b>🦀 Cargo (from crates.io)</b></summary>
-
-Install using Rust's cargo:
-
-```bash
-cargo install termide
 ```
 
 </details>

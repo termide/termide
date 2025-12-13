@@ -38,6 +38,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 description = "Cross-platform terminal IDE, file manager and virtual terminal"
+publish = false
 repository = "https://github.com/termide/termide"
 license = "MIT"
 keywords = ["terminal", "ide", "file-manager", "tui", "terminal-ui"]

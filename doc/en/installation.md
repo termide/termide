@@ -56,21 +56,6 @@ sudo mv termide /usr/local/bin/
 
 Now you can run `termide` from anywhere in your terminal.
 
-## Install from crates.io
-
-If you have Rust installed, you can install TermIDE directly from crates.io:
-
-```bash
-cargo install termide
-```
-
-The binary will be installed to `~/.cargo/bin/termide`.
-
-Make sure `~/.cargo/bin` is in your PATH:
-```bash
-export PATH="$HOME/.cargo/bin:$PATH"
-```
-
 ## Build from Source
 
 ### Prerequisites
