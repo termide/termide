@@ -6,7 +6,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use std::io::Write;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use vte::{Params, Perform};
 
 use ratatui::style::Color;
@@ -16,22 +16,63 @@ use super::{
     TerminalScreen,
 };
 
+/// Batched screen operation to reduce mutex contention.
+///
+/// Instead of acquiring a lock for each character, we batch operations
+/// and apply them all at once with a single lock.
+#[derive(Clone)]
+pub enum ScreenOp {
+    PutChar(char),
+    Newline,
+    CarriageReturn,
+    Backspace,
+    Tab,
+}
+
 /// VT100 parser and performer.
 ///
 /// Implements the vte::Perform trait to handle ANSI/VT100 escape sequences
 /// and update the terminal screen state accordingly.
+///
+/// Uses batching to reduce lock contention: simple operations (print, execute)
+/// are collected in a buffer and applied with a single lock via `flush()`.
 pub struct VtPerformer {
-    pub screen: Arc<Mutex<TerminalScreen>>,
+    pub screen: Arc<RwLock<TerminalScreen>>,
     pub pending_backslash: bool,
+    /// Buffer for batching screen operations
+    pub pending_ops: Vec<ScreenOp>,
 }
 
 impl VtPerformer {
     /// Create a new VtPerformer with the given screen.
     #[allow(dead_code)]
-    pub fn new(screen: Arc<Mutex<TerminalScreen>>) -> Self {
+    pub fn new(screen: Arc<RwLock<TerminalScreen>>) -> Self {
         Self {
             screen,
             pending_backslash: false,
+            pending_ops: Vec::with_capacity(4096),
+        }
+    }
+
+    /// Apply all pending operations with a single write lock.
+    ///
+    /// This significantly reduces lock contention when processing
+    /// large amounts of terminal output (e.g., from Claude Code).
+    pub fn flush(&mut self) {
+        if self.pending_ops.is_empty() {
+            return;
+        }
+        if let Ok(mut screen) = self.screen.write() {
+            for op in self.pending_ops.drain(..) {
+                match op {
+                    ScreenOp::PutChar(ch) => screen.put_char(ch),
+                    ScreenOp::Newline => screen.newline(),
+                    ScreenOp::CarriageReturn => screen.carriage_return(),
+                    ScreenOp::Backspace => screen.backspace(),
+                    ScreenOp::Tab => screen.tab(),
+                }
+            }
+            screen.dirty = true;
         }
     }
 }
@@ -52,10 +93,8 @@ impl Perform for VtPerformer {
                 return;
             }
             // Otherwise print deferred backslash and current character
-            if let Ok(mut screen) = self.screen.lock() {
-                screen.put_char('\\');
-                screen.put_char(ch);
-            }
+            self.pending_ops.push(ScreenOp::PutChar('\\'));
+            self.pending_ops.push(ScreenOp::PutChar(ch));
             return;
         }
 
@@ -65,25 +104,22 @@ impl Perform for VtPerformer {
             return;
         }
 
-        if let Ok(mut screen) = self.screen.lock() {
-            screen.put_char(ch);
-        }
+        // Batch the operation instead of acquiring lock immediately
+        self.pending_ops.push(ScreenOp::PutChar(ch));
     }
 
     fn execute(&mut self, byte: u8) {
-        if let Ok(mut screen) = self.screen.lock() {
-            match byte {
-                b'\n' => screen.newline(),
-                b'\r' => screen.carriage_return(),
-                b'\x08' => screen.backspace(),
-                b'\t' => screen.tab(),
-                b'\x07' => {
-                    // Bell character - forward to parent terminal
-                    print!("\x07");
-                    let _ = std::io::stdout().flush();
-                }
-                _ => {}
+        match byte {
+            b'\n' => self.pending_ops.push(ScreenOp::Newline),
+            b'\r' => self.pending_ops.push(ScreenOp::CarriageReturn),
+            b'\x08' => self.pending_ops.push(ScreenOp::Backspace),
+            b'\t' => self.pending_ops.push(ScreenOp::Tab),
+            b'\x07' => {
+                // Bell character - forward to parent terminal (no screen lock needed)
+                print!("\x07");
+                let _ = std::io::stdout().flush();
             }
+            _ => {}
         }
     }
 
@@ -96,9 +132,12 @@ impl Perform for VtPerformer {
     fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {}
 
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], _ignore: bool, c: char) {
+        // Flush pending operations before CSI dispatch to maintain order
+        self.flush();
+
         // Handle private sequences (start with '?')
         if !intermediates.is_empty() && intermediates[0] == b'?' {
-            if let Ok(mut screen) = self.screen.lock() {
+            if let Ok(mut screen) = self.screen.write() {
                 // Get private sequence number
                 let mode = params
                     .iter()
@@ -190,6 +229,7 @@ impl Perform for VtPerformer {
                         // Ignore other private sequences
                     }
                 }
+                screen.dirty = true;
             }
             return;
         }
@@ -199,7 +239,7 @@ impl Perform for VtPerformer {
             return;
         }
 
-        if let Ok(mut screen) = self.screen.lock() {
+        if let Ok(mut screen) = self.screen.write() {
             match c {
                 'H' | 'f' => {
                     // Move cursor
@@ -434,8 +474,13 @@ impl Perform for VtPerformer {
                             }
                         }
                         // Insert n blank lines at cursor position
+                        // Use O(1) push_front when at row 0, otherwise O(n) insert
                         for _ in 0..n.min(rows - row) {
-                            buffer.insert(row, vec![empty_cell; cols]);
+                            if row == 0 {
+                                buffer.push_front(vec![empty_cell; cols]);
+                            } else {
+                                buffer.insert(row, vec![empty_cell; cols]);
+                            }
                         }
                     }
                 }
@@ -458,9 +503,14 @@ impl Perform for VtPerformer {
                     let buffer = screen.active_buffer_mut();
                     if row < buffer.len() {
                         // Delete n lines at cursor position
+                        // Use O(1) pop_front when at row 0, otherwise O(n) remove
                         for _ in 0..n.min(buffer.len() - row) {
                             if row < buffer.len() {
-                                buffer.remove(row);
+                                if row == 0 {
+                                    buffer.pop_front();
+                                } else {
+                                    buffer.remove(row);
+                                }
                             }
                         }
                         // Add n blank lines at bottom
@@ -696,6 +746,7 @@ impl Perform for VtPerformer {
                 }
                 _ => {}
             }
+            screen.dirty = true;
         }
     }
 

@@ -164,6 +164,8 @@ pub struct TerminalScreen {
     pub max_scrollback: usize,
     /// Wrap pending flag (for auto-wrap mode)
     pub wrap_pending: bool,
+    /// Dirty flag - screen content has changed and needs re-render
+    pub dirty: bool,
 }
 
 impl TerminalScreen {
@@ -194,6 +196,7 @@ impl TerminalScreen {
             scroll_offset: 0,
             max_scrollback: 10000,
             wrap_pending: false,
+            dirty: true,
         }
     }
 

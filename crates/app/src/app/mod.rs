@@ -180,6 +180,16 @@ impl App {
                     self.state.needs_redraw = true;
                 }
                 Event::Tick => {
+                    // Check terminal panels for pending output (efficient redraw trigger)
+                    for panel in self.layout_manager.iter_all_panels_mut() {
+                        if let Some(terminal) = panel.as_terminal_mut() {
+                            if terminal.has_pending_output() {
+                                self.state.needs_redraw = true;
+                                break; // One terminal with output is enough to trigger redraw
+                            }
+                        }
+                    }
+
                     // Check channel for directory size calculation results
                     self.check_dir_size_update();
 

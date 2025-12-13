@@ -23,7 +23,8 @@ use ratatui::{
 };
 use std::any::Any;
 use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use vte::Parser;
 
@@ -42,8 +43,8 @@ pub struct Terminal {
     child: Box<dyn Child + Send>,
     /// Shell process PID
     shell_pid: Option<u32>,
-    /// Virtual terminal screen
-    screen: Arc<Mutex<TerminalScreen>>,
+    /// Virtual terminal screen (RwLock allows concurrent reads during render)
+    screen: Arc<RwLock<TerminalScreen>>,
     /// Terminal size
     size: PtySize,
     /// Process activity flag
@@ -54,6 +55,17 @@ pub struct Terminal {
     initial_cwd: std::path::PathBuf,
     /// Cached theme for rendering
     cached_theme: Theme,
+    /// Flag set by PTY thread when new data arrives (triggers redraw)
+    has_new_data: Arc<AtomicBool>,
+    /// Cached rendered lines to avoid re-rendering when nothing changed
+    /// Wrapped in Arc for O(1) clone on cache hit
+    cached_lines: Option<Arc<Vec<Line<'static>>>>,
+    /// Cached cursor position
+    cached_cursor: (usize, usize),
+    /// Cached cursor visibility state
+    cached_cursor_shown: bool,
+    /// Last focus state (for cache invalidation)
+    cached_focus: bool,
 }
 
 impl Terminal {
@@ -121,7 +133,7 @@ impl Terminal {
         let child = pair.slave.spawn_command(cmd)?;
         let shell_pid = child.process_id();
 
-        let screen = Arc::new(Mutex::new(TerminalScreen::new(
+        let screen = Arc::new(RwLock::new(TerminalScreen::new(
             rows as usize,
             cols as usize,
         )));
@@ -132,25 +144,34 @@ impl Terminal {
 
         let pty = Arc::new(Mutex::new(pair.master));
         let is_alive = Arc::new(Mutex::new(true));
+        let has_new_data = Arc::new(AtomicBool::new(false));
 
         // Start thread for reading from PTY
         let screen_clone = Arc::clone(&screen);
         let is_alive_clone = Arc::clone(&is_alive);
+        let has_new_data_clone = Arc::clone(&has_new_data);
         thread::spawn(move || {
             let mut parser = Parser::new();
-            let mut buf = [0u8; 4096];
+            // Increased buffer from 4KB to 16KB for better throughput with intensive output
+            let mut buf = [0u8; 16384];
+            // Reuse performer across reads to maintain state
+            let mut performer = terminal::VtPerformer {
+                screen: Arc::clone(&screen_clone),
+                pending_backslash: false,
+                pending_ops: Vec::with_capacity(8192),
+            };
 
             loop {
                 match reader.read(&mut buf) {
                     Ok(n) if n > 0 => {
-                        let mut performer = terminal::VtPerformer {
-                            screen: Arc::clone(&screen_clone),
-                            pending_backslash: false,
-                        };
-
                         for byte in &buf[..n] {
                             parser.advance(&mut performer, *byte);
                         }
+                        // Flush all batched operations with a single lock
+                        // This reduces mutex contention significantly
+                        performer.flush();
+                        // Signal main thread that new data is available for rendering
+                        has_new_data_clone.store(true, Ordering::Release);
                     }
                     Ok(_) => {
                         // EOF - shell terminated
@@ -192,6 +213,11 @@ impl Terminal {
             terminal_title,
             initial_cwd: working_dir,
             cached_theme: Theme::default(),
+            has_new_data,
+            cached_lines: None,
+            cached_cursor: (0, 0),
+            cached_cursor_shown: false,
+            cached_focus: false,
         })
     }
 
@@ -257,7 +283,7 @@ impl Terminal {
         }
 
         // Update virtual screen size - in-place resize without cloning
-        if let Ok(mut screen) = self.screen.lock() {
+        if let Ok(mut screen) = self.screen.write() {
             let new_rows = rows as usize;
             let new_cols = cols as usize;
 
@@ -287,8 +313,14 @@ impl Terminal {
                 // Limit cursor position to new dimensions
                 screen.cursor.0 = screen.cursor.0.min(new_rows.saturating_sub(1));
                 screen.cursor.1 = screen.cursor.1.min(new_cols.saturating_sub(1));
+
+                // Mark dirty to force re-render
+                screen.dirty = true;
             }
         }
+
+        // Invalidate render cache on resize
+        self.cached_lines = None;
 
         Ok(())
     }
@@ -456,7 +488,7 @@ impl Terminal {
 
     /// Get selected text
     fn get_selected_text(&self) -> String {
-        let screen = self.screen.lock().expect("Terminal screen lock poisoned");
+        let screen = self.screen.read().expect("Terminal screen lock poisoned");
         let (start, end) = match (screen.selection_start, screen.selection_end) {
             (Some(s), Some(e)) => (s, e),
             _ => return String::new(),
@@ -531,7 +563,7 @@ impl Terminal {
         // Check if bracketed paste mode is enabled
         let bracketed_paste = self
             .screen
-            .lock()
+            .read()
             .expect("Terminal screen lock poisoned")
             .bracketed_paste_mode;
 
@@ -559,7 +591,7 @@ impl Terminal {
         use crossterm::event::{MouseButton, MouseEventKind};
 
         let (mouse_tracking, sgr_mode) = {
-            let screen = self.screen.lock().expect("Terminal screen lock poisoned");
+            let screen = self.screen.read().expect("Terminal screen lock poisoned");
             (screen.mouse_tracking, screen.sgr_mouse_mode)
         };
 
@@ -647,51 +679,166 @@ impl Terminal {
         Ok(())
     }
 
-    /// Get lines for display
-    /// Returns: (lines, cursor_position, cursor_shown)
+    /// Get lines for display using copy-out pattern with caching.
+    ///
+    /// Optimization: Uses dirty flag to skip re-rendering when terminal
+    /// content hasn't changed. Returns Arc-wrapped lines for O(1) cache hits.
+    ///
+    /// Returns: (lines_arc, cursor_position, cursor_shown)
     fn get_display_lines(
-        &self,
+        &mut self,
         show_cursor: bool,
         theme: &Theme,
-    ) -> (Vec<Line<'_>>, (usize, usize), bool) {
-        let screen = self.screen.lock().expect("Terminal screen lock poisoned");
-        let buffer = screen.active_buffer();
-        let cursor_pos = screen.cursor;
-        let visible_rows = screen.rows;
-        let cols = screen.cols;
+    ) -> (Arc<Vec<Line<'static>>>, (usize, usize), bool) {
+        // === PHASE 0: Check if we can return cached result ===
+        let (is_dirty, has_selection) = {
+            let screen = self.screen.read().expect("Terminal screen lock poisoned");
+            (screen.dirty, screen.selection_start.is_some())
+        };
 
-        // Pre-allocate output with capacity
-        let mut lines = Vec::with_capacity(visible_rows);
-        // Reusable string buffer - avoids allocation per row
-        let mut current_text = String::with_capacity(cols);
+        // Return cached if:
+        // - Screen is not dirty (no new PTY output)
+        // - Focus state hasn't changed (cursor visibility depends on focus)
+        // - No active selection (selection changes without dirty flag)
+        // - We have cached lines
+        if !is_dirty && self.cached_focus == show_cursor && !has_selection {
+            if let Some(ref cached) = self.cached_lines {
+                // O(1) Arc clone - no data copying!
+                return (
+                    Arc::clone(cached),
+                    self.cached_cursor,
+                    self.cached_cursor_shown,
+                );
+            }
+        }
 
-        // Determine view parameters based on scroll offset
-        let (view_start, total_scrollback, show_cursor_now) =
-            if screen.scroll_offset > 0 && !screen.use_alt_screen {
+        // === PHASE 1: Quick data copy under lock ===
+        let (
+            visible_buffer,
+            scrollback_slice,
+            cursor_pos,
+            visible_rows,
+            cols,
+            cursor_visible,
+            has_selection,
+            selection_start,
+            selection_end,
+        ) = {
+            let mut screen = self.screen.write().expect("Terminal screen lock poisoned");
+            // Clear dirty flag since we're about to render
+            screen.dirty = false;
+
+            let visible_rows = screen.rows;
+            let scroll_offset = screen.scroll_offset;
+            let use_alt_screen = screen.use_alt_screen;
+
+            // Determine what to copy based on scroll state
+            let (visible_buffer, scrollback_slice) = if scroll_offset > 0 && !use_alt_screen {
+                // Viewing history - need both scrollback and buffer data
                 let total_scrollback = screen.scrollback.len();
                 let total_lines = total_scrollback + visible_rows;
-                let view_end = total_lines.saturating_sub(screen.scroll_offset);
+                let view_end = total_lines.saturating_sub(scroll_offset);
                 let view_start = view_end.saturating_sub(visible_rows);
-                // Don't show cursor when viewing history
-                (view_start, total_scrollback, false)
+
+                // Copy only the visible portion
+                let mut combined: Vec<Vec<Cell>> = Vec::with_capacity(visible_rows);
+                for i in 0..visible_rows {
+                    let source_idx = view_start + i;
+                    if source_idx < total_scrollback {
+                        combined.push(screen.scrollback[source_idx].clone());
+                    } else {
+                        let buf_idx = source_idx - total_scrollback;
+                        if buf_idx < screen.active_buffer().len() {
+                            combined.push(screen.active_buffer()[buf_idx].clone());
+                        }
+                    }
+                }
+                (combined, true)
             } else {
-                // Not scrolling - view starts at 0, no scrollback offset
-                (0, 0, show_cursor && screen.cursor_visible)
+                // Normal view - copy active buffer
+                (screen.active_buffer().iter().cloned().collect(), false)
             };
 
-        // Helper to render a row - avoids code duplication
-        let mut render_row = |row_idx: usize, row: &[Cell]| {
-            let mut spans = Vec::new();
+            (
+                visible_buffer,
+                scrollback_slice,
+                screen.cursor,
+                visible_rows,
+                screen.cols,
+                screen.cursor_visible,
+                screen.selection_start.is_some() && screen.selection_end.is_some(),
+                screen.selection_start,
+                screen.selection_end,
+            )
+        };
+        // Lock released here - PTY writer can proceed
+
+        // === PHASE 2: Expensive rendering without lock ===
+        let mut lines = Vec::with_capacity(visible_rows);
+        let mut current_text = String::with_capacity(cols);
+
+        // Don't show cursor when viewing history
+        let show_cursor_now = if scrollback_slice {
+            false
+        } else {
+            show_cursor && cursor_visible
+        };
+
+        // Pre-compute selection bounds if selection exists
+        let selection_bounds = if has_selection {
+            let (start, end) = (selection_start.unwrap(), selection_end.unwrap());
+            let (start, end) = if start <= end {
+                (start, end)
+            } else {
+                (end, start)
+            };
+            Some((start, end))
+        } else {
+            None
+        };
+
+        // Helper to check selection (inlined for performance)
+        let is_in_selection = |row: usize, col: usize| -> bool {
+            if let Some((start, end)) = selection_bounds {
+                if row < start.0 || row > end.0 {
+                    return false;
+                }
+                if row == start.0 && row == end.0 {
+                    col >= start.1 && col <= end.1
+                } else if row == start.0 {
+                    col >= start.1
+                } else if row == end.0 {
+                    col <= end.1
+                } else {
+                    true
+                }
+            } else {
+                false
+            }
+        };
+
+        for (row_idx, row) in visible_buffer.iter().enumerate() {
+            let mut spans = Vec::with_capacity(8); // Pre-allocate for typical line
             current_text.clear();
-            let mut current_style_opt: Option<Style> = None;
+            // Use direct style value instead of Option for faster comparison
+            let mut current_style = Style::default();
 
             for (col_idx, cell) in row.iter().enumerate() {
                 // Apply reverse if set
-                let (fg, bg) = if cell.style.reverse {
+                let (mut fg, mut bg) = if cell.style.reverse {
                     (cell.style.bg, cell.style.fg)
                 } else {
                     (cell.style.fg, cell.style.bg)
                 };
+
+                // Apply theme colors during rendering (not post-processing)
+                if fg == Color::White || fg == Color::Reset {
+                    fg = theme.fg;
+                }
+                if bg == Color::Reset {
+                    bg = theme.bg;
+                }
+
                 let mut style = Style::default().fg(fg).bg(bg);
 
                 if cell.style.bold {
@@ -707,8 +854,8 @@ impl Terminal {
                     style = style.add_modifier(Modifier::REVERSED);
                 }
 
-                // Check if cell is in selection
-                if screen.is_in_selection(row_idx, col_idx) {
+                // Check if cell is in selection (optimized - skips if no selection)
+                if is_in_selection(row_idx, col_idx) {
                     style = Style::default().fg(Color::Black).bg(Color::LightYellow);
                 }
 
@@ -718,39 +865,49 @@ impl Terminal {
                     if !current_text.is_empty() {
                         spans.push(Span::styled(
                             std::mem::take(&mut current_text),
-                            current_style_opt.unwrap(),
+                            current_style,
                         ));
-                        current_style_opt = None;
                     }
 
-                    // Cursor with inverted colors
-                    let cursor_style = Style::default().bg(fg).fg(bg).add_modifier(Modifier::BOLD);
+                    // Cursor with inverted colors (use original fg/bg for inversion)
+                    let cursor_style = Style::default()
+                        .bg(
+                            if cell.style.fg == Color::White || cell.style.fg == Color::Reset {
+                                theme.fg
+                            } else {
+                                cell.style.fg
+                            },
+                        )
+                        .fg(if cell.style.bg == Color::Reset {
+                            theme.bg
+                        } else {
+                            cell.style.bg
+                        })
+                        .add_modifier(Modifier::BOLD);
 
                     let cursor_char = if cell.ch == ' ' || cell.ch == '\0' {
                         ' '
                     } else {
                         cell.ch
                     };
-                    // Use pre-allocated single char - avoid allocation
                     let mut cursor_buf = [0u8; 4];
                     let cursor_str = cursor_char.encode_utf8(&mut cursor_buf);
                     spans.push(Span::styled(cursor_str.to_owned(), cursor_style));
                     continue;
                 }
 
-                // Group characters with same style
-                if current_style_opt.is_none() || current_style_opt == Some(style) {
+                // Group characters with same style (no Option overhead)
+                if current_text.is_empty() || current_style == style {
                     current_text.push(cell.ch);
-                    current_style_opt = Some(style);
+                    current_style = style;
                 } else {
-                    if !current_text.is_empty() {
-                        spans.push(Span::styled(
-                            std::mem::take(&mut current_text),
-                            current_style_opt.unwrap(),
-                        ));
-                    }
+                    // Flush accumulated text with previous style
+                    spans.push(Span::styled(
+                        std::mem::take(&mut current_text),
+                        current_style,
+                    ));
                     current_text.push(cell.ch);
-                    current_style_opt = Some(style);
+                    current_style = style;
                 }
             }
 
@@ -758,7 +915,7 @@ impl Terminal {
             if !current_text.is_empty() {
                 spans.push(Span::styled(
                     std::mem::take(&mut current_text),
-                    current_style_opt.unwrap(),
+                    current_style,
                 ));
             }
 
@@ -772,30 +929,21 @@ impl Terminal {
             }
 
             lines.push(Line::from(spans));
-        };
-
-        // Iterate directly over buffer/scrollback without cloning
-        if screen.scroll_offset > 0 && !screen.use_alt_screen {
-            // Viewing scrollback - need to iterate over scrollback + buffer
-            for i in 0..visible_rows {
-                let source_idx = view_start + i;
-                if source_idx < total_scrollback {
-                    render_row(i, &screen.scrollback[source_idx]);
-                } else {
-                    let buf_idx = source_idx - total_scrollback;
-                    if buf_idx < buffer.len() {
-                        render_row(i, &buffer[buf_idx]);
-                    }
-                }
-            }
-        } else {
-            // Normal view - iterate directly over buffer (no clone!)
-            for (row_idx, row) in buffer.iter().enumerate() {
-                render_row(row_idx, row);
-            }
         }
 
-        (lines, cursor_pos, show_cursor_now)
+        // === PHASE 3: Cache the result (no clone - just wrap in Arc) ===
+        let arc_lines = Arc::new(lines);
+        self.cached_lines = Some(Arc::clone(&arc_lines));
+        self.cached_cursor = cursor_pos;
+        self.cached_cursor_shown = show_cursor_now;
+        self.cached_focus = show_cursor;
+
+        (arc_lines, cursor_pos, show_cursor_now)
+    }
+
+    /// Check if PTY has new data that needs rendering
+    pub fn has_pending_output(&self) -> bool {
+        self.has_new_data.swap(false, Ordering::AcqRel)
     }
 }
 
@@ -809,6 +957,10 @@ impl Panel for Terminal {
     }
 
     fn prepare_render(&mut self, theme: &Theme, _config: &Config) {
+        // Invalidate cache if theme changed
+        if self.cached_theme != *theme {
+            self.cached_lines = None;
+        }
         self.cached_theme = *theme;
     }
 
@@ -824,43 +976,18 @@ impl Panel for Terminal {
 
         // Data is read in a separate thread, just render current state
         // Show cursor only when panel is focused
-        let (display_lines, _cursor_pos, _cursor_shown) =
-            self.get_display_lines(ctx.is_focused, &self.cached_theme);
+        // Theme colors are now applied during get_display_lines() - no post-processing needed
+        let theme = self.cached_theme;
+        let (arc_lines, _cursor_pos, _cursor_shown) =
+            self.get_display_lines(ctx.is_focused, &theme);
 
         // Render terminal content directly (accordion already drew border with title/buttons)
-        let paragraph = Paragraph::new(display_lines);
+        // Extract Vec from Arc - this is the only clone point now
+        // On cache hit: Arc clone was O(1), this clone is the only cost
+        // On cache miss: Arc wrap was O(1), this clone is the only cost
+        let lines = Arc::try_unwrap(arc_lines).unwrap_or_else(|arc| (*arc).clone());
+        let paragraph = Paragraph::new(lines);
         paragraph.render(area, buf);
-
-        // Replace Color::Reset and Color::White with theme colors
-        // BUT don't touch cells with special attributes (visual cursors from applications)
-        for y in area.top()..area.bottom() {
-            for x in area.left()..area.right() {
-                if let Some(cell) = buf.cell_mut((x, y)) {
-                    let current_style = cell.style();
-
-                    // DON'T replace colors for cells with special attributes
-                    // (these are visual cursors and other styling from applications)
-                    let has_modifiers = current_style.add_modifier != Modifier::empty()
-                        || current_style.sub_modifier != Modifier::empty();
-
-                    if !has_modifiers {
-                        let mut new_style = current_style;
-
-                        // Replace Reset background with theme background
-                        if current_style.bg == Some(Color::Reset) || current_style.bg.is_none() {
-                            new_style.bg = Some(self.cached_theme.bg);
-                        }
-
-                        // Replace White text with theme text
-                        if current_style.fg == Some(Color::White) || current_style.fg.is_none() {
-                            new_style.fg = Some(self.cached_theme.fg);
-                        }
-
-                        cell.set_style(new_style);
-                    }
-                }
-            }
-        }
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Vec<PanelEvent> {
@@ -887,25 +1014,25 @@ impl Panel for Terminal {
         if key.modifiers.contains(KeyModifiers::SHIFT) {
             match key.code {
                 KeyCode::PageUp => {
-                    let mut screen = self.screen.lock().expect("Terminal screen lock poisoned");
+                    let mut screen = self.screen.write().expect("Terminal screen lock poisoned");
                     let scroll_amount = screen.rows.saturating_sub(1);
                     screen.scroll_view_up(scroll_amount);
                     return vec![];
                 }
                 KeyCode::PageDown => {
-                    let mut screen = self.screen.lock().expect("Terminal screen lock poisoned");
+                    let mut screen = self.screen.write().expect("Terminal screen lock poisoned");
                     let scroll_amount = screen.rows.saturating_sub(1);
                     screen.scroll_view_down(scroll_amount);
                     return vec![];
                 }
                 KeyCode::Home => {
-                    let mut screen = self.screen.lock().expect("Terminal screen lock poisoned");
+                    let mut screen = self.screen.write().expect("Terminal screen lock poisoned");
                     screen.scroll_offset = screen.scrollback.len();
                     return vec![];
                 }
                 KeyCode::End => {
                     self.screen
-                        .lock()
+                        .write()
                         .expect("Terminal screen lock poisoned")
                         .reset_scroll();
                     return vec![];
@@ -916,7 +1043,7 @@ impl Panel for Terminal {
 
         // Reset scroll on input and cache application_cursor_keys - single lock
         let application_cursor_keys = {
-            let mut screen = self.screen.lock().expect("Terminal screen lock poisoned");
+            let mut screen = self.screen.write().expect("Terminal screen lock poisoned");
             screen.reset_scroll();
             screen.application_cursor_keys
         };
@@ -1099,7 +1226,7 @@ impl Panel for Terminal {
 
         // Check if selection is active
         let selection_active = {
-            let screen = self.screen.lock().expect("Terminal screen lock poisoned");
+            let screen = self.screen.read().expect("Terminal screen lock poisoned");
             screen.selection_start.is_some()
         };
 
@@ -1116,7 +1243,7 @@ impl Panel for Terminal {
                     return vec![];
                 }
                 // Start text selection
-                let mut screen = self.screen.lock().expect("Terminal screen lock poisoned");
+                let mut screen = self.screen.write().expect("Terminal screen lock poisoned");
                 screen.selection_start = Some((inner_row, inner_col));
                 screen.selection_end = Some((inner_row, inner_col)); // Set immediately for visibility
                 drop(screen);
@@ -1126,7 +1253,7 @@ impl Panel for Terminal {
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 // Update selection end (using clamped coordinates)
-                let mut screen = self.screen.lock().expect("Terminal screen lock poisoned");
+                let mut screen = self.screen.write().expect("Terminal screen lock poisoned");
                 if screen.selection_start.is_some() {
                     screen.selection_end = Some((inner_row, inner_col));
                 }
@@ -1134,7 +1261,7 @@ impl Panel for Terminal {
             MouseEventKind::Up(MouseButton::Left) => {
                 // Finalize selection (using clamped coordinates)
                 {
-                    let mut screen = self.screen.lock().expect("Terminal screen lock poisoned");
+                    let mut screen = self.screen.write().expect("Terminal screen lock poisoned");
                     if screen.selection_start.is_some() {
                         screen.selection_end = Some((inner_row, inner_col));
                     }
@@ -1145,7 +1272,7 @@ impl Panel for Terminal {
 
                 // Clear selection after copying
                 {
-                    let mut screen = self.screen.lock().expect("Terminal screen lock poisoned");
+                    let mut screen = self.screen.write().expect("Terminal screen lock poisoned");
                     screen.selection_start = None;
                     screen.selection_end = None;
                 }
@@ -1159,14 +1286,14 @@ impl Panel for Terminal {
             MouseEventKind::ScrollUp => {
                 // On scroll up - show history
                 self.screen
-                    .lock()
+                    .write()
                     .expect("Terminal screen lock poisoned")
                     .scroll_view_up(3);
             }
             MouseEventKind::ScrollDown => {
                 // On scroll down - return to current
                 self.screen
-                    .lock()
+                    .write()
                     .expect("Terminal screen lock poisoned")
                     .scroll_view_down(3);
             }

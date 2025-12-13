@@ -64,6 +64,8 @@ pub struct FileManager {
     dragged_items: HashSet<usize>,
     /// Name of directory we came from (for cursor restoration when going up)
     previous_dir_name: Option<String>,
+    /// Flag indicating we're navigating down into a subdirectory (cursor should reset to 0)
+    navigating_down: bool,
     /// Currently watched root path (repo_root for git, or directory itself for non-git)
     /// Used for reference counting when navigating between directories
     watched_root: Option<PathBuf>,
@@ -118,6 +120,7 @@ impl FileManager {
             drag_mode: None,
             dragged_items: HashSet::new(),
             previous_dir_name: None,
+            navigating_down: false,
             watched_root: None,
             is_watched_root_git_repo: false,
             last_reload_time: None,
@@ -379,7 +382,12 @@ impl FileManager {
         }
 
         // Restore cursor position
-        if let Some(name) = current_name {
+        if self.navigating_down {
+            // When entering a subdirectory, always start at first item ("..")
+            self.selected = 0;
+            self.scroll_offset = 0;
+            self.navigating_down = false;
+        } else if let Some(name) = current_name {
             if let Some(pos) = self.entries.iter().position(|e| e.name == name) {
                 // Found file by name - restore to its position
                 self.selected = pos;
@@ -432,6 +440,7 @@ impl FileManager {
                 }
             } else if entry.is_dir {
                 self.previous_dir_name = None; // Clear when going down
+                self.navigating_down = true; // Signal to reset cursor to 0
                 self.current_path.push(&entry.name);
                 let _ = self.load_directory();
             } else {
