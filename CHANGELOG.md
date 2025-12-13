@@ -5,6 +5,20 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2025-12-13
+
+### Changed
+- Terminal panel performance optimizations
+  - Use `has_pending_output()` in event loop for efficient redraw triggering
+  - Pre-allocate spans Vec for reduced allocations
+  - Use O(1) VecDeque methods for row 0 operations
+- Remove crates.io publishing (distribution via GitHub Releases, deb/rpm only)
+
+### Fixed
+- Git status display in file info modal now shows actual change count
+- File manager cursor resets to position 0 when entering subdirectory
+- Version consistency across modal, panel-editor, ui-render crates
+
 ## [0.5.0] - 2025-12-13
 
 ### Added
@@ -354,6 +368,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pre-commit hooks for code quality
 - Comprehensive test suite
 
+[0.5.1]: https://github.com/termide/termide/releases/tag/0.5.1
 [0.5.0]: https://github.com/termide/termide/releases/tag/0.5.0
 [0.4.0]: https://github.com/termide/termide/releases/tag/0.4.0
 [0.3.0]: https://github.com/termide/termide/releases/tag/0.3.0
