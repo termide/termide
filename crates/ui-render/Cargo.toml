@@ -1,0 +1,22 @@
+[package]
+name = "termide-ui-render"
+version = "0.1.0"
+edition = "2021"
+description = "UI rendering components for termide"
+license = "MIT"
+
+[dependencies]
+# External
+ratatui = "0.29.0"
+unicode-width = "0.2"
+chrono = "0.4"
+
+# Workspace crates
+termide-theme = { path = "../theme" }
+termide-i18n = { path = "../i18n" }
+termide-core = { path = "../core" }
+termide-config = { path = "../config" }
+termide-panel-editor = { path = "../panel-editor" }
+termide-panel-file-manager = { path = "../panel-file-manager" }
+termide-panel-terminal = { path = "../panel-terminal" }
+termide-system-monitor = { path = "../system-monitor" }

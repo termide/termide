@@ -1,0 +1,17 @@
+[package]
+name = "termide-app-session"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Session management traits and helpers for termide"
+
+[dependencies]
+anyhow.workspace = true
+dirs.workspace = true
+
+# Foundation crates
+termide-app-core = { path = "../app-core" }
+
+[dev-dependencies]

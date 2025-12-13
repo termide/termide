@@ -1,0 +1,40 @@
+[package]
+name = "termide-highlight"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Syntax highlighting for termide using tree-sitter"
+
+[dependencies]
+ratatui.workspace = true
+anyhow.workspace = true
+tree-sitter.workspace = true
+tree-sitter-highlight.workspace = true
+
+# Grammar parsers (statically linked)
+# Programming languages
+tree-sitter-rust = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-go = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-typescript = "0.23"
+tree-sitter-c = "0.23"
+tree-sitter-cpp = "0.23"
+tree-sitter-java = "0.23"
+tree-sitter-ruby = "0.23"
+tree-sitter-php = "0.24"
+tree-sitter-haskell = "0.23"
+tree-sitter-nix = "0.3"
+
+# Web technologies
+tree-sitter-html = "0.23"
+tree-sitter-css = "0.23"
+tree-sitter-json = "0.23"
+
+# Configuration formats
+tree-sitter-toml-ng = "0.7"
+tree-sitter-yaml = "0.7"
+tree-sitter-bash = "0.23"
+tree-sitter-md = "0.3"

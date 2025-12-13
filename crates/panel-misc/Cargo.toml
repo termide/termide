@@ -1,0 +1,21 @@
+[package]
+name = "termide-panel-misc"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow = "1.0"
+chrono = "0.4"
+crossterm = "0.28"
+ratatui = "0.29.0"
+unicode-width = "0.2"
+
+# Workspace crates
+termide-config = { path = "../config" }
+termide-core = { path = "../core" }
+termide-highlight = { path = "../highlight" }
+termide-i18n = { path = "../i18n" }
+termide-keyboard = { path = "../keyboard" }
+termide-logger = { path = "../logger" }
+termide-panel-editor = { path = "../panel-editor" }
+termide-theme = { path = "../theme" }

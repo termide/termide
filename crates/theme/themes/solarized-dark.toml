@@ -1,0 +1,25 @@
+# Solarized Dark theme for TermIDE
+# Classic precision color scheme for terminals
+# Designed by Ethan Schoonover
+name = "solarized-dark"
+
+[colors]
+# Base - Solarized base03 background with base0 foreground
+bg = { rgb = [0, 43, 54] }
+fg = { rgb = [131, 148, 150] }
+
+# Accented - base02 background with blue accent
+accented_bg = { rgb = [7, 54, 66] }
+accented_fg = { rgb = [38, 139, 210] }
+
+# Selection - base01 selection
+selected_bg = { rgb = [88, 110, 117] }
+selected_fg = { rgb = [238, 232, 213] }
+
+# Disabled - base01
+disabled = { rgb = [88, 110, 117] }
+
+# Semantic
+success = { rgb = [133, 153, 0] }
+warning = { rgb = [181, 137, 0] }
+error = { rgb = [220, 50, 47] }

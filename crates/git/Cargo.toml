@@ -1,0 +1,15 @@
+[package]
+name = "termide-git"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Git integration for termide"
+
+[dependencies]
+anyhow.workspace = true
+regex.workspace = true
+similar = "2.7"
+notify.workspace = true
+notify-debouncer-mini.workspace = true

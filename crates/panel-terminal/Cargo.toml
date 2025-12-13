@@ -1,0 +1,28 @@
+[package]
+name = "termide-panel-terminal"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = "1.0"
+chrono = "0.4"
+crossterm = "0.28"
+libc = "0.2"
+log = "0.4"
+nix = { version = "0.29", features = ["signal", "process"] }
+portable-pty = "0.8"
+ratatui = "0.29.0"
+vte = "0.13"
+
+# Workspace crates
+termide-config = { path = "../config" }
+termide-core = { path = "../core" }
+termide-i18n = { path = "../i18n" }
+termide-keyboard = { path = "../keyboard" }
+termide-modal = { path = "../modal" }
+termide-state = { path = "../state" }
+termide-theme = { path = "../theme" }
+termide-ui = { path = "../ui" }

@@ -1,0 +1,11 @@
+[package]
+name = "termide-keyboard"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Keyboard handling and layout translation for termide"
+
+[dependencies]
+crossterm.workspace = true

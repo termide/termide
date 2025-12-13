@@ -1,0 +1,18 @@
+[package]
+name = "termide-app-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Core traits and types for termide app modules"
+
+[dependencies]
+anyhow.workspace = true
+
+# Foundation crates for type definitions
+termide-core = { path = "../core" }
+termide-state = { path = "../state" }
+termide-modal = { path = "../modal" }
+
+[dev-dependencies]

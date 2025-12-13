@@ -1,0 +1,12 @@
+[package]
+name = "termide-system-monitor"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "System resource monitoring for termide"
+
+[dependencies]
+sysinfo.workspace = true
+termide-i18n = { path = "../i18n" }

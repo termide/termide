@@ -1,0 +1,33 @@
+[package]
+name = "termide-panel-file-manager"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = "1.0"
+chrono = "0.4"
+crossterm = "0.28"
+dirs = "6.0"
+libc = "0.2"
+log = "0.4"
+ratatui = "0.29.0"
+unicode-width = "0.2"
+
+# Workspace crates
+termide-config = { path = "../config" }
+termide-core = { path = "../core" }
+termide-git = { path = "../git" }
+termide-highlight = { path = "../highlight" }
+termide-i18n = { path = "../i18n" }
+termide-keyboard = { path = "../keyboard" }
+termide-modal = { path = "../modal" }
+termide-state = { path = "../state" }
+termide-theme = { path = "../theme" }
+termide-ui = { path = "../ui" }
+termide-watcher = { path = "../watcher" }
+
+[dev-dependencies]
+tempfile = "3.23"

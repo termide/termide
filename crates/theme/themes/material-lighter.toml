@@ -1,0 +1,25 @@
+# Material Theme Lighter for TermIDE
+# Based on Google's Material Design principles
+# Clean, professional interface with cyan accents
+name = "material-lighter"
+
+[colors]
+# Base - bright white background
+bg = { rgb = [250, 250, 250] }
+fg = { rgb = [84, 110, 122] }
+
+# Accented - pure white with cyan accent
+accented_bg = { rgb = [255, 255, 255] }
+accented_fg = { rgb = [0, 188, 212] }
+
+# Selection - light cyan with transparency
+selected_bg = { rgb = [128, 203, 196] }
+selected_fg = { rgb = [84, 110, 122] }
+
+# Disabled - light blue-gray
+disabled = { rgb = [170, 191, 201] }
+
+# Semantic
+success = { rgb = [145, 184, 89] }
+warning = { rgb = [247, 140, 108] }
+error = { rgb = [229, 57, 53] }

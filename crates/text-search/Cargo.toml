@@ -1,0 +1,12 @@
+[package]
+name = "termide-text-search"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Text search and replace for termide"
+
+[dependencies]
+regex.workspace = true
+anyhow.workspace = true

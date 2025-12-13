@@ -1,0 +1,17 @@
+[package]
+name = "termide-app-event"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Event handling traits and hotkey processing for termide"
+
+[dependencies]
+anyhow.workspace = true
+crossterm.workspace = true
+
+# Foundation crates
+termide-app-core = { path = "../app-core" }
+
+[dev-dependencies]

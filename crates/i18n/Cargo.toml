@@ -1,0 +1,13 @@
+[package]
+name = "termide-i18n"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Internationalization support for termide"
+
+[dependencies]
+serde.workspace = true
+anyhow.workspace = true
+toml.workspace = true

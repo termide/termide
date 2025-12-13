@@ -1,25 +1,4 @@
-mod app;
-mod clipboard;
-mod config;
-mod constants;
-mod editor;
-mod event;
-mod fs_watcher;
-mod git;
-mod i18n;
-mod keyboard;
-mod layout_manager;
-mod logger;
-mod panels;
-mod path_utils;
-mod rename_pattern;
-mod session;
-mod state;
-mod syntax_highlighter;
-mod system_monitor;
-mod theme;
 mod ui;
-mod xdg_dirs;
 
 use anyhow::Result;
 use crossterm::{
@@ -36,23 +15,32 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 
-use app::App;
-use panels::file_manager::FileManager;
+use termide_app::App;
+use termide_config::Config;
+use termide_git::check_git_available;
+use termide_i18n::{init_with_language, t};
+use termide_panel_file_manager::FileManager;
+use termide_theme::set_themes_dir;
 
 fn main() -> Result<()> {
     // Load config first to get language setting
-    let config = config::Config::load().unwrap_or_default();
+    let config = Config::load().unwrap_or_default();
+
+    // Initialize theme system with themes directory from config
+    if let Ok(themes_dir) = Config::get_themes_dir() {
+        set_themes_dir(themes_dir);
+    }
 
     // Initialize translation system with language from config
-    i18n::init_with_language(&config.general.language);
+    init_with_language(&config.general.language);
 
     // Check for git on the system
-    let git_available = git::check_git_available();
-    let t = i18n::t();
+    let git_available = check_git_available();
+    let tr = t();
     if git_available {
-        eprintln!("{}", t.git_detected());
+        eprintln!("{}", tr.git_detected());
     } else {
-        eprintln!("{}", t.git_not_found());
+        eprintln!("{}", tr.git_not_found());
     }
 
     // Initialize terminal
@@ -101,7 +89,9 @@ fn main() -> Result<()> {
     }
 
     // Run application
-    let result = app.run(&mut terminal);
+    let result = app.run(&mut terminal, |frame, state, layout_manager| {
+        ui::render_layout_with_accordion(frame, state, layout_manager);
+    });
 
     // Restore terminal
     disable_raw_mode()?;

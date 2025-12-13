@@ -1,0 +1,13 @@
+[package]
+name = "termide-watcher"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Filesystem watcher for termide"
+
+[dependencies]
+anyhow.workspace = true
+notify.workspace = true
+notify-debouncer-mini.workspace = true

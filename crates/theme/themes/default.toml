@@ -1,0 +1,23 @@
+# Default dark theme for TermIDE
+name = "default"
+
+[colors]
+# Base
+bg = { rgb = [20, 20, 20] }
+fg = "White"
+
+# Accented
+accented_bg = { rgb = [40, 40, 40] }
+accented_fg = "Green"
+
+# Selection
+selected_bg = "Blue"
+selected_fg = "White"
+
+# Disabled
+disabled = "Gray"
+
+# Semantic
+success = "Green"
+warning = "Yellow"
+error = "Red"

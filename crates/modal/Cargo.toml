@@ -1,0 +1,20 @@
+[package]
+name = "termide-modal"
+version = "0.1.0"
+edition = "2021"
+description = "Modal dialog system for termide"
+license = "MIT"
+
+[dependencies]
+# External
+anyhow = "1"
+crossterm = "0.28"
+ratatui = "0.29.0"
+unicode-width = "0.2"
+
+# Workspace crates
+termide-ui = { path = "../ui" }
+termide-theme = { path = "../theme" }
+termide-i18n = { path = "../i18n" }
+termide-config = { path = "../config" }
+termide-state = { path = "../state" }

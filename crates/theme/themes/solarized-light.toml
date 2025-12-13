@@ -1,0 +1,25 @@
+# Solarized Light theme for TermIDE
+# Classic precision color scheme designed by Ethan Schoonover
+# Scientifically balanced colors to minimize eye strain
+name = "solarized-light"
+
+[colors]
+# Base - base3 background with base00 foreground
+bg = { rgb = [253, 246, 227] }
+fg = { rgb = [101, 123, 131] }
+
+# Accented - base2 background with blue accent
+accented_bg = { rgb = [238, 232, 213] }
+accented_fg = { rgb = [38, 139, 210] }
+
+# Selection - base0
+selected_bg = { rgb = [147, 161, 161] }
+selected_fg = { rgb = [7, 54, 66] }
+
+# Disabled - base1
+disabled = { rgb = [147, 161, 161] }
+
+# Semantic
+success = { rgb = [133, 153, 0] }
+warning = { rgb = [181, 137, 0] }
+error = { rgb = [220, 50, 47] }

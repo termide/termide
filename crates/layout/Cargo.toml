@@ -1,0 +1,12 @@
+[package]
+name = "termide-layout"
+version = "0.1.0"
+edition = "2021"
+description = "Panel layout management for termide"
+license = "MIT"
+publish = false
+
+[dependencies]
+termide-core = { path = "../core" }
+termide-config = { path = "../config" }
+anyhow = "1.0"

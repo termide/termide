@@ -1,0 +1,34 @@
+[package]
+name = "termide-panel-editor"
+version = "0.1.0"
+edition = "2021"
+description = "Text editor panel for termide"
+license = "MIT"
+
+[dependencies]
+# External
+anyhow = "1"
+chrono = "0.4"
+crossterm = "0.28"
+log = "0.4"
+ratatui = "0.29.0"
+ropey = "1.6"
+unicode-width = "0.2"
+unicode-segmentation = "1.11"
+dirs = "5"
+
+# Workspace crates
+termide-buffer = { path = "../buffer" }
+termide-config = { path = "../config" }
+termide-core = { path = "../core" }
+termide-git = { path = "../git" }
+termide-highlight = { path = "../highlight" }
+termide-i18n = { path = "../i18n" }
+termide-modal = { path = "../modal" }
+termide-session = { path = "../session" }
+termide-state = { path = "../state" }
+termide-theme = { path = "../theme" }
+termide-clipboard = { path = "../clipboard" }
+
+[dev-dependencies]
+tempfile = "3"

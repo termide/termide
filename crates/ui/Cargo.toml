@@ -1,0 +1,18 @@
+[package]
+name = "termide-ui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "UI components for termide"
+
+[dependencies]
+ratatui.workspace = true
+crossterm.workspace = true
+anyhow.workspace = true
+
+# Workspace crates
+termide-clipboard = { path = "../clipboard" }
+termide-config = { path = "../config" }
+termide-system-monitor = { path = "../system-monitor" }

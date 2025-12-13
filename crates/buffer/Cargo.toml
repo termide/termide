@@ -1,0 +1,18 @@
+[package]
+name = "termide-buffer"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Text buffer with rope data structure for termide"
+
+[dependencies]
+ropey.workspace = true
+anyhow.workspace = true
+unicode-segmentation.workspace = true
+unicode-width.workspace = true
+regex.workspace = true
+
+[dev-dependencies]
+tempfile = "3.12"

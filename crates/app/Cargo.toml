@@ -1,0 +1,50 @@
+[package]
+name = "termide-app"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Application orchestrator for termide - coordinates all app modules"
+
+[dependencies]
+anyhow.workspace = true
+crossterm.workspace = true
+ratatui.workspace = true
+dirs.workspace = true
+chrono.workspace = true
+
+# All app-* foundation crates
+termide-app-core = { path = "../app-core" }
+termide-app-event = { path = "../app-event" }
+termide-app-modal = { path = "../app-modal" }
+termide-app-panel = { path = "../app-panel" }
+termide-app-watcher = { path = "../app-watcher" }
+termide-app-session = { path = "../app-session" }
+
+# Core workspace crates
+termide-core = { path = "../core" }
+termide-clipboard = { path = "../clipboard" }
+termide-keyboard = { path = "../keyboard" }
+termide-state = { path = "../state" }
+termide-modal = { path = "../modal" }
+termide-layout = { path = "../layout" }
+termide-config = { path = "../config" }
+termide-theme = { path = "../theme" }
+termide-i18n = { path = "../i18n" }
+termide-session = { path = "../session" }
+termide-git = { path = "../git" }
+termide-watcher = { path = "../watcher" }
+termide-logger = { path = "../logger" }
+termide-system-monitor = { path = "../system-monitor" }
+termide-ui = { path = "../ui" }
+termide-ui-render = { path = "../ui-render" }
+
+# Panel crates
+termide-panel-editor = { path = "../panel-editor" }
+termide-panel-file-manager = { path = "../panel-file-manager" }
+termide-panel-terminal = { path = "../panel-terminal" }
+termide-panel-misc = { path = "../panel-misc" }
+
+[dev-dependencies]
+tempfile = "3.12"

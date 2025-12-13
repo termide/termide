@@ -1,0 +1,17 @@
+[package]
+name = "termide-app-modal"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Modal result handling and batch operation processing for termide"
+
+[dependencies]
+anyhow.workspace = true
+
+# Foundation crates
+termide-app-core = { path = "../app-core" }
+termide-state = { path = "../state" }
+
+[dev-dependencies]

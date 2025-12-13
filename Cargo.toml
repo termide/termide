@@ -1,8 +1,42 @@
-[package]
-name = "termide"
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
 version = "0.4.0"
 edition = "2021"
 authors = ["Nick Nizovtsev"]
+license = "MIT"
+repository = "https://github.com/termide/termide"
+
+[workspace.dependencies]
+# Core dependencies
+anyhow = "1.0"
+crossterm = "0.28"
+ratatui = "0.29.0"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+dirs = "6.0"
+ropey = "1.6"
+arboard = "3.4"
+unicode-segmentation = "1.11"
+unicode-width = "0.2"
+# Infra dependencies
+tree-sitter = "0.24"
+tree-sitter-highlight = "0.24"
+regex = "1.12"
+notify = { version = "6.1", default-features = false, features = ["macos_kqueue"] }
+notify-debouncer-mini = "0.4"
+sysinfo = "0.31"
+chrono = { version = "0.4", features = ["serde"] }
+portable-pty = "0.8"
+vte = "0.13"
+
+[package]
+name = "termide"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
 description = "Cross-platform terminal IDE, file manager and virtual terminal"
 repository = "https://github.com/termide/termide"
 license = "MIT"
@@ -108,6 +142,38 @@ tree-sitter-bash = "0.23"
 tree-sitter-md = "0.3"
 regex = "1.12.2"
 similar = "2.7.0"
+
+# Workspace crates
+termide-buffer = { path = "crates/buffer" }
+termide-clipboard = { path = "crates/clipboard" }
+termide-config = { path = "crates/config" }
+termide-core = { path = "crates/core" }
+termide-git = { path = "crates/git" }
+termide-highlight = { path = "crates/highlight" }
+termide-i18n = { path = "crates/i18n" }
+termide-keyboard = { path = "crates/keyboard" }
+termide-layout = { path = "crates/layout" }
+termide-logger = { path = "crates/logger" }
+termide-modal = { path = "crates/modal" }
+termide-panel-editor = { path = "crates/panel-editor" }
+termide-panel-file-manager = { path = "crates/panel-file-manager" }
+termide-panel-misc = { path = "crates/panel-misc" }
+termide-panel-terminal = { path = "crates/panel-terminal" }
+termide-session = { path = "crates/session" }
+termide-state = { path = "crates/state" }
+termide-system-monitor = { path = "crates/system-monitor" }
+termide-text-search = { path = "crates/text-search" }
+termide-theme = { path = "crates/theme" }
+termide-ui = { path = "crates/ui" }
+termide-ui-render = { path = "crates/ui-render" }
+termide-watcher = { path = "crates/watcher" }
+termide-app-core = { path = "crates/app-core" }
+termide-app-event = { path = "crates/app-event" }
+termide-app-modal = { path = "crates/app-modal" }
+termide-app-panel = { path = "crates/app-panel" }
+termide-app-watcher = { path = "crates/app-watcher" }
+termide-app-session = { path = "crates/app-session" }
+termide-app = { path = "crates/app" }
 
 [build-dependencies]
 cc = "1.0"

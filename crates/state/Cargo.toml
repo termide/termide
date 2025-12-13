@@ -1,0 +1,12 @@
+[package]
+name = "termide-state"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "State types and data structures for termide"
+
+[dependencies]
+chrono = "0.4"
+termide-config = { path = "../config" }

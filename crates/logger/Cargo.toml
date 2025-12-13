@@ -1,0 +1,11 @@
+[package]
+name = "termide-logger"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Logging infrastructure for termide"
+
+[dependencies]
+chrono = "0.4"
