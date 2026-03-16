@@ -12,7 +12,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::event::{
-    self, Event as CrosstermEvent, KeyEvent, KeyEventKind, MouseEvent, MouseEventKind,
+    self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent,
+    MouseEventKind,
 };
 
 /// Application event
@@ -73,7 +74,9 @@ impl EventHandler {
             match event::read()? {
                 // With kitty keyboard protocol, we receive Press, Release, and Repeat events.
                 // Only handle Press events to avoid duplicate actions.
-                CrosstermEvent::Key(key) if key.kind == KeyEventKind::Press => Ok(Event::Key(key)),
+                CrosstermEvent::Key(key) if key.kind == KeyEventKind::Press => {
+                    self.try_coalesce_paste(key)
+                }
                 CrosstermEvent::Key(_) => Ok(Event::Tick), // Ignore Release and Repeat
                 CrosstermEvent::Mouse(mouse)
                     if matches!(
@@ -171,6 +174,87 @@ impl EventHandler {
         }
 
         Ok(Event::Mouse(latest))
+    }
+
+    /// On Windows, pasted text arrives as individual Key events because the console
+    /// input API doesn't support bracketed paste. Detect by waiting a few ms after
+    /// each character for more input — paste fills the buffer rapidly while typing
+    /// has natural gaps. The 5ms wait is imperceptible for typing but enough for
+    /// Windows to deliver the full paste buffer.
+    fn try_coalesce_paste(&self, first_key: KeyEvent) -> Result<Event> {
+        // Only coalesce on Windows - other platforms get native Event::Paste
+        if !cfg!(windows) {
+            return Ok(Event::Key(first_key));
+        }
+
+        // Only coalesce plain character events (Shift is OK for uppercase)
+        if first_key.modifiers.contains(KeyModifiers::CONTROL)
+            || first_key.modifiers.contains(KeyModifiers::ALT)
+        {
+            return Ok(Event::Key(first_key));
+        }
+
+        // Must start with a printable character
+        let KeyCode::Char(first_ch) = first_key.code else {
+            return Ok(Event::Key(first_key));
+        };
+
+        // Wait briefly to see if more chars arrive (paste detection).
+        // Normal typing: no events within 5ms → return Key immediately.
+        // Paste: Windows fills console buffer → events arrive within 5ms.
+        if !event::poll(Duration::from_millis(5))? {
+            return Ok(Event::Key(first_key));
+        }
+
+        let mut text = String::new();
+        text.push(first_ch);
+
+        // Paste detected — drain all available chars, then keep waiting
+        // for more batches (Windows may deliver paste in chunks).
+        loop {
+            let before = text.len();
+            self.collect_paste_chars(&mut text)?;
+            // Wait for next batch; stop when no more arrive
+            if text.len() == before || !event::poll(Duration::from_millis(5))? {
+                break;
+            }
+        }
+
+        Ok(Event::Paste(text))
+    }
+
+    /// Drain character-like events from the input buffer with zero timeout.
+    fn collect_paste_chars(&self, text: &mut String) -> Result<()> {
+        while event::poll(Duration::ZERO)? {
+            let raw = event::read()?;
+            match &raw {
+                CrosstermEvent::Key(key)
+                    if key.kind == KeyEventKind::Press
+                        && !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
+                    match key.code {
+                        KeyCode::Char(c) => text.push(c),
+                        KeyCode::Enter => text.push('\r'),
+                        KeyCode::Tab => text.push('\t'),
+                        _ => {
+                            if let Some(ev) = self.convert_crossterm_event(raw) {
+                                self.pending_events.borrow_mut().push_back(ev);
+                            }
+                            return Ok(());
+                        }
+                    }
+                }
+                CrosstermEvent::Key(_) => continue,
+                _ => {
+                    if let Some(ev) = self.convert_crossterm_event(raw) {
+                        self.pending_events.borrow_mut().push_back(ev);
+                    }
+                    return Ok(());
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Convert crossterm event to our Event type.
