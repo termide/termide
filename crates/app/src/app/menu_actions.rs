@@ -643,13 +643,12 @@ impl App {
         &mut self,
         key: crossterm::event::KeyEvent,
     ) -> Result<()> {
-        let shells = termide_panel_terminal::shell_utils::discover_shells();
-        let item_count = shells.len();
+        let item_count = self.state.cached_shells.len();
 
         match navigate_submenu(&key, &mut self.state.ui.tools_nested, item_count) {
             SubmenuNavAction::Close => self.state.close_tools_nested_submenu(),
             SubmenuNavAction::Execute => {
-                if let Some(shell) = shells.get(self.state.ui.tools_nested.selected) {
+                if let Some(shell) = self.state.cached_shells.get(self.state.ui.tools_nested.selected) {
                     let shell_path = shell.path.clone();
                     // Save as default
                     self.state.config.terminal.default_shell = Some(shell_path.clone());
@@ -674,17 +673,23 @@ impl App {
                 self.handle_new_file_manager()?;
             }
             1 => {
-                // Terminal - open shell picker submenu
-                let shells = termide_panel_terminal::shell_utils::discover_shells();
+                // Terminal - open shell picker submenu (caches shells on open)
+                self.state.open_tools_nested_submenu(0);
+                // Adjust selection to match the current default shell
                 let default_idx = self
                     .state
                     .config
                     .terminal
                     .default_shell
                     .as_ref()
-                    .and_then(|default| shells.iter().position(|s| s.path == *default))
+                    .and_then(|default| {
+                        self.state
+                            .cached_shells
+                            .iter()
+                            .position(|s| s.path == *default)
+                    })
                     .unwrap_or(0);
-                self.state.open_tools_nested_submenu(default_idx);
+                self.state.ui.tools_nested.selected = default_idx;
             }
             2 => {
                 // Editor - open new editor panel

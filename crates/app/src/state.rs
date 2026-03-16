@@ -272,6 +272,8 @@ pub struct AppState {
     pub batch_sub_operation_id: Option<termide_file_ops::OperationId>,
     /// Counter for generating synthetic batch operation IDs.
     batch_id_counter: u64,
+    /// Cached shell list for the shell picker submenu (populated on open, cleared on close).
+    pub cached_shells: Vec<termide_panel_terminal::shell_utils::ShellInfo>,
 }
 
 impl Default for AppState {
@@ -352,6 +354,7 @@ impl AppState {
             batch_tracking_id: None,
             batch_sub_operation_id: None,
             batch_id_counter: u64::MAX / 2,
+            cached_shells: Vec::new(),
         }
     }
 
@@ -432,16 +435,19 @@ impl AppState {
     pub fn close_tools_submenu(&mut self) {
         self.ui.tools_submenu.close();
         self.ui.tools_nested.close();
+        self.cached_shells.clear();
     }
 
-    /// Open Tools nested submenu (shell picker)
+    /// Open Tools nested submenu (shell picker) and cache the shell list
     pub fn open_tools_nested_submenu(&mut self, initial_item: usize) {
+        self.cached_shells = termide_panel_terminal::shell_utils::discover_shells();
         self.ui.tools_nested.open_at(initial_item);
     }
 
-    /// Close Tools nested submenu
+    /// Close Tools nested submenu and clear cached shells
     pub fn close_tools_nested_submenu(&mut self) {
         self.ui.tools_nested.close();
+        self.cached_shells.clear();
     }
 
     /// Open Scripts submenu

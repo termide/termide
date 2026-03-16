@@ -71,15 +71,14 @@ fn render_dropdowns_and_modals(frame: &mut Frame, state: &mut AppState) {
 
         // Render shell picker nested submenu if open (Terminal selected)
         if state.ui.tools_nested.open && state.ui.tools_submenu.selected == 1 {
-            let shells = termide_panel_terminal::shell_utils::discover_shells();
             let shell_items = get_shell_items(
-                &shells,
+                &state.cached_shells,
                 state.config.terminal.default_shell.as_deref(),
             );
             if !shell_items.is_empty() {
                 let nested_x = menu_x + dropdown.width();
-                // Position at Terminal item row (index 1 + 1 for border)
-                let nested_y = dropdown_y + 1 + 1;
+                // +1 for border, +selected for the item row
+                let nested_y = dropdown_y + 1 + state.ui.tools_submenu.selected as u16;
                 let nested_dropdown = Dropdown::new(
                     &shell_items,
                     state.ui.tools_nested.selected,

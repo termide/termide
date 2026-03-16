@@ -17,7 +17,7 @@ pub struct ShellInfo {
 /// Returns a list of shells with friendly names, ordered by preference.
 pub fn discover_shells() -> Vec<ShellInfo> {
     let mut shells = Vec::new();
-    let mut seen_paths: Vec<String> = Vec::new();
+    let mut seen_paths = std::collections::HashSet::new();
 
     #[cfg(windows)]
     {
@@ -32,7 +32,7 @@ pub fn discover_shells() -> Vec<ShellInfo> {
                     name: "Git Bash".to_string(),
                     path: path.to_string(),
                 });
-                seen_paths.push(path.to_lowercase());
+                seen_paths.insert(path.to_lowercase());
                 break; // Only add one Git Bash
             }
         }
@@ -44,7 +44,7 @@ pub fn discover_shells() -> Vec<ShellInfo> {
                     name: "Bash".to_string(),
                     path: path.clone(),
                 });
-                seen_paths.push(path.to_lowercase());
+                seen_paths.insert(path.to_lowercase());
             }
         }
 
@@ -55,7 +55,7 @@ pub fn discover_shells() -> Vec<ShellInfo> {
                     name: "PowerShell Core".to_string(),
                     path: path.clone(),
                 });
-                seen_paths.push(path.to_lowercase());
+                seen_paths.insert(path.to_lowercase());
             }
         }
 
@@ -66,7 +66,7 @@ pub fn discover_shells() -> Vec<ShellInfo> {
                     name: "Windows PowerShell".to_string(),
                     path: path.clone(),
                 });
-                seen_paths.push(path.to_lowercase());
+                seen_paths.insert(path.to_lowercase());
             }
         }
 
@@ -77,7 +77,7 @@ pub fn discover_shells() -> Vec<ShellInfo> {
                 name: "Command Prompt".to_string(),
                 path: cmd.clone(),
             });
-            seen_paths.push(cmd.to_lowercase());
+            seen_paths.insert(cmd.to_lowercase());
         }
 
         // WSL distributions
@@ -126,7 +126,7 @@ pub fn discover_shells() -> Vec<ShellInfo> {
                         name: shell_display_name(line),
                         path: line.to_string(),
                     });
-                    seen_paths.push(line.to_string());
+                    seen_paths.insert(line.to_string());
                 }
             }
         }
@@ -147,7 +147,7 @@ pub fn discover_shells() -> Vec<ShellInfo> {
                     name: shell_display_name(path),
                     path: path.to_string(),
                 });
-                seen_paths.push(path.to_string());
+                seen_paths.insert(path.to_string());
             }
         }
     }
@@ -171,16 +171,15 @@ fn shell_display_name(path: &str) -> String {
     }
 }
 
-/// Check if a path is already in the seen list (case-insensitive on Windows).
-fn seen_contains(seen: &[String], path: &str) -> bool {
+/// Check if a path is already in the seen set (case-insensitive on Windows).
+fn seen_contains(seen: &std::collections::HashSet<String>, path: &str) -> bool {
     #[cfg(windows)]
     {
-        let lower = path.to_lowercase();
-        seen.iter().any(|s| s == &lower)
+        seen.contains(&path.to_lowercase())
     }
     #[cfg(not(windows))]
     {
-        seen.iter().any(|s| s == path)
+        seen.contains(path)
     }
 }
 

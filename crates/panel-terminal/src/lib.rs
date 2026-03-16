@@ -216,71 +216,10 @@ impl Terminal {
         }
     }
 
-    /// Create new terminal with specified working directory
+    /// Create new terminal with specified working directory (auto-detects shell)
     pub fn new_with_cwd(rows: u16, cols: u16, cwd: Option<std::path::PathBuf>) -> Result<Self> {
-        let pty_system = native_pty_system();
-        let size = PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        };
-        let pair = pty_system.openpty(size)?;
-
-        // Detect shell
         let shell = shell_utils::detect_shell();
-        let shell_args = shell_utils::get_shell_args(&shell);
-
-        let mut cmd = CommandBuilder::new(&shell);
-        for arg in shell_args {
-            cmd.arg(arg);
-        }
-
-        let working_dir =
-            cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| "/".into()));
-        cmd.cwd(&working_dir);
-        Self::set_env(&mut cmd, &working_dir);
-        cmd.env("SHELL", &shell);
-
-        let child = pair.slave.spawn_command(cmd)?;
-        let shell_pid = child.process_id();
-        let screen = Arc::new(RwLock::new(TerminalScreen::new(
-            rows as usize,
-            cols as usize,
-        )));
-        let reader = pair.master.try_clone_reader()?;
-        let writer = pair.master.take_writer()?;
-        let pty = Arc::new(Mutex::new(pair.master));
-        let is_alive = Arc::new(Mutex::new(true));
-        let has_new_data = Arc::new(AtomicBool::new(false));
-
-        Self::spawn_reader(reader, &screen, &is_alive, &has_new_data);
-
-        let username = std::env::var("USER")
-            .or_else(|_| std::env::var("USERNAME"))
-            .unwrap_or_else(|_| "user".to_string());
-        let hostname = std::env::var("HOSTNAME")
-            .or_else(|_| std::env::var("HOST"))
-            .unwrap_or_else(|_| "localhost".to_string());
-        let current_dir = std::env::current_dir()
-            .ok()
-            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
-            .unwrap_or_else(|| "~".to_string());
-        let title_prefix = format!("{}@{}//{}", username, hostname, current_dir);
-
-        let mut term = Self::build(
-            pty,
-            writer,
-            child,
-            shell_pid,
-            screen,
-            size,
-            is_alive,
-            has_new_data,
-        );
-        term.title_prefix = title_prefix;
-        term.initial_cwd = working_dir;
-        Ok(term)
+        Self::new_with_shell(rows, cols, &shell, cwd)
     }
 
     /// Create new terminal with a specific shell and optional working directory.
