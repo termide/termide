@@ -119,6 +119,8 @@ pub struct UiState {
     pub sessions_submenu: SubmenuState,
     /// Tools submenu state
     pub tools_submenu: SubmenuState,
+    /// Tools nested submenu state (shell picker inside Terminal)
+    pub tools_nested: SubmenuState,
     /// Scripts submenu state
     pub scripts_submenu: SubmenuState,
     /// Scripts nested submenu state (for subdirectory groups)
@@ -143,6 +145,7 @@ impl UiState {
     pub fn close_all_submenus(&mut self) {
         self.sessions_submenu.close();
         self.tools_submenu.close();
+        self.tools_nested.close();
         self.options_submenu.close();
         self.nested_submenu.close();
         self.scripts_submenu.close();
@@ -284,6 +287,7 @@ mod tests {
         let mut ui = UiState::default();
         ui.sessions_submenu.open();
         ui.tools_submenu.open();
+        ui.tools_nested.open();
         ui.options_submenu.open();
         ui.scripts_submenu.open();
         ui.bookmarks_submenu.open();
@@ -294,6 +298,7 @@ mod tests {
 
         assert!(!ui.sessions_submenu.open);
         assert!(!ui.tools_submenu.open);
+        assert!(!ui.tools_nested.open);
         assert!(!ui.options_submenu.open);
         assert!(!ui.scripts_submenu.open);
         assert!(!ui.bookmarks_submenu.open);

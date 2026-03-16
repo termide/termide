@@ -15,7 +15,8 @@ use termide_panel_terminal::Terminal;
 use termide_theme::Theme;
 use termide_ui_render::{
     get_bookmarks_group_items, get_bookmarks_items, get_menu_item_x_position, get_options_items,
-    get_scripts_group_items, get_scripts_items, get_sessions_items, get_tools_items,
+    get_scripts_group_items, get_scripts_items, get_sessions_items, get_shell_items,
+    get_tools_items,
     render_collapsed_panel, render_dividers, render_expanded_panel, render_menu, Dropdown,
     ExpandedPanelParams, LanguageDropdown, MenuRenderParams, ThemeDropdown, BOOKMARKS_MENU_INDEX,
     OPTIONS_MENU_INDEX, SCRIPTS_MENU_INDEX, SESSIONS_MENU_INDEX, WINDOWS_MENU_INDEX,
@@ -67,6 +68,28 @@ fn render_dropdowns_and_modals(frame: &mut Frame, state: &mut AppState) {
             theme,
         );
         dropdown.render(frame.buffer_mut());
+
+        // Render shell picker nested submenu if open (Terminal selected)
+        if state.ui.tools_nested.open && state.ui.tools_submenu.selected == 1 {
+            let shells = termide_panel_terminal::shell_utils::discover_shells();
+            let shell_items = get_shell_items(
+                &shells,
+                state.config.terminal.default_shell.as_deref(),
+            );
+            if !shell_items.is_empty() {
+                let nested_x = menu_x + dropdown.width();
+                // Position at Terminal item row (index 1 + 1 for border)
+                let nested_y = dropdown_y + 1 + 1;
+                let nested_dropdown = Dropdown::new(
+                    &shell_items,
+                    state.ui.tools_nested.selected,
+                    nested_x,
+                    nested_y,
+                    theme,
+                );
+                nested_dropdown.render(frame.buffer_mut());
+            }
+        }
     }
 
     // Render Scripts submenu if open

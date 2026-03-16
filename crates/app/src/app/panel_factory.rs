@@ -14,9 +14,18 @@ use termide_panel_misc::{HelpPanel as Help, JournalPanel as Journal};
 use termide_panel_terminal::Terminal;
 
 impl App {
-    /// Create new terminal
+    /// Create new terminal using the default shell (from config or auto-detect)
     pub(super) fn handle_new_terminal(&mut self) -> Result<()> {
-        log::debug!("Opening new Terminal panel");
+        let shell = self.state.config.terminal.default_shell.clone();
+        self.handle_new_terminal_with_shell(shell.as_deref())
+    }
+
+    /// Create new terminal with a specific shell (or auto-detect if None)
+    pub(super) fn handle_new_terminal_with_shell(
+        &mut self,
+        shell_path: Option<&str>,
+    ) -> Result<()> {
+        log::debug!("Opening new Terminal panel with shell: {:?}", shell_path);
         self.close_help_panels();
         // Get working directory from current active panel
         let working_dir = self
@@ -30,10 +39,23 @@ impl App {
         let term_height = height.saturating_sub(3);
         let term_width = width.saturating_sub(2);
 
-        if let Ok(terminal_panel) = Terminal::new_with_cwd(term_height, term_width, working_dir) {
+        let result = match shell_path {
+            Some(path) => Terminal::new_with_shell(term_height, term_width, path, working_dir),
+            None => Terminal::new_with_cwd(term_height, term_width, working_dir),
+        };
+
+        if let Ok(terminal_panel) = result {
             self.add_panel(Box::new(terminal_panel));
             self.auto_save_session();
         }
+        Ok(())
+    }
+
+    /// Save shell preference to config file
+    pub(super) fn save_shell_preference(&self, shell_path: &str) -> Result<()> {
+        let mut config = termide_config::Config::load()?;
+        config.terminal.default_shell = Some(shell_path.to_string());
+        config.save()?;
         Ok(())
     }
 

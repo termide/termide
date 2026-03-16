@@ -431,6 +431,17 @@ impl AppState {
     /// Close Tools submenu
     pub fn close_tools_submenu(&mut self) {
         self.ui.tools_submenu.close();
+        self.ui.tools_nested.close();
+    }
+
+    /// Open Tools nested submenu (shell picker)
+    pub fn open_tools_nested_submenu(&mut self, initial_item: usize) {
+        self.ui.tools_nested.open_at(initial_item);
+    }
+
+    /// Close Tools nested submenu
+    pub fn close_tools_nested_submenu(&mut self) {
+        self.ui.tools_nested.close();
     }
 
     /// Open Scripts submenu

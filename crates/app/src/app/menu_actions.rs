@@ -619,6 +619,11 @@ impl App {
         &mut self,
         key: crossterm::event::KeyEvent,
     ) -> Result<()> {
+        // If shell picker nested submenu is open, delegate to it
+        if self.state.ui.tools_nested.open {
+            return self.handle_tools_nested_submenu_key(key);
+        }
+
         use termide_ui_render::TOOLS_SUBMENU_ITEM_COUNT;
 
         match navigate_submenu(
@@ -633,6 +638,33 @@ impl App {
         Ok(())
     }
 
+    /// Handle keyboard event in Tools nested submenu (shell picker)
+    fn handle_tools_nested_submenu_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+    ) -> Result<()> {
+        let shells = termide_panel_terminal::shell_utils::discover_shells();
+        let item_count = shells.len();
+
+        match navigate_submenu(&key, &mut self.state.ui.tools_nested, item_count) {
+            SubmenuNavAction::Close => self.state.close_tools_nested_submenu(),
+            SubmenuNavAction::Execute => {
+                if let Some(shell) = shells.get(self.state.ui.tools_nested.selected) {
+                    let shell_path = shell.path.clone();
+                    // Save as default
+                    self.state.config.terminal.default_shell = Some(shell_path.clone());
+                    if let Err(e) = self.save_shell_preference(&shell_path) {
+                        log::warn!("Failed to save shell preference: {}", e);
+                    }
+                    self.state.close_menu();
+                    self.handle_new_terminal_with_shell(Some(&shell_path))?;
+                }
+            }
+            SubmenuNavAction::None => {}
+        }
+        Ok(())
+    }
+
     /// Execute action for selected Tools submenu item
     pub(super) fn execute_tools_submenu_action(&mut self) -> Result<()> {
         match self.state.ui.tools_submenu.selected {
@@ -642,9 +674,17 @@ impl App {
                 self.handle_new_file_manager()?;
             }
             1 => {
-                // Terminal - open new terminal panel
-                self.state.close_menu();
-                self.handle_new_terminal()?;
+                // Terminal - open shell picker submenu
+                let shells = termide_panel_terminal::shell_utils::discover_shells();
+                let default_idx = self
+                    .state
+                    .config
+                    .terminal
+                    .default_shell
+                    .as_ref()
+                    .and_then(|default| shells.iter().position(|s| s.path == *default))
+                    .unwrap_or(0);
+                self.state.open_tools_nested_submenu(default_idx);
             }
             2 => {
                 // Editor - open new editor panel

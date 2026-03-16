@@ -167,6 +167,9 @@ pub struct GitStatusSettings {
 /// Terminal panel settings.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TerminalSettings {
+    /// Default shell path (None = auto-detect)
+    #[serde(default)]
+    pub default_shell: Option<String>,
     /// Terminal keyboard shortcuts
     #[serde(default)]
     pub keybindings: TerminalKeybindings,

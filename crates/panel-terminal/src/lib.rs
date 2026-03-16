@@ -4,7 +4,7 @@
 mod clipboard;
 mod disk_space;
 mod link_detection;
-mod shell_utils;
+pub mod shell_utils;
 mod terminal;
 mod terminal_info;
 
@@ -241,6 +241,87 @@ impl Terminal {
         cmd.cwd(&working_dir);
         Self::set_env(&mut cmd, &working_dir);
         cmd.env("SHELL", &shell);
+
+        let child = pair.slave.spawn_command(cmd)?;
+        let shell_pid = child.process_id();
+        let screen = Arc::new(RwLock::new(TerminalScreen::new(
+            rows as usize,
+            cols as usize,
+        )));
+        let reader = pair.master.try_clone_reader()?;
+        let writer = pair.master.take_writer()?;
+        let pty = Arc::new(Mutex::new(pair.master));
+        let is_alive = Arc::new(Mutex::new(true));
+        let has_new_data = Arc::new(AtomicBool::new(false));
+
+        Self::spawn_reader(reader, &screen, &is_alive, &has_new_data);
+
+        let username = std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .unwrap_or_else(|_| "user".to_string());
+        let hostname = std::env::var("HOSTNAME")
+            .or_else(|_| std::env::var("HOST"))
+            .unwrap_or_else(|_| "localhost".to_string());
+        let current_dir = std::env::current_dir()
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+            .unwrap_or_else(|| "~".to_string());
+        let title_prefix = format!("{}@{}//{}", username, hostname, current_dir);
+
+        let mut term = Self::build(
+            pty,
+            writer,
+            child,
+            shell_pid,
+            screen,
+            size,
+            is_alive,
+            has_new_data,
+        );
+        term.title_prefix = title_prefix;
+        term.initial_cwd = working_dir;
+        Ok(term)
+    }
+
+    /// Create new terminal with a specific shell and optional working directory.
+    pub fn new_with_shell(
+        rows: u16,
+        cols: u16,
+        shell_path: &str,
+        cwd: Option<std::path::PathBuf>,
+    ) -> Result<Self> {
+        let pty_system = native_pty_system();
+        let size = PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        };
+        let pair = pty_system.openpty(size)?;
+
+        let shell_args = shell_utils::get_shell_args(shell_path);
+
+        // WSL entries use "wsl -d distro" format
+        let mut cmd = if shell_path.starts_with("wsl ") {
+            let parts: Vec<&str> = shell_path.split_whitespace().collect();
+            let mut cmd = CommandBuilder::new(parts[0]);
+            for arg in &parts[1..] {
+                cmd.arg(arg);
+            }
+            cmd
+        } else {
+            let mut cmd = CommandBuilder::new(shell_path);
+            for arg in shell_args {
+                cmd.arg(arg);
+            }
+            cmd
+        };
+
+        let working_dir =
+            cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| "/".into()));
+        cmd.cwd(&working_dir);
+        Self::set_env(&mut cmd, &working_dir);
+        cmd.env("SHELL", shell_path);
 
         let child = pair.slave.spawn_command(cmd)?;
         let shell_pid = child.process_id();

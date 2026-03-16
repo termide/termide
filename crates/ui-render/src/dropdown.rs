@@ -212,7 +212,7 @@ pub fn get_tools_items() -> Vec<DropdownItem> {
     let t = i18n::t();
     vec![
         DropdownItem::new(t.tools_files(), "files"),
-        DropdownItem::new(t.tools_terminal(), "terminal"),
+        DropdownItem::new(t.tools_terminal(), "terminal").with_submenu(),
         DropdownItem::new(t.tools_editor(), "editor"),
         DropdownItem::new(t.tools_git_status(), "git_status"),
         DropdownItem::new(t.tools_git_log(), "git_log"),
@@ -225,6 +225,29 @@ pub fn get_tools_items() -> Vec<DropdownItem> {
 
 /// Number of items in Tools submenu
 pub const TOOLS_SUBMENU_ITEM_COUNT: usize = 9;
+
+/// Get shell picker submenu items from discovered shells.
+///
+/// Marks the default shell with a `●` indicator.
+pub fn get_shell_items(
+    shells: &[termide_panel_terminal::shell_utils::ShellInfo],
+    default_shell: Option<&str>,
+) -> Vec<DropdownItem> {
+    shells
+        .iter()
+        .map(|shell| {
+            let is_default = default_shell
+                .map(|d| d == shell.path)
+                .unwrap_or(false);
+            let label = if is_default {
+                format!("{} ●", shell.name)
+            } else {
+                shell.name.clone()
+            };
+            DropdownItem::new(label, &shell.path)
+        })
+        .collect()
+}
 
 /// Get options submenu items
 pub fn get_options_items() -> Vec<DropdownItem> {

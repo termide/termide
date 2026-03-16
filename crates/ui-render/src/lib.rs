@@ -12,9 +12,9 @@ pub mod theme_dropdown;
 
 pub use dropdown::{
     get_bookmarks_group_items, get_bookmarks_item_count, get_bookmarks_items, get_options_items,
-    get_scripts_group_items, get_scripts_items, get_sessions_items, get_tools_items, Dropdown,
-    DropdownItem, BOOKMARK_ADD_CURRENT, OPTIONS_SUBMENU_ITEM_COUNT, SCRIPT_ADD_NEW,
-    SESSIONS_SUBMENU_ITEM_COUNT, TOOLS_SUBMENU_ITEM_COUNT,
+    get_scripts_group_items, get_scripts_items, get_sessions_items, get_shell_items,
+    get_tools_items, Dropdown, DropdownItem, BOOKMARK_ADD_CURRENT, OPTIONS_SUBMENU_ITEM_COUNT,
+    SCRIPT_ADD_NEW, SESSIONS_SUBMENU_ITEM_COUNT, TOOLS_SUBMENU_ITEM_COUNT,
 };
 pub use inline_selector::InlineSelector;
 pub use language_dropdown::{find_current_language_index, LanguageDropdown};

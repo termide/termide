@@ -16,8 +16,8 @@ use termide_theme::Theme;
 use termide_ui_render::{
     get_bookmarks_group_items, get_bookmarks_items, get_menu_item_x_position, get_options_items,
     get_resource_indicator_ranges, get_scripts_group_items, get_scripts_items, get_sessions_items,
-    get_tools_items, MenuRenderParams, BOOKMARKS_MENU_INDEX, OPTIONS_MENU_INDEX,
-    SCRIPTS_MENU_INDEX, SESSIONS_MENU_INDEX, WINDOWS_MENU_INDEX,
+    get_shell_items, get_tools_items, MenuRenderParams, BOOKMARKS_MENU_INDEX,
+    OPTIONS_MENU_INDEX, SCRIPTS_MENU_INDEX, SESSIONS_MENU_INDEX, WINDOWS_MENU_INDEX,
 };
 
 /// Hit-test a dropdown menu and return the clicked item index (if any).
@@ -965,6 +965,36 @@ impl App {
     fn handle_tools_submenu_click(&mut self, x: u16, y: u16) -> Result<bool> {
         let menu_x = get_menu_item_x_position(WINDOWS_MENU_INDEX);
         let items = get_tools_items();
+
+        // If shell picker nested submenu is open, check clicks on it first
+        if self.state.ui.tools_nested.open {
+            let shells = termide_panel_terminal::shell_utils::discover_shells();
+            let shell_items = get_shell_items(
+                &shells,
+                self.state.config.terminal.default_shell.as_deref(),
+            );
+            if !shell_items.is_empty() {
+                // Calculate nested dropdown position (same as in ui.rs rendering)
+                let parent_width =
+                    items.iter().map(|i| i.label.width()).max().unwrap_or(10) as u16 + 4;
+                let nested_x = menu_x + parent_width;
+                let nested_y = 1 + 1 + 1; // dropdown_y + border + Terminal index
+                if let Some(index) = hit_dropdown_item(x, y, nested_x, nested_y, &shell_items) {
+                    if let Some(shell) = shells.get(index) {
+                        let shell_path = shell.path.clone();
+                        self.state.config.terminal.default_shell = Some(shell_path.clone());
+                        if let Err(e) = self.save_shell_preference(&shell_path) {
+                            log::warn!("Failed to save shell preference: {}", e);
+                        }
+                        self.state.close_menu();
+                        self.handle_new_terminal_with_shell(Some(&shell_path))?;
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+
+        // Check click on Tools main dropdown
         if let Some(index) = hit_dropdown_item(x, y, menu_x, 1, &items) {
             self.state.ui.tools_submenu.selected = index;
             self.execute_tools_submenu_action()?;
