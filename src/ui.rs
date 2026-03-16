@@ -16,10 +16,10 @@ use termide_theme::Theme;
 use termide_ui_render::{
     get_bookmarks_group_items, get_bookmarks_items, get_menu_item_x_position, get_options_items,
     get_scripts_group_items, get_scripts_items, get_sessions_items, get_shell_items,
-    get_tools_items,
-    render_collapsed_panel, render_dividers, render_expanded_panel, render_menu, Dropdown,
-    ExpandedPanelParams, LanguageDropdown, MenuRenderParams, ThemeDropdown, BOOKMARKS_MENU_INDEX,
-    OPTIONS_MENU_INDEX, SCRIPTS_MENU_INDEX, SESSIONS_MENU_INDEX, WINDOWS_MENU_INDEX,
+    get_tools_items, render_collapsed_panel, render_dividers, render_expanded_panel, render_menu,
+    Dropdown, ExpandedPanelParams, LanguageDropdown, MenuRenderParams, ThemeDropdown,
+    BOOKMARKS_MENU_INDEX, OPTIONS_MENU_INDEX, SCRIPTS_MENU_INDEX, SESSIONS_MENU_INDEX,
+    WINDOWS_MENU_INDEX,
 };
 
 use termide_ui_render::{StatusBar, StatusBarParams};

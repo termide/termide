@@ -243,6 +243,9 @@ impl Terminal {
         // WSL entries use "wsl -d distro" format
         let mut cmd = if shell_path.starts_with("wsl ") {
             let parts: Vec<&str> = shell_path.split_whitespace().collect();
+            if parts.is_empty() {
+                anyhow::bail!("empty shell path");
+            }
             let mut cmd = CommandBuilder::new(parts[0]);
             for arg in &parts[1..] {
                 cmd.arg(arg);

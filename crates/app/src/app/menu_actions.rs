@@ -639,16 +639,21 @@ impl App {
     }
 
     /// Handle keyboard event in Tools nested submenu (shell picker)
-    fn handle_tools_nested_submenu_key(
-        &mut self,
-        key: crossterm::event::KeyEvent,
-    ) -> Result<()> {
+    fn handle_tools_nested_submenu_key(&mut self, key: crossterm::event::KeyEvent) -> Result<()> {
         let item_count = self.state.cached_shells.len();
+        if item_count == 0 {
+            self.state.close_tools_nested_submenu();
+            return Ok(());
+        }
 
         match navigate_submenu(&key, &mut self.state.ui.tools_nested, item_count) {
             SubmenuNavAction::Close => self.state.close_tools_nested_submenu(),
             SubmenuNavAction::Execute => {
-                if let Some(shell) = self.state.cached_shells.get(self.state.ui.tools_nested.selected) {
+                if let Some(shell) = self
+                    .state
+                    .cached_shells
+                    .get(self.state.ui.tools_nested.selected)
+                {
                     let shell_path = shell.path.clone();
                     // Save as default
                     self.state.config.terminal.default_shell = Some(shell_path.clone());

@@ -236,9 +236,7 @@ pub fn get_shell_items(
     shells
         .iter()
         .map(|shell| {
-            let is_default = default_shell
-                .map(|d| d == shell.path)
-                .unwrap_or(false);
+            let is_default = default_shell.map(|d| d == shell.path).unwrap_or(false);
             let label = if is_default {
                 format!("{} ●", shell.name)
             } else {
