@@ -72,13 +72,15 @@ impl EventHandler {
 
         if event::poll(self.tick_rate)? {
             match event::read()? {
-                // With kitty keyboard protocol, we receive Press, Release, and Repeat events.
-                // Only handle Press events to avoid duplicate actions.
-                CrosstermEvent::Key(key) if key.kind == KeyEventKind::Press => {
+                // Handle Press and Repeat (held-key auto-repeat) so navigation/resize
+                // keeps firing while key is down.
+                CrosstermEvent::Key(key)
+                    if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
+                {
                     self.try_coalesce_paste(key)
                 }
                 CrosstermEvent::Key(_) => {
-                    // Release/Repeat from REPORT_EVENT_TYPES — drain buffered
+                    // Release from REPORT_EVENT_TYPES — drain buffered
                     // events with zero timeout instead of generating a spurious
                     // Tick that triggers the full background-processing pipeline.
                     self.drain_non_press_keys()
@@ -181,13 +183,15 @@ impl EventHandler {
         Ok(Event::Mouse(latest))
     }
 
-    /// Drain buffered Release/Repeat key events left by REPORT_EVENT_TYPES.
-    /// Returns the first real event found (Press key, mouse, resize…) or Tick
-    /// when the queue is empty.
+    /// Drain buffered Release key events left by REPORT_EVENT_TYPES.
+    /// Returns the first real event found (Press/Repeat key, mouse, resize…) or
+    /// Tick when the queue is empty.
     fn drain_non_press_keys(&self) -> Result<Event> {
         while event::poll(Duration::ZERO)? {
             match event::read()? {
-                CrosstermEvent::Key(key) if key.kind == KeyEventKind::Press => {
+                CrosstermEvent::Key(key)
+                    if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
+                {
                     return self.try_coalesce_paste(key);
                 }
                 CrosstermEvent::Key(_) => continue,
@@ -287,14 +291,66 @@ impl EventHandler {
     /// Convert crossterm event to our Event type.
     fn convert_crossterm_event(&self, raw: CrosstermEvent) -> Option<Event> {
         match raw {
-            CrosstermEvent::Key(key) if key.kind == KeyEventKind::Press => Some(Event::Key(key)),
-            CrosstermEvent::Key(_) => None, // Ignore Release and Repeat
+            CrosstermEvent::Key(key)
+                if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
+            {
+                Some(Event::Key(key))
+            }
+            CrosstermEvent::Key(_) => None, // Ignore Release
             CrosstermEvent::Mouse(mouse) => Some(Event::Mouse(mouse)),
             CrosstermEvent::Resize(width, height) => Some(Event::Resize(width, height)),
             CrosstermEvent::FocusLost => Some(Event::FocusLost),
             CrosstermEvent::FocusGained => Some(Event::FocusGained),
             CrosstermEvent::Paste(text) => Some(Event::Paste(text)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key_event(kind: KeyEventKind) -> CrosstermEvent {
+        CrosstermEvent::Key(KeyEvent::new_with_kind(
+            KeyCode::Down,
+            KeyModifiers::NONE,
+            kind,
+        ))
+    }
+
+    /// Regression: held-key auto-repeat. Under the Kitty keyboard protocol
+    /// (`REPORT_EVENT_TYPES`) a held key streams `Repeat` events; they must be
+    /// delivered as `Press` — so navigation and panel resize keep firing
+    /// while a key is held.
+    #[test]
+    fn repeat_key_is_treated_as_input() {
+        let handler = EventHandler::new(Duration::from_millis(50));
+        match handler.convert_crossterm_event(key_event(KeyEventKind::Repeat)) {
+            Some(Event::Key(key)) => assert_eq!(key.code, KeyCode::Down),
+            other => panic!("Repeat should yield a key event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn press_key_is_treated_as_input() {
+        let handler = EventHandler::new(Duration::from_millis(50));
+        match handler.convert_crossterm_event(key_event(KeyEventKind::Press)) {
+            Some(Event::Key(key)) => assert_eq!(key.code, KeyCode::Down),
+            other => panic!("Press should yield a key event, got {other:?}"),
+        }
+    }
+
+    /// `Release` carries no actionable input and must stay filtered out, so a
+    /// single key tap still produces exactly one action.
+    #[test]
+    fn release_key_is_ignored() {
+        let handler = EventHandler::new(Duration::from_millis(50));
+        assert!(
+            handler
+                .convert_crossterm_event(key_event(KeyEventKind::Release))
+                .is_none(),
+            "Release events must be discarded"
+        );
     }
 }
 

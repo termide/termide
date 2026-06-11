@@ -5,6 +5,11 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Held-key auto-repeat on Kitty-protocol terminals.** When the terminal supports the Kitty keyboard protocol, termide enables `REPORT_EVENT_TYPES`, so a held key streams `Repeat` events. The event handler previously discarded `Repeat` along with `Release`. `Repeat` is now treated like `Press`, restoring auto-repeat.
+
 ## [0.24.0] - 2026-06-07
 
 ### Added
