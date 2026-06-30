@@ -189,7 +189,7 @@ bg = "Black"
 error = "Red"
 ```
 
-支持的颜色名称：`Black`、`Red`、`Green`、`Yellow`、`Blue`、`Magenta`、`Cyan`、`White`、`Gray`、`DarkGray`
+支持的颜色名称：`Black`、`Red`、`Green`、`Yellow`、`Blue`、`Magenta`、`Cyan`、`White`、`Gray`、`DarkGray`、`LightRed`、`LightGreen`、`LightYellow`、`LightBlue`、`LightMagenta`、`LightCyan`、`Reset`。名称不区分大小写（`Reset` 与 `reset` 等价）；无法识别的名称回退为 `White`。
 
 **2. RGB 值：**
 ```toml
@@ -199,6 +199,15 @@ selected_bg = { rgb = [0, 120, 215] }
 ```
 
 RGB 值范围为每个通道（红、绿、蓝）0 到 255。
+
+**3. `"Reset"` — 透明背景：**
+```toml
+bg = "Reset"
+```
+
+将某个颜色设为 `"Reset"` 会使其透明——终端的背景会透出来。当你希望 termide 融入终端原生配色时很有用。所有主题颜色都支持 `"Reset"`，但最常用于 `bg`（面板背景）和 `accented_bg`（状态栏/菜单背景）。
+
+> **提示：** 浅色/深色自动检测读取背景颜色，而 `"Reset"` 被视为深色。如果你的终端使用浅色背景，请显式设置 `is_light = true`（主题顶层的 `is_light` 字段），以便语法高亮选用浅色调色板。
 
 ## 主题颜色用途
 

@@ -1,0 +1,40 @@
+# Mermaid 图表查看器
+
+TermIDE 将 [Mermaid](https://mermaid.js.org/) 源文件（`.mmd`、`.mermaid`）渲染为
+只读的文本伪图形图表，而不是打开原始源码。同一渲染器也会绘制
+[Markdown 预览](markdown.md)中嵌入的 ```` ```mermaid ```` 代码块。
+
+## 打开
+
+- 在 `.mmd` / `.mermaid` 文件上按 **`F3`** — 打开渲染后的图表。
+- **`Enter`** 或 **`F4`** — 在编辑器中打开原始源码（与任何文本文件一样）。
+
+## 图表 ↔ 源码
+
+图表和源码编辑器是同一文件的两种视图。在原地切换——面板被替换，而不是堆叠：
+
+- **`Ctrl+E`**（可通过 `[viewer.keybindings] toggle_view` 配置）。
+- 状态栏中可点击的 **`Edit`** 标签。
+
+当源码有未保存的改动时，切回图表会被阻止——请先保存。
+
+## 支持的图表类型
+
+无需外部 Mermaid 引擎即可解析与排版（纯 Rust 实现）：
+
+- **flowchart** / **graph** — 分层（Sugiyama 风格）布局，正交折线边、制表符连接点和边标签。
+- **sequenceDiagram** — 参与者方框、生命线、箭头（实线/虚线/开口/叉形箭头）、注释和自消息。
+- **stateDiagram** — 复用 flowchart 引擎（`[*]` 成为开始/结束节点）。
+- **classDiagram** / **erDiagram** — 带有成员/属性分区的方框。
+- **gantt** — 按区段分组的时间条，采用网格表格布局：上下各有一条日期轴、竖向网格线，以及区段之间的 `┼` 分隔符。
+- **pie**、**journey**、**mindmap**、**timeline**、**gitGraph**、**quadrant**。
+
+尚未支持排版的图表类型（如 `requirementDiagram`、`C4Context`）会显示源码并附带提示说明。
+
+## 导航与复制
+
+- `↑`/`↓`/`←`/`→`（或 `k`/`j`/`h`/`l`）— 在两个方向上滚动画布。
+- `PageUp`/`PageDown`（或 `Space`）— 垂直翻页；`Home`/`End` — 顶部/底部；鼠标滚轮和右边缘滚动条同样可滚动。
+- **`y`** 或 **`Ctrl+C`**，或面板 `[≡]` 菜单中的 **`Copy diagram`** 项 — 将渲染后的图表（伪图形）复制到剪贴板。
+
+该面板在会话之间保持，并在同一文件上重新打开。

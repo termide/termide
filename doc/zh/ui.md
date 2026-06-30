@@ -82,7 +82,7 @@
   - [Operations](operations.md) — 后台操作面板
   - Outline — 代码结构导航面板
 - `Scripts` — 用户自定义脚本（支持分组子菜单）。点击分组标题可展开子菜单；再次点击同一标题则折叠（toggle）。
-- `Bookmarks` — 书签（目录、文件、SSH、SFTP）。分组行为与 Scripts 相同，支持 toggle。
+- `Bookmarks` — 书签（目录、文件、SSH、SFTP、网页链接）。打开时按类型路由：目录和远程路径在文件管理器中，HTML/Markdown/Mermaid/图片文件和 `http(s)` 链接在内置查看器中（见 [HTML 预览](html.md)；遵循 `[viewer] open_links`），其他文本文件在编辑器中，SSH 在终端中，数据库在 DB 查看器中。分组行为与 Scripts 相同，支持 toggle。
 - `Options` — 设置子菜单：
   - Themes — 主题选择（实时预览）
   - Language — 界面语言（实时预览）
