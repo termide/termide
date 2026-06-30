@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Transparent background via the `"Reset"` theme colour.** Set any theme colour to `"Reset"` to use the terminal's native colour instead of a solid one — e.g. `bg = "Reset"` lets the terminal background show through. Named theme colours are now matched case-insensitively. (#37, thanks @shepelpavel)
 - **Anchor-link navigation in the viewers.** Following a `#section` link jumps within the page to the matching `id` (HTML) or heading (Markdown, GitHub-style slugs), and a `page#section` link navigates to the page and then jumps to the anchor.
 - **`Windows ▸ Web` menu entry.** A discoverable way to start text-mode browsing: it opens a URL prompt and shows the page in a viewer. A fetched view shows the URL as its title and a 🌐 globe icon.
 - **Separate "open in panel vs external" settings for pages and images.** `[viewer] open_links` (pages/links) and `[viewer] open_images` (image links), each `panel` (default) or `external`; `O` is still the per-link external override.

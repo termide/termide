@@ -189,7 +189,7 @@ bg = "Black"
 error = "Red"
 ```
 
-Supported named colors: `Black`, `Red`, `Green`, `Yellow`, `Blue`, `Magenta`, `Cyan`, `White`, `Gray`, `DarkGray`, `Reset`
+Supported named colors: `Black`, `Red`, `Green`, `Yellow`, `Blue`, `Magenta`, `Cyan`, `White`, `Gray`, `DarkGray`, `LightRed`, `LightGreen`, `LightYellow`, `LightBlue`, `LightMagenta`, `LightCyan`, `Reset`. Names are case-insensitive (`Reset` and `reset` are equivalent); an unrecognised name falls back to `White`.
 
 **2. RGB Values:**
 ```toml
@@ -206,6 +206,8 @@ bg = "Reset"
 ```
 
 Setting a color to `"Reset"` makes it transparent — the terminal's background shows through. This is useful when you want termide to blend into your terminal's native color scheme. All theme colors support `"Reset"`, but it's most commonly used for `bg` (panel backgrounds) and `accented_bg` (status bar / menu background).
+
+> **Tip:** light/dark auto-detection reads the background colour, and `"Reset"` is treated as dark. If your terminal uses a light background, set `is_light = true` explicitly (see the theme's top-level `is_light` field) so syntax highlighting picks the light palette.
 
 ## Theme Color Usage
 
