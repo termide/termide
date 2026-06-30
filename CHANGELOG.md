@@ -7,21 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- **Transparent background via the `"Reset"` theme colour.** Set any theme colour to `"Reset"` to use the terminal's native colour instead of a solid one — e.g. `bg = "Reset"` lets the terminal background show through. Named theme colours are now matched case-insensitively. (#37, thanks @shepelpavel)
-- **Anchor-link navigation in the viewers.** Following a `#section` link jumps within the page to the matching `id` (HTML) or heading (Markdown, GitHub-style slugs), and a `page#section` link navigates to the page and then jumps to the anchor.
-- **`Windows ▸ Web` menu entry.** A discoverable way to start text-mode browsing: it opens a URL prompt and shows the page in a viewer. A fetched view shows the URL as its title and a 🌐 globe icon.
-- **Separate "open in panel vs external" settings for pages and images.** `[viewer] open_links` (pages/links) and `[viewer] open_images` (image links), each `panel` (default) or `external`; `O` is still the per-link external override.
-- **Viewer shortcuts in the help panel (`Alt+H` / `F1`).** A new "Viewers" section documents the Markdown/HTML/diagram hotkeys (toggle source, go-to-path/URL, search, reload, copy, follow link, external open, history).
-- **Image links open in the image preview.** Following a link to an image (local file or fetched `image/*` URL) now opens it in the built-in image preview by default, like HTML/Markdown links, instead of always launching an external program. `O` and `[viewer] open_links = "external"` still open it externally.
-- **Bookmarks open in the viewer.** Activating a bookmark now routes by type: HTML / Markdown / Mermaid / image files and `http(s)` web links open in the built-in viewer (honouring `[viewer] open_links`), instead of always launching an external program. Directories, remote paths, SSH, and databases are unchanged.
-- **In-panel navigation for fetched pages.** Following a link (`Enter` or click) opens it in the viewer by default — a fetched page navigates in place (relative links resolve against the page URL), a file-backed view opens a new viewer — with `[`/`]` (or `Backspace`) for back/forward history. `O` always opens the link under the cursor in the external browser. The new `[viewer] open_links` setting (`panel` default, or `external`) chooses the default destination. Viewer shortcuts are matched layout-independently (Cyrillic `х`/`ъ` work as `[`/`]`).
-- **`Ctrl+G` "go to path / URL" in the Markdown and HTML viewers.** Type a path or an `http(s)://` URL to open it in the matching viewer, routed by type (local files by extension, fetched URLs by `Content-Type`) — a quick jump to a sibling file, or a basic text-mode browse of a web page. URL fetching is security-bounded: http/https only, verified TLS, 15s timeout, ≤5 redirects with no `https→http` downgrade, 8 MiB body cap, and embedded resources (e.g. `<img>`) are never loaded. (Steps toward navigable viewers; relative links and in-panel navigation come next.)
-- **HTML preview panel.** `.html` / `.htm` files open as a rendered read-only view (`F3`) — headings, lists, tables, block quotes, `<pre>`/`<code>`, inline `<kbd>`/`<b>`/`<i>`/`<sub>` styling, links, and image pictograms — with the full viewer UX: movable cursor, text selection, clipboard copy, incremental search (`Ctrl+F`), reload from disk (`Ctrl+R`), and `Ctrl+E` to toggle to the editable source. Unknown tags stay transparent; author CSS/scripts are ignored.
-- **HTML embedded in Markdown now renders.** Raw HTML in `.md` files — centered `<img>` badges, `<details>`/`<summary>`, HTML `<table>`s, and inline tags like `<kbd>` — renders through the same engine instead of appearing as literal angle-bracket text.
+## [0.28.0] - 2026-06-30
 
-### Changed
-- The Markdown and HTML viewers share a new layout engine (`termide-richtext`), driven by a `pulldown-cmark` adapter and an `html5ever` adapter respectively. Markdown rendering is unchanged.
+### Added
+- **HTML preview panel.** `.html` / `.htm` files open as a rendered, read-only view (`F3`) with the full viewer UX — movable cursor, text selection, clipboard copy, incremental search (`Ctrl+F`), reload from disk (`Ctrl+R`), and `Ctrl+E` to toggle to the editable source. A supported subset of tags is styled (headings, lists, tables, `<pre>`/`<code>`, `<kbd>`/`<b>`/`<i>`/`<sub>`, links, image pictograms); unknown tags stay transparent and author CSS/scripts are ignored.
+- **HTML embedded in Markdown now renders.** Raw HTML in `.md` files — centered `<img>` badges, `<details>`/`<summary>`, HTML `<table>`s, and inline tags like `<kbd>`/`<sub>` — renders through the same engine instead of appearing as literal angle-bracket text.
+- **The Markdown and HTML viewers are now a text-mode browser.** `Ctrl+G` — or the new `Windows ▸ Web` menu entry — opens a path or an `http(s)://` URL; pages are fetched and rendered, links are followed in place with back/forward history (`[` / `]` or `Backspace`), relative and `#section` anchor links resolve, and image links open in the image preview. A fetched view shows the URL as its title with a 🌐 icon. Fetching is security-bounded: http/https only, verified TLS, 15-second timeout, at most 5 redirects with no `https→http` downgrade, an 8 MiB body cap, and embedded resources (e.g. `<img>`) are never loaded. The `[viewer] open_links` and `[viewer] open_images` settings choose panel-vs-external (default `panel`); `O` always opens the link in the external browser.
+- **Bookmarks open in the viewer.** HTML / Markdown / Mermaid / image files and `http(s)` web links open in the built-in viewer by type (honouring `[viewer] open_links`), instead of always launching an external program. Directories, remote paths, SSH, and databases are unchanged.
+- **Transparent background via the `"Reset"` theme colour.** Set any theme colour to `"Reset"` to use the terminal's native colour (e.g. `bg = "Reset"` shows the terminal background through). Named theme colours are now matched case-insensitively. (#37, thanks @shepelpavel)
+- **Viewer shortcuts in the help panel** (`Alt+H` / `F1`) — a new "Viewers" section documenting the Markdown/HTML/diagram hotkeys.
+
+### Fixed
+- Markdown / diagram viewers: take focus on open, open a fresh viewer per file, draw the scrollbar on the panel border, reload from disk with `Ctrl+R`, hide the cursor when unfocused, and keep a heading that follows an HTML block on its own line.
+- Git log panel: the selection cursor is now full-width (no uncoloured edges, no blank bottom row), and a stray "Refreshed" status note was removed.
+
+### Documentation
+- Added a Russian README (`README.ru.md`) and reworked the README with a hero screenshot and a feature-comparison table; synchronised the installation guides, new viewer docs, and translations across en/ru/zh.
 
 ## [0.27.0] - 2026-06-24
 
@@ -239,6 +240,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `deny.toml` + `cargo-deny check` step covers advisories, licenses, bans and sources.
 - Pre-commit hook documented in `CONTRIBUTING.md`.
 
+[0.28.0]: https://github.com/termide/termide/releases/tag/0.28.0
 [0.27.0]: https://github.com/termide/termide/releases/tag/0.27.0
 [0.26.0]: https://github.com/termide/termide/releases/tag/0.26.0
 [0.25.1]: https://github.com/termide/termide/releases/tag/0.25.1
