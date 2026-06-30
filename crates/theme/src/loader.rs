@@ -35,6 +35,7 @@ impl TomlColor {
                 "LightMagenta" => Color::LightMagenta,
                 "LightCyan" => Color::LightCyan,
                 "White" => Color::White,
+                "Reset" => Color::Reset,
                 _ => Color::White,
             },
             TomlColor::Rgb { rgb } => Color::Rgb(rgb[0], rgb[1], rgb[2]),

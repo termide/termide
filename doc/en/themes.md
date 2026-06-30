@@ -189,7 +189,7 @@ bg = "Black"
 error = "Red"
 ```
 
-Supported named colors: `Black`, `Red`, `Green`, `Yellow`, `Blue`, `Magenta`, `Cyan`, `White`, `Gray`, `DarkGray`
+Supported named colors: `Black`, `Red`, `Green`, `Yellow`, `Blue`, `Magenta`, `Cyan`, `White`, `Gray`, `DarkGray`, `Reset`
 
 **2. RGB Values:**
 ```toml
@@ -199,6 +199,13 @@ selected_bg = { rgb = [0, 120, 215] }
 ```
 
 RGB values range from 0 to 255 for each channel (red, green, blue).
+
+**3. `"Reset"` — Transparent Background:**
+```toml
+bg = "Reset"
+```
+
+Setting a color to `"Reset"` makes it transparent — the terminal's background shows through. This is useful when you want termide to blend into your terminal's native color scheme. All theme colors support `"Reset"`, but it's most commonly used for `bg` (panel backgrounds) and `accented_bg` (status bar / menu background).
 
 ## Theme Color Usage
 
