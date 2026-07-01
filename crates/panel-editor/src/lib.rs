@@ -12,7 +12,7 @@ pub mod config;
 pub mod constants;
 mod core;
 pub mod cursor;
-pub mod diagram;
+mod diagram;
 mod file_io;
 pub mod git;
 mod hover_popup;

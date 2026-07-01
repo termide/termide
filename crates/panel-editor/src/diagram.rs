@@ -2,9 +2,12 @@
 
 use std::path::Path;
 
+use termide_panel_outline::symbols::SymbolKind;
+
 /// Generate a Mermaid classDiagram from source code.
 ///
 /// Returns None if the language is unsupported or no symbols are found.
+#[allow(dead_code)]
 pub fn generate_class_diagram(
     source: &str,
     language: Option<&str>,
@@ -22,15 +25,7 @@ pub fn generate_class_diagram(
 
     for sym in &symbols {
         match sym.kind {
-            termide_panel_outline::symbols::SymbolKind::Struct => {
-                mermaid.push_str(&format!("    class {} {{\n", sym.name));
-                mermaid.push_str("    }\n");
-            }
-            termide_panel_outline::symbols::SymbolKind::Enum => {
-                mermaid.push_str(&format!("    class {} {{\n", sym.name));
-                mermaid.push_str("    }\n");
-            }
-            termide_panel_outline::symbols::SymbolKind::Trait => {
+            SymbolKind::Struct | SymbolKind::Class | SymbolKind::Enum | SymbolKind::Trait => {
                 mermaid.push_str(&format!("    class {} {{\n", sym.name));
                 mermaid.push_str("    }\n");
             }
