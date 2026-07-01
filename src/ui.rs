@@ -215,12 +215,31 @@ fn render_dropdowns_and_modals(
     if state.ui.panel_action_menu.open {
         let group_count = layout_manager.panel_groups.len();
         let group_idx = state.ui.panel_action_menu.group_idx;
+        let panel_idx = state.ui.panel_action_menu.panel_idx;
         let current_group_len = layout_manager
             .panel_groups
             .get(group_idx)
             .map(|g| g.len())
             .unwrap_or(0);
-        let items = termide_ui_render::get_panel_action_menu_items(group_count, current_group_len);
+
+        // Panel-specific items (e.g. "View as diagram") prepended above
+        // generic move/close items — same order as panel_action_menu_items().
+        let mut items: Vec<termide_ui_render::DropdownItem> = layout_manager
+            .panel_groups
+            .get(group_idx)
+            .and_then(|g| g.panels().get(panel_idx))
+            .map(|p| {
+                p.context_menu_items()
+                    .into_iter()
+                    .map(|(label, action)| termide_ui_render::DropdownItem::new(&label, action))
+                    .collect()
+            })
+            .unwrap_or_default();
+        items.extend(termide_ui_render::get_panel_action_menu_items(
+            group_count,
+            current_group_len,
+        ));
+
         if !items.is_empty() {
             let (x, y) = termide_ui_render::panel_action_dropdown_position(
                 &items,
