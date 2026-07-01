@@ -7,7 +7,6 @@ use termide_panel_outline::symbols::SymbolKind;
 /// Generate a Mermaid classDiagram from source code.
 ///
 /// Returns None if the language is unsupported or no symbols are found.
-#[allow(dead_code)]
 pub fn generate_class_diagram(
     source: &str,
     language: Option<&str>,

@@ -589,8 +589,14 @@ impl Panel for Editor {
                     language.as_deref(),
                     file_path.as_deref(),
                 ) {
-                    let temp_path = std::env::temp_dir()
-                        .join(format!("termide-diagram-{}.mmd", std::process::id()));
+                    let temp_path = std::env::temp_dir().join(format!(
+                        "termide-diagram-{}-{}.mmd",
+                        std::process::id(),
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_nanos()
+                    ));
                     if std::fs::write(&temp_path, &mermaid).is_ok() {
                         return vec![PanelEvent::SwapActiveToMermaid(temp_path)];
                     }
