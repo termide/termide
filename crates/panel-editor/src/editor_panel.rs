@@ -522,6 +522,10 @@ impl Panel for Editor {
         s
     }
 
+    fn context_menu_items(&self) -> Vec<(String, &'static str)> {
+        vec![("View as diagram".to_string(), "view_as_diagram")]
+    }
+
     fn handle_status_action(&mut self, action: &str) -> Vec<PanelEvent> {
         match action {
             "goto_line" => {
@@ -571,6 +575,29 @@ impl Panel for Editor {
                 } else {
                     vec![]
                 }
+            }
+            "view_as_diagram" => {
+                let source = self.buffer.text();
+                let language = self
+                    .render_cache
+                    .highlight
+                    .current_syntax()
+                    .map(|s| s.to_string());
+                let file_path = self.file_path().map(|p| p.to_path_buf());
+                if let Some(mermaid) = crate::diagram::generate_class_diagram(
+                    &source,
+                    language.as_deref(),
+                    file_path.as_deref(),
+                ) {
+                    let temp_path = std::env::temp_dir()
+                        .join(format!("termide-diagram-{}.mmd", std::process::id()));
+                    if std::fs::write(&temp_path, &mermaid).is_ok() {
+                        return vec![PanelEvent::SwapActiveToMermaid(temp_path)];
+                    }
+                }
+                vec![PanelEvent::ShowMessage(
+                    "No symbols found to diagram".to_string(),
+                )]
             }
             _ => vec![],
         }
