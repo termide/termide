@@ -90,6 +90,14 @@ pub struct GitStatusPanel {
     branch_dropdown_area: Option<Rect>,
     /// Scroll offset in dropdown
     dropdown_scroll: usize,
+    /// Branch filter text (hidden filter row in dropdown)
+    branch_filter: String,
+    /// Whether the branch filter row is visible (shown after first keystroke)
+    show_branch_filter: bool,
+    /// Repo filter text (hidden filter row in dropdown)
+    repo_filter: String,
+    /// Whether the repo filter row is visible (shown after first keystroke)
+    show_repo_filter: bool,
     /// Stash button area (for dropdown anchoring)
     stash_button_area: Option<Rect>,
     /// Click tracker for double-click detection in files area
@@ -201,6 +209,10 @@ impl GitStatusPanel {
             repo_dropdown_area: None,
             branch_dropdown_area: None,
             dropdown_scroll: 0,
+            branch_filter: String::new(),
+            show_branch_filter: false,
+            repo_filter: String::new(),
+            show_repo_filter: false,
             stash_button_area: None,
             click_tracker: IndexClickTracker::new(),
             modal_request: None,
@@ -253,6 +265,50 @@ impl GitStatusPanel {
         self.stash_count = 0;
         self.rebuild_trees();
         self.cursor = 0;
+    }
+
+    /// Return indices into `self.branches` that match the current filter.
+    /// When the filter is empty, returns all indices.
+    fn filtered_branch_indices(&self) -> Vec<usize> {
+        if self.branch_filter.is_empty() {
+            (0..self.branches.len()).collect()
+        } else {
+            let f = self.branch_filter.to_lowercase();
+            self.branches
+                .iter()
+                .enumerate()
+                .filter(|(_, b)| b.to_lowercase().contains(&f))
+                .map(|(i, _)| i)
+                .collect()
+        }
+    }
+
+    /// Reset the branch filter state.
+    fn reset_branch_filter(&mut self) {
+        self.branch_filter.clear();
+        self.show_branch_filter = false;
+    }
+
+    /// Return indices into repo list that match the current filter.
+    fn filtered_repo_indices(&self) -> Vec<usize> {
+        let repos = self.repo_manager.repos();
+        if self.repo_filter.is_empty() {
+            (0..repos.len()).collect()
+        } else {
+            let f = self.repo_filter.to_lowercase();
+            repos
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| git::get_repo_name(p).to_lowercase().contains(&f))
+                .map(|(i, _)| i)
+                .collect()
+        }
+    }
+
+    /// Reset the repo filter state.
+    fn reset_repo_filter(&mut self) {
+        self.repo_filter.clear();
+        self.show_repo_filter = false;
     }
 
     pub fn refresh(&mut self) {
@@ -552,9 +608,17 @@ impl GitStatusPanel {
     /// Item count of the currently open selector dropdown (repo or branch).
     fn open_dropdown_len(&self) -> usize {
         if self.repo_dropdown_open {
-            self.repo_manager.len()
+            if self.show_repo_filter {
+                self.filtered_repo_indices().len()
+            } else {
+                self.repo_manager.len()
+            }
         } else if self.branch_dropdown_open {
-            self.branches.len()
+            if self.show_branch_filter {
+                self.filtered_branch_indices().len()
+            } else {
+                self.branches.len()
+            }
         } else {
             0
         }
@@ -716,7 +780,12 @@ impl GitStatusPanel {
         match self.current_section {
             Section::RepoSelector => {
                 if self.repo_dropdown_open {
-                    if self.dropdown_cursor + 1 < self.repo_manager.len() {
+                    let len = if self.show_repo_filter {
+                        self.filtered_repo_indices().len()
+                    } else {
+                        self.repo_manager.len()
+                    };
+                    if self.dropdown_cursor + 1 < len {
                         self.dropdown_cursor += 1;
                     }
                 } else if self.has_any_files() {
@@ -729,7 +798,12 @@ impl GitStatusPanel {
             }
             Section::BranchSelector => {
                 if self.branch_dropdown_open {
-                    if self.dropdown_cursor + 1 < self.branches.len() {
+                    let len = if self.show_branch_filter {
+                        self.filtered_branch_indices().len()
+                    } else {
+                        self.branches.len()
+                    };
+                    if self.dropdown_cursor + 1 < len {
                         self.dropdown_cursor += 1;
                     }
                 } else if self.has_any_files() {
@@ -782,23 +856,45 @@ impl GitStatusPanel {
             }
             Section::RepoSelector => {
                 if self.repo_dropdown_open {
-                    if self.dropdown_cursor != self.repo_manager.selected_index() {
-                        self.repo_manager.select(self.dropdown_cursor);
+                    let idx = if self.show_repo_filter {
+                        self.filtered_repo_indices()
+                            .get(self.dropdown_cursor)
+                            .copied()
+                            .unwrap_or(0)
+                    } else {
+                        self.dropdown_cursor
+                    };
+                    if idx != self.repo_manager.selected_index() {
+                        self.repo_manager.select(idx);
                         self.refresh();
                     }
                     self.repo_dropdown_open = false;
+                    self.reset_repo_filter();
                 } else {
                     self.repo_dropdown_open = true;
+                    self.branch_dropdown_open = false;
+                    self.reset_branch_filter();
                     self.dropdown_cursor = self.repo_manager.selected_index();
                 }
                 vec![]
             }
             Section::BranchSelector => {
                 if self.branch_dropdown_open {
-                    self.switch_to_branch(self.dropdown_cursor);
+                    let idx = if self.show_branch_filter {
+                        self.filtered_branch_indices()
+                            .get(self.dropdown_cursor)
+                            .copied()
+                            .unwrap_or(0)
+                    } else {
+                        self.dropdown_cursor
+                    };
+                    self.switch_to_branch(idx);
                     self.branch_dropdown_open = false;
+                    self.reset_branch_filter();
                 } else {
                     self.branch_dropdown_open = true;
+                    self.repo_dropdown_open = false;
+                    self.reset_repo_filter();
                     self.dropdown_cursor = self
                         .branches
                         .iter()
@@ -1091,6 +1187,72 @@ impl Panel for GitStatusPanel {
         // Clear status message on any key
         self.status_message = None;
 
+        // Repo dropdown filter: intercept printable keys while the dropdown is
+        // open so typing narrows the list instead of triggering hotkeys.
+        if self.repo_dropdown_open {
+            match key.code {
+                KeyCode::Char(c)
+                    if !key
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(crossterm::event::KeyModifiers::ALT) =>
+                {
+                    self.show_repo_filter = true;
+                    self.repo_filter.push(c);
+                    self.dropdown_cursor = 0;
+                    return vec![];
+                }
+                KeyCode::Backspace if self.show_repo_filter && !self.repo_filter.is_empty() => {
+                    self.repo_filter.pop();
+                    if self.repo_filter.is_empty() {
+                        self.show_repo_filter = false;
+                    }
+                    self.dropdown_cursor = 0;
+                    return vec![];
+                }
+                KeyCode::Esc if self.show_repo_filter && !self.repo_filter.is_empty() => {
+                    self.repo_filter.clear();
+                    self.show_repo_filter = false;
+                    self.dropdown_cursor = 0;
+                    return vec![];
+                }
+                _ => {}
+            }
+        }
+
+        // Branch dropdown filter: intercept printable keys while the dropdown is
+        // open so typing narrows the list instead of triggering hotkeys.
+        if self.branch_dropdown_open {
+            match key.code {
+                KeyCode::Char(c)
+                    if !key
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(crossterm::event::KeyModifiers::ALT) =>
+                {
+                    self.show_branch_filter = true;
+                    self.branch_filter.push(c);
+                    self.dropdown_cursor = 0;
+                    return vec![];
+                }
+                KeyCode::Backspace if self.show_branch_filter && !self.branch_filter.is_empty() => {
+                    self.branch_filter.pop();
+                    if self.branch_filter.is_empty() {
+                        self.show_branch_filter = false;
+                    }
+                    self.dropdown_cursor = 0;
+                    return vec![];
+                }
+                KeyCode::Esc if self.show_branch_filter && !self.branch_filter.is_empty() => {
+                    self.branch_filter.clear();
+                    self.show_branch_filter = false;
+                    self.dropdown_cursor = 0;
+                    return vec![];
+                }
+                _ => {}
+            }
+        }
+
         // Configurable actions via HotkeyTable
         if self.hotkeys.matches("stage", &key) {
             if self.current_section == Section::Files
@@ -1335,8 +1497,10 @@ impl Panel for GitStatusPanel {
             KeyCode::Esc => {
                 if self.branch_dropdown_open {
                     self.branch_dropdown_open = false;
+                    self.reset_branch_filter();
                 } else if self.repo_dropdown_open {
                     self.repo_dropdown_open = false;
+                    self.reset_repo_filter();
                 }
             }
             _ => {}
@@ -1380,16 +1544,33 @@ impl Panel for GitStatusPanel {
                 if self.repo_dropdown_open {
                     if let Some(dropdown_area) = self.repo_dropdown_area {
                         if self.is_in_rect(col, row, dropdown_area) {
-                            // Calculate which item was clicked (accounting for border)
-                            let relative_row = row.saturating_sub(dropdown_area.y + 1) as usize;
+                            // Calculate which item was clicked (accounting for border + filter row)
+                            let row_offset = if self.show_repo_filter { 3 } else { 1 };
+                            let relative_row =
+                                row.saturating_sub(dropdown_area.y + row_offset) as usize;
                             let clicked_idx = self.dropdown_scroll + relative_row;
-                            if clicked_idx < self.repo_manager.len()
-                                && relative_row < dropdown_area.height.saturating_sub(2) as usize
+                            let max_items = if self.show_repo_filter {
+                                self.filtered_repo_indices().len()
+                            } else {
+                                self.repo_manager.len()
+                            };
+                            if clicked_idx < max_items
+                                && relative_row
+                                    < dropdown_area.height.saturating_sub(row_offset + 1) as usize
                             {
-                                self.repo_manager.select(clicked_idx);
+                                let repo_idx = if self.show_repo_filter {
+                                    self.filtered_repo_indices()
+                                        .get(clicked_idx)
+                                        .copied()
+                                        .unwrap_or(0)
+                                } else {
+                                    clicked_idx
+                                };
+                                self.repo_manager.select(repo_idx);
                                 self.refresh();
                             }
                             self.repo_dropdown_open = false;
+                            self.reset_repo_filter();
                             return vec![];
                         }
                     }
@@ -1399,15 +1580,32 @@ impl Panel for GitStatusPanel {
                 if self.branch_dropdown_open {
                     if let Some(dropdown_area) = self.branch_dropdown_area {
                         if self.is_in_rect(col, row, dropdown_area) {
-                            // Calculate which item was clicked (accounting for border)
-                            let relative_row = row.saturating_sub(dropdown_area.y + 1) as usize;
+                            // Calculate which item was clicked (accounting for border + filter row)
+                            let row_offset = if self.show_branch_filter { 3 } else { 1 };
+                            let relative_row =
+                                row.saturating_sub(dropdown_area.y + row_offset) as usize;
                             let clicked_idx = self.dropdown_scroll + relative_row;
-                            if clicked_idx < self.branches.len()
-                                && relative_row < dropdown_area.height.saturating_sub(2) as usize
+                            let max_items = if self.show_branch_filter {
+                                self.filtered_branch_indices().len()
+                            } else {
+                                self.branches.len()
+                            };
+                            if clicked_idx < max_items
+                                && relative_row
+                                    < dropdown_area.height.saturating_sub(row_offset + 1) as usize
                             {
-                                self.switch_to_branch(clicked_idx);
+                                let branch_idx = if self.show_branch_filter {
+                                    self.filtered_branch_indices()
+                                        .get(clicked_idx)
+                                        .copied()
+                                        .unwrap_or(0)
+                                } else {
+                                    clicked_idx
+                                };
+                                self.switch_to_branch(branch_idx);
                             }
                             self.branch_dropdown_open = false;
+                            self.reset_branch_filter();
                             return vec![];
                         }
                     }
