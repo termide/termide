@@ -16,7 +16,7 @@ use std::any::Any;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crossterm::event::{KeyCode, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -90,6 +90,10 @@ pub struct GitStatusPanel {
     branch_dropdown_area: Option<Rect>,
     /// Scroll offset in dropdown
     dropdown_scroll: usize,
+    /// Typeahead search buffer for the open branch dropdown (jump-to-match)
+    branch_typeahead: String,
+    /// Instant of the last typeahead keystroke; buffer expires after a pause
+    branch_typeahead_at: Option<std::time::Instant>,
     /// Stash button area (for dropdown anchoring)
     stash_button_area: Option<Rect>,
     /// Click tracker for double-click detection in files area
@@ -161,6 +165,18 @@ fn build_git_status_hotkey_table(config: &Config) -> HotkeyTable {
     t
 }
 
+/// Return the index of the first branch whose name starts with `query`
+/// (case-insensitive). An empty query matches nothing.
+fn first_prefix_match(branches: &[String], query: &str) -> Option<usize> {
+    if query.is_empty() {
+        return None;
+    }
+    let query = query.to_lowercase();
+    branches
+        .iter()
+        .position(|b| b.to_lowercase().starts_with(&query))
+}
+
 impl GitStatusPanel {
     /// Create a new Git Status panel from a list of paths (from panels/session)
     pub fn new(paths: &[PathBuf]) -> Self {
@@ -201,6 +217,8 @@ impl GitStatusPanel {
             repo_dropdown_area: None,
             branch_dropdown_area: None,
             dropdown_scroll: 0,
+            branch_typeahead: String::new(),
+            branch_typeahead_at: None,
             stash_button_area: None,
             click_tracker: IndexClickTracker::new(),
             modal_request: None,
@@ -670,6 +688,46 @@ impl GitStatusPanel {
     // Keyboard Navigation Helpers
     // =========================================================================
 
+    /// Clear the branch-dropdown typeahead search buffer.
+    fn reset_branch_typeahead(&mut self) {
+        self.branch_typeahead.clear();
+        self.branch_typeahead_at = None;
+    }
+
+    /// Feed a key to the branch-dropdown typeahead search while the dropdown is
+    /// open. Returns `true` if the key was consumed (a printable char or
+    /// Backspace); navigation/selection keys are left for the caller.
+    ///
+    /// The buffer expires after a short pause so that pressing a fresh letter
+    /// starts a new jump instead of extending a stale query.
+    fn handle_branch_typeahead(&mut self, code: KeyCode) -> bool {
+        const TYPEAHEAD_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1000);
+        let now = std::time::Instant::now();
+        let expired = self
+            .branch_typeahead_at
+            .map(|at| now.duration_since(at) > TYPEAHEAD_TIMEOUT)
+            .unwrap_or(true);
+
+        match code {
+            KeyCode::Char(c) => {
+                if expired {
+                    self.branch_typeahead.clear();
+                }
+                self.branch_typeahead.push(c);
+            }
+            KeyCode::Backspace if !expired && !self.branch_typeahead.is_empty() => {
+                self.branch_typeahead.pop();
+            }
+            _ => return false,
+        }
+
+        self.branch_typeahead_at = Some(now);
+        if let Some(idx) = first_prefix_match(&self.branches, &self.branch_typeahead) {
+            self.dropdown_cursor = idx;
+        }
+        true
+    }
+
     /// Handle Up key navigation
     fn handle_up_key(&mut self) {
         match self.current_section {
@@ -680,6 +738,7 @@ impl GitStatusPanel {
             }
             Section::BranchSelector => {
                 if self.branch_dropdown_open && self.dropdown_cursor > 0 {
+                    self.reset_branch_typeahead();
                     self.dropdown_cursor -= 1;
                 }
             }
@@ -730,6 +789,7 @@ impl GitStatusPanel {
             Section::BranchSelector => {
                 if self.branch_dropdown_open {
                     if self.dropdown_cursor + 1 < self.branches.len() {
+                        self.reset_branch_typeahead();
                         self.dropdown_cursor += 1;
                     }
                 } else if self.has_any_files() {
@@ -799,6 +859,7 @@ impl GitStatusPanel {
                     self.branch_dropdown_open = false;
                 } else {
                     self.branch_dropdown_open = true;
+                    self.reset_branch_typeahead();
                     self.dropdown_cursor = self
                         .branches
                         .iter()
@@ -1090,6 +1151,20 @@ impl Panel for GitStatusPanel {
         let key = chord.raw;
         // Clear status message on any key
         self.status_message = None;
+
+        // Typeahead search in the open branch dropdown. Runs before the hotkey
+        // and vim-navigation checks below so typed letters (including j/k, or
+        // letters bound to hotkeys like stage/refresh) jump-to-branch instead
+        // of triggering those actions. Arrow keys still navigate the list.
+        // SHIFT is allowed (uppercase letters); CONTROL/ALT/SUPER are not — those
+        // are reserved for hotkeys and shortcuts.
+        let non_text_mods = KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER;
+        if self.branch_dropdown_open
+            && !key.modifiers.intersects(non_text_mods)
+            && self.handle_branch_typeahead(key.code)
+        {
+            return vec![];
+        }
 
         // Configurable actions via HotkeyTable
         if self.hotkeys.matches("stage", &key) {
@@ -1493,6 +1568,7 @@ impl Panel for GitStatusPanel {
                         self.repo_dropdown_open = false;
                         self.branch_dropdown_open = !self.branch_dropdown_open;
                         if self.branch_dropdown_open {
+                            self.reset_branch_typeahead();
                             self.dropdown_cursor = self
                                 .branches
                                 .iter()
@@ -1632,5 +1708,52 @@ impl Panel for GitStatusPanel {
             }
         }
         events
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::first_prefix_match;
+
+    fn branches() -> Vec<String> {
+        ["develop", "main", "master", "feat/marketing", "Release"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn matches_first_branch_by_prefix() {
+        let b = branches();
+        assert_eq!(first_prefix_match(&b, "m"), Some(1)); // "main" before "master"
+        assert_eq!(first_prefix_match(&b, "ma"), Some(1));
+        assert_eq!(first_prefix_match(&b, "mas"), Some(2)); // "master"
+        assert_eq!(first_prefix_match(&b, "d"), Some(0));
+    }
+
+    #[test]
+    fn is_case_insensitive() {
+        let b = branches();
+        assert_eq!(first_prefix_match(&b, "M"), Some(1));
+        assert_eq!(first_prefix_match(&b, "rel"), Some(4)); // matches "Release"
+        assert_eq!(first_prefix_match(&b, "RELE"), Some(4));
+    }
+
+    #[test]
+    fn prefix_not_substring() {
+        let b = branches();
+        // "marketing" appears mid-name in "feat/marketing" but not as a prefix.
+        assert_eq!(first_prefix_match(&b, "mark"), None);
+        assert_eq!(first_prefix_match(&b, "feat"), Some(3));
+    }
+
+    #[test]
+    fn empty_query_matches_nothing() {
+        assert_eq!(first_prefix_match(&branches(), ""), None);
+    }
+
+    #[test]
+    fn no_match_returns_none() {
+        assert_eq!(first_prefix_match(&branches(), "zzz"), None);
     }
 }
