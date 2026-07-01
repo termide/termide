@@ -44,16 +44,38 @@ fn osc52_copy(text: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to write OSC 52: {}", e))
 }
 
+/// Detect whether a display server is available on Linux.
+///
+/// Returns true when `$DISPLAY` or `$WAYLAND_DISPLAY` is set, indicating
+/// an X11 or Wayland session where arboard can reach the clipboard.
+/// On non-Linux platforms this always returns true (arboard works natively).
+#[cfg(target_os = "linux")]
+fn has_display_server() -> bool {
+    std::env::var("DISPLAY").is_ok() || std::env::var("WAYLAND_DISPLAY").is_ok()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn has_display_server() -> bool {
+    true
+}
+
 /// Copy text to system clipboard.
 ///
 /// Uses arboard for local clipboard access. Falls back to OSC 52
-/// escape sequence when no display server is available (SSH sessions).
+/// escape sequence when no display server is available (headless, SSH,
+/// Docker, serial console, etc.).
 /// On Linux with a display server, copies to BOTH CLIPBOARD and PRIMARY selections.
 ///
 /// Returns Ok(()) on success, or Err with detailed error message.
 pub fn copy(text: &str) -> Result<(), String> {
     if text.is_empty() {
         return Err("Cannot copy empty text".to_string());
+    }
+
+    // Without a display server arboard cannot reach the clipboard — go
+    // straight to OSC 52 which the terminal emulator handles locally.
+    if !has_display_server() {
+        return osc52_copy(text);
     }
 
     // Try arboard first (works with display server)
@@ -63,7 +85,11 @@ pub fn copy(text: &str) -> Result<(), String> {
         return Ok(());
     }
 
-    // Fall back to OSC 52 for SSH/headless sessions
+    // Fall back to OSC 52 for other failures
+    log::warn!(
+        "arboard failed ({}), falling back to OSC 52",
+        arboard_result.unwrap_err()
+    );
     osc52_copy(text)
 }
 

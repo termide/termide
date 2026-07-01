@@ -1951,7 +1951,12 @@ impl Panel for Terminal {
             return vec![];
         }
         if self.hotkeys.matches("copy", &key) {
-            let _ = self.copy_selection_to_clipboard();
+            if let Err(e) = self.copy_selection_to_clipboard() {
+                return vec![PanelEvent::SetStatusMessage {
+                    message: format!("Clipboard error: {}", e),
+                    is_error: true,
+                }];
+            }
             return vec![];
         }
         if self.hotkeys.matches("switch_directory", &key) {
@@ -2006,9 +2011,15 @@ impl Panel for Terminal {
                             screen.selection_start.is_some() && screen.selection_end.is_some()
                         };
                         if has_selection {
-                            let _ = self.copy_selection_to_clipboard();
+                            let copy_result = self.copy_selection_to_clipboard();
                             // Clear selection after copying
                             self.write_screen().clear_selection();
+                            if let Err(e) = copy_result {
+                                return vec![PanelEvent::SetStatusMessage {
+                                    message: format!("Clipboard error: {}", e),
+                                    is_error: true,
+                                }];
+                            }
                         } else {
                             let _ = self.send_input(&[3]); // Ctrl+C (SIGINT)
                         }

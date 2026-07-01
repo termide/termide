@@ -76,10 +76,7 @@ pub fn copy_selection_to_clipboard(screen: &RwLock<TerminalScreen>) -> Result<()
         return Ok(());
     }
 
-    // Use universal buffer (includes OSC 52)
-    let _ = termide_ui::clipboard::copy(&text);
-
-    Ok(())
+    termide_ui::clipboard::copy(&text).map_err(|e| anyhow::anyhow!("{}", e))
 }
 
 /// Paste text from system clipboard.
