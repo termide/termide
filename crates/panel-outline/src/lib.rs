@@ -5,7 +5,7 @@
 //! with a regex fallback for markdown and HTML.
 
 mod regex_fallback;
-mod symbols;
+pub mod symbols;
 mod treesitter;
 
 use std::any::Any;

@@ -37,5 +37,9 @@ termide-system-monitor = { path = "../system-monitor" }
 termide-theme = { path = "../theme" }
 termide-ui = { path = "../ui" }
 
+# Diagram generation
+termide-panel-outline = { path = "../panel-outline" }
+tree-sitter.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
