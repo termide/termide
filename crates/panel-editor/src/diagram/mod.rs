@@ -86,7 +86,7 @@ mod tests {
         // Regression: previously a file of only free functions produced no
         // diagram at all, so public functions were invisible.
         let out = rust("pub fn parse(s: &str) -> usize { 0 }\nfn helper() {}\n");
-        assert!(out.contains("<<module>>"), "got:\n{out}");
+        assert!(out.contains("[\"module\"]"), "got:\n{out}");
         assert!(out.contains("+parse(&str) usize"), "got:\n{out}");
         assert!(out.contains("-helper()"), "got:\n{out}");
     }
@@ -94,7 +94,10 @@ mod tests {
     #[test]
     fn struct_fields_carry_types_and_visibility() {
         let out = rust("pub struct Circle { pub radius: f64, center: Point }");
-        assert!(out.contains("class Circle {"), "got:\n{out}");
+        assert!(
+            out.contains("class Circle[\"pub struct Circle\"]"),
+            "got:\n{out}"
+        );
         assert!(out.contains("+radius: f64"), "got:\n{out}");
         assert!(out.contains("-center: Point"), "got:\n{out}");
     }
@@ -107,20 +110,25 @@ mod tests {
     }
 
     #[test]
-    fn trait_is_stereotyped_with_methods() {
+    fn trait_header_and_methods() {
         let out =
             rust("pub trait Draw {\n    fn draw(&self);\n    fn area(&self) -> f64 { 0.0 }\n}\n");
-        assert!(out.contains("class Draw {"), "got:\n{out}");
-        assert!(out.contains("<<trait>>"), "got:\n{out}");
+        assert!(
+            out.contains("class Draw[\"pub trait Draw\"]"),
+            "got:\n{out}"
+        );
         assert!(out.contains("+draw()"), "got:\n{out}");
         assert!(out.contains("+area() f64"), "got:\n{out}");
     }
 
     #[test]
-    fn enum_variants_and_stereotype() {
+    fn enum_variants_and_header() {
         let out =
             rust("pub enum Shape {\n    Unit,\n    Pair(f64, f64),\n    Named { side: f64 },\n}\n");
-        assert!(out.contains("<<enum>>"), "got:\n{out}");
+        assert!(
+            out.contains("class Shape[\"pub enum Shape\"]"),
+            "got:\n{out}"
+        );
         assert!(out.contains("Unit"), "got:\n{out}");
         assert!(out.contains("Pair(f64, f64)"), "got:\n{out}");
         assert!(out.contains("Named(side: f64)"), "got:\n{out}");
@@ -149,7 +157,7 @@ mod tests {
     #[test]
     fn module_box_lists_const_and_type_alias() {
         let out = rust("pub(crate) const PI: f64 = 3.14;\npub type Meters = f64;\n");
-        assert!(out.contains("<<module>>"), "got:\n{out}");
+        assert!(out.contains("[\"module\"]"), "got:\n{out}");
         assert!(out.contains("~const PI: f64"), "got:\n{out}");
         assert!(out.contains("+type Meters"), "got:\n{out}");
     }
@@ -162,7 +170,7 @@ mod tests {
             Some(Path::new("/src/shape.rs")),
         )
         .unwrap();
-        assert!(out.contains("class shape {"), "got:\n{out}");
+        assert!(out.contains("class shape[\"shape.rs\"]"), "got:\n{out}");
     }
 
     #[test]
@@ -189,7 +197,7 @@ mod tests {
             None,
         )
         .expect("function-only file should still diagram");
-        assert!(out.contains("<<module>>"), "got:\n{out}");
+        assert!(out.contains("[\"module\"]"), "got:\n{out}");
         assert!(out.contains("+Hello()"), "got:\n{out}");
         assert!(out.contains("+World()"), "got:\n{out}");
     }
@@ -203,9 +211,11 @@ mod tests {
                    export const VERSION: string = \"1\";\n";
         let out = generate_class_diagram(src, Some("tsx"), Some(Path::new("App.tsx")))
             .expect("tsx should diagram");
-        assert!(out.contains("class Props {"), "got:\n{out}");
-        assert!(out.contains("<<interface>>"), "got:\n{out}");
-        assert!(out.contains("<<module>>"), "got:\n{out}");
+        assert!(
+            out.contains("class Props[\"export interface Props\"]"),
+            "got:\n{out}"
+        );
+        assert!(out.contains("[\"App.tsx\"]"), "got:\n{out}");
         assert!(out.contains("+App(Props)"), "got:\n{out}");
         assert!(out.contains("+VERSION: string"), "got:\n{out}");
     }
@@ -219,7 +229,7 @@ mod tests {
     #[test]
     fn python_free_functions_and_consts_in_module_box() {
         let out = python("PI: float = 3.14\ndef area(r: float) -> float:\n    return r\n");
-        assert!(out.contains("<<module>>"), "got:\n{out}");
+        assert!(out.contains("[\"module\"]"), "got:\n{out}");
         assert!(out.contains("+PI: float"), "got:\n{out}");
         assert!(out.contains("+area(float) float"), "got:\n{out}");
     }
@@ -229,7 +239,10 @@ mod tests {
         let out = python(
             "class Animal(Base):\n    kind: str = \"?\"\n    def speak(self, loud: bool) -> None:\n        pass\n    def _hidden(self):\n        pass\n",
         );
-        assert!(out.contains("class Animal {"), "got:\n{out}");
+        assert!(
+            out.contains("class Animal[\"class Animal\"]"),
+            "got:\n{out}"
+        );
         assert!(out.contains("+kind: str"), "got:\n{out}");
         assert!(out.contains("+speak(bool) None"), "got:\n{out}");
         assert!(out.contains("-_hidden()"), "got:\n{out}");
@@ -247,7 +260,7 @@ mod tests {
         let out = ts(
             "export const TAU: number = 6.28;\nexport function area(r: number): number { return r; }\nexport type Meters = number;\n",
         );
-        assert!(out.contains("<<module>>"), "got:\n{out}");
+        assert!(out.contains("[\"module\"]"), "got:\n{out}");
         assert!(out.contains("+TAU: number"), "got:\n{out}");
         assert!(out.contains("+area(number) number"), "got:\n{out}");
         assert!(out.contains("+type Meters"), "got:\n{out}");
@@ -258,7 +271,10 @@ mod tests {
         let out = ts(
             "class Circle extends Shape implements Draw {\n    public radius: number = 0;\n    private center: Point;\n    draw(): void {}\n}\n",
         );
-        assert!(out.contains("class Circle {"), "got:\n{out}");
+        assert!(
+            out.contains("class Circle[\"class Circle\"]"),
+            "got:\n{out}"
+        );
         assert!(out.contains("+radius: number"), "got:\n{out}");
         assert!(out.contains("-center: Point"), "got:\n{out}");
         assert!(out.contains("+draw() void"), "got:\n{out}");
@@ -267,14 +283,19 @@ mod tests {
     }
 
     #[test]
-    fn ts_interface_and_enum_stereotypes() {
+    fn ts_interface_and_enum_headers() {
         let out = ts(
             "export interface Draw { draw(): void; area(): number; }\nexport enum Color { Red, Green }\n",
         );
-        assert!(out.contains("class Draw {"), "got:\n{out}");
-        assert!(out.contains("<<interface>>"), "got:\n{out}");
+        assert!(
+            out.contains("class Draw[\"export interface Draw\"]"),
+            "got:\n{out}"
+        );
         assert!(out.contains("+draw() void"), "got:\n{out}");
-        assert!(out.contains("<<enum>>"), "got:\n{out}");
+        assert!(
+            out.contains("class Color[\"export enum Color\"]"),
+            "got:\n{out}"
+        );
         assert!(out.contains("Red"), "got:\n{out}");
     }
 
@@ -291,14 +312,18 @@ mod tests {
                    const Pi = 3.14\n";
         let out = generate_class_diagram(src, Some("go"), None).expect("go diagram");
         assert!(
-            out.contains("class Shape {") && out.contains("<<interface>>"),
+            out.contains("class Shape[\"interface Shape\"]"),
+            "got:\n{out}"
+        );
+        assert!(
+            out.contains("class Circle[\"struct Circle\"]"),
             "got:\n{out}"
         );
         assert!(out.contains("+Area() float64"), "got:\n{out}");
         assert!(out.contains("+Radius: float64"), "got:\n{out}");
         assert!(out.contains("-center: Point"), "got:\n{out}");
         assert!(
-            out.contains("<<module>>") && out.contains("+Bounding(Shape) Point"),
+            out.contains("[\"module\"]") && out.contains("+Bounding(Shape) Point"),
             "got:\n{out}"
         );
         assert!(out.contains("Circle *-- Point"), "got:\n{out}");
@@ -318,7 +343,12 @@ mod tests {
                    enum Color { RED, GREEN }\n";
         let out = generate_class_diagram(src, Some("java"), None).expect("java diagram");
         assert!(
-            out.contains("<<interface>>") && out.contains("+draw() void"),
+            out.contains("class Draw[\"public interface Draw\"]"),
+            "got:\n{out}"
+        );
+        assert!(out.contains("+draw() void"), "got:\n{out}");
+        assert!(
+            out.contains("class Circle[\"public class Circle\"]"),
             "got:\n{out}"
         );
         assert!(out.contains("-radius: double"), "got:\n{out}");
@@ -327,7 +357,7 @@ mod tests {
         assert!(out.contains("Draw <|.. Circle"), "got:\n{out}");
         assert!(out.contains("Circle *-- Point"), "got:\n{out}");
         assert!(
-            out.contains("<<enum>>") && out.contains("RED"),
+            out.contains("class Color[\"enum Color\"]") && out.contains("RED"),
             "got:\n{out}"
         );
     }
@@ -342,19 +372,19 @@ mod tests {
                    double area(struct Point *p, int n) { return 0; }\n";
         let out = generate_class_diagram(src, Some("c"), None).expect("c diagram");
         assert!(
-            out.contains("class Point {") && out.contains("+x: double"),
+            out.contains("class Point[\"struct Point\"]") && out.contains("+x: double"),
             "got:\n{out}"
         );
         assert!(
-            out.contains("class Pair {") && out.contains("+a: int"),
+            out.contains("class Pair[\"struct Pair\"]") && out.contains("+a: int"),
             "got:\n{out}"
         );
         assert!(
-            out.contains("<<enum>>") && out.contains("GREEN"),
+            out.contains("class Color[\"enum Color\"]") && out.contains("GREEN"),
             "got:\n{out}"
         );
         assert!(
-            out.contains("<<module>>") && out.contains("+area("),
+            out.contains("[\"module\"]") && out.contains("+area("),
             "got:\n{out}"
         );
     }
@@ -376,7 +406,11 @@ mod tests {
         assert!(out.contains("Shape <|-- Circle"), "got:\n{out}");
         assert!(out.contains("Circle *-- Point"), "got:\n{out}");
         assert!(
-            out.contains("<<module>>") && out.contains("+area(Circle) double"),
+            out.contains("class Circle[\"class Circle\"]"),
+            "got:\n{out}"
+        );
+        assert!(
+            out.contains("[\"module\"]") && out.contains("+area(Circle) double"),
             "got:\n{out}"
         );
     }
@@ -388,12 +422,15 @@ mod tests {
         let src = "class Animal < Base\n  def speak(loud)\n  end\n  def self.make\n  end\nend\n\
                    def top_level\nend\n";
         let out = generate_class_diagram(src, Some("ruby"), None).expect("ruby diagram");
-        assert!(out.contains("class Animal {"), "got:\n{out}");
+        assert!(
+            out.contains("class Animal[\"class Animal\"]"),
+            "got:\n{out}"
+        );
         assert!(out.contains("+speak(loud)"), "got:\n{out}");
         assert!(out.contains("+self.make()"), "got:\n{out}");
         assert!(out.contains("Base <|-- Animal"), "got:\n{out}");
         assert!(
-            out.contains("<<module>>") && out.contains("+top_level()"),
+            out.contains("[\"module\"]") && out.contains("+top_level()"),
             "got:\n{out}"
         );
     }
@@ -413,7 +450,12 @@ mod tests {
                    function bounding(array $shapes): Point { return new Point(); }\n";
         let out = generate_class_diagram(src, Some("php"), None).expect("php diagram");
         assert!(
-            out.contains("<<interface>>") && out.contains("+draw() void"),
+            out.contains("class Draw[\"interface Draw\"]"),
+            "got:\n{out}"
+        );
+        assert!(out.contains("+draw() void"), "got:\n{out}");
+        assert!(
+            out.contains("class Circle[\"class Circle\"]"),
             "got:\n{out}"
         );
         assert!(out.contains("+$radius: float"), "got:\n{out}");
@@ -422,7 +464,7 @@ mod tests {
         assert!(out.contains("Draw <|.. Circle"), "got:\n{out}");
         assert!(out.contains("Circle *-- Point"), "got:\n{out}");
         assert!(
-            out.contains("<<module>>") && out.contains("+bounding(array) Point"),
+            out.contains("[\"module\"]") && out.contains("+bounding(array) Point"),
             "got:\n{out}"
         );
     }

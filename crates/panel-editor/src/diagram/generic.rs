@@ -11,7 +11,7 @@ use std::path::Path;
 
 use termide_panel_outline::symbols::{SymbolInfo, SymbolKind};
 
-use super::model::{module_name, Model};
+use super::model::{module_label, module_name, Model};
 
 pub(crate) fn generate(
     source: &str,
@@ -23,8 +23,21 @@ pub(crate) fn generate(
         termide_panel_outline::symbols::extract_symbols(source, language, file_path, &mut parser);
 
     let mut model = Model::new();
+    model.set_module_label(module_label(file_path));
     build(&symbols, &module_name(file_path), &mut model);
     model.render()
+}
+
+/// Declaration keyword for a type kind (best-effort; the outline can't
+/// distinguish struct/class beyond the tree-sitter capture).
+fn kind_keyword(kind: SymbolKind) -> Option<&'static str> {
+    match kind {
+        SymbolKind::Struct => Some("struct"),
+        SymbolKind::Class => Some("class"),
+        SymbolKind::Enum => Some("enum"),
+        SymbolKind::Trait => Some("trait"),
+        _ => None,
+    }
 }
 
 /// Whether a type kind is a container that directly holds methods.
@@ -53,10 +66,8 @@ fn build(symbols: &[SymbolInfo], module: &str, model: &mut Model) {
             | SymbolKind::Trait
             | SymbolKind::Impl => {
                 if let Some(idx) = model.box_idx(&sym.name) {
-                    match sym.kind {
-                        SymbolKind::Enum => model.set_stereotype(idx, "enum"),
-                        SymbolKind::Trait => model.set_stereotype(idx, "trait"),
-                        _ => {}
+                    if let Some(kw) = kind_keyword(sym.kind) {
+                        model.set_header(idx, format!("{kw} {}", sym.name));
                     }
                     if is_container_kind(sym.kind) {
                         current = Some((sym.depth, idx));
@@ -82,13 +93,12 @@ fn build(symbols: &[SymbolInfo], module: &str, model: &mut Model) {
     }
 }
 
-/// Get-or-create the synthetic `<<module>>` box for top-level functions.
+/// Get-or-create the file-level box for top-level functions (cached).
 fn module_box(model: &mut Model, module: &str, module_idx: &mut Option<usize>) -> usize {
     if let Some(i) = *module_idx {
         return i;
     }
-    let i = model.box_idx(module).unwrap_or(0);
-    model.set_stereotype(i, "module");
+    let i = model.module_box(module).unwrap_or(0);
     *module_idx = Some(i);
     i
 }

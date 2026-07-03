@@ -6,7 +6,7 @@ use std::path::Path;
 
 use tree_sitter::{Node, Parser};
 
-use super::model::{module_name, node_text as text, rel, Model};
+use super::model::{module_label, module_name, node_text as text, rel, sanitize_ident, Model};
 
 pub(crate) fn generate(source: &str, file_path: Option<&Path>) -> Option<String> {
     let mut parser = Parser::new();
@@ -18,6 +18,7 @@ pub(crate) fn generate(source: &str, file_path: Option<&Path>) -> Option<String>
 
     let module = module_name(file_path);
     let mut model = Model::new();
+    model.set_module_label(module_label(file_path));
     walk(tree.root_node(), src, &mut model, &module, None);
     model.render()
 }
@@ -58,6 +59,12 @@ fn handle_type(item: Node, src: &[u8], model: &mut Model, module: &str) {
     let Some(idx) = model.box_idx(&type_name) else {
         return;
     };
+    let kw = if item.kind() == "module" {
+        "module"
+    } else {
+        "class"
+    };
+    model.set_header(idx, format!("{kw} {}", sanitize_ident(&type_name)));
     if let Some(sc) = item.child_by_field_name("superclass") {
         // `superclass` node is `< Base`; take its constant.
         let mut c = sc.walk();

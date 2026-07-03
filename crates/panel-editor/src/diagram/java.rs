@@ -57,6 +57,14 @@ fn handle_class(
     let Some(idx) = model.box_idx(&type_name) else {
         return;
     };
+    model.set_header(
+        idx,
+        format!(
+            "{}class {}",
+            vis_keyword(item, src),
+            sanitize_ident(&type_name)
+        ),
+    );
     let owner = sanitize_ident(&type_name);
 
     if let Some(sc) = item.child_by_field_name("superclass") {
@@ -113,7 +121,14 @@ fn handle_interface(item: Node, src: &[u8], model: &mut Model) {
     let Some(idx) = model.box_idx(&type_name) else {
         return;
     };
-    model.set_stereotype(idx, "interface");
+    model.set_header(
+        idx,
+        format!(
+            "{}interface {}",
+            vis_keyword(item, src),
+            sanitize_ident(&type_name)
+        ),
+    );
     if let Some(body) = item.child_by_field_name("body") {
         let mut c = body.walk();
         for m in body.named_children(&mut c) {
@@ -130,10 +145,18 @@ fn handle_enum(item: Node, src: &[u8], model: &mut Model) {
     let Some(name_node) = item.child_by_field_name("name") else {
         return;
     };
-    let Some(idx) = model.box_idx(text(name_node, src)) else {
+    let type_name = text(name_node, src).to_string();
+    let Some(idx) = model.box_idx(&type_name) else {
         return;
     };
-    model.set_stereotype(idx, "enum");
+    model.set_header(
+        idx,
+        format!(
+            "{}enum {}",
+            vis_keyword(item, src),
+            sanitize_ident(&type_name)
+        ),
+    );
     if let Some(body) = item.child_by_field_name("body") {
         let mut c = body.walk();
         for e in body.named_children(&mut c) {
@@ -202,6 +225,17 @@ fn first_type_ident(node: Node, src: &[u8]) -> Option<String> {
                 .find_map(|ch| first_type_ident(ch, src));
             found
         }
+    }
+}
+
+/// Type-level visibility keyword with a trailing space (`public `, `private `,
+/// `protected `), or empty for package-private.
+fn vis_keyword(item: Node, src: &[u8]) -> &'static str {
+    match vis(item, src) {
+        "+" => "public ",
+        "#" => "protected ",
+        "-" => "private ",
+        _ => "",
     }
 }
 

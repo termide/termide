@@ -7,7 +7,9 @@ use std::path::Path;
 
 use tree_sitter::{Node, Parser};
 
-use super::model::{collapse, module_name, node_text as text, rel, sanitize_ident, Model};
+use super::model::{
+    collapse, module_label, module_name, node_text as text, rel, sanitize_ident, Model,
+};
 
 pub(crate) fn generate(source: &str, file_path: Option<&Path>) -> Option<String> {
     let mut parser = Parser::new();
@@ -19,6 +21,7 @@ pub(crate) fn generate(source: &str, file_path: Option<&Path>) -> Option<String>
 
     let module = module_name(file_path);
     let mut model = Model::new();
+    model.set_module_label(module_label(file_path));
     let mut comps: Vec<(String, String, String)> = Vec::new();
 
     let mut c = tree.root_node().walk();
@@ -59,6 +62,12 @@ fn handle_record(
     let Some(idx) = model.box_idx(&type_name) else {
         return;
     };
+    let kw = match item.kind() {
+        "struct_specifier" => "struct",
+        "union_specifier" => "union",
+        _ => "class",
+    };
+    model.set_header(idx, format!("{kw} {}", sanitize_ident(&type_name)));
     let owner = sanitize_ident(&type_name);
 
     // Base classes: `class C : public Base { ... }`.
@@ -124,10 +133,11 @@ fn handle_enum(item: Node, src: &[u8], model: &mut Model) {
     let Some(name_node) = item.child_by_field_name("name") else {
         return;
     };
-    let Some(idx) = model.box_idx(text(name_node, src)) else {
+    let type_name = text(name_node, src).to_string();
+    let Some(idx) = model.box_idx(&type_name) else {
         return;
     };
-    model.set_stereotype(idx, "enum");
+    model.set_header(idx, format!("enum {}", sanitize_ident(&type_name)));
     if let Some(body) = item.child_by_field_name("body") {
         let mut c = body.walk();
         for e in body.named_children(&mut c) {

@@ -7,7 +7,9 @@ use std::path::Path;
 
 use tree_sitter::{Node, Parser};
 
-use super::model::{collapse, module_name, node_text as text, rel, sanitize_ident, Model};
+use super::model::{
+    collapse, module_label, module_name, node_text as text, rel, sanitize_ident, Model,
+};
 
 pub(crate) fn generate(source: &str, file_path: Option<&Path>) -> Option<String> {
     let mut parser = Parser::new();
@@ -17,6 +19,7 @@ pub(crate) fn generate(source: &str, file_path: Option<&Path>) -> Option<String>
 
     let module = module_name(file_path);
     let mut model = Model::new();
+    model.set_module_label(module_label(file_path));
     let mut comps: Vec<(String, String, String)> = Vec::new();
 
     let mut c = tree.root_node().walk();
@@ -69,6 +72,7 @@ fn handle_type_decl(
                 let Some(idx) = model.box_idx(&type_name) else {
                     continue;
                 };
+                model.set_header(idx, format!("struct {}", sanitize_ident(&type_name)));
                 let owner = sanitize_ident(&type_name);
                 if let Some(fields) = ty.named_child(0) {
                     let mut fc = fields.walk();
@@ -97,7 +101,7 @@ fn handle_type_decl(
                 let Some(idx) = model.box_idx(&type_name) else {
                     continue;
                 };
-                model.set_stereotype(idx, "interface");
+                model.set_header(idx, format!("interface {}", sanitize_ident(&type_name)));
                 let mut ic = ty.walk();
                 for m in ty.named_children(&mut ic) {
                     if m.kind() == "method_elem" {

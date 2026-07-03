@@ -9,7 +9,9 @@ use std::path::Path;
 
 use tree_sitter::{Node, Parser};
 
-use super::model::{collapse, module_name, node_text as text, rel, sanitize_ident, Model};
+use super::model::{
+    collapse, module_label, module_name, node_text as text, rel, sanitize_ident, Model,
+};
 
 pub(crate) fn generate(source: &str, file_path: Option<&Path>) -> Option<String> {
     let mut parser = Parser::new();
@@ -21,6 +23,7 @@ pub(crate) fn generate(source: &str, file_path: Option<&Path>) -> Option<String>
 
     let module = module_name(file_path);
     let mut model = Model::new();
+    model.set_module_label(module_label(file_path));
     let mut comps: Vec<(String, String, String)> = Vec::new();
     let mut module_idx: Option<usize> = None;
 
@@ -94,6 +97,7 @@ fn handle_class(
     let Some(idx) = model.box_idx(&type_name) else {
         return;
     };
+    model.set_header(idx, format!("class {}", sanitize_ident(&type_name)));
     let owner = sanitize_ident(&type_name);
 
     // Base classes -> inheritance edges.
@@ -139,13 +143,12 @@ fn handle_class(
     }
 }
 
-/// Get-or-create the synthetic `<<module>>` box.
+/// Get-or-create the file-level box (cached in `module_idx`).
 fn module_box(model: &mut Model, module: &str, module_idx: &mut Option<usize>) -> usize {
     if let Some(i) = *module_idx {
         return i;
     }
-    let i = model.box_idx(module).unwrap_or(0);
-    model.set_stereotype(i, "module");
+    let i = model.module_box(module).unwrap_or(0);
     *module_idx = Some(i);
     i
 }

@@ -20,9 +20,14 @@ pub(crate) mod rel {
 }
 
 struct DiagramBox {
+    /// Mermaid id used for relationship endpoints (a bare identifier).
     name: String,
-    /// `<<enum>>`, `<<trait>>`, `<<module>>`, etc.
-    stereotype: Option<&'static str>,
+    /// Declaration title shown in the box (`pub struct Cli`, `enum Color`, the
+    /// file name for the module box). `None` renders as a plain `class name`.
+    header: Option<String>,
+    /// The synthetic file-level box (free functions/consts); excluded as a
+    /// composition target.
+    is_module: bool,
     /// Pre-formatted, sanitized member lines.
     members: Vec<String>,
 }
@@ -40,6 +45,8 @@ pub(crate) struct Model {
     boxes: Vec<DiagramBox>,
     rels: Vec<Relation>,
     index: HashMap<String, usize>,
+    /// Title for the file-level box (e.g. `cli.rs`).
+    module_label: Option<String>,
 }
 
 impl Model {
@@ -61,25 +68,36 @@ impl Model {
         self.index.insert(name.clone(), i);
         self.boxes.push(DiagramBox {
             name,
-            stereotype: None,
+            header: None,
+            is_module: false,
             members: Vec::new(),
         });
         Some(i)
     }
 
-    /// Get-or-create the synthetic `<<module>>` box holding top-level free
-    /// items (functions, constants, aliases). Idempotent by name.
-    pub fn module_box(&mut self, name: &str) -> Option<usize> {
-        let idx = self.box_idx(name)?;
-        self.set_stereotype(idx, "module");
+    /// Set the title used for the file-level (`module`) box.
+    pub fn set_module_label(&mut self, label: String) {
+        self.module_label = Some(label);
+    }
+
+    /// Get-or-create the file-level box holding top-level free items
+    /// (functions, constants, aliases). Titled with the file name. Idempotent
+    /// by id.
+    pub fn module_box(&mut self, id: &str) -> Option<usize> {
+        let idx = self.box_idx(id)?;
+        self.boxes[idx].is_module = true;
+        if self.boxes[idx].header.is_none() {
+            let header = self.module_label.clone().unwrap_or_else(|| id.to_string());
+            self.boxes[idx].header = Some(header);
+        }
         Some(idx)
     }
 
-    /// Set a box stereotype, keeping the first one assigned.
-    pub fn set_stereotype(&mut self, idx: usize, stereotype: &'static str) {
+    /// Set a box's declaration header, keeping the first one assigned.
+    pub fn set_header(&mut self, idx: usize, header: impl Into<String>) {
         let b = &mut self.boxes[idx];
-        if b.stereotype.is_none() {
-            b.stereotype = Some(stereotype);
+        if b.header.is_none() {
+            b.header = Some(header.into());
         }
     }
 
@@ -117,13 +135,13 @@ impl Model {
         });
     }
 
-    /// Sanitized names of boxes that denote a concrete local type (everything
-    /// except the synthetic `<<module>>` box). Used to filter composition edges
-    /// to types actually declared in this file.
+    /// Sanitized ids of boxes that denote a concrete local type (everything
+    /// except the file-level box). Used to filter composition edges to types
+    /// actually declared in this file.
     pub fn local_type_names(&self) -> Vec<String> {
         self.boxes
             .iter()
-            .filter(|b| b.stereotype != Some("module"))
+            .filter(|b| !b.is_module)
             .map(|b| b.name.clone())
             .collect()
     }
@@ -136,21 +154,21 @@ impl Model {
         }
         let mut s = String::from("classDiagram\n");
         for b in &self.boxes {
-            let has_body = b.stereotype.is_some() || !b.members.is_empty();
-            if !has_body {
-                s.push_str("    class ");
-                s.push_str(&b.name);
+            // `class Id` or `class Id["Header"]`.
+            s.push_str("    class ");
+            s.push_str(&b.name);
+            if let Some(h) = &b.header {
+                s.push('[');
+                s.push('"');
+                s.push_str(&sanitize_header(h));
+                s.push('"');
+                s.push(']');
+            }
+            if b.members.is_empty() {
                 s.push('\n');
                 continue;
             }
-            s.push_str("    class ");
-            s.push_str(&b.name);
             s.push_str(" {\n");
-            if let Some(st) = b.stereotype {
-                s.push_str("        <<");
-                s.push_str(st);
-                s.push_str(">>\n");
-            }
             for m in &b.members {
                 s.push_str("        ");
                 s.push_str(m);
@@ -195,6 +213,16 @@ fn sanitize_member(raw: &str) -> String {
     cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Sanitize a box header: drop characters that would break the
+/// `class Id["Header"]` syntax, and collapse whitespace.
+fn sanitize_header(raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .filter(|c| !matches!(c, '[' | ']' | '"' | '{' | '}'))
+        .collect();
+    cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// UTF-8 text of a node (empty on malformed bytes).
 pub(crate) fn node_text<'a>(n: Node, src: &'a [u8]) -> &'a str {
     n.utf8_text(src).unwrap_or("")
@@ -209,12 +237,21 @@ pub(crate) fn collapse(n: Node, src: &[u8]) -> String {
         .join(" ")
 }
 
-/// The synthetic module box name: the file stem, or `module` when unknown.
+/// The file-level box id: the sanitized file stem, or `module` when unknown.
 pub(crate) fn module_name(file_path: Option<&Path>) -> String {
     file_path
         .and_then(|p| p.file_stem())
         .and_then(|s| s.to_str())
         .map(sanitize_ident)
         .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "module".to_string())
+}
+
+/// The file-level box title: the full file name (e.g. `cli.rs`), or `module`.
+pub(crate) fn module_label(file_path: Option<&Path>) -> String {
+    file_path
+        .and_then(|p| p.file_name())
+        .and_then(|s| s.to_str())
+        .map(str::to_string)
         .unwrap_or_else(|| "module".to_string())
 }

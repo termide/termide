@@ -8,7 +8,7 @@ use std::path::Path;
 use tree_sitter::{Node, Parser};
 
 use super::model::{
-    collapse as type_text, module_name, node_text as text, rel, sanitize_ident, Model,
+    collapse as type_text, module_label, module_name, node_text as text, rel, sanitize_ident, Model,
 };
 
 pub(crate) fn generate(source: &str, file_path: Option<&Path>) -> Option<String> {
@@ -21,6 +21,7 @@ pub(crate) fn generate(source: &str, file_path: Option<&Path>) -> Option<String>
 
     let module = module_name(file_path);
     let mut model = Model::new();
+    model.set_module_label(module_label(file_path));
     // Composition candidates (owner, referenced base type, edge label). Resolved
     // to edges only for base types declared in this file.
     let mut comps: Vec<(String, String, String)> = Vec::new();
@@ -110,6 +111,19 @@ fn handle_struct(
     let Some(idx) = model.box_idx(&type_name) else {
         return;
     };
+    let kw = if item.kind() == "union_item" {
+        "union"
+    } else {
+        "struct"
+    };
+    model.set_header(
+        idx,
+        format!(
+            "{}{kw} {}",
+            vis_keyword(item, src),
+            sanitize_ident(&type_name)
+        ),
+    );
     let owner = sanitize_ident(&type_name);
     let Some(body) = item.child_by_field_name("body") else {
         return;
@@ -172,7 +186,14 @@ fn handle_enum(
     let Some(idx) = model.box_idx(&type_name) else {
         return;
     };
-    model.set_stereotype(idx, "enum");
+    model.set_header(
+        idx,
+        format!(
+            "{}enum {}",
+            vis_keyword(item, src),
+            sanitize_ident(&type_name)
+        ),
+    );
     let owner = sanitize_ident(&type_name);
     let Some(body) = item.child_by_field_name("body") else {
         return;
@@ -235,10 +256,18 @@ fn handle_trait(item: Node, src: &[u8], model: &mut Model) {
     let Some(name_node) = item.child_by_field_name("name") else {
         return;
     };
-    let Some(idx) = model.box_idx(text(name_node, src)) else {
+    let type_name = text(name_node, src).to_string();
+    let Some(idx) = model.box_idx(&type_name) else {
         return;
     };
-    model.set_stereotype(idx, "trait");
+    model.set_header(
+        idx,
+        format!(
+            "{}trait {}",
+            vis_keyword(item, src),
+            sanitize_ident(&type_name)
+        ),
+    );
     if let Some(body) = item.child_by_field_name("body") {
         let mut c = body.walk();
         for m in body.named_children(&mut c) {
@@ -287,15 +316,27 @@ fn handle_impl(item: Node, src: &[u8], model: &mut Model) {
     }
 }
 
-/// Get-or-create the synthetic `<<module>>` box for file-level free items.
+/// Get-or-create the file-level box for free items (cached in `module_idx`).
 fn module_box(model: &mut Model, module: &str, module_idx: &mut Option<usize>) -> usize {
     if let Some(i) = *module_idx {
         return i;
     }
-    let i = model.box_idx(module).unwrap_or(0);
-    model.set_stereotype(i, "module");
+    let i = model.module_box(module).unwrap_or(0);
     *module_idx = Some(i);
     i
+}
+
+/// Rust type-level visibility keyword with a trailing space (`pub `,
+/// `pub(crate) `), or empty for private.
+fn vis_keyword(item: Node, src: &[u8]) -> String {
+    let mut c = item.walk();
+    let v = item
+        .named_children(&mut c)
+        .find(|n| n.kind() == "visibility_modifier");
+    match v {
+        Some(v) => format!("{} ", type_text(v, src)),
+        None => String::new(),
+    }
 }
 
 fn format_fn(f: Node, src: &[u8], marker: &str) -> Option<String> {

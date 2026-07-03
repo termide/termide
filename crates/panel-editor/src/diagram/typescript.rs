@@ -7,7 +7,9 @@ use std::path::Path;
 
 use tree_sitter::{Node, Parser};
 
-use super::model::{collapse, module_name, node_text as text, rel, sanitize_ident, Model};
+use super::model::{
+    collapse, module_label, module_name, node_text as text, rel, sanitize_ident, Model,
+};
 
 pub(crate) fn generate(source: &str, file_path: Option<&Path>, tsx: bool) -> Option<String> {
     // The TSX grammar also parses plain TS, but the TypeScript grammar rejects
@@ -24,21 +26,30 @@ pub(crate) fn generate(source: &str, file_path: Option<&Path>, tsx: bool) -> Opt
 
     let module = module_name(file_path);
     let mut model = Model::new();
+    model.set_module_label(module_label(file_path));
     let mut comps: Vec<(String, String, String)> = Vec::new();
     let mut module_idx: Option<usize> = None;
 
     let mut c = tree.root_node().walk();
     for child in tree.root_node().named_children(&mut c) {
         // `export <decl>` wraps the declaration; unwrap to it.
-        let decl = if child.kind() == "export_statement" {
+        let (decl, exported) = if child.kind() == "export_statement" {
             match child.child_by_field_name("declaration") {
-                Some(d) => d,
+                Some(d) => (d, true),
                 None => continue,
             }
         } else {
-            child
+            (child, false)
         };
-        dispatch(decl, src, &mut model, &module, &mut module_idx, &mut comps);
+        dispatch(
+            decl,
+            exported,
+            src,
+            &mut model,
+            &module,
+            &mut module_idx,
+            &mut comps,
+        );
     }
 
     let local: HashSet<String> = model.local_type_names().into_iter().collect();
@@ -50,8 +61,10 @@ pub(crate) fn generate(source: &str, file_path: Option<&Path>, tsx: bool) -> Opt
     model.render()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn dispatch(
     decl: Node,
+    exported: bool,
     src: &[u8],
     model: &mut Model,
     module: &str,
@@ -59,9 +72,11 @@ fn dispatch(
     comps: &mut Vec<(String, String, String)>,
 ) {
     match decl.kind() {
-        "class_declaration" | "abstract_class_declaration" => handle_class(decl, src, model, comps),
-        "interface_declaration" => handle_interface(decl, src, model),
-        "enum_declaration" => handle_enum(decl, src, model),
+        "class_declaration" | "abstract_class_declaration" => {
+            handle_class(decl, exported, src, model, comps)
+        }
+        "interface_declaration" => handle_interface(decl, exported, src, model),
+        "enum_declaration" => handle_enum(decl, exported, src, model),
         "function_declaration" | "generator_function_declaration" => {
             if let Some(sig) = format_fn(decl, src, "+") {
                 let idx = module_box(model, module, module_idx);
@@ -96,6 +111,7 @@ fn dispatch(
 
 fn handle_class(
     decl: Node,
+    exported: bool,
     src: &[u8],
     model: &mut Model,
     comps: &mut Vec<(String, String, String)>,
@@ -107,6 +123,14 @@ fn handle_class(
     let Some(idx) = model.box_idx(&type_name) else {
         return;
     };
+    model.set_header(
+        idx,
+        format!(
+            "{}class {}",
+            export_kw(exported),
+            sanitize_ident(&type_name)
+        ),
+    );
     let owner = sanitize_ident(&type_name);
 
     // Heritage: `extends Base` (inherit), `implements Iface` (realize).
@@ -173,7 +197,7 @@ fn handle_class(
     }
 }
 
-fn handle_interface(decl: Node, src: &[u8], model: &mut Model) {
+fn handle_interface(decl: Node, exported: bool, src: &[u8], model: &mut Model) {
     let Some(name_node) = decl.child_by_field_name("name") else {
         return;
     };
@@ -181,7 +205,14 @@ fn handle_interface(decl: Node, src: &[u8], model: &mut Model) {
     let Some(idx) = model.box_idx(&type_name) else {
         return;
     };
-    model.set_stereotype(idx, "interface");
+    model.set_header(
+        idx,
+        format!(
+            "{}interface {}",
+            export_kw(exported),
+            sanitize_ident(&type_name)
+        ),
+    );
 
     // `interface X extends A, B`
     let mut hc = decl.walk();
@@ -222,14 +253,18 @@ fn handle_interface(decl: Node, src: &[u8], model: &mut Model) {
     }
 }
 
-fn handle_enum(decl: Node, src: &[u8], model: &mut Model) {
+fn handle_enum(decl: Node, exported: bool, src: &[u8], model: &mut Model) {
     let Some(name_node) = decl.child_by_field_name("name") else {
         return;
     };
-    let Some(idx) = model.box_idx(text(name_node, src)) else {
+    let type_name = text(name_node, src).to_string();
+    let Some(idx) = model.box_idx(&type_name) else {
         return;
     };
-    model.set_stereotype(idx, "enum");
+    model.set_header(
+        idx,
+        format!("{}enum {}", export_kw(exported), sanitize_ident(&type_name)),
+    );
     let Some(body) = decl.child_by_field_name("body") else {
         return;
     };
@@ -247,15 +282,23 @@ fn handle_enum(decl: Node, src: &[u8], model: &mut Model) {
     }
 }
 
-/// Get-or-create the synthetic `<<module>>` box.
+/// Get-or-create the file-level box (cached in `module_idx`).
 fn module_box(model: &mut Model, module: &str, module_idx: &mut Option<usize>) -> usize {
     if let Some(i) = *module_idx {
         return i;
     }
-    let i = model.box_idx(module).unwrap_or(0);
-    model.set_stereotype(i, "module");
+    let i = model.module_box(module).unwrap_or(0);
     *module_idx = Some(i);
     i
+}
+
+/// TypeScript `export ` keyword prefix (the type-level visibility signal).
+fn export_kw(exported: bool) -> &'static str {
+    if exported {
+        "export "
+    } else {
+        ""
+    }
 }
 
 fn format_fn(f: Node, src: &[u8], marker: &str) -> Option<String> {
