@@ -356,6 +356,13 @@ pub trait Translation: Send + Sync {
     fn menu_quit(&self) -> &str;
     fn menu_bookmarks(&self) -> &str;
 
+    // Diagram (Mermaid / editor "view as diagram") menu + status
+    fn menu_copy_diagram(&self) -> &str;
+    fn menu_save_diagram_as(&self) -> &str;
+    fn menu_view_as_diagram(&self) -> &str;
+    fn status_no_diagram_symbols(&self) -> &str;
+    fn status_diagram_copied(&self, lines: usize) -> String;
+
     // Bookmarks submenu
     fn bookmarks_add_bookmark(&self) -> &str;
     fn bookmarks_no_bookmarks(&self) -> &str;

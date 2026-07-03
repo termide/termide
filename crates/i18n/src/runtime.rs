@@ -280,6 +280,10 @@ impl Translation for RuntimeTranslation {
         menu_windows,
         menu_commands,
         menu_commands_add,
+        menu_copy_diagram,
+        menu_save_diagram_as,
+        menu_view_as_diagram,
+        status_no_diagram_symbols,
         command_params_title,
         command_params_run,
         command_params_cancel,
@@ -705,6 +709,10 @@ impl Translation for RuntimeTranslation {
 
     fn status_file_saved(&self, name: &str) -> String {
         self.format("status_file_saved", &[("name", name)])
+    }
+
+    fn status_diagram_copied(&self, lines: usize) -> String {
+        self.format("status_diagram_copied", &[("lines", &lines.to_string())])
     }
 
     fn status_error_save(&self, error: &str) -> String {
