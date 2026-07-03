@@ -18,6 +18,8 @@ pub struct ClickTracker<P = usize> {
     time: Option<Instant>,
     /// Last click position.
     position: Option<P>,
+    /// Consecutive-click count at `position` (for double/triple detection).
+    count: u8,
     /// Flag to skip next MouseUp event (useful after double-click selection).
     pub skip_next_up: bool,
 }
@@ -28,8 +30,29 @@ impl<P: PartialEq + Clone> ClickTracker<P> {
         Self {
             time: None,
             position: None,
+            count: 0,
             skip_next_up: false,
         }
+    }
+
+    /// Register a click and return the consecutive-click count at this position:
+    /// 1 (single), 2 (double), 3 (triple), cycling back to 1 on the fourth. A
+    /// click at a different position or after the timeout resets to 1.
+    pub fn click(&mut self, position: P) -> u8 {
+        let now = Instant::now();
+        let consecutive = match (self.time, &self.position) {
+            (Some(t), Some(last))
+                if *last == position
+                    && now.duration_since(t).as_millis() < DOUBLE_CLICK_INTERVAL_MS =>
+            {
+                (self.count % 3) + 1
+            }
+            _ => 1,
+        };
+        self.time = Some(now);
+        self.position = Some(position);
+        self.count = consecutive;
+        consecutive
     }
 
     /// Check if this click is a double-click (same position within threshold).
@@ -68,6 +91,7 @@ impl<P: PartialEq + Clone> ClickTracker<P> {
     pub fn reset(&mut self) {
         self.time = None;
         self.position = None;
+        self.count = 0;
     }
 
     /// Get the last recorded position.
@@ -129,6 +153,17 @@ mod tests {
         tracker.reset();
         assert!(!tracker.is_double_click(&5));
         assert!(tracker.last_position().is_none());
+    }
+
+    #[test]
+    fn click_counts_cycle_single_double_triple() {
+        let mut t: PositionClickTracker = ClickTracker::new();
+        assert_eq!(t.click((1, 1)), 1);
+        assert_eq!(t.click((1, 1)), 2);
+        assert_eq!(t.click((1, 1)), 3);
+        assert_eq!(t.click((1, 1)), 1); // cycles back
+                                        // A different position resets to single.
+        assert_eq!(t.click((2, 2)), 1);
     }
 
     #[test]

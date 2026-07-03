@@ -102,6 +102,9 @@ pub struct Terminal {
     find_bar_focus_buffer: bool,
     /// Selection drag is active (left button held during selection).
     selection_drag_active: bool,
+    /// Multi-click tracking (double = word, triple = line) keyed by the
+    /// absolute (row, column) clicked.
+    click_tracker: termide_ui::ClickTracker<(usize, usize)>,
     /// Last mouse position in screen coordinates for auto-scroll.
     last_mouse_position: Option<(u16, u16)>,
     /// Panel bounds for auto-scroll calculations.
@@ -444,6 +447,7 @@ impl Terminal {
             find_bar: None,
             find_bar_focus_buffer: false,
             selection_drag_active: false,
+            click_tracker: termide_ui::ClickTracker::new(),
             last_mouse_position: None,
             panel_bounds: None,
             color_preview: None,
@@ -2380,15 +2384,27 @@ impl Panel for Terminal {
                         };
                     }
 
-                    // Start text selection with absolute coordinates
+                    let abs_row = self.write_screen().visual_to_absolute(inner_row);
+                    // 1 = single (start drag select), 2 = word, 3 = line.
+                    let clicks = self.click_tracker.click((abs_row, inner_col));
                     let mut screen = self.write_screen();
-                    let abs_row = screen.visual_to_absolute(inner_row);
-                    screen.selection_start = Some((abs_row, inner_col));
-                    screen.selection_end = Some((abs_row, inner_col)); // Set immediately for visibility
+                    let range = match clicks {
+                        2 => word_selection(&screen, abs_row, inner_col),
+                        3 => line_selection(&screen, abs_row),
+                        _ => None,
+                    };
+                    if let Some((start, end)) = range {
+                        screen.selection_start = Some(start);
+                        screen.selection_end = Some(end);
+                    } else {
+                        screen.selection_start = Some((abs_row, inner_col));
+                        screen.selection_end = Some((abs_row, inner_col));
+                    }
                     drop(screen);
 
-                    // Start selection drag tracking for auto-scroll
-                    self.selection_drag_active = true;
+                    // Only single-click begins a drag selection; word/line
+                    // clicks set a fixed selection.
+                    self.selection_drag_active = clicks == 1;
                     needs_redraw = true;
                 }
                 MouseEventKind::Drag(MouseButton::Left) => {
@@ -2701,9 +2717,69 @@ impl Drop for Terminal {
     }
 }
 
+/// Whether a terminal cell char is part of a word (for double-click select).
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// Word around `col` on `abs_row` as an inclusive (start, end) selection range,
+/// or `None` when the clicked cell is not part of a word.
+fn word_selection(
+    screen: &TerminalScreen,
+    abs_row: usize,
+    col: usize,
+) -> Option<((usize, usize), (usize, usize))> {
+    let row = screen.get_line_by_absolute(abs_row)?;
+    if col >= row.len() || !is_word_char(row[col].ch) {
+        return None;
+    }
+    let mut start = col;
+    while start > 0 && is_word_char(row[start - 1].ch) {
+        start -= 1;
+    }
+    let mut end = col;
+    while end + 1 < row.len() && is_word_char(row[end + 1].ch) {
+        end += 1;
+    }
+    Some(((abs_row, start), (abs_row, end)))
+}
+
+/// Whole line on `abs_row` as an inclusive (start, end) selection range.
+/// Trailing whitespace is trimmed at copy time.
+fn line_selection(
+    screen: &TerminalScreen,
+    abs_row: usize,
+) -> Option<((usize, usize), (usize, usize))> {
+    let row = screen.get_line_by_absolute(abs_row)?;
+    let last = row.len().saturating_sub(1);
+    Some(((abs_row, 0), (abs_row, last)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn word_selection_covers_word_and_skips_boundaries() {
+        let mut screen = TerminalScreen::new(3, 20);
+        for ch in "foo bar_baz".chars() {
+            screen.put_char(ch);
+        }
+        // Click inside "bar_baz" (cols 4..=10) -> whole word selected.
+        assert_eq!(word_selection(&screen, 0, 5), Some(((0, 4), (0, 10))));
+        // Click on the space -> no word selection.
+        assert_eq!(word_selection(&screen, 0, 3), None);
+    }
+
+    #[test]
+    fn line_selection_starts_at_column_zero() {
+        let mut screen = TerminalScreen::new(3, 20);
+        for ch in "hi".chars() {
+            screen.put_char(ch);
+        }
+        let sel = line_selection(&screen, 0).unwrap();
+        assert_eq!(sel.0, (0, 0));
+    }
     use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEventKind};
 
     #[test]
