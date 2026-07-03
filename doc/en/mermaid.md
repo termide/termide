@@ -22,6 +22,23 @@ them in place — the panel is replaced, not stacked:
 Switching back to the diagram is blocked while the source has unsaved changes —
 save first.
 
+## Generate a class diagram from source code
+
+From an open source file in the editor, the **`View as diagram`** entry in the
+panel `[≡]` menu builds a Mermaid class diagram of what the file declares and
+opens it in the viewer. Each box header is a declaration (`pub struct Cli`,
+`enum Mode`, `public interface Draw`, …); members carry UML visibility markers
+(`+` public, `-` private, `#` protected, `~` restricted). Free functions,
+constants and type aliases collect into a box named after the file. Inheritance,
+trait/interface realization and field composition are drawn as edges.
+
+Rust, Python, TypeScript/TSX/JSX, Go, Java, C, C++, Ruby and PHP have rich
+extractors (types, signatures, relationships); other tree-sitter languages fall
+back to type boxes with method names plus a module box of top-level functions.
+
+The generated diagram opens as a temporary `.mmd` file. Save it to a permanent
+location with **`Ctrl+S`** or the **`Save diagram as…`** menu entry.
+
 ## Supported diagram types
 
 Parsed and laid out without an external Mermaid engine (pure Rust):
@@ -48,5 +65,7 @@ Diagram kinds that are not yet laid out (e.g. `requirementDiagram`,
   bottom; the mouse wheel and a right-edge scrollbar scroll too.
 - **`y`** or **`Ctrl+C`**, or the **`Copy diagram`** entry in the panel `[≡]`
   menu — copy the rendered diagram (the pseudographics) to the clipboard.
+- **`Ctrl+S`**, or the **`Save diagram as…`** menu entry — save the diagram
+  source (`.mmd`) to a chosen path.
 
 The panel persists across sessions and reopens at the same file.

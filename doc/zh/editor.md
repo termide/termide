@@ -45,6 +45,8 @@
 | `Ctrl+D`          | 复制当前行或选区                           |
 | `Backspace`       | 删除光标左侧的字符                         |
 | `Delete`          | 删除光标右侧的字符                         |
+| `Ctrl+Backspace`  | 删除左侧单词（也可用 Alt+Backspace）       |
+| `Ctrl+Delete`     | 删除右侧单词                               |
 | `Enter`           | 插入新行（带自动缩进）                     |
 | `Tab`             | 插入缩进（可配置，默认为 4）               |
 | `Ctrl+/`          | 切换注释（行注释/块注释）                  |

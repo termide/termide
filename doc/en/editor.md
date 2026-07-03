@@ -45,6 +45,8 @@ The text editor panel provides a functional editor for working with text files w
 | `Ctrl+D`          | Duplicate current line or selection        |
 | `Backspace`       | Delete character to the left of cursor     |
 | `Delete`          | Delete character to the right of cursor    |
+| `Ctrl+Backspace`  | Delete word to the left (Alt+Backspace also)|
+| `Ctrl+Delete`     | Delete word to the right                   |
 | `Enter`           | Insert new line (with auto-indentation)    |
 | `Tab`             | Insert indent (configurable, default 4)    |
 | `Ctrl+/`          | Toggle comment (line/block)                |
