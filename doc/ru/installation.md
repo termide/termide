@@ -12,33 +12,33 @@
 
 **Linux x86_64** (также работает в WSL/WSL2):
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.28.0-x86_64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.0-x86_64-unknown-linux-gnu.tar.gz
 ```
 
 **Linux x86_64 — статический musl** (Alpine, distroless-контейнеры,
 любая система без glibc):
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.28.0-x86_64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.0-x86_64-unknown-linux-musl.tar.gz
 ```
 
 **Linux ARM64** (Raspberry Pi, ARM серверы):
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.28.0-aarch64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.0-aarch64-unknown-linux-gnu.tar.gz
 ```
 
 **Linux ARM64 — статический musl** (Android/Termux, Alpine ARM, любая ARM64-система без glibc):
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.28.0-aarch64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.0-aarch64-unknown-linux-musl.tar.gz
 ```
 
 **macOS Intel (x86_64)**:
 ```bash
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.28.0-x86_64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.29.0-x86_64-apple-darwin.tar.gz
 ```
 
 **macOS Apple Silicon (M1/M2/M3)**:
 ```bash
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.28.0-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.29.0-aarch64-apple-darwin.tar.gz
 ```
 
 ### Шаг 2: Распаковка
@@ -76,8 +76,8 @@ russh-sftp — без OpenSSL и libssh2), поэтому это тот же к�
 под musl.
 
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.28.0-x86_64-unknown-linux-musl.tar.gz
-tar xzf termide-0.28.0-x86_64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.0-x86_64-unknown-linux-musl.tar.gz
+tar xzf termide-0.29.0-x86_64-unknown-linux-musl.tar.gz
 ./termide
 
 # Проверка полной статичности — нет разделяемых библиотек
@@ -101,15 +101,15 @@ nix build github:termide/termide#termide-static
 ### Debian/Ubuntu (.deb)
 
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide_0.28.0-1_amd64.deb
-sudo dpkg -i termide_0.28.0-1_amd64.deb
+wget https://github.com/termide/termide/releases/latest/download/termide_0.29.0-1_amd64.deb
+sudo dpkg -i termide_0.29.0-1_amd64.deb
 ```
 
 ### Fedora/RHEL/CentOS (.rpm)
 
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.28.0-1.x86_64.rpm
-sudo rpm -i termide-0.28.0-1.x86_64.rpm
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.0-1.x86_64.rpm
+sudo rpm -i termide-0.29.0-1.x86_64.rpm
 ```
 
 ### Arch Linux (AUR)
@@ -234,8 +234,8 @@ TermIDE также работает в Windows Subsystem for Linux (WSL и WSL2)
 1. Установите WSL2, если еще не установлен
 2. Скачайте Linux x86_64 бинарный файл внутри WSL:
    ```bash
-   wget https://github.com/termide/termide/releases/latest/download/termide-0.28.0-x86_64-unknown-linux-gnu.tar.gz
-   tar xzf termide-0.28.0-x86_64-unknown-linux-gnu.tar.gz
+   wget https://github.com/termide/termide/releases/latest/download/termide-0.29.0-x86_64-unknown-linux-gnu.tar.gz
+   tar xzf termide-0.29.0-x86_64-unknown-linux-gnu.tar.gz
    ./termide
    ```
 
@@ -247,8 +247,8 @@ Android (libc Bionic):
 
 ```bash
 pkg install git openssh   # инструменты, к которым обращается termide (плюс нужные LSP)
-wget https://github.com/termide/termide/releases/latest/download/termide-0.28.0-aarch64-unknown-linux-musl.tar.gz
-tar xzf termide-0.28.0-aarch64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.0-aarch64-unknown-linux-musl.tar.gz
+tar xzf termide-0.29.0-aarch64-unknown-linux-musl.tar.gz
 ./termide
 ```
 

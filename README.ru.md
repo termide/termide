@@ -85,37 +85,37 @@
 
 ```bash
 # Linux x86_64 (также работает в WSL)
-wget https://github.com/termide/termide/releases/latest/download/termide-0.28.0-x86_64-unknown-linux-gnu.tar.gz
-tar xzf termide-0.28.0-x86_64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.0-x86_64-unknown-linux-gnu.tar.gz
+tar xzf termide-0.29.0-x86_64-unknown-linux-gnu.tar.gz
 ./termide
 
 # Linux x86_64 (статический musl — Alpine, distroless-контейнеры, любая система без glibc)
-wget https://github.com/termide/termide/releases/latest/download/termide-0.28.0-x86_64-unknown-linux-musl.tar.gz
-tar xzf termide-0.28.0-x86_64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.0-x86_64-unknown-linux-musl.tar.gz
+tar xzf termide-0.29.0-x86_64-unknown-linux-musl.tar.gz
 ./termide
 
 # macOS Intel (x86_64)
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.28.0-x86_64-apple-darwin.tar.gz
-tar xzf termide-0.28.0-x86_64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.29.0-x86_64-apple-darwin.tar.gz
+tar xzf termide-0.29.0-x86_64-apple-darwin.tar.gz
 ./termide
 
 # macOS Apple Silicon (ARM64)
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.28.0-aarch64-apple-darwin.tar.gz
-tar xzf termide-0.28.0-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.29.0-aarch64-apple-darwin.tar.gz
+tar xzf termide-0.29.0-aarch64-apple-darwin.tar.gz
 ./termide
 
 # Linux ARM64 (Raspberry Pi, ARM-серверы)
-wget https://github.com/termide/termide/releases/latest/download/termide-0.28.0-aarch64-unknown-linux-gnu.tar.gz
-tar xzf termide-0.28.0-aarch64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.0-aarch64-unknown-linux-gnu.tar.gz
+tar xzf termide-0.29.0-aarch64-unknown-linux-gnu.tar.gz
 ./termide
 
 # Linux ARM64 (статический musl — Android/Termux, Alpine ARM, любой ARM64 без glibc)
-wget https://github.com/termide/termide/releases/latest/download/termide-0.28.0-aarch64-unknown-linux-musl.tar.gz
-tar xzf termide-0.28.0-aarch64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.0-aarch64-unknown-linux-musl.tar.gz
+tar xzf termide-0.29.0-aarch64-unknown-linux-musl.tar.gz
 ./termide
 
 # Windows x86_64 (скачайте .zip с Releases, распакуйте, запустите в Windows Terminal)
-# https://github.com/termide/termide/releases/latest/download/termide-0.28.0-x86_64-pc-windows-msvc.zip
+# https://github.com/termide/termide/releases/latest/download/termide-0.29.0-x86_64-pc-windows-msvc.zip
 ```
 
 </details>
@@ -125,14 +125,14 @@ tar xzf termide-0.28.0-aarch64-unknown-linux-musl.tar.gz
 
 TermIDE работает нативно на Windows 10+ через ConPTY. Для лучшего опыта используйте **Windows Terminal**.
 
-1. Скачайте `termide-0.28.0-x86_64-pc-windows-msvc.zip` с [GitHub Releases](https://github.com/termide/termide/releases).
+1. Скачайте `termide-0.29.0-x86_64-pc-windows-msvc.zip` с [GitHub Releases](https://github.com/termide/termide/releases).
 2. Распакуйте архив.
 3. Запустите `termide.exe` в Windows Terminal.
 
 Конфигурация хранится в `%APPDATA%\termide\` (config, сессии) и
 `%LOCALAPPDATA%\termide\cache\` (логи).
 
-Либо в **WSL/WSL2** используйте сборку Linux x86_64 (`termide-0.28.0-x86_64-unknown-linux-gnu.tar.gz`), как на любом Linux.
+Либо в **WSL/WSL2** используйте сборку Linux x86_64 (`termide-0.29.0-x86_64-unknown-linux-gnu.tar.gz`), как на любом Linux.
 
 </details>
 
@@ -143,8 +143,8 @@ TermIDE работает нативно на Windows 10+ через ConPTY. Дл
 
 ```bash
 # Только x86_64 (для ARM64 используйте tar.gz выше)
-wget https://github.com/termide/termide/releases/latest/download/termide_0.28.0-1_amd64.deb
-sudo dpkg -i termide_0.28.0-1_amd64.deb
+wget https://github.com/termide/termide/releases/latest/download/termide_0.29.0-1_amd64.deb
+sudo dpkg -i termide_0.29.0-1_amd64.deb
 ```
 
 </details>
@@ -156,8 +156,8 @@ sudo dpkg -i termide_0.28.0-1_amd64.deb
 
 ```bash
 # Только x86_64 (для ARM64 используйте tar.gz выше)
-wget https://github.com/termide/termide/releases/latest/download/termide-0.28.0-1.x86_64.rpm
-sudo rpm -i termide-0.28.0-1.x86_64.rpm
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.0-1.x86_64.rpm
+sudo rpm -i termide-0.29.0-1.x86_64.rpm
 ```
 
 </details>
@@ -228,8 +228,8 @@ nix profile install github:termide/termide
 
 ```bash
 pkg install git openssh   # инструменты, которые вызывает termide (а также нужные LSP-серверы)
-wget https://github.com/termide/termide/releases/latest/download/termide-0.28.0-aarch64-unknown-linux-musl.tar.gz
-tar xzf termide-0.28.0-aarch64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.0-aarch64-unknown-linux-musl.tar.gz
+tar xzf termide-0.29.0-aarch64-unknown-linux-musl.tar.gz
 ./termide
 ```
 
@@ -288,8 +288,8 @@ cargo build --release
 Проще всего взять готовый tarball из релиза:
 
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.28.0-x86_64-unknown-linux-musl.tar.gz
-tar xzf termide-0.28.0-x86_64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.0-x86_64-unknown-linux-musl.tar.gz
+tar xzf termide-0.29.0-x86_64-unknown-linux-musl.tar.gz
 ./termide
 
 # Проверка полной статичности — нет разделяемых библиотек
