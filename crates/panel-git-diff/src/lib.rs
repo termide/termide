@@ -16,7 +16,8 @@ use unicode_width::UnicodeWidthStr;
 
 use termide_config::{is_go_end, is_go_home, is_move_down, is_move_up, Config};
 use termide_core::{
-    HotkeyTable, Panel, PanelEvent, RenderContext, SessionPanel, ThemeColors, WidthPreference,
+    CommandResult, HotkeyTable, Panel, PanelCommand, PanelEvent, RenderContext, SessionPanel,
+    ThemeColors, WidthPreference,
 };
 use termide_git::{self as git};
 use termide_theme::Theme;
@@ -959,6 +960,18 @@ impl GitDiffPanel {
 impl Panel for GitDiffPanel {
     fn name(&self) -> &'static str {
         "git_diff"
+    }
+
+    fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
+        match cmd {
+            // Reloaded on focus gain (and Ctrl+R) so the diff picks up changes
+            // made outside the panel without a manual refresh.
+            PanelCommand::Reload | PanelCommand::RefreshIfStale => {
+                self.refresh();
+                CommandResult::NeedsRedraw(true)
+            }
+            _ => CommandResult::None,
+        }
     }
 
     fn width_preference(&self) -> WidthPreference {

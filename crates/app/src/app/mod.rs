@@ -75,6 +75,10 @@ pub struct App {
     /// with explicit file arguments ($EDITOR mode), so editing a commit
     /// message or crontab never restores or overwrites the project session.
     persist_session: bool,
+    /// Focus signature (group index, active panel name) from the previous
+    /// input, used to detect when focus moves to a git panel so it can be
+    /// refreshed automatically (no manual Ctrl+R).
+    last_focus_sig: Option<(usize, String)>,
 }
 
 impl App {
@@ -148,6 +152,7 @@ impl App {
             command_palette_actions: None,
             normalizer: termide_keyboard::KeyNormalizer::default(),
             persist_session: true,
+            last_focus_sig: None,
         }
     }
 
@@ -241,6 +246,7 @@ impl App {
             command_palette_actions: None,
             normalizer: termide_keyboard::KeyNormalizer::new(caps),
             persist_session: true,
+            last_focus_sig: None,
         }
     }
 
@@ -487,6 +493,29 @@ impl App {
     }
 
     /// Run the main application loop
+    /// When input moves focus to a git panel, reload it so changes made
+    /// outside the panel appear automatically (no manual Ctrl+R). Detected by
+    /// comparing a (focus group, active panel name) signature across inputs.
+    fn refresh_git_panel_on_focus_change(&mut self) {
+        let sig = self
+            .layout_manager
+            .active_panel()
+            .map(|p| (self.layout_manager.focus, p.name().to_string()));
+        if sig == self.last_focus_sig {
+            return;
+        }
+        self.last_focus_sig = sig.clone();
+        if let Some((_, name)) = sig {
+            if name == "git_status" || name == "git_diff" {
+                if let Some(panel) = self.layout_manager.active_panel_mut() {
+                    if panel.handle_command(PanelCommand::Reload).needs_redraw() {
+                        self.state.needs_redraw = true;
+                    }
+                }
+            }
+        }
+    }
+
     pub fn run<B: Backend>(
         &mut self,
         terminal: &mut Terminal<B>,
@@ -508,6 +537,7 @@ impl App {
                         termide_config::constants::EVENT_HANDLER_INTERVAL_MS,
                     ));
                     self.handle_key_event(key)?;
+                    self.refresh_git_panel_on_focus_change();
                     self.state.needs_redraw = true;
                 }
                 Event::Mouse(mouse) => {
@@ -522,6 +552,7 @@ impl App {
                         ));
                     }
                     self.handle_mouse_event(mouse)?;
+                    self.refresh_git_panel_on_focus_change();
                     if !is_moved {
                         self.state.needs_redraw = true;
                     }
