@@ -1,43 +1,49 @@
-//! Mouse click tracking for double-click detection.
-//!
-//! Provides functionality to detect double-clicks based on timing and position.
+//! Mouse click tracking for multi-click detection (double = word, triple =
+//! line), based on timing and position.
 
 use std::time::Instant;
 
-/// Double-click detection time threshold in milliseconds.
-const DOUBLE_CLICK_THRESHOLD_MS: u128 = 500;
+/// Consecutive-click time threshold in milliseconds.
+const MULTI_CLICK_THRESHOLD_MS: u128 = 500;
 
-/// Mouse click tracking for double-click detection.
+/// Mouse click tracking for double/triple-click detection.
 #[derive(Default)]
 pub(crate) struct ClickTracker {
     /// Last click time.
     time: Option<Instant>,
     /// Last click position (line, column).
     position: Option<(usize, usize)>,
-    /// Skip next MouseUp event (after double-click word selection).
+    /// Consecutive-click count at `position` (1, 2, or 3; cycles).
+    count: u8,
+    /// Skip next MouseUp event (after a word/line selection).
     pub(crate) skip_next_up: bool,
 }
 
 impl ClickTracker {
-    /// Check if this click is a double-click (same position within threshold).
-    pub(crate) fn is_double_click(&self, line: usize, col: usize) -> bool {
-        if let (Some(last_time), Some((last_line, last_col))) = (self.time, self.position) {
-            let elapsed = Instant::now().duration_since(last_time);
-            elapsed.as_millis() < DOUBLE_CLICK_THRESHOLD_MS && last_line == line && last_col == col
-        } else {
-            false
-        }
-    }
-
-    /// Record a click at the given position.
-    pub(crate) fn record_click(&mut self, line: usize, col: usize) {
-        self.time = Some(Instant::now());
+    /// Register a click and return the consecutive-click count at this
+    /// position: 1 (single), 2 (double), 3 (triple), cycling back to 1 on the
+    /// fourth. A click at a different position or after the timeout resets to 1.
+    pub(crate) fn click(&mut self, line: usize, col: usize) -> u8 {
+        let now = Instant::now();
+        let consecutive = match (self.time, self.position) {
+            (Some(t), Some(pos))
+                if pos == (line, col)
+                    && now.duration_since(t).as_millis() < MULTI_CLICK_THRESHOLD_MS =>
+            {
+                (self.count % 3) + 1
+            }
+            _ => 1,
+        };
+        self.time = Some(now);
         self.position = Some((line, col));
+        self.count = consecutive;
+        consecutive
     }
 
-    /// Reset click tracking (e.g., after double-click).
+    /// Reset click tracking.
     pub(crate) fn reset(&mut self) {
         self.time = None;
         self.position = None;
+        self.count = 0;
     }
 }

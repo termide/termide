@@ -7,7 +7,7 @@
 //! - Newline insertion with auto-indentation
 
 use anyhow::Result;
-use termide_buffer::Cursor;
+use termide_buffer::{Cursor, Selection};
 
 use crate::{auto_pairs, clipboard, cursor, selection, text_editing};
 
@@ -275,6 +275,30 @@ impl Editor {
             self.invalidate_cache_after_edit(result.start_line, result.is_multiline);
         }
         Ok(())
+    }
+
+    /// Delete from the cursor back to the start of the previous word
+    /// (Ctrl+Backspace). No-op at the buffer start.
+    pub(crate) fn backspace_word(&mut self) -> Result<()> {
+        let mut target = self.cursor;
+        cursor::physical::move_word_backward(&mut target, &self.buffer);
+        if target == self.cursor {
+            return Ok(());
+        }
+        self.selection = Some(Selection::new(target, self.cursor));
+        self.delete_selection()
+    }
+
+    /// Delete from the cursor forward to the end of the next word
+    /// (Ctrl+Delete). No-op at the buffer end.
+    pub(crate) fn delete_word(&mut self) -> Result<()> {
+        let mut target = self.cursor;
+        cursor::physical::move_word_forward(&mut target, &self.buffer);
+        if target == self.cursor {
+            return Ok(());
+        }
+        self.selection = Some(Selection::new(self.cursor, target));
+        self.delete_selection()
     }
 
     // =========================================================================

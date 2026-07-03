@@ -418,26 +418,21 @@ impl Editor {
                 // Start selection drag tracking for auto-scroll
                 self.input.selection_drag_active = true;
 
-                if self
-                    .input
-                    .click_tracker
-                    .is_double_click(target_line, target_col)
-                {
-                    let temp_cursor = Cursor::at(target_line, target_col);
-                    if let Some((new_selection, new_cursor)) =
-                        selection::select_word(&self.buffer, &temp_cursor)
-                    {
-                        self.selection = Some(new_selection);
-                        self.cursor = new_cursor;
-                        self.input.click_tracker.skip_next_up = true;
-                    }
-                    self.input.click_tracker.reset();
+                // 1 = single (place cursor), 2 = select word, 3 = select line.
+                let clicks = self.input.click_tracker.click(target_line, target_col);
+                let temp_cursor = Cursor::at(target_line, target_col);
+                let multi = match clicks {
+                    2 => selection::select_word(&self.buffer, &temp_cursor),
+                    3 => selection::select_line(&self.buffer, &temp_cursor),
+                    _ => None,
+                };
+                if let Some((new_selection, new_cursor)) = multi {
+                    self.selection = Some(new_selection);
+                    self.cursor = new_cursor;
+                    self.input.click_tracker.skip_next_up = true;
                 } else {
-                    self.cursor = Cursor::at(target_line, target_col);
+                    self.cursor = temp_cursor;
                     self.selection = Some(Selection::new(self.cursor, self.cursor));
-                    self.input
-                        .click_tracker
-                        .record_click(target_line, target_col);
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) => {

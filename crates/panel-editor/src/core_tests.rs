@@ -383,3 +383,37 @@ fn count_virtual_rows_counts_deletion_markers() {
     assert_eq!(editor.count_virtual_rows_between(0, 3, 80), 2);
     assert_eq!(editor.count_virtual_rows_between(2, 3, 80), 0);
 }
+
+#[test]
+fn backspace_word_deletes_previous_word() {
+    let (mut editor, _f) = create_editor_with_content("hello world");
+    editor.cursor = termide_buffer::Cursor::at(0, 11); // end of "world"
+    editor.handle_delete_key(|e| e.backspace_word()).unwrap();
+    assert_eq!(editor.buffer.text(), "hello ");
+}
+
+#[test]
+fn backspace_word_at_start_is_noop() {
+    let (mut editor, _f) = create_editor_with_content("abc");
+    editor.cursor = termide_buffer::Cursor::at(0, 0);
+    editor.handle_delete_key(|e| e.backspace_word()).unwrap();
+    assert_eq!(editor.buffer.text(), "abc");
+}
+
+#[test]
+fn delete_word_forward_deletes_next_word() {
+    let (mut editor, _f) = create_editor_with_content("hello world");
+    editor.cursor = termide_buffer::Cursor::at(0, 0); // start of "hello"
+    editor.handle_delete_key(|e| e.delete_word()).unwrap();
+    // Forward word delete removes up to the start of the next word.
+    assert_eq!(editor.buffer.text(), "world");
+}
+
+#[test]
+fn select_line_spans_whole_line() {
+    let (editor, _f) = create_editor_with_content("hello world\nsecond");
+    let cur = termide_buffer::Cursor::at(0, 3);
+    let (sel, new_cur) = crate::selection::select_line(&editor.buffer, &cur).unwrap();
+    assert_eq!(sel.start().column, 0);
+    assert_eq!(new_cur.column, 11); // end of "hello world"
+}

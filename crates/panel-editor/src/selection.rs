@@ -152,3 +152,14 @@ pub fn select_word(buffer: &TextBuffer, cursor: &Cursor) -> Option<(Selection, C
 
     Some((Selection::new(start, end), end))
 }
+
+/// Select the whole line at the cursor (triple-click). Covers the line
+/// content from column 0 to end of line; the cursor lands at line end.
+pub fn select_line(buffer: &TextBuffer, cursor: &Cursor) -> Option<(Selection, Cursor)> {
+    let line_text = buffer.line(cursor.line)?;
+    // `line()` includes the trailing newline; exclude it from the selection.
+    let end_col = line_text.trim_end_matches(['\n', '\r']).chars().count();
+    let start = Cursor::at(cursor.line, 0);
+    let end = Cursor::at(cursor.line, end_col);
+    Some((Selection::new(start, end), end))
+}

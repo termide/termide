@@ -61,6 +61,10 @@ pub enum EditorCommand {
     InsertNewline,
     Backspace,
     Delete,
+    /// Delete from cursor to start of previous word (Ctrl+Backspace).
+    DeleteWordBackward,
+    /// Delete from cursor to end of next word (Ctrl+Delete).
+    DeleteWordForward,
 
     // Undo/Redo
     Undo,
@@ -389,6 +393,19 @@ impl EditorCommand {
             (KeyCode::Enter, KeyModifiers::NONE) if !read_only => Self::InsertNewline,
             (KeyCode::Backspace, KeyModifiers::NONE) if !read_only => Self::Backspace,
             (KeyCode::Delete, KeyModifiers::NONE) if !read_only => Self::Delete,
+            // Word delete: Ctrl+Backspace / Alt+Backspace (macOS) back, Ctrl+Delete forward.
+            (KeyCode::Backspace, m)
+                if !read_only
+                    && (m.contains(KeyModifiers::CONTROL) || m.contains(KeyModifiers::ALT)) =>
+            {
+                Self::DeleteWordBackward
+            }
+            (KeyCode::Delete, m)
+                if !read_only
+                    && (m.contains(KeyModifiers::CONTROL) || m.contains(KeyModifiers::ALT)) =>
+            {
+                Self::DeleteWordForward
+            }
 
             // Esc - close search
             (KeyCode::Esc, KeyModifiers::NONE) if has_search => Self::CloseSearch,
@@ -586,6 +603,8 @@ impl EditorCommand {
             Self::InsertNewline => editor.insert_newline(),
             Self::Backspace => editor.handle_delete_key(|e| e.backspace()),
             Self::Delete => editor.handle_delete_key(|e| e.delete()),
+            Self::DeleteWordBackward => editor.handle_delete_key(|e| e.backspace_word()),
+            Self::DeleteWordForward => editor.handle_delete_key(|e| e.delete_word()),
 
             // Undo/Redo
             Self::Undo => editor.handle_undo_redo(|buf| buf.undo()),
