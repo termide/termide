@@ -737,10 +737,13 @@ pub fn parse_pie(src: &str) -> Pie {
 // Class diagram
 // ===========================================================================
 
-/// One class: its name and member lines (attributes + methods, verbatim).
+/// One class: its id, display label (defaults to the id), and member lines
+/// (attributes + methods, verbatim).
 #[derive(Debug, Clone, Default)]
 pub struct ClassEntry {
     pub name: String,
+    /// Title shown in the box; set from `class Id["Label"]`, else equals `name`.
+    pub label: String,
     pub members: Vec<String>,
 }
 
@@ -765,6 +768,7 @@ impl ClassDiagram {
         }
         self.entries.push(ClassEntry {
             name: name.to_string(),
+            label: name.to_string(),
             members: Vec::new(),
         });
         self.entries.len() - 1
@@ -821,13 +825,29 @@ pub fn parse_class(src: &str) -> ClassDiagram {
             continue;
         }
         if let Some(rest) = line.strip_prefix("class ") {
+            // `class Id`, `class Id {`, `class Id["Label"]`, `class Id["Label"] {`
             let rest = rest.trim();
-            if let Some(name) = rest.strip_suffix('{') {
-                let name = name.trim();
-                d.entry(name);
-                block = Some(name.to_string());
-            } else {
-                d.entry(rest);
+            let (decl, opens_block) = match rest.strip_suffix('{') {
+                Some(d) => (d.trim(), true),
+                None => (rest, false),
+            };
+            let (id, label) = match decl.find('[') {
+                Some(br) => {
+                    let id = decl[..br].trim();
+                    let label =
+                        decl[br..].trim_matches(|c| c == '[' || c == ']' || c == '"' || c == ' ');
+                    (id, Some(label.to_string()))
+                }
+                None => (decl, None),
+            };
+            let idx = d.entry(id);
+            if let Some(label) = label {
+                if !label.is_empty() {
+                    d.entries[idx].label = label;
+                }
+            }
+            if opens_block {
+                block = Some(id.to_string());
             }
             continue;
         }
