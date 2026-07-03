@@ -856,17 +856,21 @@ impl GitStatusPanel {
             }
             Section::RepoSelector => {
                 if self.repo_dropdown_open {
+                    // When filtering, resolve the highlighted position to a real
+                    // repo index; if the filter matches nothing, close without
+                    // switching instead of falling back to index 0.
                     let idx = if self.show_repo_filter {
                         self.filtered_repo_indices()
                             .get(self.dropdown_cursor)
                             .copied()
-                            .unwrap_or(0)
                     } else {
-                        self.dropdown_cursor
+                        Some(self.dropdown_cursor)
                     };
-                    if idx != self.repo_manager.selected_index() {
-                        self.repo_manager.select(idx);
-                        self.refresh();
+                    if let Some(idx) = idx {
+                        if idx != self.repo_manager.selected_index() {
+                            self.repo_manager.select(idx);
+                            self.refresh();
+                        }
                     }
                     self.repo_dropdown_open = false;
                     self.reset_repo_filter();
@@ -880,15 +884,19 @@ impl GitStatusPanel {
             }
             Section::BranchSelector => {
                 if self.branch_dropdown_open {
+                    // When filtering, resolve the highlighted position to a real
+                    // branch index; if the filter matches nothing, close without
+                    // checking out instead of falling back to index 0.
                     let idx = if self.show_branch_filter {
                         self.filtered_branch_indices()
                             .get(self.dropdown_cursor)
                             .copied()
-                            .unwrap_or(0)
                     } else {
-                        self.dropdown_cursor
+                        Some(self.dropdown_cursor)
                     };
-                    self.switch_to_branch(idx);
+                    if let Some(idx) = idx {
+                        self.switch_to_branch(idx);
+                    }
                     self.branch_dropdown_open = false;
                     self.reset_branch_filter();
                 } else {
@@ -1830,5 +1838,44 @@ impl Panel for GitStatusPanel {
             }
         }
         events
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn panel() -> GitStatusPanel {
+        GitStatusPanel::new(&[])
+    }
+
+    #[test]
+    fn empty_branch_filter_returns_all_indices() {
+        let mut p = panel();
+        p.branches = vec!["main".into(), "dev".into()];
+        assert_eq!(p.filtered_branch_indices(), vec![0, 1]);
+    }
+
+    #[test]
+    fn branch_filter_matches_case_insensitive_substrings() {
+        let mut p = panel();
+        p.branches = vec![
+            "main".into(),
+            "feature/login".into(),
+            "Feature/Logout".into(),
+        ];
+        p.branch_filter = "log".into();
+        assert_eq!(p.filtered_branch_indices(), vec![1, 2]);
+    }
+
+    #[test]
+    fn branch_filter_with_no_match_is_empty() {
+        // The Enter handler relies on this: an empty result means `.get(cursor)`
+        // yields None, so no branch is checked out (previously it fell back to
+        // index 0 and checked out the first branch).
+        let mut p = panel();
+        p.branches = vec!["main".into(), "dev".into()];
+        p.branch_filter = "zzz".into();
+        assert!(p.filtered_branch_indices().is_empty());
     }
 }

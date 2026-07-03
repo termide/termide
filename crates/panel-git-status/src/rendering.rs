@@ -19,15 +19,9 @@ use crate::GitStatusPanel;
 
 /// Calculate dropdown x and width so that the full item text is visible.
 /// Tries to expand rightward first (up to `max_right`), then leftward
-/// (clamped to `min_x`). Falls back to the available space if neither
+/// (clamped to the screen edge). Falls back to the available space if neither
 /// direction has enough room.
-fn expand_dropdown(
-    x: u16,
-    max_width: u16,
-    min_x: u16,
-    max_right: u16,
-    items: &[String],
-) -> (u16, u16) {
+fn expand_dropdown(x: u16, max_width: u16, max_right: u16, items: &[String]) -> (u16, u16) {
     let max_item_width = items.iter().map(|s| s.width()).max().unwrap_or(10);
     // +4 for borders (2) + inner padding (2)
     let needed = (max_item_width + 4) as u16;
@@ -43,11 +37,185 @@ fn expand_dropdown(
         // Expand leftward with remaining extra
         let remaining = extra.saturating_sub(right_extra);
         if remaining > 0 {
-            new_x = x.saturating_sub(remaining).max(min_x);
+            new_x = x.saturating_sub(remaining);
             new_width = (x + max_width).saturating_sub(new_x);
         }
         (new_x, new_width)
     }
+}
+
+/// Truncate `s` to at most `max_width` display columns, returning a byte slice
+/// aligned to a char boundary and respecting unicode widths.
+fn truncate_to_width(s: &str, max_width: usize) -> &str {
+    if s.width() <= max_width {
+        return s;
+    }
+    let mut end = 0;
+    let mut w = 0;
+    for ch in s.chars() {
+        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if w + cw > max_width {
+            break;
+        }
+        w += cw;
+        end += ch.len_utf8();
+    }
+    &s[..end]
+}
+
+/// Render a selector dropdown with a filter input row on top, shared by the
+/// repo and branch selectors.
+///
+/// The caller supplies the pre-filtered display `items`, the current `filter`
+/// text, the highlighted `cursor` position, and `selected_pos` — the index
+/// within `items` that is the active selection (if it is in the filtered set).
+/// Returns the dropdown's screen `Rect` (for click hit-testing) and the applied
+/// vertical scroll offset.
+#[allow(clippy::too_many_arguments)]
+fn render_filtered_dropdown(
+    buf: &mut Buffer,
+    theme: &ThemeColors,
+    anchor_x: u16,
+    max_width: u16,
+    max_right: u16,
+    dropdown_y: u16,
+    max_dropdown_height: usize,
+    items: &[String],
+    filter: &str,
+    cursor: usize,
+    selected_pos: Option<usize>,
+) -> (Rect, usize) {
+    // Reserve 1 row for filter input, 1 for separator.
+    let filter_rows: u16 = 2;
+    let list_max_height = max_dropdown_height.saturating_sub(filter_rows as usize);
+    let visible_count = items.len().min(list_max_height);
+    let scroll_offset = if cursor >= visible_count {
+        cursor - visible_count + 1
+    } else {
+        0
+    };
+
+    let total_height = (visible_count as u16) + filter_rows + 2; // +2 for borders
+    let (dropdown_x, dropdown_width) = expand_dropdown(anchor_x, max_width, max_right, items);
+    let area = Rect {
+        x: dropdown_x,
+        y: dropdown_y,
+        width: dropdown_width,
+        height: total_height,
+    };
+
+    // Draw border and background
+    let border_style = Style::default().fg(theme.border_focused);
+    let bg_style = Style::default().bg(theme.bg);
+    for dy in 0..total_height {
+        for dx in 0..dropdown_width {
+            let cell = &mut buf[(dropdown_x + dx, dropdown_y + dy)];
+            cell.set_style(bg_style);
+            if dy == 0 || dy == total_height - 1 {
+                if dx == 0 {
+                    cell.set_symbol(if dy == 0 { "┌" } else { "└" });
+                } else if dx == dropdown_width - 1 {
+                    cell.set_symbol(if dy == 0 { "┐" } else { "┘" });
+                } else {
+                    cell.set_symbol("─");
+                }
+                cell.set_style(border_style);
+            } else if dx == 0 || dx == dropdown_width - 1 {
+                cell.set_symbol("│").set_style(border_style);
+            } else {
+                cell.set_symbol(" ");
+            }
+        }
+    }
+
+    let inner_width = dropdown_width.saturating_sub(2) as usize;
+
+    // Filter row (row 1 inside border)
+    let filter_text = format!(" Filter: {}", filter);
+    let padding_len = inner_width.saturating_sub(filter_text.width() + 1);
+    let filter_style = Style::default().fg(theme.fg);
+    let cursor_style = Style::default()
+        .fg(theme.bg)
+        .bg(theme.fg)
+        .add_modifier(Modifier::BOLD);
+    let filter_line = Line::from(vec![
+        Span::styled(filter_text, filter_style),
+        Span::styled("█", cursor_style),
+        Span::styled(" ".repeat(padding_len), filter_style),
+    ]);
+    ratatui::widgets::Paragraph::new(filter_line).render(
+        Rect {
+            x: dropdown_x + 1,
+            y: dropdown_y + 1,
+            width: inner_width as u16,
+            height: 1,
+        },
+        buf,
+    );
+
+    // Separator row (row 2 inside border)
+    let sep_y = dropdown_y + 2;
+    for dx in 1..dropdown_width - 1 {
+        buf[(dropdown_x + dx, sep_y)]
+            .set_symbol("─")
+            .set_style(Style::default().fg(theme.border));
+    }
+
+    // Item list (below separator)
+    let list_y = dropdown_y + filter_rows + 1;
+    for (i, item) in items
+        .iter()
+        .skip(scroll_offset)
+        .take(visible_count)
+        .enumerate()
+    {
+        let item_y = list_y + i as u16;
+        let item_idx = scroll_offset + i;
+        let style = if item_idx == cursor {
+            Style::default()
+                .fg(theme.selection_fg)
+                .bg(theme.selection_bg)
+                .remove_modifier(Modifier::all())
+        } else if selected_pos == Some(item_idx) {
+            Style::default()
+                .fg(theme.cursor)
+                .remove_modifier(Modifier::all())
+        } else {
+            Style::default()
+                .fg(theme.fg)
+                .remove_modifier(Modifier::all())
+        };
+
+        // Clear line and draw item
+        for dx in 1..dropdown_width - 1 {
+            buf[(dropdown_x + dx, item_y)]
+                .set_symbol(" ")
+                .set_style(style);
+        }
+        buf.set_string(
+            dropdown_x + 1,
+            item_y,
+            truncate_to_width(item, inner_width),
+            style,
+        );
+    }
+
+    // Scrollbar
+    if visible_count < items.len() {
+        ScrollBar::render(
+            buf,
+            dropdown_x + dropdown_width - 1,
+            list_y,
+            visible_count as u16,
+            scroll_offset,
+            visible_count,
+            items.len(),
+            theme,
+            true,
+        );
+    }
+
+    (area, scroll_offset)
 }
 
 impl GitStatusPanel {
@@ -283,162 +451,22 @@ impl GitStatusPanel {
                     .map(|&i| repo_names[i].clone())
                     .collect();
                 let selected_idx = self.repo_manager.selected_index();
-
-                // Reserve 1 row for filter input, 1 for separator
-                let filter_rows: u16 = 2;
-                let list_max_height = max_dropdown_height.saturating_sub(filter_rows as usize);
-                let visible_count = filtered_repos.len().min(list_max_height);
-                let scroll_offset = if self.dropdown_cursor >= visible_count {
-                    self.dropdown_cursor - visible_count + 1
-                } else {
-                    0
-                };
-                self.dropdown_scroll = scroll_offset;
-
-                let total_height = (visible_count as u16) + filter_rows + 2; // +2 for borders
-                let (dropdown_x, dropdown_width) = expand_dropdown(
+                let selected_pos = filtered_indices.iter().position(|&i| i == selected_idx);
+                let (area, scroll_offset) = render_filtered_dropdown(
+                    buf,
+                    &theme,
                     content_area.x,
                     content_area.width / 2,
-                    0,
                     content_area.x + content_area.width,
+                    dropdown_y,
+                    max_dropdown_height,
                     &filtered_repos,
+                    &self.repo_filter,
+                    self.dropdown_cursor,
+                    selected_pos,
                 );
-                self.repo_dropdown_area = Some(Rect {
-                    x: dropdown_x,
-                    y: dropdown_y,
-                    width: dropdown_width,
-                    height: total_height,
-                });
-
-                // Draw border and background
-                let border_style = Style::default().fg(theme.border_focused);
-                let bg_style = Style::default().bg(theme.bg);
-                for dy in 0..total_height {
-                    for dx in 0..dropdown_width {
-                        let cell = &mut buf[(dropdown_x + dx, dropdown_y + dy)];
-                        cell.set_style(bg_style);
-                        if dy == 0 || dy == total_height - 1 {
-                            if dx == 0 {
-                                cell.set_symbol(if dy == 0 { "┌" } else { "└" });
-                            } else if dx == dropdown_width - 1 {
-                                cell.set_symbol(if dy == 0 { "┐" } else { "┘" });
-                            } else {
-                                cell.set_symbol("─");
-                            }
-                            cell.set_style(border_style);
-                        } else if dx == 0 || dx == dropdown_width - 1 {
-                            cell.set_symbol("│").set_style(border_style);
-                        } else {
-                            cell.set_symbol(" ");
-                        }
-                    }
-                }
-
-                // Filter row (row 1 inside border)
-                let filter_y = dropdown_y + 1;
-                let filter_label = " Filter: ";
-                let filter_text = format!("{}{}", filter_label, self.repo_filter);
-                let padding_len =
-                    (dropdown_width as usize - 2).saturating_sub(filter_text.width() + 1);
-                let padding = " ".repeat(padding_len);
-
-                let filter_style = Style::default().fg(theme.fg);
-                let cursor_style = Style::default()
-                    .fg(theme.bg)
-                    .bg(theme.fg)
-                    .add_modifier(Modifier::BOLD);
-
-                let filter_line = Line::from(vec![
-                    Span::styled(filter_text, filter_style),
-                    Span::styled("█", cursor_style),
-                    Span::styled(padding, filter_style),
-                ]);
-                ratatui::widgets::Paragraph::new(filter_line).render(
-                    Rect {
-                        x: dropdown_x + 1,
-                        y: filter_y,
-                        width: dropdown_width - 2,
-                        height: 1,
-                    },
-                    buf,
-                );
-
-                // Separator row (row 2 inside border)
-                let sep_y = dropdown_y + 2;
-                for dx in 1..dropdown_width - 1 {
-                    buf[(dropdown_x + dx, sep_y)]
-                        .set_symbol("─")
-                        .set_style(Style::default().fg(theme.border));
-                }
-
-                // Repo list (below separator)
-                let list_y = dropdown_y + filter_rows + 1;
-                for (i, item) in filtered_repos
-                    .iter()
-                    .skip(scroll_offset)
-                    .take(visible_count)
-                    .enumerate()
-                {
-                    let item_y = list_y + i as u16;
-                    let item_idx = scroll_offset + i;
-                    let original_idx = filtered_indices[item_idx];
-                    let is_cursor = item_idx == self.dropdown_cursor;
-                    let is_selected = original_idx == selected_idx;
-
-                    let style = if is_cursor {
-                        Style::default()
-                            .fg(theme.selection_fg)
-                            .bg(theme.selection_bg)
-                            .remove_modifier(Modifier::all())
-                    } else if is_selected {
-                        Style::default()
-                            .fg(theme.cursor)
-                            .remove_modifier(Modifier::all())
-                    } else {
-                        Style::default()
-                            .fg(theme.fg)
-                            .remove_modifier(Modifier::all())
-                    };
-
-                    // Clear line and draw item
-                    for dx in 1..dropdown_width - 1 {
-                        buf[(dropdown_x + dx, item_y)]
-                            .set_symbol(" ")
-                            .set_style(style);
-                    }
-                    let max_item_width = (dropdown_width - 2) as usize;
-                    let display_item: std::borrow::Cow<str> = if item.width() > max_item_width {
-                        let mut end = 0;
-                        let mut w = 0;
-                        for ch in item.chars() {
-                            let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-                            if w + cw > max_item_width {
-                                break;
-                            }
-                            w += cw;
-                            end += ch.len_utf8();
-                        }
-                        std::borrow::Cow::Borrowed(&item[..end])
-                    } else {
-                        std::borrow::Cow::Borrowed(item)
-                    };
-                    buf.set_string(dropdown_x + 1, item_y, display_item, style);
-                }
-
-                // Scrollbar
-                if visible_count < filtered_repos.len() {
-                    ScrollBar::render(
-                        buf,
-                        dropdown_x + dropdown_width - 1,
-                        list_y,
-                        visible_count as u16,
-                        scroll_offset,
-                        visible_count,
-                        filtered_repos.len(),
-                        &theme,
-                        true,
-                    );
-                }
+                self.dropdown_scroll = scroll_offset;
+                self.repo_dropdown_area = Some(area);
             } else {
                 // Normal dropdown (no filter)
                 let visible_count = repo_names.len().min(max_dropdown_height);
@@ -451,7 +479,6 @@ impl GitStatusPanel {
                 let (dropdown_x, dropdown_width) = expand_dropdown(
                     content_area.x,
                     content_area.width / 2,
-                    0,
                     content_area.x + content_area.width,
                     &repo_names,
                 );
@@ -492,162 +519,24 @@ impl GitStatusPanel {
                     .iter()
                     .position(|b| Some(b.as_str()) == self.branch.as_deref())
                     .unwrap_or(0);
-
-                // Reserve 1 row for filter input, 1 for separator
-                let filter_rows: u16 = 2;
-                let list_max_height = max_dropdown_height.saturating_sub(filter_rows as usize);
-                let visible_count = filtered_branches.len().min(list_max_height);
-                let scroll_offset = if self.dropdown_cursor >= visible_count {
-                    self.dropdown_cursor - visible_count + 1
-                } else {
-                    0
-                };
-                self.dropdown_scroll = scroll_offset;
-
-                let total_height = (visible_count as u16) + filter_rows + 2; // +2 for borders
-                let (dropdown_x, dropdown_width) = expand_dropdown(
+                let selected_pos = filtered_indices
+                    .iter()
+                    .position(|&i| i == current_branch_idx);
+                let (area, scroll_offset) = render_filtered_dropdown(
+                    buf,
+                    &theme,
                     branch_x,
                     branch_max_width,
-                    0,
                     content_area.x + content_area.width,
+                    dropdown_y,
+                    max_dropdown_height,
                     &filtered_branches,
+                    &self.branch_filter,
+                    self.dropdown_cursor,
+                    selected_pos,
                 );
-                self.branch_dropdown_area = Some(Rect {
-                    x: dropdown_x,
-                    y: dropdown_y,
-                    width: dropdown_width,
-                    height: total_height,
-                });
-
-                // Draw border and background
-                let border_style = Style::default().fg(theme.border_focused);
-                let bg_style = Style::default().bg(theme.bg);
-                for dy in 0..total_height {
-                    for dx in 0..dropdown_width {
-                        let cell = &mut buf[(dropdown_x + dx, dropdown_y + dy)];
-                        cell.set_style(bg_style);
-                        if dy == 0 || dy == total_height - 1 {
-                            if dx == 0 {
-                                cell.set_symbol(if dy == 0 { "┌" } else { "└" });
-                            } else if dx == dropdown_width - 1 {
-                                cell.set_symbol(if dy == 0 { "┐" } else { "┘" });
-                            } else {
-                                cell.set_symbol("─");
-                            }
-                            cell.set_style(border_style);
-                        } else if dx == 0 || dx == dropdown_width - 1 {
-                            cell.set_symbol("│").set_style(border_style);
-                        } else {
-                            cell.set_symbol(" ");
-                        }
-                    }
-                }
-
-                // Filter row (row 1 inside border)
-                let filter_y = dropdown_y + 1;
-                let filter_label = " Filter: ";
-                let filter_text = format!("{}{}", filter_label, self.branch_filter);
-                let padding_len =
-                    (dropdown_width as usize - 2).saturating_sub(filter_text.width() + 1);
-                let padding = " ".repeat(padding_len);
-
-                let filter_style = Style::default().fg(theme.fg);
-                let cursor_style = Style::default()
-                    .fg(theme.bg)
-                    .bg(theme.fg)
-                    .add_modifier(Modifier::BOLD);
-
-                let filter_line = Line::from(vec![
-                    Span::styled(filter_text, filter_style),
-                    Span::styled("█", cursor_style),
-                    Span::styled(padding, filter_style),
-                ]);
-                ratatui::widgets::Paragraph::new(filter_line).render(
-                    Rect {
-                        x: dropdown_x + 1,
-                        y: filter_y,
-                        width: dropdown_width - 2,
-                        height: 1,
-                    },
-                    buf,
-                );
-
-                // Separator row (row 2 inside border)
-                let sep_y = dropdown_y + 2;
-                for dx in 1..dropdown_width - 1 {
-                    buf[(dropdown_x + dx, sep_y)]
-                        .set_symbol("─")
-                        .set_style(Style::default().fg(theme.border));
-                }
-
-                // Branch list (below separator)
-                let list_y = dropdown_y + filter_rows + 1;
-                for (i, item) in filtered_branches
-                    .iter()
-                    .skip(scroll_offset)
-                    .take(visible_count)
-                    .enumerate()
-                {
-                    let item_y = list_y + i as u16;
-                    let item_idx = scroll_offset + i;
-                    let original_idx = filtered_indices[item_idx];
-                    let is_cursor = item_idx == self.dropdown_cursor;
-                    let is_selected = original_idx == current_branch_idx;
-
-                    let style = if is_cursor {
-                        Style::default()
-                            .fg(theme.selection_fg)
-                            .bg(theme.selection_bg)
-                            .remove_modifier(Modifier::all())
-                    } else if is_selected {
-                        Style::default()
-                            .fg(theme.cursor)
-                            .remove_modifier(Modifier::all())
-                    } else {
-                        Style::default()
-                            .fg(theme.fg)
-                            .remove_modifier(Modifier::all())
-                    };
-
-                    // Clear line and draw item
-                    for dx in 1..dropdown_width - 1 {
-                        buf[(dropdown_x + dx, item_y)]
-                            .set_symbol(" ")
-                            .set_style(style);
-                    }
-                    let max_item_width = (dropdown_width - 2) as usize;
-                    let display_item: std::borrow::Cow<str> = if item.width() > max_item_width {
-                        let mut end = 0;
-                        let mut w = 0;
-                        for ch in item.chars() {
-                            let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-                            if w + cw > max_item_width {
-                                break;
-                            }
-                            w += cw;
-                            end += ch.len_utf8();
-                        }
-                        std::borrow::Cow::Borrowed(&item[..end])
-                    } else {
-                        std::borrow::Cow::Borrowed(item)
-                    };
-                    buf.set_string(dropdown_x + 1, item_y, display_item, style);
-                }
-
-                // Scrollbar
-                if visible_count < filtered_branches.len() {
-                    ScrollBar::render(
-                        buf,
-                        dropdown_x + dropdown_width - 1,
-                        list_y,
-                        visible_count as u16,
-                        scroll_offset,
-                        visible_count,
-                        filtered_branches.len(),
-                        &theme,
-                        true,
-                    );
-                }
+                self.dropdown_scroll = scroll_offset;
+                self.branch_dropdown_area = Some(area);
             } else {
                 // Normal dropdown (no filter)
                 let current_branch_idx = self
@@ -665,7 +554,6 @@ impl GitStatusPanel {
                 let (dropdown_x, dropdown_width) = expand_dropdown(
                     branch_x,
                     branch_max_width,
-                    0,
                     content_area.x + content_area.width,
                     &self.branches,
                 );
