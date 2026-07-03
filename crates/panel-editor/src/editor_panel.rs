@@ -523,7 +523,7 @@ impl Panel for Editor {
     }
 
     fn context_menu_items(&self) -> Vec<(String, &'static str)> {
-        vec![("View as diagram".to_string(), "view_as_diagram")]
+        vec![(t().menu_view_as_diagram().to_string(), "view_as_diagram")]
     }
 
     fn handle_status_action(&mut self, action: &str) -> Vec<PanelEvent> {
@@ -602,7 +602,7 @@ impl Panel for Editor {
                     }
                 }
                 vec![PanelEvent::ShowMessage(
-                    "No symbols found to diagram".to_string(),
+                    t().status_no_diagram_symbols().to_string(),
                 )]
             }
             _ => vec![],
