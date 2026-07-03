@@ -422,6 +422,14 @@ pub enum PanelEvent {
     /// Swap the active panel in place for the Mermaid diagram view of `path`
     SwapActiveToMermaid(PathBuf),
 
+    /// Request a "Save As" dialog to write in-memory text `content` to a
+    /// user-chosen path, seeded with `default_name`. Used by read-only viewers
+    /// (e.g. the diagram panel) to export their source to a permanent file.
+    SaveContentAs {
+        content: String,
+        default_name: String,
+    },
+
     /// Navigate the active viewer in place to an `http(s)://` URL (a link
     /// followed inside a fetched page, or a history back/forward step).
     NavigateUrl(String),

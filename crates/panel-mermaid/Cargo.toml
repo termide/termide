@@ -14,5 +14,6 @@ unicode-width.workspace = true
 
 # Workspace crates
 termide-core = { path = "../core" }
+termide-i18n = { path = "../i18n" }
 termide-mermaid = { path = "../mermaid" }
 termide-ui = { path = "../ui" }

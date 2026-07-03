@@ -6,7 +6,9 @@
 //! over the source until their layout lands. `Ctrl+E` (or the `Edit` status
 //! chip) swaps the panel in place for the editable source. `y`/`Ctrl+C` (or the
 //! `Copy diagram` entry in the panel `[≡]` menu) copies the rendered diagram to
-//! the system clipboard. The canvas scrolls in two dimensions.
+//! the system clipboard. `Ctrl+S` (or the `Save diagram as…` menu entry) exports
+//! the diagram source to a chosen `.mmd` file. The canvas scrolls in two
+//! dimensions.
 
 use std::any::Any;
 use std::path::{Path, PathBuf};
@@ -198,10 +200,30 @@ impl MermaidPanel {
         vec![
             PanelEvent::CopyToClipboard(text),
             PanelEvent::SetStatusMessage {
-                message: format!("Copied diagram to clipboard ({lines} lines)"),
+                message: termide_i18n::t().status_diagram_copied(lines),
                 is_error: false,
             },
         ]
+    }
+
+    /// Request a "Save As" dialog to export the diagram source (`.mmd`). The
+    /// default name follows the current file, or `diagram.mmd` for a generated
+    /// temp file.
+    fn save_as_event(&self) -> Vec<PanelEvent> {
+        let stem = self
+            .file_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("diagram");
+        let default_name = if stem.starts_with("termide-diagram") {
+            "diagram.mmd".to_string()
+        } else {
+            format!("{stem}.mmd")
+        };
+        vec![PanelEvent::SaveContentAs {
+            content: self.source.clone(),
+            default_name,
+        }]
     }
 }
 
@@ -297,6 +319,10 @@ impl Panel for MermaidPanel {
         {
             return self.copy_to_clipboard();
         }
+        // Ctrl+S: export the diagram source to a chosen file (Save As).
+        if key.code == KeyCode::Char('s') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return self.save_as_event();
+        }
         // Ctrl+R: re-read the source from disk (pick up external edits), keeping
         // the scroll position.
         if key.code == KeyCode::Char('r') && key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -364,6 +390,7 @@ impl Panel for MermaidPanel {
         match action {
             "edit_source" => vec![PanelEvent::SwapActiveToText(self.file_path.clone())],
             "copy_diagram" => self.copy_to_clipboard(),
+            "save_diagram" => self.save_as_event(),
             _ => vec![],
         }
     }
@@ -372,7 +399,11 @@ impl Panel for MermaidPanel {
         if self.error.is_some() {
             return vec![];
         }
-        vec![("Copy diagram".to_string(), "copy_diagram")]
+        let t = termide_i18n::t();
+        vec![
+            (t.menu_copy_diagram().to_string(), "copy_diagram"),
+            (t.menu_save_diagram_as().to_string(), "save_diagram"),
+        ]
     }
 
     fn reload(&mut self) -> anyhow::Result<()> {

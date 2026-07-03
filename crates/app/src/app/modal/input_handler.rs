@@ -251,6 +251,35 @@ impl App {
         Ok(())
     }
 
+    /// Write in-memory `content` to a Save-As-chosen path (used by read-only
+    /// viewers exporting their source). Relative names resolve against
+    /// `directory`.
+    pub(in crate::app) fn handle_save_content_as(
+        &mut self,
+        directory: PathBuf,
+        content: String,
+        value: Box<dyn std::any::Any>,
+    ) -> Result<()> {
+        if let Some(result) = value.downcast_ref::<SaveAsResult>() {
+            let t = i18n::t();
+            let input_path = termide_ui::expand_tilde(&result.path);
+            let file_path = if input_path.is_absolute() {
+                input_path
+            } else {
+                directory.join(&result.path)
+            };
+            let display_path = file_path.display().to_string();
+            match std::fs::write(&file_path, content.as_bytes()) {
+                Ok(()) => self.state.set_info(t.status_file_saved(&display_path)),
+                Err(e) => {
+                    log::error!("Save error '{}': {}", display_path, e);
+                    self.show_error_modal(t.status_error_save(&e.to_string()));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Handle git stash push: user provided stash message.
     pub(in crate::app) fn handle_git_stash_push(
         &mut self,

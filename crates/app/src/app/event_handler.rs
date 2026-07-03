@@ -89,6 +89,13 @@ impl App {
                 self.event_swap_active_to_mermaid(path)?;
             }
 
+            PanelEvent::SaveContentAs {
+                content,
+                default_name,
+            } => {
+                self.event_save_content_as(content, default_name)?;
+            }
+
             PanelEvent::NavigateUrl(url) => {
                 self.start_url_fetch_in_place(url);
             }
@@ -618,6 +625,18 @@ impl App {
             }
             Err(e) => self.show_error_modal(format!("Failed to open diagram file: {e}")),
         }
+        Ok(())
+    }
+
+    /// Open a "Save As" dialog to export in-memory `content` to a chosen path.
+    /// Seeds the dialog with `default_name` under the current directory.
+    fn event_save_content_as(&mut self, content: String, default_name: String) -> Result<()> {
+        use termide_modal::{ActiveModal, SaveAsModal};
+        let directory = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let default_value = directory.join(&default_name).display().to_string();
+        let modal = SaveAsModal::new(i18n::t().modal_save_as_title(), default_value);
+        let action = PendingAction::SaveContentAs { directory, content };
+        self.handle_modal_request(action, ActiveModal::SaveAs(Box::new(modal)))?;
         Ok(())
     }
 

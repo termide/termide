@@ -293,6 +293,9 @@ impl App {
                 PendingAction::SaveFileAs { directory } => {
                     self.handle_save_file_as(directory, value)?;
                 }
+                PendingAction::SaveContentAs { directory, content } => {
+                    self.handle_save_content_as(directory, content, value)?;
+                }
                 PendingAction::SaveBinary => {
                     if value.downcast_ref::<bool>().copied().unwrap_or(false) {
                         if let Some(panel) = self.layout_manager.active_panel_mut() {

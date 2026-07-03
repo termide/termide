@@ -46,6 +46,10 @@ pub enum PendingAction {
     },
     /// Save unnamed file (Save As)
     SaveFileAs { directory: PathBuf },
+    /// Write in-memory content to a Save-As-chosen path (from a read-only
+    /// viewer such as the diagram panel). Relative names resolve against
+    /// `directory`.
+    SaveContentAs { directory: PathBuf, content: String },
     /// Close panel (with confirmation if there are unsaved changes)
     ClosePanel,
     /// Close editor with choice: save, don't save, cancel
