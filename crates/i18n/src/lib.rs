@@ -855,11 +855,27 @@ pub fn language_generation() -> u64 {
 
 /// Get the current translation.
 ///
-/// # Panics
-/// Panics if the translation system is not initialized.
+/// The application calls [`init`] / [`init_with_language`] at startup to select
+/// the configured language. If `t()` is reached before that (e.g. in unit
+/// tests, or an early code path), it lazily falls back to English rather than
+/// panicking, so callers never crash on an uninitialized translation system.
 pub fn t() -> &'static dyn Translation {
-    let guard = TRANSLATION.read().expect("Translation lock poisoned");
-    guard.expect("Translation system not initialized. Call i18n::init() first.")
+    if let Ok(guard) = TRANSLATION.read() {
+        if let Some(t) = *guard {
+            return t;
+        }
+    }
+    // Not initialized yet — install the built-in English translation.
+    let en: &'static dyn Translation = Box::leak(Box::new(
+        runtime::RuntimeTranslation::new("en").expect("built-in English translations must load"),
+    ));
+    if let Ok(mut guard) = TRANSLATION.write() {
+        if let Some(t) = *guard {
+            return t; // another thread initialized it in the meantime
+        }
+        *guard = Some(en);
+    }
+    en
 }
 
 /// Get the current language code.
