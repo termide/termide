@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Open databases without a bookmark.** Pressing `Enter` or `F3` on a `.db` / `.sqlite` / `.sqlite3` / `.db3` file in the file manager now opens it in the database viewer (instead of the hex viewer).
+- **`Windows ▸ Open…`** — a universal opener prompt (replacing the old `Web` entry, now the first item in the menu) that routes what you type by type: a file (by extension), a directory (file manager), a database URL (`sqlite://` / `postgres://` / `mysql://`), or an `http(s)://` address. `Ctrl+G` in any viewer shares the same behaviour.
+
+### Fixed
+- The database viewer's table and database dropdowns now draw a border, matching the git panel's branch/repository selectors (previously they rendered as an unframed list).
+- The database viewer's data grid now shows scrollbars drawn on the panel frame: a vertical bar on the right border (position within the whole table, across pages) and a horizontal bar on the bottom border when the columns are wider than the panel. Previously there was no indication of how many pages remained or that columns extended off-screen.
+
 ## [0.29.1] - 2026-07-08
 
 ### Added

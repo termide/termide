@@ -77,12 +77,17 @@ pub(super) fn determine_file_open_event(
                 return Some(PanelEvent::ViewHtml(file_path.to_path_buf()));
             }
 
-            // 6. Binary files → hex viewer
+            // 6. SQLite database → database viewer
+            if is_database_file(&entry.name) {
+                return Some(PanelEvent::ViewDatabase(file_path.to_path_buf()));
+            }
+
+            // 7. Binary files → hex viewer
             if is_binary_file(file_path) {
                 return Some(PanelEvent::ViewBinary(file_path.to_path_buf()));
             }
 
-            // 7. Text files → read-only editor
+            // 8. Text files → read-only editor
             Some(PanelEvent::ViewFile(file_path.to_path_buf()))
         }
         FileOpenMode::Default => {
@@ -104,12 +109,17 @@ pub(super) fn determine_file_open_event(
                 return Some(PanelEvent::OpenFile(file_path.to_path_buf()));
             }
 
-            // 4. Executable binary → run in terminal
+            // 4. SQLite database → database viewer
+            if is_database_file(&entry.name) {
+                return Some(PanelEvent::ViewDatabase(file_path.to_path_buf()));
+            }
+
+            // 5. Executable binary → run in terminal
             if entry.is_executable {
                 return Some(PanelEvent::ExecuteFile(file_path.to_path_buf()));
             }
 
-            // 5. Binary files → hex viewer
+            // 6. Binary files → hex viewer
             if is_binary_file(file_path) {
                 return Some(PanelEvent::ViewBinary(file_path.to_path_buf()));
             }
@@ -152,6 +162,13 @@ fn is_markdown(filename: &str) -> bool {
 
 fn is_mermaid(filename: &str) -> bool {
     matches!(get_extension(filename).as_str(), "mmd" | "mermaid")
+}
+
+fn is_database_file(filename: &str) -> bool {
+    matches!(
+        get_extension(filename).as_str(),
+        "db" | "sqlite" | "sqlite3" | "db3"
+    )
 }
 
 fn is_html(filename: &str) -> bool {
@@ -418,5 +435,47 @@ impl FileManager {
         self.navigation.set_newly_created_path(target_full_path);
         self.load_directory()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(name: &str) -> FileEntry {
+        FileEntry {
+            name: name.to_string(),
+            is_dir: false,
+            is_symlink: false,
+            is_executable: false,
+            is_readonly: false,
+            git_status: GitStatus::Unmodified,
+            size: Some(0),
+            modified: None,
+        }
+    }
+
+    #[test]
+    fn database_files_open_in_db_viewer() {
+        // Enter (Default) and F3 (View) on a SQLite file route to the DB viewer,
+        // not the hex/binary viewer. Extension match is case-insensitive.
+        for name in ["data.db", "app.sqlite", "cache.sqlite3", "x.DB3"] {
+            let e = entry(name);
+            let p = std::path::Path::new(name);
+            assert!(
+                matches!(
+                    determine_file_open_event(&e, p, FileOpenMode::View),
+                    Some(PanelEvent::ViewDatabase(_))
+                ),
+                "F3 on {name} should open the DB viewer"
+            );
+            assert!(
+                matches!(
+                    determine_file_open_event(&e, p, FileOpenMode::Default),
+                    Some(PanelEvent::ViewDatabase(_))
+                ),
+                "Enter on {name} should open the DB viewer"
+            );
+        }
     }
 }

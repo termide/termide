@@ -21,6 +21,15 @@ bookmark (Bookmarks menu → Add) and put the connection URL in the *Path* field
 Activating a database bookmark opens the Database panel and connects in the
 background — the UI never blocks while connecting.
 
+There are two more ways to open a database without a bookmark:
+
+- **Open a local SQLite file directly.** Press `Enter` or `F3` on a `.db` /
+  `.sqlite` / `.sqlite3` / `.db3` file in the file manager — it opens in the
+  database viewer instead of the hex viewer.
+- **Windows ▸ Open…** (or `Ctrl+G` in a viewer) accepts a connection URL
+  (`sqlite://` / `postgres://` / `mysql://`) as well as a file path, a
+  directory, or an `http(s)://` address, and routes it to the matching viewer.
+
 ### Passwords
 
 As with SFTP/FTP bookmarks, the password is **not** treated specially: the
@@ -47,8 +56,11 @@ connection URL omits a database (PostgreSQL/MySQL), a **database selector**
 appears to its left; the viewer auto-selects the first database so data shows
 immediately, and you can switch to another via that selector. The grid
 has a 2D cell cursor: the highlighted cell is the target for sorting, filtering
-and copying. The shared status bar shows the current range, total row count,
-active sort and filter, e.g. `app.db · users · rows 1–200 of 1203 · sort: name ↑ · filter: 1`.
+and copying. A **vertical scrollbar** on the right shows how far through the
+whole table you are (across pages), and a **horizontal scrollbar** along the
+bottom appears when the columns are wider than the panel. The shared status bar
+shows the current range, total row count, active sort and filter, e.g.
+`app.db · users · rows 1–200 of 1203 · sort: name ↑ · filter: 1`.
 
 ## Keys
 

@@ -10,6 +10,16 @@ use super::super::App;
 use crate::PanelExt;
 use termide_i18n as i18n;
 use termide_modal::SaveAsResult;
+use termide_panel_file_manager::FileManager;
+
+/// Whether `s` is a database connection URL the DB viewer handles.
+fn is_database_url(s: &str) -> bool {
+    s.starts_with("postgres://")
+        || s.starts_with("postgresql://")
+        || s.starts_with("mysql://")
+        || s.starts_with("mariadb://")
+        || s.starts_with("sqlite://")
+}
 
 impl App {
     /// Open a path typed in a viewer's "go to" prompt, routed to the
@@ -25,6 +35,12 @@ impl App {
         };
         let input = input.trim();
         if input.is_empty() {
+            return Ok(());
+        }
+
+        // A database connection URL opens the read-only database viewer.
+        if is_database_url(input) {
+            self.open_database(input.to_string());
             return Ok(());
         }
 
@@ -54,12 +70,17 @@ impl App {
             self.show_error_modal(format!("No such path: {}", path.display()));
             return Ok(());
         }
+
+        // A directory opens in the file manager.
         if path.is_dir() {
-            self.show_error_modal(format!("Not a file: {}", path.display()));
+            self.close_help_panels();
+            self.add_panel(Box::new(FileManager::new_with_path(path)));
+            self.state.needs_watcher_registration = true;
+            self.auto_save_session();
             return Ok(());
         }
 
-        // Route by type, mirroring the file manager's View-mode mapping.
+        // Route a file by type, mirroring the file manager's View-mode mapping.
         let ext = path
             .extension()
             .and_then(|e| e.to_str())
@@ -72,6 +93,7 @@ impl App {
             "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "tiff" | "tif" => {
                 self.event_preview_media(path)
             }
+            "db" | "sqlite" | "sqlite3" | "db3" => self.event_view_database(path),
             _ => self.event_view_file(path),
         }
     }

@@ -61,6 +61,10 @@ impl App {
                 self.event_view_binary(path)?;
             }
 
+            PanelEvent::ViewDatabase(path) => {
+                self.event_view_database(path)?;
+            }
+
             PanelEvent::EditBinary(path) => {
                 self.event_edit_binary(path)?;
             }

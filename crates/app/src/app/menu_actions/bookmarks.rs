@@ -544,6 +544,23 @@ impl App {
         }
     }
 
+    /// Open the read-only database viewer for a connection URL
+    /// (`sqlite://`, `postgres://`, `mysql://`).
+    pub(in crate::app) fn open_database(&mut self, url: String) {
+        self.close_help_panels();
+        let panel = termide_panel_db::DbPanel::new(url, String::new());
+        self.add_panel(Box::new(panel));
+        self.auto_save_session();
+    }
+
+    /// Open a local SQLite file in the database viewer, deriving a
+    /// `sqlite:///<abs-path>` URL from the file path.
+    pub(in crate::app) fn event_view_database(&mut self, path: PathBuf) -> Result<()> {
+        let abs = std::fs::canonicalize(&path).unwrap_or(path);
+        self.open_database(format!("sqlite://{}", abs.display()));
+        Ok(())
+    }
+
     /// Hand a path/URL to the system's default application.
     fn open_path_external(&self, path: &str) {
         let _ = std::process::Command::new("xdg-open")
@@ -675,10 +692,7 @@ impl App {
             }
             BookmarkType::Database => {
                 // Open the read-only database viewer for this connection URL.
-                self.close_help_panels();
-                let panel = termide_panel_db::DbPanel::new(path, String::new());
-                self.add_panel(Box::new(panel));
-                self.auto_save_session();
+                self.open_database(path.to_string());
             }
             BookmarkType::Unknown => {
                 // Try to determine type and handle

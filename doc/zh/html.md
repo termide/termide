@@ -49,7 +49,7 @@ TermIDE 将 HTML 文件（`.html`、`.htm`）渲染为只读预览面板——�
 
 ## 获取 URL
 
-**Windows ▸ Web** 菜单项直接打开 URL 提示（一个易于发现的入口）；任何查看器中的 `Ctrl+G` 也是如此。`Ctrl+G` 配合 `http(s)://` 地址会在后台获取文档，并按 `Content-Type` 路由打开（HTML → 本查看器，Markdown → Markdown 查看器，其他文本 → 原样显示）。获取是刻意受限的——这是一个阅读器，而非浏览器引擎：
+**Windows ▸ Open…** 菜单项打开一个通用提示（一个易于发现的入口），可接受文件路径、目录、数据库 URL 或 `http(s)://` 地址；任何查看器中的 `Ctrl+G` 也是如此。`Ctrl+G` 配合 `http(s)://` 地址会在后台获取文档，并按 `Content-Type` 路由打开（HTML → 本查看器，Markdown → Markdown 查看器，其他文本 → 原样显示）。获取是刻意受限的——这是一个阅读器，而非浏览器引擎：
 
 - 仅 `http` 和 `https`；TLS 会被校验（不可关闭）。
 - 15 秒超时；最多 5 次重定向，且 `https` 来源绝不会降级为 `http`。

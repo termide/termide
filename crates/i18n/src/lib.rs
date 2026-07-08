@@ -392,8 +392,8 @@ pub trait Translation: Send + Sync {
     fn tools_diagnostics(&self) -> &str;
     fn tools_operations(&self) -> &str;
     fn tools_outline(&self) -> &str;
-    fn tools_web(&self) -> &str;
-    fn tools_web_prompt(&self) -> &str;
+    fn tools_open(&self) -> &str;
+    fn tools_open_prompt(&self) -> &str;
 
     // Options submenu
     fn options_help(&self) -> &str;

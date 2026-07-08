@@ -285,6 +285,8 @@ pub const SESSIONS_SUBMENU_CHANGE_ROOT: usize = 2;
 pub fn get_tools_items() -> Vec<DropdownItem> {
     let t = i18n::t();
     vec![
+        DropdownItem::new(t.tools_open(), "open"),
+        DropdownItem::separator(),
         DropdownItem::new(t.tools_terminal(), "terminal").with_submenu(),
         DropdownItem::new(t.tools_files(), "files"),
         DropdownItem::new(t.tools_editor(), "editor"),
@@ -294,24 +296,26 @@ pub fn get_tools_items() -> Vec<DropdownItem> {
         DropdownItem::new(t.tools_diagnostics(), "diagnostics"),
         DropdownItem::new(t.tools_operations(), "operations"),
         DropdownItem::new(t.tools_outline(), "outline"),
-        DropdownItem::new(t.tools_web(), "web"),
     ]
 }
 
-/// Number of items in Tools submenu
-pub const TOOLS_SUBMENU_ITEM_COUNT: usize = 10;
+/// Number of items in Tools submenu (including the separator row).
+pub const TOOLS_SUBMENU_ITEM_COUNT: usize = 11;
+
+/// Index of the (non-selectable) separator row in the Tools submenu.
+pub const TOOLS_SUBMENU_SEPARATOR: usize = 1;
 
 /// Index of Tools submenu items
-pub const TOOLS_SUBMENU_TERMINAL: usize = 0;
-pub const TOOLS_SUBMENU_FILES: usize = 1;
-pub const TOOLS_SUBMENU_EDITOR: usize = 2;
-pub const TOOLS_SUBMENU_GIT_STATUS: usize = 3;
-pub const TOOLS_SUBMENU_GIT_LOG: usize = 4;
-pub const TOOLS_SUBMENU_JOURNAL: usize = 5;
-pub const TOOLS_SUBMENU_DIAGNOSTICS: usize = 6;
-pub const TOOLS_SUBMENU_OPERATIONS: usize = 7;
-pub const TOOLS_SUBMENU_OUTLINE: usize = 8;
-pub const TOOLS_SUBMENU_WEB: usize = 9;
+pub const TOOLS_SUBMENU_OPEN: usize = 0;
+pub const TOOLS_SUBMENU_TERMINAL: usize = 2;
+pub const TOOLS_SUBMENU_FILES: usize = 3;
+pub const TOOLS_SUBMENU_EDITOR: usize = 4;
+pub const TOOLS_SUBMENU_GIT_STATUS: usize = 5;
+pub const TOOLS_SUBMENU_GIT_LOG: usize = 6;
+pub const TOOLS_SUBMENU_JOURNAL: usize = 7;
+pub const TOOLS_SUBMENU_DIAGNOSTICS: usize = 8;
+pub const TOOLS_SUBMENU_OPERATIONS: usize = 9;
+pub const TOOLS_SUBMENU_OUTLINE: usize = 10;
 
 /// Get shell picker submenu items from discovered shells.
 ///

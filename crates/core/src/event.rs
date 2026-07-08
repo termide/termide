@@ -401,6 +401,9 @@ pub enum PanelEvent {
     /// Open a binary file in the hex/ASCII viewer (read-only)
     ViewBinary(PathBuf),
 
+    /// Open a local database file (SQLite) in the read-only database viewer.
+    ViewDatabase(PathBuf),
+
     /// Open a binary file in the hex editor (editable)
     EditBinary(PathBuf),
 

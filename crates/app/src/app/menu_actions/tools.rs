@@ -6,8 +6,8 @@ use std::sync::Arc;
 use super::super::App;
 use termide_ui_render::{
     TOOLS_SUBMENU_DIAGNOSTICS, TOOLS_SUBMENU_EDITOR, TOOLS_SUBMENU_FILES, TOOLS_SUBMENU_GIT_LOG,
-    TOOLS_SUBMENU_GIT_STATUS, TOOLS_SUBMENU_JOURNAL, TOOLS_SUBMENU_OPERATIONS,
-    TOOLS_SUBMENU_OUTLINE, TOOLS_SUBMENU_TERMINAL, TOOLS_SUBMENU_WEB,
+    TOOLS_SUBMENU_GIT_STATUS, TOOLS_SUBMENU_JOURNAL, TOOLS_SUBMENU_OPEN, TOOLS_SUBMENU_OPERATIONS,
+    TOOLS_SUBMENU_OUTLINE, TOOLS_SUBMENU_SEPARATOR, TOOLS_SUBMENU_TERMINAL,
 };
 
 impl App {
@@ -29,12 +29,12 @@ impl App {
             &key,
             &mut self.state.ui.tools_submenu,
             TOOLS_SUBMENU_ITEM_COUNT,
-            &[],
+            &[TOOLS_SUBMENU_SEPARATOR],
         ) {
             SubmenuNavAction::Close => self.state.close_menu(),
             SubmenuNavAction::Execute => self.execute_tools_submenu_action()?,
             SubmenuNavAction::Right => {
-                // Terminal (index 0) has submenu
+                // Terminal has a nested (shell picker) submenu
                 if self.state.ui.tools_submenu.selected == TOOLS_SUBMENU_TERMINAL {
                     self.execute_tools_submenu_action()?;
                 } else {
@@ -150,14 +150,15 @@ impl App {
                 self.state.close_menu();
                 self.handle_open_outline()?;
             }
-            TOOLS_SUBMENU_WEB => {
-                // Open a URL prompt; the entered address is fetched and shown in
-                // a viewer (the discoverable entry point for text-mode browsing).
+            TOOLS_SUBMENU_OPEN => {
+                // Universal opener: the entered value is routed by type — a file
+                // (by extension), a directory (file manager), a database URL
+                // (DB viewer), or an http(s) address (fetched into a viewer).
                 self.state.close_menu();
                 let base = std::env::current_dir().unwrap_or_default();
                 self.event_show_input(
-                    termide_i18n::t().tools_web_prompt().to_string(),
-                    "https://".to_string(),
+                    termide_i18n::t().tools_open_prompt().to_string(),
+                    String::new(),
                     termide_core::InputAction::ViewPath { base_dir: base },
                 );
             }
