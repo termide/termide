@@ -362,6 +362,12 @@ pub fn cleanup_stale_buffers(session_dir: &Path, session: &Session) {
 pub fn cleanup_old_sessions(current_project: &Path, retention_days: u32) -> Result<()> {
     use std::time::{Duration, SystemTime};
 
+    // 0 disables cleanup (keep sessions forever). Guard against the footgun
+    // where a 0 cutoff of "now" would delete every non-current session.
+    if retention_days == 0 {
+        return Ok(());
+    }
+
     let data_dir = get_data_dir()?;
     let sessions_dir = data_dir.join("sessions");
 
@@ -405,38 +411,77 @@ fn walk_and_cleanup(
         };
 
         let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
 
-        if path.is_dir() {
-            // Check if this directory contains session.toml
-            let session_file = path.join("session.toml");
+        // Project paths nest, so their session directories nest too (e.g.
+        // `.../Data/Downloads` and `.../Data/Downloads/proj`). Always recurse
+        // first so every session is evaluated on its own age — never shadowed
+        // by, or deleted together with, an ancestor session.
+        let _ = walk_and_cleanup(&path, current_project, cutoff_time);
 
-            if session_file.exists() {
-                // Check if this is the current project's session
-                if !is_same_session(&path, current_project) {
-                    // Check file modification time
-                    if let Ok(metadata) = session_file.metadata() {
-                        if let Ok(modified) = metadata.modified() {
-                            if modified < cutoff_time && !has_non_empty_unsaved_buffers(&path) {
-                                // Remove entire session directory
-                                if let Err(e) = fs::remove_dir_all(&path) {
-                                    log::warn!(
-                                        "Failed to remove old session {}: {}",
-                                        path.display(),
-                                        e
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-            } else {
-                // Recurse into subdirectories
-                let _ = walk_and_cleanup(&path, current_project, cutoff_time);
-            }
+        let session_file = path.join("session.toml");
+        if !session_file.exists() || is_same_session(&path, current_project) {
+            continue;
+        }
+        let stale = session_file
+            .metadata()
+            .and_then(|m| m.modified())
+            .map(|modified| modified < cutoff_time)
+            .unwrap_or(false);
+        if !stale || has_non_empty_unsaved_buffers(&path) {
+            continue;
+        }
+
+        if contains_nested_session(&path) {
+            // A parent project session that also contains child project
+            // sessions: drop only this session's own files, keep the nested
+            // ones intact.
+            remove_session_own_files(&path);
+        } else if let Err(e) = fs::remove_dir_all(&path) {
+            log::warn!("Failed to remove old session {}: {}", path.display(), e);
         }
     }
 
     Ok(())
+}
+
+/// Whether any subdirectory of `dir` (at any depth) holds a `session.toml`,
+/// i.e. `dir` is an ancestor of one or more nested project sessions.
+fn contains_nested_session(dir: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() && (path.join("session.toml").exists() || contains_nested_session(&path)) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Remove only a session's own files (`session.toml` and its unsaved buffer
+/// files), leaving any nested project session directories untouched. Prunes the
+/// directory afterwards only if it ended up empty.
+fn remove_session_own_files(dir: &Path) {
+    let _ = fs::remove_file(dir.join("session.toml"));
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name.starts_with("unsaved-") && name.ends_with(".txt") {
+                    let _ = fs::remove_file(&path);
+                }
+            }
+        }
+    }
+    // Succeeds only when nothing (no nested sessions, no other files) remains.
+    let _ = fs::remove_dir(dir);
 }
 
 /// Check if session directory corresponds to the given project path
@@ -688,6 +733,54 @@ pub fn format_relative_time(time: std::time::SystemTime) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression: a stale *parent* project session must not take fresh
+    /// *nested* project sessions down with it (previously `remove_dir_all` on
+    /// the parent wiped nested sessions, and nested sessions were never
+    /// evaluated on their own age).
+    #[test]
+    fn cleanup_keeps_nested_fresh_session_when_parent_is_stale() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::time::{Duration, SystemTime};
+
+        static N: AtomicU32 = AtomicU32::new(0);
+        let base = std::env::temp_dir().join(format!(
+            "termide-session-nest-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+        let parent = base.join("parent");
+        let child = parent.join("child");
+        fs::create_dir_all(&child).unwrap();
+
+        let parent_toml = parent.join("session.toml");
+        let child_toml = child.join("session.toml");
+        fs::write(&parent_toml, "focused_group = 0\n").unwrap();
+        fs::write(&child_toml, "focused_group = 0\n").unwrap();
+
+        let now = SystemTime::now();
+        let cutoff = now - Duration::from_secs(30 * 24 * 60 * 60);
+        // Parent is 60 days old (stale); child keeps its fresh "now" mtime.
+        let old = now - Duration::from_secs(60 * 24 * 60 * 60);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&parent_toml)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+
+        // A current project that matches neither session.
+        let current = base.join("nonexistent");
+        walk_and_cleanup(&base, &current, cutoff).unwrap();
+
+        assert!(child_toml.exists(), "fresh nested session must survive");
+        assert!(
+            !parent_toml.exists(),
+            "stale parent session should be cleaned"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
 
     // =========================================================================
     // Round-trip serialization
