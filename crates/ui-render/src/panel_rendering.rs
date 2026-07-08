@@ -481,6 +481,11 @@ pub fn render_expanded_panel(
         terminal_width: params.terminal_width,
         terminal_height: params.terminal_height,
         border_right_x: Some(area.x + area.width - 1),
+        border_bottom_y: if params.omit_bottom_border {
+            None
+        } else {
+            Some(area.y + area.height - 1)
+        },
     };
 
     // Prepare panel for rendering (update cached theme/config)

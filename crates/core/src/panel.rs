@@ -67,6 +67,10 @@ pub struct RenderContext<'a> {
     pub terminal_height: u16,
     /// X position of right border (for scrollbar rendering on border)
     pub border_right_x: Option<u16>,
+    /// Y position of the bottom border (for a horizontal scrollbar drawn on the
+    /// frame). `None` when the panel has no bottom border (e.g. side-by-side
+    /// layouts that omit it).
+    pub border_bottom_y: Option<u16>,
 }
 
 /// Minimal theme colors needed for rendering.

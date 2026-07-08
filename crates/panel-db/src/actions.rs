@@ -189,7 +189,8 @@ impl DbPanel {
         }
         let (row, col) = (event.row, event.column);
 
-        let list_top = self.geom.selector_y + 1;
+        // First item row sits just below the dropdown's top border.
+        let list_top = self.geom.selector_y + 2;
 
         // Open DB dropdown: pick a database.
         if self.db_dd.open {

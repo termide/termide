@@ -710,7 +710,13 @@ impl Panel for DbPanel {
 
     fn render(&mut self, area: Rect, buf: &mut Buffer, ctx: &RenderContext) {
         self.last_area = area;
-        self.render_content(area, buf, ctx.is_focused);
+        self.render_content(
+            area,
+            buf,
+            ctx.is_focused,
+            ctx.border_right_x,
+            ctx.border_bottom_y,
+        );
     }
 
     fn handle_key(&mut self, chord: KeyChord) -> Vec<PanelEvent> {

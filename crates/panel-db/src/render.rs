@@ -3,7 +3,7 @@
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use unicode_width::UnicodeWidthStr;
 
 use termide_db::SortDir;
@@ -17,7 +17,14 @@ const MIN_COL_WIDTH: usize = 3;
 const COL_OVERHEAD: usize = 3;
 
 impl DbPanel {
-    pub(crate) fn render_content(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool) {
+    pub(crate) fn render_content(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        is_focused: bool,
+        border_right_x: Option<u16>,
+        border_bottom_y: Option<u16>,
+    ) {
         if area.width < 4 || area.height < 2 {
             return;
         }
@@ -80,7 +87,7 @@ impl DbPanel {
                 } else if self.selected_table.is_none() {
                     self.center_message(buf, body, tr.db_no_tables(), base);
                 } else {
-                    self.render_grid(buf, body, is_focused);
+                    self.render_grid(buf, body, is_focused, border_right_x, border_bottom_y);
                 }
             }
         }
@@ -102,7 +109,14 @@ impl DbPanel {
     }
 
     #[allow(clippy::needless_range_loop)]
-    fn render_grid(&mut self, buf: &mut Buffer, area: Rect, is_focused: bool) {
+    fn render_grid(
+        &mut self,
+        buf: &mut Buffer,
+        area: Rect,
+        is_focused: bool,
+        border_right_x: Option<u16>,
+        border_bottom_y: Option<u16>,
+    ) {
         let theme = self.cached_theme;
         let base = Style::default().fg(theme.fg).bg(theme.bg);
         let names = self.column_names();
@@ -111,29 +125,9 @@ impl DbPanel {
             return;
         }
 
-        // Header occupies row 0; data fills the rest.
-        let data_height = area.height.saturating_sub(1) as usize;
-        self.visible_rows = data_height;
-
-        // Keep the fetch window equal to the visible height: one fetched
-        // window is exactly one screen, so we page instead of scrolling within
-        // a 200-row buffer. Re-fetch when the viewport height changes (resize).
-        let want = data_height.max(1) as u64;
-        if want != self.page_rows {
-            self.page_rows = want;
-            self.reload_page();
-        }
-
-        // Vertical scroll: keep the cursor row visible.
-        if self.cursor_row < self.row_scroll {
-            self.row_scroll = self.cursor_row;
-        } else if data_height > 0 && self.cursor_row >= self.row_scroll + data_height {
-            self.row_scroll = self.cursor_row + 1 - data_height;
-        }
-
-        // Column widths from the visible window sample.
+        // Column widths from the visible window sample. Reserve room for the
+        // sort arrow in the sorted column's header.
         let mut widths = self.column_widths(&names);
-        // Reserve room for the sort arrow in the sorted column header.
         let sorted = self.order_by.first().cloned();
         if let Some((c, _)) = &sorted {
             if let Some(idx) = names.iter().position(|n| n == c) {
@@ -141,10 +135,52 @@ impl DbPanel {
             }
         }
 
-        // Horizontal scroll: keep the cursor column visible.
-        self.adjust_col_scroll(&widths, area.width as usize);
+        // Scrollbars sit on the panel's actual frame when the chrome provides
+        // its coordinates; otherwise they fall back to the content edge and a
+        // content column/row is reserved so they don't overlap data.
+        let total_cols = names.len();
+        let total_col_w: usize = widths.iter().map(|w| w + COL_OVERHEAD).sum();
+        let h_needed = total_col_w > area.width as usize;
+        let h_reserve = if h_needed && border_bottom_y.is_none() {
+            1
+        } else {
+            0
+        };
 
-        let max_x = area.x + area.width;
+        // Header occupies row 0; data fills the rest (minus a reserved
+        // horizontal-scrollbar row only in the fallback case).
+        let data_rows_region = area.height.saturating_sub(1) as usize;
+        let data_height = data_rows_region.saturating_sub(h_reserve);
+        let v_needed = matches!(self.total_rows, Some(t) if (t as usize) > data_height);
+        let v_reserve = if v_needed && border_right_x.is_none() {
+            1
+        } else {
+            0
+        };
+        let content_width = area.width.saturating_sub(v_reserve);
+
+        self.visible_rows = data_height;
+
+        // Keep the fetch window equal to the visible height: one fetched window
+        // is exactly one screen, so we page instead of scrolling within a
+        // buffer. Re-fetch when the viewport height changes (resize).
+        let want = data_height.max(1) as u64;
+        if want != self.page_rows {
+            self.page_rows = want;
+            self.reload_page();
+        }
+
+        // Vertical scroll within the window: keep the cursor row visible.
+        if self.cursor_row < self.row_scroll {
+            self.row_scroll = self.cursor_row;
+        } else if data_height > 0 && self.cursor_row >= self.row_scroll + data_height {
+            self.row_scroll = self.cursor_row + 1 - data_height;
+        }
+
+        // Horizontal scroll: keep the cursor column visible within content_width.
+        self.adjust_col_scroll(&widths, content_width as usize);
+
+        let max_x = area.x + content_width;
         let border = base.fg(theme.border);
 
         // Each column is a slot ` content ` (one space of padding on each side);
@@ -225,6 +261,55 @@ impl DbPanel {
             }
         }
 
+        // --- scrollbars (drawn last so they sit above the grid) ---
+        let sb_color = if is_focused {
+            theme.border_focused
+        } else {
+            theme.disabled
+        };
+        if v_needed {
+            // Position across the whole table: window offset + in-window scroll.
+            let offset = self.offset as usize + self.row_scroll;
+            let total = self.total_rows.unwrap_or(0) as usize;
+            let vx = border_right_x.unwrap_or(area.x + area.width - 1);
+            render_vscrollbar(
+                buf,
+                vx,
+                area.y + 1,
+                data_height as u16,
+                offset,
+                data_height,
+                total,
+                sb_color,
+            );
+        }
+        if h_needed {
+            // Count only fully-visible columns so a partially-clipped rightmost
+            // column still reports "more to the right" at col_scroll == 0.
+            let mut used = 0usize;
+            let mut visible_cols = 0usize;
+            for w in widths.iter().skip(self.col_scroll) {
+                let need = w + COL_OVERHEAD;
+                if used + need > content_width as usize {
+                    break;
+                }
+                used += need;
+                visible_cols += 1;
+            }
+            let visible_cols = visible_cols.max(1);
+            let hy = border_bottom_y.unwrap_or(area.y + area.height - 1);
+            render_hscrollbar(
+                buf,
+                area.x,
+                hy,
+                content_width,
+                self.col_scroll,
+                visible_cols,
+                total_cols,
+                sb_color,
+            );
+        }
+
         if self.loading {
             let style = base.fg(theme.info);
             let label = format!(" {} ", termide_i18n::t().db_loading());
@@ -295,6 +380,76 @@ impl DbPanel {
     }
 }
 
+/// Vertical scrollbar on column `x`, rows `y0..y0+height`. Matches the shared
+/// [`termide_ui::ScrollBar`] look (`│` track, `▌` thumb). No-op when all rows fit.
+#[allow(clippy::too_many_arguments)]
+fn render_vscrollbar(
+    buf: &mut Buffer,
+    x: u16,
+    y0: u16,
+    height: u16,
+    offset: usize,
+    visible: usize,
+    total: usize,
+    color: Color,
+) {
+    if total <= visible || height == 0 {
+        return;
+    }
+    let style = Style::default().fg(color);
+    let thumb = ((height as f32 * (visible as f32 / total as f32)).max(1.0)) as u16;
+    let max_scroll = total.saturating_sub(visible);
+    let ratio = if max_scroll > 0 {
+        offset.min(max_scroll) as f32 / max_scroll as f32
+    } else {
+        0.0
+    };
+    let pos = ((height.saturating_sub(thumb)) as f32 * ratio) as u16;
+    for i in 0..height {
+        let sym = if i >= pos && i < pos + thumb {
+            "▌"
+        } else {
+            "│"
+        };
+        buf[(x, y0 + i)].set_symbol(sym).set_style(style);
+    }
+}
+
+/// Horizontal scrollbar on row `y`, columns `x0..x0+width`, sized in list units
+/// (table columns). `─` track, `━` thumb. No-op when everything fits.
+#[allow(clippy::too_many_arguments)]
+fn render_hscrollbar(
+    buf: &mut Buffer,
+    x0: u16,
+    y: u16,
+    width: u16,
+    offset: usize,
+    visible: usize,
+    total: usize,
+    color: Color,
+) {
+    if total <= visible || width == 0 {
+        return;
+    }
+    let style = Style::default().fg(color);
+    let thumb = ((width as f32 * (visible as f32 / total as f32)).max(1.0)) as u16;
+    let max_scroll = total.saturating_sub(visible);
+    let ratio = if max_scroll > 0 {
+        offset.min(max_scroll) as f32 / max_scroll as f32
+    } else {
+        0.0
+    };
+    let pos = ((width.saturating_sub(thumb)) as f32 * ratio) as u16;
+    for i in 0..width {
+        let sym = if i >= pos && i < pos + thumb {
+            "━"
+        } else {
+            "─"
+        };
+        buf[(x0 + i, y)].set_symbol(sym).set_style(style);
+    }
+}
+
 /// Fill a single row with spaces in `style` (background paint).
 fn fill_line(buf: &mut Buffer, x: u16, y: u16, width: u16, style: Style) {
     let blanks = " ".repeat(width as usize);
@@ -337,5 +492,40 @@ fn pad(s: &str, w: usize) -> String {
             out.push_str(&" ".repeat(w - ow));
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::layout::Rect;
+
+    #[test]
+    fn vscrollbar_draws_thumb_and_track() {
+        let mut buf = Buffer::empty(Rect::new(0, 0, 3, 10));
+        render_vscrollbar(&mut buf, 2, 0, 10, 0, 10, 100, Color::White);
+        let col: String = (0..10).map(|y| buf[(2, y)].symbol().to_string()).collect();
+        assert!(col.contains('▌'), "thumb present: {col:?}");
+        assert!(col.contains('│'), "track present: {col:?}");
+    }
+
+    #[test]
+    fn scrollbars_are_noop_when_all_fit() {
+        let mut buf = Buffer::empty(Rect::new(0, 0, 20, 5));
+        render_vscrollbar(&mut buf, 2, 0, 5, 0, 5, 5, Color::White);
+        render_hscrollbar(&mut buf, 0, 4, 20, 0, 12, 12, Color::White);
+        let col: String = (0..5).map(|y| buf[(2, y)].symbol().to_string()).collect();
+        let row: String = (0..20).map(|x| buf[(x, 4)].symbol().to_string()).collect();
+        assert!(!col.contains('▌') && !col.contains('│'), "no vbar: {col:?}");
+        assert!(!row.contains('━'), "no hbar: {row:?}");
+    }
+
+    #[test]
+    fn hscrollbar_draws_thumb_and_track() {
+        let mut buf = Buffer::empty(Rect::new(0, 0, 20, 1));
+        render_hscrollbar(&mut buf, 0, 0, 20, 0, 3, 12, Color::White);
+        let row: String = (0..20).map(|x| buf[(x, 0)].symbol().to_string()).collect();
+        assert!(row.contains('━'), "thumb present: {row:?}");
+        assert!(row.contains('─'), "track present: {row:?}");
     }
 }
