@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.1] - 2026-07-08
+
 ### Added
 - **Kotlin support.** `.kt` / `.kts` files now get syntax highlighting, an outline of their classes, interfaces, objects, enums and functions, and rich class diagrams (`View as diagram`) with properties, function signatures, `val`/`var` constructor properties, superclass/interface relationships, and top-level declarations collected in the file box.
+
+### Fixed
+- Project sessions are no longer deleted wholesale during cleanup. A stale parent directory that contains a fresh, in-use nested session now keeps that session — only the parent's own expired files are removed — so active sessions and their settings are no longer silently lost.
 
 ## [0.29.0] - 2026-07-03
 
@@ -261,6 +266,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `deny.toml` + `cargo-deny check` step covers advisories, licenses, bans and sources.
 - Pre-commit hook documented in `CONTRIBUTING.md`.
 
+[0.29.1]: https://github.com/termide/termide/releases/tag/0.29.1
 [0.29.0]: https://github.com/termide/termide/releases/tag/0.29.0
 [0.28.0]: https://github.com/termide/termide/releases/tag/0.28.0
 [0.27.0]: https://github.com/termide/termide/releases/tag/0.27.0
