@@ -4,7 +4,7 @@
 //! [`Model`] of boxes and relationships, then render it to Mermaid text that
 //! `crates/mermaid` lays out as terminal pseudographics.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use tree_sitter::Node;
@@ -144,6 +144,18 @@ impl Model {
             .filter(|b| !b.is_module)
             .map(|b| b.name.clone())
             .collect()
+    }
+
+    /// Turn composition candidates `(owner, base, label)` into `*--` edges,
+    /// keeping only those whose `base` is a type declared in this file (and not
+    /// the owner itself). Shared by every language extractor.
+    pub fn resolve_compositions(&mut self, comps: Vec<(String, String, String)>) {
+        let local: HashSet<String> = self.local_type_names().into_iter().collect();
+        for (owner, base, label) in comps {
+            if owner != base && local.contains(&base) {
+                self.add_rel(&owner, &base, rel::COMPOSE, &label);
+            }
+        }
     }
 
     /// Render to Mermaid `classDiagram` source, or `None` if there is nothing

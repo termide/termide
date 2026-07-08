@@ -2,7 +2,6 @@
 //! signatures, `extends`/`implements` relationships, and access-modifier
 //! visibility.
 
-use std::collections::HashSet;
 use std::path::Path;
 
 use tree_sitter::{Node, Parser};
@@ -23,12 +22,7 @@ pub(crate) fn generate(source: &str, file_path: Option<&Path>) -> Option<String>
 
     walk(tree.root_node(), src, &mut model, &mut comps);
 
-    let local: HashSet<String> = model.local_type_names().into_iter().collect();
-    for (owner, base, label) in comps {
-        if owner != base && local.contains(&base) {
-            model.add_rel(&owner, &base, rel::COMPOSE, &label);
-        }
-    }
+    model.resolve_compositions(comps);
     model.render()
 }
 

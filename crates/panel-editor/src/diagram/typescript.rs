@@ -2,7 +2,6 @@
 //! interfaces, enums, `extends`/`implements` edges, field composition, and
 //! module-level functions/consts/type aliases.
 
-use std::collections::HashSet;
 use std::path::Path;
 
 use tree_sitter::{Node, Parser};
@@ -52,12 +51,7 @@ pub(crate) fn generate(source: &str, file_path: Option<&Path>, tsx: bool) -> Opt
         );
     }
 
-    let local: HashSet<String> = model.local_type_names().into_iter().collect();
-    for (owner, base, label) in comps {
-        if owner != base && local.contains(&base) {
-            model.add_rel(&owner, &base, rel::COMPOSE, &label);
-        }
-    }
+    model.resolve_compositions(comps);
     model.render()
 }
 
