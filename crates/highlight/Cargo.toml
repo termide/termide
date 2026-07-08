@@ -24,6 +24,9 @@ tree-sitter-typescript = "0.23"
 tree-sitter-c = "0.23"
 tree-sitter-cpp = "0.23"
 tree-sitter-java = "0.23"
+# Kotlin grammar (ABI-14 compatible; ships no bundled highlights query, so the
+# highlighter hand-writes one — see KOTLIN_HIGHLIGHTS).
+tree-sitter-kotlin-ng = "1.1"
 tree-sitter-ruby = "0.23"
 # Pinned to 0.23: 0.24 ships grammars built with tree-sitter ABI 15, which the
 # workspace's tree-sitter 0.24 (max ABI 14) rejects, silently disabling PHP.

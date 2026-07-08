@@ -32,8 +32,8 @@ opens it in the viewer. Each box header is a declaration (`pub struct Cli`,
 constants and type aliases collect into a box named after the file. Inheritance,
 trait/interface realization and field composition are drawn as edges.
 
-Rust, Python, TypeScript/TSX/JSX, Go, Java, C, C++, Ruby and PHP have rich
-extractors (types, signatures, relationships); other tree-sitter languages fall
+Rust, Python, TypeScript/TSX/JSX, Go, Java, Kotlin, C, C++, Ruby and PHP have
+rich extractors (types, signatures, relationships); other tree-sitter languages fall
 back to type boxes with method names plus a module box of top-level functions.
 
 The generated diagram opens as a temporary `.mmd` file. Save it to a permanent

@@ -218,6 +218,29 @@ fn build_queries() -> HashMap<&'static str, QueryEntry> {
         ],
     );
 
+    // Kotlin. `class_declaration` covers classes, interfaces and enum classes;
+    // `object_declaration` covers `object`/`companion object`. All callables use
+    // `function_declaration`, so methods and free functions share one pattern.
+    register(
+        &mut map,
+        "kotlin",
+        tree_sitter_kotlin_ng::LANGUAGE.into(),
+        &[
+            (
+                "(class_declaration name: (identifier) @class)",
+                SymbolKind::Class,
+            ),
+            (
+                "(object_declaration name: (identifier) @class)",
+                SymbolKind::Class,
+            ),
+            (
+                "(function_declaration name: (identifier) @function)",
+                SymbolKind::Function,
+            ),
+        ],
+    );
+
     // Ruby
     register(
         &mut map,
@@ -461,6 +484,7 @@ fn is_symbol_container(
             | "class_definition"
             | "class_declaration"
             | "class_specifier"
+            | "object_declaration"
             | "module"
             | "module_definition"
     )
@@ -481,6 +505,25 @@ trait Panel {}
         let mut parser = Parser::new();
         let symbols = extract_symbols_treesitter(source, "rust", &mut parser);
         assert!(!symbols.is_empty(), "Should find Rust symbols");
+    }
+
+    #[test]
+    fn test_kotlin_symbols() {
+        let source = "package p\n\n\
+                      class Animal {\n    fun speak() {}\n}\n\n\
+                      interface Draw {\n    fun draw()\n}\n\n\
+                      object Registry {\n    fun get(): Int = 1\n}\n\n\
+                      enum class Color { RED, GREEN }\n\n\
+                      fun topLevel() {}\n";
+        let mut parser = Parser::new();
+        let symbols = extract_symbols_treesitter(source, "kotlin", &mut parser);
+        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"Animal"), "classes: {names:?}");
+        assert!(names.contains(&"Draw"), "interfaces: {names:?}");
+        assert!(names.contains(&"Registry"), "objects: {names:?}");
+        assert!(names.contains(&"Color"), "enums: {names:?}");
+        assert!(names.contains(&"speak"), "methods: {names:?}");
+        assert!(names.contains(&"topLevel"), "free functions: {names:?}");
     }
 
     #[test]

@@ -22,6 +22,7 @@ tree-sitter-typescript = "0.23"
 tree-sitter-c = "0.23"
 tree-sitter-cpp = "0.23"
 tree-sitter-java = "0.23"
+tree-sitter-kotlin-ng = "1.1"
 tree-sitter-ruby = "0.23"
 # Must match termide-highlight's tree-sitter-php (0.23): two versions in one
 # binary collide the `tree_sitter_php` C symbol and break PHP highlighting.

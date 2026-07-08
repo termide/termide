@@ -40,7 +40,7 @@
 
 ## 功能特性
 
-- **基于终端的 IDE** - 支持 21 种语言的语法高亮、单词导航（Ctrl+Left/Right）、段落/符号导航（Ctrl+Up/Down）、自动缩进、自动关闭括号
+- **基于终端的 IDE** - 支持 22 种语言的语法高亮、单词导航（Ctrl+Left/Right）、段落/符号导航（Ctrl+Up/Down）、自动缩进、自动关闭括号
 - **LSP 支持** - 代码补全、查找引用、重命名符号、跳转到定义，通过 rust-analyzer、pylsp、typescript-language-server 及其他 LSP 服务器实现
 - **智能文件管理器** - 可展开目录的树形视图、嵌套 Git 状态、批量操作、文件/内容搜索（glob/正则表达式）、树内增量搜索
 - **远程文件系统** - 在文件管理器中通过 SFTP / FTP / FTPS 浏览和编辑远程服务器上的文件，在本地与远程面板之间复制 —— 纯 Rust（russh + rustls），无需原生库，可在静态 musl 上运行（`smb://` / `nfs://` 走系统挂载）

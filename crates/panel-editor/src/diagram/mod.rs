@@ -13,6 +13,7 @@ mod cpp;
 mod generic;
 mod go;
 mod java;
+mod kotlin;
 mod model;
 mod php;
 mod python;
@@ -40,6 +41,7 @@ pub fn generate_class_diagram(
         Some("tsx") | Some("jsx") => typescript::generate(source, file_path, true),
         Some("go") => go::generate(source, file_path),
         Some("java") => java::generate(source, file_path),
+        Some("kotlin") => kotlin::generate(source, file_path),
         Some("c") => c::generate(source, file_path),
         Some("cpp") => cpp::generate(source, file_path),
         Some("ruby") => ruby::generate(source, file_path),
@@ -64,6 +66,7 @@ fn resolve_language(language: Option<&str>, file_path: Option<&Path>) -> Option<
         "tsx" => Some("tsx".to_string()),
         "js" | "mjs" | "cjs" => Some("javascript".to_string()),
         "jsx" => Some("jsx".to_string()),
+        "kt" | "kts" => Some("kotlin".to_string()),
         _ => None,
     }
 }
@@ -360,6 +363,66 @@ mod tests {
             out.contains("class Color[\"enum Color\"]") && out.contains("RED"),
             "got:\n{out}"
         );
+    }
+
+    // --- Kotlin ---
+
+    #[test]
+    fn kotlin_classes_interfaces_objects_and_module() {
+        let src = "package p\n\n\
+                   interface Draw {\n    fun draw(): Unit\n}\n\n\
+                   open class Shape\n\n\
+                   class Circle(val center: Point, radius: Double) : Shape(), Draw {\n\
+                     private var count: Int = 0\n\
+                     override fun draw(): Unit {}\n\
+                     fun area(k: Double): Double = 0.0\n\
+                   }\n\n\
+                   data class Point(val x: Int, val y: Int)\n\n\
+                   enum class Color { RED, GREEN }\n\n\
+                   object Registry {\n    fun get(): Int = 1\n}\n\n\
+                   fun bounding(s: Shape): Point = Point(0, 0)\n\
+                   val VERSION: String = \"1\"\n\
+                   typealias Meters = Int\n";
+        let out = generate_class_diagram(src, Some("kotlin"), Some(Path::new("shapes.kt")))
+            .expect("kotlin diagram");
+        // Headers with recovered keywords.
+        assert!(
+            out.contains("class Draw[\"interface Draw\"]"),
+            "got:\n{out}"
+        );
+        assert!(
+            out.contains("class Circle[\"class Circle\"]"),
+            "got:\n{out}"
+        );
+        assert!(
+            out.contains("class Point[\"data class Point\"]"),
+            "got:\n{out}"
+        );
+        assert!(
+            out.contains("class Color[\"enum class Color\"]"),
+            "got:\n{out}"
+        );
+        assert!(
+            out.contains("class Registry[\"object Registry\"]"),
+            "got:\n{out}"
+        );
+        // Members: constructor `val` property, private field, method signatures.
+        assert!(out.contains("+center: Point"), "got:\n{out}");
+        assert!(out.contains("-count: Int"), "got:\n{out}");
+        assert!(out.contains("+area(Double) Double"), "got:\n{out}");
+        assert!(out.contains("+draw() Unit"), "got:\n{out}");
+        assert!(out.contains("RED"), "got:\n{out}");
+        // Relationships: `Shape()` -> inherit, `Draw` -> realize, field -> compose.
+        assert!(out.contains("Shape <|-- Circle"), "got:\n{out}");
+        assert!(out.contains("Draw <|.. Circle"), "got:\n{out}");
+        assert!(out.contains("Circle *-- Point"), "got:\n{out}");
+        // File box with top-level function, property and typealias.
+        assert!(
+            out.contains("[\"shapes.kt\"]") && out.contains("+bounding(Shape) Point"),
+            "got:\n{out}"
+        );
+        assert!(out.contains("+VERSION: String"), "got:\n{out}");
+        assert!(out.contains("+type Meters"), "got:\n{out}");
     }
 
     // --- C ---

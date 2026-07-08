@@ -99,7 +99,7 @@ termide/
 │   ├── core/                 # Core Panel trait and shared types
 │   ├── file-ops/             # File operations (copy, move, delete, upload, download)
 │   ├── git/                  # Git integration (status, diff, log)
-│   ├── highlight/            # Syntax highlighting (tree-sitter, 21 languages)
+│   ├── highlight/            # Syntax highlighting (tree-sitter, 22 languages)
 │   ├── i18n/                 # Internationalization (15 languages)
 │   ├── keyboard/             # Keyboard handling and layout translation
 │   ├── layout/               # Panel groups, split layout, fullscreen preset

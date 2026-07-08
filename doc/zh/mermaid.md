@@ -26,7 +26,7 @@ TermIDE 将 [Mermaid](https://mermaid.js.org/) 源文件（`.mmd`、`.mermaid`�
 `-` 私有、`#` 受保护、`~` 受限）。自由函数、常量和类型别名会归入一个以文件名命名的方框。
 继承、trait/接口实现以及按字段类型的组合关系以连线表示。
 
-Rust、Python、TypeScript/TSX/JSX、Go、Java、C、C++、Ruby 和 PHP 具有完整的提取器
+Rust、Python、TypeScript/TSX/JSX、Go、Java、Kotlin、C、C++、Ruby 和 PHP 具有完整的提取器
 （类型、签名、关系）；其他 tree-sitter 语言则回退为带方法名的类型方框，外加一个包含
 顶层函数的模块方框。
 

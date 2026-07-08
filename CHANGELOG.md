@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Kotlin support.** `.kt` / `.kts` files now get syntax highlighting, an outline of their classes, interfaces, objects, enums and functions, and rich class diagrams (`View as diagram`) with properties, function signatures, `val`/`var` constructor properties, superclass/interface relationships, and top-level declarations collected in the file box.
+
 ## [0.29.0] - 2026-07-03
 
 ### Added

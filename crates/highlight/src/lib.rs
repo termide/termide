@@ -48,6 +48,30 @@ pub const HIGHLIGHT_NAMES: &[&str] = &[
     "embedded",
 ];
 
+/// Hand-written highlights query for Kotlin.
+///
+/// `tree-sitter-kotlin-ng` ships no bundled highlights query, so this covers the
+/// common node kinds (validated against the grammar's actual AST). Keep captures
+/// to names present in [`HIGHLIGHT_NAMES`]. Literal keyword tokens must be
+/// anonymous tokens the grammar actually exposes (`true`/`false`/`null` are
+/// literal nodes here, not keyword tokens, so they are excluded).
+const KOTLIN_HIGHLIGHTS: &str = r#"
+(line_comment) @comment
+(block_comment) @comment
+(string_literal) @string
+(character_literal) @string
+(number_literal) @number
+(float_literal) @number
+(function_declaration (identifier) @function)
+(call_expression (identifier) @function)
+(class_declaration (identifier) @type)
+(object_declaration (identifier) @type)
+(user_type (identifier) @type)
+(parameter (identifier) @variable.parameter)
+(class_parameter (identifier) @variable.parameter)
+["class" "interface" "object" "fun" "val" "var" "return" "if" "else" "when" "for" "while" "import" "package" "is" "as" "override" "private" "public" "protected" "internal" "open" "abstract" "sealed" "data" "enum" "const" "companion" "typealias" "this" "super" "throw" "do" "constructor"] @keyword
+"#;
+
 /// Map an injection language name (as it appears in a grammar's injections
 /// query or a markdown code fence) to the key under which its config is loaded.
 /// Unknown names pass through unchanged and resolve to no config.
@@ -81,6 +105,7 @@ pub fn detect_language(path: &Path) -> Option<&'static str> {
         "c" | "h" => Some("c"),
         "cpp" | "cc" | "cxx" | "hpp" | "hxx" => Some("cpp"),
         "java" => Some("java"),
+        "kt" | "kts" => Some("kotlin"),
         "rb" => Some("ruby"),
         "php" => Some("php"),
         "hs" => Some("haskell"),
@@ -108,6 +133,7 @@ pub const SUPPORTED_LANGUAGES: &[&str] = &[
     "c",
     "cpp",
     "java",
+    "kotlin",
     "ruby",
     "php",
     "haskell",
@@ -235,6 +261,15 @@ impl TreeSitterHighlighter {
             "java",
             tree_sitter_java::LANGUAGE.into(),
             tree_sitter_java::HIGHLIGHTS_QUERY,
+            "",
+            &highlight_names,
+        );
+
+        Self::load_language_config(
+            &mut configs,
+            "kotlin",
+            tree_sitter_kotlin_ng::LANGUAGE.into(),
+            KOTLIN_HIGHLIGHTS,
             "",
             &highlight_names,
         );
@@ -1259,8 +1294,8 @@ mod tests {
         let h = global_highlighter();
         let samples = [
             "a.rs", "a.py", "a.go", "a.js", "a.ts", "a.tsx", "a.jsx", "a.c", "a.cpp", "a.java",
-            "a.rb", "a.php", "a.hs", "a.nix", "a.html", "a.css", "a.json", "a.toml", "a.yaml",
-            "a.sh", "a.md",
+            "a.kt", "a.rb", "a.php", "a.hs", "a.nix", "a.html", "a.css", "a.json", "a.toml",
+            "a.yaml", "a.sh", "a.md",
         ];
         for sample in samples {
             let lang = detect_language(Path::new(sample))
@@ -1284,6 +1319,16 @@ mod tests {
         assert!(
             styled_on_line(&mut cache, 1, "$count = 1; // comment") > 0,
             "PHP statement should be highlighted in a document"
+        );
+    }
+
+    #[test]
+    fn kotlin_line_is_highlighted() {
+        // Kotlin ships no bundled highlights query; this guards the hand-written
+        // KOTLIN_HIGHLIGHTS against a grammar/ABI regression silently disabling it.
+        assert!(
+            segment_count("kotlin", "fun area(r: Double): Double = 0.0") > 1,
+            "Kotlin line should produce multiple highlighted segments"
         );
     }
 
