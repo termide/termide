@@ -997,13 +997,31 @@ impl Panel for GitLogPanel {
 
     fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
         match cmd {
-            PanelCommand::Reload => {
+            PanelCommand::Reload | PanelCommand::RefreshIfStale => {
                 self.refresh();
                 CommandResult::NeedsRedraw(true)
             }
             PanelCommand::UpdateRepoPaths { paths } => {
                 self.update_repos(&paths);
                 CommandResult::NeedsRedraw(true)
+            }
+            // Live watcher updates: a commit / ref / rebase touches `.git` and
+            // arrives as OnGitUpdate — reload the log if it's this repo. (Plain
+            // working-tree edits don't change the graph, so OnFsUpdate is
+            // ignored.)
+            PanelCommand::OnGitUpdate { repo_paths } => {
+                let hit = if let Some(cur) = self.repo_manager.current() {
+                    repo_paths
+                        .iter()
+                        .any(|p| cur.starts_with(p) || p.starts_with(cur))
+                } else {
+                    false
+                };
+                if hit {
+                    self.refresh();
+                    return CommandResult::NeedsRedraw(true);
+                }
+                CommandResult::NeedsRedraw(false)
             }
             _ => CommandResult::None,
         }

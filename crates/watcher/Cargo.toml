@@ -12,3 +12,6 @@ anyhow.workspace = true
 notify.workspace = true
 notify-debouncer-mini.workspace = true
 ignore.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

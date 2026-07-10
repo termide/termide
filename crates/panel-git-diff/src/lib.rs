@@ -970,6 +970,26 @@ impl Panel for GitDiffPanel {
                 self.refresh();
                 CommandResult::NeedsRedraw(true)
             }
+            // Live watcher updates: refresh an open diff as soon as something in
+            // its repo changes (working-tree edit -> OnFsUpdate, commit/index ->
+            // OnGitUpdate), instead of waiting for the next focus/Ctrl+R.
+            PanelCommand::OnGitUpdate { repo_paths } => {
+                let hit = repo_paths
+                    .iter()
+                    .any(|p| self.repo_path.starts_with(p) || p.starts_with(&self.repo_path));
+                if hit {
+                    self.refresh();
+                    return CommandResult::NeedsRedraw(true);
+                }
+                CommandResult::NeedsRedraw(false)
+            }
+            PanelCommand::OnFsUpdate { changed_path } => {
+                if changed_path.starts_with(&self.repo_path) {
+                    self.refresh();
+                    return CommandResult::NeedsRedraw(true);
+                }
+                CommandResult::NeedsRedraw(false)
+            }
             _ => CommandResult::None,
         }
     }

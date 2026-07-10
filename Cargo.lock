@@ -5727,6 +5727,7 @@ dependencies = [
  "ignore",
  "notify",
  "notify-debouncer-mini",
+ "tempfile",
 ]
 
 [[package]]

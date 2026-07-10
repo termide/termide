@@ -219,6 +219,11 @@ pub struct FileManager {
     /// Background directory reload result (watcher- or constructor-
     /// triggered, non-blocking).
     async_reload_receiver: Option<mpsc::Receiver<AsyncDirReloadResult>>,
+    /// A watcher-driven reload was coalesced away (debounce window or an
+    /// in-flight reload) and must be retried so the tail of a change burst
+    /// still lands. Set by `start_async_reload` when it skips; drained by
+    /// `check_async_reload` once a slot frees up.
+    reload_dirty: bool,
     /// Cursor restore state to apply once `async_reload_receiver`
     /// resolves. Set by the navigation-driven path which used to be
     /// synchronous; cleared by `check_async_reload`. `None` means a
@@ -500,6 +505,7 @@ impl FileManager {
             hotkeys: HotkeyTable::default(),
             last_config_ptr: 0,
             async_reload_receiver: None,
+            reload_dirty: false,
             pending_dir_load: None,
             pending_expansions: HashMap::new(),
         }
@@ -1227,12 +1233,17 @@ impl FileManager {
     fn start_async_reload(&mut self) {
         const RELOAD_DEBOUNCE_MS: u128 = 300;
         if !self.navigation.should_reload(RELOAD_DEBOUNCE_MS) {
+            // Too soon after the last reload — remember to retry so a burst's
+            // final change isn't lost.
+            self.reload_dirty = true;
             return;
         }
         // Don't overlap with an existing async reload
         if self.async_reload_receiver.is_some() {
+            self.reload_dirty = true;
             return;
         }
+        self.reload_dirty = false;
         let dir_path = self.current_path.clone();
         let show_hidden = self.show_hidden;
         let git_cache = self.git_status_cache.clone();
@@ -1253,7 +1264,14 @@ impl FileManager {
     pub fn check_async_reload(&mut self) -> bool {
         let rx = match self.async_reload_receiver.take() {
             Some(rx) => rx,
-            None => return false,
+            None => {
+                // No reload in flight — retry a burst reload that was coalesced
+                // away earlier (start_async_reload re-checks the debounce gate).
+                if self.reload_dirty {
+                    self.start_async_reload();
+                }
+                return false;
+            }
         };
         let result = match rx.try_recv() {
             Ok(result) => result,
@@ -2440,6 +2458,13 @@ impl Panel for FileManager {
 
                 if should_reload {
                     self.start_async_reload();
+                    // The light reload re-reads the listing but reuses the
+                    // cached git statuses; recompute them too so badges
+                    // reflect the change (a plain working-tree edit emits only
+                    // this FS event, never an OnGitUpdate).
+                    if self.git_root.is_some() && !self.vfs.is_remote() {
+                        self.refresh_git_status();
+                    }
                     return CommandResult::NeedsRedraw(true);
                 }
                 CommandResult::NeedsRedraw(false)
@@ -2459,8 +2484,13 @@ impl Panel for FileManager {
                         .iter()
                         .any(|p| git_root.starts_with(p) || p.starts_with(git_root));
                     if should_update {
-                        // Reload directory to pick up new/deleted files and git status
+                        // Reload directory to pick up new/deleted files, and
+                        // recompute git status (the light reload only reapplies
+                        // the cached statuses).
                         self.start_async_reload();
+                        if !self.vfs.is_remote() {
+                            self.refresh_git_status();
+                        }
                         return CommandResult::NeedsRedraw(true);
                     }
                 }

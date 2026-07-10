@@ -506,7 +506,7 @@ impl App {
         }
         self.last_focus_sig = sig.clone();
         if let Some((_, name)) = sig {
-            if name == "git_status" || name == "git_diff" {
+            if name == "git_status" || name == "git_diff" || name == "git_log" {
                 if let Some(panel) = self.layout_manager.active_panel_mut() {
                     if panel.handle_command(PanelCommand::Reload).needs_redraw() {
                         self.state.needs_redraw = true;
