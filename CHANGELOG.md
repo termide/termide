@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.2] - 2026-07-10
+
 ### Added
 - **Open databases without a bookmark.** Pressing `Enter` or `F3` on a `.db` / `.sqlite` / `.sqlite3` / `.db3` file in the file manager now opens it in the database viewer (instead of the hex viewer).
 - **`Windows ▸ Open…`** — a universal opener prompt (replacing the old `Web` entry, now the first item in the menu) that routes what you type by type: a file (by extension), a directory (file manager), a database URL (`sqlite://` / `postgres://` / `mysql://`), or an `http(s)://` address. `Ctrl+G` in any viewer shares the same behaviour.
@@ -275,6 +277,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `deny.toml` + `cargo-deny check` step covers advisories, licenses, bans and sources.
 - Pre-commit hook documented in `CONTRIBUTING.md`.
 
+[0.29.2]: https://github.com/termide/termide/releases/tag/0.29.2
 [0.29.1]: https://github.com/termide/termide/releases/tag/0.29.1
 [0.29.0]: https://github.com/termide/termide/releases/tag/0.29.0
 [0.28.0]: https://github.com/termide/termide/releases/tag/0.28.0

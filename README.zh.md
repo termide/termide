@@ -84,37 +84,37 @@
 
 ```bash
 # Linux x86_64（也适用于 WSL）
-wget https://github.com/termide/termide/releases/latest/download/termide-0.29.1-x86_64-unknown-linux-gnu.tar.gz
-tar xzf termide-0.29.1-x86_64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.2-x86_64-unknown-linux-gnu.tar.gz
+tar xzf termide-0.29.2-x86_64-unknown-linux-gnu.tar.gz
 ./termide
 
 # Linux x86_64（静态 musl — Alpine、distroless 容器、任何无 glibc 的系统）
-wget https://github.com/termide/termide/releases/latest/download/termide-0.29.1-x86_64-unknown-linux-musl.tar.gz
-tar xzf termide-0.29.1-x86_64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.2-x86_64-unknown-linux-musl.tar.gz
+tar xzf termide-0.29.2-x86_64-unknown-linux-musl.tar.gz
 ./termide
 
 # macOS Intel (x86_64)
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.29.1-x86_64-apple-darwin.tar.gz
-tar xzf termide-0.29.1-x86_64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.29.2-x86_64-apple-darwin.tar.gz
+tar xzf termide-0.29.2-x86_64-apple-darwin.tar.gz
 ./termide
 
 # macOS Apple Silicon (ARM64)
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.29.1-aarch64-apple-darwin.tar.gz
-tar xzf termide-0.29.1-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.29.2-aarch64-apple-darwin.tar.gz
+tar xzf termide-0.29.2-aarch64-apple-darwin.tar.gz
 ./termide
 
 # Linux ARM64（树莓派、ARM 服务器）
-wget https://github.com/termide/termide/releases/latest/download/termide-0.29.1-aarch64-unknown-linux-gnu.tar.gz
-tar xzf termide-0.29.1-aarch64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.2-aarch64-unknown-linux-gnu.tar.gz
+tar xzf termide-0.29.2-aarch64-unknown-linux-gnu.tar.gz
 ./termide
 
 # Linux ARM64（静态 musl —— Android/Termux、Alpine ARM、任何无 glibc 的 ARM64）
-wget https://github.com/termide/termide/releases/latest/download/termide-0.29.1-aarch64-unknown-linux-musl.tar.gz
-tar xzf termide-0.29.1-aarch64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.2-aarch64-unknown-linux-musl.tar.gz
+tar xzf termide-0.29.2-aarch64-unknown-linux-musl.tar.gz
 ./termide
 
 # Windows x86_64（从 Releases 下载 .zip，解压后在 Windows Terminal 中运行）
-# https://github.com/termide/termide/releases/latest/download/termide-0.29.1-x86_64-pc-windows-msvc.zip
+# https://github.com/termide/termide/releases/latest/download/termide-0.29.2-x86_64-pc-windows-msvc.zip
 ```
 
 </details>
@@ -125,7 +125,7 @@ tar xzf termide-0.29.1-aarch64-unknown-linux-musl.tar.gz
 TermIDE 通过 ConPTY 在 Windows 10+ 上原生运行。建议使用 **Windows Terminal**
 以获得最佳体验。
 
-1. 从 [GitHub Releases](https://github.com/termide/termide/releases) 下载 `termide-0.29.1-x86_64-pc-windows-msvc.zip`。
+1. 从 [GitHub Releases](https://github.com/termide/termide/releases) 下载 `termide-0.29.2-x86_64-pc-windows-msvc.zip`。
 2. 解压压缩包。
 3. 在 Windows Terminal 中运行 `termide.exe`。
 
@@ -133,7 +133,7 @@ TermIDE 通过 ConPTY 在 Windows 10+ 上原生运行。建议使用 **Windows T
 `%LOCALAPPDATA%\termide\cache\`。
 
 或者在 **WSL/WSL2** 中，像在任意 Linux 上一样使用 Linux x86_64 构建
-（`termide-0.29.1-x86_64-unknown-linux-gnu.tar.gz`）。
+（`termide-0.29.2-x86_64-unknown-linux-gnu.tar.gz`）。
 
 </details>
 
@@ -144,8 +144,8 @@ TermIDE 通过 ConPTY 在 Windows 10+ 上原生运行。建议使用 **Windows T
 
 ```bash
 # 仅限 x86_64（ARM64 请使用上面的 tar.gz）
-wget https://github.com/termide/termide/releases/latest/download/termide_0.29.1-1_amd64.deb
-sudo dpkg -i termide_0.29.1-1_amd64.deb
+wget https://github.com/termide/termide/releases/latest/download/termide_0.29.2-1_amd64.deb
+sudo dpkg -i termide_0.29.2-1_amd64.deb
 ```
 
 </details>
@@ -157,8 +157,8 @@ sudo dpkg -i termide_0.29.1-1_amd64.deb
 
 ```bash
 # 仅限 x86_64（ARM64 请使用上面的 tar.gz）
-wget https://github.com/termide/termide/releases/latest/download/termide-0.29.1-1.x86_64.rpm
-sudo rpm -i termide-0.29.1-1.x86_64.rpm
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.2-1.x86_64.rpm
+sudo rpm -i termide-0.29.2-1.x86_64.rpm
 ```
 
 </details>
@@ -229,8 +229,8 @@ nix profile install github:termide/termide
 
 ```bash
 pkg install git openssh   # termide 会调用的工具（以及所需的 LSP 服务器）
-wget https://github.com/termide/termide/releases/latest/download/termide-0.29.1-aarch64-unknown-linux-musl.tar.gz
-tar xzf termide-0.29.1-aarch64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.2-aarch64-unknown-linux-musl.tar.gz
+tar xzf termide-0.29.2-aarch64-unknown-linux-musl.tar.gz
 ./termide
 ```
 
@@ -288,8 +288,8 @@ russh-sftp —— 无 OpenSSL、无 libssh2），因此这与普通构建是相�
 最简单的方式是从发行版下载预编译的 tarball：
 
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.29.1-x86_64-unknown-linux-musl.tar.gz
-tar xzf termide-0.29.1-x86_64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/latest/download/termide-0.29.2-x86_64-unknown-linux-musl.tar.gz
+tar xzf termide-0.29.2-x86_64-unknown-linux-musl.tar.gz
 ./termide
 
 # 验证完全静态 —— 无共享库
