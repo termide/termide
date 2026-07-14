@@ -306,6 +306,21 @@ impl Panel for MermaidPanel {
             &self.colors,
             ctx.is_focused,
         );
+
+        // Horizontal scrollbar on the panel's bottom border — the diagram is
+        // often much wider than the viewport, so this shows how far along the X
+        // axis the view is (and that there's more to the right).
+        ScrollBar::render_horizontal(
+            buf,
+            area.x,
+            ctx.border_bottom_y.unwrap_or(area.y + area.height - 1),
+            self.viewport_w() as u16,
+            self.scroll_x,
+            self.viewport_w(),
+            self.canvas_width,
+            &self.colors,
+            ctx.is_focused,
+        );
     }
 
     fn handle_key(&mut self, chord: KeyChord) -> Vec<PanelEvent> {

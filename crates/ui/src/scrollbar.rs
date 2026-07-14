@@ -92,6 +92,55 @@ impl ScrollBar {
         }
     }
 
+    /// Render a horizontal scrollbar on a single row (e.g. a panel's bottom
+    /// border). Mirrors [`ScrollBar::render`] but along the X axis: `─` track,
+    /// `━` thumb. No-op when all content fits (`total <= visible`).
+    ///
+    /// * `x_start` / `y` — top-left of the bar row.
+    /// * `width` — number of columns the bar spans.
+    /// * `offset` — first visible column index.
+    /// * `visible` — number of visible columns in the viewport.
+    /// * `total` — total content width in columns.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_horizontal(
+        buf: &mut Buffer,
+        x_start: u16,
+        y: u16,
+        width: u16,
+        offset: usize,
+        visible: usize,
+        total: usize,
+        theme: &ThemeColors,
+        is_focused: bool,
+    ) {
+        if total <= visible || width == 0 {
+            return;
+        }
+        let color = if is_focused {
+            theme.border_focused
+        } else {
+            theme.disabled
+        };
+        let track = Style::default().fg(color);
+        let visible_ratio = width as f32 / total as f32;
+        let thumb_width = (width as f32 * visible_ratio).max(1.0) as u16;
+        let max_scroll = total.saturating_sub(visible);
+        let scroll_ratio = if max_scroll > 0 {
+            offset.min(max_scroll) as f32 / max_scroll as f32
+        } else {
+            0.0
+        };
+        let thumb_pos = ((width.saturating_sub(thumb_width)) as f32 * scroll_ratio) as u16;
+        for i in 0..width {
+            let sym = if i >= thumb_pos && i < thumb_pos + thumb_width {
+                "━"
+            } else {
+                "─"
+            };
+            buf[(x_start + i, y)].set_symbol(sym).set_style(track);
+        }
+    }
+
     /// Check if a scrollbar is needed for the given content.
     ///
     /// Returns `true` if `total > visible`.

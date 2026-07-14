@@ -606,6 +606,27 @@ fn assign_cross(
                 center[i] = c;
                 prev_right = c + half;
             }
+            // Re-center the rank. The pass above can only push a node right of
+            // its desired position (never left), so a rank whose nodes crowd the
+            // same target — e.g. the many children of a hub entity that all point
+            // back at one parent — drifts rightward as a block, stranding the
+            // first nodes far to the left with long connecting elbows. Shifting
+            // the whole rank by its mean displacement restores symmetry (spacing
+            // is preserved since every node moves equally) so a hub's children
+            // straddle it instead of fanning out to one side.
+            if !g.is_empty() {
+                let drift: i64 = g
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, &i)| center[i] - desired[idx])
+                    .sum::<i64>()
+                    / g.len() as i64;
+                if drift > 0 {
+                    for &i in g {
+                        center[i] -= drift;
+                    }
+                }
+            }
         }
     }
 
