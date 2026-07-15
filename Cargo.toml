@@ -15,7 +15,7 @@ repository = "https://github.com/termide/termide"
 [workspace.dependencies]
 # Core dependencies
 anyhow = "1.0"
-crossterm = "0.28"
+crossterm = "0.29"
 ratatui = "0.30.0"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
@@ -113,7 +113,7 @@ arboard = "3.4"
 base64.workspace = true
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
-crossterm = "0.28"
+crossterm = "0.29"
 dirs = "6.0"
 log = "0.4"
 notify = { version = "6.1", default-features = false, features = ["macos_kqueue"] }
