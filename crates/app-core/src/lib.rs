@@ -23,7 +23,7 @@
 //! └──────────────────────────────────────────────────────────────┘
 //! ```
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
 
@@ -210,14 +210,6 @@ pub enum Message {
     },
 }
 
-/// Trait for receiving messages from background tasks.
-pub trait MessageReceiver {
-    /// Poll for new messages (non-blocking).
-    ///
-    /// Returns all available messages without waiting.
-    fn poll_messages(&mut self) -> Vec<Message>;
-}
-
 // ============================================================================
 // Commands (Explicit State Mutations)
 // ============================================================================
@@ -320,57 +312,6 @@ pub enum AppCommand {
         /// The event to forward
         event: PanelEvent,
     },
-}
-
-// ============================================================================
-// Context Traits (Composite Interfaces)
-// ============================================================================
-
-/// Context for event handling operations.
-///
-/// Combines state management, modal management, and panel access
-/// for use in event handlers.
-pub trait EventContext: StateManager + ModalManager + PanelProvider {
-    /// Get terminal dimensions.
-    fn terminal_size(&self) -> (u16, u16);
-
-    /// Check if menu is currently open.
-    fn menu_open(&self) -> bool;
-}
-
-/// Context for modal result processing.
-///
-/// Provides access to state and panels for processing
-/// modal dialog results.
-pub trait ModalContext: StateManager + PanelProvider {
-    /// Get mutable access to file operations handler.
-    fn file_operations(&mut self) -> &mut dyn FileOperations;
-}
-
-/// File operations interface for modal handlers.
-///
-/// Abstracts filesystem operations for testability.
-pub trait FileOperations {
-    /// Create a new file.
-    fn create_file(&mut self, path: &Path) -> Result<()>;
-
-    /// Create a new directory.
-    fn create_directory(&mut self, path: &Path) -> Result<()>;
-
-    /// Delete a path (file or directory).
-    fn delete_path(&mut self, path: &Path) -> Result<()>;
-
-    /// Copy a path to destination.
-    fn copy_path(&mut self, source: &Path, destination: &Path) -> Result<()>;
-
-    /// Move a path to destination.
-    fn move_path(&mut self, source: &Path, destination: &Path) -> Result<()>;
-
-    /// Check if path exists.
-    fn path_exists(&self, path: &Path) -> bool;
-
-    /// Check if path is a directory.
-    fn is_directory(&self, path: &Path) -> bool;
 }
 
 // ============================================================================
