@@ -19,4 +19,5 @@ termide-i18n = { path = "../i18n" }
 termide-modal = { path = "../modal" }
 termide-state = { path = "../state" }
 termide-theme = { path = "../theme" }
+termide-ui = { path = "../ui" }
 termide-ui-render = { path = "../ui-render" }

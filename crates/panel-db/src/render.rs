@@ -3,10 +3,11 @@
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use unicode_width::UnicodeWidthStr;
 
 use termide_db::SortDir;
+use termide_ui::ScrollBar;
 use termide_ui_render::InlineSelector;
 
 use crate::{ConnState, DbPanel, Section};
@@ -262,17 +263,12 @@ impl DbPanel {
         }
 
         // --- scrollbars (drawn last so they sit above the grid) ---
-        let sb_color = if is_focused {
-            theme.border_focused
-        } else {
-            theme.disabled
-        };
         if v_needed {
             // Position across the whole table: window offset + in-window scroll.
             let offset = self.offset as usize + self.row_scroll;
             let total = self.total_rows.unwrap_or(0) as usize;
             let vx = border_right_x.unwrap_or(area.x + area.width - 1);
-            render_vscrollbar(
+            ScrollBar::render(
                 buf,
                 vx,
                 area.y + 1,
@@ -280,7 +276,8 @@ impl DbPanel {
                 offset,
                 data_height,
                 total,
-                sb_color,
+                &theme,
+                is_focused,
             );
         }
         if h_needed {
@@ -298,7 +295,7 @@ impl DbPanel {
             }
             let visible_cols = visible_cols.max(1);
             let hy = border_bottom_y.unwrap_or(area.y + area.height - 1);
-            render_hscrollbar(
+            ScrollBar::render_horizontal(
                 buf,
                 area.x,
                 hy,
@@ -306,7 +303,8 @@ impl DbPanel {
                 self.col_scroll,
                 visible_cols,
                 total_cols,
-                sb_color,
+                &theme,
+                is_focused,
             );
         }
 
@@ -380,76 +378,6 @@ impl DbPanel {
     }
 }
 
-/// Vertical scrollbar on column `x`, rows `y0..y0+height`. Matches the shared
-/// [`termide_ui::ScrollBar`] look (`│` track, `▌` thumb). No-op when all rows fit.
-#[allow(clippy::too_many_arguments)]
-fn render_vscrollbar(
-    buf: &mut Buffer,
-    x: u16,
-    y0: u16,
-    height: u16,
-    offset: usize,
-    visible: usize,
-    total: usize,
-    color: Color,
-) {
-    if total <= visible || height == 0 {
-        return;
-    }
-    let style = Style::default().fg(color);
-    let thumb = ((height as f32 * (visible as f32 / total as f32)).max(1.0)) as u16;
-    let max_scroll = total.saturating_sub(visible);
-    let ratio = if max_scroll > 0 {
-        offset.min(max_scroll) as f32 / max_scroll as f32
-    } else {
-        0.0
-    };
-    let pos = ((height.saturating_sub(thumb)) as f32 * ratio) as u16;
-    for i in 0..height {
-        let sym = if i >= pos && i < pos + thumb {
-            "▌"
-        } else {
-            "│"
-        };
-        buf[(x, y0 + i)].set_symbol(sym).set_style(style);
-    }
-}
-
-/// Horizontal scrollbar on row `y`, columns `x0..x0+width`, sized in list units
-/// (table columns). `─` track, `━` thumb. No-op when everything fits.
-#[allow(clippy::too_many_arguments)]
-fn render_hscrollbar(
-    buf: &mut Buffer,
-    x0: u16,
-    y: u16,
-    width: u16,
-    offset: usize,
-    visible: usize,
-    total: usize,
-    color: Color,
-) {
-    if total <= visible || width == 0 {
-        return;
-    }
-    let style = Style::default().fg(color);
-    let thumb = ((width as f32 * (visible as f32 / total as f32)).max(1.0)) as u16;
-    let max_scroll = total.saturating_sub(visible);
-    let ratio = if max_scroll > 0 {
-        offset.min(max_scroll) as f32 / max_scroll as f32
-    } else {
-        0.0
-    };
-    let pos = ((width.saturating_sub(thumb)) as f32 * ratio) as u16;
-    for i in 0..width {
-        let sym = if i >= pos && i < pos + thumb {
-            "━"
-        } else {
-            "─"
-        };
-        buf[(x0 + i, y)].set_symbol(sym).set_style(style);
-    }
-}
-
 /// Fill a single row with spaces in `style` (background paint).
 fn fill_line(buf: &mut Buffer, x: u16, y: u16, width: u16, style: Style) {
     let blanks = " ".repeat(width as usize);
@@ -492,40 +420,5 @@ fn pad(s: &str, w: usize) -> String {
             out.push_str(&" ".repeat(w - ow));
         }
         out
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ratatui::layout::Rect;
-
-    #[test]
-    fn vscrollbar_draws_thumb_and_track() {
-        let mut buf = Buffer::empty(Rect::new(0, 0, 3, 10));
-        render_vscrollbar(&mut buf, 2, 0, 10, 0, 10, 100, Color::White);
-        let col: String = (0..10).map(|y| buf[(2, y)].symbol().to_string()).collect();
-        assert!(col.contains('▌'), "thumb present: {col:?}");
-        assert!(col.contains('│'), "track present: {col:?}");
-    }
-
-    #[test]
-    fn scrollbars_are_noop_when_all_fit() {
-        let mut buf = Buffer::empty(Rect::new(0, 0, 20, 5));
-        render_vscrollbar(&mut buf, 2, 0, 5, 0, 5, 5, Color::White);
-        render_hscrollbar(&mut buf, 0, 4, 20, 0, 12, 12, Color::White);
-        let col: String = (0..5).map(|y| buf[(2, y)].symbol().to_string()).collect();
-        let row: String = (0..20).map(|x| buf[(x, 4)].symbol().to_string()).collect();
-        assert!(!col.contains('▌') && !col.contains('│'), "no vbar: {col:?}");
-        assert!(!row.contains('━'), "no hbar: {row:?}");
-    }
-
-    #[test]
-    fn hscrollbar_draws_thumb_and_track() {
-        let mut buf = Buffer::empty(Rect::new(0, 0, 20, 1));
-        render_hscrollbar(&mut buf, 0, 0, 20, 0, 3, 12, Color::White);
-        let row: String = (0..20).map(|x| buf[(x, 0)].symbol().to_string()).collect();
-        assert!(row.contains('━'), "thumb present: {row:?}");
-        assert!(row.contains('─'), "track present: {row:?}");
     }
 }
