@@ -258,7 +258,7 @@ mod tests {
     fn default_hotkeys() -> HotkeyTable {
         let mut config = termide_config::Config::default();
         config.normalize();
-        crate::build_fm_hotkey_table(&config)
+        crate::command_dispatch::build_fm_hotkey_table(&config)
     }
 
     #[test]
