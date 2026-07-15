@@ -156,19 +156,30 @@ impl RepoManager {
         let mut new_roots = find_toplevel_repos(paths);
         sort_by_display_name(&mut new_roots);
 
-        // Swap in the upward baseline only when it actually found repos.
-        // If it's empty we keep the current set — which may hold nested repos
-        // a previous async walk discovered — until the freshly spawned walk
-        // lands, so a non-repo root doesn't flash "no repositories" on every
-        // navigation. `poll()` will then replace it with the authoritative set.
-        let changed = if !new_roots.is_empty() && new_roots != self.repos {
-            self.repos = new_roots.clone();
+        // Merge the top-level baseline with the repos we already hold rather
+        // than replacing outright. The current set may include submodules and
+        // nested projects that a previous async walk surfaced (via `poll`); the
+        // bare `new_roots` never contains those, so a plain swap would drop them
+        // and — if the selected repo was one of them — reset the selection to
+        // the first entry on every navigation. Merging keeps every known repo
+        // (so the selection survives) until the freshly spawned walk lands and
+        // `poll()` replaces the set with the authoritative, pruned list.
+        let changed = if new_roots.is_empty() {
+            false
+        } else {
+            let mut merged = new_roots.clone();
+            for r in &self.repos {
+                if !merged.contains(r) {
+                    merged.push(r.clone());
+                }
+            }
+            sort_by_display_name(&mut merged);
+            let actually_changed = merged != self.repos;
+            self.repos = merged;
             self.selected = current
                 .and_then(|c| self.repos.iter().position(|r| r == &c))
                 .unwrap_or(0);
-            true
-        } else {
-            false
+            actually_changed
         };
         // Always restart the walk so a later poll() picks up new/removed
         // submodules and nested repos even when the baseline was unchanged.
@@ -270,6 +281,43 @@ mod tests {
         sort_by_display_name(&mut repos);
         let names: Vec<String> = repos.iter().map(|p| crate::get_repo_name(p)).collect();
         assert_eq!(names, vec!["apple", "mango", "Zebra"]);
+    }
+
+    #[test]
+    fn update_preserves_selection_of_async_discovered_repo() {
+        use std::fs;
+        // Two real top-level repos so find_toplevel_repos returns them.
+        let tmp = std::env::temp_dir().join(format!("termide-rm-sel-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("a/.git")).unwrap();
+        fs::create_dir_all(tmp.join("b/.git")).unwrap();
+        let a = std::fs::canonicalize(tmp.join("a")).unwrap();
+        let b = std::fs::canonicalize(tmp.join("b")).unwrap();
+
+        let mut mgr = RepoManager::new(&[a.clone(), b.clone()]);
+        // Simulate a submodule/nested repo the async walk surfaced and that the
+        // user then selected.
+        let nested = a.join("vendor/lib");
+        if !mgr.repos.contains(&nested) {
+            mgr.repos.push(nested.clone());
+        }
+        mgr.selected = mgr.repos.iter().position(|r| r == &nested).unwrap();
+
+        // A path update that only re-derives the top-level set must keep the
+        // nested repo and the selection on it.
+        mgr.update(&[a.clone(), b.clone()]);
+        let _ = fs::remove_dir_all(&tmp);
+
+        assert!(
+            mgr.repos().contains(&nested),
+            "async-discovered repo was dropped: {:?}",
+            mgr.repos()
+        );
+        assert_eq!(
+            mgr.current(),
+            Some(nested.as_path()),
+            "selection reset off the nested repo"
+        );
     }
 
     #[test]
