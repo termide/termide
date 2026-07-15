@@ -13,6 +13,8 @@ pub mod app;
 pub mod layout_session;
 pub mod panel_ext;
 pub mod state;
+mod state_operations;
+mod state_types;
 
 // Re-export main types for convenience
 pub use app::App;

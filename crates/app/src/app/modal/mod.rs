@@ -2,7 +2,10 @@
 //!
 //! These modules handle the results of modal dialogs.
 
+mod batch_conflict;
 mod batch_handler;
+mod batch_symlink;
+mod batch_transfer;
 mod bookmark_handler;
 mod command_handler;
 mod command_palette_handler;
