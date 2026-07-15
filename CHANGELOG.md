@@ -5,7 +5,7 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.29.3] - 2026-07-15
 
 ### Fixed
 - The git status/log panels no longer reset the selected repository when working in a directory that contains many git projects. Navigating (which re-derives the repo list) dropped the asynchronously-discovered nested repositories and submodules, resetting the selection to the first repository; the repo list is now merged instead of replaced, so the selection is preserved.
@@ -282,6 +282,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `deny.toml` + `cargo-deny check` step covers advisories, licenses, bans and sources.
 - Pre-commit hook documented in `CONTRIBUTING.md`.
 
+[0.29.3]: https://github.com/termide/termide/releases/tag/0.29.3
 [0.29.2]: https://github.com/termide/termide/releases/tag/0.29.2
 [0.29.1]: https://github.com/termide/termide/releases/tag/0.29.1
 [0.29.0]: https://github.com/termide/termide/releases/tag/0.29.0
