@@ -11,8 +11,10 @@
 pub mod key_handler;
 mod mode;
 pub mod motions;
+mod normal_mode;
 pub mod operators;
 mod state;
+mod visual_mode;
 
 pub use key_handler::{handle_vim_key, InsertPosition, VimKeyResult};
 pub use mode::VimMode;
