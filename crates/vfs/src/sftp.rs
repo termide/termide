@@ -26,7 +26,7 @@ use std::thread;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use russh::client;
-use russh::keys::{decode_secret_key, load_secret_key, PrivateKey, PrivateKeyWithHashAlg};
+use russh::keys::{load_secret_key, PrivateKey, PrivateKeyWithHashAlg};
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::{FileAttributes, FileType as SftpFileType, OpenFlags};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -1924,14 +1924,6 @@ impl VfsProvider for SftpProvider {
         // Could be implemented via SSH exec "df" but not used by termide yet.
         None
     }
-}
-
-// Decoding helper kept around for downstream use cases (e.g. inline keys).
-#[allow(dead_code)]
-fn decode_inline_key(pem: &str, passphrase: Option<&str>) -> VfsResult<PrivateKey> {
-    decode_secret_key(pem, passphrase).map_err(|e| {
-        VfsError::AuthenticationFailed(format!("Failed to decode inline private key: {e}"))
-    })
 }
 
 // ============================================================================

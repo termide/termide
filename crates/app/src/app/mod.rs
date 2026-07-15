@@ -156,15 +156,6 @@ impl App {
         }
     }
 
-    /// Create a new application with specified terminal size
-    /// This is useful during initialization to set proper terminal dimensions
-    /// before creating panels
-    pub fn new_with_size(width: u16, height: u16) -> Self {
-        let mut app = Self::new();
-        app.state.update_terminal_size(width, height);
-        app
-    }
-
     /// Create a new application with a pre-loaded config and specified terminal size.
     /// This avoids double config loading by accepting an already-configured Config.
     ///
@@ -817,19 +808,9 @@ impl App {
         &self.state
     }
 
-    /// Get mutable reference to AppState
-    pub fn state_mut(&mut self) -> &mut AppState {
-        &mut self.state
-    }
-
     /// Get reference to LayoutManager
     pub fn layout_manager(&self) -> &LayoutManager {
         &self.layout_manager
-    }
-
-    /// Get mutable reference to LayoutManager
-    pub fn layout_manager_mut(&mut self) -> &mut LayoutManager {
-        &mut self.layout_manager
     }
 
     /// Find existing panel by name and focus on it

@@ -602,12 +602,6 @@ impl FileSearchState {
         }
     }
 
-    /// Total matches across all files (content mode); used by the replace
-    /// confirmation. Distinct from the displayed, per-file-capped rows.
-    pub fn total_matches(&self) -> usize {
-        self.result_count
-    }
-
     /// Bar counter: (current_index, total) over the selectable rows — files in
     /// content mode, entries in file-name mode.
     pub fn get_match_info(&self) -> Option<(usize, usize)> {
@@ -849,11 +843,6 @@ impl FileSearchState {
                 false
             }
         }
-    }
-
-    /// Number of file-group headers (i.e. distinct files with matches).
-    pub fn file_header_count(&self) -> usize {
-        self.tree_nodes.iter().filter(|n| n.is_file_header).count()
     }
 
     /// Store the in-progress replacement text (Content mode), used for the

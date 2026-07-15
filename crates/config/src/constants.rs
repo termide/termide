@@ -40,14 +40,8 @@ pub const MODAL_MAX_WIDTH_PERCENTAGE_DEFAULT: f32 = 0.75;
 /// Maximum modal width as percentage of screen width (wide modals).
 pub const MODAL_MAX_WIDTH_PERCENTAGE_WIDE: f32 = 0.9;
 
-/// Minimum modal width (default).
-pub const MODAL_MIN_WIDTH_DEFAULT: u16 = 20;
-
 /// Minimum modal width (wide modals).
 pub const MODAL_MIN_WIDTH_WIDE: u16 = 30;
-
-/// Modal total width addition with border and padding.
-pub const MODAL_PADDING_WITH_BORDER: u16 = 6; // 2 (border) + 4 (padding)
 
 /// Modal total width addition with double border and padding.
 pub const MODAL_PADDING_WITH_DOUBLE_BORDER: u16 = 8; // 4 (borders) + 4 (padding)
@@ -59,9 +53,6 @@ pub const MODAL_BUTTON_SPACING: u16 = 4;
 pub const MODAL_MIN_VALUE_WIDTH: usize = 20;
 
 // ===== Performance and security constants =====
-
-/// Maximum recursion depth when copying directories.
-pub const MAX_DIRECTORY_COPY_DEPTH: usize = 100;
 
 /// Maximum number of log entries.
 pub const MAX_LOG_ENTRIES: usize = 1000;

@@ -207,32 +207,6 @@ pub fn get_line_number_git_style(
         .unwrap_or((theme.disabled, None))
 }
 
-/// Get git status marker (for backward compatibility).
-///
-/// Returns the git status marker character.
-pub fn get_git_status_marker(
-    line_idx: usize,
-    git_diff_cache: &Option<GitDiffCache>,
-    show_git_diff: bool,
-) -> char {
-    if !show_git_diff {
-        return ' ';
-    }
-
-    git_diff_cache
-        .as_ref()
-        .map(|cache| {
-            let status = cache.get_line_status(line_idx);
-            match status {
-                LineStatus::Added => '+',
-                LineStatus::Modified => '~',
-                LineStatus::Unchanged => ' ',
-                LineStatus::DeletedAfter => ' ',
-            }
-        })
-        .unwrap_or(' ')
-}
-
 /// Get LSP diagnostic marker for gutter.
 ///
 /// Returns the marker character and color for diagnostic severity.

@@ -110,8 +110,6 @@ pub mod modal_constants {
     pub const PADDING_WITH_BORDER: u16 = 6;
     /// Padding with double border.
     pub const PADDING_WITH_DOUBLE_BORDER: u16 = 8;
-    /// Button spacing in modal dialogs.
-    pub const BUTTON_SPACING: u16 = 4;
 }
 
 /// Configuration for modal width calculation.

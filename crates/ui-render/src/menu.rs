@@ -179,15 +179,6 @@ pub fn get_menu_item_x_position(menu_index: usize) -> u16 {
     MenuLayout::compute().x_positions[menu_index.min(MENU_ITEM_COUNT - 1)]
 }
 
-/// Get the width of a menu item by index
-pub fn get_menu_item_width(menu_index: usize) -> u16 {
-    MenuLayout::compute()
-        .widths
-        .get(menu_index)
-        .copied()
-        .unwrap_or(0)
-}
-
 /// Pick the battery indicator icon based on AC state.
 fn battery_icon(info: BatteryInfo) -> &'static str {
     if info.charging {

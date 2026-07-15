@@ -829,13 +829,6 @@ impl AppState {
             .unwrap_or(false)
     }
 
-    /// Cancel all operations.
-    pub fn cancel_all_operations(&mut self) {
-        if let Some(manager) = self.operation_manager_mut() {
-            manager.cancel_all();
-        }
-    }
-
     /// Get summary of background operations for status bar display.
     pub fn background_operations_summary(&self) -> Option<BackgroundOperationSummary> {
         self.operation_manager()

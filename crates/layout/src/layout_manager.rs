@@ -1074,11 +1074,6 @@ impl LayoutManager {
         self.panel_groups.get_mut(index)
     }
 
-    /// Get reference to group by index.
-    pub fn get_group(&self, index: usize) -> Option<&PanelGroup> {
-        self.panel_groups.get(index)
-    }
-
     /// Get number of groups.
     pub fn group_count(&self) -> usize {
         self.panel_groups.len()
@@ -1169,14 +1164,6 @@ mod tests {
             Self {
                 name,
                 width_pref: WidthPreference::NoPreference,
-            }
-        }
-
-        #[allow(dead_code)]
-        fn with_width_pref(name: &'static str, pref: WidthPreference) -> Self {
-            Self {
-                name,
-                width_pref: pref,
             }
         }
     }

@@ -366,26 +366,6 @@ impl FileManager {
         self.selection.items.len()
     }
 
-    /// Check if any selected entry is a directory.
-    /// If nothing is selected, check if current item under cursor is a directory.
-    pub fn has_selected_directories(&self) -> bool {
-        if self.selection.items.is_empty() {
-            if let Some(entry) = self.entry_at(self.selected) {
-                return entry.is_dir && entry.name != "..";
-            }
-            return false;
-        }
-
-        for &vis_idx in &self.selection.items {
-            if let Some(entry) = self.entry_at(vis_idx) {
-                if entry.is_dir && entry.name != ".." {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
     /// Select all visible descendants of an expanded directory.
     /// Used when expanding a directory that is already selected.
     pub(crate) fn select_descendants(&mut self, vis_idx: usize) {

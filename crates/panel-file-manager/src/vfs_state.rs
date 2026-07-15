@@ -84,24 +84,6 @@ impl VfsState {
         }
     }
 
-    /// Create VFS state with shared manager.
-    pub fn with_manager(manager: Arc<VfsManager>) -> Self {
-        let current_path = std::env::current_dir()
-            .map(VfsPath::local)
-            .unwrap_or_else(|_| VfsPath::local("/"));
-
-        Self {
-            manager,
-            current_path,
-            previous_path: None,
-            pending_operation: None,
-            connection_status: None,
-            awaiting_password: false,
-            connection_started: None,
-            resolved_file_open: None,
-        }
-    }
-
     /// Create VFS state for a specific path.
     pub fn with_path(path: VfsPath, manager: Option<Arc<VfsManager>>) -> Self {
         Self {
@@ -203,12 +185,6 @@ impl VfsState {
     /// Set the current path.
     pub fn set_path(&mut self, path: VfsPath) {
         self.current_path = path;
-    }
-
-    /// Navigate to a path string (parses URL if needed).
-    pub fn navigate_to_string(&mut self, path_str: &str) -> VfsResult<()> {
-        let path = termide_vfs::parse_vfs_url(path_str)?;
-        self.navigate_to(path)
     }
 
     /// Navigate to a VfsPath.

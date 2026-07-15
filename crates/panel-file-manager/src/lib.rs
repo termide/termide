@@ -582,33 +582,12 @@ impl FileManager {
         self.file_search = None;
     }
 
-    /// Get match info for search modal display
-    pub fn get_file_search_match_info(&self) -> Option<(usize, usize)> {
-        self.file_search.as_ref().and_then(|s| s.get_match_info())
-    }
-
-    /// Whether file search is active
-    pub fn is_file_search_active(&self) -> bool {
-        self.file_search.is_some()
-    }
-
     /// Set the in-progress replacement text for the content search (drives the
     /// `-old/+new` preview on the cursor match).
     pub fn set_content_replace(&mut self, text: Option<String>) {
         if let Some(ref mut state) = self.file_search {
             state.set_replace_text(text);
         }
-    }
-
-    /// (files, matches) for the active content search — for the confirm prompt.
-    pub fn content_search_summary(&self) -> Option<(usize, usize)> {
-        let state = self.file_search.as_ref()?;
-        let matches = state.total_matches();
-        if matches == 0 {
-            return None;
-        }
-        let files = state.file_header_count();
-        Some((files, matches))
     }
 
     /// Apply `replace_with` to every matched file of the active content search.
@@ -1030,16 +1009,6 @@ impl FileManager {
         self.git_root.as_ref()
     }
 
-    /// Set the watched root path and whether it's a git repository
-    pub fn set_watched_root(&mut self, root: Option<PathBuf>, is_git_repo: bool) {
-        self.git_root = if is_git_repo { root } else { None };
-    }
-
-    /// Check if the watched root is a git repository
-    pub fn is_watched_root_git_repo(&self) -> bool {
-        self.git_root.is_some()
-    }
-
     /// Check if absolute path is in a gitignored directory
     /// Uses cached git_status_cache to avoid spawning git processes
     pub fn is_path_ignored(&self, absolute_path: &std::path::Path) -> bool {
@@ -1119,11 +1088,6 @@ impl FileManager {
     /// Get reference to VFS state (for network filesystem operations).
     pub fn vfs_state(&self) -> &VfsState {
         &self.vfs
-    }
-
-    /// Get mutable reference to VFS state.
-    pub fn vfs_state_mut(&mut self) -> &mut VfsState {
-        &mut self.vfs
     }
 
     /// Check if current path is a remote (network) filesystem.

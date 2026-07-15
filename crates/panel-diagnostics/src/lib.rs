@@ -181,20 +181,6 @@ impl DiagnosticsPanel {
         self.rebuild_list();
     }
 
-    /// Clear all diagnostics.
-    pub fn clear_all(&mut self) {
-        self.diagnostics_by_file.clear();
-        self.all_diagnostics.clear();
-        self.selected_index = 0;
-        self.scroll_offset = 0;
-        // Invalidate caches
-        self.filter_cache_valid = false;
-        self.counts_cache_valid = false;
-        self.cached_filtered_indices.clear();
-        self.cached_error_count = 0;
-        self.cached_warning_count = 0;
-    }
-
     /// Rebuild flattened list from diagnostics by file.
     fn rebuild_list(&mut self) {
         self.all_diagnostics.clear();

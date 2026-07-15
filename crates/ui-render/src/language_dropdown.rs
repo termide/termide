@@ -75,11 +75,6 @@ impl<'a> LanguageDropdown<'a> {
         (items_count + 2) as u16 // +2 for borders
     }
 
-    /// Get language code by index
-    pub fn get_language_code(&self, index: usize) -> Option<&'static str> {
-        self.languages.get(index).map(|(code, _)| *code)
-    }
-
     /// Get total number of languages
     pub fn len(&self) -> usize {
         self.languages.len()
