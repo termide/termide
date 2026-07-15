@@ -22,7 +22,7 @@ pub struct FileInfo {
 
 impl FileManager {
     /// Get information about the currently selected file
-    pub fn get_current_file_info(&self) -> Option<FileInfo> {
+    pub fn get_current_file_info(&mut self) -> Option<FileInfo> {
         let te = self.tree_entry_at(self.selected)?;
         let entry = &te.file_entry;
 
@@ -112,10 +112,12 @@ impl FileManager {
 
         let target_is_dir = metadata.is_dir();
 
-        let size = if target_is_dir {
-            "DIR".to_string()
+        // Files: formatted byte size. Directories: computed further below
+        // (recursive size from the shared cache + immediate child count).
+        let file_size = if target_is_dir {
+            None
         } else {
-            utils::format_size(metadata.len())
+            Some(utils::format_size(metadata.len()))
         };
 
         #[cfg(unix)]
@@ -139,8 +141,38 @@ impl FileManager {
             (owner, String::new(), mode)
         };
 
+        // Capture the name before touching `self` mutably below (this is the
+        // last read through the `te`/`entry` borrow).
+        let name = entry.name.clone();
+
+        // Size string. Files: the plain byte size. Directories: the recursive
+        // size (from the shared cache the size-scheduler / a prior info-modal
+        // populates; `…` until known) plus the immediate, non-recursive child
+        // count in parentheses — matching the info modal, e.g. "3.0 KB (5 items)".
+        let size = if target_is_dir {
+            let count = match &self.dir_item_count_memo {
+                // Memoized by path so repeated redraws on the same folder don't
+                // re-read the directory.
+                Some((p, n)) if *p == file_path => *n,
+                _ => {
+                    let n = fs::read_dir(&file_path).map(|rd| rd.count()).unwrap_or(0);
+                    self.dir_item_count_memo = Some((file_path.clone(), n));
+                    n
+                }
+            };
+            let t = termide_i18n::t();
+            let size_part = match utils::shared_dir_size_cache().get(&file_path) {
+                Some(o) if o.overflowed => format!("{}+", utils::format_size(o.size)),
+                Some(o) => utils::format_size(o.size),
+                None => "…".to_string(),
+            };
+            format!("{} ({})", size_part, t.file_info_items(count))
+        } else {
+            file_size.unwrap_or_default()
+        };
+
         Some(FileInfo {
-            name: entry.name.clone(),
+            name,
             file_type: file_type.to_string(),
             size,
             owner,
@@ -247,8 +279,26 @@ impl FileManager {
                 (t.file_info_title_file(&entry.name), false)
             };
 
+            // Immediate (non-recursive) child count, shown in parentheses on
+            // the size line. Cheap read_dir; the recursive byte total is
+            // computed asynchronously below and patched in later.
+            let dir_item_count = if is_dir {
+                fs::read_dir(&file_path).map(|rd| rd.count()).ok()
+            } else {
+                None
+            };
+
             let size = if is_dir {
-                format!("{}...", t.file_info_calculating())
+                match dir_item_count {
+                    Some(n) => {
+                        format!(
+                            "{}... ({})",
+                            t.file_info_calculating(),
+                            t.file_info_items(n)
+                        )
+                    }
+                    None => format!("{}...", t.file_info_calculating()),
+                }
             } else {
                 utils::format_size(metadata.len())
             };
@@ -468,7 +518,10 @@ impl FileManager {
                             overflowed: false,
                         },
                     );
-                    let _ = tx.send(DirSizeResult { size });
+                    let _ = tx.send(DirSizeResult {
+                        size,
+                        item_count: dir_item_count,
+                    });
                 });
 
                 self.dir_size_receiver = Some(rx);

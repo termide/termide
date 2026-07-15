@@ -9,6 +9,8 @@ use chrono::{DateTime, Local};
 #[derive(Debug)]
 pub struct DirSizeResult {
     pub size: u64,
+    /// Immediate (non-recursive) child count of the directory, when known.
+    pub item_count: Option<usize>,
 }
 
 /// Batch operation type

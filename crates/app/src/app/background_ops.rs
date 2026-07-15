@@ -245,6 +245,12 @@ impl App {
             if let Ok(result) = rx.try_recv() {
                 let t = termide_i18n::t();
                 let formatted_size = FileManager::format_size_static(result.size);
+                // Keep the immediate child count in parentheses on the size
+                // line, matching what was shown while calculating.
+                let formatted_size = match result.item_count {
+                    Some(n) => format!("{} ({})", formatted_size, t.file_info_items(n)),
+                    None => formatted_size,
+                };
 
                 // Update Info or InfoAction modal if open
                 match &mut self.state.active_modal {

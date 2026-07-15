@@ -392,6 +392,7 @@ impl Translation for RuntimeTranslation {
         status_file,
         status_mod,
         status_owner,
+        status_size,
         status_selected,
         status_pos,
         status_tab,
@@ -935,6 +936,10 @@ impl Translation for RuntimeTranslation {
         self.format("file_info_title_symlink", &[("name", name)])
     }
 
+    fn file_info_items(&self, count: usize) -> String {
+        self.format("file_info_items", &[("count", &count.to_string())])
+    }
+
     fn file_info_git_uncommitted(&self, count: usize) -> String {
         self.format(
             "file_info_git_uncommitted",
@@ -1158,6 +1163,11 @@ mod tests {
                 sel.contains('1') && sel.contains('4') && sel.contains('9'),
                 "{lang}: {sel:?}"
             );
+
+            // Directory item count — a format key with a `{count}` placeholder,
+            // so it must also resolve from `[formats]` in every language.
+            let items = t.file_info_items(42);
+            assert!(items.contains("42"), "{lang}: {items:?}");
         }
     }
 }

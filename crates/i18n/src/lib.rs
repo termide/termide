@@ -546,6 +546,8 @@ pub trait Translation: Send + Sync {
     fn status_file(&self) -> &str;
     fn status_mod(&self) -> &str;
     fn status_owner(&self) -> &str;
+    /// Status-bar label for the entry's size, e.g. "Size:".
+    fn status_size(&self) -> &str;
     fn status_selected(&self) -> &str;
     fn status_pos(&self) -> &str;
     fn status_tab(&self) -> &str;
@@ -585,6 +587,8 @@ pub trait Translation: Send + Sync {
     fn file_info_created(&self) -> &str;
     fn file_info_modified(&self) -> &str;
     fn file_info_calculating(&self) -> &str;
+    /// Immediate (non-recursive) child count of a directory, e.g. "42 items".
+    fn file_info_items(&self, count: usize) -> String;
     fn file_info_git(&self) -> &str;
     fn file_info_git_uncommitted(&self, count: usize) -> String;
     fn file_info_git_ahead(&self, count: usize) -> String;

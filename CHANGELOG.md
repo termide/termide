@@ -5,6 +5,11 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- The file manager status bar now shows a labelled **Size:** field (to the right of **Owner:**) for the entry under the cursor — a plain byte size for files, and `<size> (N items)` for directories, where `N` is the immediate (non-recursive) child count. This matches the properties modal (`Space` / `F12`), whose **Size** line likewise appends the item count in parentheses (e.g. `1.2 MB (42 items)`); the count appears immediately while the recursive size is still being calculated.
+
 ## [0.29.3] - 2026-07-15
 
 ### Fixed

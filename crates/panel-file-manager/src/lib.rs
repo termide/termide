@@ -102,6 +102,10 @@ pub struct FileManager {
     git_status_receiver: Option<mpsc::Receiver<GitStatusAsyncResult>>,
     /// Channel receiver for directory size calculation results (needs to be passed to AppState)
     pub dir_size_receiver: Option<mpsc::Receiver<DirSizeResult>>,
+    /// Memo of the last directory whose immediate child count was read for the
+    /// status bar: `(path, count)`. Avoids a `read_dir` on every redraw while
+    /// the cursor stays on the same folder; refreshed when it moves.
+    dir_item_count_memo: Option<(PathBuf, usize)>,
     /// Directories waiting for a bounded size walk, FIFO. Results land
     /// in the process-wide `utils::shared_dir_size_cache()`, not here.
     dir_size_queue: VecDeque<PathBuf>,
@@ -271,6 +275,7 @@ impl FileManager {
             git_status_cache: None,
             git_status_receiver: None,
             dir_size_receiver: None,
+            dir_item_count_memo: None,
             dir_size_queue: VecDeque::new(),
             dir_size_pending: None,
             dir_size_cache_generation: 0,

@@ -217,6 +217,7 @@ Files are displayed in groups, each sorted alphabetically:
 
 - `..` (parent directory) cannot be selected — it is only for navigation
 - Input modals support `~/` expansion to home directory
+- The status bar shows a **Size:** field (to the right of **Owner:**) for the entry under the cursor: a plain byte size for files, and `<size> (N items)` for directories — the recursive size plus the immediate (non-recursive) child count. The count appears immediately while the recursive size fills in. The properties modal (`Space`) shows the same on its **Size** line (e.g. `1.2 MB (42 items)`).
 
 ## Configuration
 

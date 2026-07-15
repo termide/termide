@@ -306,8 +306,9 @@ impl StatusBar {
             // File manager: show information about current file
             let mut spans = vec![];
 
-            // Format for directories: "Dir: dirname | Mod: 0755 | Owner: nvn:users"
-            // Format for files: "File: filename | 12.3MB | Mod: 0755 | Owner: nvn:users"
+            // Layout: "Dir:/File: name [→ target] | Mod: 0755 | Owner: nvn:users | Size: …"
+            // where Size is the byte size for files and "<size> (N items)" for
+            // directories.
 
             if info.file_type == "Directory" || (info.file_type == "Symlink" && info.target_is_dir)
             {
@@ -320,13 +321,6 @@ impl StatusBar {
             if let Some(ref target) = info.symlink_target {
                 spans.push(Span::styled(" → ", base_style));
                 spans.push(Span::styled(target.as_str(), highlight_style));
-            }
-
-            // For files show size (skip for directories and symlinks-to-directories)
-            if info.file_type != "Directory" && !(info.file_type == "Symlink" && info.target_is_dir)
-            {
-                spans.push(Span::styled(t.ui_hint_separator(), base_style));
-                spans.push(Span::styled(info.size.as_str(), highlight_style));
             }
 
             spans.push(Span::styled(
@@ -343,6 +337,14 @@ impl StatusBar {
                 format!("{}:{}", info.owner, info.group),
                 highlight_style,
             ));
+
+            // Size, to the right of Owner. Files: byte size. Directories:
+            // "<recursive size> (N items)" (same as the info modal).
+            spans.push(Span::styled(
+                format!("{}{} ", t.ui_hint_separator(), t.status_size()),
+                base_style,
+            ));
+            spans.push(Span::styled(info.size.as_str(), highlight_style));
 
             // If there are selected files, add their count
             if let Some(count) = selected_count {
