@@ -10,7 +10,11 @@
 //! wrapping. `Ctrl+E` (or the `Edit` status chip) swaps the panel in place for
 //! the editable source.
 
+mod links;
+mod navigation;
 mod render;
+mod search;
+mod text;
 
 use std::any::Any;
 use std::path::{Path, PathBuf};
@@ -18,15 +22,16 @@ use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{buffer::Buffer, layout::Rect, style::Style};
-use unicode_width::UnicodeWidthChar;
 
-use render::{LinkSpan, Rendered};
+use render::Rendered;
 use termide_core::{
     Config, HotkeyTable, InputAction, KeyChord, LinkOpen, Panel, PanelEvent, RenderContext,
     SegmentKind, SessionPanel, StatusSegment, Theme, ThemeColors, WidthPreference,
 };
-use termide_modal::{FindBar, FindBarAction, FindBarBtn, FindBarConfig, FindField};
+use termide_modal::FindBar;
 use termide_ui::ScrollBar;
+
+use text::{char_col_to_display, display_to_char_col, url_fragment};
 
 /// A cursor / selection position: `(line index, character column)`.
 type Pos = (usize, usize);
@@ -170,101 +175,6 @@ impl MarkdownPanel {
         self.layout_width = 0;
     }
 
-    /// Resolve a link `href` to an absolute target: against the document URL for
-    /// a fetched page, or against the file's directory for a file-backed view.
-    fn resolve(&self, href: &str) -> String {
-        if let Some(base) = &self.source_url {
-            if let Ok(b) = url::Url::parse(base) {
-                if let Ok(joined) = b.join(href) {
-                    return joined.to_string();
-                }
-            }
-            return href.to_string();
-        }
-        // File-backed: resolve a relative path against the file's directory.
-        if href.contains("://") || std::path::Path::new(href).is_absolute() {
-            return href.to_string();
-        }
-        if let Some(dir) = self.file_path.parent() {
-            return dir.join(href).to_string_lossy().into_owned();
-        }
-        href.to_string()
-    }
-
-    /// Follow a link. Non-web targets go to the external opener. Web links
-    /// honor the `open_links` setting: `External` → browser; `Panel` →
-    /// in-place navigation in a fetched view, or a new viewer otherwise.
-    fn activate_link(&mut self, href: &str) -> Vec<PanelEvent> {
-        if href.is_empty() {
-            return vec![];
-        }
-        // Same-page anchor: scroll to it (don't hand "#" to the system opener).
-        if let Some(frag) = href.strip_prefix('#') {
-            if !frag.is_empty() {
-                self.scroll_to_anchor(frag);
-            }
-            return vec![PanelEvent::NeedsRedraw];
-        }
-        let target = self.resolve(href);
-        let is_web = target.starts_with("http://") || target.starts_with("https://");
-        let is_image = is_image_path(&target);
-        // Images and pages each follow their own open-where setting; `O` is the
-        // per-action external override (handled by the caller).
-        let mode = if is_image {
-            self.open_images
-        } else {
-            self.open_links
-        };
-        if mode == LinkOpen::External {
-            return vec![PanelEvent::OpenExternal(PathBuf::from(target))];
-        }
-        if is_web {
-            // Fetch and render in the viewer; image responses are routed to the
-            // image preview by the fetch handler.
-            if self.source_url.is_some() {
-                self.history.truncate(self.hist_idx + 1);
-                self.history.push(target.clone());
-                self.hist_idx = self.history.len() - 1;
-                vec![PanelEvent::NavigateUrl(target)]
-            } else {
-                vec![PanelEvent::OpenUrl(target)]
-            }
-        } else if is_image {
-            // Local image → built-in image preview.
-            vec![PanelEvent::PreviewMedia(PathBuf::from(target))]
-        } else {
-            vec![PanelEvent::OpenExternal(PathBuf::from(target))]
-        }
-    }
-
-    /// Step back in history, re-fetching the previous page.
-    fn go_back(&mut self) -> Vec<PanelEvent> {
-        if self.hist_idx > 0 {
-            self.hist_idx -= 1;
-            return vec![PanelEvent::NavigateUrl(self.history[self.hist_idx].clone())];
-        }
-        vec![]
-    }
-
-    /// Step forward in history, re-fetching the next page.
-    fn go_forward(&mut self) -> Vec<PanelEvent> {
-        if self.hist_idx + 1 < self.history.len() {
-            self.hist_idx += 1;
-            return vec![PanelEvent::NavigateUrl(self.history[self.hist_idx].clone())];
-        }
-        vec![]
-    }
-
-    /// Scroll so the named anchor's line is at the top of the view. No-op if
-    /// the anchor is unknown.
-    fn scroll_to_anchor(&mut self, frag: &str) {
-        if let Some(&(_, line)) = self.doc.anchors.iter().find(|(id, _)| id == frag) {
-            self.top = line.min(self.max_top());
-            self.cursor = (line, 0);
-            self.anchor = None;
-        }
-    }
-
     /// Point the panel at a new file, reloading its content.
     pub fn set_file(&mut self, path: PathBuf) {
         self.title = path
@@ -290,256 +200,6 @@ impl MarkdownPanel {
         self.layout_width = 0; // force re-layout
     }
 
-    fn line_count(&self) -> usize {
-        self.doc.lines.len()
-    }
-
-    /// Plain text of a rendered line (concatenated span contents).
-    fn line_text(&self, i: usize) -> String {
-        self.doc
-            .lines
-            .get(i)
-            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
-            .unwrap_or_default()
-    }
-
-    /// Character count of a rendered line.
-    fn line_len(&self, i: usize) -> usize {
-        self.line_text(i).chars().count()
-    }
-
-    fn viewport_height(&self) -> usize {
-        self.last_area.height.max(1) as usize
-    }
-
-    fn max_top(&self) -> usize {
-        self.line_count().saturating_sub(self.viewport_height())
-    }
-
-    fn relayout_if_needed(&mut self, width: u16) {
-        if width == self.layout_width || width == 0 {
-            return;
-        }
-        self.doc = render::render_markdown(&self.source, width, &self.colors, self.is_light);
-        self.layout_width = width;
-        self.clamp_cursor();
-        self.run_search(); // re-locate matches against the new wrapping
-        self.top = self.top.min(self.max_top());
-        // Jump to a pending `#fragment` now that anchor line indices exist.
-        if let Some(frag) = self.pending_anchor.take() {
-            self.scroll_to_anchor(&frag);
-        }
-    }
-
-    fn clamp_cursor(&mut self) {
-        let lines = self.line_count();
-        if lines == 0 {
-            self.cursor = (0, 0);
-            return;
-        }
-        self.cursor.0 = self.cursor.0.min(lines - 1);
-        self.cursor.1 = self.cursor.1.min(self.line_len(self.cursor.0));
-    }
-
-    fn scroll_by(&mut self, delta: i32) {
-        let max = self.max_top();
-        self.top = (self.top as i64 + delta as i64).clamp(0, max as i64) as usize;
-    }
-
-    /// Keep the cursor line within the viewport.
-    fn ensure_cursor_visible(&mut self) {
-        let h = self.viewport_height();
-        if self.cursor.0 < self.top {
-            self.top = self.cursor.0;
-        } else if self.cursor.0 >= self.top + h {
-            self.top = self.cursor.0 + 1 - h;
-        }
-        self.top = self.top.min(self.max_top());
-    }
-
-    /// Move the cursor, optionally extending the selection.
-    fn move_cursor(&mut self, to: Pos, extend: bool) {
-        if extend {
-            if self.anchor.is_none() {
-                self.anchor = Some(self.cursor);
-            }
-        } else {
-            self.anchor = None;
-        }
-        self.cursor = to;
-        self.clamp_cursor();
-        self.ensure_cursor_visible();
-    }
-
-    fn move_vertical(&mut self, delta: i32, extend: bool) {
-        let lines = self.line_count();
-        if lines == 0 {
-            return;
-        }
-        let line = (self.cursor.0 as i64 + delta as i64).clamp(0, lines as i64 - 1) as usize;
-        let col = self.cursor.1.min(self.line_len(line));
-        self.move_cursor((line, col), extend);
-    }
-
-    fn move_horizontal(&mut self, forward: bool, extend: bool) {
-        let (mut line, mut col) = self.cursor;
-        if forward {
-            if col < self.line_len(line) {
-                col += 1;
-            } else if line + 1 < self.line_count() {
-                line += 1;
-                col = 0;
-            }
-        } else if col > 0 {
-            col -= 1;
-        } else if line > 0 {
-            line -= 1;
-            col = self.line_len(line);
-        }
-        self.move_cursor((line, col), extend);
-    }
-
-    /// Normalized selection range `(start, end)` with `start <= end`.
-    fn selection(&self) -> Option<(Pos, Pos)> {
-        let a = self.anchor?;
-        let b = self.cursor;
-        if a <= b {
-            Some((a, b))
-        } else {
-            Some((b, a))
-        }
-    }
-
-    /// Text of the current selection, or the cursor's line when none.
-    fn selected_text(&self) -> String {
-        let Some((start, end)) = self.selection() else {
-            return self.line_text(self.cursor.0);
-        };
-        if start.0 == end.0 {
-            return slice_chars(&self.line_text(start.0), start.1, end.1);
-        }
-        let mut out = String::new();
-        for line in start.0..=end.0 {
-            let text = self.line_text(line);
-            let part = if line == start.0 {
-                slice_chars(&text, start.1, text.chars().count())
-            } else if line == end.0 {
-                slice_chars(&text, 0, end.1)
-            } else {
-                text
-            };
-            out.push_str(&part);
-            if line != end.0 {
-                out.push('\n');
-            }
-        }
-        out
-    }
-
-    /// The link under display column `col` on the given rendered line.
-    fn link_at(&self, line: usize, col: u16) -> Option<&LinkSpan> {
-        self.doc
-            .links
-            .iter()
-            .find(|l| l.line == line && col >= l.start && col < l.end)
-    }
-
-    /// The link under the cursor (cursor column is a char index; compare in
-    /// display columns, which match for the common ASCII case).
-    fn link_under_cursor(&self) -> Option<&LinkSpan> {
-        let (line, col) = self.cursor;
-        let disp = char_col_to_display(&self.line_text(line), col);
-        self.link_at(line, disp as u16)
-    }
-
-    // --- search ---------------------------------------------------------
-
-    fn open_find(&mut self) {
-        let mut bar = FindBar::new(FindBarConfig {
-            fields: vec![FindField::Find],
-            // Same button order as the editor: [Aa] Case, ◄ Prev, Next ►.
-            buttons: vec![FindBarBtn::Case, FindBarBtn::Prev, FindBarBtn::Next],
-        });
-        // Seed the Find field from a single-line selection (the common
-        // "Ctrl+F searches the current selection" behavior).
-        let seed = self.selection().and_then(|(s, e)| {
-            (s.0 == e.0 && s != e).then(|| slice_chars(&self.line_text(s.0), s.1, e.1))
-        });
-        if let Some(text) = seed {
-            bar.set_text(FindField::Find, text);
-        }
-        bar.focus_first();
-        self.find_bar = Some(bar);
-        self.matches.clear();
-        self.match_idx = 0;
-        self.run_search();
-    }
-
-    fn close_find(&mut self) {
-        self.find_bar = None;
-        self.matches.clear();
-    }
-
-    /// Re-run the search and jump to the first match at/after the cursor.
-    fn run_search(&mut self) {
-        let Some(bar) = self.find_bar.as_ref() else {
-            return;
-        };
-        let query = bar.find_text().to_string();
-        let ci = !bar.case_sensitive();
-        self.matches.clear();
-        self.match_idx = 0;
-        if query.is_empty() {
-            if let Some(bar) = self.find_bar.as_mut() {
-                bar.clear_match_info();
-            }
-            return;
-        }
-        self.match_len = query.chars().count();
-        for line in 0..self.line_count() {
-            for col in find_in_line(&self.line_text(line), &query, ci) {
-                self.matches.push((line, col));
-            }
-        }
-        // Prefer the first match at/after the current cursor.
-        if let Some(idx) = self.matches.iter().position(|&m| m >= self.cursor) {
-            self.match_idx = idx;
-        }
-        if let Some(bar) = self.find_bar.as_mut() {
-            if self.matches.is_empty() {
-                bar.set_match_info(0, 0);
-            } else {
-                bar.set_match_info(self.match_idx + 1, self.matches.len());
-            }
-        }
-        self.jump_to_current_match();
-    }
-
-    fn step_match(&mut self, forward: bool) {
-        if self.matches.is_empty() {
-            return;
-        }
-        let n = self.matches.len();
-        self.match_idx = if forward {
-            (self.match_idx + 1) % n
-        } else {
-            (self.match_idx + n - 1) % n
-        };
-        if let Some(bar) = self.find_bar.as_mut() {
-            bar.set_match_info(self.match_idx + 1, n);
-        }
-        self.jump_to_current_match();
-    }
-
-    fn jump_to_current_match(&mut self) {
-        if let Some(&(line, col)) = self.matches.get(self.match_idx) {
-            self.anchor = None;
-            self.cursor = (line, col);
-            self.clamp_cursor();
-            self.ensure_cursor_visible();
-        }
-    }
-
     /// Build the "go to path" input request, seeded with this file's directory
     /// so relative entries resolve naturally.
     fn goto_path_event(&self) -> PanelEvent {
@@ -557,17 +217,6 @@ impl MarkdownPanel {
             initial_value: initial,
             on_submit: InputAction::ViewPath { base_dir: base },
         }
-    }
-
-    fn handle_find_action(&mut self, action: FindBarAction) -> Vec<PanelEvent> {
-        match action {
-            FindBarAction::QueryChanged | FindBarAction::Refresh => self.run_search(),
-            FindBarAction::Next | FindBarAction::Submit => self.step_match(true),
-            FindBarAction::Previous => self.step_match(false),
-            FindBarAction::Close => self.close_find(),
-            _ => {}
-        }
-        vec![PanelEvent::NeedsRedraw]
     }
 }
 
@@ -982,78 +631,10 @@ impl Panel for MarkdownPanel {
     }
 }
 
-/// The `#fragment` part of a URL, if present and non-empty.
-fn url_fragment(url: &str) -> Option<String> {
-    url.split_once('#')
-        .map(|(_, f)| f.to_string())
-        .filter(|f| !f.is_empty())
-}
-
-/// Whether `path` (or URL) ends in a known raster-image extension.
-fn is_image_path(path: &str) -> bool {
-    let ext = path
-        .rsplit('.')
-        .next()
-        .map(|e| e.to_ascii_lowercase())
-        .unwrap_or_default();
-    matches!(
-        ext.as_str(),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "tiff" | "tif"
-    )
-}
-
-/// Substring of `s` between character indices `[start, end)`.
-fn slice_chars(s: &str, start: usize, end: usize) -> String {
-    s.chars()
-        .skip(start)
-        .take(end.saturating_sub(start))
-        .collect()
-}
-
-/// Display column at character index `col` (sum of preceding char widths).
-fn char_col_to_display(s: &str, col: usize) -> usize {
-    s.chars().take(col).map(|c| c.width().unwrap_or(0)).sum()
-}
-
-/// Character index at (or just past) display column `disp`.
-fn display_to_char_col(s: &str, disp: u16) -> usize {
-    let target = disp as usize;
-    let mut acc = 0usize;
-    for (i, c) in s.chars().enumerate() {
-        if acc >= target {
-            return i;
-        }
-        acc += c.width().unwrap_or(0);
-    }
-    s.chars().count()
-}
-
-/// Character indices where `needle` occurs in `line` (case-insensitive when `ci`).
-fn find_in_line(line: &str, needle: &str, ci: bool) -> Vec<usize> {
-    let hay: Vec<char> = line.chars().collect();
-    let pat: Vec<char> = needle.chars().collect();
-    let mut out = Vec::new();
-    if pat.is_empty() || pat.len() > hay.len() {
-        return out;
-    }
-    let eq = |a: char, b: char| {
-        if ci {
-            a.eq_ignore_ascii_case(&b) || a.to_lowercase().eq(b.to_lowercase())
-        } else {
-            a == b
-        }
-    };
-    for i in 0..=hay.len() - pat.len() {
-        if (0..pat.len()).all(|j| eq(hay[i + j], pat[j])) {
-            out.push(i);
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use termide_modal::FindField;
 
     fn panel_from(src: &str) -> MarkdownPanel {
         let mut p = MarkdownPanel {
@@ -1144,11 +725,5 @@ mod tests {
         let first = p.cursor;
         p.step_match(true);
         assert_ne!(p.cursor, first, "next match should move the cursor");
-    }
-
-    #[test]
-    fn find_in_line_case_insensitive() {
-        assert_eq!(find_in_line("Foo foo FOO", "foo", true), vec![0, 4, 8]);
-        assert_eq!(find_in_line("Foo foo FOO", "foo", false), vec![4]);
     }
 }
