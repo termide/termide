@@ -974,9 +974,7 @@ impl Panel for GitDiffPanel {
             // its repo changes (working-tree edit -> OnFsUpdate, commit/index ->
             // OnGitUpdate), instead of waiting for the next focus/Ctrl+R.
             PanelCommand::OnGitUpdate { repo_paths } => {
-                let hit = repo_paths
-                    .iter()
-                    .any(|p| self.repo_path.starts_with(p) || p.starts_with(&self.repo_path));
+                let hit = git::repo_paths_overlap(&self.repo_path, repo_paths);
                 if hit {
                     self.refresh();
                     return CommandResult::NeedsRedraw(true);

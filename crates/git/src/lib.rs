@@ -88,6 +88,16 @@ pub fn find_repo_root(path: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Whether `repo` overlaps any of `paths` — either `repo` sits inside one of
+/// them or one of them sits inside `repo`. The git/file panels use this to
+/// decide whether a watcher `OnGitUpdate` (which carries the changed repo
+/// roots) touches the repository they currently display.
+pub fn repo_paths_overlap(repo: &Path, paths: &[&Path]) -> bool {
+    paths
+        .iter()
+        .any(|p| repo.starts_with(p) || p.starts_with(repo))
+}
+
 /// Find the top-level repository root, skipping submodules.
 ///
 /// Submodules have `.git` as a file (not directory) containing `gitdir: ...`.

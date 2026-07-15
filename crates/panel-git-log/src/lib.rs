@@ -1010,13 +1010,10 @@ impl Panel for GitLogPanel {
             // working-tree edits don't change the graph, so OnFsUpdate is
             // ignored.)
             PanelCommand::OnGitUpdate { repo_paths } => {
-                let hit = if let Some(cur) = self.repo_manager.current() {
-                    repo_paths
-                        .iter()
-                        .any(|p| cur.starts_with(p) || p.starts_with(cur))
-                } else {
-                    false
-                };
+                let hit = self
+                    .repo_manager
+                    .current()
+                    .is_some_and(|cur| git::repo_paths_overlap(cur, repo_paths));
                 if hit {
                     self.refresh();
                     return CommandResult::NeedsRedraw(true);

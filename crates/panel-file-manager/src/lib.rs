@@ -2444,9 +2444,7 @@ impl Panel for FileManager {
             PanelCommand::OnGitUpdate { repo_paths } => {
                 // Check if current directory is within one of the updated repositories
                 if let Some(git_root) = &self.git_root {
-                    let should_update = repo_paths
-                        .iter()
-                        .any(|p| git_root.starts_with(p) || p.starts_with(git_root));
+                    let should_update = termide_git::repo_paths_overlap(git_root, repo_paths);
                     if should_update {
                         // Reload directory to pick up new/deleted files, and
                         // recompute git status (the light reload only reapplies

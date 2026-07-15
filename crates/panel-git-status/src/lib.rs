@@ -1104,9 +1104,7 @@ impl Panel for GitStatusPanel {
             PanelCommand::OnGitUpdate { repo_paths } => {
                 // Check if current repo is in the updated list
                 if let Some(current_repo) = self.repo_manager.current() {
-                    let should_refresh = repo_paths
-                        .iter()
-                        .any(|p| current_repo.starts_with(p) || p.starts_with(current_repo));
+                    let should_refresh = git::repo_paths_overlap(current_repo, repo_paths);
                     if should_refresh {
                         self.refresh();
                         return CommandResult::NeedsRedraw(true);
