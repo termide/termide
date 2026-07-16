@@ -5,7 +5,7 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.29.4] - 2026-07-16
 
 ### Fixed
 - Terminal panel: a completed text selection no longer gets "stuck" after a mouse-tracking application (e.g. an agent) turns mouse reporting on. Previously any subsequent click extended the stale selection to the click point with no way to clear it. Selection now only keeps capturing the mouse while a drag is actually in progress, and clicking into a mouse-tracking application clears the leftover local highlight.
@@ -293,6 +293,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `deny.toml` + `cargo-deny check` step covers advisories, licenses, bans and sources.
 - Pre-commit hook documented in `CONTRIBUTING.md`.
 
+[0.29.4]: https://github.com/termide/termide/releases/tag/0.29.4
 [0.29.3]: https://github.com/termide/termide/releases/tag/0.29.3
 [0.29.2]: https://github.com/termide/termide/releases/tag/0.29.2
 [0.29.1]: https://github.com/termide/termide/releases/tag/0.29.1
