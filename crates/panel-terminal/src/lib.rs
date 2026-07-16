@@ -1779,10 +1779,15 @@ impl Panel for Terminal {
             needs_redraw = true;
         }
 
-        let (selection_active, mouse_tracking) = {
-            let screen = self.read_screen();
-            (screen.selection_start.is_some(), screen.mouse_tracking)
-        };
+        // `selection_active` gates whether an in-progress local selection drag
+        // keeps capturing drag/up events even over a mouse-tracking app. It
+        // must reflect a drag IN PROGRESS, not a completed selection that still
+        // shows a highlight: otherwise, once a tracking app (e.g. an agent)
+        // turns mouse reporting on, every click's button-up would be treated as
+        // a selection drag and extend the stale selection to the click point —
+        // which then can't be cleared.
+        let selection_active = self.selection_drag_active;
+        let mouse_tracking = self.read_screen().mouse_tracking;
 
         // If mouse is outside and selection is not active - ignore other events
         if !is_inside && !selection_active {
@@ -1949,6 +1954,16 @@ impl Panel for Terminal {
             MouseRoute::Pty => {
                 self.color_preview = None;
                 self.selection_drag_active = false;
+                // A click into a mouse-tracking app supersedes any lingering
+                // local selection highlight — drop it so it clears instead of
+                // staying stuck on screen.
+                if matches!(mouse.kind, MouseEventKind::Down(_)) {
+                    let mut screen = self.write_screen();
+                    if screen.selection_start.is_some() {
+                        screen.clear_selection();
+                        needs_redraw = true;
+                    }
+                }
                 let _ = self.send_mouse_to_pty(&mouse, panel_area);
             }
             MouseRoute::Ignore => {

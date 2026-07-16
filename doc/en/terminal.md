@@ -78,7 +78,7 @@ default_shell = "/usr/bin/fish"
 
 ## Mouse Support
 
-- **Text Selection**: In the normal shell/scrollback view, click and drag with the left mouse button to select text. When the application inside the terminal enables xterm mouse tracking, use `Alt+drag` for local text selection instead
+- **Text Selection**: In the normal shell/scrollback view, click and drag with the left mouse button to select text, then `Ctrl+C` copies it. When the application inside the terminal enables xterm mouse tracking (e.g. an editor or agent), the mouse belongs to that application (it draws its own selection); hold `Alt+drag` for a local TermIDE selection instead, which `Ctrl+C` then copies
 - **Double-click**: Select the word under the cursor; **triple-click**: select the whole line
 - **Scroll Wheel**: Scroll through terminal output history until the application inside the terminal enables mouse tracking. After that, the wheel is passed through to the application
 - **Ctrl+Click on URL/path**: Open link in browser or file manager
