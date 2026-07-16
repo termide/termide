@@ -125,6 +125,20 @@ pub enum PanelCommand<'a> {
     },
 
     // === Clipboard commands ===
+    /// Copy the panel's current selection / focused item to the clipboard.
+    /// Routed from the global `copy` keybinding to the focused panel; the
+    /// panel decides what "copy" means (selected text, file paths, a table
+    /// cell, …).
+    /// Response: `CommandResult::Handled(bool)` — `false` means the panel had
+    /// nothing to copy, so the key should fall through (e.g. a terminal with
+    /// no selection lets `Ctrl+C` reach the shell as SIGINT).
+    Copy,
+
+    /// Cut the panel's current selection to the clipboard.
+    /// Routed from the global `cut` keybinding.
+    /// Response: `CommandResult::Handled(bool)` (`false` to fall through).
+    Cut,
+
     /// Paste clipboard contents into the panel (editor/terminal).
     /// Response: `CommandResult::None`
     Paste,
@@ -147,6 +161,11 @@ pub enum CommandResult {
 
     /// Whether the panel needs to be redrawn.
     NeedsRedraw(bool),
+
+    /// Whether the panel consumed a routed command (e.g. a clipboard
+    /// `Copy`/`Cut`). `false` means the command was not applicable, so the
+    /// originating key should fall through to normal panel key handling.
+    Handled(bool),
 
     /// Git repository root (response to GetRepoRoot).
     RepoRoot(Option<PathBuf>),

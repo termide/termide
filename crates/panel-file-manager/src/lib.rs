@@ -1054,6 +1054,19 @@ impl Panel for FileManager {
                     CommandResult::None
                 }
             }
+            // Global clipboard routed to the focused panel.
+            PanelCommand::Copy => {
+                self.clipboard_copy_selection();
+                CommandResult::Handled(true)
+            }
+            PanelCommand::Cut => {
+                self.clipboard_cut_selection();
+                CommandResult::Handled(true)
+            }
+            PanelCommand::Paste => {
+                self.clipboard_paste_files();
+                CommandResult::Handled(true)
+            }
             // Commands not applicable to FileManager
             PanelCommand::CheckPendingGitDiff
             | PanelCommand::CheckGitDiffReceiver
@@ -1065,7 +1078,6 @@ impl Panel for FileManager {
             | PanelCommand::CloseWithoutSaving
             | PanelCommand::SetGitOperationInProgress { .. }
             | PanelCommand::UpdateRepoPaths { .. }
-            | PanelCommand::Paste
             | PanelCommand::PasteText { .. } => CommandResult::None,
         }
     }

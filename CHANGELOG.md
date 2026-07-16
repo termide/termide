@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Copy / cut / paste are now a single set of **global** keybindings (`Ctrl+C` / `Ctrl+X` / `Ctrl+V`) routed to the focused panel, instead of being configured separately per panel. Each panel handles them by capability — the editor copies/cuts/pastes selected text, the file manager the selected paths, the database the current cell, the git panels the file path / commit hash. In the **terminal**, `Ctrl+C` copies the selection when there is one and otherwise sends `SIGINT` to the shell, and `Ctrl+V` pastes (previously `Ctrl+Shift+C` / `Ctrl+Shift+V`). The per-panel `copy` / `cut` / `paste` / `clipboard_copy` bindings were removed from the settings; rebind them once under **Global**.
+
 ### Added
 - The file manager status bar now shows a labelled **Size:** field (to the right of **Owner:**) for the entry under the cursor — a plain byte size for files, and `<size> (N items)` for directories, where `N` is the immediate (non-recursive) child count. This matches the properties modal (`Space` / `F12`), whose **Size** line likewise appends the item count in parentheses (e.g. `1.2 MB (42 items)`); the count appears immediately while the recursive size is still being calculated.
 

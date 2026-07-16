@@ -15,9 +15,8 @@ The terminal panel provides a full-featured terminal emulator with pseudotermina
 |------------------------|--------------------------------------------|
 | `Ctrl+/`               | Open directory switcher                    |
 | `Ctrl+F`               | Open text search in scrollback             |
-| `Ctrl+Shift+C`         | Copy selected text to clipboard            |
-| `Ctrl+Shift+V`         | Paste text from clipboard                  |
-| `Ctrl+Shift+М`         | Paste text from clipboard (Cyrillic layout)|
+| `Ctrl+C`               | Copy selection to clipboard **if text is selected**, otherwise sent to the shell as `SIGINT` |
+| `Ctrl+V`               | Paste text from clipboard                  |
 | `Shift+Enter`          | Insert newline (multi-line input)          |
 | `Shift+PageUp`         | Scroll output history up                   |
 | `Shift+PageDown`       | Scroll output history down                 |
@@ -26,7 +25,7 @@ The terminal panel provides a full-featured terminal emulator with pseudotermina
 
 **Keyboard Layout Support:**
 
-TermIDE supports Cyrillic keyboard layouts for common shortcuts. When using a Russian/Cyrillic layout, you can use `Ctrl+Shift+М` (where М is the Cyrillic letter corresponding to V) instead of switching to Latin layout. This works for paste operations in the terminal.
+TermIDE supports Cyrillic keyboard layouts for common shortcuts. When using a Russian/Cyrillic layout, paste (`Ctrl+V`) works without switching to a Latin layout — pressing it with the Cyrillic letter on the same physical key is recognized automatically.
 
 All other key combinations are passed directly to the application running in the terminal.
 

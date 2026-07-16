@@ -155,9 +155,6 @@ impl DbPanel {
             self.open_row_detail();
             return self.redraw();
         }
-        if self.hotkeys.matches("copy_cell", &key) {
-            return self.copy(false);
-        }
         if self.hotkeys.matches("copy_row", &key) {
             return self.copy(true);
         }
@@ -457,20 +454,26 @@ impl DbPanel {
         self.reload_page();
     }
 
-    fn copy(&self, whole_row: bool) -> Vec<PanelEvent> {
-        let Some(row) = self.page.rows.get(self.cursor_row) else {
-            return vec![];
-        };
-        let text = if whole_row {
-            row.iter()
-                .map(|v| tsv_escape(&v.display()))
-                .collect::<Vec<_>>()
-                .join("\t")
+    /// Text for the current cell (`whole_row == false`) or the whole row
+    /// tab-separated (`whole_row == true`). `None` when there is no row/cell
+    /// under the cursor.
+    pub(crate) fn copy_text(&self, whole_row: bool) -> Option<String> {
+        let row = self.page.rows.get(self.cursor_row)?;
+        if whole_row {
+            Some(
+                row.iter()
+                    .map(|v| tsv_escape(&v.display()))
+                    .collect::<Vec<_>>()
+                    .join("\t"),
+            )
         } else {
-            match row.get(self.cursor_col) {
-                Some(v) => v.display(),
-                None => return vec![],
-            }
+            Some(row.get(self.cursor_col)?.display())
+        }
+    }
+
+    fn copy(&self, whole_row: bool) -> Vec<PanelEvent> {
+        let Some(text) = self.copy_text(whole_row) else {
+            return vec![];
         };
         let t = termide_i18n::t();
         let message = if whole_row {

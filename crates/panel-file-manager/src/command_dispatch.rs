@@ -59,9 +59,6 @@ pub(crate) fn build_fm_hotkey_table(config: &Config) -> HotkeyTable {
     }
     t.insert("switch_directory", &kb.switch_directory);
     t.insert("go_to_path", &kb.go_to_path);
-    t.insert("clipboard_copy", &kb.clipboard_copy);
-    t.insert("clipboard_cut", &kb.clipboard_cut);
-    t.insert("clipboard_paste", &kb.clipboard_paste);
     t
 }
 
@@ -331,64 +328,6 @@ impl FileManager {
                 events.push(PanelEvent::NeedsRedraw);
             }
 
-            // Clipboard
-            FmCommand::ClipboardCopy => {
-                let paths = self.get_selected_paths();
-                if !paths.is_empty() {
-                    let text = paths
-                        .iter()
-                        .map(|p| p.display().to_string())
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    let _ = clipboard::copy(&text);
-                }
-            }
-            FmCommand::ClipboardCut => {
-                let paths = self.get_selected_paths();
-                if !paths.is_empty() {
-                    let text = paths
-                        .iter()
-                        .map(|p| p.display().to_string())
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    let _ = clipboard::cut(&text);
-                }
-            }
-            FmCommand::ClipboardPaste => {
-                if let Some(text) = clipboard::paste() {
-                    let files: Vec<std::path::PathBuf> = text
-                        .lines()
-                        .filter(|line| !line.is_empty())
-                        .map(std::path::PathBuf::from)
-                        .filter(|path| path.exists())
-                        .collect();
-
-                    if !files.is_empty() {
-                        // Land the paste at the cursor's tree level —
-                        // same rule as create_file / create_dir use via
-                        // `create_target_dir`. Cursor on a root entry
-                        // pastes into `current_path`; cursor inside an
-                        // expanded subdir pastes into that subdir.
-                        let (local_target, _vfs_target) = self.create_target_dir();
-                        let t = termide_i18n::t();
-                        let message = t.fm_paste_confirm(
-                            files.len(),
-                            "Copy",
-                            &local_target.display().to_string(),
-                        );
-                        let action = PendingAction::CopyPath {
-                            sources: files,
-                            target_directory: Some(local_target),
-                            create_symlink: false,
-                            create_relative_symlink: false,
-                        };
-                        let modal =
-                            ConfirmModal::new(termide_i18n::t().modal_confirm_title(), &message);
-                        self.modal_request = Some((action, ActiveModal::Confirm(Box::new(modal))));
-                    }
-                }
-            }
-
             // Misc
             FmCommand::ShowFileInfo => self.show_file_info(),
             FmCommand::Refresh => {
@@ -466,5 +405,66 @@ impl FileManager {
         }
 
         events
+    }
+
+    /// Copy the selected item paths to the system clipboard as newline-joined
+    /// paths (global `PanelCommand::Copy`).
+    pub(crate) fn clipboard_copy_selection(&self) {
+        let paths = self.get_selected_paths();
+        if !paths.is_empty() {
+            let text = paths
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            let _ = clipboard::copy(&text);
+        }
+    }
+
+    /// Mark the selected item paths for move on the system clipboard
+    /// (global `PanelCommand::Cut`).
+    pub(crate) fn clipboard_cut_selection(&self) {
+        let paths = self.get_selected_paths();
+        if !paths.is_empty() {
+            let text = paths
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            let _ = clipboard::cut(&text);
+        }
+    }
+
+    /// Paste files referenced by the system clipboard into the cursor's tree
+    /// level (global `PanelCommand::Paste`).
+    pub(crate) fn clipboard_paste_files(&mut self) {
+        if let Some(text) = clipboard::paste() {
+            let files: Vec<PathBuf> = text
+                .lines()
+                .filter(|line| !line.is_empty())
+                .map(PathBuf::from)
+                .filter(|path| path.exists())
+                .collect();
+
+            if !files.is_empty() {
+                // Land the paste at the cursor's tree level —
+                // same rule as create_file / create_dir use via
+                // `create_target_dir`. Cursor on a root entry
+                // pastes into `current_path`; cursor inside an
+                // expanded subdir pastes into that subdir.
+                let (local_target, _vfs_target) = self.create_target_dir();
+                let t = termide_i18n::t();
+                let message =
+                    t.fm_paste_confirm(files.len(), "Copy", &local_target.display().to_string());
+                let action = PendingAction::CopyPath {
+                    sources: files,
+                    target_directory: Some(local_target),
+                    create_symlink: false,
+                    create_relative_symlink: false,
+                };
+                let modal = ConfirmModal::new(termide_i18n::t().modal_confirm_title(), &message);
+                self.modal_request = Some((action, ActiveModal::Confirm(Box::new(modal))));
+            }
+        }
     }
 }

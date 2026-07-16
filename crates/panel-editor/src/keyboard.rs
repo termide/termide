@@ -82,11 +82,6 @@ pub enum EditorCommand {
     // Selection
     SelectAll,
 
-    // Clipboard
-    Copy,
-    Cut,
-    Paste,
-
     // Advanced editing
     DuplicateLine,
     DeleteLine,
@@ -264,17 +259,6 @@ impl EditorCommand {
         // Selection
         if hotkeys.matches("select_all", &key) {
             return Self::SelectAll;
-        }
-
-        // Clipboard
-        if hotkeys.matches("copy", &key) {
-            return Self::Copy;
-        }
-        if !read_only && hotkeys.matches("cut", &key) {
-            return Self::Cut;
-        }
-        if !read_only && hotkeys.matches("paste", &key) {
-            return Self::Paste;
         }
 
         // Advanced editing
@@ -659,11 +643,6 @@ impl EditorCommand {
                 editor.select_all();
                 Ok(())
             }
-
-            // Clipboard
-            Self::Copy => editor.copy_to_clipboard(),
-            Self::Cut => editor.cut_to_clipboard(),
-            Self::Paste => editor.paste_from_clipboard(),
 
             // Advanced editing
             Self::DuplicateLine => editor.duplicate_line(),

@@ -5260,6 +5260,7 @@ version = "0.29.3"
 dependencies = [
  "crossterm",
  "ratatui",
+ "termide-clipboard",
  "termide-config",
  "termide-core",
  "termide-db",

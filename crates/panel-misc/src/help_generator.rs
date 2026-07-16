@@ -172,6 +172,18 @@ impl HelpGenerator {
                 keys: Self::format_keys(&kb.open_command_palette),
                 description: t.help_desc_command_palette().to_string(),
             },
+            HelpEntry {
+                keys: Self::format_keys(&kb.copy),
+                description: t.help_desc_edit_copy().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.cut),
+                description: t.help_desc_edit_cut().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.paste),
+                description: t.help_desc_edit_paste().to_string(),
+            },
         ];
 
         HelpSection {
@@ -357,18 +369,6 @@ impl HelpGenerator {
                 description: t.help_desc_refresh().to_string(),
             },
             HelpEntry {
-                keys: Self::format_keys(&kb.clipboard_copy),
-                description: t.help_desc_edit_copy().to_string(),
-            },
-            HelpEntry {
-                keys: Self::format_keys(&kb.clipboard_cut),
-                description: t.help_desc_edit_cut().to_string(),
-            },
-            HelpEntry {
-                keys: Self::format_keys(&kb.clipboard_paste),
-                description: t.help_desc_edit_paste().to_string(),
-            },
-            HelpEntry {
                 keys: "/".to_string(),
                 description: t.help_desc_tree_search().to_string(),
             },
@@ -453,18 +453,6 @@ impl HelpGenerator {
             HelpEntry {
                 keys: Self::format_keys(&kb.select_all),
                 description: t.help_desc_select_all().to_string(),
-            },
-            HelpEntry {
-                keys: Self::format_keys(&kb.copy),
-                description: t.help_desc_edit_copy().to_string(),
-            },
-            HelpEntry {
-                keys: Self::format_keys(&kb.cut),
-                description: t.help_desc_edit_cut().to_string(),
-            },
-            HelpEntry {
-                keys: Self::format_keys(&kb.paste),
-                description: t.help_desc_edit_paste().to_string(),
             },
             HelpEntry {
                 keys: Self::format_keys(&kb.trigger_completion),
@@ -590,10 +578,6 @@ impl HelpGenerator {
                 keys: Self::format_keys(&kb.refresh),
                 description: t.help_desc_refresh().to_string(),
             },
-            HelpEntry {
-                keys: Self::format_keys(&kb.clipboard_copy),
-                description: t.help_desc_copy_hash().to_string(),
-            },
         ];
 
         HelpSection {
@@ -626,10 +610,6 @@ impl HelpGenerator {
                 description: t.help_desc_checkout().to_string(),
             },
             HelpEntry {
-                keys: Self::format_keys(&kb.clipboard_copy),
-                description: t.help_desc_copy_hash().to_string(),
-            },
-            HelpEntry {
                 keys: Self::format_keys(&fm_kb.open_external),
                 description: t.help_desc_open_external().to_string(),
             },
@@ -655,14 +635,6 @@ impl HelpGenerator {
         t: &dyn termide_i18n::Translation,
     ) -> HelpSection {
         let entries = vec![
-            HelpEntry {
-                keys: Self::format_keys(&kb.copy),
-                description: t.help_desc_terminal_copy().to_string(),
-            },
-            HelpEntry {
-                keys: Self::format_keys(&kb.paste),
-                description: t.help_desc_terminal_paste().to_string(),
-            },
             HelpEntry {
                 keys: Self::format_keys(&kb.search),
                 description: t.help_desc_search().to_string(),
@@ -716,10 +688,6 @@ impl HelpGenerator {
             HelpEntry {
                 keys: Self::format_keys(&kb.detail),
                 description: t.help_desc_db_detail().to_string(),
-            },
-            HelpEntry {
-                keys: Self::format_keys(&kb.copy_cell),
-                description: t.help_desc_db_copy_cell().to_string(),
             },
             HelpEntry {
                 keys: Self::format_keys(&kb.copy_row),

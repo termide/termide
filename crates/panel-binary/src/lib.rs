@@ -439,6 +439,19 @@ impl Panel for BinaryPanel {
                 is_modified: self.editable && self.is_modified(),
                 has_external_change: false,
             },
+            // Copy is routed from the global keybinding to the focused panel.
+            // Copy the selection if one exists; otherwise let the key fall
+            // through. Cut/Paste are inapplicable to this read-only viewer.
+            PanelCommand::Copy => {
+                if self.anchor.is_some() {
+                    self.copy_selection();
+                    CommandResult::Handled(true)
+                } else {
+                    CommandResult::Handled(false)
+                }
+            }
+            PanelCommand::Cut => CommandResult::Handled(false),
+            PanelCommand::Paste => CommandResult::Handled(false),
             _ => CommandResult::None,
         }
     }
@@ -470,9 +483,6 @@ impl Panel for BinaryPanel {
         if self.hotkeys.matches("toggle_view", &key) {
             self.editable = !self.editable;
             return vec![PanelEvent::NeedsRedraw];
-        }
-        if key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL {
-            return self.copy_selection();
         }
         // Ctrl+R: re-read the file from disk (pick up external changes), keeping
         // the cursor. Skipped while there are unsaved edits so they aren't lost.

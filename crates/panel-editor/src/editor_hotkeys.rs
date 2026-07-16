@@ -28,11 +28,6 @@ pub(crate) fn build_editor_hotkey_table(config: &Config) -> HotkeyTable {
     // Selection
     t.insert("select_all", &kb.select_all);
 
-    // Clipboard
-    t.insert("copy", &kb.copy);
-    t.insert("cut", &kb.cut);
-    t.insert("paste", &kb.paste);
-
     // Advanced editing
     t.insert("duplicate_line", &kb.duplicate_line);
     t.insert("delete_line", &kb.delete_line);

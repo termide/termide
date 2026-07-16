@@ -118,7 +118,6 @@ fn build_git_log_hotkey_table(config: &Config) -> HotkeyTable {
     }
 
     t.insert("checkout", &kb.checkout);
-    t.insert("clipboard_copy", &kb.clipboard_copy);
     t
 }
 
@@ -235,6 +234,17 @@ impl Panel for GitLogPanel {
                 }
                 CommandResult::NeedsRedraw(false)
             }
+            PanelCommand::Copy => {
+                if let Some(commit) = self.selected_commit() {
+                    if !commit.hash.is_empty() {
+                        let hash = commit.hash.clone();
+                        let _ = termide_clipboard::copy(&hash);
+                        self.status_message = Some(format!("Copied: {}", hash));
+                    }
+                }
+                CommandResult::Handled(true)
+            }
+            PanelCommand::Cut | PanelCommand::Paste => CommandResult::Handled(false),
             _ => CommandResult::None,
         }
     }
@@ -296,16 +306,6 @@ impl Panel for GitLogPanel {
                             commit.hash,
                             t.git_checkout_not_impl()
                         ));
-                    }
-                }
-                return vec![];
-            }
-            if self.hotkeys.matches("clipboard_copy", &key) {
-                if let Some(commit) = self.selected_commit() {
-                    if !commit.hash.is_empty() {
-                        let hash = commit.hash.clone();
-                        let _ = termide_clipboard::copy(&hash);
-                        self.status_message = Some(format!("Copied: {}", hash));
                     }
                 }
                 return vec![];

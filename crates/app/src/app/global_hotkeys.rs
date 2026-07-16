@@ -9,7 +9,7 @@ use super::App;
 use crate::state::{ActiveModal, PendingAction};
 use crate::PanelExt;
 use termide_config::GlobalKeybindings;
-use termide_core::HotkeyTable;
+use termide_core::{CommandResult, HotkeyTable, PanelCommand};
 use termide_i18n as i18n;
 
 /// Build a HotkeyTable from GlobalKeybindings config.
@@ -66,6 +66,11 @@ pub(super) fn build_global_hotkey_table(kb: &GlobalKeybindings) -> HotkeyTable {
 
     // Application
     t.insert("quit", &kb.quit);
+
+    // Clipboard (routed to the focused panel)
+    t.insert("copy", &kb.copy);
+    t.insert("cut", &kb.cut);
+    t.insert("paste", &kb.paste);
 
     t
 }
@@ -243,6 +248,20 @@ impl App {
             return Ok(true);
         }
 
+        // Clipboard — routed to the focused panel, which decides what to
+        // copy/cut/paste. `Handled(false)` (or no clipboard support) lets the
+        // key fall through to normal panel handling — e.g. a terminal with no
+        // selection sends `Ctrl+C` to the shell as SIGINT.
+        if table.matches("copy", key) {
+            return Ok(self.route_clipboard(PanelCommand::Copy));
+        }
+        if table.matches("cut", key) {
+            return Ok(self.route_clipboard(PanelCommand::Cut));
+        }
+        if table.matches("paste", key) {
+            return Ok(self.route_clipboard(PanelCommand::Paste));
+        }
+
         // Command hotkeys (already in cached table as run_command:* entries)
         let matched = table.find_match("run_command:", key);
         if let Some(action) = matched {
@@ -252,6 +271,21 @@ impl App {
         }
 
         Ok(false)
+    }
+
+    /// Route a clipboard command (`Copy`/`Cut`/`Paste`) to the focused panel.
+    /// Returns `true` when the panel consumed it (so the originating key is
+    /// swallowed), `false` to let the key fall through to normal handling.
+    fn route_clipboard(&mut self, cmd: PanelCommand) -> bool {
+        let handled = self
+            .layout_manager
+            .active_panel_mut()
+            .map(|panel| matches!(panel.handle_command(cmd), CommandResult::Handled(true)))
+            .unwrap_or(false);
+        if handled {
+            self.state.needs_redraw = true;
+        }
+        handled
     }
 
     /// Handle app action by name (used by command palette).

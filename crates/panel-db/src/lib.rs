@@ -613,7 +613,6 @@ fn build_db_hotkey_table(config: &Config) -> HotkeyTable {
     t.insert("filter", &kb.filter);
     t.insert("clear_filter", &kb.clear_filter);
     t.insert("detail", &kb.detail);
-    t.insert("copy_cell", &kb.copy_cell);
     t.insert("copy_row", &kb.copy_row);
     t.insert("refresh", &kb.refresh);
     t
@@ -739,8 +738,22 @@ impl Panel for DbPanel {
         }
     }
 
-    fn handle_command(&mut self, _cmd: PanelCommand<'_>) -> CommandResult {
-        CommandResult::None
+    fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
+        match cmd {
+            // Global clipboard: copy the current cell value (previously the
+            // per-panel `copy_cell` keybinding). The whole-row copy stays a
+            // panel keybinding (`copy_row`).
+            PanelCommand::Copy => {
+                if let Some(text) = self.copy_text(false) {
+                    let _ = termide_clipboard::copy(&text);
+                }
+                CommandResult::Handled(true)
+            }
+            // Read-only table view: nothing to cut or paste into.
+            PanelCommand::Cut => CommandResult::Handled(false),
+            PanelCommand::Paste => CommandResult::Handled(false),
+            _ => CommandResult::None,
+        }
     }
 
     fn captures_escape(&self) -> bool {

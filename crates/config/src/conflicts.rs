@@ -146,6 +146,9 @@ pub fn enumerate_bindings(config: &Config) -> Vec<(BindingLocation, ParsedKeyBin
         "open_command_palette",
         &g.open_command_palette,
     );
+    push(&mut out, "general", "copy", &g.copy);
+    push(&mut out, "general", "cut", &g.cut);
+    push(&mut out, "general", "paste", &g.paste);
 
     let e = &config.editor.keybindings;
     push(&mut out, "editor", "save", &e.save);
@@ -162,9 +165,6 @@ pub fn enumerate_bindings(config: &Config) -> Vec<(BindingLocation, ParsedKeyBin
     push(&mut out, "editor", "replace_current", &e.replace_current);
     push(&mut out, "editor", "replace_all", &e.replace_all);
     push(&mut out, "editor", "select_all", &e.select_all);
-    push(&mut out, "editor", "copy", &e.copy);
-    push(&mut out, "editor", "cut", &e.cut);
-    push(&mut out, "editor", "paste", &e.paste);
     push(
         &mut out,
         "editor",
@@ -218,19 +218,6 @@ pub fn enumerate_bindings(config: &Config) -> Vec<(BindingLocation, ParsedKeyBin
     push(&mut out, "file_manager", "select_all", &f.select_all);
     push(&mut out, "file_manager", "open_external", &f.open_external);
     push(&mut out, "file_manager", "toggle_hidden", &f.toggle_hidden);
-    push(
-        &mut out,
-        "file_manager",
-        "clipboard_copy",
-        &f.clipboard_copy,
-    );
-    push(&mut out, "file_manager", "clipboard_cut", &f.clipboard_cut);
-    push(
-        &mut out,
-        "file_manager",
-        "clipboard_paste",
-        &f.clipboard_paste,
-    );
 
     let gs = &config.git_status.keybindings;
     push(&mut out, "git_status", "stage", &gs.stage);
@@ -252,26 +239,21 @@ pub fn enumerate_bindings(config: &Config) -> Vec<(BindingLocation, ParsedKeyBin
         "scroll_half_down",
         &gd.scroll_half_down,
     );
-    push(&mut out, "git_diff", "clipboard_copy", &gd.clipboard_copy);
 
     let gl = &config.git_log.keybindings;
     push(&mut out, "git_log", "info", &gl.info);
     push(&mut out, "git_log", "view_diff", &gl.view_diff);
     push(&mut out, "git_log", "checkout", &gl.checkout);
-    push(&mut out, "git_log", "clipboard_copy", &gl.clipboard_copy);
 
     let db = &config.database.keybindings;
     push(&mut out, "database", "sort", &db.sort);
     push(&mut out, "database", "filter", &db.filter);
     push(&mut out, "database", "clear_filter", &db.clear_filter);
     push(&mut out, "database", "detail", &db.detail);
-    push(&mut out, "database", "copy_cell", &db.copy_cell);
     push(&mut out, "database", "copy_row", &db.copy_row);
     push(&mut out, "database", "refresh", &db.refresh);
 
     let t = &config.terminal.keybindings;
-    push(&mut out, "terminal", "copy", &t.copy);
-    push(&mut out, "terminal", "paste", &t.paste);
     push(&mut out, "terminal", "scroll_up", &t.scroll_up);
     push(&mut out, "terminal", "scroll_down", &t.scroll_down);
     push(&mut out, "terminal", "scroll_top", &t.scroll_top);

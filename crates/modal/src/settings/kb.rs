@@ -82,6 +82,9 @@ pub(super) fn kb_binding_names(section: usize) -> &'static [&'static str] {
             "goto_panel_9",
             "quit",
             "open_command_palette",
+            "copy",
+            "cut",
+            "paste",
         ],
         1 => &[
             "save",
@@ -99,9 +102,6 @@ pub(super) fn kb_binding_names(section: usize) -> &'static [&'static str] {
             "replace_current",
             "replace_all",
             "select_all",
-            "copy",
-            "cut",
-            "paste",
             "trigger_completion",
             "show_hover",
             "goto_definition",
@@ -130,9 +130,6 @@ pub(super) fn kb_binding_names(section: usize) -> &'static [&'static str] {
             "select_all",
             "open_external",
             "toggle_hidden",
-            "clipboard_copy",
-            "clipboard_cut",
-            "clipboard_paste",
         ],
         3 => &[
             "stage", "unstage", "view", "edit", "info", "revert", "refresh",
@@ -143,12 +140,9 @@ pub(super) fn kb_binding_names(section: usize) -> &'static [&'static str] {
             "refresh",
             "scroll_half_up",
             "scroll_half_down",
-            "clipboard_copy",
         ],
-        5 => &["info", "view_diff", "checkout", "clipboard_copy"],
+        5 => &["info", "view_diff", "checkout"],
         6 => &[
-            "copy",
-            "paste",
             "scroll_up",
             "scroll_down",
             "scroll_top",
@@ -206,7 +200,10 @@ pub(super) fn get_kb_value(config: &Config, section: usize, name: &str) -> Strin
             goto_panel_8,
             goto_panel_9,
             quit,
-            open_command_palette
+            open_command_palette,
+            copy,
+            cut,
+            paste
         ),
         1 => kb_get!(
             config.editor.keybindings,
@@ -226,9 +223,6 @@ pub(super) fn get_kb_value(config: &Config, section: usize, name: &str) -> Strin
             replace_current,
             replace_all,
             select_all,
-            copy,
-            cut,
-            paste,
             trigger_completion,
             show_hover,
             goto_definition,
@@ -258,10 +252,7 @@ pub(super) fn get_kb_value(config: &Config, section: usize, name: &str) -> Strin
             toggle_selection,
             select_all,
             open_external,
-            toggle_hidden,
-            clipboard_copy,
-            clipboard_cut,
-            clipboard_paste
+            toggle_hidden
         ),
         3 => kb_get!(
             config.git_status.keybindings,
@@ -281,22 +272,12 @@ pub(super) fn get_kb_value(config: &Config, section: usize, name: &str) -> Strin
             edit,
             refresh,
             scroll_half_up,
-            scroll_half_down,
-            clipboard_copy
+            scroll_half_down
         ),
-        5 => kb_get!(
-            config.git_log.keybindings,
-            name,
-            info,
-            view_diff,
-            checkout,
-            clipboard_copy
-        ),
+        5 => kb_get!(config.git_log.keybindings, name, info, view_diff, checkout),
         6 => kb_get!(
             config.terminal.keybindings,
             name,
-            copy,
-            paste,
             scroll_up,
             scroll_down,
             scroll_top,
@@ -355,7 +336,10 @@ pub(super) fn set_kb_value(config: &mut Config, section: usize, name: &str, valu
             goto_panel_8,
             goto_panel_9,
             quit,
-            open_command_palette
+            open_command_palette,
+            copy,
+            cut,
+            paste
         ),
         1 => kb_set!(
             config.editor.keybindings,
@@ -376,9 +360,6 @@ pub(super) fn set_kb_value(config: &mut Config, section: usize, name: &str, valu
             replace_current,
             replace_all,
             select_all,
-            copy,
-            cut,
-            paste,
             trigger_completion,
             show_hover,
             goto_definition,
@@ -409,10 +390,7 @@ pub(super) fn set_kb_value(config: &mut Config, section: usize, name: &str, valu
             toggle_selection,
             select_all,
             open_external,
-            toggle_hidden,
-            clipboard_copy,
-            clipboard_cut,
-            clipboard_paste
+            toggle_hidden
         ),
         3 => kb_set!(
             config.git_status.keybindings,
@@ -434,8 +412,7 @@ pub(super) fn set_kb_value(config: &mut Config, section: usize, name: &str, valu
             edit,
             refresh,
             scroll_half_up,
-            scroll_half_down,
-            clipboard_copy
+            scroll_half_down
         ),
         5 => kb_set!(
             config.git_log.keybindings,
@@ -443,15 +420,12 @@ pub(super) fn set_kb_value(config: &mut Config, section: usize, name: &str, valu
             value,
             info,
             view_diff,
-            checkout,
-            clipboard_copy
+            checkout
         ),
         6 => kb_set!(
             config.terminal.keybindings,
             name,
             value,
-            copy,
-            paste,
             scroll_up,
             scroll_down,
             scroll_top,

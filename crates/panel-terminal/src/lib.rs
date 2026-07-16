@@ -133,8 +133,6 @@ fn build_terminal_hotkey_table(config: &Config) -> HotkeyTable {
     let mut t = HotkeyTable::new();
     let kb = &config.terminal.keybindings;
 
-    t.insert("paste", &kb.paste);
-    t.insert("copy", &kb.copy);
     t.insert("search", &kb.search);
     t.insert("switch_directory", &kb.switch_directory);
     t.insert("scroll_up", &kb.scroll_up);
@@ -1457,20 +1455,9 @@ impl Panel for Terminal {
             }
         }
 
-        // Configurable actions via HotkeyTable (key already translated by app)
-        if self.hotkeys.matches("paste", &key) {
-            let _ = self.paste_from_clipboard();
-            return vec![];
-        }
-        if self.hotkeys.matches("copy", &key) {
-            if let Err(e) = self.copy_selection_to_clipboard() {
-                return vec![PanelEvent::SetStatusMessage {
-                    message: format!("Clipboard error: {}", e),
-                    is_error: true,
-                }];
-            }
-            return vec![];
-        }
+        // Configurable actions via HotkeyTable (key already translated by app).
+        // copy/paste are routed from the global keybindings via
+        // `PanelCommand::Copy`/`Paste` (see handle_command), not matched here.
         if self.hotkeys.matches("switch_directory", &key) {
             return vec![PanelEvent::OpenDirectorySwitcher];
         }
@@ -2084,11 +2071,30 @@ impl Panel for Terminal {
             }
             // Terminals always stay active (PTY must be drained), so MarkStale/RefreshIfStale are no-ops
             PanelCommand::MarkStale | PanelCommand::RefreshIfStale => CommandResult::None,
+            // Smart Ctrl+C: copy the selection if there is one, otherwise let
+            // the key fall through so the shell receives it as SIGINT.
+            PanelCommand::Copy => {
+                let has_selection = self
+                    .screen
+                    .read()
+                    .map(|s| s.selection_start.is_some() && s.selection_end.is_some())
+                    .unwrap_or(false);
+                if has_selection {
+                    if let Err(e) = self.copy_selection_to_clipboard() {
+                        log::error!("Terminal copy failed: {}", e);
+                    }
+                    CommandResult::Handled(true)
+                } else {
+                    CommandResult::Handled(false)
+                }
+            }
+            // Nothing to cut from terminal output — fall through to the shell.
+            PanelCommand::Cut => CommandResult::Handled(false),
             PanelCommand::Paste => {
                 if let Err(e) = self.paste_from_clipboard() {
                     log::error!("Terminal paste failed: {}", e);
                 }
-                CommandResult::None
+                CommandResult::Handled(true)
             }
             PanelCommand::PasteText { text } => {
                 if let Err(e) = self.paste_text(&text) {

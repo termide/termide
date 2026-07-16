@@ -725,11 +725,31 @@ impl Panel for Editor {
                     CommandResult::None
                 }
             }
+            PanelCommand::Copy => {
+                if self.selection.is_some() {
+                    if let Err(e) = self.copy_to_clipboard() {
+                        log::error!("Editor copy failed: {}", e);
+                    }
+                    CommandResult::Handled(true)
+                } else {
+                    CommandResult::Handled(false)
+                }
+            }
+            PanelCommand::Cut => {
+                if self.selection.is_some() {
+                    if let Err(e) = self.cut_to_clipboard() {
+                        log::error!("Editor cut failed: {}", e);
+                    }
+                    CommandResult::Handled(true)
+                } else {
+                    CommandResult::Handled(false)
+                }
+            }
             PanelCommand::Paste => {
                 if let Err(e) = self.paste_from_clipboard() {
                     log::error!("Editor paste failed: {}", e);
                 }
-                CommandResult::None
+                CommandResult::Handled(true)
             }
             PanelCommand::PasteText { text } => {
                 if let Err(e) = self.paste_text(&text) {

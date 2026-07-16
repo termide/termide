@@ -62,6 +62,12 @@ pub struct GlobalKeybindings {
     // Application
     pub quit: Option<KeyBinding>,
     pub open_command_palette: Option<KeyBinding>,
+
+    // Clipboard (routed to the focused panel, which copies/cuts/pastes
+    // according to its own capabilities).
+    pub copy: Option<KeyBinding>,
+    pub cut: Option<KeyBinding>,
+    pub paste: Option<KeyBinding>,
 }
 
 /// Editor keybindings (editor.keybindings section).
@@ -89,11 +95,6 @@ pub struct EditorKeybindings {
 
     // Selection
     pub select_all: Option<KeyBinding>,
-
-    // Clipboard
-    pub copy: Option<KeyBinding>,
-    pub cut: Option<KeyBinding>,
-    pub paste: Option<KeyBinding>,
 
     // LSP
     pub trigger_completion: Option<KeyBinding>,
@@ -137,9 +138,6 @@ pub struct FileManagerKeybindings {
     // Other
     pub open_external: Option<KeyBinding>,
     pub toggle_hidden: Option<KeyBinding>,
-    pub clipboard_copy: Option<KeyBinding>,
-    pub clipboard_cut: Option<KeyBinding>,
-    pub clipboard_paste: Option<KeyBinding>,
 }
 
 /// Git status panel keybindings (git_status.keybindings section).
@@ -202,8 +200,6 @@ pub struct GitDiffKeybindings {
     pub scroll_half_up: Option<KeyBinding>,
     /// Scroll half page down
     pub scroll_half_down: Option<KeyBinding>,
-    /// Copy selected file path to clipboard
-    pub clipboard_copy: Option<KeyBinding>,
 }
 
 impl GitDiffKeybindings {
@@ -228,7 +224,6 @@ impl GitDiffKeybindings {
         }
         set_default!(scroll_half_up, "Ctrl+U");
         set_default!(scroll_half_down, "Ctrl+D");
-        set_default!(clipboard_copy, "Ctrl+C");
     }
 }
 
@@ -241,8 +236,6 @@ pub struct GitLogKeybindings {
     pub view_diff: Option<KeyBinding>,
     /// Checkout commit/branch
     pub checkout: Option<KeyBinding>,
-    /// Copy selected commit hash to clipboard
-    pub clipboard_copy: Option<KeyBinding>,
 }
 
 impl GitLogKeybindings {
@@ -259,7 +252,6 @@ impl GitLogKeybindings {
         set_default!(info, "Space");
         set_default!(view_diff, "D");
         set_default!(checkout, "C");
-        set_default!(clipboard_copy, "Ctrl+C");
     }
 }
 
@@ -274,8 +266,6 @@ pub struct DatabaseKeybindings {
     pub clear_filter: Option<KeyBinding>,
     /// Show the full current row (detail dialog)
     pub detail: Option<KeyBinding>,
-    /// Copy the current cell value
-    pub copy_cell: Option<KeyBinding>,
     /// Copy the current row (tab-separated)
     pub copy_row: Option<KeyBinding>,
     /// Reload tables and the current view
@@ -302,7 +292,6 @@ impl DatabaseKeybindings {
         if self.detail.is_none() {
             self.detail = Some(KeyBinding::Multiple(vec!["Space".into(), "F12".into()]));
         }
-        set_default!(copy_cell, "Ctrl+C");
         set_default!(copy_row, "Ctrl+Y");
         set_default!(refresh, "Ctrl+R");
     }
@@ -336,8 +325,6 @@ impl ViewerKeybindings {
 /// Terminal panel keybindings (terminal.keybindings section).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TerminalKeybindings {
-    pub copy: Option<KeyBinding>,
-    pub paste: Option<KeyBinding>,
     pub scroll_up: Option<KeyBinding>,
     pub scroll_down: Option<KeyBinding>,
     pub scroll_top: Option<KeyBinding>,
@@ -434,6 +421,11 @@ impl GlobalKeybindings {
         // Application
         set_default!(quit, "Alt+Q");
         set_default!(open_command_palette, "Ctrl+P");
+
+        // Clipboard (routed to the focused panel)
+        set_default!(copy, "Ctrl+C");
+        set_default!(cut, "Ctrl+X");
+        set_default!(paste, "Ctrl+V");
     }
 }
 
@@ -487,11 +479,6 @@ impl EditorKeybindings {
 
         // Selection
         set_default!(select_all, "Ctrl+A");
-
-        // Clipboard
-        set_default_multiple!(copy, "Ctrl+C", "Ctrl+Insert", "Ctrl+Shift+C");
-        set_default_multiple!(cut, "Ctrl+X", "Shift+Delete");
-        set_default_multiple!(paste, "Ctrl+V", "Shift+Insert", "Ctrl+Shift+V");
 
         // LSP
         // - `Ctrl+J` (`\x0A`, control char): universal — always reaches
@@ -577,9 +564,6 @@ impl FileManagerKeybindings {
             self.open_external = Some(KeyBinding::Multiple(vec!["O".into(), "Alt+Enter".into()]));
         }
         set_default!(toggle_hidden, ".");
-        set_default!(clipboard_copy, "Ctrl+C");
-        set_default!(clipboard_cut, "Ctrl+X");
-        set_default!(clipboard_paste, "Ctrl+V");
     }
 }
 
@@ -594,8 +578,6 @@ impl TerminalKeybindings {
             };
         }
 
-        set_default!(copy, "Ctrl+Shift+C");
-        set_default!(paste, "Ctrl+Shift+V");
         set_default!(scroll_up, "Shift+PageUp");
         set_default!(scroll_down, "Shift+PageDown");
         set_default!(scroll_top, "Shift+Home");

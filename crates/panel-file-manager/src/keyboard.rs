@@ -55,11 +55,6 @@ pub enum FmCommand {
     SearchContent,
     SearchReplace,
 
-    // Clipboard
-    ClipboardCopy,
-    ClipboardCut,
-    ClipboardPaste,
-
     // Misc
     ShowFileInfo,
     Refresh,
@@ -161,15 +156,6 @@ impl FmCommand {
         }
         if hotkeys.matches("go_to_path", &key) {
             return Self::GoToPath;
-        }
-        if hotkeys.matches("clipboard_copy", &key) {
-            return Self::ClipboardCopy;
-        }
-        if hotkeys.matches("clipboard_cut", &key) {
-            return Self::ClipboardCut;
-        }
-        if hotkeys.matches("clipboard_paste", &key) {
-            return Self::ClipboardPaste;
         }
 
         // =================================================================
