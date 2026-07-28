@@ -16,7 +16,7 @@ chrono.workspace = true
 termide-logger = { path = "../logger" }
 
 # SFTP support — pure-Rust russh stack (no OpenSSL/libssh2 needed).
-russh = "0.61"
+russh = "0.62"
 russh-sftp = "2.2"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "io-util", "macros", "time", "net", "fs"] }
 async-trait = "0.1"
