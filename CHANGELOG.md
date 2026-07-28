@@ -5,6 +5,11 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.5] - 2026-07-28
+
+### Security
+- Updated the `russh` SSH library (used by the SFTP remote-file backend) to 0.62.4, addressing three medium-severity advisories affecting russh ≤ 0.62.3: GHSA-5xvq-cp9x-6p6r, GHSA-cqjc-rmpq-xprq and GHSA-g9hv-x236-4qp3.
+
 ## [0.29.4] - 2026-07-16
 
 ### Fixed
@@ -293,6 +298,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `deny.toml` + `cargo-deny check` step covers advisories, licenses, bans and sources.
 - Pre-commit hook documented in `CONTRIBUTING.md`.
 
+[0.29.5]: https://github.com/termide/termide/releases/tag/0.29.5
 [0.29.4]: https://github.com/termide/termide/releases/tag/0.29.4
 [0.29.3]: https://github.com/termide/termide/releases/tag/0.29.3
 [0.29.2]: https://github.com/termide/termide/releases/tag/0.29.2
