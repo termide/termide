@@ -19,6 +19,10 @@ use unicode_width::UnicodeWidthStr;
 /// One styled word (no internal spaces), with an optional link id.
 type Word = (String, Style, Option<usize>);
 
+/// A table cell: styled fragments in order of arrival, each carrying an
+/// optional link id (same shape as a paragraph's inline runs).
+type Cell = Vec<Word>;
+
 /// A clickable region: a half-open `[start, end)` column range on a rendered
 /// line that opens `url`.
 #[derive(Debug, Clone)]
@@ -41,9 +45,18 @@ pub struct Rendered {
 /// A pending table being collected between its start and end.
 struct Table {
     aligns: usize,
-    rows: Vec<Vec<String>>,
+    rows: Vec<Vec<Cell>>,
     header_rows: usize,
-    cur_row: Vec<String>,
+    cur_row: Vec<Cell>,
+}
+
+/// Output of laying out a single table cell: its styled spans, the display
+/// width they occupy, and `[start, end)` column ranges (relative to the cell
+/// content) that link to `url_id`.
+struct RenderedCell {
+    spans: Vec<Span<'static>>,
+    used: usize,
+    links: Vec<(usize, usize, usize)>,
 }
 
 /// A link span recorded during wrapping, before url ids are resolved.
@@ -393,7 +406,7 @@ impl<'c> Builder<'c> {
 
     pub fn start_table_cell(&mut self) {
         if let Some(t) = self.table.as_mut() {
-            t.cur_row.push(String::new());
+            t.cur_row.push(Cell::new());
         }
         self.in_cell = true;
     }
@@ -425,22 +438,37 @@ impl<'c> Builder<'c> {
     // --- internals ----------------------------------------------------------
 
     fn push_text(&mut self, text: &str) {
-        if self.in_cell {
-            if let Some(t) = self.table.as_mut() {
-                if let Some(cell) = t.cur_row.last_mut() {
-                    cell.push_str(text);
-                }
-            }
+        let style = self.cur_style();
+        if self.push_cell(text, style) {
             return;
         }
-        let style = self.cur_style();
         let link = self.cur_link;
         self.runs.push((text.to_string(), style, link));
     }
 
     fn push_span(&mut self, text: impl Into<String>, style: Style) {
+        let text = text.into();
+        if self.push_cell(&text, style) {
+            return;
+        }
         let link = self.cur_link;
-        self.runs.push((text.into(), style, link));
+        self.runs.push((text, style, link));
+    }
+
+    /// Route inline text into the open table cell, if any, preserving its
+    /// style and link id so cell formatting and hit-areas survive to
+    /// `flush_table`; returns true when consumed by a cell.
+    fn push_cell(&mut self, text: &str, style: Style) -> bool {
+        if !self.in_cell {
+            return false;
+        }
+        let link = self.cur_link;
+        if let Some(t) = self.table.as_mut() {
+            if let Some(cell) = t.cur_row.last_mut() {
+                cell.push((text.to_string(), style, link));
+            }
+        }
+        true
     }
 
     fn push_blank(&mut self) {
@@ -540,7 +568,7 @@ impl<'c> Builder<'c> {
         let mut widths = vec![0usize; ncols];
         for row in &t.rows {
             for (c, cell) in row.iter().enumerate() {
-                widths[c] = widths[c].max(cell.trim().width());
+                widths[c] = widths[c].max(cell_width(cell));
             }
         }
         for w in &mut widths {
@@ -567,22 +595,34 @@ impl<'c> Builder<'c> {
         };
 
         self.lines.push(border("┌", "┬", "┐", "─"));
+        let empty: Cell = Vec::new();
         for (ri, row) in t.rows.iter().enumerate() {
             let header = ri < t.header_rows;
+            let line_idx = self.lines.len();
             let mut spans: Vec<Span<'static>> = vec![Span::styled("│", dis)];
+            // Column offset of the next span; the leading `│` occupies col 0.
+            let mut col = 1usize;
             for (c, w) in widths.iter().enumerate() {
-                let raw = row.get(c).map(|s| s.trim()).unwrap_or("");
-                let cell = clip(raw, *w);
-                let pad = w.saturating_sub(cell.width());
-                let style = if header {
-                    self.base_style().add_modifier(Modifier::BOLD)
-                } else {
-                    self.base_style()
-                };
+                let cell = row.get(c).unwrap_or(&empty);
+                let rendered = self.render_cell(cell, *w, header);
                 spans.push(Span::raw(" "));
-                spans.push(Span::styled(cell, style));
+                col += 1;
+                let cell_base = col;
+                spans.extend(rendered.spans);
+                col += rendered.used;
+                for (s, e, url_id) in rendered.links {
+                    self.pending_links.push(PendingLink {
+                        line: line_idx,
+                        start: (cell_base + s) as u16,
+                        end: (cell_base + e) as u16,
+                        url_id,
+                    });
+                }
+                let pad = w.saturating_sub(rendered.used);
                 spans.push(Span::raw(" ".repeat(pad + 1)));
+                col += pad + 1;
                 spans.push(Span::styled("│", dis));
+                col += 1;
             }
             self.lines.push(Line::from(spans));
             if header && t.header_rows > 0 && ri + 1 == t.header_rows {
@@ -590,6 +630,91 @@ impl<'c> Builder<'c> {
             }
         }
         self.lines.push(border("└", "┴", "┘", "─"));
+    }
+
+    /// Render a table cell's styled fragments clipped to `width` columns,
+    /// bolding header cells and preserving per-fragment styles (inline code,
+    /// emphasis) and link hit-areas. Outer whitespace is trimmed; an ellipsis
+    /// marks truncation. Link ranges are `[start, end)` column offsets relative
+    /// to the start of the cell content, clamped to what actually rendered.
+    fn render_cell(&self, cell: &[Word], width: usize, header: bool) -> RenderedCell {
+        let extra = if header {
+            Modifier::BOLD
+        } else {
+            Modifier::empty()
+        };
+        // Flatten to styled chars so trimming and clipping can span fragments.
+        let mut chars: Vec<(char, Style, Option<usize>)> = Vec::new();
+        for (text, style, link) in cell {
+            let style = style.add_modifier(extra);
+            for ch in text.chars() {
+                chars.push((ch, style, *link));
+            }
+        }
+        let start = chars
+            .iter()
+            .position(|(c, _, _)| !c.is_whitespace())
+            .unwrap_or(chars.len());
+        let end = chars
+            .iter()
+            .rposition(|(c, _, _)| !c.is_whitespace())
+            .map_or(start, |i| i + 1);
+        let slice = &chars[start..end];
+
+        let total: usize = slice.iter().map(|(c, _, _)| char_width(*c)).sum();
+        let (limit, ellipsis) = if total > width {
+            (width.saturating_sub(1), true)
+        } else {
+            (width, false)
+        };
+
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        let mut buf = String::new();
+        let mut buf_style = self.base_style();
+        let mut used = 0usize;
+        // Open link run: (start_col, url_id). Spans coalesce by style only, so
+        // link tracking is kept separate from span buffering.
+        let mut links: Vec<(usize, usize, usize)> = Vec::new();
+        let mut open: Option<(usize, usize)> = None;
+        for (ch, style, link) in slice.iter().copied() {
+            let cw = char_width(ch);
+            if used + cw > limit {
+                break;
+            }
+            if !buf.is_empty() && style != buf_style {
+                spans.push(Span::styled(std::mem::take(&mut buf), buf_style));
+            }
+            if buf.is_empty() {
+                buf_style = style;
+            }
+            match (link, open) {
+                (Some(id), Some((_, cur))) if cur == id => {}
+                (Some(id), _) => {
+                    if let Some((s, cur)) = open {
+                        links.push((s, used, cur));
+                    }
+                    open = Some((used, id));
+                }
+                (None, Some((s, cur))) => {
+                    links.push((s, used, cur));
+                    open = None;
+                }
+                (None, None) => {}
+            }
+            buf.push(ch);
+            used += cw;
+        }
+        if let Some((s, cur)) = open {
+            links.push((s, used, cur));
+        }
+        if !buf.is_empty() {
+            spans.push(Span::styled(buf, buf_style));
+        }
+        if ellipsis {
+            spans.push(Span::styled("…", self.base_style().add_modifier(extra)));
+            used += 1;
+        }
+        RenderedCell { spans, used, links }
     }
 
     /// Wrap accumulated inline runs to width and append as lines, applying the
@@ -706,21 +831,13 @@ fn prefix_width(spans: &[Span<'_>]) -> usize {
     spans.iter().map(|s| s.content.width()).sum()
 }
 
-/// Clip a string to a display width (best-effort, char boundary).
-fn clip(s: &str, width: usize) -> String {
-    if s.width() <= width {
-        return s.to_string();
-    }
-    let mut out = String::new();
-    let mut w = 0;
-    for ch in s.chars() {
-        let cw = ch.to_string().width();
-        if w + cw > width.saturating_sub(1) {
-            out.push('…');
-            break;
-        }
-        out.push(ch);
-        w += cw;
-    }
-    out
+/// Trimmed display width of a table cell's concatenated text.
+fn cell_width(cell: &[Word]) -> usize {
+    let text: String = cell.iter().map(|(t, _, _)| t.as_str()).collect();
+    text.trim().width()
+}
+
+/// Display width of a single character (best-effort).
+fn char_width(ch: char) -> usize {
+    ch.to_string().width()
 }

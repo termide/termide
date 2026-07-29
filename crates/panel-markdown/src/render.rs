@@ -267,6 +267,75 @@ mod tests {
     }
 
     #[test]
+    fn table_cell_inline_code_stays_in_cell() {
+        // Inline code spans inside a cell must render in the cell, not leak
+        // out as a paragraph below the table.
+        let md = "| Crate | Path |\n|---|---|\n| core | `/p/x/*` |";
+        let out = render(md);
+        // The code content must appear on a bordered table line.
+        assert!(
+            out.iter().any(|l| l.contains("│") && l.contains("/p/x/*")),
+            "code not rendered inside cell: {out:?}"
+        );
+        // And it must NOT appear on any non-table (borderless) line.
+        assert!(
+            !out.iter().any(|l| l.contains("/p/x/*") && !l.contains("│")),
+            "code leaked outside the table: {out:?}"
+        );
+    }
+
+    #[test]
+    fn table_cell_formatting_is_styled() {
+        let c = colors();
+        let md = "| Head | X |\n|---|---|\n| a | `code` |";
+        let r = render_markdown(md, 80, &c, false);
+        // The inline-code fragment inside the cell keeps its success color.
+        let code = r
+            .lines
+            .iter()
+            .flat_map(|l| &l.spans)
+            .find(|s| s.content.contains("code"))
+            .expect("code span present");
+        assert_eq!(code.style.fg, Some(c.success), "code lost its style");
+        // Header cell text is bold.
+        let head = r
+            .lines
+            .iter()
+            .flat_map(|l| &l.spans)
+            .find(|s| s.content.contains("Head"))
+            .expect("header span present");
+        assert!(
+            head.style
+                .add_modifier
+                .contains(ratatui::style::Modifier::BOLD),
+            "header not bold: {:?}",
+            head.style
+        );
+    }
+
+    #[test]
+    fn table_cell_link_is_clickable() {
+        let md = "| Site | Y |\n|---|---|\n| [docs](https://ex.com) | z |";
+        let out = render_markdown(md, 80, &colors(), false);
+        assert_eq!(out.links.len(), 1, "{:?}", out.links);
+        let link = &out.links[0];
+        assert_eq!(link.url, "https://ex.com");
+        // The recorded columns must land exactly on the visible label inside
+        // the cell (line is ASCII + box chars, so char index == column).
+        let line: String = out.lines[link.line]
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
+        let slice: String = line
+            .chars()
+            .skip(link.start as usize)
+            .take((link.end - link.start) as usize)
+            .collect();
+        assert_eq!(slice, "docs", "line={line:?} span={link:?}");
+    }
+
+    #[test]
     fn embedded_mermaid_renders_diagram() {
         let md = "```mermaid\nsequenceDiagram\nA->>B: hi\n```";
         let out = render(md);
