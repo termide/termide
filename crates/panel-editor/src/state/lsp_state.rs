@@ -561,18 +561,6 @@ impl LspState {
         self.diagnostics = diagnostics;
     }
 
-    /// Get diagnostic at a specific line (if any).
-    pub fn diagnostic_at_line(&self, line: usize) -> Option<&Diagnostic> {
-        self.diagnostics
-            .iter()
-            .find(|d| d.range.start.line as usize == line)
-    }
-
-    /// Check if there are any diagnostics.
-    pub fn has_diagnostics(&self) -> bool {
-        !self.diagnostics.is_empty()
-    }
-
     /// Get error count.
     pub fn error_count(&self) -> usize {
         use lsp_types::DiagnosticSeverity;

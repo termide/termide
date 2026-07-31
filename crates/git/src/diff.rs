@@ -351,11 +351,6 @@ impl GitDiffCache {
         Ok(())
     }
 
-    /// Get count of lines with statuses (for debugging)
-    pub fn line_status_count(&self) -> usize {
-        self.line_statuses.len()
-    }
-
     /// Get status for a specific line (0-based index)
     pub fn get_line_status(&self, line: usize) -> LineStatus {
         self.line_statuses

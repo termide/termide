@@ -48,7 +48,7 @@ pub use diff::{
 };
 
 // Import command helpers for use in this module
-use command::{git_command, git_command_stdout, run_git_simple};
+use command::{git_command_stdout, run_git_simple};
 
 /// Global flag for git availability on system.
 static GIT_AVAILABLE: OnceLock<bool> = OnceLock::new();
@@ -117,35 +117,6 @@ pub fn find_toplevel_repo(path: &Path) -> Option<PathBuf> {
         }
         current = current.parent()?;
     }
-}
-
-/// Get git status for a specific file relative to repo root.
-pub fn file_status(repo_root: &Path, file_path: &Path) -> GitStatus {
-    let relative = match file_path.strip_prefix(repo_root) {
-        Ok(rel) => rel,
-        Err(_) => return GitStatus::default(),
-    };
-
-    let relative_str = relative.to_string_lossy();
-
-    // Check if file is ignored
-    if git_command(repo_root, &["check-ignore", "-q", &relative_str]).is_some() {
-        return GitStatus::Ignored;
-    }
-
-    // Get status
-    if let Some(stdout) = git_command_stdout(
-        repo_root,
-        &["status", "--porcelain=v1", "--", &relative_str],
-    ) {
-        if let Some(line) = stdout.lines().next() {
-            if line.len() >= 2 {
-                return parse_status_code(&line[0..2]);
-            }
-        }
-    }
-
-    GitStatus::Unmodified
 }
 
 /// Parse git status porcelain code to GitStatus enum.

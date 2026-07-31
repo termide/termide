@@ -341,26 +341,11 @@ pub struct CommandsRegistry {
 }
 
 impl CommandsRegistry {
-    /// Find a root-level command by name.
-    pub fn find_command_by_name(&self, name: &str) -> Option<&CommandItem> {
-        self.root_items.iter().find(|s| s.name == name)
-    }
-
     /// Find a root-level command by name and source.
     pub fn find_root_command(&self, name: &str, is_project: bool) -> Option<&CommandItem> {
         self.root_items
             .iter()
             .find(|s| s.name == name && s.is_project == is_project)
-    }
-
-    /// Find a command by name across root items and all groups.
-    pub fn find_command_anywhere(&self, name: &str) -> Option<&CommandItem> {
-        self.root_items.iter().find(|s| s.name == name).or_else(|| {
-            self.groups
-                .iter()
-                .flat_map(|g| g.items.iter())
-                .find(|s| s.name == name)
-        })
     }
 
     /// Find a command by name across root items and all groups, scoped by source.

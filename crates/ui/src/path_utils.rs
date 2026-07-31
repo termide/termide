@@ -41,22 +41,6 @@ fn destination_is_directory(destination: &Path, explicit_directory: bool) -> boo
     explicit_directory || destination.is_dir()
 }
 
-/// Resolve destination path for a single file/directory operation
-///
-/// If destination is a directory, appends source filename to it.
-/// Otherwise, uses destination as-is.
-pub fn resolve_destination_path(
-    source: &Path,
-    destination: &Path,
-    explicit_directory: bool,
-) -> PathBuf {
-    if destination_is_directory(destination, explicit_directory) {
-        destination.join(source.file_name().unwrap_or_default())
-    } else {
-        destination.to_path_buf()
-    }
-}
-
 /// Resolve destination path for batch operations
 ///
 /// Handles special case where single source to non-directory destination

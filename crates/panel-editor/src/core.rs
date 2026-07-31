@@ -209,20 +209,10 @@ impl Editor {
         self.syntax_picker = None;
     }
 
-    /// Check if Vim mode is enabled
-    pub fn vim_mode_enabled(&self) -> bool {
-        self.vim.is_some()
-    }
-
     /// Get Vim mode display string for status bar (e.g., "NORMAL", "INSERT")
     /// Returns None if Vim mode is disabled
     pub fn vim_mode_display(&self) -> Option<&'static str> {
         self.vim.as_ref().map(|v| v.mode.display())
-    }
-
-    /// Get mutable reference to Vim state
-    pub fn vim_state_mut(&mut self) -> Option<&mut VimState> {
-        self.vim.as_mut()
     }
 
     /// Get reference to Vim state
@@ -353,11 +343,6 @@ impl Editor {
     /// Get immutable reference to viewport.
     pub fn viewport(&self) -> &Viewport {
         &self.viewport
-    }
-
-    /// Get mutable reference to viewport.
-    pub fn viewport_mut(&mut self) -> &mut Viewport {
-        &mut self.viewport
     }
 
     /// Set cursor to specific line (for log viewer scroll-to-end).

@@ -45,58 +45,12 @@ impl GitIntegration {
         }
     }
 
-    /// Check if git diff is available.
-    pub fn has_diff(&self) -> bool {
-        self.diff_cache.is_some()
-    }
-
-    /// Check if there's a pending async diff load.
-    pub fn has_pending_load(&self) -> bool {
-        self.diff_receiver.is_some()
-    }
-
-    /// Set update pending with current timestamp.
-    pub fn mark_update_pending(&mut self) {
-        self.update_pending = Some(Instant::now());
-    }
-
-    /// Clear update pending.
-    pub fn clear_update_pending(&mut self) {
-        self.update_pending = None;
-    }
-
-    /// Check and clear update pending if debounce time has passed.
-    /// Returns true if update should proceed.
-    pub fn check_debounce(&mut self, debounce_ms: u128) -> bool {
-        if let Some(pending_time) = self.update_pending {
-            if pending_time.elapsed().as_millis() >= debounce_ms {
-                self.update_pending = None;
-                return true;
-            }
-        }
-        false
-    }
-
     /// Start async blame load for the given file (called on open when blame is enabled by default).
     pub fn start_blame(&mut self, repo: &Path, file: &Path) {
         self.blame_rx = Some(termide_git::get_blame_async(
             repo.to_path_buf(),
             file.to_path_buf(),
         ));
-    }
-
-    /// Toggle blame on/off.  When enabling, starts an async load for the given file.
-    pub fn toggle_blame(&mut self, repo: &Path, file: &Path) {
-        self.blame_enabled = !self.blame_enabled;
-        if self.blame_enabled {
-            self.blame_rx = Some(termide_git::get_blame_async(
-                repo.to_path_buf(),
-                file.to_path_buf(),
-            ));
-        } else {
-            self.blame_data.clear();
-            self.blame_rx = None;
-        }
     }
 
     /// Poll the background blame thread.  Returns `true` if new data arrived (triggers redraw).

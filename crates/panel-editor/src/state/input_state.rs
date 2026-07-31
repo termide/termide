@@ -22,19 +22,4 @@ impl InputState {
     pub fn new() -> Self {
         Self::default()
     }
-
-    /// Reset preferred column (e.g., after horizontal movement).
-    pub fn clear_preferred_column(&mut self) {
-        self.preferred_column = None;
-    }
-
-    /// Set preferred column.
-    pub fn set_preferred_column(&mut self, col: usize) {
-        self.preferred_column = Some(col);
-    }
-
-    /// Get preferred column or current column.
-    pub fn get_preferred_column(&self, current_col: usize) -> usize {
-        self.preferred_column.unwrap_or(current_col)
-    }
 }

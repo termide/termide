@@ -624,12 +624,6 @@ impl TextInput {
 
     // === Mouse support methods ===
 
-    /// Set cursor position (for mouse click without selection)
-    pub fn set_cursor_pos(&mut self, pos: usize) {
-        self.clear_selection();
-        self.cursor_pos = pos.min(self.input.chars().count());
-    }
-
     /// Set cursor and start selection (for mouse down)
     pub fn set_cursor_with_selection_start(&mut self, pos: usize) {
         let pos = pos.min(self.input.chars().count());
@@ -648,18 +642,6 @@ impl TextInput {
     /// Check if input is empty
     pub fn is_empty(&self) -> bool {
         self.input.is_empty()
-    }
-
-    /// Get text before cursor (for rendering)
-    pub fn text_before_cursor(&self) -> &str {
-        let byte_idx = self.byte_index();
-        &self.input[..byte_idx]
-    }
-
-    /// Get text after cursor (for rendering)
-    pub fn text_after_cursor(&self) -> &str {
-        let byte_idx = self.byte_index();
-        &self.input[byte_idx..]
     }
 }
 

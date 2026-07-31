@@ -49,11 +49,6 @@ impl Editor {
         }
     }
 
-    /// Check if LSP is enabled for this editor.
-    pub fn lsp_enabled(&self) -> bool {
-        self.lsp.enabled
-    }
-
     /// Get the language ID for this editor's file.
     pub fn lsp_language(&self) -> Option<&str> {
         self.lsp.language_id.as_deref()
@@ -62,11 +57,6 @@ impl Editor {
     /// Mark that the buffer has changed (for LSP notification).
     pub fn mark_lsp_changed(&mut self) {
         self.lsp.mark_changed();
-    }
-
-    /// Check if there are pending LSP changes that need to be sent.
-    pub fn has_pending_lsp_change(&self) -> bool {
-        self.lsp.has_pending_change()
     }
 
     /// Send pending LSP change notification if needed.

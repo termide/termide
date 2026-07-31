@@ -31,11 +31,6 @@ impl VimMode {
     pub fn is_insert(&self) -> bool {
         matches!(self, VimMode::Insert)
     }
-
-    /// Check if mode is a visual selection mode.
-    pub fn is_visual(&self) -> bool {
-        matches!(self, VimMode::Visual | VimMode::VisualLine)
-    }
 }
 
 impl fmt::Display for VimMode {

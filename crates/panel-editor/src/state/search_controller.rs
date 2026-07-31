@@ -26,11 +26,6 @@ impl SearchController {
         self.state.is_some()
     }
 
-    /// Get current search query.
-    pub fn current_query(&self) -> Option<&str> {
-        self.state.as_ref().map(|s| s.query.as_str())
-    }
-
     /// Save current search query as last query.
     pub fn save_last_query(&mut self) {
         if let Some(ref state) = self.state {
@@ -44,15 +39,5 @@ impl SearchController {
     pub fn clear(&mut self) {
         self.save_last_query();
         self.state = None;
-    }
-
-    /// Save replace queries.
-    pub fn save_replace_queries(&mut self, find: &str, replace: &str) {
-        if !find.is_empty() {
-            self.last_replace_find = Some(find.to_string());
-        }
-        if !replace.is_empty() {
-            self.last_replace_with = Some(replace.to_string());
-        }
     }
 }

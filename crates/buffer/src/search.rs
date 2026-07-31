@@ -74,11 +74,6 @@ impl SearchState {
         self.matches.len()
     }
 
-    /// Get current match
-    pub fn current_match_cursor(&self) -> Option<&Cursor> {
-        self.current_match.and_then(|idx| self.matches.get(idx))
-    }
-
     /// Go to next match
     pub fn next_match(&mut self) {
         if self.matches.is_empty() {

@@ -83,27 +83,6 @@ impl RenderingCache {
         }
     }
 
-    /// Create RenderingCache with large file optimization.
-    pub fn new_large_file() -> Self {
-        let theme = Theme::default();
-        Self {
-            // Note: is_light_theme and default_fg will be set correctly by prepare_render()
-            highlight: HighlightCache::new(global_highlighter(), false, Color::White),
-            virtual_line_count: 0,
-            content_width: 0,
-            content_height: 0,
-            use_smart_wrap: false,
-            wrap_cache: HashMap::new(),
-            cumulative_visual_rows: Vec::new(),
-            cumulative_valid: false,
-            diagnostic_rows_cache: HashMap::new(),
-            diagnostic_cache_width: 0,
-            diagnostic_cache_valid: false,
-            theme,
-            config: Arc::new(Config::default()),
-        }
-    }
-
     /// Get cached wrap data for a line, if available and valid for current settings.
     ///
     /// Returns `None` if the cached data was computed with different width or smart_wrap settings.
