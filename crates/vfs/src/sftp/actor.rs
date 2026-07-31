@@ -134,10 +134,10 @@ impl SftpHandle {
         let (tx, rx) = oneshot::channel();
         let cmd = build(tx);
         block_on(async move {
-            self.cmd_tx
-                .send(cmd)
-                .await
-                .map_err(|_| VfsError::NotConnected)?;
+            self.cmd_tx.send(cmd).await.map_err(|e| {
+                log::debug!("sftp dispatch send failed (actor gone): {e}");
+                VfsError::NotConnected
+            })?;
             match tokio::time::timeout(DISPATCH_TIMEOUT, rx).await {
                 Ok(Ok(res)) => res,
                 Ok(Err(_)) => Err(VfsError::NotConnected),

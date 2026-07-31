@@ -120,12 +120,14 @@ impl Bookmark {
     }
 
     /// Create a new bookmark with description.
+    #[must_use]
     pub fn with_description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
         self
     }
 
     /// Create a new bookmark with group.
+    #[must_use]
     pub fn with_group(mut self, group: impl Into<String>) -> Self {
         self.group = Some(group.into());
         self

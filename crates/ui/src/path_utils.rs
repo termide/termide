@@ -109,23 +109,30 @@ pub fn get_file_name_string(path: &Path) -> String {
     get_file_name_str(path).to_string()
 }
 
-/// Truncate a string to fit within a given display width.
-///
-/// Respects Unicode character widths (e.g., CJK characters count as 2).
-pub fn truncate_to_width(s: &str, max_width: usize) -> String {
-    let mut result = String::new();
+/// Truncate `s` to at most `max_width` display columns, returning a byte slice
+/// aligned to a char boundary. Respects Unicode widths (CJK = 2). No ellipsis;
+/// allocation-free, suitable for render paths.
+#[must_use]
+pub fn truncate_to_width_str(s: &str, max_width: usize) -> &str {
+    let mut end = 0;
     let mut width = 0;
-
     for c in s.chars() {
         let char_width = c.width().unwrap_or(0);
         if width + char_width > max_width {
             break;
         }
-        result.push(c);
         width += char_width;
+        end += c.len_utf8();
     }
+    &s[..end]
+}
 
-    result
+/// Truncate a string to fit within a given display width.
+///
+/// Respects Unicode character widths (e.g., CJK characters count as 2).
+#[must_use]
+pub fn truncate_to_width(s: &str, max_width: usize) -> String {
+    truncate_to_width_str(s, max_width).to_string()
 }
 
 /// Truncate a string from the right with ellipsis suffix.

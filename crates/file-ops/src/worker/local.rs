@@ -179,7 +179,9 @@ impl LocalCopyWorker {
             {
                 use std::os::unix::fs::{MetadataExt, PermissionsExt};
                 let perms = std::fs::Permissions::from_mode(metadata.mode());
-                let _ = fs::set_permissions(dest, perms);
+                if let Err(e) = fs::set_permissions(dest, perms) {
+                    log::warn!("failed to preserve permissions on {dest:?}: {e}");
+                }
             }
         }
 

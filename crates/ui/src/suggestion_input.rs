@@ -73,6 +73,7 @@ impl SuggestionInput {
     }
 
     /// Create a suggestion input with initial text.
+    #[must_use]
     pub fn with_text(text: impl Into<String>, suggestions: Vec<String>) -> Self {
         let text = text.into();
         let total = suggestions.len();

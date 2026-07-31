@@ -11,6 +11,7 @@ use unicode_width::UnicodeWidthStr;
 
 use termide_core::ThemeColors;
 use termide_git::{self as git, truncate_left};
+use termide_ui::path_utils::truncate_to_width_str;
 use termide_ui::ScrollBar;
 use termide_ui_render::{render_simple_dropdown, InlineSelector};
 
@@ -42,25 +43,6 @@ fn expand_dropdown(x: u16, max_width: u16, max_right: u16, items: &[String]) -> 
         }
         (new_x, new_width)
     }
-}
-
-/// Truncate `s` to at most `max_width` display columns, returning a byte slice
-/// aligned to a char boundary and respecting unicode widths.
-fn truncate_to_width(s: &str, max_width: usize) -> &str {
-    if s.width() <= max_width {
-        return s;
-    }
-    let mut end = 0;
-    let mut w = 0;
-    for ch in s.chars() {
-        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-        if w + cw > max_width {
-            break;
-        }
-        w += cw;
-        end += ch.len_utf8();
-    }
-    &s[..end]
 }
 
 /// Render a selector dropdown with a filter input row on top, shared by the
@@ -195,7 +177,7 @@ fn render_filtered_dropdown(
         buf.set_string(
             dropdown_x + 1,
             item_y,
-            truncate_to_width(item, inner_width),
+            truncate_to_width_str(item, inner_width),
             style,
         );
     }

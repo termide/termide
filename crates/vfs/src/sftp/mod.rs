@@ -175,8 +175,11 @@ impl SftpProvider {
     }
 
     fn get_handle(&self) -> VfsResult<SftpHandle> {
-        let guard = self.inner.lock().map_err(|_| VfsError::RemoteError {
-            message: "SFTP state poisoned".into(),
+        let guard = self.inner.lock().map_err(|e| {
+            log::warn!("sftp inner mutex poisoned: {e}");
+            VfsError::RemoteError {
+                message: "SFTP state poisoned".into(),
+            }
         })?;
         match &guard.handle {
             Some(h) => Ok(SftpHandle {
