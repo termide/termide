@@ -46,6 +46,13 @@ impl GitStatusPanel {
     }
 
     pub fn refresh(&mut self) {
+        // Coalesce: a worker is already running, so mark that one more pass is
+        // needed when it finishes rather than spawning a parallel worker (and a
+        // fresh batch of git subprocesses) for every queued event.
+        if self.refresh_rx.is_some() {
+            self.refresh_pending = true;
+            return;
+        }
         self.is_loading = true;
 
         let repo = match self.repo_manager.current() {
@@ -108,6 +115,7 @@ impl GitStatusPanel {
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 self.refresh_rx = None;
                 self.is_loading = false;
+                self.run_pending_refresh();
                 return true;
             }
         };
@@ -133,7 +141,17 @@ impl GitStatusPanel {
         }
 
         self.is_loading = false;
+        self.run_pending_refresh();
         true
+    }
+
+    /// If a refresh was requested while a worker was in flight, run the single
+    /// coalesced follow-up pass now that the receiver is free.
+    fn run_pending_refresh(&mut self) {
+        if self.refresh_pending {
+            self.refresh_pending = false;
+            self.refresh();
+        }
     }
 
     /// Lightweight refresh of only the data used by `title()`.

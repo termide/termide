@@ -140,6 +140,10 @@ pub struct GitStatusPanel {
     /// `git status` / `git branch` / `git rev-list` commands. `tick()`
     /// polls the receiver and folds the result in once it lands.
     refresh_rx: Option<std::sync::mpsc::Receiver<GitStatusRefreshResult>>,
+    /// Set when `refresh()` is called while a worker is already in flight, so a
+    /// single follow-up pass runs once it lands instead of stacking threads
+    /// (and git subprocesses) per watcher event during a `.git` storm.
+    refresh_pending: bool,
 }
 
 /// Build HotkeyTable for the git status panel.
@@ -219,6 +223,7 @@ impl GitStatusPanel {
             hotkeys: HotkeyTable::default(),
             last_config_ptr: 0,
             refresh_rx: None,
+            refresh_pending: false,
         };
 
         panel.refresh();

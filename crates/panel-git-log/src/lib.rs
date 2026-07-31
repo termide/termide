@@ -89,6 +89,10 @@ pub struct GitLogPanel {
     /// `get_all_branches` / `get_log_with_graph` calls run on a worker
     /// thread; `tick()` swaps the result into place when ready.
     refresh_rx: Option<std::sync::mpsc::Receiver<GitLogRefreshResult>>,
+    /// Set when `refresh()` is called while a worker is already in flight, so a
+    /// single follow-up pass runs once it lands instead of stacking threads
+    /// (and git subprocesses) per watcher event during a `.git` storm.
+    refresh_pending: bool,
 }
 
 /// Build HotkeyTable for the git log panel from config.
@@ -150,6 +154,7 @@ impl GitLogPanel {
             hotkeys: HotkeyTable::default(),
             last_config_ptr: 0,
             refresh_rx: None,
+            refresh_pending: false,
         };
         panel.refresh();
         panel
