@@ -671,7 +671,12 @@ impl GitStatusPanel {
         // Determine style based on node kind
         let (fg_color, extra_modifier, label) = match node.kind {
             crate::tree::TreeNodeKind::Directory { expanded } => {
-                let (status, untracked) = crate::tree::aggregate_dir_status(tree_nodes, tree_idx);
+                // Aggregate status is precomputed in `recompute_visible`.
+                let (status, untracked) = ft
+                    .node_status
+                    .get(tree_idx)
+                    .copied()
+                    .unwrap_or(('?', false));
                 let (color, _modifier) = Self::get_file_style(status, untracked, theme);
                 const DIR_COLLAPSED: &str = if cfg!(windows) { "►" } else { "▶" };
                 let arrow = if expanded { "▼" } else { DIR_COLLAPSED };

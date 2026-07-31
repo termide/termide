@@ -113,8 +113,16 @@ pub fn render_editor_content<H: LineHighlighter>(
 
     let selection_style = Style::default().bg(theme.selected_bg).fg(theme.selected_fg);
 
-    // Prepare rendering context
-    let mut render_context = context::RenderContext::prepare(search_state, selection, diagnostics);
+    // Prepare rendering context. Bound the search-highlight map to the
+    // physical lines that can be on screen; in word-wrap mode fewer physical
+    // lines fit than `content_height`, so this range is a safe superset.
+    let visible_lines = viewport.top_line
+        ..viewport
+            .top_line
+            .saturating_add(content_height)
+            .saturating_add(1);
+    let mut render_context =
+        context::RenderContext::prepare(search_state, selection, diagnostics, visible_lines);
 
     // Group diagnostics by line once per render — hot paths read this
     // instead of rebuilding the HashMap for every visible row.

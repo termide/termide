@@ -10,6 +10,10 @@ pub(crate) struct FileTree {
     pub tree: Vec<tree::TreeNode>,
     pub visible: Vec<usize>,
     pub prefixes: Vec<String>,
+    /// Per-node `(status, untracked)`, indexed like `tree`. For directories
+    /// this is the aggregate over descendants, computed once when the tree is
+    /// (re)derived so rendering never re-walks the subtree per frame.
+    pub node_status: Vec<(char, bool)>,
     pub collapsed: HashSet<PathBuf>,
 }
 
@@ -19,14 +23,27 @@ impl FileTree {
             tree: Vec::new(),
             visible: Vec::new(),
             prefixes: Vec::new(),
+            node_status: Vec::new(),
             collapsed: HashSet::new(),
         }
     }
 
-    /// Recompute `visible` and `prefixes` from the current `tree`.
+    /// Recompute `visible`, `prefixes`, and `node_status` from the current
+    /// `tree`.
     pub fn recompute_visible(&mut self) {
         self.visible = tree::compute_visible_nodes(&self.tree);
         self.prefixes = tree::compute_tree_prefixes(&self.tree, &self.visible);
+        self.node_status = self
+            .tree
+            .iter()
+            .enumerate()
+            .map(|(i, node)| match node.kind {
+                tree::TreeNodeKind::Directory { .. } => tree::aggregate_dir_status(&self.tree, i),
+                tree::TreeNodeKind::File {
+                    status, untracked, ..
+                } => (status, untracked),
+            })
+            .collect();
     }
 }
 

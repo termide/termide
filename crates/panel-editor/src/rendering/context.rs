@@ -37,10 +37,16 @@ impl RenderContext {
     /// Prepare rendering context from editor state.
     ///
     /// Extracts and pre-computes all derived state needed for rendering.
+    /// `visible_lines` bounds the search-highlight map to the physical lines
+    /// that can appear on screen: the per-character map is only ever queried
+    /// for visible rows, so building entries for the whole document (which can
+    /// be tens of thousands of inserts per keystroke when a common substring
+    /// matches) is wasted work.
     pub fn prepare(
         search_state: &Option<SearchState>,
         selection: &Option<Selection>,
         diagnostics: &[Diagnostic],
+        visible_lines: std::ops::Range<usize>,
     ) -> Self {
         // Pre-extract match information
         let search_matches: Vec<(usize, usize, usize)> = if let Some(ref search) = search_state {
@@ -56,7 +62,7 @@ impl RenderContext {
         let current_match_idx = search_state.as_ref().and_then(|s| s.current_match);
 
         // Build search match map for O(1) lookups during rendering
-        let search_match_map = build_search_match_map(&search_matches);
+        let search_match_map = build_search_match_map(&search_matches, &visible_lines);
 
         // Pre-extract selection information
         let selection_range = selection.as_ref().map(|s| (s.start(), s.end()));
@@ -89,12 +95,25 @@ impl RenderContext {
 ///
 /// Maps each (line, column) coordinate within a match to its match index.
 /// This allows fast character-by-character highlighting during rendering.
+///
+/// Only matches on lines within `visible_lines` are inserted — off-screen
+/// entries are never queried. Match indices remain the position in the full
+/// `search_matches` list so they stay comparable with `current_match`.
 fn build_search_match_map(
     search_matches: &[(usize, usize, usize)],
+    visible_lines: &std::ops::Range<usize>,
 ) -> HashMap<(usize, usize), usize> {
-    let mut map = HashMap::with_capacity(search_matches.len() * 10);
+    let capacity: usize = search_matches
+        .iter()
+        .filter(|(m_line, _, _)| visible_lines.contains(m_line))
+        .map(|(_, _, m_len)| *m_len)
+        .sum();
+    let mut map = HashMap::with_capacity(capacity);
 
     for (idx, &(m_line, m_col, m_len)) in search_matches.iter().enumerate() {
+        if !visible_lines.contains(&m_line) {
+            continue;
+        }
         for col in m_col..(m_col + m_len) {
             map.insert((m_line, col), idx);
         }
@@ -160,7 +179,7 @@ mod tests {
             (1, 10, 4), // Line 1, col 10-13
         ];
 
-        let map = build_search_match_map(&matches);
+        let map = build_search_match_map(&matches, &(0..1000));
 
         // First match
         assert_eq!(map.get(&(0, 5)), Some(&0));
@@ -179,7 +198,7 @@ mod tests {
     #[test]
     fn test_build_search_match_map_empty() {
         let matches = vec![];
-        let map = build_search_match_map(&matches);
+        let map = build_search_match_map(&matches, &(0..1000));
         assert!(map.is_empty());
     }
 }
