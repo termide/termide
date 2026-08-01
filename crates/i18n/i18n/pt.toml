@@ -526,6 +526,7 @@ time_hours_ago = "há {count} hora{plural}"
 time_minutes_ago = "há {count} minuto{plural}"
 time_months_ago = "há {count} {plural}"
 time_weeks_ago = "há {count} semana{plural}"
+time_years_ago = "há {count} ano{plural}"
 
 conflict_already_exists = "{type} '{name}' já existe."
 op_data_progress = "Dados: {current}/{total}"
@@ -562,3 +563,4 @@ hour = { one = "", other = "s" }
 minute = { one = "", other = "s" }
 month = { one = "mês", other = "meses" }
 week = { one = "", other = "s" }
+year = { one = "", other = "s" }

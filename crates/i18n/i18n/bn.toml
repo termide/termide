@@ -526,6 +526,7 @@ time_hours_ago = "{count} ঘন্টা আগে"
 time_minutes_ago = "{count} মিনিট আগে"
 time_months_ago = "{count} মাস আগে"
 time_weeks_ago = "{count} সপ্তাহ আগে"
+time_years_ago = "{count} বছর আগে"
 
 conflict_already_exists = "{type} '{name}' ইতিমধ্যে বিদ্যমান।"
 op_data_progress = "ডেটা: {current}/{total}"

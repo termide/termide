@@ -526,6 +526,7 @@ time_hours_ago = "{count} saat önce"
 time_minutes_ago = "{count} dakika önce"
 time_months_ago = "{count} ay önce"
 time_weeks_ago = "{count} hafta önce"
+time_years_ago = "{count} yıl önce"
 
 conflict_already_exists = "{type} '{name}' zaten mevcut."
 op_data_progress = "Veri: {current}/{total}"

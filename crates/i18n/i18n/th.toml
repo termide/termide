@@ -526,6 +526,7 @@ time_hours_ago = "{count} ชั่วโมงที่แล้ว"
 time_minutes_ago = "{count} นาทีที่แล้ว"
 time_months_ago = "{count} เดือนที่แล้ว"
 time_weeks_ago = "{count} สัปดาห์ที่แล้ว"
+time_years_ago = "{count} ปีที่แล้ว"
 
 conflict_already_exists = "{type} '{name}' มีอยู่แล้ว"
 op_data_progress = "ข้อมูล: {current}/{total}"

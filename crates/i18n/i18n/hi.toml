@@ -526,6 +526,7 @@ time_hours_ago = "{count} घंटे पहले"
 time_minutes_ago = "{count} मिनट पहले"
 time_months_ago = "{count} महीने पहले"
 time_weeks_ago = "{count} सप्ताह पहले"
+time_years_ago = "{count} साल पहले"
 
 conflict_already_exists = "{type} '{name}' पहले से मौजूद है।"
 op_data_progress = "डेटा: {current}/{total}"

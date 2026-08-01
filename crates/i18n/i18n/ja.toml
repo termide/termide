@@ -526,6 +526,7 @@ time_hours_ago = "{count}時間前"
 time_minutes_ago = "{count}分前"
 time_months_ago = "{count}ヶ月前"
 time_weeks_ago = "{count}週間前"
+time_years_ago = "{count}年前"
 
 conflict_already_exists = "{type} '{name}' は既に存在します。"
 op_data_progress = "データ: {current}/{total}"

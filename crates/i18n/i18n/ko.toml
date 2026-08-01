@@ -526,6 +526,7 @@ time_hours_ago = "{count}시간 전"
 time_minutes_ago = "{count}분 전"
 time_months_ago = "{count}개월 전"
 time_weeks_ago = "{count}주 전"
+time_years_ago = "{count}년 전"
 
 conflict_already_exists = "{type} '{name}'이(가) 이미 존재합니다."
 op_data_progress = "데이터: {current}/{total}"

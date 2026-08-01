@@ -526,6 +526,7 @@ time_hours_ago = "{count} giờ trước"
 time_minutes_ago = "{count} phút trước"
 time_months_ago = "{count} tháng trước"
 time_weeks_ago = "{count} tuần trước"
+time_years_ago = "{count} năm trước"
 
 conflict_already_exists = "{type} '{name}' đã tồn tại."
 op_data_progress = "Dữ liệu: {current}/{total}"

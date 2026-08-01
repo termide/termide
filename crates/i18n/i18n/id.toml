@@ -526,6 +526,7 @@ time_hours_ago = "{count} jam lalu"
 time_minutes_ago = "{count} menit lalu"
 time_months_ago = "{count} bulan lalu"
 time_weeks_ago = "{count} minggu lalu"
+time_years_ago = "{count} tahun lalu"
 
 conflict_already_exists = "{type} '{name}' sudah ada."
 op_data_progress = "Data: {current}/{total}"
