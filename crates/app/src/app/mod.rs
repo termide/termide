@@ -590,170 +590,7 @@ impl App {
                     self.handle_coalesced_scroll(event, delta)?;
                     self.state.needs_redraw = true;
                 }
-                Event::Tick => {
-                    // Adaptive tick rate: slow down polling when idle
-                    if self.state.last_activity.elapsed()
-                        > Duration::from_millis(termide_config::constants::IDLE_THRESHOLD_MS)
-                    {
-                        self.event_handler.set_tick_rate(Duration::from_millis(
-                            termide_config::constants::IDLE_TICK_MS,
-                        ));
-                    }
-
-                    // Debounce scroll renders: consume pending flag and trigger redraw
-                    if self.state.pending_scroll_render {
-                        self.state.pending_scroll_render = false;
-                        self.state.needs_redraw = true;
-                    }
-
-                    // Detect active scrolling (within 100ms of last scroll event)
-                    // Skip heavy operations during scrolling to prevent UI lag
-                    let is_scrolling = self
-                        .state
-                        .last_mouse_scroll
-                        .map(|t| t.elapsed() < Duration::from_millis(100))
-                        .unwrap_or(false);
-
-                    let is_dragging = self.state.ui.drag.is_dragging();
-
-                    // Skip heavy operations during active scrolling or divider drag
-                    if !is_scrolling && !is_dragging {
-                        // Single combined loop: terminal output + panel tick + FM spinner
-                        let mut all_panel_events = Vec::new();
-                        for (panel, is_expanded) in self
-                            .layout_manager
-                            .iter_all_panels_with_expanded_state_mut()
-                        {
-                            // Terminal output check (always needed, even during idle)
-                            // PTY must be drained to avoid buffer deadlock
-                            if let Some(terminal) = panel.as_terminal_mut() {
-                                if terminal.has_pending_output() {
-                                    self.state.needs_redraw = true;
-                                }
-                            }
-
-                            // Always call tick() — stale panels drain async
-                            // results internally and return early
-                            let events = panel.tick();
-                            if !events.is_empty() {
-                                self.state.needs_redraw = true;
-                                all_panel_events.extend(events);
-                            }
-
-                            // FileManager-specific: only check VFS for expanded panels
-                            if is_expanded {
-                                if let Some(fm) = panel.as_file_manager_mut() {
-                                    if fm.vfs_state().has_pending_operation() {
-                                        self.state.needs_redraw = true;
-                                    }
-                                }
-                            }
-                        }
-                        // Process collected events
-                        if !all_panel_events.is_empty() {
-                            if let Err(e) = self.process_panel_events(all_panel_events) {
-                                log::error!("Error processing panel events: {}", e);
-                            }
-                        }
-                    } else {
-                        // During scrolling: only check terminal output (lightweight)
-                        for panel in self.layout_manager.iter_all_panels_mut() {
-                            if let Some(terminal) = panel.as_terminal_mut() {
-                                if terminal.has_pending_output() {
-                                    self.state.needs_redraw = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    if !is_scrolling {
-                        // Check for modal requests from FileManager panels (e.g., VFS error modals)
-                        // This must happen after tick() processing to show connection error modals
-                        let modal_request = self
-                            .layout_manager
-                            .iter_all_panels_mut()
-                            .find_map(|panel| panel.take_modal_request());
-                        if let Some((action, modal)) = modal_request {
-                            if let Err(e) = self.handle_modal_request(action, modal) {
-                                log::error!("Error handling modal request: {}", e);
-                            }
-                            self.state.needs_redraw = true;
-                        }
-
-                        // Check for pending upload operations from Editor panels (Ctrl+S remote saves)
-                        let pending_upload = self
-                            .layout_manager
-                            .iter_all_panels_mut()
-                            .find_map(|panel| panel.take_pending_upload());
-                        if let Some((temp_path, remote_path, vfs_manager)) = pending_upload {
-                            self.handle_pending_upload(temp_path, remote_path, vfs_manager);
-                            self.state.needs_redraw = true;
-                        }
-
-                        // Check channel for directory size calculation results
-                        self.check_dir_size_update();
-
-                        // Register panel watchers only when needed (panel added/navigated)
-                        if self.state.needs_watcher_registration {
-                            self.register_panel_watchers();
-                            self.state.needs_watcher_registration = false;
-                        }
-
-                        // Drain any finished repository walks so the
-                        // inotify watches install non-blockingly. The
-                        // walk itself runs on a worker thread; this is
-                        // just the per-path `watcher.watch` call.
-                        if let Some(watcher) = self.state.watcher.as_mut() {
-                            if watcher.poll_pending() {
-                                self.state.needs_redraw = true;
-                            }
-                        }
-
-                        // Poll unified watcher for git and filesystem events
-                        self.poll_watcher_events();
-
-                        // Single-pass: async git status, async dir reload, pending git diff
-                        self.check_background_panel_updates();
-
-                        // Deliver a completed viewer URL fetch (Ctrl+G with a URL)
-                        self.check_view_fetch();
-
-                        // Check background git operation result (push/pull)
-                        self.check_git_operation_result();
-
-                        // Check background command operation result (.report. commands)
-                        self.check_command_operation_result();
-                        self.check_bg_command_completion();
-
-                        // Poll unified operation manager for events (new system)
-                        self.poll_operation_manager();
-
-                        // Sync active operations data to the operations panel
-                        self.update_operations_panel();
-
-                        // Debounced outline sync for live editing (cheap: u64 compare only)
-                        self.check_outline_live_edit();
-
-                        // Apply pending outline navigation to editor
-                        self.apply_outline_navigation();
-
-                        // Check pending local batch operation (start after modal rendered)
-                        self.check_pending_batch_operation();
-                    }
-
-                    // Update system resource monitoring (CPU, RAM)
-                    // This is fast, always run it
-                    self.update_system_resources();
-
-                    // Poll LSP completion responses for active editor
-                    // This is fast, always run it
-                    self.poll_lsp_completion();
-
-                    // Update spinner in all modals that support animation
-                    // This is fast, always run it
-                    self.update_modal_spinners();
-                }
+                Event::Tick => self.poll_background(),
             }
 
             // Check and close panels that should auto-close
@@ -769,6 +606,177 @@ impl App {
         }
 
         Ok(())
+    }
+
+    /// Per-tick background polling batch, run once for every `Event::Tick`.
+    ///
+    /// Keeps `run` as pure loop control: this drains terminal output and panel
+    /// ticks, honours the scroll/drag fast-paths, then fans out to the watcher,
+    /// operation-manager, git/command/fetch pollers and the always-on
+    /// system-resource / LSP-completion / modal-spinner updates.
+    fn poll_background(&mut self) {
+        // Adaptive tick rate: slow down polling when idle
+        if self.state.last_activity.elapsed()
+            > Duration::from_millis(termide_config::constants::IDLE_THRESHOLD_MS)
+        {
+            self.event_handler.set_tick_rate(Duration::from_millis(
+                termide_config::constants::IDLE_TICK_MS,
+            ));
+        }
+
+        // Debounce scroll renders: consume pending flag and trigger redraw
+        if self.state.pending_scroll_render {
+            self.state.pending_scroll_render = false;
+            self.state.needs_redraw = true;
+        }
+
+        // Detect active scrolling (within 100ms of last scroll event)
+        // Skip heavy operations during scrolling to prevent UI lag
+        let is_scrolling = self
+            .state
+            .last_mouse_scroll
+            .map(|t| t.elapsed() < Duration::from_millis(100))
+            .unwrap_or(false);
+
+        let is_dragging = self.state.ui.drag.is_dragging();
+
+        // Skip heavy operations during active scrolling or divider drag
+        if !is_scrolling && !is_dragging {
+            // Single combined loop: terminal output + panel tick + FM spinner
+            let mut all_panel_events = Vec::new();
+            for (panel, is_expanded) in self
+                .layout_manager
+                .iter_all_panels_with_expanded_state_mut()
+            {
+                // Terminal output check (always needed, even during idle)
+                // PTY must be drained to avoid buffer deadlock
+                if let Some(terminal) = panel.as_terminal_mut() {
+                    if terminal.has_pending_output() {
+                        self.state.needs_redraw = true;
+                    }
+                }
+
+                // Always call tick() — stale panels drain async
+                // results internally and return early
+                let events = panel.tick();
+                if !events.is_empty() {
+                    self.state.needs_redraw = true;
+                    all_panel_events.extend(events);
+                }
+
+                // FileManager-specific: only check VFS for expanded panels
+                if is_expanded {
+                    if let Some(fm) = panel.as_file_manager_mut() {
+                        if fm.vfs_state().has_pending_operation() {
+                            self.state.needs_redraw = true;
+                        }
+                    }
+                }
+            }
+            // Process collected events
+            if !all_panel_events.is_empty() {
+                if let Err(e) = self.process_panel_events(all_panel_events) {
+                    log::error!("Error processing panel events: {}", e);
+                }
+            }
+        } else {
+            // During scrolling: only check terminal output (lightweight)
+            for panel in self.layout_manager.iter_all_panels_mut() {
+                if let Some(terminal) = panel.as_terminal_mut() {
+                    if terminal.has_pending_output() {
+                        self.state.needs_redraw = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if !is_scrolling {
+            // Check for modal requests from FileManager panels (e.g., VFS error modals)
+            // This must happen after tick() processing to show connection error modals
+            let modal_request = self
+                .layout_manager
+                .iter_all_panels_mut()
+                .find_map(|panel| panel.take_modal_request());
+            if let Some((action, modal)) = modal_request {
+                if let Err(e) = self.handle_modal_request(action, modal) {
+                    log::error!("Error handling modal request: {}", e);
+                }
+                self.state.needs_redraw = true;
+            }
+
+            // Check for pending upload operations from Editor panels (Ctrl+S remote saves)
+            let pending_upload = self
+                .layout_manager
+                .iter_all_panels_mut()
+                .find_map(|panel| panel.take_pending_upload());
+            if let Some((temp_path, remote_path, vfs_manager)) = pending_upload {
+                self.handle_pending_upload(temp_path, remote_path, vfs_manager);
+                self.state.needs_redraw = true;
+            }
+
+            // Check channel for directory size calculation results
+            self.check_dir_size_update();
+
+            // Register panel watchers only when needed (panel added/navigated)
+            if self.state.needs_watcher_registration {
+                self.register_panel_watchers();
+                self.state.needs_watcher_registration = false;
+            }
+
+            // Drain any finished repository walks so the
+            // inotify watches install non-blockingly. The
+            // walk itself runs on a worker thread; this is
+            // just the per-path `watcher.watch` call.
+            if let Some(watcher) = self.state.watcher.as_mut() {
+                if watcher.poll_pending() {
+                    self.state.needs_redraw = true;
+                }
+            }
+
+            // Poll unified watcher for git and filesystem events
+            self.poll_watcher_events();
+
+            // Single-pass: async git status, async dir reload, pending git diff
+            self.check_background_panel_updates();
+
+            // Deliver a completed viewer URL fetch (Ctrl+G with a URL)
+            self.check_view_fetch();
+
+            // Check background git operation result (push/pull)
+            self.check_git_operation_result();
+
+            // Check background command operation result (.report. commands)
+            self.check_command_operation_result();
+            self.check_bg_command_completion();
+
+            // Poll unified operation manager for events (new system)
+            self.poll_operation_manager();
+
+            // Sync active operations data to the operations panel
+            self.update_operations_panel();
+
+            // Debounced outline sync for live editing (cheap: u64 compare only)
+            self.check_outline_live_edit();
+
+            // Apply pending outline navigation to editor
+            self.apply_outline_navigation();
+
+            // Check pending local batch operation (start after modal rendered)
+            self.check_pending_batch_operation();
+        }
+
+        // Update system resource monitoring (CPU, RAM)
+        // This is fast, always run it
+        self.update_system_resources();
+
+        // Poll LSP completion responses for active editor
+        // This is fast, always run it
+        self.poll_lsp_completion();
+
+        // Update spinner in all modals that support animation
+        // This is fast, always run it
+        self.update_modal_spinners();
     }
 
     /// Check and close panels that should auto-close
