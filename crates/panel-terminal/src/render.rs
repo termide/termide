@@ -16,6 +16,13 @@ use crate::terminal::Cell;
 use crate::Terminal;
 
 impl Terminal {
+    /// Get lines for display with zero-copy rendering under lock.
+    ///
+    /// Optimization: Renders directly from screen buffer under lock,
+    /// eliminating Vec<Vec<Cell>> cloning (~77KB per dirty frame).
+    /// Uses dirty flag to skip re-rendering when content hasn't changed.
+    ///
+    /// Returns: (lines_arc, cursor_position, cursor_shown)
     pub(super) fn get_display_lines(
         &mut self,
         show_cursor: bool,
