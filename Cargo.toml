@@ -6,7 +6,7 @@ resolver = "2"
 unicode-width = { path = "crates/unicode-width-fix" }
 
 [workspace.package]
-version = "0.29.5"
+version = "0.29.6"
 edition = "2021"
 authors = ["Nick Nizovtsev"]
 license = "MIT"

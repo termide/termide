@@ -5,6 +5,18 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.6] - 2026-08-01
+
+### Fixed
+- Markdown and HTML tables now render inline formatting (inline code, `**bold**`, `*italic*`) and clickable links inside cells. Previously a formatted cell was left blank and its content leaked out as plain text below the table.
+- The diagnostics panel no longer panics when the terminal is only a few rows tall.
+- Git status and log panels no longer stack redundant background refresh workers during rapid `.git` activity (rebase, gc, fetch, large checkout), avoiding CPU and git-subprocess spikes.
+- The editor's inline git diff no longer risks a git/SSH credential prompt being drawn over the interface, and now resolves diffs correctly for files opened through a symlinked path.
+
+### Changed
+- Git blame ages and the relative times in the session list now follow the interface language (blame was previously always English) and gain a "years" bucket; the new string is translated across all bundled locales.
+- Faster editor rendering while searching in large files, and lower per-frame work in the git-status panel.
+
 ## [0.29.5] - 2026-07-28
 
 ### Security
@@ -298,6 +310,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `deny.toml` + `cargo-deny check` step covers advisories, licenses, bans and sources.
 - Pre-commit hook documented in `CONTRIBUTING.md`.
 
+[0.29.6]: https://github.com/termide/termide/releases/tag/0.29.6
 [0.29.5]: https://github.com/termide/termide/releases/tag/0.29.5
 [0.29.4]: https://github.com/termide/termide/releases/tag/0.29.4
 [0.29.3]: https://github.com/termide/termide/releases/tag/0.29.3
