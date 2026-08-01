@@ -561,6 +561,7 @@ time_hours_ago = "{count}小时前"
 time_minutes_ago = "{count}分钟前"
 time_months_ago = "{count}个月前"
 time_weeks_ago = "{count}周前"
+time_years_ago = "{count}年前"
 
 conflict_already_exists = "{type} '{name}' 已存在。"
 op_data_progress = "数据: {current}/{total}"

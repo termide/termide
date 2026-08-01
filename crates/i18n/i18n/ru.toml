@@ -597,6 +597,7 @@ time_hours_ago = "{count} {plural} назад"
 time_minutes_ago = "{count} {plural} назад"
 time_months_ago = "{count} {plural} назад"
 time_weeks_ago = "{count} {plural} назад"
+time_years_ago = "{count} {plural} назад"
 
 diagnostics_filter_fmt = "Фильтр: {filter} | {count} элементов"
 diagnostics_title_fmt = "Диагностика ({errors} ошибок, {warnings} предупреждений)"
@@ -640,3 +641,5 @@ minute = { one = "минуту", few = "минуты", other = "минут" }
 month = { one = "месяц", few = "месяца", other = "месяцев" }
 # 1 неделя, 2-4 недели, 5+ недель
 week = { one = "неделю", few = "недели", other = "недель" }
+# 1 год, 2-4 года, 5+ лет
+year = { one = "год", few = "года", other = "лет" }

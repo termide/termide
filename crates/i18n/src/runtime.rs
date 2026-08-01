@@ -924,6 +924,14 @@ impl Translation for RuntimeTranslation {
         )
     }
 
+    fn time_years_ago(&self, count: usize) -> String {
+        let plural = self.pluralize(count, "year");
+        self.format(
+            "time_years_ago",
+            &[("count", &count.to_string()), ("plural", plural)],
+        )
+    }
+
     fn file_info_title_file(&self, name: &str) -> String {
         self.format("file_info_title_file", &[("name", name)])
     }

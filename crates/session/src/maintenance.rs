@@ -470,37 +470,13 @@ fn collect_sessions(
     Ok(())
 }
 
-/// Format a SystemTime as a relative time string (e.g., "2 hours ago")
+/// Format a SystemTime as a relative time string (e.g., "2 hours ago").
 pub fn format_relative_time(time: std::time::SystemTime) -> String {
-    use std::time::SystemTime;
-
-    let now = SystemTime::now();
-    let duration = match now.duration_since(time) {
-        Ok(d) => d,
-        Err(_) => return termide_i18n::t().time_just_now().to_string(),
-    };
-
-    let seconds = duration.as_secs();
-    let t = termide_i18n::t();
-
-    if seconds < 60 {
-        t.time_just_now().to_string()
-    } else if seconds < 3600 {
-        let minutes = seconds / 60;
-        t.time_minutes_ago(minutes as usize)
-    } else if seconds < 86400 {
-        let hours = seconds / 3600;
-        t.time_hours_ago(hours as usize)
-    } else if seconds < 604800 {
-        let days = seconds / 86400;
-        t.time_days_ago(days as usize)
-    } else if seconds < 2592000 {
-        let weeks = seconds / 604800;
-        t.time_weeks_ago(weeks as usize)
-    } else {
-        let months = seconds / 2592000;
-        t.time_months_ago(months as usize)
-    }
+    let seconds = std::time::SystemTime::now()
+        .duration_since(time)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    termide_i18n::relative_age(seconds)
 }
 
 #[cfg(test)]

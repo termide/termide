@@ -5113,6 +5113,7 @@ dependencies = [
  "notify-debouncer-mini",
  "regex",
  "similar",
+ "termide-i18n",
  "termide-ui",
 ]
 

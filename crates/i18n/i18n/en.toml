@@ -597,6 +597,7 @@ time_hours_ago = "{count} hour{plural} ago"
 time_minutes_ago = "{count} minute{plural} ago"
 time_months_ago = "{count} month{plural} ago"
 time_weeks_ago = "{count} week{plural} ago"
+time_years_ago = "{count} year{plural} ago"
 
 diagnostics_filter_fmt = "Filter: {filter} | {count} items"
 diagnostics_title_fmt = "Diagnostics ({errors} errors, {warnings} warnings)"

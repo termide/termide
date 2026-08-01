@@ -540,6 +540,7 @@ pub trait Translation: Send + Sync {
     fn time_days_ago(&self, count: usize) -> String;
     fn time_weeks_ago(&self, count: usize) -> String;
     fn time_months_ago(&self, count: usize) -> String;
+    fn time_years_ago(&self, count: usize) -> String;
 
     // Status bar
     fn status_dir(&self) -> &str;
@@ -857,6 +858,24 @@ pub fn language_generation() -> u64 {
     LANGUAGE_GENERATION.load(std::sync::atomic::Ordering::Acquire)
 }
 
+/// Localized "N units ago" for an elapsed duration in `seconds`, using the
+/// current translation. Buckets scale just-now → minutes → hours → days →
+/// weeks → months → years. Shared by session listings and git blame so both
+/// stay translated and consistent.
+#[must_use]
+pub fn relative_age(seconds: u64) -> String {
+    let tr = t();
+    match seconds {
+        0..=59 => tr.time_just_now().to_string(),
+        60..=3_599 => tr.time_minutes_ago((seconds / 60) as usize),
+        3_600..=86_399 => tr.time_hours_ago((seconds / 3_600) as usize),
+        86_400..=604_799 => tr.time_days_ago((seconds / 86_400) as usize),
+        604_800..=2_591_999 => tr.time_weeks_ago((seconds / 604_800) as usize),
+        2_592_000..=31_535_999 => tr.time_months_ago((seconds / 2_592_000) as usize),
+        _ => tr.time_years_ago((seconds / 31_536_000) as usize),
+    }
+}
+
 /// Get the current translation.
 ///
 /// The application calls [`init`] / [`init_with_language`] at startup to select
@@ -902,4 +921,24 @@ pub fn get_language_name(code: &str) -> Option<&'static str> {
         .iter()
         .find(|(c, _)| *c == code)
         .map(|(_, name)| *name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::relative_age;
+
+    // `relative_age` falls back to the built-in English translation when no
+    // language is initialized, so these assert the English bucket wording.
+    #[test]
+    fn relative_age_buckets() {
+        assert_eq!(relative_age(30), "just now");
+        assert_eq!(relative_age(300), "5 minutes ago"); // 5 min
+        assert_eq!(relative_age(7_200), "2 hours ago");
+        assert_eq!(relative_age(2 * 86_400), "2 days ago");
+        assert_eq!(relative_age(2 * 604_800), "2 weeks ago");
+        assert_eq!(relative_age(3 * 2_592_000), "3 months ago");
+        // Years bucket — the case git blame previously handled but session did not.
+        assert_eq!(relative_age(3 * 31_536_000), "3 years ago");
+        assert_eq!(relative_age(31_536_000), "1 year ago");
+    }
 }

@@ -28,22 +28,14 @@ impl BlameEntry {
     }
 }
 
-/// Human-readable age from a Unix timestamp.
+/// Human-readable, localized age from a Unix timestamp.
 fn format_age(timestamp: i64) -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let secs = (now - timestamp).max(0) as u64;
-    match secs {
-        0..=60 => "just now".to_string(),
-        61..=3599 => format!("{} min ago", secs / 60),
-        3600..=86399 => format!("{} hours ago", secs / 3600),
-        86400..=604799 => format!("{} days ago", secs / 86400),
-        604800..=2591999 => format!("{} weeks ago", secs / 604800),
-        2592000..=31535999 => format!("{} months ago", secs / 2592000),
-        _ => format!("{} years ago", secs / 31536000),
-    }
+    termide_i18n::relative_age(secs)
 }
 
 /// Run `git blame --porcelain` in a background thread.
@@ -179,7 +171,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        assert_eq!(format_age(now - 300), "5 min ago");
+        // Default (uninitialized) translation falls back to English.
+        assert_eq!(format_age(now - 300), "5 minutes ago");
     }
 
     #[test]
