@@ -88,15 +88,7 @@ impl GitLogPanel {
     /// Ensure selected item is visible
     pub(crate) fn ensure_visible(&mut self) {
         let visible_height = self.last_area.height.saturating_sub(2) as usize;
-        if visible_height == 0 {
-            return;
-        }
-
-        if self.selected < self.scroll {
-            self.scroll = self.selected;
-        } else if self.selected >= self.scroll + visible_height {
-            self.scroll = self.selected - visible_height + 1;
-        }
+        self.scroll = termide_ui::ensure_offset_visible(self.scroll, self.selected, visible_height);
     }
 
     /// Get selected commit

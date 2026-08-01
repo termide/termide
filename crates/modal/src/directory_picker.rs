@@ -271,11 +271,8 @@ impl DirectoryPickerModal {
     }
 
     fn adjust_scroll(&mut self) {
-        if self.cursor < self.scroll_offset {
-            self.scroll_offset = self.cursor;
-        } else if self.cursor >= self.scroll_offset + MAX_VISIBLE_ITEMS {
-            self.scroll_offset = self.cursor - MAX_VISIBLE_ITEMS + 1;
-        }
+        self.scroll_offset =
+            termide_ui::ensure_offset_visible(self.scroll_offset, self.cursor, MAX_VISIBLE_ITEMS);
     }
 
     /// Go to parent directory (reload tree root)

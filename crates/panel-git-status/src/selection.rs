@@ -182,15 +182,12 @@ impl GitStatusPanel {
 
     /// Ensure cursor is visible in viewport
     pub(crate) fn ensure_cursor_visible(&mut self) {
-        if self.viewport_height == 0 {
-            return;
-        }
         let cursor_line = self.cursor_to_virtual_line();
-        if cursor_line < self.scroll_offset {
-            self.scroll_offset = cursor_line;
-        } else if cursor_line >= self.scroll_offset + self.viewport_height {
-            self.scroll_offset = cursor_line - self.viewport_height + 1;
-        }
+        self.scroll_offset = termide_ui::ensure_offset_visible(
+            self.scroll_offset,
+            cursor_line,
+            self.viewport_height,
+        );
     }
 
     /// Get total virtual lines count (headers + items)

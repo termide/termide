@@ -345,11 +345,11 @@ pub trait CursorNavigation {
     /// Adjust scroll offset to keep cursor visible.
     fn adjust_scroll(&mut self) {
         let max_visible = self.max_visible();
-        if self.cursor() < self.scroll_offset() {
-            self.set_scroll_offset(self.cursor());
-        } else if self.cursor() >= self.scroll_offset() + max_visible {
-            self.set_scroll_offset(self.cursor() - max_visible + 1);
-        }
+        self.set_scroll_offset(termide_ui::ensure_offset_visible(
+            self.scroll_offset(),
+            self.cursor(),
+            max_visible,
+        ));
     }
 
     /// Move cursor up by page (max_visible items).

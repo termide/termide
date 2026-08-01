@@ -24,7 +24,7 @@ pub use selection_style::{
 };
 pub use suggestion_input::{DropdownState, SuggestionAction, SuggestionInput};
 pub use textarea::TextArea;
-pub use viewport::Viewport;
+pub use viewport::{ensure_offset_visible, Viewport};
 
 // Re-exports for convenience
 pub use termide_clipboard as clipboard;

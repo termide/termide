@@ -66,11 +66,7 @@ impl HtmlPanel {
     /// Keep the cursor line within the viewport.
     pub(crate) fn ensure_cursor_visible(&mut self) {
         let h = self.viewport_height();
-        if self.cursor.0 < self.top {
-            self.top = self.cursor.0;
-        } else if self.cursor.0 >= self.top + h {
-            self.top = self.cursor.0 + 1 - h;
-        }
+        self.top = termide_ui::ensure_offset_visible(self.top, self.cursor.0, h);
         self.top = self.top.min(self.max_top());
     }
 

@@ -3,6 +3,28 @@
 //! Provides reusable scroll offset and cursor visibility logic
 //! for panels that display scrollable lists of items.
 
+/// Adjust a scroll `offset` so item `selected` is visible within a window of
+/// `height` rows, returning the new offset.
+///
+/// This is the free-function form of [`Viewport::ensure_visible`] for the many
+/// list panels and modals that track a bare `(offset, selected, height)` triple
+/// rather than a [`Viewport`]. It performs only the bring-into-view step (no
+/// upper clamp against a total count); callers that need one apply it
+/// separately. A `height` of 0 leaves the offset unchanged.
+#[must_use]
+pub fn ensure_offset_visible(offset: usize, selected: usize, height: usize) -> usize {
+    if height == 0 {
+        return offset;
+    }
+    if selected < offset {
+        selected
+    } else if selected >= offset + height {
+        selected + 1 - height
+    } else {
+        offset
+    }
+}
+
 /// Viewport state for scrollable content.
 ///
 /// Handles scroll offset calculation to ensure the cursor/selected item
@@ -240,6 +262,18 @@ mod tests {
         let mut vp = Viewport::new(10, 25);
         vp.offset = 20;
         assert_eq!(vp.visible_range(), 20..25);
+    }
+
+    #[test]
+    fn test_ensure_offset_visible_free_fn() {
+        // Above the window: snap to the selected row.
+        assert_eq!(ensure_offset_visible(20, 15, 10), 15);
+        // Below the window: bring the selected row to the last visible slot.
+        assert_eq!(ensure_offset_visible(0, 15, 10), 6); // 15 + 1 - 10
+                                                         // Already visible: unchanged.
+        assert_eq!(ensure_offset_visible(10, 15, 10), 10);
+        // Zero height: never touch the offset (and never underflow).
+        assert_eq!(ensure_offset_visible(3, 0, 0), 3);
     }
 
     #[test]

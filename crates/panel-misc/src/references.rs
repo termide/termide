@@ -85,14 +85,7 @@ impl ReferencesPanel {
 
     fn ensure_visible(&mut self) {
         let height = self.last_height.saturating_sub(2);
-        if height == 0 {
-            return;
-        }
-        if self.selected < self.scroll {
-            self.scroll = self.selected;
-        } else if self.selected >= self.scroll + height {
-            self.scroll = self.selected + 1 - height;
-        }
+        self.scroll = termide_ui::ensure_offset_visible(self.scroll, self.selected, height);
     }
 
     fn open_selected(&self) -> Vec<PanelEvent> {

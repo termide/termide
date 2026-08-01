@@ -301,12 +301,8 @@ impl SettingsModal {
     // ---- Scroll ----
 
     pub(super) fn clamp_scroll(&mut self, visible: usize) {
-        if self.field_cursor < self.content_scroll {
-            self.content_scroll = self.field_cursor;
-        }
-        if visible > 0 && self.field_cursor >= self.content_scroll + visible {
-            self.content_scroll = self.field_cursor - visible + 1;
-        }
+        self.content_scroll =
+            termide_ui::ensure_offset_visible(self.content_scroll, self.field_cursor, visible);
     }
 
     /// Commit the current edit buffer to the config.

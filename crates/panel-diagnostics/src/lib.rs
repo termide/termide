@@ -274,12 +274,11 @@ impl DiagnosticsPanel {
     /// Ensure selected item is visible.
     fn ensure_visible(&mut self) {
         let content_height = self.last_height.saturating_sub(3); // Header + border
-
-        if self.selected_index < self.scroll_offset {
-            self.scroll_offset = self.selected_index;
-        } else if self.selected_index >= self.scroll_offset + content_height {
-            self.scroll_offset = self.selected_index.saturating_sub(content_height - 1);
-        }
+        self.scroll_offset = termide_ui::ensure_offset_visible(
+            self.scroll_offset,
+            self.selected_index,
+            content_height,
+        );
     }
 
     /// Ensure counts cache is valid.
