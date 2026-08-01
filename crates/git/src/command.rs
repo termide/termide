@@ -86,6 +86,44 @@ pub(crate) fn git_command_stdout(dir: &Path, args: &[&str]) -> Option<String> {
     git_command(dir, args).and_then(|output| String::from_utf8(output.stdout).ok())
 }
 
+/// Read a file's content as of `HEAD`, using hardened git so a credential or
+/// ssh prompt can never reach the TUI.
+///
+/// Returns:
+/// - `Some(content)` for a file tracked in `HEAD`,
+/// - `Some(String::new())` for an untracked, non-ignored file (its lines all
+///   show as added against an empty original),
+/// - `None` when the path is outside a repo, gitignored, or unreadable.
+///
+/// The path is canonicalized first so `strip_prefix` matches git's canonical
+/// repository root even when the caller holds a symlinked path.
+pub(crate) fn head_file_content(file_path: &Path) -> Option<String> {
+    let file_path = std::fs::canonicalize(file_path).unwrap_or_else(|_| file_path.to_path_buf());
+    let dir = file_path.parent().unwrap_or_else(|| Path::new("/"));
+
+    let root = git_command_stdout(dir, &["rev-parse", "--show-toplevel"])?;
+    let root = Path::new(root.trim());
+    let relative = file_path.strip_prefix(root).ok()?;
+    let head_ref = format!("HEAD:{}", relative.display());
+
+    let show = hardened_git(root, &["show", &head_ref]).output().ok()?;
+    if show.status.success() {
+        return String::from_utf8(show.stdout).ok();
+    }
+
+    // Not in HEAD: gitignored → no diff; otherwise a new file → empty original.
+    let ignored = hardened_git(root, &["check-ignore", "-q"])
+        .arg(&file_path)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if ignored {
+        None
+    } else {
+        Some(String::new())
+    }
+}
+
 /// Run a simple git operation, returning Ok(()) on success or error message on failure.
 pub(crate) fn run_git_simple(repo: &Path, args: &[&str], error_msg: &str) -> Result<(), String> {
     match git_command(repo, args) {

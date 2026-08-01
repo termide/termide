@@ -1,8 +1,7 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use similar::TextDiff;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::mpsc;
 
 /// Result of async git diff load operation
@@ -33,55 +32,7 @@ pub fn load_original_async(file_path: PathBuf) -> mpsc::Receiver<GitDiffAsyncRes
 /// Synchronous function to load original content from HEAD
 /// Extracted for use in background thread
 fn load_original_from_head_sync(file_path: &std::path::Path) -> Option<String> {
-    // Canonicalize to resolve symlinks (git returns canonical paths)
-    let file_path = &std::fs::canonicalize(file_path).unwrap_or_else(|_| file_path.to_path_buf());
-
-    // Get git root
-    let git_root_output = Command::new("git")
-        .arg("rev-parse")
-        .arg("--show-toplevel")
-        .current_dir(file_path.parent().unwrap_or(std::path::Path::new("/")))
-        .output()
-        .ok()?;
-
-    if !git_root_output.status.success() {
-        return None;
-    }
-
-    let git_root = String::from_utf8(git_root_output.stdout)
-        .ok()?
-        .trim()
-        .to_string();
-    let git_root_path = std::path::Path::new(&git_root);
-
-    // Get relative path
-    let relative_path = file_path.strip_prefix(git_root_path).ok()?;
-
-    // Get content from HEAD
-    let output = Command::new("git")
-        .arg("show")
-        .arg(format!("HEAD:{}", relative_path.display()))
-        .current_dir(&git_root)
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        // Check if file is gitignored — no diff coloring for ignored files
-        let ignored = Command::new("git")
-            .args(["check-ignore", "-q"])
-            .arg(file_path)
-            .current_dir(&git_root)
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if ignored {
-            return None;
-        }
-        // Truly new file (untracked, not ignored) — empty original → all lines Added
-        return Some(String::new());
-    }
-
-    String::from_utf8(output.stdout).ok()
+    crate::command::head_file_content(file_path)
 }
 
 /// Git diff status for a line in a file
@@ -200,72 +151,11 @@ impl GitDiffCache {
         }
     }
 
-    /// Load original content from HEAD
+    /// Load original content from HEAD. Never errors: a file outside a repo,
+    /// gitignored, or unreadable simply yields no original (and thus no diff
+    /// markers). Returns `Result` for call-site ergonomics.
     pub fn load_original_from_head(&mut self) -> Result<()> {
-        // Get the directory containing the file to run git commands from
-        let file_dir = self
-            .file_path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."));
-
-        // Convert absolute path to relative path from git root
-        let git_root_output = Command::new("git")
-            .arg("rev-parse")
-            .arg("--show-toplevel")
-            .current_dir(file_dir)
-            .output()
-            .context("Failed to get git root")?;
-
-        if !git_root_output.status.success() {
-            self.original_content = None;
-            return Ok(());
-        }
-
-        let git_root = String::from_utf8(git_root_output.stdout)
-            .context("Failed to parse git root as UTF-8")?
-            .trim()
-            .to_string();
-        let git_root_path = std::path::Path::new(&git_root);
-
-        // Get relative path from git root
-        let relative_path = match self.file_path.strip_prefix(git_root_path) {
-            Ok(p) => p,
-            Err(_) => {
-                self.original_content = None;
-                return Ok(());
-            }
-        };
-
-        // Get file content from HEAD
-        let output = Command::new("git")
-            .arg("show")
-            .arg(format!("HEAD:{}", relative_path.display()))
-            .current_dir(&git_root)
-            .output()
-            .context("Failed to execute git show")?;
-
-        if !output.status.success() {
-            // Check if file is gitignored — no diff coloring for ignored files
-            let ignored = Command::new("git")
-                .args(["check-ignore", "-q"])
-                .arg(&self.file_path)
-                .current_dir(&git_root)
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-            if ignored {
-                self.original_content = None;
-                return Ok(());
-            }
-            // Truly new file (untracked, not ignored)
-            self.original_content = Some(String::new());
-            return Ok(());
-        }
-
-        let content =
-            String::from_utf8(output.stdout).context("Failed to parse git show output as UTF-8")?;
-
-        self.original_content = Some(content);
+        self.original_content = crate::command::head_file_content(&self.file_path);
         Ok(())
     }
 
