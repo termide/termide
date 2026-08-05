@@ -72,7 +72,7 @@
         packages = {
           default = pkgs.rustPlatform.buildRustPackage {
             pname = "termide";
-            version = "0.29.6";
+            version = "0.29.7";
 
             src = ./.;
 
@@ -110,7 +110,7 @@
             muslPkgs = pkgs.pkgsCross.musl64;
           in muslPkgs.rustPlatform.buildRustPackage {
             pname = "termide";
-            version = "0.29.6";
+            version = "0.29.7";
 
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;

@@ -5,6 +5,20 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.7] - 2026-08-01
+
+### Security
+- Updated the `russh` SSH library to 0.62.5, clearing advisory GHSA-m65r-rprj-r5rg (a server-side channel-lifecycle flaw). TermIDE only uses russh as an SFTP client, so the vulnerable server path isn't exercised, but the dependency is bumped to the patched release.
+
+### Fixed
+- A single invalid field in the config (most easily an `[lsp.servers.*]` entry with no `command`) no longer discards every other setting — configuration now degrades to the largest valid subset instead of silently falling back to defaults.
+- Terminal panel: a leftover text selection is now cleared when the mouse wheel scrolls a mouse-tracking application (e.g. an agent or editor) inside the terminal, instead of the highlight staying stuck on screen and bleeding over the freshly scrolled content.
+- The editor's "file changed on disk" message no longer points at a non-existent force-save shortcut; it now names the actions that actually exist (reload with `Ctrl+Shift+R`, or Save As).
+
+### Changed
+- Completed localization for the remaining 12 languages (de/es/fr/pt/ko/hi/ja/th/tr/vi/id/bn): the database viewer, in-files find/replace, and the remote-connection dialog strings are now translated instead of falling back to English; all bundled locales are now at full key parity.
+- Corrected documented keybindings across the English/Russian/Chinese docs: the directory switcher is `Ctrl+\` (not `Ctrl+/`), "Add bookmark" is `Alt+B` (not `Alt+K`), and `Alt+P` opens the Settings modal.
+
 ## [0.29.6] - 2026-08-01
 
 ### Fixed
@@ -310,6 +324,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `deny.toml` + `cargo-deny check` step covers advisories, licenses, bans and sources.
 - Pre-commit hook documented in `CONTRIBUTING.md`.
 
+[0.29.7]: https://github.com/termide/termide/releases/tag/0.29.7
 [0.29.6]: https://github.com/termide/termide/releases/tag/0.29.6
 [0.29.5]: https://github.com/termide/termide/releases/tag/0.29.5
 [0.29.4]: https://github.com/termide/termide/releases/tag/0.29.4
