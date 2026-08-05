@@ -18,7 +18,7 @@ sqlx = { version = "0.8", default-features = false, features = [
     "mysql",
 ] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
-thiserror = "1.0"
+thiserror = "2.0"
 log = "0.4"
 url.workspace = true
 

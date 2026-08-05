@@ -1,7 +1,7 @@
 [package]
 name = "termide-panel-editor"
 version.workspace = true
-edition = "2021"
+edition.workspace = true
 description = "Text editor panel for termide"
 license = "MIT"
 

@@ -5078,7 +5078,7 @@ dependencies = [
  "log",
  "sqlx",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
  "url",
 ]
@@ -5100,7 +5100,7 @@ dependencies = [
  "tempfile",
  "termide-logger",
  "termide-vfs",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -5698,7 +5698,7 @@ dependencies = [
  "suppaftp",
  "tempfile",
  "termide-logger",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "tokio",
  "url",
  "webpki-roots 0.25.4",

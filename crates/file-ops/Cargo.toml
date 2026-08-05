@@ -8,7 +8,7 @@ repository.workspace = true
 description = "Unified file operations system for termide with queue, progress, and pause/cancel support"
 
 [dependencies]
-thiserror = "1.0"
+thiserror = "2.0"
 log = "0.4"
 termide-logger = { path = "../logger" }
 termide-vfs = { path = "../vfs" }
