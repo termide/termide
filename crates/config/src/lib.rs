@@ -182,9 +182,22 @@ impl Config {
             }
         }
 
-        let mut effective: Self = value.try_into()?;
+        // A single invalid field in the merged config must not discard every
+        // other user setting. Degrade layer-by-layer instead of refusing the
+        // whole document: full merge → global layer (defaults + global) →
+        // built-in defaults, keeping the largest valid subset.
+        let mut effective: Self = value.try_into().unwrap_or_else(|e| {
+            log::warn!("Merged config is invalid ({e}); falling back to the global layer");
+            global_layer_value.clone().try_into().unwrap_or_else(|e2| {
+                log::warn!("Global config layer is also invalid ({e2}); using defaults");
+                Self::default()
+            })
+        });
         effective.normalize();
-        let mut global_layer: Self = global_layer_value.try_into()?;
+        let mut global_layer: Self = global_layer_value.try_into().unwrap_or_else(|e| {
+            log::warn!("Global config layer is invalid ({e}); using defaults as baseline");
+            Self::default()
+        });
         global_layer.normalize();
 
         // Make sure the themes directory exists on first run.

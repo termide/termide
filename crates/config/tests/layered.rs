@@ -142,3 +142,25 @@ fn manual_layered_overlay_resolves_in_priority_order() {
     // Untouched defaults survive.
     assert_eq!(cfg.general.language, Config::default().general.language);
 }
+
+#[test]
+fn command_less_lsp_server_does_not_poison_the_whole_config() {
+    // Regression: a project overlay with an lsp server that omits the (now
+    // defaulted) `command` field must still deserialize — keeping every other
+    // setting — instead of failing `try_into` and discarding the whole
+    // document back to defaults.
+    let mut value = Value::try_from(Config::default()).unwrap();
+
+    let project: Value =
+        toml::from_str("[editor]\ntab_size = 8\n[lsp.servers.broken]\nargs = [\"--stdio\"]\n")
+            .unwrap();
+    merge_partial(&mut value, &project);
+
+    let cfg: Config = value
+        .try_into()
+        .expect("a command-less lsp server must not fail config parsing");
+
+    assert_eq!(cfg.editor.tab_size, 8); // sibling setting preserved
+    assert_eq!(cfg.lsp.servers["broken"].command, ""); // command defaulted
+    assert_eq!(cfg.lsp.servers["broken"].args, vec!["--stdio".to_string()]);
+}

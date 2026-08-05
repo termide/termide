@@ -378,7 +378,10 @@ pub struct LspSettings {
 /// Configuration for a specific LSP server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LspServerSettings {
-    /// Command to start the server
+    /// Command to start the server. Defaulted so a server entry that omits it
+    /// deserializes to an (unusable, logged-at-spawn) empty command rather than
+    /// failing the whole config document and discarding every other setting.
+    #[serde(default)]
     pub command: String,
 
     /// Command arguments
