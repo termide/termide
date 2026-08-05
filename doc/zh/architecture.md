@@ -581,6 +581,27 @@ crates/i18n/
 - 文件系统监视器使用独立线程
 - 防抖避免过多更新
 
+### 异步管道
+
+一些启动和热路径操作过去会阻塞渲染循环，现在改为在工作线程上运行，并从每个
+面板的 `tick()` 中轮询。模式在所有情况下都相同：启动一个工作线程，在面板上停放
+一个 `mpsc::Receiver`，当 `try_recv()` 返回时换入结果。下表指出每个管道所在位置。
+
+| 管道                             | 工作线程位置                                                     | 轮询于                                                                        |
+|----------------------------------|-----------------------------------------------------------------|-------------------------------------------------------------------------------|
+| FileManager 初次目录读取         | `crates/panel-file-manager/src/lib.rs` (`start_async_reload`)   | 应用每帧 `check_background_panel_updates` 中的 `check_async_reload`            |
+| FileManager 子树展开             | `crates/panel-file-manager/src/lib.rs` (`start_listing`)        | 同一路径的 `poll_pending_expansions`；占位行在解析前显示 `…`                   |
+| FileManager 每条目 git 状态      | `crates/panel-file-manager/src/git_status.rs`                   | `check_git_status_async`；若目录读取抢先，`apply_git_statuses` 会重新应用      |
+| Git 状态/日志面板刷新            | `crates/panel-git-status/src/lib.rs`、`panel-git-log/src/lib.rs`| 各面板 `tick` 中的 `poll_refresh`                                             |
+| Git 子模块发现（RepoManager）    | `crates/git/src/repo_manager.rs` (`spawn_submodule_walk`)       | git 面板 `tick` 中的 `RepoManager::poll`                                       |
+| 会话恢复——并行构建面板           | `crates/app/src/layout_session.rs`（每面板 `construct_panel`）  | 启动后同步 join，因此最慢的面板仍决定首帧                                     |
+| 监视器仓库注册                   | `crates/watcher/src/lib.rs` (`watch_repository`)                | 主循环中的 `poll_pending`；inotify 每帧按 `INSTALL_CHUNK` 分块安装             |
+| 目录大小遍历（宽视图）           | `crates/panel-file-manager/src/utils.rs` (`shared_dir_size_cache`) | 对共享缓存逐帧 `try_recv`；每次遍历有预算限制                              |
+
+SFTP/FTP 后端使用不同的模式——一个专用的 tokio 运行时拥有连接和一个“分块即命令”
+actor（见 `crates/vfs/src/sftp.rs`）。同步工作线程驱动分块循环，并在分发之间
+轮询暂停/取消标志，因此暂停的传输会让 actor 空闲以服务其他面板的元数据请求。
+
 ### 8. 会话管理
 
 **位置：** `crates/session/src/lib.rs`
@@ -617,6 +638,38 @@ path = "/home/user/project/main.rs"
 ```
 
 旧会话中的 `mode = "accordion"` 字段仍会被读取，并在加载时一次性迁移为全屏预设（当前代码不再写入该字段）。
+
+### 9. VFS（远程文件系统）
+
+**位置：** `crates/vfs/src/`
+
+一个纯 Rust 的 VFS 层让远程服务器在应用的其余部分看来像本地目录。无需原生
+OpenSSL 或 libssh——SFTP 运行在 `russh` + `russh-sftp` 上，FTPS 运行在 `rustls`
+上。构建可在 Alpine / musl 上静态完成。
+
+**支持的协议：** `sftp://`、`ftp://`、`ftps://`（URL 解析也识别 `smb://` /
+`nfs://`，但尚未提供相应的 provider）。
+
+**关键组件：**
+- **`VfsProvider` trait**（`crates/vfs/src/traits.rs`）——供 FileManager、
+  file-ops、编辑器使用的抽象文件系统 API：`list_dir`、`read_file`、`write_file`、
+  `delete`、`upload`、`upload_with_progress` 等。每次调用返回一个
+  `VfsOperation<T>`，调用方轮询其 receiver——没有阻塞变体。
+- **`VfsManager`**（`crates/vfs/src/lib.rs`）——按 `(scheme, host, port, user)`
+  为键的 provider 缓存；淘汰其 actor 已死的条目。
+- **SFTP actor**（`crates/vfs/src/sftp.rs`）——单个 tokio 任务拥有
+  `russh-sftp` 会话，处理小的原子命令（`OpenRead` / `ReadChunk` / `WriteChunk` /
+  `CloseHandle` / `Stat` / `ListDir` / `MkdirRecursive` / …）。分块循环位于同步
+  工作线程一侧，在分发之间轮询暂停/取消。
+- **URL 解析**（`crates/vfs/src/url.rs`）——UTF-8 往返并对路径做百分号解码，
+  使非 ASCII 文件名得以保留。
+- **认证**——SSH agent → `~/.ssh/config` 的 `IdentityFile` → 默认密钥
+  （`id_ed25519` / `id_rsa` / `id_ecdsa` / `id_dsa`）→ 密码；这四种都可作为显式的
+  `AuthMethod` 变体选择，供不想使用自动链的用户。
+
+**取消安全：** 传输在分块之间取消；部分文件会弹出“删除部分上传？”模态框，使
+服务器不会留下滞留的字节。同连接内的重命名保持在服务器端（无需先下载再上传）。
+用户视角见 `doc/zh/vfs.md`，取消流程见 `doc/zh/operations.md`。
 
 ## 未来架构考虑
 
