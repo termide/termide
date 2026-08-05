@@ -238,7 +238,7 @@ The device name is automatically detected from the filesystem:
 | `Alt+I`           | Open diagnostics panel                     |
 | `Alt+C`           | Open git log panel                         |
 | `Alt+L`           | Open journal panel                             |
-| `Alt+P`           | Open configuration file in editor          |
+| `Alt+P`           | Open Settings (preferences)                    |
 | `Alt+H`           | Open help window                           |
 | `Alt+Q`           | Close application                          |
 | `Escape`          | Close panel / Close modal                  |

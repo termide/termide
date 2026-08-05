@@ -89,7 +89,7 @@ pub struct PanelGroup {
 ```rust
 let new_width_if_split = available_width / (num_groups + 1);
 
-if new_width_if_split < config.min_panel_width {
+if new_width_if_split < config.auto_stack_threshold {
     // 在活动组中垂直堆叠（带高度缓存的拆分布局）
     active_group.add_panel(panel);
 } else {
@@ -99,7 +99,7 @@ if new_width_if_split < config.min_panel_width {
 }
 ```
 
-**默认阈值：** `min_panel_width = 80` 字符
+**默认阈值：** `auto_stack_threshold = 80` 字符
 
 这确保面板始终有足够的空间保持可用性。
 

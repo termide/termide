@@ -27,10 +27,14 @@ impl Editor {
             std::sync::Arc<termide_vfs::VfsManager>,
         )>,
     > {
-        // Check for external modification conflict
+        // Check for external modification conflict. There is no in-place
+        // force-save shortcut (Ctrl+Shift+S is Save As), so point the user at
+        // the actions that actually exist: reload to take the disk version, or
+        // Save As to write elsewhere. Overwriting in place is offered by the
+        // conflict dialog when closing the editor.
         if self.file_state.external_change_detected {
             return Err(anyhow::anyhow!(
-                "File was modified on disk. Use force save (Ctrl+Shift+S) to overwrite or reload (Ctrl+Shift+R) to discard changes."
+                "File was modified on disk. Reload (Ctrl+Shift+R) to load the disk version and discard your changes, or Save As (Ctrl+Shift+S) to write to a different file."
             ));
         }
 

@@ -20,9 +20,9 @@ authentication setup.
 | `→` / `l`       | Expand directory (tree view)                |
 | `←` / `h`       | Collapse directory (tree view)              |
 | `/`              | In-tree incremental search                  |
-| `Ctrl+/`          | Open directory switcher                    |
+| `Ctrl+\`          | Open directory switcher                    |
 | `Ctrl+G`          | Go to path/URL                             |
-| `Alt+K`           | Add bookmark                               |
+| `Alt+B`           | Add bookmark                               |
 | `Tab`             | Go to next panel                           |
 | `Shift+Tab`       | Go to previous panel                       |
 

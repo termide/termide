@@ -13,7 +13,7 @@ The terminal panel provides a full-featured terminal emulator with pseudotermina
 
 | Shortcut               | Action                                     |
 |------------------------|--------------------------------------------|
-| `Ctrl+/`               | Open directory switcher                    |
+| `Ctrl+\`               | Open directory switcher                    |
 | `Ctrl+F`               | Open text search in scrollback             |
 | `Ctrl+C`               | Copy selection to clipboard **if text is selected**, otherwise sent to the shell as `SIGINT` |
 | `Ctrl+V`               | Paste text from clipboard                  |

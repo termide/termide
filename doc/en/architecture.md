@@ -90,7 +90,7 @@ When adding a new panel via `LayoutManager::add_panel()`:
 ```rust
 let new_width_if_split = available_width / (num_groups + 1);
 
-if new_width_if_split < config.min_panel_width {
+if new_width_if_split < config.auto_stack_threshold {
     // Stack vertically in the active group (split with cached heights)
     active_group.add_panel(panel);
 } else {
@@ -100,7 +100,7 @@ if new_width_if_split < config.min_panel_width {
 }
 ```
 
-**Default threshold:** `min_panel_width = 80` characters
+**Default threshold:** `auto_stack_threshold = 80` characters
 
 This ensures panels always have enough space to be usable.
 
@@ -538,7 +538,7 @@ crates/i18n/
 - Every panel in a group is visible by default; the user picks heights via mouse drag (the panel's bottom border or its title bar), `Alt+Shift+=` / `Alt+Shift+-`, or any combination thereof.
 - `Alt+F11` toggles a "fullscreen current panel" preset that mirrors the legacy accordion view (one panel takes the full column, others collapse to one row), with the previous heights stashed for instant restore.
 - Heights are cached and rescaled proportionally when the terminal resizes.
-- Automatic stacking still kicks in when the terminal is too narrow (`min_panel_width`).
+- Automatic stacking still kicks in when the terminal is too narrow (`auto_stack_threshold`).
 
 ### Why Dynamic Panels?
 
