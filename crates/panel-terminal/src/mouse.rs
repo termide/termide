@@ -400,10 +400,13 @@ impl Terminal {
             MouseRoute::Pty => {
                 self.color_preview = None;
                 self.selection_drag_active = false;
-                // A click into a mouse-tracking app supersedes any lingering
-                // local selection highlight — drop it so it clears instead of
-                // staying stuck on screen.
-                if matches!(mouse.kind, MouseEventKind::Down(_)) {
+                // Any event forwarded to a mouse-tracking app — a click OR the
+                // wheel — supersedes a lingering local selection: the app
+                // redraws the grid underneath the highlight (e.g. scrolling its
+                // own history), so the fixed-coordinate selection would bleed
+                // over the freshly drawn content. Drop it instead of leaving it
+                // stuck on screen.
+                {
                     let mut screen = self.write_screen();
                     if screen.selection_start.is_some() {
                         screen.clear_selection();
