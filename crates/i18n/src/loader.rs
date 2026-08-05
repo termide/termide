@@ -139,10 +139,7 @@ mod tests {
         assert_eq!(rules.other, "ов");
     }
 
-    // Note: Actual language loading tests will be added once TOML files are generated
-    // For now, these will fail since TOML files don't exist yet
     #[test]
-    #[ignore]
     fn test_load_all_languages() {
         let languages = vec![
             "en", "ru", "de", "es", "fr", "pt", "zh", "hi", "th", "bn", "id", "ja", "ko", "tr",
@@ -169,7 +166,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_unsupported_language_fallback() {
         // Should fallback to English
         let result = load_language("unknown");

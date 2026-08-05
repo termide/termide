@@ -634,3 +634,4 @@ hour = { one = "", other = "s" }
 minute = { one = "", other = "s" }
 month = { one = "", other = "s" }
 week = { one = "", other = "s" }
+year = { one = "", other = "s" }
