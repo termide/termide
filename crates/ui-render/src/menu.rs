@@ -414,6 +414,18 @@ mod tests {
     /// rebuilt, so a runtime language switch left it in the old language.
     #[test]
     fn menu_labels_follow_runtime_language_switch() {
+        // This test mutates the process-global translation singleton. Restore
+        // it to English on the way out — via a drop guard so a panicking
+        // assertion below can't leave the global set to "ru" and pollute other
+        // tests in this crate that read `i18n::t()`.
+        struct RestoreLang;
+        impl Drop for RestoreLang {
+            fn drop(&mut self) {
+                let _ = i18n::set_language("en");
+            }
+        }
+        let _restore = RestoreLang;
+
         i18n::set_language("en").unwrap();
         let en = get_menu_items().clone();
 
