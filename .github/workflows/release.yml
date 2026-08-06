@@ -282,6 +282,11 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    # AUR git/SSH backend is intermittently locked read-only (malware-incident
+    # maintenance on the AUR side). Keep publishing on every tag, but don't let
+    # an AUR-side outage fail the whole release workflow — it self-heals once
+    # AUR reopens writes. Revert this once AUR is stable again.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
