@@ -81,7 +81,7 @@ impl FileManager {
             // (e.g. for ".." or odd entries). Reuse host/port/user.
             Some(termide_vfs::VfsPath::remote(
                 base.protocol,
-                base.host.clone().unwrap_or_default(),
+                base.host.unwrap_or_default(),
                 dir_path,
             ))
         }

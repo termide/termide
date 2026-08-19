@@ -82,7 +82,7 @@ impl App {
                                         &vfs_current_path,
                                         final_dest,
                                     );
-                                    let mut r = OperationRequest::upload(source.clone(), vfs_dest);
+                                    let mut r = OperationRequest::upload(source, vfs_dest);
                                     r.is_move = is_move;
                                     r
                                 } else if is_remote_dest_ow {
@@ -92,7 +92,7 @@ impl App {
                                         final_dest,
                                     );
                                     make_copy_or_move_request(
-                                        OperationPath::Remote(vfs_source.clone()),
+                                        OperationPath::Remote(vfs_source),
                                         OperationPath::Remote(vfs_dest),
                                         is_move,
                                     )
@@ -131,10 +131,10 @@ impl App {
                                     .map(|p| p.to_path_buf())
                                     .unwrap_or_else(|| final_dest.clone())
                             } else {
-                                final_dest.clone()
+                                final_dest
                             };
                             let request = make_copy_or_move_request(
-                                OperationPath::Local(source.clone()),
+                                OperationPath::Local(source),
                                 OperationPath::Local(worker_dest),
                                 is_move,
                             )
@@ -334,7 +334,7 @@ impl App {
                                 let vfs_dest =
                                     Self::vfs_path_with_connection(&vfs_current_path, new_dest);
                                 make_copy_or_move_request(
-                                    OperationPath::Remote(vfs_source.clone()),
+                                    OperationPath::Remote(vfs_source),
                                     OperationPath::Remote(vfs_dest),
                                     is_move,
                                 )
@@ -355,7 +355,7 @@ impl App {
                         if let Some(_fm) = panel.as_file_manager_mut() {
                             let is_move = operation.operation_type == BatchOperationType::Move;
                             let request = make_copy_or_move_request(
-                                OperationPath::Local(source.clone()),
+                                OperationPath::Local(source),
                                 OperationPath::Local(new_dest),
                                 is_move,
                             );

@@ -127,8 +127,8 @@ pub fn render_flowchart(fc: &Flowchart) -> Vec<String> {
     // The layout then routes the chain around the boxes in between instead of
     // crashing straight through them (classic Sugiyama virtual nodes).
     let mut rank_ext = rank.clone();
-    let mut bw = box_w.clone();
-    let mut bh = box_h.clone();
+    let mut bw = box_w;
+    let mut bh = box_h;
     let mut segs: Vec<Seg> = Vec::new();
     let mut dummies: Vec<usize> = Vec::new();
     for e in &fc.edges {

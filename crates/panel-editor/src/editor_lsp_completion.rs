@@ -28,11 +28,7 @@ impl Editor {
     ///
     /// Used to determine the prefix when triggering completion.
     fn find_word_start_column(&self) -> usize {
-        let line_text = self
-            .buffer
-            .line(self.cursor.line)
-            .map(|cow| cow.to_string())
-            .unwrap_or_default();
+        let line_text = self.buffer.line(self.cursor.line).unwrap_or_default();
 
         let cursor_col = self.cursor.column;
         if cursor_col == 0 || line_text.is_empty() {
@@ -98,11 +94,7 @@ impl Editor {
 
     /// Get the prefix text for completion (from trigger column to cursor).
     fn get_completion_prefix(&self) -> String {
-        let line_text = self
-            .buffer
-            .line(self.cursor.line)
-            .map(|cow| cow.to_string())
-            .unwrap_or_default();
+        let line_text = self.buffer.line(self.cursor.line).unwrap_or_default();
 
         let trigger_col = self.lsp.completion_trigger_column;
         let cursor_col = self.cursor.column;
@@ -154,8 +146,7 @@ impl Editor {
                 }
                 // Side-effect edits (imports) can still accompany a textEdit-less item.
                 if !resolution.additional.is_empty() {
-                    let additional = resolution.additional.clone();
-                    self.apply_completion_text_edits(&additional);
+                    self.apply_completion_text_edits(&resolution.additional);
                 }
             }
         }

@@ -192,7 +192,7 @@ impl LspServer {
 
         let params = InitializeParams {
             process_id: Some(std::process::id()),
-            root_uri: Some(root_uri.clone()),
+            root_uri: Some(root_uri),
             capabilities: ClientCapabilities {
                 // Tell the server we honor server-initiated `workspace/applyEdit`
                 // requests, so command-based quick-fixes (e.g. phpactor's

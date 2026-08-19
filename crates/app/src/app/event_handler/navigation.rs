@@ -71,7 +71,7 @@ impl App {
         use termide_panel_file_manager::FileManager;
 
         // Create new file manager panel at the given path
-        let mut fm = FileManager::new_with_path(path.clone());
+        let mut fm = FileManager::new_with_path(path);
 
         // If a file should be selected, find and select it
         if let Some(file_name) = select_file {

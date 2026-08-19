@@ -503,7 +503,7 @@ impl App {
                 let request = if is_remote_dest {
                     let vfs_dest = Self::vfs_path_with_connection(&vfs_current_path, final_dest);
                     make_copy_or_move_request(
-                        OperationPath::Remote(vfs_source.clone()),
+                        OperationPath::Remote(vfs_source),
                         OperationPath::Remote(vfs_dest),
                         is_move,
                     )
@@ -540,10 +540,10 @@ impl App {
                     .map(|p| p.to_path_buf())
                     .unwrap_or_else(|| final_dest.clone())
             } else {
-                final_dest.clone()
+                final_dest
             };
             let request = make_copy_or_move_request(
-                OperationPath::Local(source.clone()),
+                OperationPath::Local(source),
                 OperationPath::Local(worker_dest),
                 is_move,
             )

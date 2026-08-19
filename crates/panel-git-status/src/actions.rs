@@ -126,7 +126,7 @@ impl GitStatusPanel {
                 }
                 Err(e) => {
                     let t = termide_i18n::t();
-                    self.status_message = Some(t.git_action_error_fmt(action, &e.to_string()));
+                    self.status_message = Some(t.git_action_error_fmt(action, &e));
                 }
             }
         }
@@ -275,7 +275,7 @@ impl GitStatusPanel {
                     }
                     Err(e) => {
                         let t = termide_i18n::t();
-                        self.status_message = Some(t.git_checkout_error_fmt(&e.to_string()));
+                        self.status_message = Some(t.git_checkout_error_fmt(&e));
                     }
                 }
             }
@@ -465,7 +465,7 @@ impl GitStatusPanel {
                         }
                         Err(e) => {
                             let t = termide_i18n::t();
-                            self.status_message = Some(t.git_init_failed_fmt(&e.to_string()));
+                            self.status_message = Some(t.git_init_failed_fmt(&e));
                         }
                     }
                 }

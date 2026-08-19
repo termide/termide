@@ -125,7 +125,7 @@ impl From<PathBuf> for OperationPath {
 impl From<VfsPath> for OperationPath {
     fn from(path: VfsPath) -> Self {
         if path.is_local() {
-            Self::Local(path.path.clone())
+            Self::Local(path.path)
         } else {
             Self::Remote(path)
         }

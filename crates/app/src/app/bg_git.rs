@@ -69,7 +69,7 @@ impl App {
                 // rather than a modal, so an auto-fetch on startup never nags.
                 if result.operation == "fetch" {
                     if !result.success {
-                        let repo = handle.repo_path.clone();
+                        let repo = handle.repo_path;
                         if !self.maybe_prompt_ssh_passphrase("fetch", repo, &result.stderr) {
                             let msg = format!(
                                 "git fetch failed: {}",
@@ -89,7 +89,7 @@ impl App {
                 // On an SSH auth failure, prompt for the key passphrase and
                 // retry instead of showing a failure modal.
                 if !result.success {
-                    let repo = handle.repo_path.clone();
+                    let repo = handle.repo_path;
                     if self.maybe_prompt_ssh_passphrase(&result.operation, repo, &result.stderr) {
                         for panel in self.layout_manager.iter_all_panels_mut() {
                             panel.handle_command(PanelCommand::Reload);
@@ -135,7 +135,7 @@ impl App {
 
                 // Fallback if no output
                 if lines.is_empty() {
-                    lines.push((String::new(), t.git_completed().to_string()));
+                    lines.push((String::new(), t.git_completed()));
                 }
 
                 let modal = InfoModal::new(title, lines);

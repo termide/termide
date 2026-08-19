@@ -490,7 +490,7 @@ impl App {
                                                 .file_name()
                                                 .map(|n| n.to_string_lossy().into_owned())
                                         })?;
-                                    Some((path, pending.vfs_manager.clone(), filename))
+                                    Some((path, pending.vfs_manager, filename))
                                 });
                             if partial_remote.is_some() {
                                 self.state.close_modal();

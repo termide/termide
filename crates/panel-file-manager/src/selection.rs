@@ -152,13 +152,11 @@ impl FileManager {
         let Some(parent_vis) = self.find_parent_dir_vis(vis_idx) else {
             return;
         };
-        let descendants = self.visible_descendants_range(parent_vis);
+        let mut descendants = self.visible_descendants_range(parent_vis);
         if descendants.is_empty() {
             return;
         }
-        let all_selected = descendants
-            .clone()
-            .all(|i| self.selection.items.contains(&i));
+        let all_selected = descendants.all(|i| self.selection.items.contains(&i));
         if all_selected {
             self.selection.items.insert(parent_vis);
         } else {

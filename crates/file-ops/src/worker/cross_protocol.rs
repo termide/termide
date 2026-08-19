@@ -297,7 +297,7 @@ impl CrossProtocolWorker {
 
         let mut upload_worker = UploadWorker::with_retry_policy(
             std::sync::Arc::clone(&self.vfs_manager),
-            vec![temp_file.clone()],
+            vec![temp_file],
             dest_path,
             false, // is_move handled by CrossProtocolWorker (temp files deleted separately)
             self.retry_policy.clone(),

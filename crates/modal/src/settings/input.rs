@@ -497,7 +497,7 @@ impl SettingsModal {
                             &mut self.config,
                             self.kb_section,
                             action,
-                            KeyBinding::Single(binding_str.clone()),
+                            KeyBinding::Single(binding_str),
                         );
                         self.dirty = true;
                         self.kb_capture_message = conflict_msg;

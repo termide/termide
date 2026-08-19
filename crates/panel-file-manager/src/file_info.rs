@@ -502,7 +502,7 @@ impl FileManager {
 
             if is_dir {
                 let (tx, rx) = mpsc::channel();
-                let cache_path = file_path.clone();
+                let cache_path = file_path;
 
                 std::thread::spawn(move || {
                     let size = utils::calculate_dir_size(&cache_path);

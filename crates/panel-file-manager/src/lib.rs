@@ -413,7 +413,7 @@ impl FileManager {
         } else {
             // Remote path - update VFS state and trigger connection/listing
             self.vfs
-                .navigate_to(vfs_path.clone())
+                .navigate_to(vfs_path)
                 .map_err(|e| anyhow::anyhow!("VFS navigation failed: {}", e))?;
 
             // If already connected, start listing (otherwise connection will trigger it)
