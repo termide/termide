@@ -60,7 +60,8 @@ pub fn find_all_repos(root: &Path, max_depth: usize) -> Vec<PathBuf> {
 /// - Searches UP to find the repository root
 /// - Searches DOWN (up to submodule_depth) to find submodules
 ///
-/// Optimizations: deduplicates paths, removes nested paths, skips already-scanned repos.
+/// Deduplicates input paths and discovered roots, so several panels inside
+/// one repository cost a single submodule walk.
 pub fn find_repos_from_paths(paths: &[PathBuf], submodule_depth: usize) -> Vec<PathBuf> {
     let toplevel = find_toplevel_repos(paths);
     let mut all: std::collections::HashSet<PathBuf> = toplevel.iter().cloned().collect();
@@ -77,67 +78,31 @@ pub fn find_repos_from_paths(paths: &[PathBuf], submodule_depth: usize) -> Vec<P
 /// Resolve `paths` to the set of top-level repository roots, skipping the
 /// recursive submodule walk. This is the cheap half of
 /// [`find_repos_from_paths`] — only the upward search to find each repo
-/// root, with the same dedup/nested-path filtering. Used by the async
-/// repo manager so the panel can render a baseline list immediately
-/// while the submodule walk runs in the background.
+/// root. Used by the async repo manager so the panel can render a baseline
+/// list immediately while the submodule walk runs in the background.
 pub fn find_toplevel_repos(paths: &[PathBuf]) -> Vec<PathBuf> {
     use std::collections::HashSet;
 
-    if paths.is_empty() {
-        return Vec::new();
-    }
-
     // Resolve symlinks so that paths like /home/user/docs -> /Data/docs
     // don't create duplicate entries for the same physical directory.
-    let mut unique_paths: Vec<PathBuf> = paths
+    let unique_paths: HashSet<PathBuf> = paths
         .iter()
         .map(|p| std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()))
+        .collect();
+
+    // Every input path gets its own upward search. A path nested inside
+    // another input path can still resolve to a *different* repository — a
+    // project under a plain container directory, or under a whole-home
+    // dotfiles repo — so filtering nested inputs out beforehand would drop
+    // those repos from the panel's list. Repeated roots (several panels
+    // inside one repo) collapse in the set below at no cost.
+    let mut result: Vec<PathBuf> = unique_paths
+        .iter()
+        .filter_map(|path| find_toplevel_repo(path))
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
-    unique_paths.sort();
-
-    let filtered_paths = remove_nested_paths(&unique_paths);
-
-    let mut roots = HashSet::new();
-    for path in filtered_paths {
-        if let Some(repo_root) = find_toplevel_repo(&path) {
-            roots.insert(repo_root);
-        }
-    }
-
-    let mut result: Vec<PathBuf> = roots.into_iter().collect();
     result.sort();
-    result
-}
-
-/// Remove paths that are nested inside other paths.
-/// E.g., ["/repo", "/repo/src", "/repo/src/lib"] -> ["/repo"]
-///
-/// Optimized from O(n²) to O(n log n) by leveraging sorted order:
-/// after sorting, a parent path always comes before its children,
-/// so we only need to check against the last added path.
-///
-/// Note: Input must be pre-sorted. If not sorted, behavior is undefined.
-fn remove_nested_paths(paths: &[PathBuf]) -> Vec<PathBuf> {
-    if paths.is_empty() {
-        return Vec::new();
-    }
-
-    // Input is expected to be pre-sorted (sorted by caller)
-    let mut result = Vec::with_capacity(paths.len());
-
-    for path in paths {
-        // After sorting, parent always comes before child.
-        // So we only need to check if current path is nested under the last added path.
-        let is_nested = result
-            .last()
-            .is_some_and(|last: &PathBuf| path.starts_with(last));
-        if !is_nested {
-            result.push(path.clone());
-        }
-    }
-
     result
 }
 
@@ -203,5 +168,46 @@ mod tests {
         if let Some(root) = find_repo_root(&current) {
             assert!(root.join(".git").exists());
         }
+    }
+
+    // One panel sits in a plain container directory, another inside a repo
+    // nested under it. The repo must survive: it used to be discarded as a
+    // "nested input path" before the upward search ever ran, so it never
+    // reached the git panel's repo dropdown.
+    #[test]
+    fn keeps_repo_nested_under_another_input_path() {
+        use std::fs;
+        let tmp = std::env::temp_dir().join(format!("termide-disc-nested-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let deep = tmp.join("container/lvl1/lvl2/deeprepo");
+        fs::create_dir_all(deep.join(".git")).unwrap();
+        let container = fs::canonicalize(tmp.join("container")).unwrap();
+        let deep = fs::canonicalize(&deep).unwrap();
+
+        let roots = find_toplevel_repos(&[container, deep.clone()]);
+        let _ = fs::remove_dir_all(&tmp);
+        assert!(
+            roots.contains(&deep),
+            "repo nested under another input path was dropped: {roots:?}"
+        );
+    }
+
+    // Several panels inside one repository must still collapse to a single
+    // root — that was the point of the nested-path filter, and the root-level
+    // dedup has to keep covering it.
+    #[test]
+    fn collapses_multiple_paths_inside_one_repo() {
+        use std::fs;
+        let tmp =
+            std::env::temp_dir().join(format!("termide-disc-collapse-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let repo = tmp.join("repo");
+        fs::create_dir_all(repo.join(".git")).unwrap();
+        fs::create_dir_all(repo.join("src/inner")).unwrap();
+        let repo = fs::canonicalize(&repo).unwrap();
+
+        let roots = find_toplevel_repos(&[repo.clone(), repo.join("src"), repo.join("src/inner")]);
+        let _ = fs::remove_dir_all(&tmp);
+        assert_eq!(roots, vec![repo], "paths inside one repo did not collapse");
     }
 }

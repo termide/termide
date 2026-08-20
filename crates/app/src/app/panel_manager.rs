@@ -185,6 +185,20 @@ impl App {
         unique_paths.into_iter().collect()
     }
 
+    /// Paths the git panels search for repositories: every panel working
+    /// directory plus the session root.
+    ///
+    /// The session root is included because panel directories alone lose it as
+    /// soon as every panel navigates elsewhere — the repository termide was
+    /// started in would then vanish from the repo dropdown.
+    pub(super) fn collect_repo_search_paths(&self) -> Vec<PathBuf> {
+        let mut paths = self.collect_panel_paths();
+        if !paths.contains(&self.project_root) {
+            paths.push(self.project_root.clone());
+        }
+        paths
+    }
+
     /// Find all panels that have working directories
     /// Returns deduplicated and sorted list of paths from all panel types (FM, Terminal, Editor)
     /// For remote file managers, returns full URLs (e.g., sftp://user@host/path)

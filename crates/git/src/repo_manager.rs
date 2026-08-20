@@ -83,6 +83,15 @@ impl RepoManager {
 
     /// Drain the background submodule walk if it has finished.
     ///
+    /// The walk result is *merged* into the known set rather than replacing
+    /// it. The walk only ever sees the paths handed to the last
+    /// [`Self::update`] (or the constructor), so a plain swap dropped repos
+    /// discovered from another source — most visibly the repository a
+    /// [`Self::for_repo`] panel was opened for, which disappeared from the
+    /// dropdown as soon as unrelated panel paths arrived. Entries whose
+    /// `.git` is gone are pruned so the merged list cannot accumulate
+    /// deleted repositories.
+    ///
     /// Returns `true` once the list changed so the caller can trigger a
     /// redraw. Subsequent calls are no-ops until a new walk is spawned
     /// by [`Self::update`].
@@ -93,12 +102,20 @@ impl RepoManager {
         match rx.try_recv() {
             Ok(full) => {
                 let current = self.current().map(|p| p.to_path_buf());
-                self.repos = full;
+                let mut merged = full;
+                for repo in &self.repos {
+                    if !merged.contains(repo) && repo.join(".git").exists() {
+                        merged.push(repo.clone());
+                    }
+                }
+                sort_by_display_name(&mut merged);
+                let changed = merged != self.repos;
+                self.repos = merged;
                 if let Some(c) = current {
                     self.selected = self.repos.iter().position(|r| r == &c).unwrap_or(0);
                 }
                 self.submodule_rx = None;
-                true
+                changed
             }
             // Walk hasn't completed yet — keep the receiver around. A
             // disconnected channel (worker thread panicked) is treated
@@ -162,8 +179,8 @@ impl RepoManager {
         // bare `new_roots` never contains those, so a plain swap would drop them
         // and — if the selected repo was one of them — reset the selection to
         // the first entry on every navigation. Merging keeps every known repo
-        // (so the selection survives) until the freshly spawned walk lands and
-        // `poll()` replaces the set with the authoritative, pruned list.
+        // (so the selection survives); the freshly spawned walk then folds its
+        // own findings in via `poll()`, which merges the same way.
         let changed = if new_roots.is_empty() {
             false
         } else {
@@ -317,6 +334,75 @@ mod tests {
             mgr.current(),
             Some(nested.as_path()),
             "selection reset off the nested repo"
+        );
+    }
+
+    // A panel opened for one specific repository must keep that repository in
+    // the dropdown after unrelated panel paths arrive and the background walk
+    // lands — the walk never sees the `for_repo` root, so `poll()` has to merge
+    // instead of replacing.
+    #[test]
+    fn poll_keeps_repo_the_panel_was_opened_for() {
+        use std::fs;
+        let tmp = std::env::temp_dir().join(format!("termide-rm-poll-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let deep = tmp.join("container/lvl1/lvl2/deeprepo");
+        fs::create_dir_all(deep.join(".git")).unwrap();
+        let container = std::fs::canonicalize(tmp.join("container")).unwrap();
+        let deep = std::fs::canonicalize(&deep).unwrap();
+
+        let mut mgr = RepoManager::for_repo(deep.clone());
+        assert_eq!(mgr.current(), Some(deep.as_path()));
+
+        // Panel paths for a directory that only *contains* the repo, deeper
+        // than the nested scan reaches.
+        mgr.update(std::slice::from_ref(&container));
+        let mut tries = 0;
+        while mgr.submodule_rx.is_some() && tries < 300 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            mgr.poll();
+            tries += 1;
+        }
+
+        let repos = mgr.repos().to_vec();
+        let current = mgr.current().map(|p| p.to_path_buf());
+        let _ = fs::remove_dir_all(&tmp);
+        assert!(
+            repos.contains(&deep),
+            "the panel's own repo was dropped by poll(): {repos:?}"
+        );
+        assert_eq!(
+            current.as_deref(),
+            Some(deep.as_path()),
+            "selection moved off the panel's own repo"
+        );
+    }
+
+    // Repos that disappeared from disk must not survive the merge forever.
+    #[test]
+    fn poll_prunes_deleted_repos() {
+        use std::fs;
+        let tmp = std::env::temp_dir().join(format!("termide-rm-prune-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("live/.git")).unwrap();
+        let live = std::fs::canonicalize(tmp.join("live")).unwrap();
+
+        let mut mgr = RepoManager::new(std::slice::from_ref(&live));
+        let gone = tmp.join("gone");
+        mgr.repos.push(gone.clone());
+        let mut tries = 0;
+        while mgr.submodule_rx.is_some() && tries < 300 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            mgr.poll();
+            tries += 1;
+        }
+
+        let repos = mgr.repos().to_vec();
+        let _ = fs::remove_dir_all(&tmp);
+        assert!(repos.contains(&live), "live repo missing: {repos:?}");
+        assert!(
+            !repos.contains(&gone),
+            "deleted repo survived the merge: {repos:?}"
         );
     }
 
