@@ -1,11 +1,13 @@
 # Database Viewer
 
-TermIDE includes a built-in, **read-only** database browser for **SQLite**,
-**PostgreSQL** and **MySQL/MariaDB**. It connects over the native wire protocol
-(no external client tools required), lists a database's tables, and shows rows
-in a scrollable grid with sorting and per-column filtering.
+TermIDE includes a built-in database browser for **SQLite**, **PostgreSQL** and
+**MySQL/MariaDB**. It connects over the native wire protocol (no external client
+tools required), lists a database's tables, and shows rows in a scrollable grid
+with sorting and per-column filtering.
 
-The viewer never writes: it only issues `SELECT` and catalog queries.
+Browsing issues only `SELECT` and catalog queries. Values can be edited (see
+[Editing values](#editing-values)); until you do, nothing is written — a SQLite
+file is even held open read-only and reopened for writing on the first edit.
 
 ## Opening a connection
 
@@ -74,7 +76,8 @@ shows the current range, total row count, active sort and filter, e.g.
 | `S` | Sort by the current column — cycles ascending → descending → unsorted |
 | `Ctrl+F` / `F3` | Filter the current column (opens the filter dialog) |
 | `Alt+F` | Clear all filters |
-| `Space` / `F12` (on grid) | Show the full current row (key/value), with copy options |
+| `Enter` (on grid) | Edit the current cell in place (`Enter` saves, `Escape` discards) |
+| `Space` / `F12` (on grid) | Open the row dialog: edit any value, or copy the row |
 | `Ctrl+C` | Copy the current cell value |
 | `Ctrl+Y` | Copy the current row as tab-separated values |
 | `Ctrl+R` | Refresh the table list and reload the current view |
@@ -118,11 +121,31 @@ opening the dialog. Values are always sent as bound parameters; if a filter
 produces a database error (e.g. a non-numeric value on a numeric column) it is
 shown as a non-fatal warning in the status bar and the current data stays.
 
-## Row detail
+## Row detail and editing
 
-Press `Space` on a row to open a detail dialog listing every column as
-key/value — useful for long text, JSON or wide rows that don't fit the grid. The
-dialog can copy the row as **TSV**, **JSON**, or an **INSERT** statement.
+Press `Space` on a row to open the row dialog: every column on its own line,
+with the value in full — useful for long text, JSON or wide rows that don't fit
+the grid. Values are editable there, and the dialog can also copy the row as
+**TSV**, **JSON**, or an **INSERT** statement.
+
+Move between fields with `Tab` / arrow keys, type to change a value, and press
+`Enter` to jump to the button bar — then `Save` writes every changed column.
+A column that accepts NULL shows a `[ ] NULL` checkbox toggled with `Space`;
+clearing the text field writes an empty value, not NULL. Primary-key columns are
+shown but not editable: they are the address the update is sent to.
+
+## Editing values
+
+Press `Enter` on a cell to edit it in place. The cell turns into a text field
+with a caret; `Enter` again saves, `Escape` discards. An unchanged value runs no
+query at all. The typed text is interpreted against the column's type, so a
+numeric column stores a number rather than digits as text.
+
+Editing needs a way to name exactly one row, so it is available only for tables
+with a **primary key**. Elsewhere the panel says so instead of opening an
+editor. Each edit is a single-row `UPDATE` addressed by that key; if the server
+reports no row changed — the row was deleted, or its key changed — the panel
+tells you to refresh instead of pretending the edit landed.
 
 ## Pagination
 

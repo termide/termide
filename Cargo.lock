@@ -5260,6 +5260,8 @@ version = "0.29.7"
 dependencies = [
  "crossterm",
  "ratatui",
+ "sqlx",
+ "tempfile",
  "termide-clipboard",
  "termide-config",
  "termide-core",
@@ -5270,6 +5272,7 @@ dependencies = [
  "termide-theme",
  "termide-ui",
  "termide-ui-render",
+ "tokio",
  "unicode-width",
 ]
 

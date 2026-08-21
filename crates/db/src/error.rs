@@ -15,6 +15,12 @@ pub enum DbError {
     #[error("database connection closed")]
     Closed,
 
+    /// The request cannot be fulfilled against this table — editing a row in a
+    /// table with no primary key, for instance. Carries a message meant for
+    /// the user, not a driver failure.
+    #[error("{0}")]
+    Rejected(String),
+
     /// Anything coming from the underlying driver (connect, query, decode).
     #[error(transparent)]
     Sqlx(#[from] sqlx::Error),

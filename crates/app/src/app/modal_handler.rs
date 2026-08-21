@@ -830,6 +830,42 @@ impl App {
                         }
                     }
                 }
+                PendingAction::DbRowEdit {
+                    row,
+                    tsv,
+                    json,
+                    insert,
+                } => {
+                    use termide_modal::DbRowEditResult;
+                    if let Some(result) = value.downcast_ref::<DbRowEditResult>() {
+                        // A copy button reports itself instead of changes; the
+                        // formats travelled with the action so no call back into
+                        // the panel is needed.
+                        if let Some(id) = result.copy.as_deref() {
+                            let text = match id {
+                                "json" => Some(json),
+                                "insert" => Some(insert),
+                                "tsv" => Some(tsv),
+                                _ => None,
+                            };
+                            if let Some(text) = text {
+                                if let Err(e) = termide_clipboard::copy(&text) {
+                                    log::error!("Failed to copy to clipboard: {}", e);
+                                } else {
+                                    self.state
+                                        .set_info(termide_i18n::t().db_copied().to_string());
+                                }
+                            }
+                        } else if let Some(panel) = self.layout_manager.active_panel_mut() {
+                            if let Some(db) = panel
+                                .as_any_mut()
+                                .downcast_mut::<termide_panel_db::DbPanel>()
+                            {
+                                db.apply_row_edit(row, result.clone());
+                            }
+                        }
+                    }
+                }
                 PendingAction::DbConnectionError => {
                     use termide_modal::InfoActionResult;
                     if let Some(InfoActionResult::Action(id)) =
@@ -848,27 +884,6 @@ impl App {
                             }
                             "close" => self.close_panel_at_index(),
                             _ => {}
-                        }
-                    }
-                }
-                PendingAction::DbRowDetail { tsv, json, insert } => {
-                    use termide_modal::InfoActionResult;
-                    if let Some(InfoActionResult::Action(id)) =
-                        value.downcast_ref::<InfoActionResult>()
-                    {
-                        let text = match id.as_str() {
-                            "copy_json" => Some(json),
-                            "copy_insert" => Some(insert),
-                            "copy_tsv" => Some(tsv),
-                            _ => None,
-                        };
-                        if let Some(text) = text {
-                            if let Err(e) = termide_clipboard::copy(&text) {
-                                log::error!("Failed to copy to clipboard: {}", e);
-                            } else {
-                                self.state
-                                    .set_info(termide_i18n::t().db_copied().to_string());
-                            }
                         }
                     }
                 }

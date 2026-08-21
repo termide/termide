@@ -22,3 +22,11 @@ termide-state = { path = "../state" }
 termide-theme = { path = "../theme" }
 termide-ui = { path = "../ui" }
 termide-ui-render = { path = "../ui-render" }
+
+[dev-dependencies]
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    "sqlite",
+] }
+tempfile.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

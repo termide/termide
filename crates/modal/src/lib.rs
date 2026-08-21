@@ -30,6 +30,7 @@ pub mod commit;
 pub mod confirm;
 pub mod conflict;
 pub mod db_filter;
+pub mod db_row_edit;
 pub mod directory_picker;
 pub mod directory_switcher;
 pub mod editable_select;
@@ -56,6 +57,7 @@ pub use commit::CommitModal;
 pub use confirm::ConfirmModal;
 pub use conflict::{ConflictModal, ConflictResolution};
 pub use db_filter::{DbFilterColumn, DbFilterCondition, DbFilterModal, DbFilterResult};
+pub use db_row_edit::{DbRowEditColumn, DbRowEditModal, DbRowEditResult};
 pub use directory_picker::DirectoryPickerModal;
 pub use directory_switcher::{DirectoryItem, DirectorySwitcherModal};
 pub use editable_select::{EditableSelectModal, SelectOption};
@@ -118,6 +120,7 @@ pub enum ActiveModal {
     Settings(Box<SettingsModal>),
     /// Database single-column filter modal
     DbFilter(Box<DbFilterModal>),
+    DbRowEdit(Box<DbRowEditModal>),
 }
 
 /// Helper to convert a typed ModalResult into a type-erased ModalResult<Box<dyn Any>>.
@@ -155,6 +158,7 @@ macro_rules! dispatch_modal {
             ActiveModal::CommandParams(m) => m.$method($($arg),*),
             ActiveModal::Settings(m) => m.$method($($arg),*),
             ActiveModal::DbFilter(m) => m.$method($($arg),*),
+            ActiveModal::DbRowEdit(m) => m.$method($($arg),*),
         }
     };
 }
@@ -184,6 +188,7 @@ macro_rules! dispatch_modal_erased {
             ActiveModal::CommandParams(m) => m.$method($($arg),*)?.map(erase_modal_result),
             ActiveModal::Settings(m) => m.$method($($arg),*)?.map(erase_modal_result),
             ActiveModal::DbFilter(m) => m.$method($($arg),*)?.map(erase_modal_result),
+            ActiveModal::DbRowEdit(m) => m.$method($($arg),*)?.map(erase_modal_result),
         }
     };
 }

@@ -65,6 +65,9 @@ pub enum TypeCategory {
 pub struct ColumnInfo {
     pub name: String,
     pub category: TypeCategory,
+    /// Whether the column accepts NULL. Drives the "NULL" checkbox in the row
+    /// editor: a column that rejects NULL must not offer it.
+    pub nullable: bool,
 }
 
 /// Sort direction for an `ORDER BY` term.
@@ -139,6 +142,18 @@ enum Request {
     Page {
         req: PageRequest,
         reply: mpsc::Sender<Result<Page, DbError>>,
+    },
+    PrimaryKey {
+        table: String,
+        reply: mpsc::Sender<Result<Vec<String>, DbError>>,
+    },
+    UpdateCell {
+        table: String,
+        /// Primary-key columns and their values for the row being edited.
+        key: Vec<(String, DbValue)>,
+        column: String,
+        value: DbValue,
+        reply: mpsc::Sender<Result<u64, DbError>>,
     },
 }
 
@@ -230,6 +245,39 @@ impl DbConnection {
         self.request(|reply| Request::Page { req, reply })
     }
 
+    /// Primary-key columns of `table`, in key order. An empty list means the
+    /// table has no primary key, so its rows cannot be addressed for editing.
+    pub fn primary_key(
+        &self,
+        table: impl Into<String>,
+    ) -> mpsc::Receiver<Result<Vec<String>, DbError>> {
+        let table = table.into();
+        self.request(|reply| Request::PrimaryKey { table, reply })
+    }
+
+    /// Set one column of one row, addressed by its primary key.
+    ///
+    /// Resolves to the number of rows the server changed; the caller treats
+    /// anything but 1 as a failed edit. For SQLite this is the point where the
+    /// pool is reopened writable — browsing never holds a writable handle.
+    pub fn update_cell(
+        &self,
+        table: impl Into<String>,
+        key: Vec<(String, DbValue)>,
+        column: impl Into<String>,
+        value: DbValue,
+    ) -> mpsc::Receiver<Result<u64, DbError>> {
+        let table = table.into();
+        let column = column.into();
+        self.request(|reply| Request::UpdateCell {
+            table,
+            key,
+            column,
+            value,
+            reply,
+        })
+    }
+
     /// Send a request built from a fresh reply channel and return its receiver.
     /// If the worker is gone, the receiver yields `Closed` immediately.
     fn request<T: Send + 'static>(
@@ -278,7 +326,7 @@ fn run_worker(
         }
     };
 
-    let pool = match rt.block_on(engine::connect(&url)) {
+    let mut pool = match rt.block_on(engine::connect(&url)) {
         Ok(pool) => {
             let _ = init_tx.send(Ok(()));
             pool
@@ -288,6 +336,10 @@ fn run_worker(
             return;
         }
     };
+
+    // SQLite starts read-only and is upgraded on the first edit; the server
+    // engines have no such mode, so they count as writable from the start.
+    let mut writable = !matches!(pool, engine::Pool::Sqlite(_));
 
     while let Ok(req) = rx.recv() {
         match req {
@@ -309,6 +361,42 @@ fn run_worker(
             }
             Request::Page { req, reply } => {
                 let _ = reply.send(rt.block_on(engine::fetch_page(&pool, &req)));
+            }
+            Request::PrimaryKey { table, reply } => {
+                let _ = reply.send(rt.block_on(engine::primary_key(&pool, &table)));
+            }
+            Request::UpdateCell {
+                table,
+                key,
+                column,
+                value,
+                reply,
+            } => {
+                // SQLite browses through a read-only handle, so the first edit
+                // reopens the pool writable. A database on read-only media
+                // fails here with the driver's error, which is what the user
+                // needs to see.
+                let upgraded = match &pool {
+                    engine::Pool::Sqlite(_) if !writable => {
+                        match rt.block_on(engine::connect_writable(&url)) {
+                            Ok(new_pool) => {
+                                let old = std::mem::replace(&mut pool, new_pool);
+                                rt.block_on(engine::close(old));
+                                writable = true;
+                                Ok(())
+                            }
+                            Err(e) => Err(e),
+                        }
+                    }
+                    _ => Ok(()),
+                };
+                let result = match upgraded {
+                    Ok(()) => {
+                        rt.block_on(engine::update_cell(&pool, &table, &key, &column, &value))
+                    }
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(result);
             }
         }
     }
@@ -367,6 +455,152 @@ mod tests {
             DbBackend::MySql
         );
         assert!(DbBackend::from_url("redis://x").is_err());
+    }
+
+    /// The row editor offers a NULL checkbox only where the column accepts it,
+    /// so nullability has to come from the catalog.
+    #[test]
+    fn sqlite_columns_report_nullability() {
+        let (_dir, url) = make_sqlite_db();
+        let conn = DbConnection::connect(&url).unwrap();
+
+        let columns = conn.columns("users").recv().unwrap().unwrap();
+        let by_name = |name: &str| {
+            columns
+                .iter()
+                .find(|c| c.name == name)
+                .unwrap_or_else(|| panic!("no column {name}"))
+        };
+        // INTEGER PRIMARY KEY is the rowid alias — SQLite reports it as
+        // nullable, but the other columns are plainly nullable too.
+        assert!(by_name("name").nullable);
+        assert!(by_name("score").nullable);
+    }
+
+    #[test]
+    fn sqlite_primary_key_is_reported_in_key_order() {
+        let (_dir, url) = make_sqlite_db();
+        let conn = DbConnection::connect(&url).unwrap();
+
+        let key = conn.primary_key("users").recv().unwrap().unwrap();
+        assert_eq!(key, vec!["id".to_string()]);
+
+        // A table without a primary key reports none — editing is refused for
+        // it rather than guessing which row to write.
+        let none = conn.primary_key("empty_t").recv().unwrap().unwrap();
+        assert!(none.is_empty(), "{none:?}");
+    }
+
+    /// The viewer browses SQLite through a read-only handle; the first edit has
+    /// to reopen it writable, and the new value must be visible afterwards.
+    #[test]
+    fn sqlite_update_cell_writes_through_a_read_only_handle() {
+        let (_dir, url) = make_sqlite_db();
+        let conn = DbConnection::connect(&url).unwrap();
+
+        let affected = conn
+            .update_cell(
+                "users",
+                vec![("id".to_string(), DbValue::Int(1))],
+                "name",
+                DbValue::Text("alice-edited".to_string()),
+            )
+            .recv()
+            .unwrap()
+            .unwrap();
+        assert_eq!(affected, 1);
+
+        let page = conn
+            .page(PageRequest {
+                table: "users".to_string(),
+                filters: vec![],
+                order_by: vec![],
+                limit: 10,
+                offset: 0,
+            })
+            .recv()
+            .unwrap()
+            .unwrap();
+        let names: Vec<String> = page
+            .rows
+            .iter()
+            .map(|row| match &row[1] {
+                DbValue::Text(s) => s.clone(),
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect();
+        assert!(
+            names.contains(&"alice-edited".to_string()),
+            "edit not visible: {names:?}"
+        );
+    }
+
+    /// NULL is a value like any other: writing it must clear the cell, not
+    /// store the text "NULL".
+    #[test]
+    fn sqlite_update_cell_can_write_null() {
+        let (_dir, url) = make_sqlite_db();
+        let conn = DbConnection::connect(&url).unwrap();
+
+        let affected = conn
+            .update_cell(
+                "users",
+                vec![("id".to_string(), DbValue::Int(1))],
+                "name",
+                DbValue::Null,
+            )
+            .recv()
+            .unwrap()
+            .unwrap();
+        assert_eq!(affected, 1);
+
+        let page = conn
+            .page(PageRequest {
+                table: "users".to_string(),
+                filters: vec![],
+                order_by: vec![],
+                limit: 10,
+                offset: 0,
+            })
+            .recv()
+            .unwrap()
+            .unwrap();
+        let first = page.rows.iter().find(|row| row[0] == DbValue::Int(1));
+        assert_eq!(first.map(|row| &row[1]), Some(&DbValue::Null));
+    }
+
+    /// A key that matches nothing reports zero rows changed, so the panel can
+    /// tell the user the row is gone instead of pretending the edit landed.
+    #[test]
+    fn sqlite_update_cell_reports_no_rows_for_a_stale_key() {
+        let (_dir, url) = make_sqlite_db();
+        let conn = DbConnection::connect(&url).unwrap();
+
+        let affected = conn
+            .update_cell(
+                "users",
+                vec![("id".to_string(), DbValue::Int(9_999))],
+                "name",
+                DbValue::Text("ghost".to_string()),
+            )
+            .recv()
+            .unwrap()
+            .unwrap();
+        assert_eq!(affected, 0);
+    }
+
+    /// Editing a table with no primary key is refused before any SQL runs.
+    #[test]
+    fn sqlite_update_cell_refuses_a_table_without_a_key() {
+        let (_dir, url) = make_sqlite_db();
+        let conn = DbConnection::connect(&url).unwrap();
+
+        let err = conn
+            .update_cell("empty_t", vec![], "x", DbValue::Int(1))
+            .recv()
+            .unwrap()
+            .expect_err("must refuse");
+        assert!(matches!(err, DbError::Rejected(_)), "{err:?}");
     }
 
     #[test]

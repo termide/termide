@@ -1,8 +1,10 @@
 //! Engine layer: per-backend sqlx pools and the async query primitives.
 //!
-//! Read-only by design — only `SELECT`/metadata queries are issued. Table and
-//! column identifiers are quoted (never parameterised — they can't be), while
-//! every user-supplied *value* (filter operands) is bound as a parameter.
+//! Reads are `SELECT`/metadata queries; the only write is a single-row
+//! `UPDATE` addressed by primary key ([`update_cell`]). Table and column
+//! identifiers are quoted (never parameterised — they can't be), while every
+//! user-supplied *value* (filter operands, updated values, key values) is
+//! bound as a parameter.
 
 use std::str::FromStr;
 
@@ -43,13 +45,24 @@ pub(crate) enum Pool {
 }
 
 /// Connect to `url`, returning a single-connection pool. SQLite opens
-/// read-only so the viewer can never mutate the file (and can open DBs on
-/// read-only media); Postgres/MySQL stay read-only by only ever running
-/// SELECT/metadata statements.
+/// read-only so browsing can never mutate the file and databases on read-only
+/// media still open; the pool is reopened writable on the first edit (see
+/// [`connect_writable`]). Postgres/MySQL have no such mode — they simply are
+/// not sent writes until the user edits a cell.
 pub(crate) async fn connect(url: &str) -> Result<Pool, DbError> {
+    connect_with_writes(url, false).await
+}
+
+/// Connect with writes enabled — used when an edit is applied, so a viewer
+/// that only browses keeps its read-only guarantee.
+pub(crate) async fn connect_writable(url: &str) -> Result<Pool, DbError> {
+    connect_with_writes(url, true).await
+}
+
+async fn connect_with_writes(url: &str, writable: bool) -> Result<Pool, DbError> {
     match DbBackend::from_url(url)? {
         DbBackend::Sqlite => {
-            let opts = SqliteConnectOptions::from_str(url)?.read_only(true);
+            let opts = SqliteConnectOptions::from_str(url)?.read_only(!writable);
             let pool = SqlitePoolOptions::new()
                 .max_connections(1)
                 .connect_with(opts)
@@ -151,15 +164,18 @@ pub(crate) async fn columns(pool: &Pool, table: &str) -> Result<Vec<ColumnInfo>,
                 .map(|r| {
                     let name: String = r.try_get("name").unwrap_or_default();
                     let ty: String = r.try_get("type").unwrap_or_default();
+                    let notnull: i64 = r.try_get("notnull").unwrap_or(0);
                     ColumnInfo {
                         name,
                         category: sqlite_category(&ty),
+                        nullable: notnull == 0,
                     }
                 })
                 .collect())
         }
         Pool::Postgres(p) => {
-            let sql = "SELECT column_name::text AS column_name, data_type::text AS data_type \
+            let sql = "SELECT column_name::text AS column_name, data_type::text AS data_type, \
+                              is_nullable::text AS is_nullable \
                        FROM information_schema.columns \
                        WHERE table_schema = current_schema() AND table_name = $1 \
                        ORDER BY ordinal_position";
@@ -169,15 +185,18 @@ pub(crate) async fn columns(pool: &Pool, table: &str) -> Result<Vec<ColumnInfo>,
                 .map(|r| {
                     let name: String = r.try_get("column_name").unwrap_or_default();
                     let ty: String = r.try_get("data_type").unwrap_or_default();
+                    let nullable: String = r.try_get("is_nullable").unwrap_or_default();
                     ColumnInfo {
                         name,
                         category: pg_category(&ty),
+                        nullable: nullable.eq_ignore_ascii_case("yes"),
                     }
                 })
                 .collect())
         }
         Pool::MySql(p) => {
-            let sql = "SELECT column_name, data_type FROM information_schema.columns \
+            let sql = "SELECT column_name, data_type, is_nullable \
+                       FROM information_schema.columns \
                        WHERE table_schema = DATABASE() AND table_name = ? \
                        ORDER BY ordinal_position";
             let rows = sqlx::query(sql).bind(table).fetch_all(p).await?;
@@ -186,14 +205,127 @@ pub(crate) async fn columns(pool: &Pool, table: &str) -> Result<Vec<ColumnInfo>,
                 .map(|r| {
                     let name: String = r.try_get("column_name").unwrap_or_default();
                     let ty: String = r.try_get("data_type").unwrap_or_default();
+                    let nullable: String = r.try_get("is_nullable").unwrap_or_default();
                     ColumnInfo {
                         name,
                         category: mysql_category(&ty),
+                        nullable: nullable.eq_ignore_ascii_case("yes"),
                     }
                 })
                 .collect())
         }
     }
+}
+
+/// Primary-key column names for `table`, in key order. Empty when the table
+/// has no primary key — cell editing is refused in that case, because without
+/// a key there is no way to name exactly one row.
+pub(crate) async fn primary_key(pool: &Pool, table: &str) -> Result<Vec<String>, DbError> {
+    match pool {
+        Pool::Sqlite(p) => {
+            let sql = format!(
+                "PRAGMA table_info({})",
+                quote_ident(DbBackend::Sqlite, table)
+            );
+            let rows = sqlx::query(&sql).fetch_all(p).await?;
+            // `pk` is the 1-based position within the key, 0 for other columns.
+            let mut keyed: Vec<(i64, String)> = rows
+                .iter()
+                .filter_map(|r| {
+                    let pk: i64 = r.try_get("pk").unwrap_or(0);
+                    let name: String = r.try_get("name").unwrap_or_default();
+                    (pk > 0).then_some((pk, name))
+                })
+                .collect();
+            keyed.sort_by_key(|(pos, _)| *pos);
+            Ok(keyed.into_iter().map(|(_, name)| name).collect())
+        }
+        Pool::Postgres(p) => {
+            // Cast to text: `name`/`sql_identifier` don't decode to String.
+            let sql = "SELECT kcu.column_name::text AS column_name \
+                       FROM information_schema.table_constraints tc \
+                       JOIN information_schema.key_column_usage kcu \
+                         ON kcu.constraint_name = tc.constraint_name \
+                        AND kcu.table_schema = tc.table_schema \
+                       WHERE tc.constraint_type = 'PRIMARY KEY' \
+                         AND tc.table_schema = current_schema() \
+                         AND tc.table_name = $1 \
+                       ORDER BY kcu.ordinal_position";
+            Ok(collect_first_column(
+                sqlx::query(sql).bind(table).fetch_all(p).await?,
+            ))
+        }
+        Pool::MySql(p) => {
+            let sql = "SELECT column_name FROM information_schema.key_column_usage \
+                       WHERE table_schema = DATABASE() AND table_name = ? \
+                         AND constraint_name = 'PRIMARY' \
+                       ORDER BY ordinal_position";
+            Ok(collect_first_column(
+                sqlx::query(sql).bind(table).fetch_all(p).await?,
+            ))
+        }
+    }
+}
+
+/// Set one column of one row, addressed by its primary key.
+///
+/// Returns the number of rows the server reports as changed, which the caller
+/// checks: anything but 1 means the row the grid displayed is not the row on
+/// disk any more (deleted, or the key changed underneath), and the edit is
+/// reported as failed rather than silently accepted.
+pub(crate) async fn update_cell(
+    pool: &Pool,
+    table: &str,
+    key: &[(String, DbValue)],
+    column: &str,
+    value: &DbValue,
+) -> Result<u64, DbError> {
+    if key.is_empty() {
+        return Err(DbError::Rejected(
+            "table has no primary key, cannot address a row".to_string(),
+        ));
+    }
+    let backend = match pool {
+        Pool::Sqlite(_) => DbBackend::Sqlite,
+        Pool::Postgres(_) => DbBackend::Postgres,
+        Pool::MySql(_) => DbBackend::MySql,
+    };
+
+    // Binds go in statement order: the new value first, then the key values.
+    let mut binds: Vec<DbValue> = Vec::with_capacity(key.len() + 1);
+    binds.push(value.clone());
+    let mut conditions = Vec::with_capacity(key.len());
+    for (name, key_value) in key {
+        binds.push(key_value.clone());
+        conditions.push(format!(
+            "{} = {}",
+            quote_ident(backend, name),
+            placeholder(backend, binds.len())
+        ));
+    }
+    let sql = format!(
+        "UPDATE {} SET {} = {} WHERE {}",
+        quote_ident(backend, table),
+        quote_ident(backend, column),
+        placeholder(backend, 1),
+        conditions.join(" AND ")
+    );
+
+    let affected = match pool {
+        Pool::Sqlite(p) => bind_values!(sqlx::query(&sql), binds)
+            .execute(p)
+            .await?
+            .rows_affected(),
+        Pool::Postgres(p) => bind_values!(sqlx::query(&sql), binds)
+            .execute(p)
+            .await?
+            .rows_affected(),
+        Pool::MySql(p) => bind_values!(sqlx::query(&sql), binds)
+            .execute(p)
+            .await?
+            .rows_affected(),
+    };
+    Ok(affected)
 }
 
 /// Count rows matching `filters` (`SELECT COUNT(*)` + the same `WHERE`).

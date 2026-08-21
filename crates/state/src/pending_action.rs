@@ -282,18 +282,16 @@ pub enum PendingAction {
     /// Result of the DB single-column filter modal. The result value carries
     /// the column/operator/value; it is applied to the active DB panel.
     DbFilter,
+    /// Row editor for the database panel. Carries the grid row it was opened
+    /// for (updates address that row) and the precomputed copy formats, so a
+    /// copy action needs no call back into the panel.
+    DbRowEdit {
+        row: usize,
+        tsv: String,
+        json: String,
+        insert: String,
+    },
     /// Result of the DB connection-lost recovery dialog: the chosen button's
     /// action id ("reconnect" / "close") is routed to the active DB panel.
     DbConnectionError,
-    /// Result of the DB row-detail modal: the row pre-formatted in each copy
-    /// format. The chosen button's action id selects which to put on the
-    /// clipboard ("copy_tsv" / "copy_json" / "copy_insert").
-    DbRowDetail {
-        /// Tab-separated values.
-        tsv: String,
-        /// JSON object `{col: value, …}`.
-        json: String,
-        /// `INSERT INTO … VALUES (…);` statement.
-        insert: String,
-    },
 }

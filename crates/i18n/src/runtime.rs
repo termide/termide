@@ -588,6 +588,13 @@ impl Translation for RuntimeTranslation {
         db_total_unknown,
         db_copied,
         db_copied_cell,
+        db_edit_needs_primary_key,
+        db_edit_title,
+        db_edit_save,
+        db_edit_null_checkbox,
+        db_edit_null_value,
+        db_edit_saved,
+        db_edit_row_gone,
         db_copied_row,
         db_copy_tsv,
         db_copy_json,
@@ -621,6 +628,10 @@ impl Translation for RuntimeTranslation {
 
     fn db_total_fmt(&self, total: i64) -> String {
         self.format("db_total_fmt", &[("total", &total.to_string())])
+    }
+
+    fn db_edit_failed_fmt(&self, error: &str) -> String {
+        self.format("db_edit_failed_fmt", &[("error", error)])
     }
 
     fn db_sort_fmt(&self, column: &str, arrow: &str) -> String {

@@ -4,7 +4,8 @@ use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKin
 use termide_core::{KeyChord, PanelEvent};
 use termide_db::{Condition, FilterOp, SortDir, TypeCategory};
 use termide_modal::{
-    ActionButton, ActiveModal, DbFilterColumn, DbFilterModal, DbFilterResult, InfoActionModal,
+    ActiveModal, DbFilterColumn, DbFilterModal, DbFilterResult, DbRowEditColumn, DbRowEditModal,
+    DbRowEditResult,
 };
 use termide_state::PendingAction;
 
@@ -133,6 +134,16 @@ impl DbPanel {
     fn handle_grid_key(&mut self, key: KeyEvent) -> Vec<PanelEvent> {
         if !self.is_connected() {
             return vec![];
+        }
+
+        // An open cell editor owns the keyboard: typing must not reach the
+        // grid's navigation or its action hotkeys.
+        if self.edit.is_some() {
+            return self.handle_edit_key(key);
+        }
+
+        if key.code == KeyCode::Enter {
+            return self.begin_edit();
         }
 
         // Configurable action hotkeys (see [database.keybindings]).
@@ -491,27 +502,195 @@ impl DbPanel {
         ]
     }
 
-    /// Build the row-detail modal for the current row: a key→value list plus
-    /// copy-format buttons. The three copy formats are precomputed and carried
-    /// in the `PendingAction` so the app can copy without calling back here.
+    /// Start editing the cell under the cursor.
+    ///
+    /// Refused — with a message in the status line — when the row cannot be
+    /// addressed: no table, no rows, a page still loading, or a table without a
+    /// primary key. Better to say so than to open an editor whose Enter would
+    /// fail.
+    fn begin_edit(&mut self) -> Vec<PanelEvent> {
+        let t = termide_i18n::t();
+        if self.selected_table.is_none() || self.page.rows.is_empty() {
+            return vec![];
+        }
+        if self.loading_page() {
+            return vec![];
+        }
+        if self.primary_key.is_empty() {
+            self.query_error = Some(t.db_edit_needs_primary_key().to_string());
+            return self.redraw();
+        }
+        let Some(row) = self.page.rows.get(self.cursor_row) else {
+            return vec![];
+        };
+        let Some(value) = row.get(self.cursor_col) else {
+            return vec![];
+        };
+        // A NULL cell opens as an empty field: typing replaces it with a value,
+        // and leaving it empty writes an empty value rather than NULL. Use the
+        // row editor to put NULL back.
+        let text = if value.is_null() {
+            String::new()
+        } else {
+            value.display()
+        };
+        let caret = text.chars().count();
+        self.query_error = None;
+        self.edit = Some(crate::CellEdit {
+            row: self.cursor_row,
+            col: self.cursor_col,
+            original: text.clone(),
+            text,
+            caret,
+            saving: false,
+        });
+        self.redraw()
+    }
+
+    /// Keys while a cell editor is open: Enter commits, Escape cancels, the
+    /// rest edits the text.
+    fn handle_edit_key(&mut self, key: KeyEvent) -> Vec<PanelEvent> {
+        let Some(edit) = self.edit.as_mut() else {
+            return vec![];
+        };
+        // While the write is in flight the editor is read-only; only Escape
+        // (below) still applies, so a held Enter cannot queue a second write.
+        if edit.saving && key.code != KeyCode::Esc {
+            return vec![];
+        }
+
+        match key.code {
+            KeyCode::Enter => return self.commit_edit(),
+            KeyCode::Esc => {
+                self.edit = None;
+                return self.redraw();
+            }
+            KeyCode::Char(c) => {
+                let byte = char_index_to_byte(&edit.text, edit.caret);
+                edit.text.insert(byte, c);
+                edit.caret += 1;
+            }
+            KeyCode::Backspace => {
+                if edit.caret > 0 {
+                    let start = char_index_to_byte(&edit.text, edit.caret - 1);
+                    let end = char_index_to_byte(&edit.text, edit.caret);
+                    edit.text.replace_range(start..end, "");
+                    edit.caret -= 1;
+                }
+            }
+            KeyCode::Delete => {
+                let len = edit.text.chars().count();
+                if edit.caret < len {
+                    let start = char_index_to_byte(&edit.text, edit.caret);
+                    let end = char_index_to_byte(&edit.text, edit.caret + 1);
+                    edit.text.replace_range(start..end, "");
+                }
+            }
+            KeyCode::Left => edit.caret = edit.caret.saturating_sub(1),
+            KeyCode::Right => edit.caret = (edit.caret + 1).min(edit.text.chars().count()),
+            KeyCode::Home => edit.caret = 0,
+            KeyCode::End => edit.caret = edit.text.chars().count(),
+            _ => return vec![],
+        }
+        self.redraw()
+    }
+
+    /// Commit the open editor. An unchanged value just closes it — no query.
+    fn commit_edit(&mut self) -> Vec<PanelEvent> {
+        let Some(edit) = self.edit.as_ref() else {
+            return vec![];
+        };
+        if !edit.is_dirty() {
+            self.edit = None;
+            return self.redraw();
+        }
+        let (Some(table), Some(column)) = (
+            self.selected_table.clone(),
+            self.page.columns.get(edit.col).cloned(),
+        ) else {
+            self.edit = None;
+            return self.redraw();
+        };
+        let Some(key) = self.row_key(edit.row) else {
+            self.query_error = Some(termide_i18n::t().db_edit_needs_primary_key().to_string());
+            self.edit = None;
+            return self.redraw();
+        };
+        // The typed text is interpreted against the column's type category, so
+        // a number column stores a number rather than its digits as text.
+        let category = self
+            .columns
+            .iter()
+            .find(|c| c.name == column)
+            .map(|c| c.category)
+            .unwrap_or(TypeCategory::Text);
+        let value = parse_value(category, &edit.text);
+
+        let rx = match &self.conn {
+            crate::ConnState::Connected(conn) => {
+                Some(conn.update_cell(table, key, column, value.clone()))
+            }
+            _ => None,
+        };
+        if let Some(rx) = rx {
+            self.update_rx = Some(rx);
+            if let Some(edit) = self.edit.as_mut() {
+                edit.saving = true;
+            }
+            self.pending_value = Some(value);
+        }
+        self.redraw()
+    }
+
+    /// Primary-key columns and values for the row at `index` in the page.
+    /// `None` when the page does not carry every key column.
+    pub(crate) fn row_key(&self, index: usize) -> Option<Vec<(String, termide_db::DbValue)>> {
+        if self.primary_key.is_empty() {
+            return None;
+        }
+        let row = self.page.rows.get(index)?;
+        self.primary_key
+            .iter()
+            .map(|name| {
+                let col = self.page.columns.iter().position(|c| c == name)?;
+                Some((name.clone(), row.get(col)?.clone()))
+            })
+            .collect()
+    }
+
+    /// Open the row editor for the current row.
+    ///
+    /// It is also the row *viewer*: values are shown in full rather than
+    /// clipped to a column width, and the copy-format buttons stay on the
+    /// button bar. Without a primary key the fields are read-only and the modal
+    /// says why, so the row can still be read and copied.
     fn open_row_detail(&mut self) {
         let names = self.column_names();
         let Some(row) = self.page.rows.get(self.cursor_row) else {
             return;
         };
         let table = self.selected_table.clone().unwrap_or_default();
+        let t = termide_i18n::t();
 
-        let lines: Vec<(String, String)> = names
+        let columns: Vec<DbRowEditColumn> = names
             .iter()
             .enumerate()
             .map(|(i, name)| {
-                let v = row.get(i);
-                let text = match v {
-                    Some(v) if v.is_null() => "NULL".to_string(),
-                    Some(v) => v.display(),
-                    None => String::new(),
+                let value = match row.get(i) {
+                    Some(v) if v.is_null() => None,
+                    Some(v) => Some(v.display()),
+                    None => Some(String::new()),
                 };
-                (name.clone(), text)
+                DbRowEditColumn {
+                    name: name.clone(),
+                    value,
+                    nullable: self
+                        .columns
+                        .iter()
+                        .find(|c| &c.name == name)
+                        .is_some_and(|c| c.nullable),
+                    is_key: self.primary_key.iter().any(|k| k == name),
+                }
             })
             .collect();
 
@@ -523,19 +702,54 @@ impl DbPanel {
         let json = row_to_json(&names, row);
         let insert = row_to_insert(&table, &names, row);
 
-        let t = termide_i18n::t();
-        let buttons = vec![
-            ActionButton::new(t.db_copy_tsv(), "copy_tsv"),
-            ActionButton::new(t.db_copy_json(), "copy_json"),
-            ActionButton::new(t.db_copy_insert(), "copy_insert"),
-            ActionButton::new(t.git_action_close(), "close"),
-        ];
-        let title = t.db_row_title_fmt(&table);
-        let modal = InfoActionModal::new(title, lines, buttons);
+        let notice = self
+            .primary_key
+            .is_empty()
+            .then(|| t.db_edit_needs_primary_key().to_string());
+        let modal = DbRowEditModal::new(t.db_row_title_fmt(&table), columns, notice);
         self.modal_request = Some((
-            PendingAction::DbRowDetail { tsv, json, insert },
-            ActiveModal::InfoAction(Box::new(modal)),
+            PendingAction::DbRowEdit {
+                row: self.cursor_row,
+                tsv,
+                json,
+                insert,
+            },
+            ActiveModal::DbRowEdit(Box::new(modal)),
         ));
+    }
+
+    /// Apply what the row editor returned: a copy action, or one UPDATE per
+    /// changed column.
+    ///
+    /// The updates are queued and sent one at a time — the connection runs a
+    /// single statement at a time, and applying them in order means a failure
+    /// stops the rest instead of leaving half a row written by racing queries.
+    pub fn apply_row_edit(&mut self, row: usize, result: DbRowEditResult) {
+        if result.copy.is_some() || result.changes.is_empty() {
+            return;
+        }
+        let Some(key) = self.row_key(row) else {
+            self.edit_status = Some((
+                termide_i18n::t().db_edit_needs_primary_key().to_string(),
+                true,
+            ));
+            return;
+        };
+        self.edit_row = Some(row);
+        self.edit_key = Some(key);
+        self.edit_queue = result
+            .changes
+            .into_iter()
+            .map(|(column, value)| {
+                let category = self.category_of(&column);
+                let value = match value {
+                    Some(text) => parse_value(category, &text),
+                    None => termide_db::DbValue::Null,
+                };
+                (column, value)
+            })
+            .collect();
+        self.send_next_row_update();
     }
 
     /// Open the per-column filter modal listing every column.
@@ -629,4 +843,14 @@ impl DbPanel {
     fn redraw(&self) -> Vec<PanelEvent> {
         vec![PanelEvent::NeedsRedraw, self.status_event()]
     }
+}
+
+/// Byte offset of character `index` in `text` (its length when past the end).
+/// Cell values are arbitrary UTF-8, so the caret is counted in characters and
+/// converted here rather than indexing bytes directly.
+fn char_index_to_byte(text: &str, index: usize) -> usize {
+    text.char_indices()
+        .nth(index)
+        .map(|(byte, _)| byte)
+        .unwrap_or(text.len())
 }

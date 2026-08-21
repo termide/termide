@@ -10,6 +10,8 @@ use termide_db::SortDir;
 use termide_ui::ScrollBar;
 use termide_ui_render::InlineSelector;
 
+use termide_core::ThemeColors;
+
 use crate::{ConnState, DbPanel, Section};
 
 const MAX_COL_WIDTH: usize = 40;
@@ -242,14 +244,26 @@ impl DbPanel {
                 if x >= max_x {
                     break;
                 }
+                let editing = self.edit.as_ref().filter(|e| e.row == abs && e.col == j);
                 let value = row.get(j);
                 let (text, is_null) = match value {
                     Some(v) if v.is_null() => ("NULL".to_string(), true),
                     Some(v) => (v.display(), false),
                     None => (String::new(), false),
                 };
-                let slot = format!(" {} ", pad(&text, widths[j]));
                 let is_cur_cell = is_cur_row && j == self.cursor_col;
+
+                if let Some(edit) = editing {
+                    // The editor owns the slot: the value is drawn from the
+                    // buffer being typed, with the caret marked inside it, and
+                    // without the inverse-video cell highlight that would hide
+                    // the caret.
+                    x = render_cell_editor(buf, x, y, max_x, widths[j], edit, row_style, &theme);
+                    x = put(buf, x, y, max_x, "│", border);
+                    continue;
+                }
+
+                let slot = format!(" {} ", pad(&text, widths[j]));
                 let mut style = row_style;
                 if is_null && !is_cur_cell {
                     style = style.fg(theme.disabled);
@@ -422,4 +436,49 @@ fn pad(s: &str, w: usize) -> String {
         }
         out
     }
+}
+
+/// Draw an open cell editor into its grid slot.
+///
+/// The visible window scrolls with the caret so a value longer than the column
+/// stays editable, and the caret cell is inverse-video — the whole-slot
+/// highlight used for a selected cell would swallow it. While the write is in
+/// flight the text is dimmed and no caret is drawn: the editor is read-only
+/// until the server answers.
+#[allow(clippy::too_many_arguments)]
+fn render_cell_editor(
+    buf: &mut Buffer,
+    x: u16,
+    y: u16,
+    max_x: u16,
+    width: usize,
+    edit: &crate::CellEdit,
+    row_style: Style,
+    theme: &ThemeColors,
+) -> u16 {
+    let chars: Vec<char> = edit.text.chars().collect();
+    // Keep the caret inside the window, biased to show text before it.
+    let start = edit.caret.saturating_sub(width.saturating_sub(1));
+    let visible: String = chars.iter().skip(start).take(width).collect();
+
+    let base = if edit.saving {
+        row_style.fg(theme.disabled)
+    } else {
+        row_style.fg(theme.fg).bg(theme.selection_bg)
+    };
+    let mut cursor_x = x;
+    cursor_x = put(buf, cursor_x, y, max_x, " ", base);
+    let text_start = cursor_x;
+    cursor_x = put(buf, cursor_x, y, max_x, &pad(&visible, width), base);
+    cursor_x = put(buf, cursor_x, y, max_x, " ", base);
+
+    if !edit.saving {
+        let caret_col = text_start + (edit.caret - start) as u16;
+        if caret_col < max_x && caret_col < text_start + width as u16 {
+            if let Some(cell) = buf.cell_mut((caret_col, y)) {
+                cell.set_style(base.add_modifier(Modifier::REVERSED));
+            }
+        }
+    }
+    cursor_x
 }

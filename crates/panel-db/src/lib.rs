@@ -73,6 +73,10 @@ pub struct DbPanel {
     tables: Vec<String>,
     selected_table: Option<String>,
     columns: Vec<ColumnInfo>,
+    /// Primary-key columns of the selected table, in key order. Empty means the
+    /// table has no key, so its rows cannot be addressed and editing is
+    /// refused — see [`CellEdit`].
+    primary_key: Vec<String>,
 
     // --- current page (sliding window) ---
     page: Page,
@@ -105,6 +109,8 @@ pub struct DbPanel {
     databases_rx: Option<Receiver<Result<Vec<String>, DbError>>>,
     tables_rx: Option<Receiver<Result<Vec<String>, DbError>>>,
     columns_rx: Option<Receiver<Result<Vec<ColumnInfo>, DbError>>>,
+    primary_key_rx: Option<Receiver<Result<Vec<String>, DbError>>>,
+    update_rx: Option<Receiver<Result<u64, DbError>>>,
     count_rx: Option<Receiver<Result<i64, DbError>>>,
     page_rx: Option<Receiver<Result<Page, DbError>>>,
     loading: bool,
@@ -124,8 +130,55 @@ pub struct DbPanel {
     /// Mouse hit-test geometry captured during render.
     geom: GridGeometry,
 
+    /// In-place cell edit in progress, if any.
+    edit: Option<CellEdit>,
+    /// Value handed to the in-flight UPDATE, applied to the grid once the
+    /// server confirms it — avoids refetching the page for a single cell.
+    pending_value: Option<termide_db::DbValue>,
+    /// Message about the last edit, drained by `tick` into a status update.
+    edit_status: Option<(String, bool)>,
+    /// Remaining column updates from the row editor, applied one at a time —
+    /// the connection runs one statement at a time, and in-order application
+    /// means a failure stops the rest instead of half-writing a row.
+    edit_queue: std::collections::VecDeque<(String, termide_db::DbValue)>,
+    /// Row and key the queued updates address.
+    edit_row: Option<usize>,
+    edit_key: Option<Vec<(String, termide_db::DbValue)>>,
+    /// Column of the update currently in flight, so its value can be written
+    /// into the grid when the server confirms it.
+    edit_column: Option<String>,
+
     /// Pending modal request, polled by the app via `take_modal_request`.
     modal_request: Option<(PendingAction, ActiveModal)>,
+}
+
+/// An in-place cell edit: what is being typed, where the caret sits, and which
+/// cell it belongs to.
+///
+/// NULL is deliberately not representable here — a cell editor is a text field,
+/// and clearing it writes an empty value. Setting NULL is the row editor's job,
+/// where a column that accepts NULL gets an explicit checkbox.
+#[derive(Debug, Clone)]
+pub(crate) struct CellEdit {
+    /// Row index within the loaded page, so a reload can invalidate the edit.
+    pub(crate) row: usize,
+    pub(crate) col: usize,
+    /// Text as typed so far.
+    pub(crate) text: String,
+    /// Caret position in characters (never bytes — values are UTF-8).
+    pub(crate) caret: usize,
+    /// Text the edit started from, to tell "saved" from "nothing changed".
+    pub(crate) original: String,
+    /// True while the UPDATE is in flight: the cell stays open but read-only so
+    /// a second Enter cannot queue a second write.
+    pub(crate) saving: bool,
+}
+
+impl CellEdit {
+    /// Whether the text differs from what the cell held when editing started.
+    pub(crate) fn is_dirty(&self) -> bool {
+        self.text != self.original
+    }
 }
 
 /// Screen geometry captured each render for mouse hit-testing.
@@ -169,6 +222,7 @@ impl DbPanel {
             tables: Vec::new(),
             selected_table: None,
             columns: Vec::new(),
+            primary_key: Vec::new(),
             page: Page::default(),
             total_rows: None,
             offset: 0,
@@ -187,6 +241,8 @@ impl DbPanel {
             databases_rx: None,
             tables_rx: None,
             columns_rx: None,
+            primary_key_rx: None,
+            update_rx: None,
             count_rx: None,
             page_rx: None,
             loading: true,
@@ -197,6 +253,13 @@ impl DbPanel {
             last_area: Rect::default(),
             visible_rows: 0,
             geom: GridGeometry::default(),
+            edit: None,
+            pending_value: None,
+            edit_status: None,
+            edit_queue: std::collections::VecDeque::new(),
+            edit_row: None,
+            edit_key: None,
+            edit_column: None,
             modal_request: None,
         }
     }
@@ -346,6 +409,10 @@ impl DbPanel {
 
     /// (Re)issue columns + count + page queries for the selected table.
     fn reload_table(&mut self) {
+        // Row indices and the key belong to the old table; an edit in progress
+        // would address the wrong row.
+        self.edit = None;
+        self.primary_key.clear();
         self.offset = 0;
         self.cursor_row = 0;
         self.cursor_col = 0;
@@ -370,6 +437,7 @@ impl DbPanel {
         let rxs = if let ConnState::Connected(conn) = &self.conn {
             Some((
                 conn.columns(table.clone()),
+                conn.primary_key(table.clone()),
                 conn.count(table.clone(), filters.clone()),
                 conn.page(PageRequest {
                     table,
@@ -382,12 +450,115 @@ impl DbPanel {
         } else {
             None
         };
-        if let Some((c, n, p)) = rxs {
+        if let Some((c, k, n, p)) = rxs {
             self.columns_rx = Some(c);
+            self.primary_key_rx = Some(k);
             self.count_rx = Some(n);
             self.page_rx = Some(p);
             self.loading = true;
         }
+    }
+
+    /// Send the next queued row-editor update, if any.
+    pub(crate) fn send_next_row_update(&mut self) {
+        let (Some(table), Some(key)) = (self.selected_table.clone(), self.edit_key.clone()) else {
+            self.edit_queue.clear();
+            return;
+        };
+        let Some((column, value)) = self.edit_queue.pop_front() else {
+            // Queue drained: report once for the whole row.
+            if self.edit_row.take().is_some() {
+                self.edit_key = None;
+                self.edit_status = Some((termide_i18n::t().db_edit_saved().to_string(), false));
+            }
+            return;
+        };
+        let rx = match &self.conn {
+            ConnState::Connected(conn) => {
+                Some(conn.update_cell(table, key, column.clone(), value.clone()))
+            }
+            _ => None,
+        };
+        if let Some(rx) = rx {
+            self.edit_column = Some(column);
+            self.pending_value = Some(value);
+            self.update_rx = Some(rx);
+        } else {
+            self.edit_queue.clear();
+            self.edit_row = None;
+            self.edit_key = None;
+        }
+    }
+
+    /// Apply the outcome of the in-flight cell UPDATE.
+    ///
+    /// One changed row is the success case, and the new value is written into
+    /// the loaded page rather than refetching it — the server confirmed exactly
+    /// this row. Zero rows means the row is not there any more (deleted, or its
+    /// key changed), which the user is told about instead of being left with a
+    /// grid that disagrees with the database.
+    fn finish_edit(&mut self, result: Result<u64, DbError>) {
+        // A row-editor update has no open cell editor; it carries its own row
+        // and column instead.
+        if let (Some(row), Some(column)) = (self.edit_row, self.edit_column.take()) {
+            self.finish_row_update(row, &column, result);
+            return;
+        }
+        let Some(edit) = self.edit.take() else {
+            return;
+        };
+        let value = self.pending_value.take();
+        let t = termide_i18n::t();
+        match result {
+            Ok(1) => {
+                if let (Some(value), Some(row)) = (value, self.page.rows.get_mut(edit.row)) {
+                    if let Some(cell) = row.get_mut(edit.col) {
+                        *cell = value;
+                    }
+                }
+                self.query_error = None;
+                self.edit_status = Some((t.db_edit_saved().to_string(), false));
+            }
+            Ok(_) => {
+                self.edit_status = Some((t.db_edit_row_gone().to_string(), true));
+            }
+            Err(e) => {
+                self.edit_status = Some((t.db_edit_failed_fmt(&e.to_string()), true));
+            }
+        }
+    }
+
+    /// Apply one row-editor update and continue with the queue.
+    fn finish_row_update(&mut self, row: usize, column: &str, result: Result<u64, DbError>) {
+        let value = self.pending_value.take();
+        let t = termide_i18n::t();
+        match result {
+            Ok(1) => {
+                if let (Some(value), Some(col)) =
+                    (value, self.page.columns.iter().position(|c| c == column))
+                {
+                    if let Some(cell) = self.page.rows.get_mut(row).and_then(|r| r.get_mut(col)) {
+                        *cell = value;
+                    }
+                }
+                self.send_next_row_update();
+            }
+            Ok(_) => {
+                self.abandon_row_edit(t.db_edit_row_gone().to_string());
+            }
+            Err(e) => {
+                self.abandon_row_edit(t.db_edit_failed_fmt(&e.to_string()));
+            }
+        }
+    }
+
+    /// Drop the rest of a row edit after a failure, reporting why.
+    fn abandon_row_edit(&mut self, message: String) {
+        self.edit_queue.clear();
+        self.edit_row = None;
+        self.edit_key = None;
+        self.edit_column = None;
+        self.edit_status = Some((message, true));
     }
 
     /// Refresh the catalog and current view. While still choosing a database
@@ -565,6 +736,24 @@ impl DbPanel {
                 if let Ok(cols) = result {
                     self.columns = cols;
                 }
+                changed = true;
+            }
+        }
+
+        if let Some(rx) = &self.primary_key_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.primary_key_rx = None;
+                // A catalog query that fails leaves the table un-editable
+                // rather than guessing a key.
+                self.primary_key = result.unwrap_or_default();
+                changed = true;
+            }
+        }
+
+        if let Some(rx) = &self.update_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.update_rx = None;
+                self.finish_edit(result);
                 changed = true;
             }
         }
@@ -767,11 +956,16 @@ impl Panel for DbPanel {
     }
 
     fn tick(&mut self) -> Vec<PanelEvent> {
-        if self.poll_async() {
-            vec![PanelEvent::NeedsRedraw, self.status_event()]
-        } else {
-            vec![]
+        let changed = self.poll_async();
+        let mut events = Vec::new();
+        if let Some((message, is_error)) = self.edit_status.take() {
+            events.push(PanelEvent::SetStatusMessage { message, is_error });
         }
+        if changed {
+            events.push(PanelEvent::NeedsRedraw);
+            events.push(self.status_event());
+        }
+        events
     }
 
     fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
@@ -795,7 +989,9 @@ impl Panel for DbPanel {
     }
 
     fn captures_escape(&self) -> bool {
-        self.table_dd.open || self.db_dd.open
+        // An open cell editor takes Escape to cancel the edit, so it must not
+        // reach the app (where it would close the panel).
+        self.table_dd.open || self.db_dd.open || self.edit.is_some()
     }
 
     fn width_preference(&self) -> WidthPreference {
@@ -815,5 +1011,244 @@ impl Panel for DbPanel {
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use termide_core::KeyChord;
+
+    /// A SQLite file with one keyed table and one without, opened read-only —
+    /// the same way a bookmark opens it.
+    fn fixture() -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("edit.db");
+        let setup = format!("sqlite://{}?mode=rwc", path.display());
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let pool = sqlx::SqlitePool::connect(&setup).await.unwrap();
+            sqlx::query("CREATE TABLE keyed (id INTEGER PRIMARY KEY, name TEXT, n INTEGER)")
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO keyed (id, name, n) VALUES (1, 'alpha', 10), (2, 'beta', 20)")
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("CREATE TABLE unkeyed (a TEXT)")
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO unkeyed (a) VALUES ('x')")
+                .execute(&pool)
+                .await
+                .unwrap();
+            pool.close().await;
+        });
+        (dir, format!("sqlite://{}", path.display()))
+    }
+
+    fn press(panel: &mut DbPanel, code: KeyCode) {
+        panel.handle_key_impl(KeyChord::identity(KeyEvent::new(code, KeyModifiers::NONE)));
+    }
+
+    /// Drive the panel until `ready` holds, pumping the async receivers the way
+    /// the app's tick does.
+    fn settle(panel: &mut DbPanel, ready: impl Fn(&DbPanel) -> bool) {
+        for _ in 0..200 {
+            panel.poll_async();
+            if ready(panel) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("panel did not reach the expected state");
+    }
+
+    fn open_table(url: &str, table: &str) -> DbPanel {
+        let mut panel = DbPanel::new(url, "test");
+        panel.page_rows = 20;
+        settle(&mut panel, |p| !p.tables.is_empty());
+        panel.selected_table = Some(table.to_string());
+        panel.reload_table();
+        settle(&mut panel, |p| {
+            !p.page.rows.is_empty() && p.primary_key_rx.is_none() && p.columns_rx.is_none()
+        });
+        panel.section = Section::Grid;
+        panel
+    }
+
+    #[test]
+    fn enter_opens_the_cell_editor_seeded_with_the_current_value() {
+        let (_dir, url) = fixture();
+        let mut panel = open_table(&url, "keyed");
+        panel.cursor_row = 0;
+        panel.cursor_col = 1; // name
+
+        press(&mut panel, KeyCode::Enter);
+
+        let edit = panel.edit.as_ref().expect("editor should be open");
+        assert_eq!(edit.text, "alpha");
+        assert_eq!(edit.caret, "alpha".chars().count());
+        assert!(!edit.is_dirty());
+    }
+
+    /// Escape must leave both the cell and the database untouched.
+    #[test]
+    fn escape_discards_the_edit() {
+        let (_dir, url) = fixture();
+        let mut panel = open_table(&url, "keyed");
+        panel.cursor_col = 1;
+
+        press(&mut panel, KeyCode::Enter);
+        press(&mut panel, KeyCode::Char('!'));
+        press(&mut panel, KeyCode::Esc);
+
+        assert!(panel.edit.is_none());
+        assert_eq!(
+            panel.page.rows[0][1],
+            termide_db::DbValue::Text("alpha".into())
+        );
+    }
+
+    /// The second Enter writes the value and the grid shows it without a
+    /// refetch; the value must also be in the database.
+    #[test]
+    fn second_enter_saves_the_edit() {
+        let (_dir, url) = fixture();
+        let mut panel = open_table(&url, "keyed");
+        panel.cursor_col = 1;
+
+        press(&mut panel, KeyCode::Enter);
+        press(&mut panel, KeyCode::Backspace);
+        press(&mut panel, KeyCode::Char('X'));
+        press(&mut panel, KeyCode::Enter);
+        settle(&mut panel, |p| p.edit.is_none() && p.update_rx.is_none());
+
+        assert_eq!(
+            panel.page.rows[0][1],
+            termide_db::DbValue::Text("alphX".into()),
+            "grid did not pick up the saved value"
+        );
+        let (message, is_error) = panel.edit_status.clone().expect("status message");
+        assert!(!is_error, "{message}");
+
+        // Confirm the write landed by reading through a fresh connection.
+        let conn = termide_db::DbConnection::connect(&url).unwrap();
+        let page = conn
+            .page(PageRequest {
+                table: "keyed".to_string(),
+                filters: vec![],
+                order_by: vec![],
+                limit: 10,
+                offset: 0,
+            })
+            .recv()
+            .unwrap()
+            .unwrap();
+        assert!(page
+            .rows
+            .iter()
+            .any(|r| r[1] == termide_db::DbValue::Text("alphX".into())));
+    }
+
+    /// An unchanged value closes the editor without touching the database.
+    #[test]
+    fn enter_on_an_unchanged_value_runs_no_query() {
+        let (_dir, url) = fixture();
+        let mut panel = open_table(&url, "keyed");
+        panel.cursor_col = 1;
+
+        press(&mut panel, KeyCode::Enter);
+        press(&mut panel, KeyCode::Enter);
+
+        assert!(panel.edit.is_none());
+        assert!(panel.update_rx.is_none(), "no UPDATE should be in flight");
+        assert!(panel.edit_status.is_none());
+    }
+
+    /// A number column stores a number, not the digits as text.
+    #[test]
+    fn numeric_column_is_written_as_a_number() {
+        let (_dir, url) = fixture();
+        let mut panel = open_table(&url, "keyed");
+        panel.cursor_col = 2; // n
+
+        press(&mut panel, KeyCode::Enter);
+        press(&mut panel, KeyCode::Backspace);
+        press(&mut panel, KeyCode::Backspace);
+        press(&mut panel, KeyCode::Char('4'));
+        press(&mut panel, KeyCode::Char('2'));
+        press(&mut panel, KeyCode::Enter);
+        settle(&mut panel, |p| p.edit.is_none() && p.update_rx.is_none());
+
+        assert_eq!(panel.page.rows[0][2], termide_db::DbValue::Int(42));
+    }
+
+    /// The row editor's changes are applied one column at a time; every change
+    /// must land, and NULL must clear the cell rather than store text.
+    #[test]
+    fn row_editor_changes_are_all_applied() {
+        let (_dir, url) = fixture();
+        let mut panel = open_table(&url, "keyed");
+
+        panel.apply_row_edit(
+            0,
+            termide_modal::DbRowEditResult {
+                changes: vec![
+                    ("name".to_string(), None),
+                    ("n".to_string(), Some("77".to_string())),
+                ],
+                copy: None,
+            },
+        );
+        settle(&mut panel, |p| {
+            p.edit_queue.is_empty() && p.update_rx.is_none() && p.edit_row.is_none()
+        });
+
+        assert_eq!(panel.page.rows[0][1], termide_db::DbValue::Null);
+        assert_eq!(panel.page.rows[0][2], termide_db::DbValue::Int(77));
+        let (message, is_error) = panel.edit_status.clone().expect("status message");
+        assert!(!is_error, "{message}");
+    }
+
+    /// A copy action carries no changes, so nothing is written.
+    #[test]
+    fn row_editor_copy_action_writes_nothing() {
+        let (_dir, url) = fixture();
+        let mut panel = open_table(&url, "keyed");
+
+        panel.apply_row_edit(
+            0,
+            termide_modal::DbRowEditResult {
+                changes: vec![],
+                copy: Some("json".to_string()),
+            },
+        );
+
+        assert!(panel.update_rx.is_none());
+        assert!(panel.edit_queue.is_empty());
+        assert_eq!(
+            panel.page.rows[0][1],
+            termide_db::DbValue::Text("alpha".into())
+        );
+    }
+
+    /// Without a primary key there is no way to name one row, so the editor
+    /// refuses to open and says why.
+    #[test]
+    fn table_without_a_primary_key_refuses_editing() {
+        let (_dir, url) = fixture();
+        let mut panel = open_table(&url, "unkeyed");
+
+        press(&mut panel, KeyCode::Enter);
+
+        assert!(panel.edit.is_none());
+        assert!(
+            panel.query_error.is_some(),
+            "the refusal must be visible to the user"
+        );
     }
 }
