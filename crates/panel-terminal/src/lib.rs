@@ -68,8 +68,8 @@ pub struct Terminal {
     size: PtySize,
     /// Process activity flag
     is_alive: Arc<Mutex<bool>>,
-    /// Terminal title prefix (user@host//dir)
-    title_prefix: String,
+    /// Where the panel title text comes from.
+    title: TitleSource,
     /// Initial working directory (set when terminal was created)
     initial_cwd: std::path::PathBuf,
     /// Cached theme for rendering
@@ -119,6 +119,23 @@ pub struct Terminal {
     /// Cached foreground command name (avoids /proc reads on every render frame).
     /// Mutex for interior mutability from `&self` in `title()`.
     cached_fg_command: std::sync::Mutex<(String, std::time::Instant)>,
+    /// Cached shell working directory, for the same reason as
+    /// `cached_fg_command`: `title()` runs per frame and takes `&self`.
+    cached_cwd: std::sync::Mutex<Option<(std::path::PathBuf, std::time::Instant)>>,
+    /// Last working directory reported to the app, so a `cd` inside the shell
+    /// is announced once instead of on every tick.
+    last_reported_cwd: Option<std::path::PathBuf>,
+}
+
+/// Where a terminal panel's title text comes from.
+#[derive(Debug, Clone)]
+enum TitleSource {
+    /// A shell: `user@host/<current directory>`, where the directory tracks
+    /// the shell's own `cd`.
+    Shell { user_host: String },
+    /// A fixed command (ssh, a tool run in a panel): the command line itself,
+    /// which has no directory to track.
+    Command(String),
 }
 
 /// Build HotkeyTable for the terminal panel from config.
@@ -227,7 +244,7 @@ impl Terminal {
             screen,
             size,
             is_alive,
-            title_prefix: String::new(),
+            title: TitleSource::Command(String::new()),
             initial_cwd: std::path::PathBuf::new(),
             cached_theme: Theme::default(),
             keybindings: TerminalKeybindings::default(),
@@ -253,6 +270,8 @@ impl Terminal {
                 "shell".to_string(),
                 std::time::Instant::now(),
             )),
+            cached_cwd: std::sync::Mutex::new(None),
+            last_reported_cwd: None,
         }
     }
 
@@ -331,11 +350,7 @@ impl Terminal {
         let hostname = std::env::var("HOSTNAME")
             .or_else(|_| std::env::var("HOST"))
             .unwrap_or_else(|_| "localhost".to_string());
-        let current_dir = std::env::current_dir()
-            .ok()
-            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-            .unwrap_or_else(|| "~".to_string());
-        let title_prefix = format!("{}@{}//{}", username, hostname, current_dir);
+        let user_host = format!("{}@{}", username, hostname);
 
         let mut term = Self::build(
             pty,
@@ -347,7 +362,7 @@ impl Terminal {
             is_alive,
             has_new_data,
         );
-        term.title_prefix = title_prefix;
+        term.title = TitleSource::Shell { user_host };
         term.initial_cwd = working_dir;
         Ok(term)
     }
@@ -407,7 +422,7 @@ impl Terminal {
             is_alive,
             has_new_data,
         );
-        term.title_prefix = command.to_string();
+        term.title = TitleSource::Command(command.to_string());
         term.initial_cwd = working_dir;
         Ok(term)
     }
@@ -639,6 +654,55 @@ impl Terminal {
         result
     }
 
+    /// Name of the directory the shell is currently in, for the panel title.
+    ///
+    /// Read from the live shell process, so a `cd` inside the shell shows up
+    /// in the title — the panel's starting directory only serves as a
+    /// fallback. Cached on the same TTL as the foreground command because
+    /// both run on the render path.
+    fn cwd_label(&self) -> String {
+        let cwd = self.shell_cwd();
+        cwd.file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            // The filesystem root has no last component.
+            .unwrap_or_else(|| cwd.to_string_lossy().into_owned())
+    }
+
+    /// The shell's current working directory.
+    ///
+    /// Read from the live process so it follows a `cd`, cached on a short TTL
+    /// because both the title (every frame) and the app's panel-path collection
+    /// (every tick) ask for it.
+    fn shell_cwd(&self) -> std::path::PathBuf {
+        const CWD_TTL: std::time::Duration = std::time::Duration::from_millis(500);
+
+        // Recover from a poisoned lock instead of cascading the panic to every
+        // subsequent render.
+        let mut cache = self.cached_cwd.lock().unwrap_or_else(|e| e.into_inner());
+        let fresh = cache.as_ref().is_some_and(|(_, at)| at.elapsed() < CWD_TTL);
+        if !fresh {
+            *cache = Some((self.read_shell_cwd_raw(), std::time::Instant::now()));
+        }
+        cache
+            .as_ref()
+            .map(|(path, _)| path.clone())
+            .unwrap_or_else(|| self.initial_cwd.clone())
+    }
+
+    /// Read the shell's working directory from the live process, falling back
+    /// to the directory the panel was created in.
+    fn read_shell_cwd_raw(&self) -> std::path::PathBuf {
+        #[cfg(unix)]
+        if let Some(pid) = self.shell_pid {
+            // The shell's own cwd, not the foreground child's: that is what the
+            // shell prompt shows and what a `cd` changes.
+            if let Ok(path) = std::fs::read_link(format!("/proc/{}/cwd", pid)) {
+                return path;
+            }
+        }
+        self.initial_cwd.clone()
+    }
+
     /// Read foreground command from /proc (Unix) or process snapshot (Windows).
     fn read_foreground_command_raw(&self) -> String {
         if let Some(pid) = self.shell_pid {
@@ -753,7 +817,13 @@ impl Panel for Terminal {
     }
 
     fn title(&self) -> String {
-        format!("{} ({})", self.title_prefix, self.get_foreground_command())
+        let foreground = self.get_foreground_command();
+        match &self.title {
+            TitleSource::Shell { user_host } => {
+                format!("{}/{} ({})", user_host, self.cwd_label(), foreground)
+            }
+            TitleSource::Command(command) => format!("{} ({})", command, foreground),
+        }
     }
 
     fn prepare_render(&mut self, theme: &Theme, config: &std::sync::Arc<Config>) {
@@ -1158,17 +1228,28 @@ impl Panel for Terminal {
     }
 
     fn tick(&mut self) -> Vec<PanelEvent> {
+        let mut events = Vec::new();
+
+        // A `cd` inside the shell changes what this panel's directory means to
+        // the rest of the app (watched roots, the git panels' repository list).
+        // Nothing else can notice it, so announce it here — once per change.
+        let cwd = self.shell_cwd();
+        if self.last_reported_cwd.as_deref() != Some(cwd.as_path()) {
+            self.last_reported_cwd = Some(cwd);
+            events.push(PanelEvent::WorkingDirectoryChanged);
+        }
+
         // Handle auto-scroll during selection drag
         if !self.selection_drag_active {
-            return vec![];
+            return events;
         }
 
         let Some((_mouse_col, mouse_row)) = self.last_mouse_position else {
-            return vec![];
+            return events;
         };
 
         let Some(bounds) = self.panel_bounds else {
-            return vec![];
+            return events;
         };
 
         // Calculate inner area (without border)
@@ -1179,7 +1260,7 @@ impl Panel for Terminal {
 
         // Skip if no selection
         if screen.selection_start.is_none() {
-            return vec![];
+            return events;
         }
 
         let max_scroll = screen.scrollback.len();
@@ -1190,7 +1271,8 @@ impl Panel for Terminal {
             // Extend selection to top visible line
             let abs_row = screen.visual_to_absolute(0);
             screen.selection_end = Some((abs_row, 0));
-            return vec![PanelEvent::NeedsRedraw];
+            events.push(PanelEvent::NeedsRedraw);
+            return events;
         }
 
         // Auto-scroll down (mouse below panel)
@@ -1201,10 +1283,11 @@ impl Panel for Terminal {
             let abs_row = screen.visual_to_absolute(last_row);
             let cols = screen.cols.saturating_sub(1);
             screen.selection_end = Some((abs_row, cols));
-            return vec![PanelEvent::NeedsRedraw];
+            events.push(PanelEvent::NeedsRedraw);
+            return events;
         }
 
-        vec![]
+        events
     }
 
     fn should_auto_close(&self) -> bool {
@@ -1308,9 +1391,11 @@ impl Panel for Terminal {
     }
 
     fn to_session(&self, _session_dir: &std::path::Path) -> Option<SessionPanel> {
-        // Save terminal with initial working directory
+        // Save where the shell was last working, not where the panel was
+        // created: reopening the session should put the user back in the
+        // directory they left off in.
         Some(SessionPanel::Terminal {
-            working_dir: self.initial_cwd.clone(),
+            working_dir: self.shell_cwd(),
         })
     }
 
@@ -1323,7 +1408,10 @@ impl Panel for Terminal {
     }
 
     fn get_working_directory(&self) -> Option<std::path::PathBuf> {
-        Some(self.initial_cwd.clone())
+        // The shell's live directory, not the one the panel started in: opening
+        // a panel "here", the directory switcher and the git panels' repository
+        // search all mean the directory the user is actually working in.
+        Some(self.shell_cwd())
     }
 
     fn has_running_processes(&self) -> bool {
@@ -1397,5 +1485,144 @@ impl Drop for Terminal {
         if self.is_alive() {
             self.kill_processes();
         }
+    }
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::*;
+
+    /// The title must name the directory the shell actually runs in — it used
+    /// to read the *application's* cwd, so every terminal was labelled with the
+    /// session root no matter where it was opened.
+    #[test]
+    fn title_shows_the_shell_start_directory() {
+        let dir = std::env::temp_dir().join(format!("termide-title-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = std::fs::canonicalize(&dir).unwrap();
+        let spawned = Terminal::new_with_cwd(24, 80, Some(dir.clone()));
+        let title = spawned.as_ref().ok().map(|t| t.title());
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // No PTY available (sandboxed test runner) — nothing to assert.
+        let Some(title) = title else {
+            return;
+        };
+        let expected = format!("/{}", dir.file_name().unwrap().to_string_lossy());
+        assert!(
+            title.contains(&expected),
+            "title {title:?} does not name the shell directory as {expected:?}"
+        );
+    }
+
+    /// Reopening a session must land the shell where the user left off, so the
+    /// saved directory is the shell's live one, not the panel's starting one.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn session_saves_the_directory_the_shell_ended_in() {
+        let dir = std::env::temp_dir().join(format!("termide-session-cd-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("subdir")).unwrap();
+        let dir = std::fs::canonicalize(&dir).unwrap();
+        let Ok(mut term) = Terminal::new_with_cwd(24, 80, Some(dir.clone())) else {
+            let _ = std::fs::remove_dir_all(&dir);
+            return; // No PTY available.
+        };
+        term.send_input(b"cd subdir\n").unwrap();
+
+        let expected = dir.join("subdir");
+        let mut saved = None;
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            saved = match term.to_session(std::path::Path::new("/tmp")) {
+                Some(SessionPanel::Terminal { working_dir }) => Some(working_dir),
+                other => panic!("terminal saved as {other:?}"),
+            };
+            if saved.as_ref() == Some(&expected) {
+                break;
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            saved.as_ref(),
+            Some(&expected),
+            "session kept the directory the panel was opened in"
+        );
+    }
+
+    /// A `cd` inside the shell must reach the panel's reported directory too:
+    /// the directory switcher, "open a panel here" and the git panels' repo
+    /// search all read it, and the app is told to re-sync through
+    /// `PanelEvent::WorkingDirectoryChanged`.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn working_directory_follows_a_cd_inside_the_shell() {
+        let dir = std::env::temp_dir().join(format!("termide-cwd-cd-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("subdir")).unwrap();
+        let dir = std::fs::canonicalize(&dir).unwrap();
+        let Ok(mut term) = Terminal::new_with_cwd(24, 80, Some(dir.clone())) else {
+            let _ = std::fs::remove_dir_all(&dir);
+            return; // No PTY available.
+        };
+        assert_eq!(term.get_working_directory().as_ref(), Some(&dir));
+        // The first tick reports the starting directory; drain it so the
+        // announcement below can only come from the `cd`.
+        term.tick();
+        term.send_input(b"cd subdir\n").unwrap();
+
+        let expected = dir.join("subdir");
+        let mut announced = false;
+        let mut reported = None;
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            announced |= term
+                .tick()
+                .iter()
+                .any(|e| matches!(e, PanelEvent::WorkingDirectoryChanged));
+            reported = term.get_working_directory();
+            if reported.as_ref() == Some(&expected) {
+                break;
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            reported.as_ref(),
+            Some(&expected),
+            "panel still reports the directory it was opened in"
+        );
+        assert!(
+            announced,
+            "the directory change was never announced to the app"
+        );
+    }
+
+    /// A `cd` inside the shell must reach the title: it is read from the live
+    /// process rather than captured once at spawn time.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn title_follows_a_cd_inside_the_shell() {
+        let dir = std::env::temp_dir().join(format!("termide-title-cd-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("subdir")).unwrap();
+        let dir = std::fs::canonicalize(&dir).unwrap();
+        let Ok(mut term) = Terminal::new_with_cwd(24, 80, Some(dir.clone())) else {
+            let _ = std::fs::remove_dir_all(&dir);
+            return; // No PTY available.
+        };
+        term.send_input(b"cd subdir\n").unwrap();
+
+        // The shell needs a moment to run the builtin, and the title caches the
+        // lookup for 500ms; poll instead of guessing a single sleep.
+        let mut title = String::new();
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            title = term.title();
+            if title.contains("subdir") {
+                break;
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            title.contains("subdir"),
+            "title {title:?} did not follow the shell into subdir"
+        );
     }
 }

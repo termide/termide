@@ -9,6 +9,24 @@ use anyhow::Result;
 use termide_core::Panel;
 use termide_layout::{LayoutManager, PanelGroup, MIN_PANEL_HEIGHT};
 
+/// First existing directory at or above `dir`, or `None` when even the root is
+/// unreachable.
+///
+/// The session stores the directory a terminal was last working in, which can
+/// be gone by the next launch (a temp directory, an unmounted share). Spawning
+/// a shell there fails and would silently drop the panel, so fall back to the
+/// nearest surviving ancestor; `None` lets the terminal pick its own default.
+fn nearest_existing_dir(dir: &Path) -> Option<PathBuf> {
+    let mut candidate = Some(dir);
+    while let Some(path) = candidate {
+        if path.is_dir() {
+            return Some(path.to_path_buf());
+        }
+        candidate = path.parent();
+    }
+    None
+}
+
 fn fullscreen_preset(n: usize, focused: usize, area_height: u16) -> Vec<u16> {
     let collapsed_total = MIN_PANEL_HEIGHT as u32 * (n as u32 - 1);
     let focused_height = (area_height as u32)
@@ -267,7 +285,7 @@ fn construct_panel(
             }
         }
         SessionPanel::Terminal { working_dir } => {
-            Terminal::new_with_cwd(term_height, term_width, Some(working_dir))
+            Terminal::new_with_cwd(term_height, term_width, nearest_existing_dir(&working_dir))
                 .ok()
                 .map(|t| Box::new(t) as Box<dyn Panel + Send>)
         }
@@ -315,5 +333,29 @@ fn construct_panel(
         SessionPanel::Database { url, label } => {
             Some(Box::new(termide_panel_db::DbPanel::new(url, label)))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A terminal's saved directory can vanish between sessions; restoring must
+    /// climb to a surviving ancestor rather than fail to spawn the shell.
+    #[test]
+    fn nearest_existing_dir_climbs_to_a_surviving_ancestor() {
+        let base = std::env::temp_dir().join(format!("termide-restore-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+
+        assert_eq!(nearest_existing_dir(&base).as_deref(), Some(base.as_path()));
+        let gone = base.join("gone/deeper");
+        assert_eq!(nearest_existing_dir(&gone).as_deref(), Some(base.as_path()));
+
+        let _ = std::fs::remove_dir_all(&base);
+        // With the whole subtree gone, the temp dir itself is the fallback.
+        assert_eq!(
+            nearest_existing_dir(&gone).as_deref(),
+            Some(std::env::temp_dir().as_path())
+        );
     }
 }

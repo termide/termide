@@ -204,6 +204,12 @@ impl App {
                 self.handle_quit_request()?;
             }
 
+            PanelEvent::WorkingDirectoryChanged => {
+                // Re-register watchers and re-sync the git panels' repository
+                // paths, the same as after an explicit navigation.
+                self.state.needs_watcher_registration = true;
+            }
+
             PanelEvent::SaveFile(path) => {
                 self.event_save_file(path)?;
             }

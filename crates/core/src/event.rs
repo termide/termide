@@ -372,6 +372,11 @@ pub enum PanelEvent {
     /// Request application quit
     Quit,
 
+    /// The panel's working directory changed on its own — a `cd` inside a
+    /// terminal shell, which no navigation event covers. The app re-collects
+    /// panel paths so watched roots and the git panels' repository list follow.
+    WorkingDirectoryChanged,
+
     // === File operations ===
     /// Open a file in the editor (editable mode)
     OpenFile(PathBuf),
