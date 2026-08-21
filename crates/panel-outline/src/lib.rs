@@ -33,6 +33,8 @@ pub struct OutlineNavigation {
 
 /// Outline panel showing structural symbols from the active editor.
 pub struct OutlinePanel {
+    /// Scrollbar drawn by the last render, for mouse thumb dragging.
+    scrollbars: termide_core::ScrollBars,
     /// Extracted symbols for the tracked file.
     symbols: Vec<SymbolInfo>,
     /// Path of the file currently being tracked.
@@ -76,6 +78,7 @@ impl OutlinePanel {
             tracked_file: None,
             tracked_language: None,
             selected_index: 0,
+            scrollbars: termide_core::ScrollBars::default(),
             scroll_offset: 0,
             last_height: 10,
             cached_theme: theme,
@@ -297,6 +300,19 @@ impl Panel for OutlinePanel {
                     CommandResult::None
                 }
             }
+            PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
+            PanelCommand::SetScrollOffset { offset, .. } => {
+                self.scroll_offset = offset;
+                // The wheel moves the selection here and lets `ensure_visible`
+                // drag the window along; a thumb drag moves the window, so pull
+                // the selection into it to keep the two consistent.
+                let visible = self.scrollbars.vertical.map_or(1, |bar| bar.visible).max(1);
+                let last = self.symbols.len().saturating_sub(1);
+                let low = offset.min(last);
+                let high = (offset + visible - 1).min(last);
+                self.selected_index = self.selected_index.clamp(low, high);
+                CommandResult::NeedsRedraw(true)
+            }
             _ => CommandResult::None,
         }
     }
@@ -458,10 +474,11 @@ impl Panel for OutlinePanel {
         }
 
         // Render scrollbar
+        self.scrollbars.vertical = None;
         if self.symbols.len() > content_height && area.width > 2 {
             let scrollbar_x = area.right() - 1;
             let theme_colors = ThemeColors::from(&theme);
-            ScrollBar::render(
+            self.scrollbars.vertical = ScrollBar::render_tracked(
                 buf,
                 scrollbar_x,
                 content_top,

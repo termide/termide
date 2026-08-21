@@ -347,8 +347,9 @@ impl GitStatusPanel {
         }
 
         // Single scrollbar for entire files area
+        self.scrollbars.vertical = None;
         if let Some(border_x) = border_right_x {
-            ScrollBar::render(
+            self.scrollbars.vertical = ScrollBar::render_tracked(
                 buf,
                 border_x,
                 files_y,

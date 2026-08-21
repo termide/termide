@@ -90,6 +90,8 @@ pub struct FileManager {
     /// Cursor position — index into `visible_indices`.
     selected: usize,
     scroll_offset: usize,
+    /// Scrollbars drawn by the last render, for mouse thumb dragging.
+    scrollbars: termide_core::ScrollBars,
     /// Modal window request (action, modal)
     modal_request: Option<(PendingAction, ActiveModal)>,
     /// Visible area height (updated during rendering)
@@ -270,6 +272,7 @@ impl FileManager {
             expanded_dirs: HashSet::new(),
             selected: 0,
             scroll_offset: 0,
+            scrollbars: termide_core::ScrollBars::default(),
             modal_request: None,
             visible_height: 10, // Default value, will be updated during rendering
             click_tracker: IndexClickTracker::new(),
@@ -587,6 +590,10 @@ impl Panel for FileManager {
     fn render(&mut self, area: Rect, buf: &mut Buffer, ctx: &RenderContext) {
         let content_height = area.height as usize;
         self.visible_height = content_height;
+        // Cleared up front so the branches below that never reach the
+        // scrollbar (search results, inline bar) leave no stale geometry for
+        // the mouse dispatcher to hit-test against.
+        self.scrollbars = termide_core::ScrollBars::default();
 
         // Inline content bar: dock it at the top, render results below.
         if let Some(mut bar) = self.search_bar.take() {
@@ -659,7 +666,7 @@ impl Panel for FileManager {
         // Render scrollbar on the right border
         if let Some(border_x) = ctx.border_right_x {
             let theme_colors = termide_core::ThemeColors::from(&self.cached_theme);
-            ScrollBar::render(
+            self.scrollbars.vertical = ScrollBar::render_tracked(
                 buf,
                 border_x,
                 area.y,
@@ -823,6 +830,20 @@ impl Panel for FileManager {
                 self.clipboard_paste_files();
                 CommandResult::Handled(true)
             }
+            PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
+            PanelCommand::SetScrollOffset { offset, .. } => {
+                self.scroll_offset = offset;
+                // Keep the cursor inside the viewport, the same way wheel
+                // scrolling does.
+                let visible_height = self.visible_height.max(1);
+                if self.selected < self.scroll_offset {
+                    self.selected = self.scroll_offset;
+                } else if self.selected >= self.scroll_offset + visible_height {
+                    self.selected = (self.scroll_offset + visible_height).saturating_sub(1);
+                }
+                CommandResult::NeedsRedraw(true)
+            }
+
             // Commands not applicable to FileManager
             PanelCommand::CheckPendingGitDiff
             | PanelCommand::CheckGitDiffReceiver
@@ -996,6 +1017,57 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let fm = FileManager::new_with_path(temp_dir.path().to_path_buf());
         (fm, temp_dir)
+    }
+
+    /// A scrollbar drag must not be undone by the next render: the panel pulls
+    /// `scroll_offset` back toward `selected` while drawing, so the command has
+    /// to move the cursor into the new viewport as wheel scrolling does.
+    #[test]
+    fn set_scroll_offset_survives_the_next_render() {
+        use ratatui::buffer::Buffer;
+
+        let temp_dir = TempDir::new().unwrap();
+        for i in 0..80 {
+            std::fs::write(temp_dir.path().join(format!("f{i:03}.txt")), "x").unwrap();
+        }
+        let mut fm = FileManager::new_with_path(temp_dir.path().to_path_buf());
+        let colors = termide_core::ThemeColors::from(&fm.cached_theme);
+        let panel_config = termide_core::PanelConfig {
+            tab_size: 4,
+            word_wrap: false,
+            show_line_numbers: false,
+            show_hidden_files: false,
+        };
+        let area = Rect::new(0, 0, 30, 10);
+        let ctx = RenderContext {
+            theme: &colors,
+            config: &panel_config,
+            is_focused: true,
+            panel_index: 0,
+            terminal_width: 30,
+            terminal_height: 12,
+            border_right_x: Some(29),
+            border_bottom_y: Some(11),
+        };
+        let mut buf = Buffer::empty(Rect::new(0, 0, 30, 12));
+        fm.render(area, &mut buf, &ctx);
+
+        fm.handle_command(PanelCommand::SetScrollOffset {
+            axis: termide_core::ScrollAxis::Vertical,
+            offset: 40,
+        });
+        assert_eq!(fm.scroll_offset, 40);
+        assert!(
+            fm.selected >= 40 && fm.selected < 40 + fm.visible_height.max(1),
+            "cursor left outside the new viewport: selected={}, offset=40",
+            fm.selected
+        );
+
+        fm.render(area, &mut buf, &ctx);
+        assert_eq!(
+            fm.scroll_offset, 40,
+            "render pulled the scroll back to the cursor"
+        );
     }
 
     #[test]

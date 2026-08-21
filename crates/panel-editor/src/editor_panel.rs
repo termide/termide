@@ -757,6 +757,22 @@ impl Panel for Editor {
                 }
                 CommandResult::None
             }
+            PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
+            PanelCommand::SetScrollOffset { offset, .. } => {
+                // The bar reports `viewport.top_line`, so a drag maps back to
+                // a buffer line. Reset the intra-line wrap offset: the new top
+                // line starts at its first visual row.
+                let max_line = self.buffer.line_count().saturating_sub(1);
+                self.viewport.top_line = offset.min(max_line);
+                self.viewport.top_visual_row_offset = 0;
+                // Detach the viewport from the cursor, exactly as wheel
+                // scrolling does — otherwise the next render snaps the
+                // viewport straight back to the cursor line and the content
+                // never follows the thumb.
+                self.scroll_follows_cursor = false;
+                CommandResult::NeedsRedraw(true)
+            }
+
             // Commands not applicable to Editor
             PanelCommand::SetFsWatchRoot { .. }
             | PanelCommand::Resize { .. }

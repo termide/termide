@@ -417,3 +417,38 @@ fn select_line_spans_whole_line() {
     assert_eq!(sel.start().column, 0);
     assert_eq!(new_cur.column, 11); // end of "hello world"
 }
+
+/// Dragging the scrollbar thumb must move the *content*, not just the thumb.
+/// The viewport snaps back to the cursor on every render unless the scroll is
+/// detached from it — wheel scrolling detaches, so the thumb drag must too.
+#[test]
+fn set_scroll_offset_moves_the_content_not_just_the_thumb() {
+    use ratatui::{buffer::Buffer, layout::Rect};
+
+    let content: String = (0..200).map(|i| format!("line{i}\n")).collect();
+    let (mut editor, _f) = create_editor_with_content(&content);
+    let theme = *termide_theme::Theme::get_by_name("github-light");
+    let config = termide_config::Config::default();
+    let area = Rect::new(0, 0, 40, 10);
+
+    let mut buf = Buffer::empty(area);
+    editor.render_content(area, &mut buf, &theme, &config, true, None);
+
+    editor.handle_command(PanelCommand::SetScrollOffset {
+        axis: termide_core::ScrollAxis::Vertical,
+        offset: 50,
+    });
+    editor.render_content(area, &mut buf, &theme, &config, true, None);
+
+    assert_eq!(
+        editor.viewport.top_line, 50,
+        "render snapped the viewport back to the cursor"
+    );
+    let first_row: String = (0..area.width)
+        .map(|x| buf[(x, 0)].symbol().to_string())
+        .collect();
+    assert!(
+        first_row.contains("line50"),
+        "content did not follow the scroll offset: {first_row:?}"
+    );
+}

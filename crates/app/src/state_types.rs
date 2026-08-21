@@ -233,3 +233,25 @@ pub struct CacheState {
     /// Cached global hotkey table (invalidated when commands_registry is)
     pub hotkey_table: Option<termide_core::HotkeyTable>,
 }
+
+/// Active scrollbar thumb drag.
+///
+/// Only the thumb is grabbed this way — the rest of a panel border keeps
+/// belonging to the layout resize handles, so this state is set solely when
+/// a press hit-tested onto a thumb reported by `PanelCommand::GetScrollBars`.
+///
+/// The bar's geometry is deliberately *not* cached here: it is re-read from
+/// the panel on every drag event, so the drag keeps working across a redraw
+/// that moved the thumb, and across a panel resize that changed the track.
+#[derive(Debug, Clone, Copy)]
+pub struct ScrollBarDrag {
+    /// Panel group holding the dragged bar.
+    pub group_idx: usize,
+    /// Panel within the group.
+    pub panel_idx: usize,
+    /// Which of the panel's bars is being dragged.
+    pub axis: termide_core::ScrollAxis,
+    /// Where inside the thumb the grab happened, so the thumb does not jump
+    /// under the cursor on the first drag event.
+    pub grab_offset: u16,
+}

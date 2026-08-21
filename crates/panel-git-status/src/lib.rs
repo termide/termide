@@ -44,6 +44,8 @@ use termide_ui::IndexClickTracker;
 pub struct GitStatusPanel {
     /// Repository manager
     repo_manager: RepoManager,
+    /// Scrollbar drawn by the last render, for mouse thumb dragging.
+    scrollbars: termide_core::ScrollBars,
     /// Current branch name
     branch: Option<String>,
     /// Available branches for current repo
@@ -187,6 +189,7 @@ impl GitStatusPanel {
             cursor: 0,
             selected_button: 0,
             scroll_offset: 0,
+            scrollbars: termide_core::ScrollBars::default(),
             viewport_height: 0,
             cached_theme: ThemeColors::default(),
             last_area: Rect::default(),
@@ -431,6 +434,11 @@ impl Panel for GitStatusPanel {
             }
             PanelCommand::UpdateRepoPaths { paths } => {
                 self.update_repos(&paths);
+                CommandResult::NeedsRedraw(true)
+            }
+            PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
+            PanelCommand::SetScrollOffset { offset, .. } => {
+                self.scroll_offset = offset;
                 CommandResult::NeedsRedraw(true)
             }
             PanelCommand::GetFsWatchInfo => {

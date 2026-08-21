@@ -17,7 +17,9 @@ use ratatui::{
 use termide_config::{is_go_end, is_go_home, is_move_down, is_move_up};
 use unicode_width::UnicodeWidthStr;
 
-use termide_core::{Panel, PanelEvent, RenderContext, ThemeColors, WidthPreference};
+use termide_core::{
+    CommandResult, Panel, PanelCommand, PanelEvent, RenderContext, ThemeColors, WidthPreference,
+};
 use termide_theme::Theme;
 use termide_ui::path_utils::truncate_right;
 use termide_ui::ScrollBar;
@@ -117,6 +119,8 @@ impl SeverityFilter {
 
 /// Diagnostics panel showing all LSP diagnostics.
 pub struct DiagnosticsPanel {
+    /// Scrollbar drawn by the last render, for mouse thumb dragging.
+    scrollbars: termide_core::ScrollBars,
     /// All diagnostics organized by file
     diagnostics_by_file: HashMap<PathBuf, Vec<DiagnosticEntry>>,
     /// Flattened list of all diagnostics (for display)
@@ -152,6 +156,7 @@ impl DiagnosticsPanel {
             diagnostics_by_file: HashMap::new(),
             all_diagnostics: Vec::new(),
             selected_index: 0,
+            scrollbars: termide_core::ScrollBars::default(),
             scroll_offset: 0,
             filter: SeverityFilter::All,
             cached_theme: *theme,
@@ -318,6 +323,25 @@ impl Panel for DiagnosticsPanel {
         "diagnostics"
     }
 
+    fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
+        match cmd {
+            PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
+            PanelCommand::SetScrollOffset { offset, .. } => {
+                self.scroll_offset = offset;
+                // The wheel moves the selection here and lets `ensure_visible`
+                // drag the window along; a thumb drag moves the window, so pull
+                // the selection into it to keep the two consistent.
+                let visible = self.scrollbars.vertical.map_or(1, |bar| bar.visible).max(1);
+                let last = self.filtered_count().saturating_sub(1);
+                let low = offset.min(last);
+                let high = (offset + visible - 1).min(last);
+                self.selected_index = self.selected_index.clamp(low, high);
+                CommandResult::NeedsRedraw(true)
+            }
+            _ => CommandResult::None,
+        }
+    }
+
     fn width_preference(&self) -> WidthPreference {
         WidthPreference::PreferNarrow
     }
@@ -482,10 +506,11 @@ impl Panel for DiagnosticsPanel {
         }
 
         // Render scrollbar
+        self.scrollbars.vertical = None;
         if filtered_len > content_height && area.width > 2 {
             let scrollbar_x = area.right() - 1;
             let theme_colors = ThemeColors::from(&theme);
-            ScrollBar::render(
+            self.scrollbars.vertical = ScrollBar::render_tracked(
                 buf,
                 scrollbar_x,
                 content_top,

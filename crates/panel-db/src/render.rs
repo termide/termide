@@ -263,12 +263,13 @@ impl DbPanel {
         }
 
         // --- scrollbars (drawn last so they sit above the grid) ---
+        self.scrollbars = termide_core::ScrollBars::default();
         if v_needed {
             // Position across the whole table: window offset + in-window scroll.
             let offset = self.offset as usize + self.row_scroll;
             let total = self.total_rows.unwrap_or(0) as usize;
             let vx = border_right_x.unwrap_or(area.x + area.width - 1);
-            ScrollBar::render(
+            self.scrollbars.vertical = ScrollBar::render_tracked(
                 buf,
                 vx,
                 area.y + 1,
@@ -295,7 +296,7 @@ impl DbPanel {
             }
             let visible_cols = visible_cols.max(1);
             let hy = border_bottom_y.unwrap_or(area.y + area.height - 1);
-            ScrollBar::render_horizontal(
+            self.scrollbars.horizontal = ScrollBar::render_horizontal_tracked(
                 buf,
                 area.x,
                 hy,

@@ -245,9 +245,10 @@ impl GitLogPanel {
         }
 
         // Render scrollbar on border
+        self.scrollbars.vertical = None;
         if needs_scrollbar {
             if let Some(border_x) = border_right_x {
-                ScrollBar::render(
+                self.scrollbars.vertical = ScrollBar::render_tracked(
                     buf,
                     border_x,
                     commits_start_y,

@@ -18,8 +18,8 @@ use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEven
 use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 
 use termide_core::{
-    Config, HotkeyTable, KeyChord, LinkOpen, Panel, PanelEvent, RenderContext, SegmentKind,
-    SessionPanel, StatusSegment, Theme, ThemeColors, WidthPreference,
+    CommandResult, Config, HotkeyTable, KeyChord, LinkOpen, Panel, PanelCommand, PanelEvent,
+    RenderContext, SegmentKind, SessionPanel, StatusSegment, Theme, ThemeColors, WidthPreference,
 };
 use termide_modal::FindBar;
 use termide_richtext::Rendered;
@@ -40,6 +40,8 @@ type Match = (usize, usize);
 
 /// Rendered HTML viewer.
 pub struct HtmlPanel {
+    /// Scrollbar drawn by the last render, for mouse thumb dragging.
+    scrollbars: termide_core::ScrollBars,
     /// Path to the HTML file.
     file_path: PathBuf,
     /// Display title (filename).
@@ -116,6 +118,7 @@ impl HtmlPanel {
             },
             layout_width: 0,
             top: 0,
+            scrollbars: termide_core::ScrollBars::default(),
             last_area: Rect::default(),
             cursor: (0, 0),
             anchor: None,
@@ -203,6 +206,17 @@ impl HtmlPanel {
 impl Panel for HtmlPanel {
     fn name(&self) -> &'static str {
         "html"
+    }
+
+    fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
+        match cmd {
+            PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
+            PanelCommand::SetScrollOffset { offset, .. } => {
+                self.top = offset.min(self.line_count().saturating_sub(1));
+                CommandResult::NeedsRedraw(true)
+            }
+            _ => CommandResult::None,
+        }
     }
 
     fn width_preference(&self) -> WidthPreference {
@@ -357,7 +371,7 @@ impl Panel for HtmlPanel {
 
         // Vertical scrollbar on the panel's right border (replacing it), not one
         // column inside it — otherwise it reads as detached from the edge.
-        ScrollBar::render(
+        self.scrollbars.vertical = ScrollBar::render_tracked(
             buf,
             ctx.border_right_x.unwrap_or(content.x + content.width - 1),
             content.y,
@@ -631,6 +645,7 @@ mod tests {
             },
             layout_width: 0,
             top: 0,
+            scrollbars: termide_core::ScrollBars::default(),
             last_area: Rect::new(0, 0, 80, 10),
             cursor: (0, 0),
             anchor: None,

@@ -18,8 +18,8 @@ use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEven
 use ratatui::{buffer::Buffer, layout::Rect, style::Modifier, style::Style};
 
 use termide_core::{
-    Config, HotkeyTable, KeyChord, Panel, PanelEvent, RenderContext, SegmentKind, SessionPanel,
-    StatusSegment, Theme, ThemeColors, WidthPreference,
+    CommandResult, Config, HotkeyTable, KeyChord, Panel, PanelCommand, PanelEvent, RenderContext,
+    ScrollAxis, SegmentKind, SessionPanel, StatusSegment, Theme, ThemeColors, WidthPreference,
 };
 use termide_mermaid::parser::{self, DiagramKind};
 use termide_ui::ScrollBar;
@@ -42,6 +42,8 @@ pub struct MermaidPanel {
     /// Scroll offsets (top row, left column).
     scroll_y: usize,
     scroll_x: usize,
+    /// Scrollbars drawn by the last render, for mouse thumb dragging.
+    scrollbars: termide_core::ScrollBars,
     /// Content area from the last render (for paging / clamping).
     last_area: Rect,
 
@@ -65,6 +67,7 @@ impl MermaidPanel {
             canvas_width: 0,
             scroll_y: 0,
             scroll_x: 0,
+            scrollbars: termide_core::ScrollBars::default(),
             last_area: Rect::default(),
             colors: ThemeColors::default(),
             is_light: false,
@@ -232,6 +235,24 @@ impl Panel for MermaidPanel {
         "mermaid"
     }
 
+    fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
+        match cmd {
+            PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
+            PanelCommand::SetScrollOffset { axis, offset } => {
+                match axis {
+                    ScrollAxis::Vertical => {
+                        self.scroll_y = offset.min(self.canvas.len().saturating_sub(1));
+                    }
+                    ScrollAxis::Horizontal => {
+                        self.scroll_x = offset.min(self.canvas_width.saturating_sub(1));
+                    }
+                }
+                CommandResult::NeedsRedraw(true)
+            }
+            _ => CommandResult::None,
+        }
+    }
+
     fn width_preference(&self) -> WidthPreference {
         WidthPreference::PreferWide
     }
@@ -295,7 +316,7 @@ impl Panel for MermaidPanel {
 
         // Draw the scrollbar on the panel's right border (replacing it), not one
         // column inside it — otherwise it reads as detached from the edge.
-        ScrollBar::render(
+        self.scrollbars.vertical = ScrollBar::render_tracked(
             buf,
             ctx.border_right_x.unwrap_or(area.x + area.width - 1),
             area.y,
@@ -310,7 +331,7 @@ impl Panel for MermaidPanel {
         // Horizontal scrollbar on the panel's bottom border — the diagram is
         // often much wider than the viewport, so this shows how far along the X
         // axis the view is (and that there's more to the right).
-        ScrollBar::render_horizontal(
+        self.scrollbars.horizontal = ScrollBar::render_horizontal_tracked(
             buf,
             area.x,
             ctx.border_bottom_y.unwrap_or(area.y + area.height - 1),
@@ -462,6 +483,7 @@ mod tests {
             canvas_width: 0,
             scroll_y: 0,
             scroll_x: 0,
+            scrollbars: termide_core::ScrollBars::default(),
             last_area: Rect::new(0, 0, 40, 10),
             colors: ThemeColors::default(),
             is_light: false,

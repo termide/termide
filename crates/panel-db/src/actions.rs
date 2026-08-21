@@ -289,7 +289,7 @@ impl DbPanel {
 
     /// True while a page fetch is in flight. Page turns are suppressed until it
     /// lands, so holding a key can't race ahead of (or loop over) stale data.
-    fn loading_page(&self) -> bool {
+    pub(crate) fn loading_page(&self) -> bool {
         self.page_rx.is_some()
     }
 

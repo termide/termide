@@ -26,6 +26,8 @@ use termide_theme::Theme;
 
 /// Git Diff Panel
 pub struct GitDiffPanel {
+    /// Scrollbar drawn by the last render, for mouse thumb dragging.
+    scrollbars: termide_core::ScrollBars,
     /// Repository path
     repo_path: PathBuf,
     /// Commit hash (None = working directory changes, Some = specific commit)
@@ -102,6 +104,7 @@ impl GitDiffPanel {
             branch,
             file_filter: None,
             diffs: Vec::new(),
+            scrollbars: termide_core::ScrollBars::default(),
             scroll: 0,
             collapsed: HashSet::new(),
             selected_file: 0,
@@ -129,6 +132,7 @@ impl GitDiffPanel {
             branch,
             file_filter: None,
             diffs: Vec::new(),
+            scrollbars: termide_core::ScrollBars::default(),
             scroll: 0,
             collapsed: HashSet::new(),
             selected_file: 0,
@@ -158,6 +162,7 @@ impl GitDiffPanel {
             branch,
             file_filter: None,
             diffs: Vec::new(),
+            scrollbars: termide_core::ScrollBars::default(),
             scroll: 0,
             collapsed: HashSet::new(),
             selected_file: 0,
@@ -186,6 +191,7 @@ impl GitDiffPanel {
             branch,
             file_filter: Some(file_filter),
             diffs: Vec::new(),
+            scrollbars: termide_core::ScrollBars::default(),
             scroll: 0,
             collapsed: HashSet::new(),
             selected_file: 0,
@@ -248,6 +254,11 @@ impl Panel for GitDiffPanel {
             }
             PanelCommand::Cut => CommandResult::Handled(false),
             PanelCommand::Paste => CommandResult::Handled(false),
+            PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
+            PanelCommand::SetScrollOffset { offset, .. } => {
+                self.scroll = offset;
+                CommandResult::NeedsRedraw(true)
+            }
             _ => CommandResult::None,
         }
     }

@@ -5,6 +5,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::scrollbar::{ScrollAxis, ScrollBars};
+
 /// Commands that can be sent to panels during tick/watcher processing.
 #[derive(Debug, Clone)]
 pub enum PanelCommand<'a> {
@@ -150,6 +152,23 @@ pub enum PanelCommand<'a> {
         /// Text to paste
         text: String,
     },
+
+    // === Scrollbar mouse interaction ===
+    /// Request the geometry of the scrollbars drawn by the panel's last
+    /// render. The mouse dispatcher uses it to route a thumb grab to the
+    /// panel while leaving the rest of the border to the layout resize.
+    /// Response: `CommandResult::ScrollBars(ScrollBars)`
+    GetScrollBars,
+
+    /// Scroll to an absolute offset along one axis, in the units the panel
+    /// itself reported through [`PanelCommand::GetScrollBars`].
+    /// Response: `CommandResult::NeedsRedraw(bool)`
+    SetScrollOffset {
+        /// Axis to scroll.
+        axis: ScrollAxis,
+        /// Target offset, already clamped to the reported range.
+        offset: usize,
+    },
 }
 
 /// Result of handling a panel command.
@@ -190,6 +209,11 @@ pub enum CommandResult {
         /// Whether file was modified externally
         has_external_change: bool,
     },
+
+    /// Scrollbars drawn by the panel's last render (response to
+    /// GetScrollBars). Default (both axes `None`) means the panel draws no
+    /// scrollbar, so the whole border stays with the layout resize.
+    ScrollBars(ScrollBars),
 
     /// Save operation result.
     SaveResult {

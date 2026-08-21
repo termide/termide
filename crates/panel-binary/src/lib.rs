@@ -62,6 +62,8 @@ enum ViewMode {
 
 /// Binary (hex/ASCII) viewer and overwrite editor.
 pub struct BinaryPanel {
+    /// Scrollbar drawn by the last render, for mouse thumb dragging.
+    scrollbars: termide_core::ScrollBars,
     /// Path to the file.
     file_path: PathBuf,
     /// Display title (filename).
@@ -122,6 +124,7 @@ impl BinaryPanel {
             file: None,
             len: 0,
             error: None,
+            scrollbars: termide_core::ScrollBars::default(),
             top_byte: 0,
             cursor: 0,
             anchor: None,
@@ -350,9 +353,10 @@ impl Panel for BinaryPanel {
             // Scroll progress on the right border, like the other panels.
             let total_rows = self.len.div_ceil(bpr) as usize;
             let viewport = hex_area.height as usize;
+            self.scrollbars.vertical = None;
             if let Some(border_x) = ctx.border_right_x {
                 if ScrollBar::needs_scrollbar(viewport, total_rows) {
-                    ScrollBar::render(
+                    self.scrollbars.vertical = ScrollBar::render_tracked(
                         buf,
                         border_x,
                         hex_area.y,
@@ -452,6 +456,13 @@ impl Panel for BinaryPanel {
             }
             PanelCommand::Cut => CommandResult::Handled(false),
             PanelCommand::Paste => CommandResult::Handled(false),
+            PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
+            PanelCommand::SetScrollOffset { offset, .. } => {
+                // The bar counts hex rows; `top_byte` counts bytes.
+                self.top_byte = (offset as u64).saturating_mul(self.cols());
+                self.clamp_top();
+                CommandResult::NeedsRedraw(true)
+            }
             _ => CommandResult::None,
         }
     }

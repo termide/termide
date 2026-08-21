@@ -87,6 +87,8 @@ pub struct Editor {
     selection: Option<Selection>,
     /// Viewport for virtual scrolling
     viewport: Viewport,
+    /// Scrollbars drawn by the last render, for mouse thumb dragging.
+    pub(crate) scrollbars: termide_core::ScrollBars,
 
     // === Grouped state ===
     /// File-related state (mtime, external changes, title)

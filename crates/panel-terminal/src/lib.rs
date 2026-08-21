@@ -52,6 +52,8 @@ type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 
 /// Full-featured terminal with PTY
 pub struct Terminal {
+    /// Scrollbar drawn by the last render, for mouse thumb dragging.
+    scrollbars: termide_core::ScrollBars,
     /// PTY master (wrapped in Arc<Mutex<>> for shared access)
     pty: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     /// Writer for writing to PTY
@@ -217,6 +219,7 @@ impl Terminal {
         has_new_data: Arc<AtomicBool>,
     ) -> Self {
         Self {
+            scrollbars: termide_core::ScrollBars::default(),
             pty,
             writer,
             child,
@@ -865,7 +868,7 @@ impl Panel for Terminal {
                 let scrollbar_offset = scrollback_len.saturating_sub(scroll_offset);
 
                 let theme_colors = termide_core::ThemeColors::from(&self.cached_theme);
-                ScrollBar::render(
+                self.scrollbars.vertical = ScrollBar::render_tracked(
                     buf,
                     border_x,
                     area.y,
@@ -1273,6 +1276,17 @@ impl Panel for Terminal {
             | PanelCommand::RefreshDirectory
             | PanelCommand::SetGitOperationInProgress { .. }
             | PanelCommand::UpdateRepoPaths { .. } => CommandResult::None,
+
+            PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
+            PanelCommand::SetScrollOffset { offset, .. } => {
+                // The bar counts top-down while the terminal counts rows back
+                // from the live edge, so invert: bar offset 0 is the oldest
+                // scrollback line, the maximum is the live screen.
+                let scrollback_len = self.read_screen().scrollback.len();
+                self.write_screen()
+                    .set_scroll_offset(scrollback_len.saturating_sub(offset));
+                CommandResult::NeedsRedraw(true)
+            }
         }
     }
 

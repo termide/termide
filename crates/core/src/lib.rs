@@ -13,6 +13,7 @@ pub mod event;
 pub mod hotkey_table;
 pub mod key_chord;
 pub mod panel;
+pub mod scrollbar;
 pub mod terminal_caps;
 pub mod util;
 
@@ -27,6 +28,7 @@ pub use panel::{
     Panel, PanelConfig, RenderContext, Searchable, SegmentKind, SessionPanel, StatusSegment,
     ThemeColors, WidthPreference,
 };
+pub use scrollbar::{ScrollAxis, ScrollBarGeometry, ScrollBars};
 pub use terminal_caps::{
     get_terminal_caps, init_icon_mode, init_terminal_caps, use_emoji_icons, ColorDepth,
     TerminalCaps,

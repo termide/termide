@@ -15,7 +15,9 @@ use ratatui::{
 use std::any::Any;
 
 use termide_config::{is_go_end, is_go_home, is_move_down, is_move_up, Config};
-use termide_core::{Panel, PanelEvent, RenderContext, WidthPreference};
+use termide_core::{
+    CommandResult, Panel, PanelCommand, PanelEvent, RenderContext, WidthPreference,
+};
 use termide_i18n;
 use termide_theme::Theme;
 use termide_ui::ScrollBar;
@@ -26,6 +28,8 @@ use crate::help_generator::{HelpGenerator, HelpSection};
 pub struct HelpPanel {
     /// Help sections data
     sections: Vec<HelpSection>,
+    /// Scrollbar drawn by the last render, for mouse thumb dragging.
+    scrollbars: termide_core::ScrollBars,
     /// Current scroll offset (first visible line)
     scroll_offset: usize,
     /// Last rendered width (for cache invalidation)
@@ -45,6 +49,7 @@ impl HelpPanel {
 
         Self {
             sections,
+            scrollbars: termide_core::ScrollBars::default(),
             scroll_offset: 0,
             last_width: 0,
             cached_lines: Vec::new(),
@@ -88,6 +93,17 @@ impl HelpPanel {
 impl Panel for HelpPanel {
     fn name(&self) -> &'static str {
         "help"
+    }
+
+    fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
+        match cmd {
+            PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
+            PanelCommand::SetScrollOffset { offset, .. } => {
+                self.scroll_offset = offset.min(self.cached_lines.len().saturating_sub(1));
+                CommandResult::NeedsRedraw(true)
+            }
+            _ => CommandResult::None,
+        }
     }
 
     fn width_preference(&self) -> WidthPreference {
@@ -134,8 +150,9 @@ impl Panel for HelpPanel {
         paragraph.render(content_area, buf);
 
         // Render scrollbar on the right edge
+        self.scrollbars.vertical = None;
         if ScrollBar::needs_scrollbar(visible_height, self.cached_lines.len()) {
-            ScrollBar::render(
+            self.scrollbars.vertical = ScrollBar::render_tracked(
                 buf,
                 area.x + area.width - 1,
                 area.y,

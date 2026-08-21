@@ -340,9 +340,10 @@ impl Editor {
         );
 
         // Render scrollbar on the right border
+        self.scrollbars = termide_core::ScrollBars::default();
         if let Some(border_x) = border_right_x {
             let theme_colors = termide_core::ThemeColors::from(theme);
-            ScrollBar::render(
+            let bar = ScrollBar::render_tracked(
                 buf,
                 border_x,
                 area.y,
@@ -353,6 +354,7 @@ impl Editor {
                 &theme_colors,
                 is_focused,
             );
+            self.scrollbars.vertical = bar;
         }
 
         // Render completion popup if active

@@ -261,9 +261,10 @@ impl GitDiffPanel {
 
         // Render scrollbar
         let needs_scrollbar = ScrollBar::needs_scrollbar(self.visible_height, self.total_lines);
+        self.scrollbars.vertical = None;
         if needs_scrollbar {
             if let Some(border_x) = border_right_x {
-                ScrollBar::render(
+                self.scrollbars.vertical = ScrollBar::render_tracked(
                     buf,
                     border_x,
                     content_area.y,

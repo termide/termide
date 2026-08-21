@@ -181,6 +181,12 @@ Items are filtered by context: e.g. *Split/Merge* is hidden when there is only o
 
 **Mouse Interaction:**
 - Click on the title area activates the panel; double-click on a file-manager title opens the directory picker.
+- **Drag a scrollbar thumb** (the `▌` block on a panel's right border, or
+  the `━` block on the bottom border where a horizontal bar is drawn) to
+  scroll the panel to that position. Only the thumb is grabbed this way:
+  the bar's track and any border without a bar keep resizing the layout as
+  described below. Dragging the thumb of an unfocused panel scrolls it in
+  place without moving the focus, the same as the mouse wheel.
 - **Drag a panel's bottom border** within a stacked column to resize its
   height (live `━` ghost line previews the new divider position, the
   resize is applied on release).

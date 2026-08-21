@@ -26,7 +26,7 @@ use ratatui::layout::Rect;
 use termide_config::Config;
 use termide_core::{
     CommandResult, HotkeyTable, KeyChord, Panel, PanelCommand, PanelEvent, RenderContext,
-    ThemeColors, WidthPreference,
+    ScrollAxis, ScrollBars, ThemeColors, WidthPreference,
 };
 use termide_db::{
     ColumnInfo, Condition, DbBackend, DbConnection, DbError, Page, PageRequest, SortDir,
@@ -78,6 +78,8 @@ pub struct DbPanel {
     page: Page,
     total_rows: Option<i64>,
     offset: u64,
+    /// Scrollbars drawn by the last render, for mouse thumb dragging.
+    scrollbars: ScrollBars,
 
     // --- grid cursor / scroll ---
     cursor_row: usize,
@@ -175,6 +177,7 @@ impl DbPanel {
             row_scroll: 0,
             col_scroll: 0,
             pending_bottom: false,
+            scrollbars: ScrollBars::default(),
             filters: Vec::new(),
             order_by: Vec::new(),
             page_rows: DEFAULT_PAGE_ROWS,
@@ -415,6 +418,39 @@ impl DbPanel {
 
     /// Re-issue only the page query (window move / sort change), keeping the
     /// known column list and total count.
+    /// Jump to an absolute scroll position reported by one of the panel's
+    /// scrollbars (mouse thumb drag).
+    ///
+    /// The fetched window is one screen tall, so an absolute row is a
+    /// page-aligned window plus a row inside it — a drag past the current
+    /// window pages the query the same way `grid_down`/`grid_up` do.
+    fn scroll_to(&mut self, axis: ScrollAxis, offset: usize) -> CommandResult {
+        match axis {
+            ScrollAxis::Horizontal => {
+                self.col_scroll = offset;
+                CommandResult::NeedsRedraw(true)
+            }
+            ScrollAxis::Vertical => {
+                if self.loading_page() {
+                    return CommandResult::NeedsRedraw(false);
+                }
+                let page = self.page_rows.max(1);
+                let window = (offset as u64 / page) * page;
+                let rel = offset.saturating_sub(window as usize);
+                if window == self.offset {
+                    self.cursor_row = rel.min(self.page.rows.len().saturating_sub(1));
+                } else {
+                    self.offset = window;
+                    // `clamp_cursor` trims this once the window lands, the
+                    // same as any other page load.
+                    self.cursor_row = rel;
+                    self.reload_page();
+                }
+                CommandResult::NeedsRedraw(true)
+            }
+        }
+    }
+
     fn reload_page(&mut self) {
         let Some(table) = self.selected_table.clone() else {
             return;
@@ -749,6 +785,8 @@ impl Panel for DbPanel {
                 }
                 CommandResult::Handled(true)
             }
+            PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
+            PanelCommand::SetScrollOffset { axis, offset } => self.scroll_to(axis, offset),
             // Read-only table view: nothing to cut or paste into.
             PanelCommand::Cut => CommandResult::Handled(false),
             PanelCommand::Paste => CommandResult::Handled(false),

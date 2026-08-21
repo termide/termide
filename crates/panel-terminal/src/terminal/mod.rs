@@ -548,6 +548,17 @@ impl TerminalScreen {
         self.dirty = true; // Invalidate cache to force re-render
     }
 
+    /// Set the view scroll offset directly, clamped to the scrollback length.
+    ///
+    /// Used by the scrollbar thumb drag, which computes an absolute position
+    /// rather than a delta. Marks the screen dirty like the relative
+    /// `scroll_view_*` helpers do: the render cache is only rebuilt for a dirty
+    /// screen, so without this the view would keep showing the cached frame.
+    pub fn set_scroll_offset(&mut self, offset: usize) {
+        self.scroll_offset = offset.min(self.scrollback.len());
+        self.dirty = true;
+    }
+
     /// Reset scroll to current screen
     pub fn reset_scroll(&mut self) {
         self.scroll_offset = 0;
@@ -677,6 +688,29 @@ mod tests {
         for _ in 0..n {
             screen.scroll_up();
         }
+    }
+
+    /// The scrollbar thumb drag sets an absolute offset; it has to invalidate
+    /// the render cache the same way the relative scroll helpers do, or the
+    /// panel keeps drawing the cached frame while the thumb moves.
+    #[test]
+    fn set_scroll_offset_clamps_and_marks_dirty() {
+        let mut screen = TerminalScreen::new(10, 80);
+        fill_scrollback(&mut screen, 30);
+        screen.dirty = false;
+
+        screen.set_scroll_offset(12);
+        assert_eq!(screen.scroll_offset, 12);
+        assert!(screen.dirty, "render cache was not invalidated");
+
+        screen.dirty = false;
+        screen.set_scroll_offset(usize::MAX);
+        assert_eq!(
+            screen.scroll_offset,
+            screen.scrollback.len(),
+            "offset past the oldest line must clamp"
+        );
+        assert!(screen.dirty);
     }
 
     #[test]

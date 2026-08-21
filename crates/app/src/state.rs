@@ -36,7 +36,7 @@ pub use termide_modal::ActiveModal;
 pub use crate::state_types::{
     kill_process_tree, BatchOperationState, CacheState, CommandOperationHandle,
     CommandOperationResult, GitOperationHandle, GitOperationResult, PendingBatchUpload,
-    PendingEditorDownload, PendingRemoteDelete, ResourceModalKind, StashState,
+    PendingEditorDownload, PendingRemoteDelete, ResourceModalKind, ScrollBarDrag, StashState,
 };
 
 /// Global application state
@@ -46,6 +46,8 @@ pub struct AppState {
     pub should_quit: bool,
     /// UI components state
     pub ui: UiState,
+    /// Scrollbar thumb being dragged with the mouse, if any.
+    pub scrollbar_drag: Option<ScrollBarDrag>,
     /// Terminal state
     pub terminal: TerminalState,
     /// Current layout mode
@@ -201,6 +203,7 @@ impl AppState {
         Self {
             should_quit: false,
             ui: UiState::default(),
+            scrollbar_drag: None,
             terminal: TerminalState::default(),
             layout_mode: LayoutMode::Single,
             layout_info,

@@ -40,6 +40,8 @@ pub enum Section {
 pub struct GitLogPanel {
     /// Repository manager
     repo_manager: RepoManager,
+    /// Scrollbar drawn by the last render, for mouse thumb dragging.
+    scrollbars: termide_core::ScrollBars,
     /// Current section
     current_section: Section,
     /// Current branch name (HEAD)
@@ -129,6 +131,7 @@ impl GitLogPanel {
     fn create(repo_manager: RepoManager) -> Self {
         let mut panel = Self {
             repo_manager,
+            scrollbars: termide_core::ScrollBars::default(),
             current_section: Section::Commits,
             branch: None,
             branches: Vec::new(),
@@ -238,6 +241,20 @@ impl Panel for GitLogPanel {
                     return CommandResult::NeedsRedraw(true);
                 }
                 CommandResult::NeedsRedraw(false)
+            }
+            PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
+            PanelCommand::SetScrollOffset { offset, .. } => {
+                self.scroll = offset;
+                // The wheel moves the selection here and lets `ensure_visible`
+                // drag the window along; a thumb drag moves the window, so pull
+                // the selection into it — otherwise the highlight sits off
+                // screen and the next arrow key jumps back.
+                let visible = self.scrollbars.vertical.map_or(1, |bar| bar.visible).max(1);
+                let last = self.commits.len().saturating_sub(1);
+                let low = offset.min(last);
+                let high = (offset + visible - 1).min(last);
+                self.selected = self.selected.clamp(low, high);
+                CommandResult::NeedsRedraw(true)
             }
             PanelCommand::Copy => {
                 if let Some(commit) = self.selected_commit() {

@@ -17,6 +17,22 @@ use termide_theme::Theme;
 impl App {
     /// Handle mouse event
     pub(super) fn handle_mouse_event(&mut self, mouse: crossterm::event::MouseEvent) -> Result<()> {
+        // A scrollbar thumb drag owns the mouse until release, ahead of the
+        // divider drags: the thumb sits on the same border they resize.
+        if self.is_dragging_scrollbar() {
+            match mouse.kind {
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    self.handle_scrollbar_drag(mouse.column, mouse.row);
+                    return Ok(());
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    self.handle_scrollbar_drag_end();
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+
         // Handle divider drag first (highest priority for smooth resize)
         if self.state.ui.drag.is_dragging() {
             match mouse.kind {
@@ -193,6 +209,15 @@ impl App {
             && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
         {
             self.state.close_menu();
+            return Ok(());
+        }
+
+        // Grabbing a scrollbar thumb wins over the divider grab zones that
+        // share the same border column/row. Only the thumb is claimed; the
+        // track and bar-less borders fall through to the resize below.
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+            && self.handle_scrollbar_press(mouse.column, mouse.row)
+        {
             return Ok(());
         }
 

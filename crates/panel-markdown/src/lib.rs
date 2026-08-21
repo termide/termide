@@ -25,8 +25,9 @@ use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 
 use render::Rendered;
 use termide_core::{
-    Config, HotkeyTable, InputAction, KeyChord, LinkOpen, Panel, PanelEvent, RenderContext,
-    SegmentKind, SessionPanel, StatusSegment, Theme, ThemeColors, WidthPreference,
+    CommandResult, Config, HotkeyTable, InputAction, KeyChord, LinkOpen, Panel, PanelCommand,
+    PanelEvent, RenderContext, SegmentKind, SessionPanel, StatusSegment, Theme, ThemeColors,
+    WidthPreference,
 };
 use termide_modal::FindBar;
 use termide_ui::ScrollBar;
@@ -41,6 +42,8 @@ type Match = (usize, usize);
 
 /// Rendered Markdown viewer.
 pub struct MarkdownPanel {
+    /// Scrollbar drawn by the last render, for mouse thumb dragging.
+    scrollbars: termide_core::ScrollBars,
     /// Path to the markdown file.
     file_path: PathBuf,
     /// Display title (filename).
@@ -117,6 +120,7 @@ impl MarkdownPanel {
             },
             layout_width: 0,
             top: 0,
+            scrollbars: termide_core::ScrollBars::default(),
             last_area: Rect::default(),
             cursor: (0, 0),
             anchor: None,
@@ -223,6 +227,17 @@ impl MarkdownPanel {
 impl Panel for MarkdownPanel {
     fn name(&self) -> &'static str {
         "markdown"
+    }
+
+    fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
+        match cmd {
+            PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
+            PanelCommand::SetScrollOffset { offset, .. } => {
+                self.top = offset.min(self.line_count().saturating_sub(1));
+                CommandResult::NeedsRedraw(true)
+            }
+            _ => CommandResult::None,
+        }
     }
 
     fn width_preference(&self) -> WidthPreference {
@@ -377,7 +392,7 @@ impl Panel for MarkdownPanel {
 
         // Vertical scrollbar on the panel's right border (replacing it), not one
         // column inside it — otherwise it reads as detached from the edge.
-        ScrollBar::render(
+        self.scrollbars.vertical = ScrollBar::render_tracked(
             buf,
             ctx.border_right_x.unwrap_or(content.x + content.width - 1),
             content.y,
@@ -649,6 +664,7 @@ mod tests {
             },
             layout_width: 0,
             top: 0,
+            scrollbars: termide_core::ScrollBars::default(),
             last_area: Rect::new(0, 0, 80, 10),
             cursor: (0, 0),
             anchor: None,
@@ -672,6 +688,61 @@ mod tests {
         p.doc = render::render_markdown(src, 80, &p.colors, false);
         p.layout_width = 80;
         p
+    }
+
+    /// End-to-end contract the mouse dispatcher relies on: after a render the
+    /// panel reports the bar it drew, a press on the thumb hit-tests, and the
+    /// offset it maps to actually scrolls the panel.
+    #[test]
+    fn reports_its_scrollbar_and_scrolls_to_a_dragged_offset() {
+        use termide_core::{CommandResult, PanelCommand, ScrollAxis};
+
+        let src = (0..200)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let mut p = panel_from(&src);
+
+        let area = Rect::new(0, 0, 80, 10);
+        let mut buf = Buffer::empty(Rect::new(0, 0, 80, 12));
+        let colors = p.colors;
+        let ctx = RenderContext {
+            theme: &colors,
+            config: &termide_core::PanelConfig {
+                tab_size: 4,
+                word_wrap: false,
+                show_line_numbers: false,
+                show_hidden_files: false,
+            },
+            is_focused: true,
+            panel_index: 0,
+            terminal_width: 80,
+            terminal_height: 12,
+            border_right_x: Some(79),
+            border_bottom_y: Some(11),
+        };
+        p.render(area, &mut buf, &ctx);
+
+        let CommandResult::ScrollBars(bars) = p.handle_command(PanelCommand::GetScrollBars) else {
+            panic!("panel did not report its scrollbars");
+        };
+        let bar = bars.vertical.expect("200 paragraphs overflow 10 rows");
+        assert_eq!(bar.x, 79, "bar must sit on the right border");
+        assert!(bar.hits_thumb(bar.x, bar.y + bar.thumb_pos));
+
+        // Grab the thumb's top row, drag to the track's end.
+        let target = bar.offset_for_drag(bar.x, bar.y + bar.len, 0);
+        assert_eq!(
+            target,
+            bar.max_offset(),
+            "dragging to the end pins to the end"
+        );
+        p.handle_command(PanelCommand::SetScrollOffset {
+            axis: ScrollAxis::Vertical,
+            offset: target,
+        });
+        assert_eq!(p.top, target.min(p.line_count() - 1));
+        assert!(p.top > 0, "the panel actually scrolled");
     }
 
     #[test]
