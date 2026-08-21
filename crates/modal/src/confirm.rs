@@ -40,6 +40,15 @@ impl ConfirmModal {
         }
     }
 
+    /// Start with "No" focused instead of "Yes".
+    ///
+    /// For a destructive, unrecoverable action — deleting files — the safe
+    /// answer should be the one a stray Enter picks.
+    pub fn defaulting_to_no(mut self) -> Self {
+        self.selected = false;
+        self
+    }
+
     /// Calculate dynamic modal width based on content
     fn calculate_modal_width(&self, screen_width: u16) -> u16 {
         let title_width = self.title.len() as u16 + 2;
@@ -175,5 +184,48 @@ impl Modal for ConfirmModal {
         } else {
             Ok(None)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyEvent, KeyModifiers};
+    use termide_core::KeyChord;
+
+    fn press(modal: &mut ConfirmModal, code: KeyCode) -> Option<ModalResult<bool>> {
+        modal
+            .handle_key(KeyChord::identity(KeyEvent::new(code, KeyModifiers::NONE)))
+            .unwrap()
+    }
+
+    #[test]
+    fn confirmation_defaults_to_yes() {
+        let mut modal = ConfirmModal::new("Confirm", "Proceed?");
+        assert!(matches!(
+            press(&mut modal, KeyCode::Enter),
+            Some(ModalResult::Confirmed(true))
+        ));
+    }
+
+    /// Delete prompts opt into "No" so a stray Enter cannot wipe files.
+    #[test]
+    fn defaulting_to_no_answers_no_on_enter() {
+        let mut modal = ConfirmModal::new("Confirm", "Delete?").defaulting_to_no();
+        assert!(matches!(
+            press(&mut modal, KeyCode::Enter),
+            Some(ModalResult::Confirmed(false))
+        ));
+    }
+
+    /// The default only moves the starting focus; navigation still works.
+    #[test]
+    fn defaulting_to_no_still_allows_choosing_yes() {
+        let mut modal = ConfirmModal::new("Confirm", "Delete?").defaulting_to_no();
+        assert!(press(&mut modal, KeyCode::Left).is_none());
+        assert!(matches!(
+            press(&mut modal, KeyCode::Enter),
+            Some(ModalResult::Confirmed(true))
+        ));
     }
 }
