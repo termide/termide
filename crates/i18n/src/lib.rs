@@ -535,6 +535,12 @@ pub trait Translation: Send + Sync {
 
     // Relative time
     fn time_just_now(&self) -> &str;
+    /// Compact unit suffix for hours in a duration, e.g. `h`.
+    fn time_short_hours(&self) -> &str;
+    /// Compact unit suffix for minutes in a duration, e.g. `m`.
+    fn time_short_minutes(&self) -> &str;
+    /// Compact unit suffix for seconds in a duration, e.g. `s`.
+    fn time_short_seconds(&self) -> &str;
     fn time_minutes_ago(&self, count: usize) -> String;
     fn time_hours_ago(&self, count: usize) -> String;
     fn time_days_ago(&self, count: usize) -> String;
@@ -876,6 +882,34 @@ pub fn relative_age(seconds: u64) -> String {
     }
 }
 
+/// Localized compact duration for an elapsed-time counter: `5s`, `2m 5s`,
+/// `1h 02m 05s`, with unit suffixes from the current translation.
+///
+/// Distinct from [`relative_age`], which says how long *ago* something
+/// happened. This one counts how long something has been running, so the
+/// units are suffixes rather than a phrase.
+#[must_use]
+pub fn compact_duration(seconds: u64) -> String {
+    let tr = t();
+    let (hours, minutes, secs) = (seconds / 3_600, (seconds % 3_600) / 60, seconds % 60);
+    if hours > 0 {
+        format!(
+            "{hours}{} {minutes}{} {secs}{}",
+            tr.time_short_hours(),
+            tr.time_short_minutes(),
+            tr.time_short_seconds()
+        )
+    } else if minutes > 0 {
+        format!(
+            "{minutes}{} {secs}{}",
+            tr.time_short_minutes(),
+            tr.time_short_seconds()
+        )
+    } else {
+        format!("{secs}{}", tr.time_short_seconds())
+    }
+}
+
 /// Get the current translation.
 ///
 /// The application calls [`init`] / [`init_with_language`] at startup to select
@@ -925,7 +959,7 @@ pub fn get_language_name(code: &str) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::relative_age;
+    use super::{compact_duration, relative_age};
 
     // `relative_age` falls back to the built-in English translation when no
     // language is initialized, so these assert the English bucket wording.
@@ -940,5 +974,18 @@ mod tests {
         // Years bucket — the case git blame previously handled but session did not.
         assert_eq!(relative_age(3 * 31_536_000), "3 years ago");
         assert_eq!(relative_age(31_536_000), "1 year ago");
+    }
+
+    /// Elapsed counters used to hard-code `h`/`m`/`s`, which stayed English in
+    /// every locale. The units now come from the translation; with none
+    /// initialized these assert the English fallback.
+    #[test]
+    fn compact_duration_scales_units() {
+        assert_eq!(compact_duration(0), "0s");
+        assert_eq!(compact_duration(45), "45s");
+        assert_eq!(compact_duration(60), "1m 0s");
+        assert_eq!(compact_duration(125), "2m 5s");
+        assert_eq!(compact_duration(3_600), "1h 0m 0s");
+        assert_eq!(compact_duration(4_205), "1h 10m 5s");
     }
 }

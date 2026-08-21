@@ -242,19 +242,7 @@ fn render_snapshot_card(
     // Elapsed time (for all operations)
     {
         let elapsed = op.started_at.elapsed().as_secs();
-        let elapsed_str = if elapsed >= 3600 {
-            format!(
-                "{}h {}m {}s",
-                elapsed / 3600,
-                (elapsed % 3600) / 60,
-                elapsed % 60
-            )
-        } else if elapsed >= 60 {
-            format!("{}m {}s", elapsed / 60, elapsed % 60)
-        } else {
-            format!("{}s", elapsed)
-        };
-        let elapsed_display = t.op_elapsed(&elapsed_str);
+        let elapsed_display = t.op_elapsed(&termide_i18n::compact_duration(elapsed));
         buf.set_line(
             inner.x,
             y,

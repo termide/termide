@@ -388,6 +388,9 @@ impl Translation for RuntimeTranslation {
         settings_kb_press_key,
         sessions_title,
         time_just_now,
+        time_short_hours,
+        time_short_minutes,
+        time_short_seconds,
         status_dir,
         status_file,
         status_mod,
@@ -1176,6 +1179,42 @@ mod tests {
             // so it must also resolve from `[formats]` in every language.
             let items = t.file_info_items(42);
             assert!(items.contains("42"), "{lang}: {items:?}");
+        }
+    }
+
+    /// Every language must carry its own compact duration units — a missing key
+    /// silently falls back to English, which is the bug these replaced.
+    #[test]
+    fn compact_duration_units_are_translated_everywhere() {
+        let english = RuntimeTranslation::new("en").unwrap();
+        let (en_h, en_m, en_s) = (
+            english.time_short_hours().to_string(),
+            english.time_short_minutes().to_string(),
+            english.time_short_seconds().to_string(),
+        );
+
+        for (code, _) in crate::SUPPORTED_LANGUAGES {
+            let t = RuntimeTranslation::new(code).unwrap();
+            for unit in [
+                t.time_short_hours(),
+                t.time_short_minutes(),
+                t.time_short_seconds(),
+            ] {
+                assert!(!unit.is_empty(), "{code}: missing a duration unit");
+            }
+            // Latin-script languages legitimately share some units with
+            // English; the ones with their own script must not.
+            if ["ru", "zh", "ja", "ko", "th", "hi", "bn"].contains(code) {
+                assert_ne!(
+                    (
+                        t.time_short_hours(),
+                        t.time_short_minutes(),
+                        t.time_short_seconds()
+                    ),
+                    (en_h.as_str(), en_m.as_str(), en_s.as_str()),
+                    "{code}: duration units left as the English fallback"
+                );
+            }
         }
     }
 }
