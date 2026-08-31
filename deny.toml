@@ -46,16 +46,6 @@ ignore = [
     # and measure timing on our process. Re-evaluate when russh
     # ships a fix or migrates off the rsa crate.
     "RUSTSEC-2023-0071",
-    # RUSTSEC-2026-0098 / 0099 / 0104 — `rustls-webpki 0.101.7`:
-    # URI / wildcard name-constraint mishandling and a panic in
-    # CRL parsing. Path: `rustls-webpki` ← `rustls 0.21` ←
-    # `suppaftp 5.4 (rustls feature)` ← termide-vfs FTPS client.
-    # We connect to a user-specified server; we don't apply name
-    # constraints to our own CA bundle, and we don't parse remote
-    # CRLs. Re-evaluate when suppaftp ships against rustls 0.23+.
-    "RUSTSEC-2026-0098",
-    "RUSTSEC-2026-0099",
-    "RUSTSEC-2026-0104",
     # RUSTSEC-2017-0008 — `serial` crate unmaintained.
     # Path: `serial` ← `portable-pty 0.8` ← termide-panel-terminal.
     # serial is used by portable-pty's optional UART backend for
