@@ -1,4 +1,4 @@
-//! Regex fallback for symbol extraction from markdown, HTML, YAML, and XML files.
+//! Fallback symbol extraction for text formats and languages without a query.
 
 use regex::Regex;
 use std::sync::LazyLock;
@@ -31,6 +31,7 @@ static XML_SELF_CLOSE_RE: LazyLock<Regex> =
 /// Extract symbols using regex patterns for languages without tree-sitter support.
 pub(crate) fn extract_symbols_regex(source: &str, language: &str) -> Vec<SymbolInfo> {
     match language {
+        "alatyr" => crate::alatyr::extract_symbols(source),
         "markdown" => extract_markdown_headings(source),
         "html" => extract_html_headings(source),
         "toml" => extract_toml_sections(source),

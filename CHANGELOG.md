@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- The Structure panel now recognizes Alatyr `.al` files. Alatyr has no declaration keywords — a declaration binds a name to a value (`name := value`) — so the outline lists bindings and classifies the right-hand-side introducer: `fn`, `struct`, `enum`, `union`, `mod` and `brand`, including declarations inside inline `mod { ... }` values. Locals inside a function body are skipped, and `:=` inside strings or comments is not mistaken for a declaration. Works whether or not you have set up `[[highlight.custom_languages]]` for the extension.
+
 ### Fixed
 - The editor's line-number column now grows for large files. It was fixed at four digits, so from line 10 000 on the number overran the diagnostic marker and the separator space next to the code; the width is now derived from the file's line count, keeping the four-digit minimum so ordinary files look exactly as before.
 

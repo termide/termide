@@ -2,8 +2,10 @@
 //!
 //! Displays a navigable list of structural symbols (functions, classes, structs, etc.)
 //! extracted from the active editor's source code using tree-sitter queries,
-//! with a regex fallback for markdown and HTML.
+//! with language-specific fallback extractors for formats such as Markdown
+//! and Alatyr.
 
+mod alatyr;
 mod regex_fallback;
 pub mod symbols;
 mod treesitter;

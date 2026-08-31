@@ -79,7 +79,8 @@ pub struct SymbolInfo {
     pub depth: usize,
 }
 
-/// Extract symbols from source code, dispatching to tree-sitter or regex fallback.
+/// Extract symbols from source code, dispatching to tree-sitter or a language
+/// specific fallback extractor.
 ///
 /// Accepts a `&mut Parser` so the caller can reuse it across invocations.
 pub fn extract_symbols(
@@ -88,7 +89,13 @@ pub fn extract_symbols(
     file_path: Option<&std::path::Path>,
     parser: &mut tree_sitter::Parser,
 ) -> Vec<SymbolInfo> {
-    let lang = language.or_else(|| file_path.and_then(termide_highlight::detect_language));
+    let lang = match language {
+        Some(lang) if lang.eq_ignore_ascii_case("alatyr") || lang.eq_ignore_ascii_case("al") => {
+            Some("alatyr")
+        }
+        Some(lang) => Some(lang),
+        None => file_path.and_then(detect_outline_language),
+    };
 
     let lang = match lang {
         Some(l) => l,
@@ -101,6 +108,40 @@ pub fn extract_symbols(
         return symbols;
     }
 
-    // Fall back to regex for markdown/HTML
+    // Fall back to lightweight extractors for languages without a tree-sitter
+    // query (including Alatyr).
     crate::regex_fallback::extract_symbols_regex(source, lang)
+}
+
+fn detect_outline_language(path: &std::path::Path) -> Option<&'static str> {
+    if path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("al"))
+    {
+        Some("alatyr")
+    } else {
+        termide_highlight::detect_language(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn detects_alatyr_from_al_extension_without_affecting_highlight_detection() {
+        let mut parser = tree_sitter::Parser::new();
+        let symbols = extract_symbols(
+            "main := fn() -> u64 { 0 }\n",
+            None,
+            Some(Path::new("main.al")),
+            &mut parser,
+        );
+
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].name, "main");
+        assert_eq!(symbols[0].kind, SymbolKind::Function);
+    }
 }

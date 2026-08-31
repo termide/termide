@@ -168,6 +168,10 @@ track multi-line constructs (a block comment must open and close on one line);
 when the language stabilises, a real tree-sitter grammar gives richer,
 scope-aware highlighting.
 
+The Structure panel also recognizes Alatyr `.al` files. It lists bindings and
+classifies `fn`, `struct`, `enum`, `union`, `mod`, and `brand` right-hand-side
+introducers, including declarations inside inline `mod { ... }` values.
+
 ## Clipboard
 
 | Shortcut           | Action                                     |
