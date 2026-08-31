@@ -62,6 +62,7 @@ pub fn render_line_no_wrap<H: LineHighlighter>(
         show_git_diff,
         diagnostic_severity,
         theme,
+        line_number_width,
     );
 
     // Render line content with horizontal scrolling
@@ -115,10 +116,10 @@ pub fn render_line_no_wrap<H: LineHighlighter>(
 
 /// Render line number gutter with git color and LSP marker.
 ///
-/// Format: `1234▶ ` (6 chars total)
-/// - Positions 0-3: line number (color = git status)
-/// - Position 4: LSP marker (▶ for error/warning, space otherwise)
-/// - Position 5: space separator
+/// Format: `1234▶ ` (`line_number_width` cells total)
+/// - Leading digit cells: line number (color = git status)
+/// - Penultimate cell: LSP marker (▶ for error/warning, space otherwise)
+/// - Last cell: space separator
 #[allow(clippy::too_many_arguments)]
 fn render_line_gutter(
     buf: &mut Buffer,
@@ -129,19 +130,21 @@ fn render_line_gutter(
     show_git_diff: bool,
     diagnostic_severity: Option<lsp_types::DiagnosticSeverity>,
     theme: &Theme,
+    line_number_width: u16,
 ) {
     // Get separate colors for line number and LSP marker
     let (line_num_fg, line_num_bg) =
         git::get_line_number_git_style(line_idx, git_diff_cache, show_git_diff, theme);
     let lsp_marker = git::get_lsp_marker(diagnostic_severity, theme);
 
-    // Render line number (4 chars) with git bg color — write digits directly to avoid format!()
+    // Render the line number with git bg color — write digits directly to avoid format!()
     let mut line_num_style = Style::default().fg(line_num_fg);
     if let Some(bg) = line_num_bg {
         line_num_style = line_num_style.bg(bg);
     }
+    let digit_cells = line_number_width.saturating_sub(super::LINE_NUMBER_MARKER_CELLS as u16);
     let mut num_buf = [0u8; 20];
-    let num_str = super::itoa_right_align::<4>(line_idx + 1, &mut num_buf);
+    let num_str = super::itoa_right_align(line_idx + 1, digit_cells as usize, &mut num_buf);
 
     for (i, ch) in num_str.chars().enumerate() {
         let x = area.x + i as u16;
@@ -152,17 +155,17 @@ fn render_line_gutter(
         }
     }
 
-    // Render LSP marker (position 4) with its own color
+    // Render LSP marker (penultimate gutter cell) with its own color
     let marker_style = Style::default().fg(lsp_marker.color);
-    let x = area.x + 4;
+    let x = area.x + digit_cells;
     let y = area.y + row as u16;
     if let Some(cell) = buf.cell_mut((x, y)) {
         cell.set_char(lsp_marker.marker);
         cell.set_style(marker_style);
     }
 
-    // Render space separator (position 5)
-    let x = area.x + 5;
+    // Render space separator (last gutter cell)
+    let x = area.x + digit_cells + 1;
     let y = area.y + row as u16;
     if let Some(cell) = buf.cell_mut((x, y)) {
         cell.set_char(' ');
@@ -868,5 +871,60 @@ pub fn render_content_no_wrap<H: LineHighlighter>(
                 super::cursor_renderer::render_cursor_at(buf, cursor_x, cursor_y, area, theme);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::style::Color;
+
+    fn test_theme() -> Theme {
+        Theme {
+            name: "test",
+            bg: Color::Black,
+            fg: Color::White,
+            selected_bg: Color::Blue,
+            selected_fg: Color::White,
+            accented_bg: Color::DarkGray,
+            accented_fg: Color::Cyan,
+            disabled: Color::Gray,
+            error: Color::Red,
+            success: Color::Green,
+            warning: Color::Yellow,
+            is_light: Some(false),
+        }
+    }
+
+    fn gutter_text(line_idx: usize, line_number_width: u16) -> String {
+        let area = Rect::new(0, 0, 20, 3);
+        let mut buf = Buffer::empty(area);
+        render_line_gutter(
+            &mut buf,
+            area,
+            0,
+            line_idx,
+            &None,
+            false,
+            None,
+            &test_theme(),
+            line_number_width,
+        );
+        (0..line_number_width)
+            .map(|x| buf.cell((x, 0)).map(|c| c.symbol()).unwrap_or(""))
+            .collect()
+    }
+
+    #[test]
+    fn gutter_right_aligns_four_digit_numbers() {
+        assert_eq!(gutter_text(41, 6), "  42  ");
+    }
+
+    #[test]
+    fn gutter_shows_full_number_in_wide_gutter() {
+        // 5-digit line in a widened gutter: the number is not clipped and the
+        // marker/separator cells stay to its right.
+        assert_eq!(gutter_text(12_344, 7), "12345  ");
+        assert_eq!(gutter_text(41, 7), "   42  ");
     }
 }

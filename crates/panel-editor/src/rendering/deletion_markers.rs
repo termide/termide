@@ -12,7 +12,7 @@ use termide_theme::Theme;
 ///
 /// Displays a visual indicator showing where lines were deleted according to git diff.
 /// The marker includes:
-/// - Gutter: 4 spaces + dimmed ▶ marker + space
+/// - Gutter: digit-width spaces + dimmed ▶ marker + space
 /// - Content: horizontal line (─) with centered deletion count text
 pub fn render_deletion_marker(
     buf: &mut Buffer,
@@ -24,7 +24,7 @@ pub fn render_deletion_marker(
     line_number_width: u16,
 ) {
     // Render gutter (line number area)
-    render_deletion_gutter(buf, area, row, theme);
+    render_deletion_gutter(buf, area, row, theme, line_number_width);
 
     // Render content area (horizontal line with text)
     render_deletion_content(
@@ -40,13 +40,20 @@ pub fn render_deletion_marker(
 
 /// Render the gutter portion of deletion marker.
 ///
-/// Format: "    ▶ " (4 spaces + dimmed marker + space)
-fn render_deletion_gutter(buf: &mut Buffer, area: Rect, row: usize, theme: &Theme) {
+/// Format: "    ▶ " (line-number spaces + dimmed marker + space)
+fn render_deletion_gutter(
+    buf: &mut Buffer,
+    area: Rect,
+    row: usize,
+    theme: &Theme,
+    line_number_width: u16,
+) {
     let y = area.y + row as u16;
+    let digit_cells = line_number_width.saturating_sub(super::LINE_NUMBER_MARKER_CELLS as u16);
 
-    // Empty space for line number (4 spaces)
-    for i in 0..4 {
-        let x = area.x + i as u16;
+    // Empty space where the line number would be
+    for i in 0..digit_cells {
+        let x = area.x + i;
         if let Some(cell) = buf.cell_mut((x, y)) {
             cell.set_char(' ');
             cell.set_style(Style::default().fg(theme.disabled));
@@ -58,14 +65,14 @@ fn render_deletion_gutter(buf: &mut Buffer, area: Rect, row: usize, theme: &Them
     // On Windows, U+25B6 ▶ is outside WGL4; use U+25BA ► instead.
     const DELETION_MARKER: char = if cfg!(windows) { '►' } else { '▶' };
     let marker_style = Style::default().fg(theme.disabled);
-    let x = area.x + 4; // Position after spaces
+    let x = area.x + digit_cells; // Position after spaces
     if let Some(cell) = buf.cell_mut((x, y)) {
         cell.set_char(DELETION_MARKER);
         cell.set_style(marker_style);
     }
 
     // Empty space after marker
-    let x = area.x + 5;
+    let x = area.x + digit_cells + 1;
     if let Some(cell) = buf.cell_mut((x, y)) {
         cell.set_char(' ');
         cell.set_style(Style::default().fg(theme.disabled));
@@ -150,7 +157,7 @@ mod tests {
         let mut buf = Buffer::empty(Rect::new(0, 0, 20, 10));
         let area = Rect::new(0, 0, 20, 10);
 
-        render_deletion_gutter(&mut buf, area, 2, &theme);
+        render_deletion_gutter(&mut buf, area, 2, &theme, 6);
 
         // Check spaces (positions 0-3)
         for i in 0..4 {

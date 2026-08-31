@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- The editor's line-number column now grows for large files. It was fixed at four digits, so from line 10 000 on the number overran the diagnostic marker and the separator space next to the code; the width is now derived from the file's line count, keeping the four-digit minimum so ordinary files look exactly as before.
+
 ### Security
 - Updated the `suppaftp` FTP client to 10.0.2, clearing RUSTSEC-2026-0271 (FTP command injection via CRLF in control-channel arguments). Command arguments — user name, password and remote paths — are now validated before they go on the wire, so a path containing `\r` or `\n` fails with an error instead of smuggling a second FTP command into the session.
 

@@ -24,8 +24,10 @@ pub mod line_rendering;
 pub mod wrap_rendering;
 
 /// Right-align a number into a fixed-width string without heap allocation.
-/// Returns a `&str` of exactly `WIDTH` chars (space-padded on the left).
-pub(crate) fn itoa_right_align<const WIDTH: usize>(n: usize, buf: &mut [u8; 20]) -> &str {
+/// Returns a `&str` of exactly `width` chars (space-padded on the left), or the
+/// bare digits when the number needs more room than `width`.
+pub(crate) fn itoa_right_align(n: usize, width: usize, buf: &mut [u8; 20]) -> &str {
+    let width = width.min(20);
     let mut pos = 20;
     let mut val = n;
     if val == 0 {
@@ -39,25 +41,55 @@ pub(crate) fn itoa_right_align<const WIDTH: usize>(n: usize, buf: &mut [u8; 20])
         }
     }
     let digit_count = 20 - pos;
-    if digit_count >= WIDTH {
+    if digit_count >= width {
         std::str::from_utf8(&buf[pos..]).unwrap_or("????")
     } else {
-        let start = 20 - WIDTH;
+        let start = 20 - width;
         buf[start..pos].fill(b' ');
         std::str::from_utf8(&buf[start..]).unwrap_or("????")
     }
 }
 
-/// Width of the line number column (including git markers).
+/// Minimum number of digit cells reserved for the line number, so the gutter
+/// keeps a stable width for ordinary files instead of jittering per buffer.
+pub const LINE_NUMBER_MIN_DIGITS: usize = 4;
+
+/// Gutter cells that follow the digits: LSP marker + separator space.
+pub const LINE_NUMBER_MARKER_CELLS: usize = 2;
+
+/// Number of decimal digits needed to print `n` (at least 1).
+fn decimal_digits(n: usize) -> usize {
+    let mut digits = 1;
+    let mut val = n;
+    while val >= 10 {
+        digits += 1;
+        val /= 10;
+    }
+    digits
+}
+
+/// Digit cells reserved for line numbers in a buffer of `total_lines` lines.
+pub fn line_number_digits(total_lines: usize) -> usize {
+    decimal_digits(total_lines).max(LINE_NUMBER_MIN_DIGITS)
+}
+
+/// Width of the line number column (digits + LSP marker + separator).
 ///
-/// Format: "  123  " (2 spaces + 3 digits + 2 git markers)
-pub const LINE_NUMBER_WIDTH: usize = 6;
+/// Grows past the 4-digit default so buffers with 10k+ lines still show the
+/// full number instead of overrunning the marker column.
+pub fn line_number_width(total_lines: usize) -> usize {
+    line_number_digits(total_lines) + LINE_NUMBER_MARKER_CELLS
+}
 
 /// Calculate content area dimensions.
 ///
 /// Returns (content_width, content_height) accounting for line numbers.
-pub fn calculate_content_dimensions(area_width: u16, area_height: u16) -> (usize, usize) {
-    let content_width = (area_width as usize).saturating_sub(LINE_NUMBER_WIDTH);
+pub fn calculate_content_dimensions(
+    area_width: u16,
+    area_height: u16,
+    total_lines: usize,
+) -> (usize, usize) {
+    let content_width = (area_width as usize).saturating_sub(line_number_width(total_lines));
     let content_height = area_height as usize;
     (content_width, content_height)
 }
@@ -90,7 +122,7 @@ pub fn render_editor_content<H: LineHighlighter>(
     content_width: usize,
     content_height: usize,
 ) {
-    let line_number_width = LINE_NUMBER_WIDTH as u16;
+    let line_number_width = line_number_width(buffer.line_count()) as u16;
 
     // Create rendering styles from theme
     let text_style = Style::default().fg(theme.fg);
@@ -193,5 +225,42 @@ pub fn render_editor_content<H: LineHighlighter>(
             current_match_style,
             selection_style,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn line_number_width_keeps_four_digit_default() {
+        assert_eq!(line_number_width(1), 6);
+        assert_eq!(line_number_width(9_999), 6);
+    }
+
+    #[test]
+    fn line_number_width_grows_with_line_count() {
+        assert_eq!(line_number_width(10_000), 7);
+        assert_eq!(line_number_width(123_456), 8);
+        assert_eq!(line_number_width(1_000_000), 9);
+    }
+
+    #[test]
+    fn content_width_shrinks_as_gutter_grows() {
+        let (small, _) = calculate_content_dimensions(80, 24, 500);
+        let (large, _) = calculate_content_dimensions(80, 24, 250_000);
+        assert_eq!(small, 74);
+        assert_eq!(large, 74 - 2);
+    }
+
+    #[test]
+    fn itoa_right_align_pads_and_overflows() {
+        let mut buf = [0u8; 20];
+        assert_eq!(itoa_right_align(42, 4, &mut buf), "  42");
+        let mut buf = [0u8; 20];
+        assert_eq!(itoa_right_align(123_456, 6, &mut buf), "123456");
+        // Narrower than the number: digits win over padding, never truncation.
+        let mut buf = [0u8; 20];
+        assert_eq!(itoa_right_align(123_456, 4, &mut buf), "123456");
     }
 }

@@ -26,8 +26,11 @@ impl Editor {
         highlighter: &mut H,
     ) {
         // Update viewport size
-        let (content_width, content_height) =
-            rendering::calculate_content_dimensions(area.width, area.height);
+        let (content_width, content_height) = rendering::calculate_content_dimensions(
+            area.width,
+            area.height,
+            self.buffer.line_count(),
+        );
 
         let effective_width = if self.config.word_wrap {
             content_width
@@ -239,7 +242,7 @@ impl Editor {
             (row, visible)
         };
 
-        let line_number_width = rendering::LINE_NUMBER_WIDTH as u16;
+        let line_number_width = rendering::line_number_width(self.buffer.line_count()) as u16;
         // area is already the inner rect (borders stripped by the app layer before calling render)
         let content_x = area.x + line_number_width;
         let line_y = area.y + anchor_row;
@@ -269,8 +272,11 @@ impl Editor {
         border_right_x: Option<u16>,
     ) {
         // Update viewport size (subtract space for line numbers)
-        let (content_width, content_height) =
-            rendering::calculate_content_dimensions(area.width, area.height);
+        let (content_width, content_height) = rendering::calculate_content_dimensions(
+            area.width,
+            area.height,
+            self.buffer.line_count(),
+        );
 
         let effective_width = if self.config.word_wrap {
             content_width
@@ -366,7 +372,8 @@ impl Editor {
                 && self.cursor.line < self.viewport.top_line + content_height
             {
                 // Calculate cursor screen position
-                let line_number_width = rendering::LINE_NUMBER_WIDTH as u16;
+                let line_number_width =
+                    rendering::line_number_width(self.buffer.line_count()) as u16;
                 let content_x = area.x + 1 + line_number_width; // +1 for border
 
                 // Calculate cursor X position within the line
@@ -401,7 +408,8 @@ impl Editor {
             if self.cursor.line >= self.viewport.top_line
                 && self.cursor.line < self.viewport.top_line + content_height
             {
-                let line_number_width = rendering::LINE_NUMBER_WIDTH as u16;
+                let line_number_width =
+                    rendering::line_number_width(self.buffer.line_count()) as u16;
                 let content_x = area.x + 1 + line_number_width;
                 let cursor_screen_col: usize = self
                     .buffer

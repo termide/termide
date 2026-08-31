@@ -246,13 +246,14 @@ fn render_empty_line(
         git::get_line_number_git_style(line_idx, git_diff_cache, show_git_diff, theme);
     let lsp_marker = git::get_lsp_marker(diagnostic_severity, theme);
 
-    // Render line number (4 chars) with git bg color
+    // Render the line number with git bg color
     let mut line_num_style = Style::default().fg(line_num_fg);
     if let Some(bg) = line_num_bg {
         line_num_style = line_num_style.bg(bg);
     }
+    let digit_cells = line_number_width.saturating_sub(super::LINE_NUMBER_MARKER_CELLS as u16);
     let mut num_buf = [0u8; 20];
-    let line_num_str = super::itoa_right_align::<4>(line_idx + 1, &mut num_buf);
+    let line_num_str = super::itoa_right_align(line_idx + 1, digit_cells as usize, &mut num_buf);
 
     for (i, ch) in line_num_str.chars().enumerate() {
         let x = area.x + i as u16;
@@ -263,17 +264,17 @@ fn render_empty_line(
         }
     }
 
-    // Render LSP marker (position 4) with its own color
+    // Render LSP marker (penultimate gutter cell) with its own color
     let marker_style = Style::default().fg(lsp_marker.color);
-    let x = area.x + 4;
+    let x = area.x + digit_cells;
     let y = area.y + visual_row as u16;
     if let Some(cell) = buf.cell_mut((x, y)) {
         cell.set_char(lsp_marker.marker);
         cell.set_style(marker_style);
     }
 
-    // Space separator (position 5)
-    let x = area.x + 5;
+    // Space separator (last gutter cell)
+    let x = area.x + digit_cells + 1;
     let y = area.y + visual_row as u16;
     if let Some(cell) = buf.cell_mut((x, y)) {
         cell.set_char(' ');
@@ -335,13 +336,15 @@ fn render_visual_line<H: LineHighlighter>(
             git::get_line_number_git_style(line_idx, git_diff_cache, show_git_diff, theme);
         let lsp_marker = git::get_lsp_marker(diagnostic_severity, theme);
 
-        // Render line number (4 chars) with git bg color
+        // Render the line number with git bg color
         let mut line_num_style = Style::default().fg(line_num_fg);
         if let Some(bg) = line_num_bg {
             line_num_style = line_num_style.bg(bg);
         }
+        let digit_cells = line_number_width.saturating_sub(super::LINE_NUMBER_MARKER_CELLS as u16);
         let mut num_buf = [0u8; 20];
-        let line_num_str = super::itoa_right_align::<4>(line_idx + 1, &mut num_buf);
+        let line_num_str =
+            super::itoa_right_align(line_idx + 1, digit_cells as usize, &mut num_buf);
 
         for (i, ch) in line_num_str.chars().enumerate() {
             let x = area.x + i as u16;
@@ -352,17 +355,17 @@ fn render_visual_line<H: LineHighlighter>(
             }
         }
 
-        // Render LSP marker (position 4) with its own color
+        // Render LSP marker (penultimate gutter cell) with its own color
         let marker_style = Style::default().fg(lsp_marker.color);
-        let x = area.x + 4;
+        let x = area.x + digit_cells;
         let y = area.y + visual_row as u16;
         if let Some(cell) = buf.cell_mut((x, y)) {
             cell.set_char(lsp_marker.marker);
             cell.set_style(marker_style);
         }
 
-        // Space separator (position 5)
-        let x = area.x + 5;
+        // Space separator (last gutter cell)
+        let x = area.x + digit_cells + 1;
         let y = area.y + visual_row as u16;
         if let Some(cell) = buf.cell_mut((x, y)) {
             cell.set_char(' ');
