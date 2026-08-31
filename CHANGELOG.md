@@ -5,6 +5,11 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+- Updated the `suppaftp` FTP client to 10.0.2, clearing RUSTSEC-2026-0271 (FTP command injection via CRLF in control-channel arguments). Command arguments — user name, password and remote paths — are now validated before they go on the wire, so a path containing `\r` or `\n` fails with an error instead of smuggling a second FTP command into the session.
+
 ## [0.30.0] - 2026-08-21
 
 ### Added

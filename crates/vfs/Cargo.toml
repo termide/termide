@@ -22,9 +22,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "io-util", "macr
 async-trait = "0.1"
 
 # FTP support — rustls TLS provider (pure-Rust, enables musl-static builds).
-suppaftp = { version = "5.3", features = ["rustls"] }
-rustls = "0.21"
-webpki-roots = "0.25"
+# `rustls-ring` keeps the TLS stack pure Rust (ring, not aws-lc-rs) so
+# musl-static builds need no cmake/C toolchain.
+suppaftp = { version = "10.0.2", features = ["rustls-ring"] }
+webpki-roots = "1"
 
 # SMB support (optional, may require system libraries)
 pavao = { version = "0.2", optional = true }

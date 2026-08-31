@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::SystemTime;
 
-use suppaftp::rustls::{ClientConfig, OwnedTrustAnchor, RootCertStore};
+use suppaftp::rustls::{ClientConfig, RootCertStore};
 use suppaftp::{RustlsConnector, RustlsFtpStream};
 
 use crate::error::{VfsError, VfsResult};
@@ -190,16 +190,9 @@ impl VfsProvider for FtpProvider {
                 // Upgrade to TLS if requested (explicit FTPS / STARTTLS).
                 // Rustls + Mozilla CA bundle from webpki-roots — no system OpenSSL needed.
                 if use_tls {
-                    let mut root_store = RootCertStore::empty();
-                    root_store.add_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.iter().map(|ta| {
-                        OwnedTrustAnchor::from_subject_spki_name_constraints(
-                            ta.subject,
-                            ta.spki,
-                            ta.name_constraints,
-                        )
-                    }));
+                    let root_store =
+                        RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
                     let config = ClientConfig::builder()
-                        .with_safe_defaults()
                         .with_root_certificates(root_store)
                         .with_no_client_auth();
                     let tls_connector = RustlsConnector::from(std::sync::Arc::new(config));
