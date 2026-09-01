@@ -5,7 +5,7 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.31.0] - 2026-09-01
 
 ### Added
 - The Structure panel now recognizes Alatyr `.al` files. Alatyr has no declaration keywords — a declaration binds a name to a value (`name := value`) — so the outline lists bindings and classifies the right-hand-side introducer: `fn`, `struct`, `enum`, `union`, `mod` and `brand`, including declarations inside inline `mod { ... }` values. Locals inside a function body are skipped, and `:=` inside strings or comments is not mistaken for a declaration. Works whether or not you have set up `[[highlight.custom_languages]]` for the extension.
@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 - Updated the `suppaftp` FTP client to 10.0.2, clearing RUSTSEC-2026-0271 (FTP command injection via CRLF in control-channel arguments). Command arguments — user name, password and remote paths — are now validated before they go on the wire, so a path containing `\r` or `\n` fails with an error instead of smuggling a second FTP command into the session.
+
+[0.31.0]: https://github.com/termide/termide/releases/tag/0.31.0
 
 ## [0.30.0] - 2026-08-21
 
