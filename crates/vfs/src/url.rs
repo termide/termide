@@ -271,4 +271,15 @@ mod tests {
         // Different host should have different key
         assert_ne!(path1.connection_key(), path3.connection_key());
     }
+
+    #[test]
+    fn log_safe_key_redacts_the_username() {
+        let path = VfsPath::remote(VfsProtocol::Sftp, "host1", "/path").with_username("alice");
+
+        // The lookup key identifies the account, so it carries the username;
+        // anything that reaches a log must go through `log_safe_key`.
+        assert!(path.connection_key().contains("alice"));
+        assert!(!path.log_safe_key().contains("alice"));
+        assert_eq!(path.log_safe_key(), "sftp://***@host1:22");
+    }
 }

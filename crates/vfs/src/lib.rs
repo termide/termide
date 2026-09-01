@@ -151,7 +151,12 @@ impl VfsManager {
     /// success stores it under `key`. Shared by every remote `connect_*`
     /// method — only the provider constructor differs.
     #[cfg(any(feature = "sftp", feature = "ftp", feature = "smb"))]
-    fn spawn_connect<P, F>(&self, options: ConnectOptions, key: String, make: F) -> VfsOperation<()>
+    fn spawn_connect<P, F>(
+        &self,
+        options: ConnectOptions,
+        path: &VfsPath,
+        make: F,
+    ) -> VfsOperation<()>
     where
         P: VfsProvider + 'static,
         F: FnOnce() -> P + Send + 'static,
@@ -159,20 +164,26 @@ impl VfsManager {
         let providers = Arc::clone(&self.remote_providers);
         let (tx, rx) = std::sync::mpsc::channel();
 
+        // `connection_key` embeds the username so providers can be looked up
+        // per account; it must never reach a log. Diagnostics use the redacted
+        // `log_safe_key` instead.
+        let key = path.connection_key();
+        let log_key = path.log_safe_key();
+
         std::thread::spawn(move || {
             let mut provider = make();
             let result = provider.connect(options).recv();
 
             if let Err(e) = &result {
-                log::error!("VfsManager: connection failed for {key}: {e}");
+                log::error!("VfsManager: connection failed for {log_key}: {e}");
             }
             if result.is_ok() {
                 if let Ok(mut providers) = providers.write() {
-                    providers.insert(key.clone(), Box::new(provider));
+                    providers.insert(key, Box::new(provider));
                 }
             }
             if let Err(e) = tx.send(result) {
-                log::error!("VfsManager: failed to send result for {key}: {e:?}");
+                log::error!("VfsManager: failed to send result for {log_key}: {e:?}");
             }
         });
 
@@ -203,8 +214,7 @@ impl VfsManager {
         let port = path.effective_port().unwrap_or(22);
         let username = path.username.clone();
 
-        let key = path.connection_key();
-        self.spawn_connect(options, key, move || {
+        self.spawn_connect(options, path, move || {
             SftpProvider::new(&host, port, username.as_deref())
         })
     }
@@ -234,8 +244,7 @@ impl VfsManager {
         let port = path.effective_port();
         let username = path.username.clone();
 
-        let key = path.connection_key();
-        self.spawn_connect(options, key, move || {
+        self.spawn_connect(options, path, move || {
             FtpProvider::new(&host, port, username.as_deref(), use_tls)
         })
     }
@@ -266,9 +275,8 @@ impl VfsManager {
         let trimmed = path_str.trim_start_matches('/');
         let share = trimmed.split('/').next().filter(|s| !s.is_empty());
 
-        let key = path.connection_key();
         let share_owned = share.map(String::from);
-        self.spawn_connect(options, key, move || {
+        self.spawn_connect(options, path, move || {
             SmbProvider::new(
                 &host,
                 port,

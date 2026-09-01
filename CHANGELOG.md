@@ -5,6 +5,11 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+- Remote connection diagnostics no longer write the account's user name to the log. Two `VfsManager` error messages printed the raw provider lookup key, which embeds the user name; they now use the same redacted form (`sftp://***@host:port`) as the rest of the codebase. No password was ever logged.
+
 ## [0.31.0] - 2026-09-01
 
 ### Added
