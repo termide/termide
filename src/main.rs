@@ -285,6 +285,19 @@ fn main() -> Result<()> {
         // modifier that Caps Lock attaches to letters. `EventHandler` drops
         // Release events so the rest of the app keeps its press-only
         // assumption (Repeat is kept, for held-key auto-repeat).
+        //
+        // REPORT_ALTERNATE_KEYS is what makes shifted characters typable.
+        // Under REPORT_ALL_KEYS_AS_ESCAPE_CODES every key — including plain
+        // text — arrives as CSI-u, and the protocol's primary codepoint is the
+        // key *without* modifiers. Without the alternate codepoint crossterm
+        // reports `Shift+6` as `Char('6') + Shift`, so a Russian layout types
+        // `6` where the user pressed a comma, and a US layout types `1` for
+        // `!`. With the flag crossterm substitutes the shifted codepoint and
+        // clears the Shift bit, which is the correct character to insert.
+        //
+        // The cost is that a chord carrying Shift reaches the matcher in that
+        // same substituted shape — `Ctrl+Shift+S` as `Ctrl+Char('S')`.
+        // `ParsedKeyBinding::matches` accepts it; see the note there.
         let mut flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
             | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
             | KeyboardEnhancementFlags::REPORT_EVENT_TYPES;

@@ -11,7 +11,7 @@
 //! copy_files = ["C", "F5"]  # multiple bindings
 //! ```
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventState, KeyModifiers};
 use serde::{Deserialize, Serialize};
 use termide_keyboard::{cyrillic_to_latin_opt, unshifted_punctuation, KeyNormalizer};
 
@@ -104,7 +104,48 @@ impl ParsedKeyBinding {
             }
             (a, b) => a == b,
         };
-        key_eq && self.modifiers == event.modifiers
+        if !key_eq {
+            return false;
+        }
+        self.modifiers == event.modifiers || self.matches_shifted_letter(event)
+    }
+
+    /// Second accepted shape for a chord that carries Shift on a letter.
+    ///
+    /// `REPORT_ALTERNATE_KEYS` — which termide requests, because without it
+    /// shifted characters cannot be typed at all — makes crossterm replace the
+    /// key with the shifted codepoint and clear the Shift bit. `Ctrl+Shift+S`
+    /// therefore arrives as `Ctrl+Char('S')`, and strict modifier equality
+    /// against the stored `Ctrl|Shift+S` would never fire.
+    ///
+    /// This is the letter counterpart of the `unshifted_punctuation` rule in
+    /// `KeyNormalizer`, which cannot help here: an uppercase letter carries no
+    /// separate glyph to map back from, only its case.
+    ///
+    /// Deliberately narrow. It requires the binding to name Shift explicitly,
+    /// the event to have dropped it, the event's character to be uppercase, and
+    /// every other modifier to agree — so a binding written as a bare
+    /// uppercase letter (`"S"` stages a file in the git panel) keeps matching
+    /// through strict equality and is untouched.
+    ///
+    /// Excluded when the terminal reports Caps Lock: canonicalization strips
+    /// the spurious Shift from a letter and leaves exactly this shape, so
+    /// `Ctrl+F` typed with Caps Lock on is indistinguishable from
+    /// `Ctrl+Shift+F` typed without it. The `CAPS_LOCK` state bit is what
+    /// tells them apart, and while it is set the no-Shift binding keeps
+    /// winning — the pre-existing resolution of that ambiguity.
+    fn matches_shifted_letter(&self, event: &KeyEvent) -> bool {
+        if !self.modifiers.contains(KeyModifiers::SHIFT)
+            || event.state.contains(KeyEventState::CAPS_LOCK)
+        {
+            return false;
+        }
+        let KeyCode::Char(pressed) = event.code else {
+            return false;
+        };
+        pressed.is_uppercase()
+            && !event.modifiers.contains(KeyModifiers::SHIFT)
+            && self.modifiers.difference(KeyModifiers::SHIFT) == event.modifiers
     }
 }
 
@@ -217,6 +258,22 @@ fn parse_key(s: &str) -> Result<KeyCode, String> {
         "f10" => Ok(KeyCode::F(10)),
         "f11" => Ok(KeyCode::F(11)),
         "f12" => Ok(KeyCode::F(12)),
+        // F13-F24: xterm and its descendants report a shifted function key as
+        // the key 12 places up — `Shift+F12` arrives as `F24`. Defaults rely on
+        // that (`find_references` is `Shift+F12` *or* `F24`), and without these
+        // arms the alternative fails to parse and is silently dropped.
+        "f13" => Ok(KeyCode::F(13)),
+        "f14" => Ok(KeyCode::F(14)),
+        "f15" => Ok(KeyCode::F(15)),
+        "f16" => Ok(KeyCode::F(16)),
+        "f17" => Ok(KeyCode::F(17)),
+        "f18" => Ok(KeyCode::F(18)),
+        "f19" => Ok(KeyCode::F(19)),
+        "f20" => Ok(KeyCode::F(20)),
+        "f21" => Ok(KeyCode::F(21)),
+        "f22" => Ok(KeyCode::F(22)),
+        "f23" => Ok(KeyCode::F(23)),
+        "f24" => Ok(KeyCode::F(24)),
 
         // Single character (works for ASCII and multi-byte Unicode)
         _ => {
@@ -262,6 +319,83 @@ mod tests {
         }
     }
 
+    /// Regression: a chord carrying Shift on a letter must match both shapes
+    /// a terminal can deliver it in.
+    ///
+    /// termide requests `REPORT_ALTERNATE_KEYS`, without which shifted
+    /// characters cannot be typed at all, so crossterm substitutes the shifted
+    /// codepoint and clears Shift: `Ctrl+Shift+S` arrives as `Ctrl+Char('S')`.
+    /// A terminal that does not send the alternate codepoint delivers the
+    /// plain `Ctrl+Shift+Char('s')`. Both must fire the binding.
+    #[test]
+    fn shift_letter_chords_match_both_event_shapes() {
+        for (binding, upper) in [
+            ("Ctrl+Shift+S", 'S'),
+            ("Ctrl+Shift+R", 'R'),
+            ("Ctrl+Shift+Z", 'Z'),
+            ("Ctrl+Shift+F", 'F'),
+            ("Ctrl+Shift+H", 'H'),
+        ] {
+            let parsed = parse_keybinding(binding).unwrap();
+
+            // REPORT_ALTERNATE_KEYS shape: uppercase, Shift cleared.
+            let substituted = KeyEvent::new(KeyCode::Char(upper), KeyModifiers::CONTROL);
+            assert!(
+                parsed.matches(&substituted),
+                "{binding} must match the alternate-keys shape Ctrl+Char('{upper}')"
+            );
+
+            // Plain shape: unshifted key, Shift present.
+            let plain = KeyEvent::new(
+                KeyCode::Char(upper.to_ascii_lowercase()),
+                KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
+            );
+            assert!(
+                parsed.matches(&plain),
+                "{binding} must match the plain shape"
+            );
+        }
+
+        // A bare uppercase letter names the key, not a Shift chord, and must
+        // keep matching through strict equality alone — `S` stages a file in
+        // the git panel.
+        let bare = parse_keybinding("S").unwrap();
+        assert!(bare.matches(&KeyEvent::new(KeyCode::Char('S'), KeyModifiers::empty())));
+        assert!(
+            !bare.matches(&KeyEvent::new(KeyCode::Char('S'), KeyModifiers::CONTROL)),
+            "a bare letter must not swallow Ctrl+<letter>"
+        );
+    }
+
+    /// Shifted punctuation still relies on `unshifted_punctuation`, which maps
+    /// the glyph back to key + Shift. That works wherever the shifted glyph is
+    /// the layout's own (`+` for `Shift+=`), which covers Linux and legacy
+    /// terminals.
+    #[test]
+    fn shift_punctuation_chords_match_kitty_event_shape() {
+        let cases: &[(&str, KeyCode, KeyModifiers)] = &[
+            (
+                "Alt+Shift+=",
+                KeyCode::Char('='),
+                KeyModifiers::ALT.union(KeyModifiers::SHIFT),
+            ),
+            (
+                "Alt+Shift+-",
+                KeyCode::Char('-'),
+                KeyModifiers::ALT.union(KeyModifiers::SHIFT),
+            ),
+        ];
+
+        for (binding, code, modifiers) in cases {
+            let parsed = parse_keybinding(binding).unwrap();
+            let event = KeyEvent::new(*code, *modifiers);
+            assert!(
+                parsed.matches(&event),
+                "{binding} must match {code:?} + {modifiers:?}"
+            );
+        }
+    }
+
     #[test]
     fn test_parse_ctrl_shift_key() {
         let kb = parse_keybinding("Ctrl+Shift+S").unwrap();
@@ -281,6 +415,21 @@ mod tests {
         let kb = parse_keybinding("F5").unwrap();
         assert_eq!(kb.key, KeyCode::F(5));
         assert_eq!(kb.modifiers, KeyModifiers::empty());
+    }
+
+    /// Regression: `F13`-`F24` must parse. xterm reports `Shift+F12` as
+    /// `F24`, and the `find_references` default lists `F24` as the
+    /// alternative for exactly that case — an unparseable binding is
+    /// dropped without a word, so the fallback silently never fired.
+    #[test]
+    fn test_parse_high_function_keys() {
+        for n in 13..=24u8 {
+            let binding = format!("F{n}");
+            let parsed = parse_keybinding(&binding)
+                .unwrap_or_else(|e| panic!("{binding} should parse, got {e}"));
+            assert_eq!(parsed.key, KeyCode::F(n));
+            assert_eq!(parsed.modifiers, KeyModifiers::empty());
+        }
     }
 
     #[test]
