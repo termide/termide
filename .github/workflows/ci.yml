@@ -6,8 +6,10 @@ name: CI
 # (or a failing log) before merging instead of finding out at
 # release time.
 #
-# Cross-platform binary builds stay in release.yml; they only matter
-# at release time and would burn minutes here on every iteration.
+# The gates run on Linux and macOS, the two platforms with day-to-day
+# developers. Cross-platform *binary* builds (Windows, musl, aarch64
+# cross) stay in release.yml; they only matter at release time and would
+# burn minutes here on every iteration.
 
 on:
   pull_request:
@@ -35,8 +37,19 @@ concurrency:
 
 jobs:
   check:
-    name: fmt / check / clippy / test
-    runs-on: ubuntu-latest
+    name: fmt / check / clippy / test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Report both platforms on a PR rather than hiding the second
+      # failure behind the first.
+      fail-fast: false
+      matrix:
+        # Linux and macOS take genuinely different code paths — process
+        # and mount-table introspection, clipboard, keyboard enhancement
+        # flags — and release.yml only builds macOS at tag time, which is
+        # far too late to learn a PR broke it. Windows stays release-only:
+        # it has no daily developer on it.
+        os: [ubuntu-latest, macos-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,6 +65,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Check formatting
+        # Formatting is platform-independent; checking it twice only
+        # doubles the ways a run can go red for the same reason.
+        if: matrix.os == 'ubuntu-latest'
         run: cargo fmt --all -- --check
 
       - name: Check compilation

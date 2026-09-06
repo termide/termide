@@ -37,6 +37,12 @@ git clone https://github.com/termide/termide.git
 cd termide
 ```
 
+Activate the repository's git hooks (one command, once per clone):
+
+```bash
+git config core.hooksPath .githooks
+```
+
 Choose your preferred build method:
 
 **Option 1: Standard (Cargo)**
@@ -44,6 +50,16 @@ Choose your preferred build method:
 cargo build
 cargo run
 ```
+
+`rust-toolchain.toml` pins the compiler, so rustup installs and selects the
+exact version CI uses on the first `cargo` command — no manual `rustup
+override` needed.
+
+The workspace is pure Rust end-to-end (rustls/russh rather than OpenSSL or
+libssh2), and the tree-sitter grammars build with whatever C compiler the
+platform already has. There are no system libraries to install on Linux,
+macOS or Windows beyond a working toolchain — on macOS, the Xcode Command
+Line Tools (`xcode-select --install`).
 
 **Option 2: Reproducible (Nix)**
 ```bash
@@ -76,14 +92,24 @@ cargo build --release
 
 ### Pre-commit Hook
 
-The project includes a pre-commit hook that automatically runs before each commit:
+The repository ships a pre-commit hook that runs the same gates as CI before
+each commit:
 
 - ✅ Code formatting check (`cargo fmt --check`)
 - ✅ Compilation check (`cargo check`)
 - ✅ Clippy lints (`cargo clippy -- -D warnings`)
 - ✅ Test suite (`cargo test`)
 
-The hook is located at `.git/hooks/pre-commit` and is automatically configured when you clone the repository.
+The hook lives at `.githooks/pre-commit` and is versioned with the code, so it
+is present in every clone — but git only runs it once you point the repository
+at that directory:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+This is per-clone configuration, so repeat it on each machine and for each new
+checkout. Bypass the hook for a single commit with `git commit --no-verify`.
 Use it as a final safety net, not as a replacement for targeted validation while you work. Prefer narrow crate-level `cargo test -p`, `cargo check -p`, and `cargo clippy -p` runs on the code you changed, then let the hook enforce the full repository-wide pass before commit.
 
 ## Code Standards
@@ -283,9 +309,19 @@ Use the [Bug Report template](.github/ISSUE_TEMPLATE/bug_report.md) when reporti
 - Relevant logs if available
 
 **Log locations:**
-- Linux: `~/.cache/termide/termide.log` (or `$XDG_CACHE_HOME/termide/termide.log`)
-- macOS: `~/Library/Caches/termide/termide.log`
-- Windows (WSL): `~/.cache/termide/termide.log`
+
+Each run writes its own `session-<date>-<time>.log` into the session directory
+for the project you opened, under the data directory:
+
+- Linux: `~/.local/share/termide/sessions/<project path>/`
+  (or `$XDG_DATA_HOME/termide/sessions/<project path>/`)
+- macOS: `~/Library/Application Support/termide/sessions/<project path>/`
+- Windows: `%APPDATA%\termide\sessions\<project path>\`
+
+`termide --diagnostics` prints the exact session directory for the current
+project. Logs older than 24 hours are removed automatically. Setting
+`logging.file_path` in `config.toml` overrides all of this with a single fixed
+file.
 
 ### Feature Requests
 
@@ -388,15 +424,13 @@ Contains:
 **Windows:** `%APPDATA%\termide\`
 
 Contains:
-- `sessions/` - Project session files and unsaved buffers
+- `sessions/` - Project session files, unsaved buffers, and per-run logs
 
-### Cache
-**Linux/BSD:** `$XDG_CACHE_HOME/termide/` (default: `~/.cache/termide/`)
-**macOS:** `~/Library/Caches/termide/`
-**Windows:** `%LOCALAPPDATA%\termide\cache\`
+### Logs
 
-Contains:
-- `termide.log` - Application log file
+Logs live in the session directory, not in a cache directory — see
+[Log locations](#bug-reports) above. One file per run,
+`session-<date>-<time>.log`, pruned after 24 hours.
 
 ## Development Resources
 

@@ -6,15 +6,26 @@ This guide is for developers who want to contribute to TermIDE or understand its
 
 ### Prerequisites
 
-- **Rust 1.70+** (stable toolchain)
+- **Rust** — the version is pinned in `rust-toolchain.toml`; rustup installs
+  and selects it automatically on the first `cargo` command in the checkout
 - **Git** for version control
+- **A C compiler** for the tree-sitter grammars, which `build.rs` compiles:
+  gcc or clang on Linux, the Xcode Command Line Tools
+  (`xcode-select --install`) on macOS, MSVC on Windows
 - **Optional:** Nix with flakes enabled for reproducible builds
+
+Nothing else. The workspace is pure Rust end-to-end — FTPS uses rustls with
+webpki-roots and SFTP uses russh, so there is no OpenSSL or libssh2 to install
+— which is also what makes the fully static musl build possible.
 
 ### Getting the Source Code
 
 ```bash
 git clone https://github.com/termide/termide.git
 cd termide
+
+# Activate the versioned git hooks (once per clone)
+git config core.hooksPath .githooks
 ```
 
 ### Building
@@ -47,6 +58,19 @@ nix build
 # Run checks
 nix flake check
 ```
+
+The dev shell reads its compiler version from `rust-toolchain.toml`, the same
+file rustup and CI use, so a Nix and a non-Nix checkout build with the same
+compiler.
+
+#### Platform notes
+
+CI runs the fmt / check / clippy / test gates on Linux and macOS; Windows and
+the cross-compiled targets are built at release time. Code that reaches for
+platform facilities needs a branch per platform — the existing examples are
+process introspection (`/proc` on Linux, libproc on macOS, ToolHelp snapshots
+on Windows), the mount table (`/proc/mounts` vs `getmntinfo`), and the
+keyboard enhancement flags.
 
 ### Running Tests
 
