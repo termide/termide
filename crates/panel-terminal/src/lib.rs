@@ -4,6 +4,8 @@
 mod clipboard;
 mod input_encoding;
 mod link_detection;
+#[cfg(target_os = "macos")]
+mod macos_proc;
 mod mouse;
 mod render;
 mod search;
@@ -692,21 +694,34 @@ impl Terminal {
     /// Read the shell's working directory from the live process, falling back
     /// to the directory the panel was created in.
     fn read_shell_cwd_raw(&self) -> std::path::PathBuf {
-        #[cfg(unix)]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         if let Some(pid) = self.shell_pid {
             // The shell's own cwd, not the foreground child's: that is what the
             // shell prompt shows and what a `cd` changes.
+            #[cfg(target_os = "linux")]
             if let Ok(path) = std::fs::read_link(format!("/proc/{}/cwd", pid)) {
+                return path;
+            }
+
+            // macOS has no /proc; the same vnode comes from libproc.
+            #[cfg(target_os = "macos")]
+            if let Some(path) = macos_proc::shell_cwd(pid) {
                 return path;
             }
         }
         self.initial_cwd.clone()
     }
 
-    /// Read foreground command from /proc (Unix) or process snapshot (Windows).
+    /// Read foreground command from /proc (Linux), libproc (macOS) or a
+    /// process snapshot (Windows).
     fn read_foreground_command_raw(&self) -> String {
         if let Some(pid) = self.shell_pid {
-            #[cfg(unix)]
+            #[cfg(target_os = "macos")]
+            if let Some(name) = macos_proc::foreground_command(pid) {
+                return name;
+            }
+
+            #[cfg(target_os = "linux")]
             {
                 // Read children of shell
                 let children_path = format!("/proc/{}/task/{}/children", pid, pid);
@@ -1416,7 +1431,16 @@ impl Panel for Terminal {
 
     fn has_running_processes(&self) -> bool {
         if let Some(pid) = self.shell_pid {
-            #[cfg(unix)]
+            // On the key-input path via `captures_escape`, so every branch
+            // below stays at a single kernel query — no scan over all pids.
+            // Falls through to `false` rather than returning outright, so the
+            // trailing platform blocks stay reachable code.
+            #[cfg(target_os = "macos")]
+            if macos_proc::has_children(pid) {
+                return true;
+            }
+
+            #[cfg(target_os = "linux")]
             {
                 let children_path = format!("/proc/{}/task/{}/children", pid, pid);
                 if let Ok(children) = std::fs::read_to_string(&children_path) {

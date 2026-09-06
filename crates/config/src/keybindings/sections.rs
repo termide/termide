@@ -394,6 +394,12 @@ impl GlobalKeybindings {
         // (canonicalize step b) reverses that — `'+' → '=' + Shift`,
         // `'_' → '-' + Shift` — yielding `Char('=') + Alt|Shift` /
         // `Char('-') + Alt|Shift`, which match these bindings strictly.
+        //
+        // The same reversal covers REPORT_ALTERNATE_KEYS, which substitutes
+        // the shifted codepoint and clears Shift. It does NOT cover macOS,
+        // where the substitute is the Option-composed glyph — `±` on a Latin
+        // layout, `«` on a Russian one — so no table can map it back and these
+        // two chords do not fire there. `Alt+F11` and the mouse remain.
         set_default!(panel_grow_vertical, "Alt+Shift+=");
         set_default!(panel_shrink_vertical, "Alt+Shift+-");
 

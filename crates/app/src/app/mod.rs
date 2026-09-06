@@ -288,6 +288,56 @@ impl App {
             );
         }
 
+        // macOS: Option composes text unless REPORT_ALL_KEYS_AS_ESCAPE_CODES is
+        // active, so every `Alt+<char>` chord arrives as a composed glyph
+        // (`Option+F` → `ƒ`) with no ALT bit and simply never fires. Say so,
+        // with the remedy that applies to the terminal at hand.
+        if cfg!(target_os = "macos") && !caps.all_keys {
+            let affected = termide_config::enumerate_bindings(config)
+                .into_iter()
+                .filter(|(_, parsed, _)| termide_config::binding_requires_macos_all_keys(parsed))
+                .count();
+            if affected > 0 {
+                let remedy = if caps.kitty_full {
+                    "set general.report_all_keys = true in config.toml"
+                } else {
+                    "this terminal has no Kitty keyboard protocol; enable its own \
+                     Option-as-Alt setting (Ghostty: macos-option-as-alt, \
+                     Terminal.app: Use Option as Meta key)"
+                };
+                log::warn!(
+                    "{affected} Alt+<key> keybinding(s) cannot fire on macOS because \
+                     Option is composing text instead: {remedy}.",
+                );
+            }
+        }
+
+        // macOS: with "Use F1, F2, etc. keys as standard function keys" off —
+        // the system default — the whole F-row sends media keys instead. Most
+        // actions survive on their non-F alternative; these have none, so they
+        // become unreachable entirely. There is no way to read that system
+        // setting from a terminal, so this states the condition rather than
+        // detecting it.
+        if cfg!(target_os = "macos") {
+            let stuck = termide_config::actions_reachable_only_by_function_key(config);
+            if !stuck.is_empty() {
+                let list = stuck
+                    .iter()
+                    .map(|(location, bindings)| {
+                        format!("{} ({})", location.display(), bindings.join(", "))
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                log::warn!(
+                    "{} action(s) are bound to a function key and nothing else, so they \
+                     cannot be invoked unless macOS is set to send real function keys \
+                     (System Settings > Keyboard > \"Use F1, F2, etc. keys as standard \
+                     function keys\"): {list}",
+                    stuck.len(),
+                );
+            }
+        }
+
         if !caps.kitty_full {
             let problematic: Vec<_> = termide_config::enumerate_bindings(config)
                 .into_iter()

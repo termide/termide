@@ -14,10 +14,10 @@ pub use normalize::{KeyNormalizer, KeyboardCaps};
 /// the same physical key as its unshifted counterpart on a US QWERTY
 /// layout, otherwise `None`. Used by `ParsedKeyBinding::matches` so a
 /// single binding like `Ctrl+Alt+=` fires whether the terminal reports
-/// the event as `Char('=')` (unshifted) or as `Char('+')` (the Kitty
-/// keyboard protocol's `REPORT_ALTERNATE_KEYS` mode rewrites events
-/// like `Shift+Ctrl+Alt+=` to `Char('+') + Ctrl|Alt`, dropping the
-/// Shift modifier and emitting the shifted glyph).
+/// the event as `Char('=')` (unshifted) or as `Char('+')` — both the
+/// Kitty protocol's `REPORT_ALTERNATE_KEYS` mode and a legacy terminal
+/// encode `Shift+Ctrl+Alt+=` as the shifted glyph with the Shift
+/// modifier dropped.
 pub fn unshifted_punctuation(c: char) -> Option<char> {
     Some(match c {
         '+' => '=',

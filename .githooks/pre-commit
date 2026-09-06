@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+#
+# Repository-wide pre-commit gate: the same fmt / check / clippy / test
+# sequence that .github/workflows/ci.yml runs on every pull request, so a
+# commit that would fail CI fails here first.
+#
+# Versioned in the repository and activated with:
+#
+#     git config core.hooksPath .githooks
+#
+# (.git/hooks is not part of a clone, so a hook that lives only there is
+# absent for every fresh checkout and every new machine.)
+#
+# This is a final safety net, not a substitute for the narrow per-crate
+# checks described in AGENTS.md — prefer `cargo test -p <crate>` while you
+# work. Skip it deliberately with `git commit --no-verify`.
+
+set -euo pipefail
+
+# Git invokes hooks with a minimal environment, and GUI clients start from a
+# login shell that never sourced ~/.cargo/env. Put a rustup install back on
+# PATH before deciding the toolchain is missing.
+if ! command -v cargo >/dev/null 2>&1; then
+    export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
+fi
+
+if ! command -v cargo >/dev/null 2>&1; then
+    echo "pre-commit: cargo not found on PATH." >&2
+    echo "  Install the toolchain (rustup, or 'nix develop' for the Nix shell)" >&2
+    echo "  or bypass this hook with 'git commit --no-verify'." >&2
+    exit 1
+fi
+
+run_step() {
+    local label="$1"
+    shift
+    printf '\n==> %s\n' "$label"
+    if ! "$@"; then
+        printf '\npre-commit: %s failed — commit aborted.\n' "$label" >&2
+        exit 1
+    fi
+}
+
+run_step "cargo fmt --all -- --check" cargo fmt --all -- --check
+run_step "cargo check --workspace --all-targets" cargo check --workspace --all-targets
+run_step "cargo clippy --workspace --all-targets -- -D warnings" \
+    cargo clippy --workspace --all-targets -- -D warnings
+run_step "cargo test --workspace" cargo test --workspace
+
+printf '\npre-commit: all checks passed.\n'

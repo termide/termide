@@ -39,11 +39,29 @@ mod tests {
         assert!(dir.ends_with("termide"));
     }
 
-    #[cfg(unix)]
+    /// XDG keeps configuration and data apart (`~/.config` vs
+    /// `~/.local/share`), and code that writes to one must not land in the
+    /// other.
+    #[cfg(target_os = "linux")]
     #[test]
     fn test_directories_are_different() {
         let config = get_config_dir().unwrap();
         let data = get_data_dir().unwrap();
         assert_ne!(config, data);
+    }
+
+    /// macOS deliberately has no such split: Apple's convention puts both
+    /// under `~/Library/Application Support`, which is what `dirs` returns
+    /// and what CONTRIBUTING.md documents. The two are safe to share because
+    /// their contents do not collide — `config.toml` and `themes/` on one
+    /// side, `sessions/` on the other. Pinned here so the coincidence stays a
+    /// decision rather than a surprise.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_directories_coincide_on_macos() {
+        let config = get_config_dir().unwrap();
+        let data = get_data_dir().unwrap();
+        assert_eq!(config, data);
+        assert!(config.ends_with("termide"));
     }
 }

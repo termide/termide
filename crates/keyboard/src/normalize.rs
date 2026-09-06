@@ -11,11 +11,12 @@
 //!
 //! 1. Cyrillic → Latin: a binding `Alt+M` fires whether the active
 //!    layout reports `Alt+M` or `Alt+Ь` (ru-layout `M`).
-//! 2. REPORT_ALTERNATE_KEYS undo: when crossterm receives a Kitty
-//!    chord like `Shift+Ctrl+=`, it rewrites the event to
-//!    `Char('+') + Ctrl` (Shift stripped, codepoint swapped). We
-//!    invert that — `'+'` → `'='` + Shift — so the matcher compares
-//!    against the logical chord the user pressed.
+//! 2. Shifted-glyph undo: both `REPORT_ALTERNATE_KEYS` and a legacy
+//!    terminal encode `Shift+=` by sending the shifted glyph `+` with
+//!    no Shift modifier. We invert that — `'+'` → `'='` + Shift — so
+//!    the matcher compares against the logical chord the user pressed.
+//!    The letter counterpart lives in `ParsedKeyBinding::matches`,
+//!    because an uppercase letter carries no separate glyph.
 //! 3. Caps Lock: when `REPORT_EVENT_TYPES` flagged the event with
 //!    `KeyEventState::CAPS_LOCK`, the spurious Shift attached to
 //!    letters is dropped.
@@ -35,19 +36,22 @@ use crate::{cyrillic_to_latin, unshifted_punctuation};
 /// enhancement flags that termide pushes in `src/main.rs`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct KeyboardCaps {
-    /// All four (or all-three-we-use) Kitty enhancement flags acknowledged.
-    /// Implies `alt_keys`, `event_types`, and `disambiguate` are all true.
+    /// The Kitty enhancement flags termide requests were acknowledged.
+    /// Implies `event_types` and `disambiguate` are both true, and that
+    /// `REPORT_ALTERNATE_KEYS` is in effect.
     pub kitty_full: bool,
-    /// `REPORT_ALTERNATE_KEYS` active — terminal sends both base and
-    /// shifted codepoints for chords like `Shift+=` and crossterm
-    /// rewrites them to the shifted glyph.
-    pub alt_keys: bool,
     /// `REPORT_EVENT_TYPES` active — events carry `KeyEventState::CAPS_LOCK`
     /// when the lock is engaged.
     pub event_types: bool,
     /// `DISAMBIGUATE_ESCAPE_CODES` active — Esc and modified keys come
     /// in unambiguous CSI-u form.
     pub disambiguate: bool,
+    /// `REPORT_ALL_KEYS_AS_ESCAPE_CODES` active — even text-producing
+    /// keys arrive as CSI-u, so macOS `Option+<letter>` reports
+    /// `Char('f') + ALT` instead of the composed glyph `ƒ`. Implies the
+    /// terminal also emits standalone modifier-key events, which
+    /// `crates/core/src/event.rs` drops.
+    pub all_keys: bool,
     /// `true` when termide ran inside an SSH session and skipped the
     /// detection probe (probe blocks indefinitely on some bridges).
     pub via_ssh: bool,
@@ -58,10 +62,15 @@ impl KeyboardCaps {
     /// - running inside SSH (probe is skipped to avoid hangs);
     /// - probe failed or returned `false`.
     ///
+    /// `request_all_keys` carries `general.report_all_keys` from the
+    /// config. It is honoured on macOS only: elsewhere `Option`/`Alt`
+    /// does not compose text, so `Alt+<letter>` already arrives with the
+    /// ALT bit and the flag would only cost dead-key/compose input.
+    ///
     /// Call this **before** `enable_raw_mode` / `PushKeyboardEnhancementFlags` —
     /// the probe is a query/response handshake that needs cooked-mode
     /// readiness.
-    pub fn detect() -> Self {
+    pub fn detect(request_all_keys: bool) -> Self {
         let via_ssh =
             std::env::var_os("SSH_CONNECTION").is_some() || std::env::var_os("SSH_TTY").is_some();
         if via_ssh {
@@ -73,9 +82,9 @@ impl KeyboardCaps {
         let supported = crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
         Self {
             kitty_full: supported,
-            alt_keys: supported,
             event_types: supported,
             disambiguate: supported,
+            all_keys: supported && request_all_keys && cfg!(target_os = "macos"),
             via_ssh: false,
         }
     }
@@ -115,14 +124,16 @@ impl KeyNormalizer {
             }
         }
 
-        // (b) REPORT_ALTERNATE_KEYS undo: '+' → '=' + Shift, '_' → '-' + Shift,
-        //     etc. Crossterm under this flag strips Shift and emits the
-        //     shifted glyph; we put the canonical chord back together.
+        // (b) Shifted-glyph undo: '+' → '=' + Shift, '_' → '-' + Shift, etc.
+        //     Under REPORT_ALTERNATE_KEYS crossterm swaps in the shifted
+        //     codepoint and clears Shift, and a legacy terminal sends the bare
+        //     glyph `+` for `Shift+=`; either way we put the canonical chord
+        //     back together.
         //
-        //     We do this even when caps.alt_keys is false, because the
-        //     transform is harmless for a user who literally typed the
-        //     shifted glyph (their keypress chord is, by construction,
-        //     `Shift+<unshifted>`, which is what we produce).
+        //     Applied unconditionally: the transform is harmless for a user
+        //     who literally typed the shifted glyph, since their keypress
+        //     chord is by construction `Shift+<unshifted>` — which is what we
+        //     produce.
         if let KeyCode::Char(c) = k.code {
             if let Some(unshifted) = unshifted_punctuation(c) {
                 k.code = KeyCode::Char(unshifted);
@@ -206,12 +217,9 @@ mod tests {
 
     #[test]
     fn canonicalize_shifted_punctuation() {
-        // Shifted glyph + no Shift modifier (REPORT_ALTERNATE_KEYS path)
+        // Shifted glyph + no Shift modifier (legacy-terminal path)
         // → unshifted + Shift added.
-        let n = KeyNormalizer::new(KeyboardCaps {
-            alt_keys: true,
-            ..Default::default()
-        });
+        let n = KeyNormalizer::new(KeyboardCaps::default());
         let canon = n.canonicalize(make(KeyCode::Char('+'), KeyModifiers::CONTROL));
         assert_eq!(canon.code, KeyCode::Char('='));
         assert_eq!(canon.modifiers, KeyModifiers::CONTROL | KeyModifiers::SHIFT);

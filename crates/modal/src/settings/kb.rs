@@ -437,17 +437,20 @@ pub(super) fn set_kb_value(config: &mut Config, section: usize, name: &str, valu
     }
 }
 
-/// Format a `KeyEvent` into a keybinding string like "Ctrl+S".
+/// Format an already-canonical `KeyEvent` into a keybinding string like
+/// `"Ctrl+S"`.
 ///
-/// The event is canonicalized first (Cyrillic→Latin, shifted-glyph
-/// punctuation → `Shift+<unshifted>`, VTE Ctrl+7→Ctrl+/, caps-lock
-/// strip when reported). That keeps the string the picker stores in
-/// the same canonical form as defaults — picker on a Russian layout
-/// records `"Alt+M"`, not `"Alt+Ь"`.
-pub(super) fn format_key_event(raw: &KeyEvent) -> String {
-    let normalizer = termide_keyboard::KeyNormalizer::default();
-    let canon = normalizer.canonicalize(*raw);
-    let key = &canon;
+/// Callers must pass `KeyChord::canonical`, which the dispatch boundary
+/// produced with the *live* terminal capabilities (Cyrillic→Latin,
+/// shifted-glyph punctuation → `Shift+<unshifted>`, VTE Ctrl+7→Ctrl+/
+/// only on non-Kitty terminals, caps-lock strip when reported). That
+/// keeps the string the picker stores in the same canonical form as the
+/// defaults — the picker on a Russian layout records `"Alt+M"`, not
+/// `"Alt+Ь"`. Canonicalizing again here would apply a *different*
+/// capability set (`KeyNormalizer::default()` claims no Kitty support)
+/// and record chords the matcher can never see, e.g. `Ctrl+7` as
+/// `Ctrl+/`.
+pub(super) fn format_key_event(key: &KeyEvent) -> String {
     let mut parts = Vec::new();
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         parts.push("Ctrl");
@@ -486,7 +489,15 @@ pub(super) fn format_key_event(raw: &KeyEvent) -> String {
         }
         KeyCode::Char(' ') => "Space",
         KeyCode::Char(c) => {
-            let s = c.to_uppercase().to_string();
+            // ASCII-only upper-casing: `parse_key` is case-insensitive for
+            // ASCII, but the matcher compares non-ASCII chars as they came,
+            // so upper-casing e.g. the macOS composed glyph `ƒ` to `Ƒ` would
+            // store a binding no keypress can ever match.
+            let s = if c.is_ascii() {
+                c.to_ascii_uppercase().to_string()
+            } else {
+                c.to_string()
+            };
             if parts.is_empty() {
                 return s;
             }
@@ -497,4 +508,43 @@ pub(super) fn format_key_event(raw: &KeyEvent) -> String {
     };
     parts.push(key_str);
     parts.join("+")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyEventKind, KeyEventState};
+
+    fn ev(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        }
+    }
+
+    #[test]
+    fn formats_alt_letter_chord() {
+        assert_eq!(
+            format_key_event(&ev(KeyCode::Char('f'), KeyModifiers::ALT)),
+            "Alt+F"
+        );
+    }
+
+    /// Regression: whatever the picker stores must be matchable. A macOS
+    /// composed glyph (`Option+F` → `ƒ` when the Kitty all-keys flag is
+    /// off) used to be upper-cased to `Ƒ`, which no keypress could match.
+    #[test]
+    fn captured_non_ascii_char_round_trips_to_a_matching_binding() {
+        let event = ev(KeyCode::Char('ƒ'), KeyModifiers::empty());
+        let binding = format_key_event(&event);
+        assert_eq!(binding, "ƒ");
+        assert!(
+            termide_config::parse_keybinding(&binding)
+                .unwrap()
+                .matches(&event),
+            "binding {binding:?} captured from Char('ƒ') must match it back"
+        );
+    }
 }

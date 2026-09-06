@@ -378,8 +378,8 @@ impl SystemMonitor {
         }
     }
 
-    /// Get top N processes by network activity, cached to avoid scanning `/proc`
-    /// on every resource tick. The cache refreshes every `NET_PROCESS_CACHE_TTL`.
+    /// Get top N processes by network activity, cached to avoid a full process
+    /// scan on every resource tick. The cache refreshes every `NET_PROCESS_CACHE_TTL`.
     pub fn top_network_processes_cached(&self, n: usize) -> Vec<NetworkProcessInfo> {
         let mut guard = match self.net_process_cache.lock() {
             Ok(g) => g,
@@ -398,7 +398,7 @@ impl SystemMonitor {
 
     /// Get disk space info with cached mount-device resolution.
     ///
-    /// Same as `get_disk_space_info()` but avoids re-reading `/proc/mounts`
+    /// Same as `get_disk_space_info()` but avoids re-reading the mount table
     /// and calling `canonicalize()` on every mount entry when the path hasn't
     /// changed and the cache is fresh.
     #[cfg(unix)]
@@ -521,7 +521,7 @@ impl SystemMonitor {
         processes
     }
 
-    /// Windows fallback: no `/proc/mounts` to cache, so just call the
+    /// Windows fallback: no mount table to cache, so just call the
     /// underlying `get_disk_space_info()` directly. Mirrors the cfg-gating
     /// of the free function below.
     #[cfg(windows)]

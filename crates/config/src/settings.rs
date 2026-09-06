@@ -162,6 +162,18 @@ pub struct GeneralSettings {
     #[serde(default = "default_resource_monitor_interval")]
     pub resource_monitor_interval: u64,
 
+    /// Ask the terminal to report **every** key as an escape code
+    /// (Kitty `REPORT_ALL_KEYS_AS_ESCAPE_CODES`). Read at startup only.
+    ///
+    /// Honoured on macOS alone, where Option is a text-composition
+    /// modifier: without the flag `Option+F` arrives as the composed
+    /// glyph `ƒ` with no ALT bit and every `Alt+<letter>` default is
+    /// unreachable. The cost is that dead-key and IME composition
+    /// (`Option+E` `E` → `é`) no longer reaches termide, so users who
+    /// need composed input can turn this off and rebind instead.
+    #[serde(default = "default_true")]
+    pub report_all_keys: bool,
+
     /// Global keyboard shortcuts
     #[serde(default)]
     pub keybindings: GlobalKeybindings,
@@ -583,6 +595,7 @@ impl From<LegacyConfig> for Config {
                 bell_on_operation_complete: default_bell_on_operation_complete(),
                 icon_mode: IconMode::default(),
                 resource_monitor_interval: legacy.resource_monitor_interval,
+                report_all_keys: default_true(),
                 keybindings: GlobalKeybindings::default(),
             },
             editor: EditorSettings {
@@ -633,6 +646,7 @@ impl Default for GeneralSettings {
             bell_on_operation_complete: default_bell_on_operation_complete(),
             icon_mode: IconMode::default(),
             resource_monitor_interval: default_resource_monitor_interval(),
+            report_all_keys: default_true(),
             keybindings: GlobalKeybindings::default(),
         }
     }

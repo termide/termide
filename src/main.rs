@@ -258,7 +258,7 @@ fn main() -> Result<()> {
     // This enables proper Alt+Cyrillic handling in modern terminals like Ghostty, Kitty, WezTerm.
     // Skip on SSH: the detection sends escape sequences and waits for a response,
     // which can hang indefinitely if the SSH terminal doesn't reply.
-    let keyboard_caps = termide_keyboard::KeyboardCaps::detect();
+    let keyboard_caps = termide_keyboard::KeyboardCaps::detect(config.general.report_all_keys);
     let keyboard_enhanced = keyboard_caps.kitty_full;
 
     let title = format!(
@@ -280,23 +280,42 @@ fn main() -> Result<()> {
     )?;
 
     if keyboard_enhanced {
-        // Note: REPORT_ALL_KEYS_AS_ESCAPE_CODES causes modifier keys (Shift, Ctrl, Alt)
-        // to generate separate events, which breaks combinations like Shift+Home.
-        // We only use DISAMBIGUATE_ESCAPE_CODES and REPORT_ALTERNATE_KEYS.
-        //
         // REPORT_EVENT_TYPES exposes `KeyEventState::CAPS_LOCK` on every key
         // event, which the hotkey matcher uses to ignore the spurious Shift
-        // modifier that Caps Lock attaches to letters. The main loop filters
-        // out Release/Repeat so the rest of the app keeps its press-only
-        // assumption.
-        execute!(
-            stdout,
-            PushKeyboardEnhancementFlags(
-                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                    | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
-                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-            )
-        )?;
+        // modifier that Caps Lock attaches to letters. `EventHandler` drops
+        // Release events so the rest of the app keeps its press-only
+        // assumption (Repeat is kept, for held-key auto-repeat).
+        //
+        // REPORT_ALTERNATE_KEYS is what makes shifted characters typable.
+        // Under REPORT_ALL_KEYS_AS_ESCAPE_CODES every key — including plain
+        // text — arrives as CSI-u, and the protocol's primary codepoint is the
+        // key *without* modifiers. Without the alternate codepoint crossterm
+        // reports `Shift+6` as `Char('6') + Shift`, so a Russian layout types
+        // `6` where the user pressed a comma, and a US layout types `1` for
+        // `!`. With the flag crossterm substitutes the shifted codepoint and
+        // clears the Shift bit, which is the correct character to insert.
+        //
+        // The cost is that a chord carrying Shift reaches the matcher in that
+        // same substituted shape — `Ctrl+Shift+S` as `Ctrl+Char('S')`.
+        // `ParsedKeyBinding::matches` accepts it; see the note there.
+        let mut flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+            | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+            | KeyboardEnhancementFlags::REPORT_EVENT_TYPES;
+
+        // REPORT_ALL_KEYS_AS_ESCAPE_CODES is what makes macOS `Option+<letter>`
+        // reach us as `Alt+<letter>`: without it the terminal composes text and
+        // sends the glyph (`Option+F` → `ƒ`) with no ALT bit, so ~25 `Alt+…`
+        // defaults are unreachable there. It also makes the terminal report
+        // standalone modifier-key presses, which `EventHandler` drops — that
+        // side effect, not the flag itself, is what once "broke Shift+Home".
+        // `KeyboardCaps::detect` restricts the flag to macOS and honours
+        // `general.report_all_keys`, because the flag also stops dead-key and
+        // IME composition from reaching the app.
+        if keyboard_caps.all_keys {
+            flags |= KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES;
+        }
+
+        execute!(stdout, PushKeyboardEnhancementFlags(flags))?;
     }
 
     let backend = CrosstermBackend::new(stdout);

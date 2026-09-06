@@ -125,6 +125,11 @@ impl TerminalCaps {
 }
 
 /// Check if stdin is connected to a Linux TTY (/dev/tty*) rather than a PTY.
+///
+/// Both probes below are Linux-console concepts backed by `/proc` and
+/// `/dev/fb0`. Off Linux they can only ever answer "no", so they are compiled
+/// out rather than paying a failing syscall on every capability detection.
+#[cfg(target_os = "linux")]
 fn is_linux_tty() -> bool {
     std::fs::read_link("/proc/self/fd/0")
         .map(|p| {
@@ -136,10 +141,21 @@ fn is_linux_tty() -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(not(target_os = "linux"))]
+fn is_linux_tty() -> bool {
+    false
+}
+
 /// Check if framebuffer is available (indicates 16-color support in Linux console).
+#[cfg(target_os = "linux")]
 fn has_framebuffer() -> bool {
     // Check if any framebuffer device exists
     std::path::Path::new("/dev/fb0").exists()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn has_framebuffer() -> bool {
+    false
 }
 
 /// Check if the locale suggests UTF-8 support.

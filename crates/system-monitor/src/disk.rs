@@ -9,6 +9,7 @@ use std::path::Path;
 /// Resolve dm-X device to physical partition.
 /// e.g., /dev/dm-0 -> /dev/nvme0n1p2
 #[cfg(unix)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn resolve_dm_device(device: &str) -> Option<String> {
     // Extract dm number (e.g., "dm-0" from "/dev/dm-0")
     let dm_name = device.strip_prefix("/dev/")?;
@@ -30,30 +31,110 @@ fn resolve_dm_device(device: &str) -> Option<String> {
     None
 }
 
-/// Get device name from /proc/mounts for a given path.
+/// One entry of the system mount table: a backing device and where it is
+/// mounted.
+#[cfg(unix)]
+pub(crate) struct MountEntry {
+    pub device: String,
+    pub mount_point: String,
+}
+
+/// Read the system mount table.
+///
+/// Linux exposes it as text in `/proc/mounts`; macOS has no `/proc` and
+/// answers the same question through `getmntinfo(3)`. Everything downstream —
+/// device resolution for a path and the all-devices listing — works off this
+/// one list, so the platform difference is confined here.
+#[cfg(target_os = "linux")]
+fn read_mounts() -> Vec<MountEntry> {
+    let Ok(content) = std::fs::read_to_string("/proc/mounts") else {
+        return Vec::new();
+    };
+
+    content
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            Some(MountEntry {
+                device: parts.next()?.to_string(),
+                mount_point: parts.next()?.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// `getmntinfo` returns a pointer into per-process static storage that the
+/// next call overwrites, so callers are serialized and copy out under the lock.
+#[cfg(target_os = "macos")]
+static MNT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(target_os = "macos")]
+fn read_mounts() -> Vec<MountEntry> {
+    let _guard = MNT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+    let mut buf: *mut libc::statfs = std::ptr::null_mut();
+
+    // SAFETY: `getmntinfo` points `buf` at a kernel-filled array of `count`
+    // `statfs` structs and returns that count (0 on failure). The storage is
+    // owned by libc and must not be freed; it stays valid until the next call,
+    // which `MNT_LOCK` prevents while the slice below is alive.
+    let count = unsafe { libc::getmntinfo(&mut buf, libc::MNT_NOWAIT) };
+    if count <= 0 || buf.is_null() {
+        return Vec::new();
+    }
+
+    // SAFETY: `count` entries were just reported as written to `buf`.
+    let entries = unsafe { std::slice::from_raw_parts(buf, count as usize) };
+
+    entries
+        .iter()
+        .filter_map(|fs| {
+            Some(MountEntry {
+                device: c_chars_to_string(&fs.f_mntfromname)?,
+                mount_point: c_chars_to_string(&fs.f_mntonname)?,
+            })
+        })
+        .collect()
+}
+
+/// No known way to enumerate mounts on this platform; callers degrade to an
+/// empty table rather than reporting wrong devices.
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+fn read_mounts() -> Vec<MountEntry> {
+    Vec::new()
+}
+
+/// Decode a fixed-size, NUL-padded C string field.
+#[cfg(target_os = "macos")]
+fn c_chars_to_string(field: &[libc::c_char]) -> Option<String> {
+    let bytes: Vec<u8> = field
+        .iter()
+        .take_while(|&&c| c != 0)
+        .map(|&c| c as u8)
+        .collect();
+    if bytes.is_empty() {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
+}
+
+/// Get the device backing a given path, by longest matching mount point.
 #[cfg(unix)]
 pub(crate) fn get_device_for_path(path: &Path) -> Option<String> {
-    let mounts_content = std::fs::read_to_string("/proc/mounts").ok()?;
     let mut best_match: Option<(String, usize)> = None;
 
-    for line in mounts_content.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 2 {
-            continue;
-        }
+    // Canonicalized once: it does not change across mount entries, and the
+    // syscall used to run per entry.
+    let canonical_path = path.canonicalize().ok()?;
 
-        let device = parts[0];
-        let mount_point = parts[1];
-
+    for entry in read_mounts() {
         // Check if this mount point is a prefix of our path
-        if let Ok(canonical_path) = path.canonicalize() {
-            if let Ok(canonical_mount) = Path::new(mount_point).canonicalize() {
-                if canonical_path.starts_with(&canonical_mount) {
-                    let mount_len = canonical_mount.as_os_str().len();
-                    // Keep track of the longest matching mount point
-                    if best_match.as_ref().is_none_or(|b| mount_len > b.1) {
-                        best_match = Some((device.to_string(), mount_len));
-                    }
+        if let Ok(canonical_mount) = Path::new(&entry.mount_point).canonicalize() {
+            if canonical_path.starts_with(&canonical_mount) {
+                let mount_len = canonical_mount.as_os_str().len();
+                // Keep track of the longest matching mount point
+                if best_match.as_ref().is_none_or(|b| mount_len > b.1) {
+                    best_match = Some((entry.device.clone(), mount_len));
                 }
             }
         }
@@ -126,25 +207,17 @@ pub fn get_disk_space_info(path: &Path) -> Option<DiskSpaceInfo> {
 
 /// Get disk space information for all real mounted devices.
 ///
-/// Parses `/proc/mounts`, filters for real devices (`/dev/`),
+/// Reads the system mount table, filters for real devices (`/dev/`),
 /// deduplicates by device path, and calls `statvfs` for each.
 #[cfg(unix)]
 pub fn get_all_disk_space_info() -> Vec<DiskSpaceInfo> {
-    let Ok(mounts_content) = std::fs::read_to_string("/proc/mounts") else {
-        return Vec::new();
-    };
-
     let mut seen_devices: HashMap<String, String> = HashMap::new(); // device -> mount_point
 
-    for line in mounts_content.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 2 {
-            continue;
-        }
-        let device = parts[0];
-        let mount_point = parts[1];
+    for entry in read_mounts() {
+        let device = entry.device.as_str();
 
-        // Only real devices
+        // Only real devices. Filters out Linux's proc/sysfs/cgroup entries and
+        // macOS's devfs, `map auto_home` and network shares alike.
         if !device.starts_with("/dev/") {
             continue;
         }
@@ -170,7 +243,7 @@ pub fn get_all_disk_space_info() -> Vec<DiskSpaceInfo> {
         // Keep only first mount point per device (usually the most relevant)
         seen_devices
             .entry(resolved)
-            .or_insert_with(|| mount_point.to_string());
+            .or_insert_with(|| entry.mount_point.clone());
     }
 
     let mut result = Vec::new();

@@ -35,7 +35,14 @@
           "x86_64-pc-windows-gnu"
         ];
 
-        rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+        # Single source of truth for the compiler version: rust-toolchain.toml,
+        # which is also what rustup honours for a non-Nix checkout and what the
+        # pinned dtolnay/rust-toolchain step in CI matches. Reading it here
+        # keeps `nix develop` from silently drifting onto a newer stable than
+        # the one PRs are gated on.
+        rustChannel = (builtins.fromTOML (builtins.readFile ./rust-toolchain.toml)).toolchain.channel;
+
+        rustToolchain = pkgs.rust-bin.stable.${rustChannel}.default.override {
           extensions = [ "rust-src" "rust-analyzer" ];
           targets = desktopTargets;
         };
@@ -50,22 +57,24 @@
           # Code quality tools
           cargo-audit
           cargo-outdated
+        ] ++ lib.optionals stdenv.isLinux [
+          # Coverage via ptrace — Linux-only, and not packaged for Darwin.
           cargo-tarpaulin
 
-          # Native compilation tools
+          # C compiler for the tree-sitter grammars. On Darwin the stdenv
+          # already provides clang; pulling GCC in there fights the `CC = "cc"`
+          # below instead of helping.
           gcc
         ];
         # Note: mingw cross-compiler removed to avoid CC conflicts with tree-sitter
         # For Windows builds, use native Windows environment or GitHub Actions
 
-        buildInputs = with pkgs; [
-          # tree-sitter grammars compile native C in build.rs — pkg-config
-          # and a working C toolchain in nativeBuildInputs are enough.
-        ] ++ lib.optionals stdenv.isDarwin [
-          # macOS frameworks
-          darwin.apple_sdk.frameworks.Security
-          darwin.apple_sdk.frameworks.SystemConfiguration
-        ];
+        # tree-sitter grammars compile native C in build.rs — pkg-config and a
+        # working C toolchain in nativeBuildInputs are enough. Darwin needs no
+        # explicit frameworks either: the workspace is pure Rust (rustls/russh,
+        # no OpenSSL), and current nixpkgs ships the Apple SDK as part of the
+        # stdenv rather than as `darwin.apple_sdk.frameworks.*` attributes.
+        buildInputs = [ ];
 
       in
       {
@@ -81,11 +90,6 @@
             };
 
             nativeBuildInputs = [ pkgs.pkg-config ];
-
-            buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [
-              pkgs.darwin.apple_sdk.frameworks.Security
-              pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
-            ];
 
             meta = with pkgs.lib; {
               description = "Cross-platform terminal IDE, file manager and virtual terminal";
