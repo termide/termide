@@ -66,8 +66,10 @@ modifier by default — Ghostty `macos-option-as-alt=false`, kitty
 `macos_option_as_alt no`, iTerm2 Option=Normal, Terminal.app "Use Option
 as Meta key" off. `Option+F` therefore arrives as the composed glyph `ƒ`
 with no ALT bit, and every `Alt+<letter>` default (about 25 global
-actions) is unreachable. Keys that produce no text are unaffected:
-`Option+F9`, `Option+Up/Down`, `Option+Backspace` keep their ALT bit.
+actions) is unreachable. How far that reaches depends on the terminal: on
+Ghostty the keys that produce no text keep their ALT bit, so `Option+F9`,
+`Option+Up/Down` and `Option+Backspace` still work, while Terminal.app
+strips the modifier from those too and delivers a bare `Up`.
 
 Termide's remedy is the Kitty `REPORT_ALL_KEYS_AS_ESCAPE_CODES` flag,
 which makes the terminal report `Option+F` as `Alt+F` even while the
@@ -108,16 +110,79 @@ Ghostty those two chords do not merely fail to reach `prev_group` /
 `next_group` — they trigger whatever is bound to `Alt+B` and `Alt+F`,
 which by default are *Add bookmark* and *New file manager*.
 
-Use the `Alt+A` / `Alt+D` alternatives, which are bound to the same two
-actions and unaffected, or clear Ghostty's bindings in its config:
+Nothing in termide can undo this: Ghostty applies the keybind before the
+keyboard protocol gets a say, so `Option+Left` arrives as the two bytes
+`ESC b` and is indistinguishable from a real `Alt+B`. Ghostty's keybind
+prefixes (`global:`, `all:`, `unconsumed:`, `performable:`) and key tables
+have no way to scope a binding to one application.
+
+The simplest answer is to use `Alt+A` / `Alt+D`, which are bound to the
+same two actions and are untouched.
+
+To get `Option+Left` / `Option+Right` back, clear the bindings in
+`~/.config/ghostty/config`:
 
 ```
 keybind = alt+arrow_left=unbind
 keybind = alt+arrow_right=unbind
 ```
 
+Reload with `Cmd+Shift+,` or restart Ghostty. Note that this is a
+terminal-wide setting, so it also removes readline word motion in your
+shell. Restore that on the shell side — for zsh, in `~/.zshrc`:
+
+```zsh
+bindkey "^[[1;3D" backward-word   # Option+Left
+bindkey "^[[1;3C" forward-word    # Option+Right
+```
+
+or for bash, in `~/.inputrc`:
+
+```
+"\e[1;3D": backward-word
+"\e[1;3C": forward-word
+```
+
+Those are the standard xterm sequences Ghostty sends for `Alt+Left` /
+`Alt+Right` once its own bindings are gone; `cat -v` followed by the
+keypress confirms what your terminal actually emits.
+
 `Option+Up` / `Option+Down` carry no such Ghostty binding and reach
 `prev_panel` / `next_panel` normally.
+
+### Alt+Shift+= and Alt+Shift+- do not reach termide on macOS
+
+`panel_grow_vertical` and `panel_shrink_vertical` are the one pair of
+defaults macOS keeps out of reach. Option composes `Option+Shift+=` into a
+single glyph — `±` on a Latin layout, `«` on a Russian one — and the
+terminal reports that glyph in place of the key. The mapping is
+layout-specific, so it cannot be reversed the way `+` → `Shift+=` is on
+other platforms.
+
+Resize vertically with the mouse, or rebind both actions through
+Settings → Keybindings to chords without `Shift`.
+
+### Terminal.app cannot use the remedy at all
+
+Terminal.app does not implement the Kitty keyboard protocol, so
+`report_all_keys` has nothing to switch on and every `Alt+<letter>` binding
+stays unreachable until **Settings → Profiles → Keyboard → "Use Option as
+Meta key"** is enabled. With it on, `Option+F` reaches termide as `Alt+F`.
+
+Its arrow keys need separate attention even then. Terminal.app ships
+profile key mappings that send `ESC b` / `ESC f` for `Option+Left` /
+`Option+Right` — the same collision Ghostty has, arriving as `Alt+B` /
+`Alt+F` — and it drops the modifier entirely from `Option+Up` /
+`Option+Down`, which arrive as bare `Up` / `Down`. Both are edited in the
+key-mapping list on that same Keyboard tab. Measured on macOS 26.5:
+
+```
+Option+Left   -> Alt+Char('b')      Option+Up   -> Up   (no ALT)
+Option+Right  -> Alt+Char('f')      Option+Down -> Down (no ALT)
+```
+
+`Alt+A` / `Alt+D` remain the alternatives that need no key-mapping work,
+once Option-as-Meta is on.
 
 ### macOS reserves some function keys
 
