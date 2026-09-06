@@ -301,10 +301,39 @@ impl App {
                 let remedy = if caps.kitty_full {
                     "set general.report_all_keys = true in config.toml"
                 } else {
-                    "this terminal has no Kitty keyboard protocol; enable its own                      Option-as-Alt setting (Ghostty: macos-option-as-alt,                      Terminal.app: Use Option as Meta key)"
+                    "this terminal has no Kitty keyboard protocol; enable its own \
+                     Option-as-Alt setting (Ghostty: macos-option-as-alt, \
+                     Terminal.app: Use Option as Meta key)"
                 };
                 log::warn!(
-                    "{affected} Alt+<key> keybinding(s) cannot fire on macOS because                      Option is composing text instead: {remedy}.",
+                    "{affected} Alt+<key> keybinding(s) cannot fire on macOS because \
+                     Option is composing text instead: {remedy}.",
+                );
+            }
+        }
+
+        // macOS: with "Use F1, F2, etc. keys as standard function keys" off —
+        // the system default — the whole F-row sends media keys instead. Most
+        // actions survive on their non-F alternative; these have none, so they
+        // become unreachable entirely. There is no way to read that system
+        // setting from a terminal, so this states the condition rather than
+        // detecting it.
+        if cfg!(target_os = "macos") {
+            let stuck = termide_config::actions_reachable_only_by_function_key(config);
+            if !stuck.is_empty() {
+                let list = stuck
+                    .iter()
+                    .map(|(location, bindings)| {
+                        format!("{} ({})", location.display(), bindings.join(", "))
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                log::warn!(
+                    "{} action(s) are bound to a function key and nothing else, so they \
+                     cannot be invoked unless macOS is set to send real function keys \
+                     (System Settings > Keyboard > \"Use F1, F2, etc. keys as standard \
+                     function keys\"): {list}",
+                    stuck.len(),
                 );
             }
         }

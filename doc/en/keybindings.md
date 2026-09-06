@@ -67,7 +67,7 @@ modifier by default — Ghostty `macos-option-as-alt=false`, kitty
 as Meta key" off. `Option+F` therefore arrives as the composed glyph `ƒ`
 with no ALT bit, and every `Alt+<letter>` default (about 25 global
 actions) is unreachable. Keys that produce no text are unaffected:
-`Option+F9`, `Option+Left`, `Option+Backspace` keep their ALT bit.
+`Option+F9`, `Option+Up/Down`, `Option+Backspace` keep their ALT bit.
 
 Termide's remedy is the Kitty `REPORT_ALL_KEYS_AS_ESCAPE_CODES` flag,
 which makes the terminal report `Option+F` as `Alt+F` even while the
@@ -90,6 +90,64 @@ modifier presses; those are dropped at the event boundary.
 
 When `Alt+<key>` bindings cannot fire, termide logs a startup warning to
 the Journal naming the remedy for the terminal at hand.
+
+### Ghostty rebinds Option+Left / Option+Right
+
+Independently of the composition problem above, Ghostty ships these
+macOS defaults:
+
+```
+keybind = alt+arrow_left=esc:b
+keybind = alt+arrow_right=esc:f
+```
+
+They implement the readline word-motion convention, and they fire before
+the key ever reaches termide: `Option+Left` arrives as the two bytes
+`ESC b`, which parse as `Alt+B`, and `Option+Right` as `Alt+F`. So on
+Ghostty those two chords do not merely fail to reach `prev_group` /
+`next_group` — they trigger whatever is bound to `Alt+B` and `Alt+F`,
+which by default are *Add bookmark* and *New file manager*.
+
+Use the `Alt+A` / `Alt+D` alternatives, which are bound to the same two
+actions and unaffected, or clear Ghostty's bindings in its config:
+
+```
+keybind = alt+arrow_left=unbind
+keybind = alt+arrow_right=unbind
+```
+
+`Option+Up` / `Option+Down` carry no such Ghostty binding and reach
+`prev_panel` / `next_panel` normally.
+
+### macOS reserves some function keys
+
+`F11` is bound to *Show Desktop* by macOS Mission Control and never
+reaches the terminal, so the `F11` alternative for *Toggle stack* does
+not work out of the box; use `Alt+Backspace`.
+
+More broadly, unless **System Settings → Keyboard → "Use F1, F2, etc.
+keys as standard function keys"** is enabled, the F-row sends media keys
+and no `F<n>` binding is reachable at all. For most global actions that
+only costs the F-key half of a pair — `Alt+M` still opens the menu when
+`F9` does not. But these defaults are bound to a function key and
+nothing else, so they are genuinely unreachable until the setting is
+turned on:
+
+| Action | Binding | Section |
+|---|---|---|
+| Toggle accordion / split | `Alt+F11` | `general` |
+| Delete line | `F8` | `editor` |
+| Find next | `F3` | `editor` |
+| Find previous | `Shift+F3` | `editor` |
+| Go to definition | `F12` | `editor` |
+| Find references | `Shift+F12`, `F24` | `editor` |
+| Rename symbol | `F4` | `editor` |
+| View file | `F3` | `git_status` |
+| Edit file | `F4` | `git_status` |
+
+Termide logs a startup warning listing them when it starts on macOS.
+Either enable the setting, or rebind these actions through
+Settings → Keybindings.
 
 ## Terminal compatibility (2026)
 

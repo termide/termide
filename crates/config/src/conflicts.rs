@@ -7,6 +7,8 @@
 //!   `binding_requires_kitty` warnings on terminals without Kitty
 //!   keyboard protocol).
 
+use std::collections::HashMap;
+
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::keybindings::{parse_keybinding, KeyBinding, ParsedKeyBinding};
@@ -157,6 +159,7 @@ pub fn enumerate_bindings(config: &Config) -> Vec<(BindingLocation, ParsedKeyBin
     push(&mut out, "editor", "undo", &e.undo);
     push(&mut out, "editor", "redo", &e.redo);
     push(&mut out, "editor", "duplicate_line", &e.duplicate_line);
+    push(&mut out, "editor", "delete_line", &e.delete_line);
     push(&mut out, "editor", "toggle_comment", &e.toggle_comment);
     push(&mut out, "editor", "search", &e.search);
     push(&mut out, "editor", "search_next", &e.search_next);
@@ -171,6 +174,7 @@ pub fn enumerate_bindings(config: &Config) -> Vec<(BindingLocation, ParsedKeyBin
         "trigger_completion",
         &e.trigger_completion,
     );
+    push(&mut out, "editor", "code_action", &e.code_action);
     push(&mut out, "editor", "show_hover", &e.show_hover);
     push(&mut out, "editor", "goto_definition", &e.goto_definition);
     push(&mut out, "editor", "find_references", &e.find_references);
@@ -335,6 +339,47 @@ pub fn binding_requires_macos_all_keys(parsed: &ParsedKeyBinding) -> bool {
         && matches!(parsed.key, KeyCode::Char(_))
 }
 
+/// `true` when this canonical chord is a function key (`F1`…`F24`),
+/// with or without modifiers.
+fn binding_is_function_key(parsed: &ParsedKeyBinding) -> bool {
+    matches!(parsed.key, KeyCode::F(_))
+}
+
+/// Actions whose *every* binding is a function key, in enumeration order.
+///
+/// macOS sends media keys for the whole F-row unless "Use F1, F2, etc.
+/// keys as standard function keys" is enabled, so an action bound only
+/// to `F<n>` cannot be invoked at all there until the user changes that
+/// system setting. An action that also carries a non-function-key
+/// alternative — `toggle_menu` is `Alt+M` as well as `F9` — merely loses
+/// one of two ways in and is not worth reporting.
+///
+/// Returns the action and the bindings it is stuck behind.
+pub fn actions_reachable_only_by_function_key(
+    config: &Config,
+) -> Vec<(BindingLocation, Vec<String>)> {
+    let mut order: Vec<String> = Vec::new();
+    let mut groups: HashMap<String, (BindingLocation, Vec<String>, bool)> = HashMap::new();
+
+    for (location, parsed, raw) in enumerate_bindings(config) {
+        let key = location.display();
+        let entry = groups.entry(key.clone()).or_insert_with(|| {
+            order.push(key);
+            (location, Vec::new(), true)
+        });
+        entry.1.push(raw);
+        entry.2 &= binding_is_function_key(&parsed);
+    }
+
+    order
+        .into_iter()
+        .filter_map(|key| {
+            let (location, bindings, only_fn) = groups.remove(&key)?;
+            only_fn.then_some((location, bindings))
+        })
+        .collect()
+}
+
 /// Returns `true` when this canonical chord is unlikely to reach
 /// termide on a terminal that does not implement the Kitty keyboard
 /// enhancement protocol. Used to warn the user at startup.
@@ -456,6 +501,53 @@ mod tests {
         // No Alt, nothing to compose.
         assert!(!binding_requires_macos_all_keys(&parse("Ctrl+S")));
         assert!(!binding_requires_macos_all_keys(&parse("F9")));
+    }
+
+    /// The default config must keep reporting exactly the actions that a
+    /// stock macOS keyboard cannot reach: bound to a function key and to
+    /// nothing else. Actions with a non-F alternative must stay out —
+    /// `toggle_menu` is `Alt+M` as well as `F9`.
+    #[test]
+    fn function_key_only_actions_in_default_config() {
+        let mut cfg = Config::default();
+        // `normalize` is what the loader runs; it fills every section's
+        // defaults, so the list below is the one a stock install has.
+        cfg.normalize();
+
+        let stuck: Vec<String> = actions_reachable_only_by_function_key(&cfg)
+            .into_iter()
+            .map(|(location, _)| location.display())
+            .collect();
+
+        for expected in [
+            "general.toggle_fullscreen_panel",
+            "editor.delete_line",
+            "editor.search_next",
+            "editor.search_prev",
+            "editor.goto_definition",
+            "editor.find_references",
+            "editor.rename_symbol",
+            "git_status.view",
+            "git_status.edit",
+        ] {
+            assert!(
+                stuck.iter().any(|s| s == expected),
+                "{expected} is bound to a function key and nothing else, but was not reported; got {stuck:?}"
+            );
+        }
+
+        for reachable in [
+            "general.toggle_menu",
+            "general.open_help",
+            "general.close_panel",
+            "general.toggle_stack",
+            "editor.save",
+        ] {
+            assert!(
+                !stuck.iter().any(|s| s == reachable),
+                "{reachable} has a non-function-key alternative and must not be reported"
+            );
+        }
     }
 
     #[test]
