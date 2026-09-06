@@ -1019,6 +1019,16 @@ mod tests {
         (fm, temp_dir)
     }
 
+    /// The temp directory as the panel reports it.
+    ///
+    /// `FileManager` canonicalizes the path it is given, and on macOS the
+    /// temp directory lives under `/var`, a symlink to `/private/var`. Compare
+    /// against the raw `TempDir::path()` and the assertion fails there while
+    /// passing on Linux, where `/tmp` is a real directory.
+    fn canonical_temp_path(temp_dir: &TempDir) -> std::path::PathBuf {
+        temp_dir.path().canonicalize().unwrap()
+    }
+
     /// A scrollbar drag must not be undone by the next render: the panel pulls
     /// `scroll_offset` back toward `selected` while drawing, so the command has
     /// to move the cursor into the new viewport as wheel scrolling does.
@@ -1073,7 +1083,7 @@ mod tests {
     #[test]
     fn test_file_manager_new() {
         let (fm, temp_dir) = create_file_manager_in_temp();
-        assert_eq!(fm.current_path(), temp_dir.path());
+        assert_eq!(fm.current_path(), canonical_temp_path(&temp_dir));
     }
 
     #[test]
@@ -1087,7 +1097,7 @@ mod tests {
             ..
         } = result
         {
-            assert_eq!(current_path, temp_dir.path());
+            assert_eq!(current_path, canonical_temp_path(&temp_dir));
             assert!(!is_git_repo);
         } else {
             panic!("Expected FsWatchInfo result");

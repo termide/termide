@@ -562,12 +562,14 @@ impl App {
     }
 
     /// Hand a path/URL to the system's default application.
+    ///
+    /// `open::that_detached` picks the platform launcher (`xdg-open`, `open`,
+    /// `rundll32`) instead of hardcoding the freedesktop one, and does not wait
+    /// for the child — a bookmark must never block the UI thread.
     fn open_path_external(&self, path: &str) {
-        let _ = std::process::Command::new("xdg-open")
-            .arg(path)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
+        if let Err(e) = open::that_detached(path) {
+            log::error!("Failed to open '{}' externally: {}", path, e);
+        }
     }
 
     fn open_bookmark(
