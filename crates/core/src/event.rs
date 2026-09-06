@@ -16,6 +16,23 @@ use crossterm::event::{
     MouseEventKind,
 };
 
+/// `true` when the event carries only a modifier key (Shift, Ctrl, Alt,
+/// Super) and no key it modifies.
+///
+/// `REPORT_ALL_KEYS_AS_ESCAPE_CODES` makes the terminal report modifier
+/// presses on their own (`CSI 57441 u` … `CSI 57444 u`). Dispatching those
+/// would run panel handlers *between* a modifier and the key it modifies —
+/// the observable breakage that removed the flag in b37b23b9.
+fn is_modifier_only(key: &KeyEvent) -> bool {
+    matches!(key.code, KeyCode::Modifier(_))
+}
+
+/// `true` when the event is a keypress the application should act on:
+/// a Press or Repeat (held-key auto-repeat) that is not a bare modifier.
+fn is_dispatchable_key(key: &KeyEvent) -> bool {
+    matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) && !is_modifier_only(key)
+}
+
 /// Application event
 #[derive(Debug, Clone)]
 pub enum Event {
@@ -74,13 +91,12 @@ impl EventHandler {
             match event::read()? {
                 // Handle Press and Repeat (held-key auto-repeat) so navigation/resize
                 // keeps firing while key is down.
-                CrosstermEvent::Key(key)
-                    if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
-                {
+                CrosstermEvent::Key(key) if is_dispatchable_key(&key) => {
                     self.try_coalesce_paste(key)
                 }
                 CrosstermEvent::Key(_) => {
-                    // Release from REPORT_EVENT_TYPES — drain buffered
+                    // Release from REPORT_EVENT_TYPES, or a bare modifier press
+                    // from REPORT_ALL_KEYS_AS_ESCAPE_CODES — drain buffered
                     // events with zero timeout instead of generating a spurious
                     // Tick that triggers the full background-processing pipeline.
                     self.drain_non_press_keys()
@@ -183,15 +199,14 @@ impl EventHandler {
         Ok(Event::Mouse(latest))
     }
 
-    /// Drain buffered Release key events left by REPORT_EVENT_TYPES.
+    /// Drain buffered Release key events left by REPORT_EVENT_TYPES and bare
+    /// modifier presses left by REPORT_ALL_KEYS_AS_ESCAPE_CODES.
     /// Returns the first real event found (Press/Repeat key, mouse, resize…) or
     /// Tick when the queue is empty.
     fn drain_non_press_keys(&self) -> Result<Event> {
         while event::poll(Duration::ZERO)? {
             match event::read()? {
-                CrosstermEvent::Key(key)
-                    if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
-                {
+                CrosstermEvent::Key(key) if is_dispatchable_key(&key) => {
                     return self.try_coalesce_paste(key);
                 }
                 CrosstermEvent::Key(_) => continue,
@@ -260,6 +275,7 @@ impl EventHandler {
             match &raw {
                 CrosstermEvent::Key(key)
                     if key.kind == KeyEventKind::Press
+                        && !is_modifier_only(key)
                         && !key.modifiers.contains(KeyModifiers::CONTROL)
                         && !key.modifiers.contains(KeyModifiers::ALT)
                         && !key.modifiers.contains(KeyModifiers::SUPER) =>
@@ -291,12 +307,8 @@ impl EventHandler {
     /// Convert crossterm event to our Event type.
     fn convert_crossterm_event(&self, raw: CrosstermEvent) -> Option<Event> {
         match raw {
-            CrosstermEvent::Key(key)
-                if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
-            {
-                Some(Event::Key(key))
-            }
-            CrosstermEvent::Key(_) => None, // Ignore Release
+            CrosstermEvent::Key(key) if is_dispatchable_key(&key) => Some(Event::Key(key)),
+            CrosstermEvent::Key(_) => None, // Ignore Release and bare modifiers
             CrosstermEvent::Mouse(mouse) => Some(Event::Mouse(mouse)),
             CrosstermEvent::Resize(width, height) => Some(Event::Resize(width, height)),
             CrosstermEvent::FocusLost => Some(Event::FocusLost),
@@ -351,6 +363,33 @@ mod tests {
                 .is_none(),
             "Release events must be discarded"
         );
+    }
+
+    /// Regression: with `REPORT_ALL_KEYS_AS_ESCAPE_CODES` the terminal reports
+    /// modifier presses on their own. Dispatching them runs panel handlers
+    /// between a modifier and the key it modifies — the breakage that removed
+    /// the flag in b37b23b9 ("breaks combinations like Shift+Home").
+    #[test]
+    fn bare_modifier_press_is_ignored() {
+        use crossterm::event::ModifierKeyCode;
+
+        let handler = EventHandler::new(Duration::from_millis(50));
+        for modifier in [
+            ModifierKeyCode::LeftShift,
+            ModifierKeyCode::LeftControl,
+            ModifierKeyCode::LeftAlt,
+            ModifierKeyCode::LeftSuper,
+        ] {
+            let raw = CrosstermEvent::Key(KeyEvent::new_with_kind(
+                KeyCode::Modifier(modifier),
+                KeyModifiers::SHIFT,
+                KeyEventKind::Press,
+            ));
+            assert!(
+                handler.convert_crossterm_event(raw).is_none(),
+                "bare {modifier:?} press must be discarded"
+            );
+        }
     }
 }
 

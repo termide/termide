@@ -48,6 +48,12 @@ pub struct KeyboardCaps {
     /// `DISAMBIGUATE_ESCAPE_CODES` active — Esc and modified keys come
     /// in unambiguous CSI-u form.
     pub disambiguate: bool,
+    /// `REPORT_ALL_KEYS_AS_ESCAPE_CODES` active — even text-producing
+    /// keys arrive as CSI-u, so macOS `Option+<letter>` reports
+    /// `Char('f') + ALT` instead of the composed glyph `ƒ`. Implies the
+    /// terminal also emits standalone modifier-key events, which
+    /// `crates/core/src/event.rs` drops.
+    pub all_keys: bool,
     /// `true` when termide ran inside an SSH session and skipped the
     /// detection probe (probe blocks indefinitely on some bridges).
     pub via_ssh: bool,
@@ -58,10 +64,15 @@ impl KeyboardCaps {
     /// - running inside SSH (probe is skipped to avoid hangs);
     /// - probe failed or returned `false`.
     ///
+    /// `request_all_keys` carries `general.report_all_keys` from the
+    /// config. It is honoured on macOS only: elsewhere `Option`/`Alt`
+    /// does not compose text, so `Alt+<letter>` already arrives with the
+    /// ALT bit and the flag would only cost dead-key/compose input.
+    ///
     /// Call this **before** `enable_raw_mode` / `PushKeyboardEnhancementFlags` —
     /// the probe is a query/response handshake that needs cooked-mode
     /// readiness.
-    pub fn detect() -> Self {
+    pub fn detect(request_all_keys: bool) -> Self {
         let via_ssh =
             std::env::var_os("SSH_CONNECTION").is_some() || std::env::var_os("SSH_TTY").is_some();
         if via_ssh {
@@ -76,6 +87,7 @@ impl KeyboardCaps {
             alt_keys: supported,
             event_types: supported,
             disambiguate: supported,
+            all_keys: supported && request_all_keys && cfg!(target_os = "macos"),
             via_ssh: false,
         }
     }

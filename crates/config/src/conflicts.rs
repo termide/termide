@@ -313,6 +313,28 @@ fn supported_via_legacy_quirk(parsed: &ParsedKeyBinding) -> bool {
         && matches!(parsed.key, KeyCode::Char('/') | KeyCode::Char('\\'))
 }
 
+/// `true` when this canonical chord is `Alt(+Shift)+<character>` — the
+/// class macOS terminals turn into a composed glyph instead of a
+/// modified key.
+///
+/// On macOS `Option` is a text-composition modifier by default in every
+/// terminal (Ghostty `macos-option-as-alt=false`, kitty
+/// `macos_option_as_alt no`, iTerm2 Option=Normal, Terminal.app meta
+/// off), so `Option+F` arrives as `ƒ` with no ALT bit and the binding
+/// cannot match. Termide's remedy is the Kitty
+/// `REPORT_ALL_KEYS_AS_ESCAPE_CODES` flag (`general.report_all_keys`);
+/// where that is unavailable the user must switch the terminal's own
+/// Option-as-Alt setting. Used to warn at startup.
+///
+/// Chords with `Ctrl` are excluded: `Ctrl` suppresses composition, and
+/// `Ctrl+Alt+…` already falls under `binding_requires_kitty`.
+pub fn binding_requires_macos_all_keys(parsed: &ParsedKeyBinding) -> bool {
+    let mods = parsed.modifiers;
+    mods.contains(KeyModifiers::ALT)
+        && !mods.contains(KeyModifiers::CONTROL)
+        && matches!(parsed.key, KeyCode::Char(_))
+}
+
 /// Returns `true` when this canonical chord is unlikely to reach
 /// termide on a terminal that does not implement the Kitty keyboard
 /// enhancement protocol. Used to warn the user at startup.
@@ -414,6 +436,26 @@ mod tests {
         // require Kitty proto.
         assert!(binding_requires_kitty(&parse("Ctrl+Alt+/")));
         assert!(binding_requires_kitty(&parse("Ctrl+Alt+\\")));
+    }
+
+    #[test]
+    fn macos_all_keys_covers_alt_char_chords() {
+        // Composed on macOS: Option+letter/digit/punctuation.
+        assert!(binding_requires_macos_all_keys(&parse("Alt+M")));
+        assert!(binding_requires_macos_all_keys(&parse("Alt+1")));
+        assert!(binding_requires_macos_all_keys(&parse("Alt+/")));
+        // Shift rides along on the same composed glyph.
+        assert!(binding_requires_macos_all_keys(&parse("Alt+Shift+=")));
+        // Non-character keys have no text to compose — Option+F9 and
+        // Option+Left keep their ALT bit even without the flag.
+        assert!(!binding_requires_macos_all_keys(&parse("Alt+F9")));
+        assert!(!binding_requires_macos_all_keys(&parse("Alt+Left")));
+        assert!(!binding_requires_macos_all_keys(&parse("Alt+Backspace")));
+        // Ctrl suppresses composition.
+        assert!(!binding_requires_macos_all_keys(&parse("Ctrl+Alt+R")));
+        // No Alt, nothing to compose.
+        assert!(!binding_requires_macos_all_keys(&parse("Ctrl+S")));
+        assert!(!binding_requires_macos_all_keys(&parse("F9")));
     }
 
     #[test]

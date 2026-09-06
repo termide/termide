@@ -288,6 +288,27 @@ impl App {
             );
         }
 
+        // macOS: Option composes text unless REPORT_ALL_KEYS_AS_ESCAPE_CODES is
+        // active, so every `Alt+<char>` chord arrives as a composed glyph
+        // (`Option+F` → `ƒ`) with no ALT bit and simply never fires. Say so,
+        // with the remedy that applies to the terminal at hand.
+        if cfg!(target_os = "macos") && !caps.all_keys {
+            let affected = termide_config::enumerate_bindings(config)
+                .into_iter()
+                .filter(|(_, parsed, _)| termide_config::binding_requires_macos_all_keys(parsed))
+                .count();
+            if affected > 0 {
+                let remedy = if caps.kitty_full {
+                    "set general.report_all_keys = true in config.toml"
+                } else {
+                    "this terminal has no Kitty keyboard protocol; enable its own                      Option-as-Alt setting (Ghostty: macos-option-as-alt,                      Terminal.app: Use Option as Meta key)"
+                };
+                log::warn!(
+                    "{affected} Alt+<key> keybinding(s) cannot fire on macOS because                      Option is composing text instead: {remedy}.",
+                );
+            }
+        }
+
         if !caps.kitty_full {
             let problematic: Vec<_> = termide_config::enumerate_bindings(config)
                 .into_iter()

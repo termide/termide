@@ -59,6 +59,38 @@ they are de-facto standards across editors. On a terminal without
 Kitty proto, termide logs a startup warning listing the affected
 bindings; the user can rebind them through Settings → Keybindings.
 
+## macOS: Option is not Alt
+
+On macOS every terminal treats `Option` as a **text-composition**
+modifier by default — Ghostty `macos-option-as-alt=false`, kitty
+`macos_option_as_alt no`, iTerm2 Option=Normal, Terminal.app "Use Option
+as Meta key" off. `Option+F` therefore arrives as the composed glyph `ƒ`
+with no ALT bit, and every `Alt+<letter>` default (about 25 global
+actions) is unreachable. Keys that produce no text are unaffected:
+`Option+F9`, `Option+Left`, `Option+Backspace` keep their ALT bit.
+
+Termide's remedy is the Kitty `REPORT_ALL_KEYS_AS_ESCAPE_CODES` flag,
+which makes the terminal report `Option+F` as `Alt+F` even while the
+system keeps composing. It is pushed at startup on macOS only, on
+terminals that advertise the Kitty keyboard protocol, and is controlled
+by:
+
+```toml
+[general]
+report_all_keys = true  # default
+```
+
+The flag has one cost: dead-key and IME composition no longer reaches
+termide, so `Option+E` `E` → `é` stops working inside the application.
+Users who need composed input should set `report_all_keys = false` and
+either rebind the affected actions or switch `Option` to `Alt` in the
+terminal itself (Ghostty `macos-option-as-alt = true`, Terminal.app "Use
+Option as Meta key"). The flag also makes the terminal report standalone
+modifier presses; those are dropped at the event boundary.
+
+When `Alt+<key>` bindings cannot fire, termide logs a startup warning to
+the Journal naming the remedy for the terminal at hand.
+
 ## Terminal compatibility (2026)
 
 | Terminal | Kitty keyboard protocol |
