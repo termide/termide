@@ -301,8 +301,10 @@ impl Modal for SettingsModal {
         }
 
         // Keybindings tab has its own key handling
+        // Keybinding capture consumes the canonical form (see
+        // `format_key_event`); navigation keys are identical in both forms.
         if self.active_tab == SettingsTab::Keybindings && self.focus == FocusArea::Content {
-            return self.handle_keybindings_key(key);
+            return self.handle_keybindings_key(chord.canonical);
         }
 
         match self.focus {

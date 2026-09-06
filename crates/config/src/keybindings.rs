@@ -96,7 +96,12 @@ impl ParsedKeyBinding {
     /// for `event`).
     pub fn matches(&self, event: &KeyEvent) -> bool {
         let key_eq = match (&self.key, &event.code) {
-            (KeyCode::Char(a), KeyCode::Char(b)) => a.eq_ignore_ascii_case(b),
+            // Case-insensitive beyond ASCII: a binding captured from a
+            // composed glyph (macOS `Option+F` → `ƒ`) or written in a
+            // non-Latin script must still match the keypress it came from.
+            (KeyCode::Char(a), KeyCode::Char(b)) => {
+                a.eq_ignore_ascii_case(b) || a.to_lowercase().eq(b.to_lowercase())
+            }
             (a, b) => a == b,
         };
         key_eq && self.modifiers == event.modifiers
@@ -240,6 +245,21 @@ mod tests {
         let kb = parse_keybinding("Ctrl+S").unwrap();
         assert_eq!(kb.key, KeyCode::Char('S'));
         assert_eq!(kb.modifiers, KeyModifiers::CONTROL);
+    }
+
+    /// Regression: a binding captured from a macOS composed glyph
+    /// (`Option+F` → `ƒ` when `REPORT_ALL_KEYS_AS_ESCAPE_CODES` is off)
+    /// must match the keypress it came from. `eq_ignore_ascii_case`
+    /// alone leaves `'Ƒ' != 'ƒ'`, so such a binding could never fire.
+    #[test]
+    fn test_matches_non_ascii_char_case_insensitively() {
+        let event = KeyEvent::new(KeyCode::Char('ƒ'), KeyModifiers::empty());
+        for binding in ["ƒ", "Ƒ"] {
+            assert!(
+                parse_keybinding(binding).unwrap().matches(&event),
+                "binding {binding:?} should match Char('ƒ')"
+            );
+        }
     }
 
     #[test]
