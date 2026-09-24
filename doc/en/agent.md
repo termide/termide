@@ -164,13 +164,14 @@ While a run works, a run clock sits right-aligned under its last block: an
 animated `✽` and the time since the request was sent. It has its own glyph
 rather than `🕒` because the figures under each block describe that block
 alone, while this one is the run's total. When the run ends the clock freezes
-where it stood. A run that finishes cleanly on an answer keeps it in the
+where it stood and dims, so a resting `✻` never reads as a working one. A run that finishes cleanly on an answer keeps it in the
 answer's meta (`✻ 3m41s`); any other run keeps it as a closing line after its
 last block, with the time it ended and how — `✻ 3m41s · 21:03:41 ✗` for a
 failed or aborted run.
 
 A run stopped with `/pause` gets a pause line instead, `‖ 1m12s`: it counts
-how long the pause has lasted and keeps that length once the run continues. A continued run's clock goes on from the
+how long the pause has lasted, its `‖` marked while the pause is on, and
+keeps that length, dimmed, once the run continues. A continued run's clock goes on from the
 original request, so its total includes the pause. Clicking the run clock
 pauses the run, like `/pause`; clicking the pause line (or the pause in the
 state strip) continues it, like `/continue`. While a pause waits for the

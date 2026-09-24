@@ -1480,7 +1480,7 @@ impl AgentPanel {
     /// Freeze the pause's line at the pause's length, once it is over.
     fn end_pause(&mut self) {
         if let Some(start) = self.pause_start.take() {
-            self.transcript.set_pause_length(millis(start.elapsed()));
+            self.transcript.finish_pause(millis(start.elapsed()));
         }
     }
 

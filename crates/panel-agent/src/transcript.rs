@@ -164,6 +164,9 @@ pub enum Item {
         ok: bool,
         /// The run stopped at a `/pause`, resumable with `/continue`.
         paused: bool,
+        /// The pause is still on: its line ticks and its `‖` stands out, as
+        /// the live run clock does; once it ends both rest, dimmed.
+        live: bool,
     },
 }
 
@@ -447,19 +450,20 @@ impl Transcript {
             at: at.to_string(),
             ok,
             paused,
+            live: paused,
         });
     }
 
-    /// Set the length of the pause the last item marks, while it lasts and
-    /// once it ends. Returns whether the shown line changed (it shows whole
-    /// seconds, so a redraw a second is enough).
+    /// Set the length of the pause the transcript ends on, while it lasts.
+    /// Returns whether the shown line changed (it shows whole seconds, so a
+    /// redraw a second is enough).
     pub fn set_pause_length(&mut self, ms: u32) -> bool {
         let Some(index) = self.items.len().checked_sub(1) else {
             return false;
         };
         let Item::RunEnd {
             elapsed_ms,
-            paused: true,
+            live: true,
             ..
         } = &mut self.items[index]
         else {
@@ -472,6 +476,24 @@ impl Transcript {
         *elapsed_ms = ms;
         self.invalidate(index);
         true
+    }
+
+    /// End the pause the transcript ends on at `ms` long: its line keeps that
+    /// length and rests, dimmed.
+    pub fn finish_pause(&mut self, ms: u32) {
+        let Some(index) = self.items.len().checked_sub(1) else {
+            return;
+        };
+        if let Item::RunEnd {
+            elapsed_ms,
+            live: live @ true,
+            ..
+        } = &mut self.items[index]
+        {
+            *elapsed_ms = ms;
+            *live = false;
+            self.invalidate(index);
+        }
     }
 
     /// Whether flattened line `line` is the live run clock: the last row of
@@ -487,7 +509,7 @@ impl Transcript {
         let last = self.items.len().checked_sub(1);
         last.is_some_and(|last| {
             self.item_at_line(line) == Some(last)
-                && matches!(self.items[last], Item::RunEnd { paused: true, .. })
+                && matches!(self.items[last], Item::RunEnd { live: true, .. })
         })
     }
 
@@ -1412,15 +1434,8 @@ fn render_body(
             if let Some(ms) = run_ms {
                 lines.push(right_meta(
                     width,
-                    vec![
-                        Span::styled(
-                            format!("{RUN_GLYPH} "),
-                            Style::default()
-                                .fg(colors.info)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(fmt_dur(*ms), dim),
-                    ],
+                    // The clock at rest, dimmed apart from the animated one.
+                    vec![Span::styled(format!("{RUN_GLYPH} {}", fmt_dur(*ms)), dim)],
                 ));
             }
             lines
@@ -1545,20 +1560,23 @@ fn render_body(
             at,
             ok,
             paused,
+            live,
         } => {
             // The live run clock, frozen where it stood: right-aligned under
             // the last block, with no rule, and the time the run ended. A pause
             // shows as `‖` in place of the resting `✻` and needs no status.
-            let (glyph, color) = if *paused {
-                (PAUSED_GLYPH, colors.warning)
+            // Only a pause still on stands out; a resting glyph is dimmed, so
+            // it reads apart from the animated one.
+            let glyph = if *paused { PAUSED_GLYPH } else { RUN_GLYPH };
+            let glyph_style = if *live {
+                Style::default()
+                    .fg(colors.warning)
+                    .add_modifier(Modifier::BOLD)
             } else {
-                (RUN_GLYPH, colors.info)
+                dim
             };
             let mut spans = vec![
-                Span::styled(
-                    format!("{glyph} "),
-                    Style::default().fg(color).add_modifier(Modifier::BOLD),
-                ),
+                Span::styled(format!("{glyph} "), glyph_style),
                 Span::styled(run_end_text(*elapsed_ms, at), dim),
             ];
             if !*paused || !*ok {
@@ -2034,6 +2052,38 @@ mod tests {
     }
 
     #[test]
+    fn a_resting_clock_is_dim_and_a_live_pause_stands_out() {
+        let colors = ThemeColors::default();
+        let glyph_fg = |transcript: &mut Transcript, glyph: &str| {
+            let lines = transcript.lines(40, &colors, false).to_vec();
+            lines
+                .iter()
+                .rev()
+                .flat_map(|l| l.spans.iter())
+                .find(|s| s.content.starts_with(glyph))
+                .and_then(|s| s.style.fg)
+        };
+        let mut transcript = Transcript::default();
+        transcript.stream_answer("done");
+        transcript.finish_assistant("done".into(), None, None, "12:00:00".into(), false);
+        transcript.end_run(5_000, "12:00:00", true, false);
+        assert_eq!(glyph_fg(&mut transcript, RUN_GLYPH), Some(colors.disabled));
+        // A pause on is marked; once it ends it rests, dimmed.
+        transcript.end_run(0, "", true, true);
+        assert_eq!(
+            glyph_fg(&mut transcript, PAUSED_GLYPH),
+            Some(colors.warning)
+        );
+        transcript.finish_pause(3_000);
+        assert_eq!(
+            glyph_fg(&mut transcript, PAUSED_GLYPH),
+            Some(colors.disabled)
+        );
+        // A pause that ended no longer ticks.
+        assert!(!transcript.set_pause_length(9_000));
+    }
+
+    #[test]
     fn a_clean_run_puts_its_total_on_the_answer() {
         let colors = ThemeColors::default();
         let mut transcript = Transcript::default();
@@ -2234,6 +2284,7 @@ mod tests {
             at: "21:03:41".into(),
             ok: true,
             paused: false,
+            live: false,
         });
         let lines = text_of(transcript.lines(60, &colors, false));
         // The frozen run clock, right-aligned with no rule above it.
@@ -2246,6 +2297,7 @@ mod tests {
             at: String::new(),
             ok: true,
             paused: true,
+            live: true,
         });
         let lines = text_of(transcript.lines(60, &colors, false));
         assert_eq!(lines.last().unwrap().trim(), "‖ 1m12s");
@@ -2272,6 +2324,7 @@ mod tests {
             at: "12:00:05".into(),
             ok: false,
             paused: false,
+            live: false,
         });
         transcript.push(Item::Notice {
             text: "goal stopped".into(),
