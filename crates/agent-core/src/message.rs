@@ -105,6 +105,22 @@ impl UserMessage {
         }
     }
 
+    /// `messages` as one, their texts joined by a blank line, or `None` for
+    /// none: messages queued one after another are usually one thought
+    /// written in pieces.
+    #[must_use]
+    pub fn merge(messages: Vec<UserMessage>) -> Option<UserMessage> {
+        if messages.len() <= 1 {
+            return messages.into_iter().next();
+        }
+        let text = messages
+            .iter()
+            .map(UserMessage::plain_text)
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        Some(UserMessage::text(text))
+    }
+
     /// Concatenated text blocks.
     #[must_use]
     pub fn plain_text(&self) -> String {

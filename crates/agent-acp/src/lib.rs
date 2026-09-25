@@ -177,6 +177,22 @@ impl Backend for AcpRuntime {
         });
     }
 
+    fn take_queued(&self) -> Vec<UserMessage> {
+        let mut queue = self.shared.queue.lock().unwrap();
+        // While the session is starting, the first message is the run's own
+        // prompt, not one waiting; it stays.
+        let keep = usize::from(!self.shared.busy.load(Ordering::Acquire) && !queue.is_empty());
+        let keep = keep.min(queue.len());
+        let taken = queue.split_off(keep);
+        drop(queue);
+        let lens = self.queue_lens();
+        let _ = self.shared.events.send(AgentEvent::QueueUpdate {
+            steering: lens.0,
+            follow_up: lens.1,
+        });
+        taken
+    }
+
     fn queue_lens(&self) -> (usize, usize) {
         let queued = self.shared.queue.lock().unwrap().len();
         let running = self.shared.busy.load(Ordering::Acquire);
@@ -341,14 +357,9 @@ impl Shared {
                 return;
             }
         };
-        let message = {
-            let mut queue = self.queue.lock().unwrap();
-            if queue.is_empty() {
-                None
-            } else {
-                Some(queue.remove(0))
-            }
-        };
+        // Everything queued goes as one turn: messages typed while the agent
+        // works are usually one thought written in pieces.
+        let message = UserMessage::merge(self.queue.lock().unwrap().drain(..).collect());
         let Some(message) = message else {
             let _ = self.events.send(AgentEvent::AgentEnd);
             self.busy.store(false, Ordering::Release);

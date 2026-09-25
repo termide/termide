@@ -22,10 +22,13 @@ use crate::tool::{ToolContext, ToolRegistry, ToolUpdate};
 /// How many queued messages one drain point delivers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum QueueMode {
-    /// Deliver one message per turn boundary, so the model reacts to each.
+    /// Deliver everything queued as one message: messages typed while the
+    /// agent works are usually one thought written in pieces.
     #[default]
+    Merged,
+    /// Deliver one message per turn boundary, so the model reacts to each.
     OneAtATime,
-    /// Deliver everything queued at once.
+    /// Deliver everything queued at once, each as its own message.
     All,
 }
 
@@ -129,6 +132,9 @@ impl QueueHandle {
 
 fn take(queue: &mut VecDeque<UserMessage>, mode: QueueMode) -> Vec<UserMessage> {
     match mode {
+        QueueMode::Merged => UserMessage::merge(queue.drain(..).collect())
+            .into_iter()
+            .collect(),
         QueueMode::OneAtATime => queue.pop_front().into_iter().collect(),
         QueueMode::All => queue.drain(..).collect(),
     }
@@ -1569,6 +1575,10 @@ mod tests {
             ]),
             ToolRegistry::new(),
         );
+        agent.set_config(AgentConfig {
+            steering_mode: QueueMode::OneAtATime,
+            follow_up_mode: QueueMode::OneAtATime,
+        });
         agent.queues().steer(UserMessage::text("s1"));
         agent.queues().steer(UserMessage::text("s2"));
 
@@ -1581,6 +1591,26 @@ mod tests {
         assert_eq!(roles(&seen[0]), vec!["user", "user"]);
         assert_eq!(roles(&seen[1]), vec!["user", "user", "assistant", "user"]);
         assert_eq!(agent.queues().lens(), (0, 0));
+    }
+
+    #[test]
+    fn queued_messages_arrive_merged_by_default() {
+        let (mut agent, provider) = agent(
+            ScriptedProvider::new(vec![text_reply("first")]),
+            ToolRegistry::new(),
+        );
+        agent.queues().steer(UserMessage::text("fix the test"));
+        agent.queues().steer(UserMessage::text("and the docs"));
+
+        collect(&mut agent, "go", &mut NoHooks);
+
+        // The prompt, then both queued messages as one.
+        let seen = provider.seen_requests();
+        assert_eq!(roles(&seen[0]), vec!["user", "user"]);
+        let Message::User(merged) = &seen[0][1] else {
+            panic!("a user message");
+        };
+        assert_eq!(merged.plain_text(), "fix the test\n\nand the docs");
     }
 
     #[test]

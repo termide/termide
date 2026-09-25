@@ -2670,6 +2670,30 @@ impl AgentPanel {
 
     /// Show an earlier (`older`) or later request in the input, the way a
     /// shell recalls its history; past the newest, the draft comes back.
+    /// Take the messages still waiting in the queue back into the input, to
+    /// edit them before they go: ahead of what is typed, as they were sent
+    /// first. Returns whether there were any, so `↑` walks history only once
+    /// the queue is empty.
+    fn unqueue(&mut self) -> bool {
+        if self.history_pos.is_some() || self.queued_texts.is_empty() {
+            return false;
+        }
+        let taken = self.runtime.take_queued();
+        self.set_queued(self.runtime.queue_lens());
+        self.queued_texts.clear();
+        let Some(queued) = UserMessage::merge(taken) else {
+            return false;
+        };
+        let typed = self.input_area().text();
+        let text = if typed.trim().is_empty() {
+            queued.plain_text()
+        } else {
+            format!("{}\n\n{typed}", queued.plain_text())
+        };
+        self.set_input(&text);
+        true
+    }
+
     fn recall(&mut self, older: bool) -> bool {
         let history = self.history();
         let next = match (self.history_pos, older) {
@@ -4961,14 +4985,16 @@ impl Panel for AgentPanel {
             KeyCode::Up if ctrl => self.scroll_by(-1),
             KeyCode::Down if ctrl => self.scroll_by(1),
             KeyCode::Up | KeyCode::Down => {
-                // Past the first or last line, the arrow walks back through
-                // what was asked before, as in a shell; with Shift held the
-                // selection takes the arrow and history waits.
+                // Past the first or last line, `↑` first takes back what is
+                // still queued, then the arrows walk through what was asked
+                // before, as in a shell; with Shift held the selection takes
+                // the arrow and history waits.
                 let up = key.code == KeyCode::Up;
-                if self.input.edit_field(0, key) == FieldEdit::NotHandled
-                    && !shift
-                    && !self.recall(up)
-                {
+                let handled = self.input.edit_field(0, key) != FieldEdit::NotHandled
+                    || shift
+                    || (up && self.unqueue())
+                    || self.recall(up);
+                if !handled {
                     return vec![];
                 }
             }
@@ -7609,6 +7635,29 @@ mod tests {
         click(&mut panel, y);
         assert!(panel.pending.is_none());
         assert_eq!(worker.join().unwrap(), PermissionAnswer::AllowSession);
+    }
+
+    #[test]
+    fn up_takes_the_queue_back_into_the_input() {
+        let mut panel = panel(vec![]);
+        panel.apply(AgentEvent::AgentStart);
+        for text in ["fix the test", "and the docs"] {
+            type_text(&mut panel, text);
+            panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+        }
+        assert_eq!(panel.runtime.queue_lens(), (2, 0));
+        type_text(&mut panel, "also");
+        // Up at the top of the input takes both back, ahead of what is typed.
+        for _ in 0..2 {
+            panel.handle_key(chord(KeyCode::Up, KeyModifiers::NONE));
+        }
+        assert_eq!(panel.input_text(), "fix the test\n\nand the docs\n\nalso");
+        assert_eq!(panel.runtime.queue_lens(), (0, 0));
+        assert!(panel.queued_texts.is_empty());
+        assert!(
+            panel.state_lines(60).is_empty(),
+            "the strip no longer lists them"
+        );
     }
 
     #[test]

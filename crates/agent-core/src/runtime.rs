@@ -94,6 +94,12 @@ pub trait Backend: Send {
     fn steer(&self, message: UserMessage);
     /// Queued messages: `(steering, follow_up)`.
     fn queue_lens(&self) -> (usize, usize);
+    /// Take back every message still queued (not yet delivered), oldest
+    /// first, so the UI can put the text back in its input to edit; the
+    /// default has no queue to take from.
+    fn take_queued(&self) -> Vec<UserMessage> {
+        Vec::new()
+    }
     /// Ask the active run to stop.
     fn abort(&self);
     /// Ask the active run to pause gracefully at the next step boundary; the
@@ -154,6 +160,11 @@ impl Backend for AgentRuntime {
     }
     fn queue_lens(&self) -> (usize, usize) {
         self.queues().lens()
+    }
+    fn take_queued(&self) -> Vec<UserMessage> {
+        let (mut steering, follow_up) = self.clear_queue();
+        steering.extend(follow_up);
+        steering
     }
     fn abort(&self) {
         AgentRuntime::abort(self);

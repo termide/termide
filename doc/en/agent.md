@@ -123,7 +123,7 @@ you have named or sent even one message to is always kept.
 | `F7` | Start a new session (the used one is kept in the list) |
 | `F8` | Delete this session (after a confirmation) and start a fresh one |
 | `/name args` + `Enter` | Send the prompt template `name` with `args` filled in, or run the command script `name`; `/compact [focus]` summarises the session, `/undo` takes the last request back, `/new` starts a fresh session, `/clear` starts one after discarding the current session, and `/rename [name]` (or `/name`) renames it; `/pause` stops the run after the current step and `/continue` resumes it (or, before the step ends, cancels the pause); `/loop [interval] <prompt>` re-runs a prompt on an interval (or back-to-back), `/loop stop` (or `Esc`) ends it; `/goal <what to achieve>` works autonomously toward a goal until a judge says it is reached, `/goal stop` (or `Esc`) ends it; `/handoff` briefs the unfinished work, then offers to save it to `HANDOFF.md` or start a new session from it; `/usage` opens the session-info modal and `/prompt` opens the assembled system prompt |
-| `↑` / `↓` | On the first or last line of the input: recall an earlier request of this session, or come back to what you were typing |
+| `↑` / `↓` | On the first or last line of the input: take back the messages still queued (`↑`, while any wait), else recall an earlier request of this session, or come back to what you were typing |
 | `Tab` | Complete the highlighted `/command` or `@file` while the list is open |
 | `Ctrl+↑` / `Ctrl+↓`, `PageUp` / `PageDown` | Scroll the session |
 | `Ctrl+Home` / `Ctrl+End` | Jump to the start, or back to following the newest output |
@@ -203,9 +203,12 @@ rows between the conversation and the input that appear only when there is
 something to show: a pending pause (`‖ will pause after the current step`) —
 once the pause takes effect the transcript's `‖` line takes over — and each
 message queued while the agent
-works (`› …`, its first line; after three, a count of the rest). A queued
-message leaves the strip when the agent takes it and shows up in the
-conversation as your message.
+works (`› …`, its first line; after three, a count of the rest). Everything queued
+goes to the agent at once, as a single message with the pieces joined by a
+blank line — messages typed while the agent works are usually one thought
+added to — and leaves the strip then, showing up in the conversation as your
+message. Until the agent takes it, `↑` on the input's first line takes the
+queue back into the input, ahead of anything typed, to edit before it goes.
 
 The system prompt in effect is shown as a folded `# ` block at the start of a
 session and again whenever it changes before your next message (switching agent
