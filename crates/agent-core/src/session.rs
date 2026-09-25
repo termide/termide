@@ -44,8 +44,13 @@ pub enum Timing {
     /// A model turn: from the request to the first token, and from there to
     /// the end of the reply.
     Turn { prefill_ms: u32, gen_ms: u32 },
-    /// A tool call, from its start to its result.
-    Tool { duration_ms: u32 },
+    /// A tool call: how long it ran, and how long it waited on a
+    /// permission answer before that (kept apart, as a pause).
+    Tool {
+        duration_ms: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        waited_ms: Option<u32>,
+    },
 }
 
 /// A message on the current branch as the log recorded it.

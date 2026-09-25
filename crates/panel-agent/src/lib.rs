@@ -524,6 +524,10 @@ pub struct AgentPanel {
     /// A `/continue` resumed the paused run, so the next `AgentStart` keeps
     /// the run's start and its clock goes on from the request.
     resuming: bool,
+    /// When the current permission question went up, and how long the
+    /// running call had already waited before it: the wait is a pause of
+    /// its own, shown on the call and kept out of its duration.
+    permission_wait: Option<(Instant, u32)>,
     /// The screen row of the state strip's pause line, a click target that
     /// continues the run.
     pause_row: Option<u16>,
@@ -704,6 +708,7 @@ impl AgentPanel {
             pause_requested: false,
             pause_start: None,
             resuming: false,
+            permission_wait: None,
             pause_row: None,
             run_buttons: Vec::new(),
             queued_texts: VecDeque::new(),
@@ -1782,7 +1787,10 @@ impl AgentPanel {
                     Message::ToolResult(result) => self
                         .transcript
                         .tool_duration(&result.tool_call_id)
-                        .map(|duration_ms| Timing::Tool { duration_ms }),
+                        .map(|duration_ms| Timing::Tool {
+                            duration_ms,
+                            waited_ms: self.transcript.tool_wait(&result.tool_call_id),
+                        }),
                 };
                 if let Some(session) = &mut self.session {
                     if let Err(error) = session.append_timed_message(&message, timing) {
@@ -1799,6 +1807,8 @@ impl AgentPanel {
                     live: None,
                     at: String::new(),
                     duration_ms: None,
+                    waited_ms: None,
+                    waiting: false,
                 });
             }
             AgentEvent::ToolExecutionUpdate {
@@ -1829,10 +1839,14 @@ impl AgentPanel {
                 }
                 let id = result.tool_call_id.clone();
                 let finished = now_hms();
+                // A wait on a permission answer is the call's pause, not its
+                // run time.
+                self.end_permission_wait();
+                let waited = self.transcript.tool_wait(&id).unwrap_or(0);
                 let elapsed = self
                     .tool_starts
                     .remove(&id)
-                    .map(|start| start.elapsed().as_millis() as u32);
+                    .map(|start| millis(start.elapsed()).saturating_sub(waited));
                 self.transcript.with_tool(&id, |item| {
                     if let Item::Tool {
                         result: slot,
@@ -1971,8 +1985,38 @@ impl AgentPanel {
                 is_error: false,
             });
             self.pending = Some(Pending::Permission { envelope, form });
+            // The question pauses the running call until it is answered.
+            let before = self.running_tool_wait();
+            self.permission_wait = Some((Instant::now(), before));
+            self.transcript.set_tool_wait(before, true);
         }
         events
+    }
+
+    /// How long the running call has waited on permission answers so far.
+    fn running_tool_wait(&self) -> u32 {
+        self.transcript
+            .items()
+            .iter()
+            .rev()
+            .find_map(|item| match item {
+                Item::Tool {
+                    result: None,
+                    waited_ms,
+                    ..
+                } => Some(waited_ms.unwrap_or(0)),
+                _ => None,
+            })
+            .unwrap_or(0)
+    }
+
+    /// The permission question is gone (answered, or dropped by a stop):
+    /// the call's wait keeps its length and rests.
+    fn end_permission_wait(&mut self) {
+        if let Some((start, before)) = self.permission_wait.take() {
+            self.transcript
+                .set_tool_wait(before.saturating_add(millis(start.elapsed())), false);
+        }
     }
 
     /// Name the conversation, so the panel title shows it instead of the
@@ -2035,6 +2079,7 @@ impl AgentPanel {
             }
             _ => {}
         }
+        self.end_permission_wait();
         let _ = envelope.reply.send(answer);
         true
     }
@@ -4306,6 +4351,8 @@ fn push_history(transcript: &mut Transcript, logged: &LoggedMessage) {
                     live: None,
                     at: at.clone(),
                     duration_ms: None,
+                    waited_ms: None,
+                    waiting: false,
                 });
             }
             // The answer keeps its wall-clock time; skip an empty answer block
@@ -4326,21 +4373,26 @@ fn push_history(transcript: &mut Transcript, logged: &LoggedMessage) {
         }
         Message::ToolResult(result) => {
             let id = result.tool_call_id.clone();
-            let elapsed = match logged.timing {
-                Some(Timing::Tool { duration_ms }) => Some(duration_ms),
-                _ => None,
+            let (elapsed, wait) = match logged.timing {
+                Some(Timing::Tool {
+                    duration_ms,
+                    waited_ms,
+                }) => (Some(duration_ms), waited_ms),
+                _ => (None, None),
             };
             transcript.with_tool(&id, |item| {
                 if let Item::Tool {
                     result: slot,
                     at: tool_at,
                     duration_ms,
+                    waited_ms,
                     ..
                 } = item
                 {
                     *slot = Some(result.clone());
                     *tool_at = at;
                     *duration_ms = elapsed;
+                    *waited_ms = wait;
                 }
             });
         }
@@ -5127,9 +5179,20 @@ impl Panel for AgentPanel {
 
     fn tick(&mut self) -> Vec<PanelEvent> {
         let mut changed = false;
-        // A pause's line ticks its length, redrawn once a second.
+        // A pause's line ticks its length, redrawn once a second; so does a
+        // call's wait on a permission question, until the question is gone.
         if let Some(start) = self.pause_start {
             changed |= self.transcript.set_pause_length(millis(start.elapsed()));
+        }
+        if let Some((start, before)) = self.permission_wait {
+            if matches!(self.pending, Some(Pending::Permission { .. })) {
+                changed |= self
+                    .transcript
+                    .set_tool_wait(before.saturating_add(millis(start.elapsed())), true);
+            } else {
+                self.end_permission_wait();
+                changed = true;
+            }
         }
         for event in self.runtime.drain() {
             self.apply(event);
@@ -5958,6 +6021,8 @@ mod tests {
             live: None,
             at: "12:00:00".into(),
             duration_ms: Some(10),
+            waited_ms: None,
+            waiting: false,
         });
         // `Ctrl+щ` is `Ctrl+O`: unfold everything.
         assert!(!panel.transcript.any_expanded());
@@ -6057,6 +6122,8 @@ mod tests {
             live: None,
             at: "12:00:00".into(),
             duration_ms: Some(100),
+            waited_ms: None,
+            waiting: false,
         });
         assert!(panel.transcript.toggle_expanded(0));
         panel.chat_focus = true;
@@ -6690,7 +6757,10 @@ mod tests {
         session
             .append_timed_message(
                 &Message::ToolResult(ToolResultMessage::text(&tool_call, "a\nb")),
-                Some(Timing::Tool { duration_ms: 4000 }),
+                Some(Timing::Tool {
+                    duration_ms: 4000,
+                    waited_ms: Some(9000),
+                }),
             )
             .unwrap();
         let session = Session::open(session.path()).unwrap();
@@ -6705,6 +6775,7 @@ mod tests {
                 if cost.prefill_ms == 1000 && cost.gen_ms == 2000 && cost.input == 100
         )));
         assert_eq!(transcript.tool_duration("t1"), Some(4000));
+        assert_eq!(transcript.tool_wait("t1"), Some(9000));
     }
 
     #[test]
@@ -7561,6 +7632,63 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn a_permission_wait_is_timed_apart_from_the_call() {
+        let mut panel = panel(vec![]);
+        let call = termide_agent_core::ToolCall {
+            id: "c".into(),
+            name: "bash".into(),
+            arguments: serde_json::json!({ "command": "cat notes.txt" }),
+        };
+        panel.apply(AgentEvent::AgentStart);
+        panel.apply(AgentEvent::ToolExecutionStart { call: call.clone() });
+        // The call started 7s ago and its question has been up for 5s.
+        panel
+            .tool_starts
+            .insert("c".into(), Instant::now() - Duration::from_secs(7));
+        let (reply, _rx) = std::sync::mpsc::channel();
+        panel.pending = Some(Pending::Permission {
+            envelope: PermissionEnvelope {
+                id: 1,
+                request: termide_agent_core::PermissionRequest {
+                    tool: "bash".into(),
+                    subject: "cat notes.txt".into(),
+                    call: call.clone(),
+                    suggested_pattern: "cat *".into(),
+                },
+                reply,
+            },
+            form: ChoiceForm::new("", vec![]),
+        });
+        panel.permission_wait = Some((Instant::now() - Duration::from_secs(5), 0));
+        panel.tick();
+        // While the question is up, the call's wait ticks as a pause.
+        let rows = strip_text(panel.transcript.lines(60, &panel.colors, false));
+        assert!(rows.iter().any(|r| r.contains("‖ 5s")), "{rows:?}");
+        assert!(matches!(
+            panel.transcript.items().last(),
+            Some(Item::Tool { waiting: true, .. })
+        ));
+        // Answered: the wait rests, and the call's duration leaves it out.
+        assert!(panel.answer_permission(PermissionAnswer::AllowOnce));
+        panel.apply(AgentEvent::ToolExecutionEnd {
+            result: ToolResultMessage::text(&call, "notes"),
+        });
+        let Some(Item::Tool {
+            waited_ms: Some(waited),
+            waiting: false,
+            duration_ms: Some(duration),
+            ..
+        }) = panel.transcript.items().last().cloned()
+        else {
+            panic!("the call keeps its wait and duration");
+        };
+        assert!((5000..6000).contains(&waited), "{waited}");
+        assert!((1500..2500).contains(&duration), "{duration}");
+        let rows = strip_text(panel.transcript.lines(60, &panel.colors, false));
+        assert!(rows.iter().any(|r| r.contains("‖ 5s 🕒 2s")), "{rows:?}");
     }
 
     #[test]

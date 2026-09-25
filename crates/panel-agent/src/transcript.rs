@@ -147,6 +147,11 @@ pub enum Item {
         at: String,
         /// How long the call took, in ms, once it has finished (`🕒`).
         duration_ms: Option<u32>,
+        /// How long the call waited on a permission answer, in ms, kept apart
+        /// from its own duration (`‖`).
+        waited_ms: Option<u32>,
+        /// The permission question is still up: the wait ticks and stands out.
+        waiting: bool,
     },
     Notice {
         text: String,
@@ -410,6 +415,43 @@ impl Transcript {
         f(&mut self.items[index]);
         self.invalidate(index);
         true
+    }
+
+    /// Set how long the running call has waited on a permission answer,
+    /// `waiting` while the question is still up. Returns whether the shown
+    /// line changed (whole seconds, so a redraw a second is enough).
+    pub fn set_tool_wait(&mut self, ms: u32, still: bool) -> bool {
+        let Some(index) = self
+            .items
+            .iter()
+            .rposition(|item| matches!(item, Item::Tool { result: None, .. }))
+        else {
+            return false;
+        };
+        let Item::Tool {
+            waited_ms, waiting, ..
+        } = &mut self.items[index]
+        else {
+            return false;
+        };
+        let changed = *waiting != still || waited_ms.is_none_or(|shown| shown / 1000 != ms / 1000);
+        *waited_ms = Some(ms);
+        *waiting = still;
+        if changed {
+            self.invalidate(index);
+        }
+        changed
+    }
+
+    /// How long the call `call_id` waited on a permission answer.
+    #[must_use]
+    pub fn tool_wait(&self, call_id: &str) -> Option<u32> {
+        self.items.iter().rev().find_map(|item| match item {
+            Item::Tool {
+                call, waited_ms, ..
+            } if call.id == call_id => *waited_ms,
+            _ => None,
+        })
     }
 
     /// How long the call `call_id` took, once it has finished.
@@ -1435,6 +1477,8 @@ fn render_body(
             live,
             at,
             duration_ms,
+            waited_ms,
+            waiting,
         } => {
             let running = is_live(item);
             let body = match (result, live) {
@@ -1452,10 +1496,27 @@ fn render_body(
             // adds the status glyph.
             let finished = !at.is_empty();
             let ok = result.as_ref().is_none_or(|r| !r.is_error);
-            let clock: Vec<Span<'static>> = duration_ms
-                .iter()
-                .map(|ms| Span::styled(format!("🕒 {}", fmt_dur(*ms)), dim))
-                .collect();
+            // A wait on a permission answer comes first, as the pause it was
+            // (`‖`, marked while the question is up), then the call's own
+            // duration.
+            let mut clock: Vec<Span<'static>> = Vec::new();
+            if let Some(ms) = waited_ms {
+                let style = if *waiting {
+                    Style::default().fg(colors.warning)
+                } else {
+                    dim
+                };
+                clock.push(Span::styled(
+                    format!("{PAUSED_GLYPH} {}", fmt_dur(*ms)),
+                    style,
+                ));
+            }
+            if let Some(ms) = duration_ms {
+                if !clock.is_empty() {
+                    clock.push(Span::raw(" "));
+                }
+                clock.push(Span::styled(format!("🕒 {}", fmt_dur(*ms)), dim));
+            }
             let one_row = |head: Vec<Span<'static>>, clip: bool| {
                 let head = if ok { head } else { paint_failed(head, colors) };
                 row_with_meta(head, clock.clone(), clip, width)
@@ -1504,6 +1565,15 @@ fn render_body(
                     format!("  {}", t.agent_more_lines(all.len() - end)),
                     dim,
                 ));
+            }
+            if !finished && !clock.is_empty() {
+                // Still running, the wait is all there is to show.
+                if lines.len() == 1 {
+                    let row = lines.pop().unwrap_or_default();
+                    lines = row_with_meta(row.spans, clock.clone(), false, width);
+                } else {
+                    lines.push(right_meta(width, clock.clone()));
+                }
             }
             if finished {
                 // A lone headline row takes the clock at its end, as when folded.
@@ -1744,6 +1814,8 @@ mod tests {
             live: None,
             at: "21:03:20".into(),
             duration_ms: Some(1200),
+            waited_ms: None,
+            waiting: false,
         });
         let lines = text_of(transcript.lines(60, &colors, false));
         assert!(
@@ -1779,6 +1851,8 @@ mod tests {
             live: None,
             at: String::new(),
             duration_ms: None,
+            waited_ms: None,
+            waiting: false,
         });
         // user(0), thinking(1), assistant(2), tool(3)
         assert_eq!(transcript.items().len(), 4);
@@ -1865,6 +1939,8 @@ mod tests {
             live: None,
             at: String::new(),
             duration_ms: None,
+            waited_ms: None,
+            waiting: false,
         });
         assert!(transcript.any_expanded());
     }
@@ -1880,6 +1956,8 @@ mod tests {
             live: None,
             at: "12:00:00".into(),
             duration_ms: Some(300),
+            waited_ms: None,
+            waiting: false,
         });
         transcript.push(Item::Assistant {
             text: "the answer".into(),
@@ -1913,6 +1991,8 @@ mod tests {
             live: None,
             at: String::new(),
             duration_ms: None,
+            waited_ms: None,
+            waiting: false,
         });
         let lines = text_of(transcript.lines(30, &colors, false));
         // No row is clipped: every one fits, continuation rows indent under
@@ -1947,6 +2027,8 @@ mod tests {
             live: None,
             at: String::new(),
             duration_ms: None,
+            waited_ms: None,
+            waiting: false,
         });
         // Collapsed: the first command line behind the marker, nothing else.
         let lines = text_of(transcript.lines(40, &colors, false));
@@ -2038,6 +2120,8 @@ mod tests {
             live: None,
             at: "12:00:01".into(),
             duration_ms: Some(100),
+            waited_ms: None,
+            waiting: false,
         });
         transcript.stream_answer("done");
         transcript.finish_assistant("done".into(), None, None, "12:00:02".into(), false);
@@ -2177,6 +2261,8 @@ mod tests {
             live: None,
             at: "12:00:00".into(),
             duration_ms: Some(500),
+            waited_ms: None,
+            waiting: false,
         });
         let lines = transcript.lines(40, &colors, false).to_vec();
         assert_eq!(lines.len(), 1);
@@ -2233,6 +2319,8 @@ mod tests {
             live: None,
             at: String::new(),
             duration_ms: None,
+            waited_ms: None,
+            waiting: false,
         });
         // While it runs, every line of the live output shows, with no fold
         // marker, and a click does not fold it.
@@ -2295,6 +2383,8 @@ mod tests {
             live: None,
             at: String::new(),
             duration_ms: None,
+            waited_ms: None,
+            waiting: false,
         });
         let lines = transcript.lines(30, &colors, false).to_vec();
         let style_of = |needle: &str| {
@@ -2435,6 +2525,8 @@ mod tests {
             live: None,
             at: "12:00:05".into(),
             duration_ms: Some(500),
+            waited_ms: None,
+            waiting: false,
         });
         let lines = text_of(transcript.lines(60, &colors, false));
         assert!(lines.iter().any(|l| l.contains("✗ HTTP 500")));

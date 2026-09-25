@@ -215,7 +215,9 @@ Your message and the agent's answer each end with a dim, right-aligned time and 
 `✓`/`✗` status (`18:34:01 ✓`), at the end of the text's last row when it fits
 there; the reasoning and tool blocks carry only their
 work figures, no wall-clock. A tool call shows how long it took (`🕒 6s`), and its
-status once unfolded. When a turn reasons, the reasoning block carries the turn's cost —
+status once unfolded. A call that waited on a permission question shows that
+wait apart, first, as the pause it was: `‖ 12s 🕒 2s`, the `‖` marked and
+ticking while the question is up; the `🕒` counts only the call's own run. When a turn reasons, the reasoning block carries the turn's cost —
 the prefill phase (`⏫ 6s (↑42k, 7k tok/s)`) and the generation phase
 (`✍️ 12s (↓5k, 420 tok/s)`), each with its duration (whole seconds), token count
 and average speed; large counts are abbreviated (`40k`, `1.2M`). A turn with no
