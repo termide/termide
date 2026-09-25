@@ -1555,8 +1555,10 @@ impl AgentPanel {
         // While tokens stream (an answer or reasoning), a generation line in the
         // same shape as a finished block's `✍️` meta, with the live estimate.
         // Input tokens are only known once the turn ends, so the `⏫` prefill
-        // line waits for the finished block.
-        if let Some(first_token) = activity.first_token {
+        // line waits for the finished block. Only while tokens stream: once a
+        // tool runs the message's first token is still known (the cost needs
+        // it), but nothing is being generated.
+        if let (Phase::Generating, Some(first_token)) = (activity.phase, activity.first_token) {
             let gen_ms = first_token.elapsed().as_millis() as u32;
             let tokens = activity.est_tokens();
             lines.push(transcript::right_meta(
@@ -6226,6 +6228,18 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert!(lines[0].contains('✍') && lines[0].contains('↓'));
         assert!(lines.iter().all(|l| !l.contains('⏫') && !l.contains('╌')));
+
+        // A tool running after the reply: the clock alone, no generation.
+        panel.apply(AgentEvent::ToolExecutionStart {
+            call: termide_agent_core::ToolCall {
+                id: "t1".into(),
+                name: "bash".into(),
+                arguments: serde_json::json!({ "command": "sleep 1" }),
+            },
+        });
+        let lines = text_of(&panel);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(!lines[0].contains('✍'), "{lines:?}");
     }
 
     #[test]
