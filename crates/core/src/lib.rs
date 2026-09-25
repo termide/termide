@@ -21,8 +21,8 @@ pub mod wide_cells;
 
 pub use command::{CommandResult, PanelCommand};
 pub use event::{
-    ConfirmAction, ConflictResolution, Event, EventHandler, GitOperationType, InputAction,
-    PanelEvent, ReferenceLocation, SelectAction, SplitDirection, VimPanelDirection,
+    ChecklistItem, ConfirmAction, ConflictResolution, Event, EventHandler, GitOperationType,
+    InputAction, PanelEvent, ReferenceLocation, SelectAction, SplitDirection, VimPanelDirection,
 };
 pub use hotkey_table::HotkeyTable;
 pub use key_chord::KeyChord;

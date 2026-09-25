@@ -22,6 +22,7 @@ pub use base::{
 pub use input_keys::{handle_input_key, InputKeyResult};
 pub mod bookmark_add;
 pub mod calendar;
+pub mod checklist;
 pub mod choice;
 pub mod command_config;
 pub mod command_palette;
@@ -46,6 +47,7 @@ pub mod settings;
 
 pub use bookmark_add::{BookmarkAddModal, BookmarkAddResult};
 pub use calendar::CalendarModal;
+pub use checklist::ChecklistModal;
 pub use choice::ChoiceModal;
 pub use command_config::{
     sanitize_filename, CommandConfigAction, CommandConfigModal, CommandConfigMode,
@@ -88,6 +90,8 @@ pub enum ActiveModal {
     Input(Box<InputModal>),
     /// Selection modal (single selection)
     Select(Box<SelectModal>),
+    /// Checkboxes under group headings, applied together
+    Checklist(Box<ChecklistModal>),
     /// File conflict resolution modal
     Conflict(Box<ConflictModal>),
     /// Information modal
@@ -142,6 +146,7 @@ macro_rules! dispatch_modal {
             ActiveModal::Choice(m) => m.$method($($arg),*),
             ActiveModal::Input(m) => m.$method($($arg),*),
             ActiveModal::Select(m) => m.$method($($arg),*),
+            ActiveModal::Checklist(m) => m.$method($($arg),*),
             ActiveModal::Conflict(m) => m.$method($($arg),*),
             ActiveModal::Info(m) => m.$method($($arg),*),
             ActiveModal::InfoAction(m) => m.$method($($arg),*),
@@ -172,6 +177,7 @@ macro_rules! dispatch_modal_erased {
             ActiveModal::Choice(m) => m.$method($($arg),*)?.map(erase_modal_result),
             ActiveModal::Input(m) => m.$method($($arg),*)?.map(erase_modal_result),
             ActiveModal::Select(m) => m.$method($($arg),*)?.map(erase_modal_result),
+            ActiveModal::Checklist(m) => m.$method($($arg),*)?.map(erase_modal_result),
             ActiveModal::Conflict(m) => m.$method($($arg),*)?.map(erase_modal_result),
             ActiveModal::Info(m) => m.$method($($arg),*)?.map(erase_modal_result),
             ActiveModal::InfoAction(m) => m.$method($($arg),*)?.map(erase_modal_result),

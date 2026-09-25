@@ -238,6 +238,19 @@ impl App {
 
         if let Some(action) = self.state.take_pending_action() {
             match action {
+                PendingAction::PanelChecklist { action } => {
+                    // Like a selection, to the focused panel that raised it;
+                    // cancelling changes nothing.
+                    if let Some(checked) = value.downcast_ref::<Vec<String>>() {
+                        if let Some(panel) = self.layout_manager.active_panel_mut() {
+                            panel.handle_command(termide_core::PanelCommand::ChecklistDone {
+                                action,
+                                checked: checked.clone(),
+                            });
+                        }
+                        self.state.needs_redraw = true;
+                    }
+                }
                 PendingAction::PanelSelection { action } => {
                     // Cancelling leaves the panel unanswered on purpose: it
                     // keeps its pending state and can re-ask. Deliver to the

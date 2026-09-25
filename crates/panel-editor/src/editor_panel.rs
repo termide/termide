@@ -776,6 +776,7 @@ impl Panel for Editor {
             | PanelCommand::RefreshDirectory
             | PanelCommand::SetGitOperationInProgress { .. }
             | PanelCommand::SelectionMade { .. }
+            | PanelCommand::ChecklistDone { .. }
             | PanelCommand::InputSubmitted { .. }
             | PanelCommand::Confirmed { .. }
             | PanelCommand::UpdateRepoPaths { .. } => CommandResult::None,

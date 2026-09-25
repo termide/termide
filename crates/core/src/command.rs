@@ -163,6 +163,16 @@ pub enum PanelCommand<'a> {
         index: usize,
     },
 
+    /// The user applied a checklist the panel raised with
+    /// [`crate::PanelEvent::ShowChecklist`]: the keys left checked. Same
+    /// delivery rule as [`PanelCommand::SelectionMade`].
+    ChecklistDone {
+        /// The `action` the panel raised the checklist with.
+        action: String,
+        /// Keys of the items left checked, in list order.
+        checked: Vec<String>,
+    },
+
     /// The user submitted an input modal the panel raised with
     /// `InputAction::Custom(action)`. Same delivery rule as
     /// [`PanelCommand::SelectionMade`].

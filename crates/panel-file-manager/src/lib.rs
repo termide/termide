@@ -846,6 +846,7 @@ impl Panel for FileManager {
             | PanelCommand::SetGitOperationInProgress { .. }
             | PanelCommand::UpdateRepoPaths { .. }
             | PanelCommand::SelectionMade { .. }
+            | PanelCommand::ChecklistDone { .. }
             | PanelCommand::InputSubmitted { .. }
             | PanelCommand::Confirmed { .. }
             | PanelCommand::PasteText { .. } => CommandResult::None,

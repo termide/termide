@@ -401,6 +401,23 @@ pub enum GitOperationType {
     Fetch,
 }
 
+/// One checkbox of [`PanelEvent::ShowChecklist`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChecklistItem {
+    /// What the panel knows the item by; returned when it is left checked.
+    pub key: String,
+    pub label: String,
+    /// The group heading it is listed under; consecutive items share one.
+    pub group: String,
+    pub checked: bool,
+    /// Whether it may be toggled; a locked item shows greyed and keeps its
+    /// state.
+    pub enabled: bool,
+    /// A dim remark after the label (why it is locked, what unchecking it
+    /// does), or empty.
+    pub note: String,
+}
+
 /// Events emitted by panels to communicate with the application.
 #[derive(Debug, Clone)]
 pub enum PanelEvent {
@@ -551,6 +568,17 @@ pub enum PanelEvent {
         title: String,
         options: Vec<String>,
         on_select: SelectAction,
+    },
+
+    /// Show a list of checkboxes; on `Enter` the keys left checked go back
+    /// to the focused panel as [`crate::PanelCommand::ChecklistDone`].
+    ShowChecklist {
+        title: String,
+        /// A hint line under the title (the keys, what a greyed item means).
+        prompt: String,
+        items: Vec<ChecklistItem>,
+        /// Echoed back with the result, so the panel knows which list it was.
+        action: String,
     },
 
     /// Show file conflict resolution modal

@@ -258,6 +258,18 @@ impl App {
             } => {
                 self.event_show_select(title, options, on_select);
             }
+            PanelEvent::ShowChecklist {
+                title,
+                prompt,
+                items,
+                action,
+            } => {
+                let modal = termide_modal::ChecklistModal::new(title, prompt, items);
+                self.state.set_pending_action(
+                    termide_state::PendingAction::PanelChecklist { action },
+                    crate::state::ActiveModal::Checklist(Box::new(modal)),
+                );
+            }
 
             PanelEvent::ShowConflict {
                 source,

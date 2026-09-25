@@ -1362,6 +1362,7 @@ impl Panel for Terminal {
             | PanelCommand::RefreshDirectory
             | PanelCommand::SetGitOperationInProgress { .. }
             | PanelCommand::SelectionMade { .. }
+            | PanelCommand::ChecklistDone { .. }
             | PanelCommand::InputSubmitted { .. }
             | PanelCommand::Confirmed { .. }
             | PanelCommand::UpdateRepoPaths { .. } => CommandResult::None,
