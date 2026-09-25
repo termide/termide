@@ -96,6 +96,10 @@ pub enum EntryKind {
     /// Whether the branch prefers reasoning from here, so a reopened session
     /// comes back with the same choice (toggled live from the status bar).
     ReasoningChange { reasoning: bool },
+    /// What the session switched off from here: tools, skills (`skill:<name>`)
+    /// and MCP servers (`mcp:<name>`), kept out of the model's context or
+    /// refused, so a reopened session comes back with the same set.
+    Toolset { disabled: Vec<String> },
     /// The user undid a request: the branch continues from this entry's
     /// parent, the undone messages stay in the file on a dead branch.
     Rewind,
@@ -439,7 +443,8 @@ impl Session {
                 | EntryKind::SessionName { .. }
                 | EntryKind::AgentChange { .. }
                 | EntryKind::Rewind
-                | EntryKind::ReasoningChange { .. } => {}
+                | EntryKind::ReasoningChange { .. }
+                | EntryKind::Toolset { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
                 } => {
@@ -471,7 +476,8 @@ impl Session {
                 | EntryKind::SessionName { .. }
                 | EntryKind::AgentChange { .. }
                 | EntryKind::Rewind
-                | EntryKind::ReasoningChange { .. } => {}
+                | EntryKind::ReasoningChange { .. }
+                | EntryKind::Toolset { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
                 } => {
@@ -544,7 +550,8 @@ impl Session {
                 | EntryKind::SessionName { .. }
                 | EntryKind::AgentChange { .. }
                 | EntryKind::Rewind
-                | EntryKind::ReasoningChange { .. } => None,
+                | EntryKind::ReasoningChange { .. }
+                | EntryKind::Toolset { .. } => None,
             })
     }
 
@@ -577,6 +584,25 @@ impl Session {
 
     pub fn append_reasoning_change(&mut self, reasoning: bool) -> std::io::Result<String> {
         self.append(EntryKind::ReasoningChange { reasoning })
+    }
+
+    pub fn append_toolset(&mut self, disabled: &[String]) -> std::io::Result<String> {
+        self.append(EntryKind::Toolset {
+            disabled: disabled.to_vec(),
+        })
+    }
+
+    /// What the session switched off, as recorded last on the current
+    /// branch; `None` when it never changed the set.
+    #[must_use]
+    pub fn current_toolset(&self) -> Option<Vec<String>> {
+        self.branch()
+            .into_iter()
+            .rev()
+            .find_map(|entry| match &entry.kind {
+                EntryKind::Toolset { disabled } => Some(disabled.clone()),
+                _ => None,
+            })
     }
 
     /// Reasoning preference recorded last on the current branch, if any.
@@ -652,7 +678,8 @@ impl From<&Session> for SessionSummary {
             | EntryKind::SessionName { .. }
             | EntryKind::AgentChange { .. }
             | EntryKind::Rewind
-            | EntryKind::ReasoningChange { .. } => None,
+            | EntryKind::ReasoningChange { .. }
+            | EntryKind::Toolset { .. } => None,
         });
         let first_prompt = messages.clone().find_map(|m| match m {
             Message::User(user) => Some(user.plain_text()),
@@ -892,6 +919,22 @@ mod tests {
         // An untimed entry writes no `timing` key, so older logs read the same.
         let text = std::fs::read_to_string(session.path()).unwrap();
         assert_eq!(text.matches("\"timing\"").count(), 1, "{text}");
+    }
+
+    #[test]
+    fn the_toolset_survives_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
+        assert_eq!(session.current_toolset(), None);
+        session.append_toolset(&["bash".into()]).unwrap();
+        session
+            .append_toolset(&["bash".into(), "mcp:github".into()])
+            .unwrap();
+        let reopened = Session::open(session.path()).unwrap();
+        assert_eq!(
+            reopened.current_toolset(),
+            Some(vec!["bash".to_string(), "mcp:github".to_string()])
+        );
     }
 
     #[test]

@@ -448,6 +448,12 @@ impl Translation for RuntimeTranslation {
         agent_unit_days,
         agent_unit_tok_per_sec,
         agent_tool_bash,
+        agent_toolset_title,
+        agent_toolset_prompt,
+        agent_toolset_builtin,
+        agent_toolset_skills,
+        agent_toolset_note_refused,
+        agent_toolset_note_new_session,
         agent_tool_read,
         agent_tool_write,
         agent_tool_edit,
@@ -826,6 +832,10 @@ impl Translation for RuntimeTranslation {
             "agent_notice_mcp_error_fmt",
             &[("source", source), ("error", error)],
         )
+    }
+
+    fn agent_toolset_mcp_fmt(&self, server: &str) -> String {
+        self.format("agent_toolset_mcp_fmt", &[("server", server)])
     }
 
     fn agent_notice_mcp_connected_fmt(&self, source: &str, count: usize) -> String {

@@ -582,6 +582,22 @@ pub trait Translation: Send + Sync {
     fn agent_notice_model_list_unavailable_fmt(&self, error: &str) -> String;
     fn agent_notice_mcp_error_fmt(&self, source: &str, error: &str) -> String;
     fn agent_notice_mcp_connected_fmt(&self, source: &str, count: usize) -> String;
+    /// Agent toolset checklist: its title.
+    fn agent_toolset_title(&self) -> &str;
+    /// Agent toolset checklist: the hint under the title.
+    fn agent_toolset_prompt(&self) -> &str;
+    /// Agent toolset checklist: the group of built-in tools.
+    fn agent_toolset_builtin(&self) -> &str;
+    /// Agent toolset checklist: the group of skills.
+    fn agent_toolset_skills(&self) -> &str;
+    /// Agent toolset checklist: an MCP server's group of tools.
+    fn agent_toolset_mcp_fmt(&self, server: &str) -> String;
+    /// Agent toolset checklist: an item switched off but still in the
+    /// model's context, so refused.
+    fn agent_toolset_note_refused(&self) -> &str;
+    /// Agent toolset checklist: an item out of the context, which cannot be
+    /// switched back on in this session.
+    fn agent_toolset_note_new_session(&self) -> &str;
     fn agent_notice_no_agent_fmt(&self, name: &str) -> String;
     fn agent_notice_agent_fmt(&self, name: &str) -> String;
     fn agent_notice_cannot_switch_agent_fmt(&self, error: &str) -> String;

@@ -76,11 +76,24 @@ instead. Give a session a name of your own through the panel's `[≡]` menu →
 **Rename session**, and the title shows that name from then on.
 
 A fresh session greets you with a banner: a small logo on the left and, on the
-right, what the agent is set up with — its provider, model, agent name and the
-directory it works in. The model and the agent are shown underlined in the
-accent colour: a click on either opens the same picker its status-bar chip
-does, so you can switch before you start. The banner gives way to the
-conversation as soon as you send your first message.
+right, what the agent is set up with — its provider, model, agent name, the
+tools it may use and the directory it works in. The model, the agent and the
+tools are shown underlined in the accent colour: a click on any opens the same
+picker its status-bar chip does, so you can set the session up before you
+start. The banner gives way to the conversation as soon as you send your first
+message.
+
+The **Tools** chip (and the banner's `tools` line) opens a checklist of what
+the session may use: the built-in tools, the skills, and each MCP server's
+tools once it has connected. Unchecking an item before the first request keeps
+it out of the model's context altogether — its description and schema are
+never sent, which saves tokens and takes the capability away. Later in the
+session an unchecked item stays in the context, so as not to throw away the
+provider's prompt cache, but every call to it is refused; it leaves the
+context at the next moment the cache is lost anyway — a compaction, an agent
+or model switch — and cannot be switched back on in that session. The set is
+kept in the session log, so a reopened session comes back with it. An external
+agent over ACP brings its own tools, so it has no checklist.
 
 The panel's `[≡]` menu is kept to the actions with no home elsewhere —
 **Session info** (also `F3` and `/usage`), **Rename session** and **Delete

@@ -163,6 +163,16 @@ impl AgentCatalog for FsCatalog {
     /// The default agent always resolves; another name only when a root
     /// defines it.
     fn resolve(&self, name: &str) -> Option<AgentProfile> {
+        self.resolve_without(name, &std::collections::BTreeSet::new())
+    }
+
+    /// The profile with what the session switched off left out of the
+    /// registry and of the prompt: a tool by name, a skill as `skill:<name>`.
+    fn resolve_without(
+        &self,
+        name: &str,
+        off: &std::collections::BTreeSet<String>,
+    ) -> Option<AgentProfile> {
         if name != DEFAULT_AGENT && !self.dirs.agents().iter().any(|n| n == name) {
             return None;
         }
@@ -183,8 +193,13 @@ impl AgentCatalog for FsCatalog {
         restrict_tools(&mut tools, &definition.spec.tools, name);
         // Skills are instructions, not a capability, so an agent's `tools`
         // list does not govern them: the tool comes with the skills.
-        let skills = self.dirs.skills();
-        if !skills.is_empty() && backend.is_none() {
+        let all_skills = self.dirs.skills();
+        let skill_names: Vec<String> = all_skills.iter().map(|skill| skill.name.clone()).collect();
+        let skills: Vec<_> = all_skills
+            .into_iter()
+            .filter(|skill| !off.contains(&format!("skill:{}", skill.name)))
+            .collect();
+        if !skill_names.is_empty() && backend.is_none() {
             tools.insert(Arc::new(SkillTool::new(skills.clone())));
         }
         // The `task` tool lets this agent hand work to the others; only when
@@ -203,6 +218,15 @@ impl AgentCatalog for FsCatalog {
                 }
             }
         }
+        // What the session switched off leaves the registry here, before the
+        // prompt lists the tools; a `skill` tool left with no skills goes too.
+        let offered: Vec<String> = tools.iter().map(|tool| tool.name().to_string()).collect();
+        for tool in off {
+            tools.remove(tool);
+        }
+        if skills.is_empty() {
+            tools.remove("skill");
+        }
         // The configuration's `ai/AGENTS.md` is the prompt template itself,
         // not an instruction file, so no global file joins the chain.
         let context_files = discover_context_files(&self.cwd, Some(&self.project_root), None);
@@ -216,6 +240,8 @@ impl AgentCatalog for FsCatalog {
             mode: definition.spec.mode,
             late_tools: (!self.mcp.is_empty() && backend.is_none()).then(|| self.mcp.subscribe()),
             backend,
+            offered,
+            skills: skill_names,
         })
     }
 }
