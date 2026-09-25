@@ -167,10 +167,11 @@ While a run works, a run clock sits right-aligned under its last block: an
 animated `✽` and the time since the request was sent. It has its own glyph
 rather than `🕒` because the figures under each block describe that block
 alone, while this one is the run's total. When the run ends the clock freezes
-where it stood and dims, so a resting `✻` never reads as a working one. A run that finishes cleanly on an answer keeps it in the
-answer's meta (`✻ 3m41s`); any other run keeps it as a closing line after its
-last block, with the time it ended and how — `✻ 3m41s · 21:03:41 ✗` for a
-failed or aborted run.
+where it stood and dims, so a resting `✻` never reads as a working one. A run that ends on an answer keeps it in the answer's meta
+(`✻ 3m41s`), under the answer's own time and `✓`/`✗` — a failed call's error
+included. A run whose end the answer cannot tell (one ended on a tool call, or
+aborted after an answer that went fine) keeps it as a closing line after its
+last block, with the time it ended and how: `✻ 3m41s · 21:03:41 ✗`.
 
 `/pause` takes effect as soon as the tool call or model reply in progress
 finishes — not at the end of the whole step, so a step that fetches several

@@ -423,22 +423,27 @@ impl Transcript {
         })
     }
 
-    /// Close a run: a clean run that ended on an answer takes its total on
-    /// that answer's meta; any other (paused, failed, ended on a tool call)
-    /// gets a closing annotation that also says how it ended.
+    /// Close a run. One that ended on an answer whose own status says how the
+    /// run went — a clean answer after a clean run, a failed one after a
+    /// failed run — takes its total on that answer's meta, beside the time
+    /// and the status it already shows. Any other (paused, ended on a tool
+    /// call, aborted after an answer) gets a closing line that says how it
+    /// ended.
     pub fn end_run(&mut self, elapsed_ms: u32, at: &str, ok: bool, paused: bool) {
-        if ok && !paused {
+        if !paused {
             if let Some(index) = self.items.len().checked_sub(1) {
                 if let Item::Assistant {
                     streaming: false,
-                    error: None,
+                    error,
                     run_ms,
                     ..
                 } = &mut self.items[index]
                 {
-                    *run_ms = Some(elapsed_ms);
-                    self.invalidate(index);
-                    return;
+                    if error.is_none() == ok {
+                        *run_ms = Some(elapsed_ms);
+                        self.invalidate(index);
+                        return;
+                    }
                 }
             }
         }
@@ -2128,6 +2133,38 @@ mod tests {
         // A paused or failed run, or one ending on a tool call, still closes
         // with a line that says how it ended.
         transcript.end_run(5_000, "21:04:00", false, false);
+        assert!(matches!(
+            transcript.items().last(),
+            Some(Item::RunEnd { ok: false, .. })
+        ));
+    }
+
+    #[test]
+    fn a_failed_run_puts_its_total_on_the_failed_answer() {
+        let colors = ThemeColors::default();
+        let mut transcript = Transcript::default();
+        transcript.finish_assistant(
+            String::new(),
+            Some("connection refused".into()),
+            None,
+            "11:35:56".into(),
+            false,
+        );
+        transcript.end_run(3_000, "11:35:56", false, false);
+        // No separate closing line: the answer already has the time and `✗`.
+        assert_eq!(transcript.items().len(), 1);
+        let lines = text_of(transcript.lines(50, &colors, false));
+        assert_eq!(
+            lines.iter().filter(|l| l.contains("11:35:56")).count(),
+            1,
+            "{lines:?}"
+        );
+        assert_eq!(lines.last().map(|l| l.trim()), Some("✻ 3s"), "{lines:?}");
+        // An answer that went fine before the run was aborted keeps its `✓`,
+        // so the run's `✗` needs its own line.
+        transcript.stream_answer("partial");
+        transcript.finish_assistant("partial".into(), None, None, "11:36:00".into(), false);
+        transcript.end_run(1_000, "11:36:01", false, false);
         assert!(matches!(
             transcript.items().last(),
             Some(Item::RunEnd { ok: false, .. })
