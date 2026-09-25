@@ -50,7 +50,7 @@ Opened with `Alt+P` or menu **Options → Edit preferences**. The previous horiz
 | Mouse wheel | Scroll sidebar / content |
 
 **Fields and indicators:**
-- **Bool** — `[✓]` (on) or `[✗]` (off), toggled with `Enter`/`Space` or `Left`/`Right`
+- **Bool** — `[✓]` (on) or `[ ]` (off), toggled with `Enter`/`Space` or `Left`/`Right`
 - **Enum** — `< value >`, cycled with `Left`/`Right`
 - **Number** / **OptionalText** — `Enter` enters inline edit mode
 - **LSP → Servers** — server list items are prefixed with a bullet `•`; there is also a `+ Add Server` row

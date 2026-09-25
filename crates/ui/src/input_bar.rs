@@ -789,7 +789,7 @@ impl InputBar {
                 (text, style)
             }
             Control::Toggle { label, on } => {
-                let mark = if *on { "x" } else { " " };
+                let mark = crate::checkbox_mark(*on);
                 let text = format!("[{mark}] {label}");
                 let mut style = if *on {
                     Style::default()

@@ -50,7 +50,7 @@
 | 鼠标滚轮 | 滚动侧边栏 / 内容 |
 
 **字段与指示符：**
-- **Bool** — `[✓]`（开）或 `[✗]`（关），通过 `Enter`/`Space` 或 `Left`/`Right` 切换
+- **Bool** — `[✓]`（开）或 `[ ]`（关），通过 `Enter`/`Space` 或 `Left`/`Right` 切换
 - **Enum** — `< 值 >`，通过 `Left`/`Right` 循环
 - **Number** / **OptionalText** — 按 `Enter` 进入内联编辑模式
 - **LSP → Servers** — 服务器列表项以项目符号 `•` 开头；另外还有一行 `+ Add Server`

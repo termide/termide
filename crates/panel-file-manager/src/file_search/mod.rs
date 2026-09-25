@@ -19,7 +19,7 @@ use result_tree::{build_tree_nodes, TreeBuildItem};
 use search_worker::{search_content, search_files};
 
 /// Content-header hit-test columns (must match the renderer): the
-/// `[▼]`/`[▶]` collapse triangle occupies columns 0..4, the `[ ]`/`[x]`
+/// `[▼]`/`[▶]` collapse triangle occupies columns 0..4, the `[ ]`/`[✓]`
 /// selection checkbox columns 4..8.
 const TRIANGLE_COLS: std::ops::Range<usize> = 0..4;
 const CHECKBOX_COLS: std::ops::Range<usize> = 4..8;

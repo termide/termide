@@ -412,7 +412,7 @@ impl Modal for EditableSelectModal {
         self.last_checkbox_areas.clear();
         for checkbox_idx in visible_checkboxes {
             let checkbox = &self.checkboxes[checkbox_idx];
-            let checkbox_char = if checkbox.checked { "x" } else { " " };
+            let checkbox_char = termide_ui::checkbox_mark(checkbox.checked);
             let checkbox_style = if self.focus == FocusArea::Checkbox(checkbox_idx) {
                 Style::default().fg(theme.accented_fg).bg(theme.bg)
             } else {

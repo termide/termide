@@ -136,7 +136,7 @@ impl InputModal {
         let checkbox_width = self
             .checkboxes
             .iter()
-            .map(|c| max_line_width(&format!(" [x] {}", c.label)))
+            .map(|c| max_line_width(&format!(" [✓] {}", c.label)))
             .max()
             .unwrap_or(0);
 
@@ -334,7 +334,7 @@ impl Modal for InputModal {
         if !visible_checkboxes.is_empty() {
             for checkbox_idx in visible_checkboxes {
                 let checkbox = &self.checkboxes[checkbox_idx];
-                let checkbox_char = if checkbox.checked { "x" } else { " " };
+                let checkbox_char = termide_ui::checkbox_mark(checkbox.checked);
                 let checkbox_style = if self.focus == FocusArea::Checkbox(checkbox_idx) {
                     Style::default().fg(theme.accented_fg).bg(theme.bg)
                 } else {

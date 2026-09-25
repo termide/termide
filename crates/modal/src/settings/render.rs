@@ -429,13 +429,7 @@ impl SettingsModal {
     fn format_field_value(&self, desc: &FieldDescriptor, index: usize) -> String {
         let raw = get_field_value(&self.config, self.active_tab, index);
         match desc.field_type {
-            FieldType::Bool => {
-                if raw == "true" {
-                    "[✓]".to_string()
-                } else {
-                    "[✗]".to_string()
-                }
-            }
+            FieldType::Bool => termide_ui::checkbox(raw == "true").to_string(),
             FieldType::Enum => {
                 format!("< {} >", raw)
             }

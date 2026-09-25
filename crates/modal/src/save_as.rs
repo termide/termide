@@ -71,7 +71,7 @@ impl SaveAsModal {
         let title_width = self.title.len() as u16 + 2;
         let buttons_width = 21u16; // "[ OK ]    [ Cancel ]"
         let input_width = self.input_handler.text().chars().count() as u16 + 20;
-        let checkbox_width = max_line_width(&format!("[x] {}", t.checkbox_executable()));
+        let checkbox_width = max_line_width(&format!("[✓] {}", t.checkbox_executable()));
 
         let width = calculate_modal_width(
             [title_width, buttons_width, input_width, checkbox_width].into_iter(),
@@ -170,7 +170,7 @@ impl Modal for SaveAsModal {
         );
 
         // Render checkbox
-        let checkbox_char = if self.executable { "x" } else { " " };
+        let checkbox_char = termide_ui::checkbox_mark(self.executable);
         let checkbox_style = if self.focus == FocusArea::Checkbox {
             Style::default().fg(theme.accented_fg).bg(theme.bg)
         } else {

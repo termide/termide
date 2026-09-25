@@ -534,7 +534,7 @@ impl Modal for InfoActionModal {
                     let idx = row * 3 + col;
                     let bit = perms.bits[idx];
                     let is_locked = perms.locked[idx];
-                    let checkbox = if bit { "[x]" } else { "[ ]" };
+                    let checkbox = termide_ui::checkbox(bit);
 
                     let is_cursor =
                         is_focused && perms.cursor_row == row && perms.cursor_col == col;

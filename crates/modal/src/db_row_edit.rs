@@ -259,7 +259,7 @@ impl Modal for DbRowEditModal {
 
             // NULL checkbox, only where the column accepts NULL.
             if field.nullable && !field.read_only {
-                let mark = if field.is_null { "x" } else { " " };
+                let mark = termide_ui::checkbox_mark(field.is_null);
                 spans.push(Span::styled(
                     format!("[{mark}] {} ", t.db_edit_null_checkbox()),
                     base,

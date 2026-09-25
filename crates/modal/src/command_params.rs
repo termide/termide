@@ -283,7 +283,7 @@ impl Modal for CommandParamsModal {
                     );
                 }
                 ParamValue::Bool { checked } => {
-                    let checkbox = if *checked { "[x]" } else { "[ ]" };
+                    let checkbox = termide_ui::checkbox(*checked);
                     let style = if is_focused {
                         Style::default()
                             .fg(theme.accented_fg)

@@ -440,7 +440,7 @@ impl Modal for BookmarkAddModal {
                 .constraints([Constraint::Length(15), Constraint::Min(1)])
                 .split(chunks[chunk_idx]);
 
-            let checkbox_char = if self.project_checked { "x" } else { " " };
+            let checkbox_char = termide_ui::checkbox_mark(self.project_checked);
             let checkbox_style = if self.focus == FocusArea::ProjectCheckbox {
                 Style::default().fg(theme.accented_fg)
             } else {

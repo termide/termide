@@ -116,7 +116,7 @@ impl ChecklistModal {
     fn modal_width(&self, screen_width: u16) -> u16 {
         let title = UnicodeWidthStr::width(self.title.as_str()) as u16 + 2;
         let prompt = max_line_width(&self.prompt);
-        // " [x] " before each item's text, a space after it.
+        // " [✓] " before each item's text, a space after it.
         let items = self
             .items
             .iter()
@@ -196,7 +196,7 @@ impl Modal for ChecklistModal {
                 }
                 Row::Item(index) => {
                     let item = &self.items[index];
-                    let mark = if item.checked { "[x]" } else { "[ ]" };
+                    let mark = termide_ui::checkbox(item.checked);
                     let text = format!(" {mark} {}", Self::item_text(item));
                     let style = if index == self.cursor {
                         Style::default().fg(theme.bg).bg(theme.fg)
@@ -308,7 +308,7 @@ mod tests {
         );
         let shown = rows(&mut modal);
         assert!(shown.iter().any(|r| r.contains("Built-in")), "{shown:?}");
-        assert!(shown.iter().any(|r| r.contains("[x] read")), "{shown:?}");
+        assert!(shown.iter().any(|r| r.contains("[✓] read")), "{shown:?}");
         assert!(
             shown.iter().any(|r| r.contains("[ ] review — locked")),
             "{shown:?}"
@@ -330,9 +330,9 @@ mod tests {
         let mut modal =
             ChecklistModal::new("Tools", "", vec![item("read", "Built-in", true, true)]);
         let shown = rows(&mut modal);
-        let y = shown.iter().position(|r| r.contains("[x] read")).unwrap();
+        let y = shown.iter().position(|r| r.contains("[✓] read")).unwrap();
         let row = &shown[y];
-        let x = row[..row.find("[x]").unwrap()].chars().count() as u16;
+        let x = row[..row.find("[✓]").unwrap()].chars().count() as u16;
         let y = y as u16;
         let click = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),

@@ -13,7 +13,7 @@ use super::SettingsTab;
 /// Type of a settings field for rendering and editing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum FieldType {
-    /// Boolean toggle — [✓] / [✗]
+    /// Boolean toggle — [✓] / [ ]
     Bool,
     /// Unsigned integer (u16, u32, u64, usize)
     Number,

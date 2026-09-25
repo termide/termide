@@ -472,7 +472,7 @@ impl FileManager {
                 // Per-file selection checkbox (content replace mode only).
                 let checkbox = if search.show_checkboxes {
                     if search.is_header_selected(idx) {
-                        "[x] "
+                        "[✓] "
                     } else {
                         "[ ] "
                     }

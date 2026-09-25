@@ -226,7 +226,7 @@ impl<'c> Builder<'c> {
 
     /// Task-list checkbox marker.
     pub fn task_marker(&mut self, done: bool) {
-        let mark = if done { "[x] " } else { "[ ] " };
+        let mark = if done { "[✓] " } else { "[ ] " };
         self.push_span(mark, Style::default().fg(self.colors.info));
     }
 
