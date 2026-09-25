@@ -235,6 +235,10 @@ pub(super) fn fields_for_tab(tab: SettingsTab) -> Vec<FieldDescriptor> {
                 label: t.settings_web_chrome_path(),
                 field_type: FieldType::OptionalText,
             },
+            FieldDescriptor {
+                label: t.settings_agent_permission_mode(),
+                field_type: FieldType::Enum,
+            },
         ],
         SettingsTab::Keybindings => vec![],
     }
@@ -328,6 +332,7 @@ pub(super) fn get_field_value(config: &Config, tab: SettingsTab, index: usize) -
             7 => bool_str(config.ai.autofold),
             8 => config.ai.web.backend.clone(),
             9 => config.ai.web.engine.clone(),
+            12 => permission_mode_label(config.ai.permission_mode()),
             10 => config.ai.web.display.clone(),
             11 => {
                 if config.ai.web.chrome_path.is_empty() {
@@ -521,6 +526,11 @@ pub(super) fn enum_options(config: &Config, tab: SettingsTab, index: usize) -> O
             let values = strings(&termide_config::WEB_DISPLAYS);
             (values.clone(), values, config.ai.web.display.clone())
         }
+        (SettingsTab::Ai, AI_PERMISSION_MODE_FIELD) => {
+            let values = strings(&termide_config::permission_modes());
+            let labels = values.iter().map(|v| permission_mode_label(v)).collect();
+            (values, labels, config.ai.permission_mode().to_string())
+        }
         _ => return None,
     };
 
@@ -550,8 +560,33 @@ pub(super) fn apply_enum_value(config: &mut Config, tab: SettingsTab, index: usi
         (SettingsTab::Ai, 8) => config.ai.web.backend = value.to_string(),
         (SettingsTab::Ai, 9) => config.ai.web.engine = value.to_string(),
         (SettingsTab::Ai, 10) => config.ai.web.display = value.to_string(),
+        (SettingsTab::Ai, AI_PERMISSION_MODE_FIELD) => config.ai.set_permission_mode(value),
         _ => {}
     }
+}
+
+/// The AI tab's field for the permission mode new sessions start in.
+pub(super) const AI_PERMISSION_MODE_FIELD: usize = 12;
+
+/// A permission mode's localized name, as the agent panel's mode picker
+/// shows it.
+fn permission_mode_label(mode: &str) -> String {
+    let t = i18n::t();
+    match mode {
+        "accept-edits" => t.agent_mode_accept_edits(),
+        "auto" => t.agent_mode_auto(),
+        "plan" => t.agent_mode_plan(),
+        _ => t.agent_mode_ask(),
+    }
+    .to_string()
+}
+
+/// Step the permission mode to the next (or previous) one, wrapping.
+fn cycle_permission_mode(config: &mut Config, forward: bool) {
+    let modes = termide_config::permission_modes();
+    let mut value = config.ai.permission_mode().to_string();
+    step_value(&mut value, &strings(&modes), forward);
+    config.ai.set_permission_mode(&value);
 }
 
 fn strings(values: &[&str]) -> Vec<String> {
@@ -655,6 +690,7 @@ pub(super) fn cycle_enum_forward(config: &mut Config, tab: SettingsTab, index: u
         SettingsTab::Ai => match index {
             0 => cycle_ai_provider(config, true),
             8..=10 => cycle_web_field(config, index, true),
+            AI_PERMISSION_MODE_FIELD => cycle_permission_mode(config, true),
             _ => {}
         },
         _ => {}
@@ -725,6 +761,7 @@ pub(super) fn cycle_enum_backward(config: &mut Config, tab: SettingsTab, index: 
         SettingsTab::Ai => match index {
             0 => cycle_ai_provider(config, false),
             8..=10 => cycle_web_field(config, index, false),
+            AI_PERMISSION_MODE_FIELD => cycle_permission_mode(config, false),
             _ => {}
         },
         _ => {}
@@ -779,8 +816,13 @@ mod field_index_tests {
     fn web_fields_read_and_write_their_own_settings() {
         let mut config = Config::default();
         let fields = fields_for_tab(SettingsTab::Ai);
-        assert_eq!(fields.len(), 12, "the web fields close the AI tab");
+        assert_eq!(
+            fields.len(),
+            13,
+            "the permission mode follows the web fields"
+        );
         assert!(matches!(fields[11].field_type, FieldType::OptionalText));
+        assert!(matches!(fields[12].field_type, FieldType::Enum));
 
         assert_eq!(get_field_value(&config, SettingsTab::Ai, 8), "auto");
         assert_eq!(get_field_value(&config, SettingsTab::Ai, 9), "duckduckgo");
@@ -899,6 +941,29 @@ mod enum_option_tests {
         config.ai.model = "gpt-5".into();
         apply_enum_value(&mut config, SettingsTab::Ai, 0, "openai_compatible");
         assert_eq!(config.ai.model, "gpt-5");
+    }
+
+    #[test]
+    fn the_permission_mode_for_new_sessions_is_chosen_from_the_four() {
+        let mut config = Config::default();
+        let field = AI_PERMISSION_MODE_FIELD;
+        // Ask by default, shown by its localized name.
+        assert_eq!(config.ai.permission_mode(), "ask");
+        let options = enum_options(&config, SettingsTab::Ai, field).unwrap();
+        assert_eq!(options.values, ["ask", "accept-edits", "auto", "plan"]);
+        assert_eq!(options.current, Some(0));
+        assert_eq!(
+            get_field_value(&config, SettingsTab::Ai, field),
+            i18n::t().agent_mode_ask()
+        );
+        apply_enum_value(&mut config, SettingsTab::Ai, field, "auto");
+        assert_eq!(config.ai.permission_mode(), "auto");
+        cycle_enum_forward(&mut config, SettingsTab::Ai, field);
+        assert_eq!(config.ai.permission_mode(), "plan");
+        cycle_enum_forward(&mut config, SettingsTab::Ai, field);
+        assert_eq!(config.ai.permission_mode(), "ask");
+        cycle_enum_backward(&mut config, SettingsTab::Ai, field);
+        assert_eq!(config.ai.permission_mode(), "plan");
     }
 
     #[test]

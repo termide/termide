@@ -224,6 +224,33 @@ impl AiSettings {
             .ok()
             .filter(|&n| n > 0)
     }
+
+    /// The permission mode new sessions start in, as configuration spells it
+    /// (`ask`, `accept-edits`, `auto`, `plan`).
+    #[must_use]
+    pub fn permission_mode(&self) -> &'static str {
+        self.permissions.mode.label()
+    }
+
+    /// Set the permission mode new sessions start in from its spelling;
+    /// an unknown one is ignored.
+    pub fn set_permission_mode(&mut self, label: &str) {
+        if let Some(mode) = termide_agent_core::Mode::ALL
+            .into_iter()
+            .find(|mode| mode.label() == label)
+        {
+            self.permissions.mode = mode;
+        }
+    }
+}
+
+/// Every permission mode's spelling, in the order the UI offers them.
+#[must_use]
+pub fn permission_modes() -> Vec<&'static str> {
+    termide_agent_core::Mode::ALL
+        .into_iter()
+        .map(termide_agent_core::Mode::label)
+        .collect()
 }
 
 /// Whether an AI provider value names a CLI agent driven over ACP (Claude

@@ -314,6 +314,10 @@ impl SettingsModal {
                 Field(0), // provider
                 Field(2), // model (pre-selected over ACP)
                 Spacer,
+                // Its tool calls ask through the panel too, under the same mode.
+                Header("Permissions"),
+                Field(12), // permission mode for new sessions
+                Spacer,
                 Header("Transcript"),
                 Field(7), // autofold
             ],
@@ -328,6 +332,9 @@ impl SettingsModal {
                 Field(4), // context_window
                 Field(5), // max_tokens
                 Field(6), // reasoning
+                Spacer,
+                Header("Permissions"),
+                Field(12), // permission mode for new sessions
                 Spacer,
                 Header("Transcript"),
                 Field(7), // autofold
@@ -620,9 +627,9 @@ mod content_row_tests {
                 _ => None,
             })
             .collect();
-        // Provider (0), the pre-selected model (2) and autofold (7) apply; the
-        // endpoint/auth/window fields are hidden.
-        assert_eq!(rendered, vec![0, 2, 7]);
+        // Provider (0), the pre-selected model (2), the permission mode (12)
+        // and autofold (7) apply; the endpoint/auth/window fields are hidden.
+        assert_eq!(rendered, vec![0, 2, 12, 7]);
     }
 
     #[test]

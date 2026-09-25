@@ -462,6 +462,7 @@ impl Translation for RuntimeTranslation {
         settings_agent_max_tokens,
         settings_agent_reasoning,
         settings_agent_autofold,
+        settings_agent_permission_mode,
         settings_web_backend,
         menu_ai_show_browser,
         menu_ai_hide_browser,

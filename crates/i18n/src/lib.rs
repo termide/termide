@@ -660,6 +660,8 @@ pub trait Translation: Send + Sync {
     fn settings_agent_max_tokens(&self) -> &str;
     fn settings_agent_reasoning(&self) -> &str;
     fn settings_agent_autofold(&self) -> &str;
+    /// Settings modal: the permission mode new agent sessions start in.
+    fn settings_agent_permission_mode(&self) -> &str;
     /// Settings modal: AI tab, web tools field labels.
     fn settings_web_backend(&self) -> &str;
     /// AI menu: the row that shows or hides the agents' web browser window.

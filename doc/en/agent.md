@@ -425,7 +425,7 @@ Rules live per tool. Among the rules that match, the strictest wins, so a
 
 ```toml
 [ai.permissions]
-mode = "ask"        # ask | accept-edits | auto | plan
+mode = "ask"        # ask | accept-edits | auto | plan — what new sessions start in
 
 [ai.permissions.bash]
 "cargo *"     = "allow"
@@ -448,8 +448,10 @@ on either half stops the whole command. Command substitution (`$(…)`, backtick
 is never allowed automatically.
 
 The mode decides what happens to anything no rule covers. `mode` in the
-configuration is the starting point; the panel's **Mode** chip and `Shift+Tab`
-change it for the current panel.
+configuration is the starting point every new session takes (`ask` unless you
+change it), also set from the settings modal's **AI** section under
+Permissions; the panel's **Mode** chip and `Shift+Tab` change it for the
+current panel only.
 
 - **ask** (the default) asks before every change and every command.
 - **accept-edits** also lets the agent edit and create files inside the project

@@ -312,6 +312,7 @@ settings_agent_context_window = "Контекстное окно (запасно
 settings_agent_max_tokens = "Максимум токенов за ход"
 settings_agent_reasoning = "Предпочитать рассуждение"
 settings_agent_autofold = "Сворачивать блоки по умолчанию"
+settings_agent_permission_mode = "Режим разрешений новых сессий"
 settings_web_backend = "Доступ к вебу"
 menu_ai_show_browser = "Показать окно браузера"
 menu_ai_hide_browser = "Скрыть окно браузера"
