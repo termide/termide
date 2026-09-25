@@ -1012,13 +1012,15 @@ fn stop_label(reason: StopReason) -> &'static str {
 /// `None` for any other provider, so the built-in loop is used.
 fn cli_provider_backend(provider: &str, agent: &str) -> Option<BackendFactory> {
     let package = match provider {
-        "claude_code" => "@zed-industries/claude-code-acp",
-        "codex" => "@zed-industries/codex-acp",
+        "claude_code" => "@agentclientprotocol/claude-agent-acp@latest",
+        "codex" => "@agentclientprotocol/codex-acp@latest",
         _ => return None,
     };
-    // The adapters ship on npm; `npx -y` fetches on first use. A power user who
-    // wants a pinned binary or a different namespace can point an agent's own
-    // `[acp]` at it and pick a compatible provider instead.
+    // The adapters ship on npm; `npx -y` fetches on first use. `@latest`,
+    // because npx otherwise keeps running the copy it fetched first, and an
+    // old adapter lists old models (and none at all, for Codex). A power
+    // user who wants a pinned binary can point an agent's own `[acp]` at it
+    // and pick a compatible provider instead.
     let config = AcpConfig {
         command: "npx".to_string(),
         args: vec!["-y".to_string(), package.to_string()],
@@ -1425,7 +1427,7 @@ mod tests {
         std::fs::create_dir_all(&outside).unwrap();
         std::fs::write(
             outside.join("agent.toml"),
-            "description = \"Claude Code\"\n[acp]\ncommand = \"npx\"\nargs = [\"-y\", \"@zed-industries/claude-code-acp\"]\n",
+            "description = \"Claude Code\"\n[acp]\ncommand = \"npx\"\nargs = [\"-y\", \"@agentclientprotocol/claude-agent-acp\"]\n",
         )
         .unwrap();
         let outside = catalog.resolve("outside").unwrap();

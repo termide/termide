@@ -68,6 +68,10 @@ struct Shared {
     /// The agent's current model id, from `session/new` and kept up to date by
     /// `current_model_update` notifications and `select_model`.
     current_model: Mutex<Option<String>>,
+    /// The id of the session config option that picks the model, when the
+    /// agent offers its models that way (`configOptions`) rather than as
+    /// `models`; a switch then goes through `session/set_config_option`.
+    model_option: Mutex<Option<String>>,
 }
 
 pub struct AcpRuntime {
@@ -139,6 +143,7 @@ impl AcpRuntime {
             child: Mutex::new(None),
             models: Mutex::new(Vec::new()),
             current_model: Mutex::new(None),
+            model_option: Mutex::new(None),
         });
         let for_reader = Arc::clone(&shared);
         std::thread::spawn(move || for_reader.read_loop(reader));
@@ -251,11 +256,19 @@ impl Backend for AcpRuntime {
         if self.is_busy() {
             return Err("finish or stop the current task first".to_string());
         }
-        self.shared.request(
-            "session/set_model",
-            json!({ "sessionId": session_id, "modelId": model_id }),
-            Duration::from_secs(30),
-        )?;
+        let option = self.shared.model_option.lock().unwrap().clone();
+        match option {
+            Some(config_id) => self.shared.request(
+                "session/set_config_option",
+                json!({ "sessionId": session_id, "configId": config_id, "value": model_id }),
+                Duration::from_secs(30),
+            )?,
+            None => self.shared.request(
+                "session/set_model",
+                json!({ "sessionId": session_id, "modelId": model_id }),
+                Duration::from_secs(30),
+            )?,
+        };
         *self.shared.current_model.lock().unwrap() = Some(model_id);
         Ok(())
     }
@@ -301,7 +314,7 @@ impl Shared {
         let conn = match result {
             Ok(value) => match value["sessionId"].as_str() {
                 Some(id) => {
-                    self.adopt_models(&value["models"]);
+                    self.adopt_models(&value);
                     Conn::Ready {
                         session_id: id.to_string(),
                     }
@@ -314,10 +327,54 @@ impl Shared {
         self.kick();
     }
 
-    /// Record the models an agent advertises in a `session/new`/`load` result
-    /// (`models.availableModels` and `models.currentModelId`), so the panel can
-    /// list and switch them. Missing or malformed data leaves the lists empty.
-    fn adopt_models(&self, models: &Value) {
+    /// Record the models an agent advertises in a `session/new`/`load` result,
+    /// so the panel can list and switch them: `models` (`availableModels`,
+    /// `currentModelId`) when it has them, else the `model` entry of its
+    /// `configOptions`. Missing or malformed data leaves the lists empty.
+    fn adopt_models(&self, result: &Value) {
+        if result["models"].is_object() {
+            *self.model_option.lock().unwrap() = None;
+            self.adopt_model_list(&result["models"]);
+        } else {
+            self.adopt_model_option(&result["configOptions"]);
+        }
+    }
+
+    /// The `model` config option: a select whose options are the models,
+    /// flat or in groups, and whose current value is the model in use.
+    fn adopt_model_option(&self, options: &Value) {
+        let Some(option) = options.as_array().and_then(|options| {
+            options
+                .iter()
+                .find(|o| o["category"] == "model" || o["id"] == "model")
+        }) else {
+            return;
+        };
+        let Some(config_id) = option["id"].as_str() else {
+            return;
+        };
+        let entry = |o: &Value| {
+            let id = o["value"].as_str()?.to_string();
+            let name = o["name"].as_str().unwrap_or(&id).to_string();
+            Some(BackendModel { id, name })
+        };
+        let list: Vec<BackendModel> = option["options"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|o| match o["options"].as_array() {
+                Some(group) => group.iter().filter_map(entry).collect::<Vec<_>>(),
+                None => entry(o).into_iter().collect(),
+            })
+            .collect();
+        *self.model_option.lock().unwrap() = Some(config_id.to_string());
+        *self.models.lock().unwrap() = list;
+        if let Some(current) = option["currentValue"].as_str() {
+            *self.current_model.lock().unwrap() = Some(current.to_string());
+        }
+    }
+
+    fn adopt_model_list(&self, models: &Value) {
         let list: Vec<BackendModel> = models["availableModels"]
             .as_array()
             .map(|entries| {
@@ -665,6 +722,10 @@ impl Shared {
                 if let Some(id) = update["modelId"].as_str() {
                     *self.current_model.lock().unwrap() = Some(id.to_string());
                 }
+            }
+            // The agent changed its options itself: the model among them.
+            "config_option_update" if self.model_option.lock().unwrap().is_some() => {
+                self.adopt_model_option(&update["configOptions"]);
             }
             other => log::debug!("acp {}: update {other} ignored", self.name),
         }
@@ -1020,6 +1081,43 @@ mod tests {
     /// An agent that advertises two models at `session/new` and accepts a
     /// `session/set_model`.
     fn models_agent(dir: PathBuf) -> AcpRuntime {
+        models_agent_with(
+            dir,
+            json!({
+                "models": {
+                    "availableModels": [
+                        { "modelId": "m-fast", "name": "Fast" },
+                        { "modelId": "m-slow", "name": "Slow" }
+                    ],
+                    "currentModelId": "m-fast"
+                }
+            }),
+        )
+    }
+
+    /// An agent that advertises the same two models as a `model` config
+    /// option, one of them in a group, and switches through
+    /// `session/set_config_option`.
+    fn config_option_agent(dir: PathBuf) -> AcpRuntime {
+        models_agent_with(
+            dir,
+            json!({
+                "configOptions": [
+                    { "id": "mode", "category": "mode", "type": "select",
+                      "currentValue": "ask", "options": [{ "value": "ask", "name": "Ask" }] },
+                    { "id": "model", "category": "model", "type": "select",
+                      "currentValue": "m-fast",
+                      "options": [
+                          { "value": "m-fast", "name": "Fast" },
+                          { "group": "older", "name": "Older",
+                            "options": [{ "value": "m-slow", "name": "Slow" }] }
+                      ] }
+                ]
+            }),
+        )
+    }
+
+    fn models_agent_with(dir: PathBuf, advertised: Value) -> AcpRuntime {
         let (to_agent_rx, to_agent_tx) = pipe().unwrap();
         let (from_agent_rx, from_agent_tx) = pipe().unwrap();
         std::thread::spawn(move || {
@@ -1033,18 +1131,18 @@ mod tests {
                     Some("initialize") => send(
                         json!({ "jsonrpc": "2.0", "id": id, "result": { "protocolVersion": 1, "agentCapabilities": {} } }),
                     ),
-                    Some("session/new") => send(json!({ "jsonrpc": "2.0", "id": id, "result": {
-                        "sessionId": "s1",
-                        "models": {
-                            "availableModels": [
-                                { "modelId": "m-fast", "name": "Fast" },
-                                { "modelId": "m-slow", "name": "Slow" }
-                            ],
-                            "currentModelId": "m-fast"
-                        }
-                    } })),
+                    Some("session/new") => {
+                        let mut result = advertised.clone();
+                        result["sessionId"] = json!("s1");
+                        send(json!({ "jsonrpc": "2.0", "id": id, "result": result }));
+                    }
                     Some("session/set_model") => {
                         assert_eq!(message["params"]["modelId"], "m-slow");
+                        send(json!({ "jsonrpc": "2.0", "id": id, "result": {} }));
+                    }
+                    Some("session/set_config_option") => {
+                        assert_eq!(message["params"]["configId"], "model");
+                        assert_eq!(message["params"]["value"], "m-slow");
                         send(json!({ "jsonrpc": "2.0", "id": id, "result": {} }));
                     }
                     _ => {}
@@ -1070,8 +1168,14 @@ mod tests {
 
     #[test]
     fn models_are_read_from_the_session_and_switched_over_acp() {
-        let dir = tempfile::tempdir().unwrap();
-        let runtime = models_agent(dir.path().to_path_buf());
+        for agent in [models_agent, config_option_agent] {
+            let dir = tempfile::tempdir().unwrap();
+            let runtime = agent(dir.path().to_path_buf());
+            switches_between_fast_and_slow(&runtime);
+        }
+    }
+
+    fn switches_between_fast_and_slow(runtime: &AcpRuntime) {
         // The handshake runs on a thread; wait for the advertised models.
         let deadline = Instant::now() + Duration::from_secs(5);
         while runtime.available_models().is_empty() {

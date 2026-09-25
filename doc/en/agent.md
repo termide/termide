@@ -95,7 +95,8 @@ built in; set it only for a gateway) and point `api_key_env` at your
 `provider = "claude_code"` and `provider = "codex"` are different in kind: instead
 of the built-in loop talking to a model endpoint, the panel drives that tool's
 own CLI as an [external agent](#external-agents) over ACP
-(`@zed-industries/claude-code-acp` / `@zed-industries/codex-acp`, run through
+(`@agentclientprotocol/claude-agent-acp` / `@agentclientprotocol/codex-acp`, the
+latest release, run through
 `npx`). The CLI owns the endpoint and the sign-in — its own subscription or
 API key — so the connection's `base_url`, `api_key_env` and context window do
 not apply; the settings modal hides them for these providers and clears them
@@ -679,7 +680,7 @@ description = "Claude Code through its ACP adapter"
 
 [acp]
 command = "npx"
-args = ["-y", "@zed-industries/claude-code-acp"]
+args = ["-y", "@agentclientprotocol/claude-agent-acp"]
 env = { ANTHROPIC_API_KEY = "$ANTHROPIC_API_KEY" }
 ```
 

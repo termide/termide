@@ -6,7 +6,7 @@
 //!
 //! [acp]
 //! command = "npx"
-//! args = ["-y", "@zed-industries/claude-code-acp"]
+//! args = ["-y", "@agentclientprotocol/claude-agent-acp"]
 //! ```
 //!
 //! The client that speaks to the process is the `termide-agent-acp` crate.

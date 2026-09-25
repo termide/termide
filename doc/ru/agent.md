@@ -97,7 +97,8 @@ Anthropic требует его обязательно, поэтому там п
 `provider = "claude_code"` и `provider = "codex"` — иного рода: вместо того чтобы
 встроенный цикл обращался к модельному эндпоинту, панель запускает CLI самого
 инструмента как [внешнего агента](#внешние-агенты) по ACP
-(`@zed-industries/claude-code-acp` / `@zed-industries/codex-acp` через `npx`).
+(`@agentclientprotocol/claude-agent-acp` / `@agentclientprotocol/codex-acp`,
+последний выпуск, через `npx`).
 Эндпоинт и вход (своя подписка или ключ) — целиком за CLI, поэтому `base_url`,
 `api_key_env` и контекстное окно подключения неактуальны: модал настроек
 прячет их для этих провайдеров и вычищает из файла. `model` сохраняется: это модель, **предвыбираемая**
@@ -686,7 +687,7 @@ description = "Claude Code через его ACP-адаптер"
 
 [acp]
 command = "npx"
-args = ["-y", "@zed-industries/claude-code-acp"]
+args = ["-y", "@agentclientprotocol/claude-agent-acp"]
 env = { ANTHROPIC_API_KEY = "$ANTHROPIC_API_KEY" }
 ```
 
