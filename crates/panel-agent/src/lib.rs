@@ -1485,17 +1485,13 @@ impl AgentPanel {
     }
 
     /// The state strip above the input: what holds right now rather than what
-    /// happened — a pending or active pause and the queued messages. Empty
-    /// when there is nothing to show.
+    /// happened — a pause asked for but not reached yet, and the queued
+    /// messages. Empty when there is nothing to show. A pause that took
+    /// effect is the transcript's `‖` line, not a line here.
     fn state_lines(&self, width: u16) -> Vec<Line<'static>> {
-        let t = termide_i18n::t();
-        let pause = if self.paused && !self.is_busy() {
-            Some(t.agent_notice_paused())
-        } else if self.pause_requested {
-            Some(t.agent_notice_will_pause())
-        } else {
-            None
-        };
+        let pause = self
+            .pause_requested
+            .then(|| termide_i18n::t().agent_notice_will_pause());
         state_strip(
             self.queued_texts.iter().map(String::as_str),
             pause,
@@ -4590,10 +4586,9 @@ impl Panel for AgentPanel {
         for (row, line) in state.iter().enumerate() {
             buf.set_line(area.x, state_y + row as u16, line, text_width);
         }
-        // The strip's pause line (after its rule) is a click target: it
-        // continues a paused run, or withdraws a pause not reached yet.
-        let pause_shown = (self.paused && !self.is_busy()) || self.pause_requested;
-        self.pause_row = (pause_shown && state.len() > 1).then_some(state_y + 1);
+        // The strip's pending-pause line (after its rule) withdraws the pause
+        // on a click.
+        self.pause_row = (self.pause_requested && state.len() > 1).then_some(state_y + 1);
         if has_separator {
             let y = form_area.y - 1;
             let style = Style::default().fg(if ctx.is_focused {
@@ -5029,14 +5024,9 @@ impl Panel for AgentPanel {
                     && event.column < area.x + area.width
                     && event.row >= area.y
                     && event.row < area.y + area.height;
-                // The state strip's pause line continues a paused run, or
-                // withdraws a pause the run has not reached yet.
-                if self.pause_row == Some(event.row) {
-                    if self.paused && !self.is_busy() {
-                        self.resume();
-                    } else if self.pause_requested {
-                        self.cancel_pause();
-                    }
+                // The state strip's pending-pause line withdraws the pause.
+                if self.pause_requested && self.pause_row == Some(event.row) {
+                    self.cancel_pause();
                     return vec![PanelEvent::NeedsRedraw];
                 }
                 if !inside {
@@ -5668,7 +5658,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pause_lives_in_the_state_strip_and_closes_the_run_as_paused() {
+    fn a_pending_pause_lives_in_the_state_strip_and_a_pause_in_the_transcript() {
         let mut panel = AgentPanel::new(setup(vec![]));
         panel.apply(AgentEvent::AgentStart);
         type_text(&mut panel, "/pause");
@@ -5678,8 +5668,9 @@ mod tests {
         assert!(lines[1].contains(t.agent_notice_will_pause()), "{lines:?}");
         panel.apply(AgentEvent::Paused);
         panel.apply(AgentEvent::AgentEnd);
-        let lines = strip_text(&panel.state_lines(80));
-        assert!(lines[1].contains(t.agent_notice_paused()), "{lines:?}");
+        // Once the pause takes effect the strip clears: the transcript's `‖`
+        // line stands for it.
+        assert!(panel.state_lines(80).is_empty());
         // History keeps only the event: the run's closing line, marked paused.
         let items = panel.transcript().items();
         assert!(items.iter().all(|i| !matches!(i, Item::Notice { .. })));

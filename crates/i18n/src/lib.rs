@@ -558,7 +558,6 @@ pub trait Translation: Send + Sync {
     fn agent_notice_goal_stopped_failed(&self) -> &str;
     fn agent_notice_compacting(&self) -> &str;
     fn agent_notice_no_model_choices(&self) -> &str;
-    fn agent_notice_paused(&self) -> &str;
     fn agent_notice_plan_no_request(&self) -> &str;
     fn agent_notice_nothing_to_open(&self) -> &str;
     fn agent_notice_nothing_to_undo(&self) -> &str;

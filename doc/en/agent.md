@@ -173,8 +173,7 @@ A run stopped with `/pause` gets a pause line instead, `‖ 1m12s`: it counts
 how long the pause has lasted, its `‖` marked while the pause is on, and
 keeps that length, dimmed, once the run continues. A continued run's clock goes on from the
 original request, so its total includes the pause. Clicking the run clock
-pauses the run, like `/pause`; clicking the pause line (or the pause in the
-state strip) continues it, like `/continue`. While a pause waits for the
+pauses the run, like `/pause`; clicking the pause line continues it, like `/continue`. While a pause waits for the
 current step to finish, clicking its notice in the state strip or sending
 `/continue` withdraws it and the run goes on.
 
@@ -190,8 +189,9 @@ closing line.
 
 What holds right now rather than what happened lives in the state strip, a few
 rows between the conversation and the input that appear only when there is
-something to show: a pending pause (`‖ will pause after the current step`), an
-active one with the `/continue` hint, and each message queued while the agent
+something to show: a pending pause (`‖ will pause after the current step`) —
+once the pause takes effect the transcript's `‖` line takes over — and each
+message queued while the agent
 works (`› …`, its first line; after three, a count of the rest). A queued
 message leaves the strip when the agent takes it and shows up in the
 conversation as your message.

@@ -426,7 +426,6 @@ impl Translation for RuntimeTranslation {
         agent_notice_goal_stopped_failed,
         agent_notice_compacting,
         agent_notice_no_model_choices,
-        agent_notice_paused,
         agent_notice_plan_no_request,
         agent_notice_nothing_to_open,
         agent_notice_nothing_to_undo,
