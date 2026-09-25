@@ -452,12 +452,25 @@ impl ConnectionCatalog for AiConnections {
     }
 }
 
-/// The connection new sessions start on, when there is one a session can
-/// run on.
+/// The connection new sessions start on, if there is any.
 fn usable_connection(settings: &AiSettings) -> Option<(&str, &Connection)> {
     let name = settings.default_connection()?;
-    let connection = &settings.connections[name];
-    connection.is_usable().then_some((name, connection))
+    Some((name, &settings.connections[name]))
+}
+
+/// `model`, or — left empty, to the provider — the first model the provider
+/// lists; `None` when it lists none. Blocks on the request, so it runs on a
+/// worker thread.
+fn resolve_model(provider: &dyn Provider, model: &str) -> Option<String> {
+    if !model.trim().is_empty() {
+        return Some(model.to_string());
+    }
+    provider
+        .list_models()
+        .ok()?
+        .into_iter()
+        .next()
+        .map(|model| model.id)
 }
 
 /// The connection `session` runs on: the one it recorded while that still
@@ -527,13 +540,17 @@ impl Subagents {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
+        let requested = definition
+            .spec
+            .model
+            .clone()
+            .unwrap_or_else(|| active.model.clone());
+        let Some(id) = resolve_model(active.provider.as_ref(), &requested) else {
+            return Err("the provider lists no model to run the subagent on".into());
+        };
         let model = ModelSpec {
             provider: "agent".to_string(),
-            id: definition
-                .spec
-                .model
-                .clone()
-                .unwrap_or_else(|| active.model.clone()),
+            id,
             context_window: active.context_window,
             max_tokens: self.max_tokens,
             reasoning: self.reasoning,
@@ -769,7 +786,7 @@ pub fn run_agent_headless(
     let stream = output == HeadlessOutput::StreamJson;
 
     let Some((_, connection)) = usable_connection(settings) else {
-        eprintln!("termide: AI is not configured (add an [ai.connections] entry with a model)");
+        eprintln!("termide: AI is not configured (add an [ai.connections] entry)");
         return 1;
     };
     let provider = build_provider(
@@ -809,13 +826,18 @@ pub fn run_agent_headless(
     options.soul = definition.soul.as_deref();
     let system_prompt = build_system_prompt(&options);
 
+    let requested = definition
+        .spec
+        .model
+        .clone()
+        .unwrap_or_else(|| connection.model.clone());
+    let Some(id) = resolve_model(provider.as_ref(), &requested) else {
+        eprintln!("termide: the provider lists no model; name one in the connection");
+        return 1;
+    };
     let model = ModelSpec {
         provider: "agent".to_string(),
-        id: definition
-            .spec
-            .model
-            .clone()
-            .unwrap_or_else(|| connection.model.clone()),
+        id,
         context_window: connection.effective_context_window(),
         max_tokens: settings.output_limit(),
         reasoning: settings.prefer_reasoning,
@@ -1309,12 +1331,48 @@ mod tests {
     fn restore_is_skipped_without_a_connection_to_run_on() {
         let mut settings = AiSettings::default();
         assert!(restore_agent_panel(&settings, PathBuf::from("/tmp"), None, None).is_none());
-        // An endpoint with no model named is no better.
+        // A connection with no model named leaves the model to the provider.
         settings
             .connections
             .insert("local".into(), Connection::default());
-        assert!(usable_connection(&settings).is_none());
-        assert!(restore_agent_panel(&settings, PathBuf::from("/tmp"), None, None).is_none());
+        assert!(usable_connection(&settings).is_some());
+    }
+
+    /// A provider listing `ids`.
+    struct Lists(Vec<&'static str>);
+
+    impl Provider for Lists {
+        fn name(&self) -> &str {
+            "lists"
+        }
+
+        fn stream(
+            &self,
+            _: &termide_agent_core::Request<'_>,
+            _: &mut dyn FnMut(termide_agent_core::StreamEvent),
+            _: &CancelToken,
+        ) -> termide_agent_core::AssistantMessage {
+            unreachable!("only asked for its models")
+        }
+
+        fn list_models(&self) -> Result<Vec<termide_agent_core::ModelInfo>, String> {
+            Ok(self
+                .0
+                .iter()
+                .map(|id| termide_agent_core::ModelInfo {
+                    id: (*id).to_string(),
+                    context_window: None,
+                })
+                .collect())
+        }
+    }
+
+    #[test]
+    fn a_model_left_to_the_provider_is_its_first() {
+        let provider = Lists(vec!["first", "second"]);
+        assert_eq!(resolve_model(&provider, "").as_deref(), Some("first"));
+        assert_eq!(resolve_model(&provider, "named").as_deref(), Some("named"));
+        assert_eq!(resolve_model(&Lists(vec![]), ""), None);
     }
 
     /// `agent.toml` narrows the tools and names a model and a mode; a name no

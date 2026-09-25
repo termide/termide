@@ -476,11 +476,16 @@ impl SettingsModal {
             FieldType::Enum if !is_model => return,
             _ => {}
         }
-        let mut value = self.field_value(field_idx);
-        // Strip "(auto)" / "(none)" placeholders
-        if value.starts_with('(') {
-            value.clear();
-        }
+        let value = if self.field_tab() == SettingsTab::Connection {
+            self.connection_edit_text(field_idx)
+        } else {
+            let mut value = self.field_value(field_idx);
+            // Strip "(auto)" / "(none)" placeholders
+            if value.starts_with('(') {
+                value.clear();
+            }
+            value
+        };
         self.edit_input = termide_ui::TextInput::with_text(value);
         self.editing = true;
     }

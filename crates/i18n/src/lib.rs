@@ -586,6 +586,9 @@ pub trait Translation: Send + Sync {
     fn agent_pick_connection(&self) -> &str;
     /// Agent notice: switching to or from a CLI agent is refused mid-session.
     fn agent_notice_connection_before_first(&self) -> &str;
+    /// Agent notice: a request waits for the provider's model list, the
+    /// model being left to it.
+    fn agent_notice_model_pending(&self) -> &str;
     /// Agent notice: the session now runs on connection `name`.
     fn agent_notice_connection_fmt(&self, name: &str) -> String;
     /// Agent notice: there is no connection `name`.
@@ -691,6 +694,9 @@ pub trait Translation: Send + Sync {
     /// Settings modal: the action that leaves a connection's page for the
     /// list.
     fn settings_ai_connection_back(&self) -> &str;
+    /// Settings modal: the model choice that leaves the model to the
+    /// provider (its first listed; a CLI agent's own default).
+    fn settings_ai_model_auto(&self) -> &str;
     /// Settings modal: the connection's name field.
     fn settings_ai_connection_name(&self) -> &str;
     /// Settings modal: the switch that makes a connection the default, the

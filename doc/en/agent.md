@@ -13,8 +13,8 @@ Open it with `Alt+A`, from **Windows → Agent**, or from the command palette
 The agent reaches a model through a **connection**: an OpenAI-compatible
 endpoint, Anthropic's Messages API, or a CLI agent. The OpenAI protocol covers
 local servers (llama.cpp, Ollama, vLLM, omlx) and most hosted gateways, OpenAI
-and OpenRouter among them. There are no connections by default; until one with
-a model exists, the panel refuses to open and says so.
+and OpenRouter among them. There are no connections by default; until one exists,
+the panel refuses to open and says so.
 
 ```toml
 [ai]
@@ -26,7 +26,7 @@ autofold = true                    # fold each block to a preview by default
 [ai.connections.local]
 provider = "openai_compatible"     # openai_compatible (default), anthropic_compatible, claude_code, codex
 base_url = "http://127.0.0.1:10000/v1"
-model = "Qwen3.8-Flash-Next-oQ4e-mtp"
+model = "Qwen3.8-Flash-Next-oQ4e-mtp"  # left out: the provider's first model
 # api_key_env = "OPENAI_API_KEY"   # name of the variable, never the key itself
 # context_window_fallback = 32000  # used only when the server does not report a window
 
@@ -53,9 +53,12 @@ on it) — and **[ Back to list ]** or `Esc` returns to the list;
 **+ Add connection** adds an OpenAI-compatible one, and
 **[ Delete connection ]** on the page, or `Del` on its row, removes one. A new
 connection is named after its provider until you name it. The model is a
-dropdown: it fills with the connection's models, fetched in the background
-when its page opens, and its last entry, "Enter a model id…", lets you type one
-by hand when the endpoint cannot list them. Text fields edit like every input in termide: the
+dropdown: **Auto — the provider's choice** first, then the connection's
+models, fetched in the background when its page opens, and last "Enter a model
+id…" to type one by hand when the endpoint cannot list them. Auto, a
+connection's model left empty, runs on the first model the provider lists (a
+CLI agent on its own default); a request sent before that list arrives waits
+in the input with a notice. Text fields edit like every input in termide: the
 cursor moves by character and word, `Shift` or a mouse drag selects, and
 `Ctrl+C`/`Ctrl+X`/`Ctrl+V`, `Ctrl+A` and undo work.
 

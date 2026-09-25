@@ -283,7 +283,8 @@ impl SettingsModal {
             PROVIDER => provider_label(&connection.provider),
             BASE_URL => empty_or(&connection.base_url),
             API_KEY_ENV => empty_or(&connection.api_key_env),
-            MODEL => empty_or(&connection.model),
+            MODEL if connection.model.is_empty() => i18n::t().settings_ai_model_auto().to_string(),
+            MODEL => connection.model.clone(),
             CONTEXT_WINDOW => connection.context_window_fallback.map_or_else(
                 || {
                     format!(
@@ -296,6 +297,25 @@ impl SettingsModal {
             DEFAULT => {
                 bool_str(Some(self.config.ai.connection.as_str()) == self.open_connection_name())
             }
+            _ => String::new(),
+        }
+    }
+
+    /// A text field's value as it is edited: the stored text, without the
+    /// placeholder its row shows for an empty or default one.
+    pub(super) fn connection_edit_text(&self, index: usize) -> String {
+        let Some(connection) = self.edited() else {
+            return String::new();
+        };
+        match index {
+            NAME => self.open_connection_name().unwrap_or_default().to_string(),
+            BASE_URL => connection.base_url.clone(),
+            API_KEY_ENV => connection.api_key_env.clone(),
+            MODEL => connection.model.clone(),
+            CONTEXT_WINDOW => connection
+                .context_window_fallback
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
             _ => String::new(),
         }
     }
@@ -468,16 +488,20 @@ impl SettingsModal {
     }
 }
 
-/// The dropdown for a model field: the fetched models (with the current
-/// value kept present), then a "type an id" escape that opens inline editing.
-/// With no fetched models — a CLI provider, or an endpoint that cannot list —
-/// only the current value and the escape show, so typing still works.
+/// The dropdown for a model field: "auto" first — the model left to the
+/// provider, stored as an empty id — then the fetched models (with the
+/// current value kept present), then a "type an id" escape that opens inline
+/// editing. With no fetched models — a CLI provider, or an endpoint that
+/// cannot list — only auto, the current value and the escape show, so typing
+/// still works.
 pub(super) fn model_enum_options(current: &str, model_options: &[String]) -> EnumOptions {
     let mut values: Vec<String> = model_options.to_vec();
     if !current.is_empty() && !values.iter().any(|v| v == current) {
         values.insert(0, current.to_string());
     }
+    values.insert(0, String::new());
     let mut labels: Vec<String> = values.clone();
+    labels[0] = i18n::t().settings_ai_model_auto().to_string();
     values.push(MODEL_TYPE_SENTINEL.to_string());
     labels.push(i18n::t().agent_model_other().to_string());
     let current_index = values.iter().position(|v| v == current);
@@ -700,19 +724,33 @@ mod tests {
         assert_eq!(asked.model, "qwen");
         assert!(modal.take_model_fetch_request().is_none());
 
+        // Auto (left to the provider) comes first.
         let options = modal.connection_enum_options(MODEL).unwrap();
-        assert_eq!(options.values, ["qwen", MODEL_TYPE_SENTINEL]);
+        assert_eq!(options.values, ["", "qwen", MODEL_TYPE_SENTINEL]);
+        assert_eq!(options.labels[0], i18n::t().settings_ai_model_auto());
         modal.set_model_options(vec!["a".into(), "qwen".into()]);
         let options = modal.connection_enum_options(MODEL).unwrap();
-        assert_eq!(options.values, ["a", "qwen", MODEL_TYPE_SENTINEL]);
-        assert_eq!(options.current, Some(1));
+        assert_eq!(options.values, ["", "a", "qwen", MODEL_TYPE_SENTINEL]);
+        assert_eq!(options.current, Some(2));
+        modal.apply_connection_enum(MODEL, "");
+        assert!(modal.config.ai.connections["local"].model.is_empty());
+        assert_eq!(
+            modal.connection_value(MODEL),
+            i18n::t().settings_ai_model_auto()
+        );
+        assert_eq!(
+            modal.connection_enum_options(MODEL).unwrap().current,
+            Some(0)
+        );
 
-        // The escape types an id by hand.
+        // The escape types an id by hand, starting from the stored id rather
+        // than the auto label.
         modal.open_enum_picker(MODEL);
-        modal.enum_picker.as_mut().unwrap().cursor = 2;
+        modal.enum_picker.as_mut().unwrap().cursor = 3;
         focus(&mut modal, ContentRow::Field(MODEL));
         modal.commit_enum_picker();
         assert!(modal.editing);
+        assert_eq!(modal.edit_input.text(), "");
         modal.edit_input.set_text("typed");
         press(&mut modal, KeyCode::Enter);
         assert_eq!(modal.config.ai.connections["local"].model, "typed");

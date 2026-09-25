@@ -1403,6 +1403,15 @@ impl AgentPanel {
             }
             None => text,
         };
+        // A model left to the provider is known once its list arrives; until
+        // then there is nothing to send to, and the text stays to send later.
+        if !self.external && self.model.id.is_empty() {
+            self.notice(
+                termide_i18n::t().agent_notice_model_pending(),
+                NoticeKind::Warn,
+            );
+            return vec![PanelEvent::NeedsRedraw];
+        }
         self.clear_input();
         self.send(text)
     }
@@ -2902,6 +2911,16 @@ impl AgentPanel {
         true
     }
 
+    /// The model as the banner and the chip show it: `auto` while it is left
+    /// to the provider and not known yet.
+    fn model_display(&self) -> String {
+        if self.model.id.is_empty() {
+            "auto".to_string()
+        } else {
+            self.model.id.clone()
+        }
+    }
+
     /// The connection as the banner and the chip show it: its name beside
     /// the protocol.
     fn connection_display(&self) -> String {
@@ -3038,11 +3057,24 @@ impl AgentPanel {
         true
     }
 
-    /// Adopt the active model's real context window from a `list_models`
-    /// result, when it is known and differs. Returns whether it changed.
-    fn adopt_context_window(&mut self, models: &[ModelInfo]) -> bool {
+    /// Adopt what a `list_models` result says: with the model left to the
+    /// provider, its first model — for this session and the next ones the
+    /// panel starts; otherwise the active model's real context window, when
+    /// it is known and differs. Returns whether anything changed.
+    fn adopt_listed_models(&mut self, models: &[ModelInfo]) -> bool {
         if self.is_busy() {
             return false;
+        }
+        if self.model.id.is_empty() {
+            let Some(first) = models.first() else {
+                return false;
+            };
+            let adopted = self.switch_model(&first.id, first.context_window);
+            if adopted && self.configured_model.id.is_empty() {
+                self.configured_model.id = self.model.id.clone();
+                self.configured_model.context_window = self.model.context_window;
+            }
+            return adopted;
         }
         let Some(window) = models
             .iter()
@@ -4111,7 +4143,7 @@ impl AgentPanel {
                 self.connections.is_some().then_some(CONNECTION_ACTION),
             ),
             (
-                field("model", self.model.id.clone(), true),
+                field("model", self.model_display(), true),
                 Some(MODEL_ACTION),
             ),
             (field("agent", self.agent.clone(), true), Some(AGENT_ACTION)),
@@ -5765,7 +5797,7 @@ impl Panel for AgentPanel {
         match self.context_probe.as_ref().map(Receiver::try_recv) {
             Some(Ok(Ok(models))) => {
                 self.context_probe = None;
-                changed |= self.adopt_context_window(&models);
+                changed |= self.adopt_listed_models(&models);
             }
             Some(Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected)) => {
                 self.context_probe = None;
@@ -6033,7 +6065,7 @@ impl Panel for AgentPanel {
             segments.extend([
                 sep(),
                 StatusSegment::clickable("Model: ", SegmentKind::Label, MODEL_ACTION),
-                StatusSegment::clickable(self.model.id.clone(), SegmentKind::Active, MODEL_ACTION),
+                StatusSegment::clickable(self.model_display(), SegmentKind::Active, MODEL_ACTION),
             ]);
         }
         segments.push(StatusSegment::spacer());
@@ -6858,10 +6890,41 @@ mod tests {
             id: panel.model.id.clone(),
             context_window: Some(48_000),
         }];
-        assert!(panel.adopt_context_window(&models));
+        assert!(panel.adopt_listed_models(&models));
         assert_eq!(panel.model.context_window, 48_000);
         // A second identical report is a no-op.
-        assert!(!panel.adopt_context_window(&models));
+        assert!(!panel.adopt_listed_models(&models));
+    }
+
+    #[test]
+    fn a_model_left_to_the_provider_is_its_first_listed() {
+        let mut base = setup(vec![reply("ok")]);
+        base.model.id = String::new();
+        let mut panel = AgentPanel::new(base);
+        assert_eq!(panel.model_display(), "auto");
+        // Before the list arrives there is nothing to send to: the text stays.
+        type_text(&mut panel, "hello");
+        panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(panel.input_text(), "hello");
+        assert!(panel.transcript.items().iter().any(|item| matches!(
+            item,
+            Item::Notice { text, .. } if text == termide_i18n::t().agent_notice_model_pending()
+        )));
+        let models = vec![
+            ModelInfo {
+                id: "first".into(),
+                context_window: Some(64_000),
+            },
+            ModelInfo {
+                id: "second".into(),
+                context_window: None,
+            },
+        ];
+        assert!(panel.adopt_listed_models(&models));
+        assert_eq!(panel.model.id, "first");
+        assert_eq!(panel.model.context_window, 64_000);
+        // A new session in the panel starts on it too.
+        assert_eq!(panel.configured_model.id, "first");
     }
 
     #[test]
@@ -6873,7 +6936,7 @@ mod tests {
             id: panel.model.id.clone(),
             context_window: None,
         }];
-        assert!(!panel.adopt_context_window(&models));
+        assert!(!panel.adopt_listed_models(&models));
         assert_eq!(panel.model.context_window, 1000);
     }
 

@@ -190,13 +190,6 @@ impl Connection {
     pub fn is_cli(&self) -> bool {
         is_cli_provider(&self.provider)
     }
-
-    /// Whether a session can run on it: a CLI agent brings its own model, an
-    /// endpoint needs one named.
-    #[must_use]
-    pub fn is_usable(&self) -> bool {
-        self.is_cli() || !self.model.trim().is_empty()
-    }
 }
 
 /// `[ai.web]`: how the agent's web tools reach the web.
@@ -1073,17 +1066,6 @@ mod ai_settings_tests {
         );
         // What it leaves out reads back as the default.
         assert_eq!(toml::from_str::<Connection>(&text).unwrap(), local);
-    }
-
-    #[test]
-    fn a_connection_is_usable_with_a_model_or_as_a_cli_agent() {
-        let mut connection = Connection::default();
-        assert!(!connection.is_usable());
-        connection.provider = "codex".into();
-        assert!(connection.is_usable());
-        connection.provider = "openai_compatible".into();
-        connection.model = "m".into();
-        assert!(connection.is_usable());
     }
 
     #[test]
