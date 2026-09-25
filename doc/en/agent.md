@@ -148,17 +148,20 @@ streaming reasoning, a running tool call with its live output — is always show
 unfolded and folds only once it finishes. Your
 message reads as plain text on a faint background; the reasoning, the system
 prompt and a tool's output are dim text, except an edit's diff, which is
-coloured the way the Git diff panel colours one. A shell call reads as its
-command (dim) behind the `$ ` prompt, wrapped to the width. A file tool reads as its glyph and a
-localized action in the same accent, then its path (`< Read src/main.rs`); a
-web tool likewise, with the URL or the query (`↓ Fetch https://docs.rs`,
-`? Search ratatui scrollbar`); any other tool as its name and a summary. The reasoning is its own
-block above the answer, and its text wraps to the width. Only the system prompt
+coloured the way the Git diff panel colours one. Every step opens with its type
+glyph and a localized action in the same accent, then its subject: the
+reasoning as `@ Thinking` and its text, a shell call as `$ Running` and its
+command (dim, wrapped to the width), a file tool with its path
+(`< Reading src/main.rs`, `> Writing`, `± Editing`), a web tool with the URL or
+the query (`↓ Fetching https://docs.rs`, `? Searching ratatui scrollbar`); any
+other tool as its name and a summary. The reasoning is its own block above the
+answer, and its text wraps to the width. Only the system prompt
 opens with a dim dashed rule that sets it apart from the block before; an
 annotation has none, its glyph marks it. A blank line follows your message and another precedes the answer; the
 reasoning and tool calls in between stack with no gap. A folded block is marked
-with `▸`, an unfolded one with `▾`, right after its type glyph (`@ ▸`, `$ ▸`,
-`# ▸`) or a file tool's action (`< Read ▸ src/main.rs`).
+with `▸`, an unfolded one with `▾`, right after the step's action
+(`@ Thinking ▸`, `$ Running ▸`, `< Reading ▸ src/main.rs`) or the system
+prompt's `#` (`# ▸`).
 
 While a run works, a run clock sits right-aligned under its last block: an
 animated `✽` and the time since the request was sent. It has its own glyph

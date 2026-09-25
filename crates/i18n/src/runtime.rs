@@ -447,6 +447,7 @@ impl Translation for RuntimeTranslation {
         agent_unit_hours,
         agent_unit_days,
         agent_unit_tok_per_sec,
+        agent_tool_bash,
         agent_tool_read,
         agent_tool_write,
         agent_tool_edit,

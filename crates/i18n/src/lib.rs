@@ -619,7 +619,7 @@ pub trait Translation: Send + Sync {
     fn agent_no_prompts(&self) -> &str;
     /// Agent panel: undo the last request (its files and messages).
     fn agent_undo(&self) -> &str;
-    /// Agent transcript: the folded-thinking header (the reasoning block).
+    /// Agent transcript: the action word after a reasoning block's `@`.
     fn agent_thinking(&self) -> &str;
     /// Agent transcript: one-line summary of a folded thinking block.
     fn agent_thought_chars(&self, count: usize) -> String;
@@ -637,6 +637,8 @@ pub trait Translation: Send + Sync {
     fn agent_unit_days(&self) -> &str;
     /// Agent transcript: tokens-per-second unit in a block's meta line.
     fn agent_unit_tok_per_sec(&self) -> &str;
+    /// Agent transcript: the action verb after a shell call's `$`.
+    fn agent_tool_bash(&self) -> &str;
     /// Agent transcript: the action verb for a `read` tool call.
     fn agent_tool_read(&self) -> &str;
     /// Agent transcript: the action verb for a `write` tool call.

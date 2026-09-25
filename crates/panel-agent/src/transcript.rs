@@ -856,6 +856,16 @@ fn shell_command(call: &ToolCall) -> Option<String> {
     })
 }
 
+/// A shell call's type glyph and its localized action, in the accent: `$
+/// Running `.
+fn shell_prefix(colors: &ThemeColors) -> Vec<Span<'static>> {
+    let accent = Style::default().fg(colors.info);
+    vec![
+        Span::styled("$ ", accent),
+        Span::styled(format!("{} ", termide_i18n::t().agent_tool_bash()), accent),
+    ]
+}
+
 /// The `$ <command>` headline of an unfolded shell call, the fold `marker`
 /// (if any) after the `$`, each command line wrapped under the command rather
 /// than clipped.
@@ -866,7 +876,7 @@ fn command_lines(
     colors: &ThemeColors,
 ) -> Vec<Line<'static>> {
     let dim = Style::default().fg(colors.disabled);
-    let mut prefix = vec![Span::styled("$ ", Style::default().fg(colors.info))];
+    let mut prefix = shell_prefix(colors);
     prefix.extend(marker);
     let indent: usize = prefix.iter().map(|s| width_of(&s.content)).sum();
     let avail = (width as usize).saturating_sub(indent);
@@ -1296,7 +1306,11 @@ fn render_body(
             if reasoning.is_empty() {
                 return Vec::new();
             }
-            let mut head = vec![Span::styled("@ ", accent)];
+            // The `@` glyph and the block's localized action, like a tool's.
+            let mut head = vec![
+                Span::styled("@ ", accent),
+                Span::styled(format!("{} ", t.agent_thinking()), accent),
+            ];
             if foldable {
                 head.push(Span::styled(if collapsed { "▸ " } else { "▾ " }, dim));
             }
@@ -1453,7 +1467,7 @@ fn render_body(
                 // call's first command line — with the meta at the row's end.
                 let head = match shell_command(call) {
                     Some(command) => {
-                        let mut head = vec![Span::styled("$ ", Style::default().fg(colors.info))];
+                        let mut head = shell_prefix(colors);
                         head.extend(marker);
                         let first = command.lines().next().unwrap_or("").to_string();
                         head.push(Span::styled(first, dim));
@@ -1742,7 +1756,9 @@ mod tests {
         );
         // The shell headline uses the `$` prefix and the command.
         assert!(
-            lines.iter().any(|l| l.starts_with("$ ▸ cargo test")),
+            lines
+                .iter()
+                .any(|l| l.starts_with("$ Running ▸ cargo test")),
             "shell headline: {lines:?}"
         );
     }
@@ -1785,11 +1801,13 @@ mod tests {
         // `▸ @` marker; the answer shows behind its own accent mark.
         assert!(transcript.finish_thinking("12:00:00", None));
         let lines = text_of(transcript.lines(40, &colors, false));
-        assert!(lines.iter().any(|l| l.starts_with("@ ▸ mulling this")));
+        assert!(lines
+            .iter()
+            .any(|l| l.starts_with("@ Thinking ▸ mulling this")));
         assert!(!lines.iter().any(|l| l.contains("second line")));
         assert!(lines.iter().all(|l| !l.contains("thought for")));
         assert!(lines.iter().any(|l| l.contains("› Looking at")));
-        assert!(lines.iter().any(|l| l.contains("< Read main.rs")));
+        assert!(lines.iter().any(|l| l.contains("< Reading main.rs")));
         assert_eq!(transcript.line_count(), lines.len());
         assert_eq!(transcript.item_at_line(0), Some(0));
         assert_eq!(transcript.item_at_line(lines.len() - 1), Some(3));
@@ -1806,7 +1824,7 @@ mod tests {
             }
         }));
         let lines = text_of(transcript.lines(40, &colors, false));
-        assert!(lines.iter().any(|l| l.starts_with("< Read ▸ main.rs")));
+        assert!(lines.iter().any(|l| l.starts_with("< Reading ▸ main.rs")));
         assert!(!lines.iter().any(|l| l.contains("line ")));
         assert!(transcript.toggle_expanded(3));
         let lines = text_of(transcript.lines(40, &colors, false));
@@ -1878,7 +1896,7 @@ mod tests {
         // Its meta shares the headline row.
         assert!(lines
             .iter()
-            .any(|l| l.starts_with("$ echo hi") && l.contains("🕒") && !l.contains('✓')));
+            .any(|l| l.starts_with("$ Running echo hi") && l.contains("🕒") && !l.contains('✓')));
         assert!(lines.iter().any(|l| l.contains("› the answer")));
         // No small block folds on request (tool 0, answer 1).
         assert!(!transcript.toggle_expanded(0));
@@ -1898,16 +1916,21 @@ mod tests {
             at: String::new(),
             duration_ms: None,
         });
-        let lines = text_of(transcript.lines(20, &colors, false));
+        let lines = text_of(transcript.lines(30, &colors, false));
         // No row is clipped: every one fits, continuation rows indent under
-        // the `$`, and the rows read back as the command.
-        assert!(lines.iter().all(|l| width_of(l) <= 20), "{lines:?}");
+        // the command, past `$ Running `, and the rows read back as it.
+        assert!(lines.iter().all(|l| width_of(l) <= 30), "{lines:?}");
         // A tool call has no dividing rule above it.
-        assert!(lines[0].starts_with("$ cargo test"));
-        assert!(lines[1].starts_with("  "));
+        assert!(lines[0].starts_with("$ Running cargo test"), "{lines:?}");
+        let indent = " ".repeat(width_of("$ Running "));
+        assert!(lines[1].starts_with(&indent));
         let joined: String = lines
             .iter()
-            .map(|l| l.strip_prefix("$ ").or(l.strip_prefix("  ")).unwrap())
+            .map(|l| {
+                l.strip_prefix("$ Running ")
+                    .or(l.strip_prefix(indent.as_str()))
+                    .unwrap()
+            })
             .collect();
         assert_eq!(joined, command);
     }
@@ -1930,13 +1953,17 @@ mod tests {
         // Collapsed: the first command line behind the marker, nothing else.
         let lines = text_of(transcript.lines(40, &colors, false));
         assert_eq!(lines.len(), 1, "{lines:?}");
-        assert!(lines[0].starts_with("$ ▸ echo 1"), "{lines:?}");
+        assert!(lines[0].starts_with("$ Running ▸ echo 1"), "{lines:?}");
         assert!(transcript.toggle_expanded(0));
         let lines = text_of(transcript.lines(40, &colors, false));
         assert!(lines.iter().any(|l| l.trim() == "echo 9"));
-        assert!(lines[0].starts_with("$ ▾ echo 1"));
-        // Continuation lines align under the command, past the marker and `$`.
-        assert!(lines[1].starts_with("    echo 2"), "{lines:?}");
+        assert!(lines[0].starts_with("$ Running ▾ echo 1"));
+        // Continuation lines align under the command, past `$ Running ▾ `.
+        let indent = " ".repeat(width_of("$ Running ▾ "));
+        assert!(
+            lines[1].starts_with(&format!("{indent}echo 2")),
+            "{lines:?}"
+        );
     }
 
     #[test]
@@ -1946,7 +1973,10 @@ mod tests {
         transcript.stream_thinking("a quick thought\nand a second one");
         let lines = text_of(transcript.lines(60, &colors, false));
         // Streaming: all of it, no marker, no dividing rule.
-        assert!(lines[0].starts_with("@ a quick thought"), "{lines:?}");
+        assert!(
+            lines[0].starts_with("@ Thinking a quick thought"),
+            "{lines:?}"
+        );
         assert!(lines.iter().any(|l| l.contains("second one")));
         assert!(lines.iter().all(|l| !l.starts_with('╌')));
         let cost = Cost {
@@ -1959,13 +1989,19 @@ mod tests {
         // Finished: the first line with the turn's total time at the row's end.
         let lines = text_of(transcript.lines(60, &colors, false));
         assert_eq!(lines.len(), 1, "{lines:?}");
-        assert!(lines[0].starts_with("@ ▸ a quick thought"), "{lines:?}");
+        assert!(
+            lines[0].starts_with("@ Thinking ▸ a quick thought"),
+            "{lines:?}"
+        );
         assert!(lines[0].contains("🕒 5"), "{lines:?}");
         assert!(!lines[0].contains("⏫") && !lines[0].contains("✍"));
         // Unfolded: the whole text and the full cost lines.
         assert!(transcript.toggle_expanded(0));
         let lines = text_of(transcript.lines(60, &colors, false));
-        assert!(lines[0].starts_with("@ ▾ a quick thought"), "{lines:?}");
+        assert!(
+            lines[0].starts_with("@ Thinking ▾ a quick thought"),
+            "{lines:?}"
+        );
         assert!(lines.iter().any(|l| l.contains("second one")));
         assert!(lines.iter().any(|l| l.contains("↑512")));
     }
@@ -1979,7 +2015,12 @@ mod tests {
         let lines: Vec<&str> = lines.iter().map(|l| l.trim_end()).collect();
         assert_eq!(
             lines,
-            vec!["@ first step", "  second step", "", "  after a gap"]
+            vec![
+                "@ Thinking first step",
+                "           second step",
+                "",
+                "           after a gap"
+            ]
         );
     }
 
@@ -2015,14 +2056,14 @@ mod tests {
             .is_some_and(|l| l.trim().is_empty() && !l.is_empty()));
         // A folded step is its single row, the first row included.
         assert_eq!(rows(1).len(), 1);
-        assert!(rows(1)[0].starts_with("@ ▸ a thought"));
+        assert!(rows(1)[0].starts_with("@ Thinking ▸ a thought"));
         assert_eq!(rows(2).len(), 1);
-        assert!(rows(2)[0].starts_with("$ ▸ ls"));
+        assert!(rows(2)[0].starts_with("$ Running ▸ ls"));
         // Unfolded, the headline row is part of it too.
         assert!(transcript.toggle_expanded(2));
         let lines = text_of(transcript.lines(40, &colors, false));
         let (first, _) = transcript.content_lines_of(2).unwrap();
-        assert!(lines[first].starts_with("$ ▾ ls"), "{lines:?}");
+        assert!(lines[first].starts_with("$ Running ▾ ls"), "{lines:?}");
         // The answer without the blank line above it.
         let (first, _) = transcript.content_lines_of(3).unwrap();
         assert!(lines[first].starts_with("› done"), "{lines:?}");
@@ -2111,7 +2152,7 @@ mod tests {
         assert_eq!(lines.len(), 1);
         let text = text_of(&lines)[0].clone();
         assert!(
-            text.starts_with("$ ▸ exit 1") && !text.contains('✗'),
+            text.starts_with("$ Running ▸ exit 1") && !text.contains('✗'),
             "{text}"
         );
         let command = lines[0]
@@ -2142,13 +2183,13 @@ mod tests {
         assert!(transcript.finish_thinking("12:00:00", None));
         // Unfolded it is a single row, so there is nothing to fold.
         let lines = text_of(transcript.lines(60, &colors, false));
-        assert_eq!(lines, vec!["@ a quick thought".to_string()]);
+        assert_eq!(lines, vec!["@ Thinking a quick thought".to_string()]);
         assert!(!transcript.toggle_expanded(0));
         assert!(!transcript.any_expanded());
         // Narrow enough to wrap, the same thought folds to its first row.
-        let lines = text_of(transcript.lines(10, &colors, false));
+        let lines = text_of(transcript.lines(20, &colors, false));
         assert_eq!(lines.len(), 1, "{lines:?}");
-        assert!(lines[0].starts_with("@ ▸ "), "{lines:?}");
+        assert!(lines[0].starts_with("@ Thinking ▸ "), "{lines:?}");
         assert!(transcript.toggle_expanded(0));
     }
 
@@ -2177,7 +2218,7 @@ mod tests {
         });
         let lines = text_of(transcript.lines(40, &colors, false));
         assert_eq!(lines.len(), 9, "{lines:?}");
-        assert_eq!(lines[0].trim_end(), "$ cargo build");
+        assert_eq!(lines[0].trim_end(), "$ Running cargo build");
         assert!(lines.iter().any(|l| l.trim() == "step 1"));
         assert!(!transcript.toggle_expanded(0));
         // Finished, it folds to its headline with the meta at the row's end.
@@ -2198,7 +2239,7 @@ mod tests {
         });
         let lines = text_of(transcript.lines(40, &colors, false));
         assert_eq!(lines.len(), 1, "{lines:?}");
-        assert!(lines[0].starts_with("$ ▸ cargo build"), "{lines:?}");
+        assert!(lines[0].starts_with("$ Running ▸ cargo build"), "{lines:?}");
         assert!(lines[0].contains("🕒 3s") && !lines[0].contains('✓'));
         assert!(width_of(&lines[0]) <= 40);
         // Too long for the row, the headline is clipped, never the meta.
@@ -2374,7 +2415,7 @@ mod tests {
         // took (`🕒`) and no status glyph.
         assert!(lines
             .iter()
-            .any(|l| l.contains("$ ▸ exit 1") && l.contains("🕒") && !l.contains('✗')));
+            .any(|l| l.contains("$ Running ▸ exit 1") && l.contains("🕒") && !l.contains('✗')));
     }
 
     #[test]
