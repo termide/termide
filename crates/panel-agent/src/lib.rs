@@ -1715,9 +1715,13 @@ impl AgentPanel {
                         }
                         self.session_input += assistant.usage.input;
                         self.session_output += assistant.usage.output;
+                        // A call that failed before its first token (no network,
+                        // say) went through no prefill or generation: it has
+                        // no cost to show, only its time and failure.
                         let cost = self
                             .activity
                             .as_ref()
+                            .filter(|a| a.first_token.is_some() || assistant.usage.total() > 0)
                             .map(|a| a.cost(assistant.usage.input, assistant.usage.output));
                         let at = now_hms();
                         let error = assistant.error_message.clone();
@@ -7446,6 +7450,29 @@ mod tests {
         click(&mut panel, y);
         assert!(panel.pending.is_none());
         assert_eq!(worker.join().unwrap(), PermissionAnswer::AllowSession);
+    }
+
+    #[test]
+    fn a_call_that_fails_before_its_first_token_shows_no_cost() {
+        let mut panel = AgentPanel::new(setup(vec![]));
+        panel.apply(AgentEvent::AgentStart);
+        panel.apply(AgentEvent::MessageStart);
+        let failed = AssistantMessage::failed("p", "m", StopReason::Error, "connection refused");
+        panel.apply(AgentEvent::MessageEnd(Message::Assistant(failed)));
+        let answer = panel
+            .transcript
+            .items()
+            .iter()
+            .find(|item| matches!(item, Item::Assistant { .. }))
+            .expect("the failure shows on an answer block");
+        assert!(matches!(
+            answer,
+            Item::Assistant {
+                cost: None,
+                error: Some(_),
+                ..
+            }
+        ));
     }
 
     #[test]
