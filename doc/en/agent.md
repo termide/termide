@@ -299,7 +299,9 @@ behind your back.
 A large paste (more than five lines or 2000 characters) is held out of the
 prompt box as a short `[#1 pasted 40 lines]` placeholder instead of flooding
 it; the full text is spliced back in place of the placeholder when you send,
-so the model still gets all of it. A smaller paste goes in as it is.
+so the model still gets all of it. Pasting the same block again unmasks it: the
+placeholder gives way to the full text, to read or edit in place. A smaller
+paste goes in as it is.
 
 **Model** asks the endpoint for the models it serves and lists them, the
 current one marked `●`; the last entry lets you type an id instead, which is

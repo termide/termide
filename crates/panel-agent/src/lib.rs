@@ -995,6 +995,17 @@ impl AgentPanel {
             self.input_area_mut().insert_str(text);
             return;
         }
+        // Pasting the same block again unmasks it: the placeholder the first
+        // paste left gives way to the full text, to read or edit in place.
+        let input = self.input_text();
+        if let Some(last) = self.pastes.last() {
+            if last.text == text && input.contains(&last.placeholder) {
+                let unmasked = input.replacen(&last.placeholder, text, 1);
+                self.pastes.pop();
+                self.set_input(&unmasked);
+                return;
+            }
+        }
         self.paste_seq += 1;
         let label = if lines > 1 {
             format!("{lines} lines")
@@ -6477,6 +6488,21 @@ mod tests {
         assert_eq!(panel.input_rows(40, 60), 12);
         // A 16-row one stops it at 8, and the prompt scrolls inside.
         assert_eq!(panel.input_rows(16, 60), 8);
+    }
+
+    #[test]
+    fn pasting_the_same_block_twice_unmasks_it() {
+        let mut panel = panel(vec![]);
+        let block = "1\n2\n3\n4\n5\n6";
+        panel.paste(block);
+        assert_eq!(panel.input_text(), "[#1 pasted 6 lines]");
+        // The same text again: the placeholder turns into the text itself.
+        panel.paste(block);
+        assert_eq!(panel.input_text(), block);
+        assert!(panel.pastes.is_empty());
+        // Another block is masked as before.
+        panel.paste("a\nb\nc\nd\ne\nf");
+        assert!(panel.input_text().ends_with("[#2 pasted 6 lines]"));
     }
 
     #[test]
