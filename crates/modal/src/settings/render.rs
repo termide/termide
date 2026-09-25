@@ -49,6 +49,17 @@ fn label_column_width(tab: SettingsTab, area_width: u16) -> usize {
 }
 
 /// Truncate `s` to at most `max_chars` Unicode scalar values, safe for UTF-8 slicing.
+/// `value` cut to `max` display columns with a trailing `…` when it does not
+/// fit. Widths, not bytes: a byte cut lands inside a multi-byte character
+/// (a Cyrillic label, say) and panics.
+fn fit_width(value: String, max: usize) -> String {
+    if max > 2 {
+        termide_ui::path_utils::truncate_right(&value, max)
+    } else {
+        value
+    }
+}
+
 fn truncate_str(s: &str, max_chars: usize) -> &str {
     if let Some((idx, _)) = s.char_indices().nth(max_chars) {
         &s[..idx]
@@ -307,11 +318,7 @@ impl SettingsModal {
                         }
                     };
 
-                    let display_value = if value.len() > max_value_width && max_value_width > 2 {
-                        format!("{}…", &value[..max_value_width - 1])
-                    } else {
-                        value
-                    };
+                    let display_value = fit_width(value, max_value_width);
                     buf.set_string(value_x as u16, y, &display_value, value_style);
                 }
                 ContentRow::LspAddServer => {
@@ -348,11 +355,7 @@ impl SettingsModal {
                             Style::default().fg(theme.disabled)
                         };
                         let max_cmd = max_value_width.saturating_sub(12);
-                        let display_cmd = if cmd_info.len() > max_cmd && max_cmd > 2 {
-                            format!("{}…", &cmd_info[..max_cmd - 1])
-                        } else {
-                            cmd_info
-                        };
+                        let display_cmd = fit_width(cmd_info, max_cmd);
                         buf.set_string(value_x as u16, y, &display_cmd, cmd_style);
 
                         let del_label = if is_focused { "[Del]" } else { "" };
@@ -405,11 +408,7 @@ impl SettingsModal {
             } else {
                 self.lsp_edit_fields[i].clone()
             };
-            let display_val = if value.len() > max_val && max_val > 2 {
-                format!("{}…", &value[..max_val - 1])
-            } else {
-                value
-            };
+            let display_val = fit_width(value, max_val);
             let val_style = if is_focused {
                 Style::default().fg(theme.accented_fg)
             } else {
@@ -514,11 +513,7 @@ impl SettingsModal {
                     Style::default().fg(theme.accented_fg)
                 };
                 let max_val = (area.x + area.width).saturating_sub(val_x) as usize;
-                let display_val = if val.len() > max_val && max_val > 2 {
-                    format!("{}…", &val[..max_val - 1])
-                } else {
-                    val
-                };
+                let display_val = fit_width(val, max_val);
                 buf.set_string(val_x, y, &display_val, val_style);
             }
         }
@@ -692,5 +687,16 @@ mod label_column_tests {
                 "area {area}: column {width} leaves no gap after a {widest}-column label"
             );
         }
+    }
+
+    #[test]
+    fn a_long_value_is_cut_by_width_not_bytes() {
+        // A byte cut at column 40 would land inside a Cyrillic letter.
+        let value = "< ask — спрашивать перед каждым изменением и командой >".to_string();
+        let cut = fit_width(value.clone(), 40);
+        assert!(cut.ends_with('…'), "{cut}");
+        assert!(UnicodeWidthStr::width(cut.as_str()) <= 40, "{cut}");
+        // A value that fits is left as it is.
+        assert_eq!(fit_width("ask".into(), 40), "ask");
     }
 }
