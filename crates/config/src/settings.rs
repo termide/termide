@@ -123,10 +123,10 @@ pub struct AiSettings {
     #[serde(default)]
     pub compaction: termide_agent_core::CompactionPolicy,
 
-    /// Fold each block in the transcript to a preview by default (the
-    /// answer still shows in full); off shows everything expanded.
-    #[serde(default = "agent_defaults::autofold")]
-    pub autofold: bool,
+    /// When the transcript folds reasoning and tool calls to their one-line
+    /// headline (the answer always shows in full).
+    #[serde(default)]
+    pub fold_blocks: FoldBlocks,
 
     /// The web tools (`fetch`, `web_search`).
     #[serde(default)]
@@ -193,6 +193,38 @@ impl Connection {
     #[must_use]
     pub fn is_cli(&self) -> bool {
         is_cli_provider(&self.provider)
+    }
+}
+
+/// `[ai] fold_blocks`: when reasoning and tool calls fold to one line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FoldBlocks {
+    /// Folded from the start, while they still run.
+    #[default]
+    Immediately,
+    /// In full while they run, folded once they finish.
+    OnFinish,
+    /// Never folded.
+    Never,
+}
+
+impl FoldBlocks {
+    /// Every choice, in the order the settings modal offers them.
+    pub const ALL: [FoldBlocks; 3] = [
+        FoldBlocks::Immediately,
+        FoldBlocks::OnFinish,
+        FoldBlocks::Never,
+    ];
+
+    /// The spelling configuration uses.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            FoldBlocks::Immediately => "immediately",
+            FoldBlocks::OnFinish => "on-finish",
+            FoldBlocks::Never => "never",
+        }
     }
 }
 
@@ -320,7 +352,7 @@ impl Default for AiSettings {
             prefer_reasoning: agent_defaults::reasoning(),
             permissions: agent_defaults::permissions(),
             compaction: termide_agent_core::CompactionPolicy::default(),
-            autofold: agent_defaults::autofold(),
+            fold_blocks: FoldBlocks::default(),
             web: WebSettings::default(),
         }
     }
@@ -729,9 +761,6 @@ mod agent_defaults {
             mode: rules.mode,
             tools: rules.tools,
         })
-    }
-    pub fn autofold() -> bool {
-        true
     }
 }
 

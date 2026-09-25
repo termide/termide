@@ -45,7 +45,7 @@ use termide_ui::{
     FieldEdit, InputBar, ScrollBar,
 };
 
-pub use transcript::{Item, NoticeKind, Transcript};
+pub use transcript::{FoldMode, Item, NoticeKind, Transcript};
 
 /// A paste past either bound is held as a short placeholder rather than
 /// inlined, so a big block does not swamp the prompt box.
@@ -219,8 +219,9 @@ pub struct AgentPanelSetup {
     pub session_dir: Option<PathBuf>,
     /// Session to start in; `None` creates one in `session_dir`.
     pub session: Option<Session>,
-    /// Fold each block to a preview by default (the answer always shows).
-    pub autofold: bool,
+    /// When reasoning and tool calls fold to their headline (the answer
+    /// always shows).
+    pub fold: FoldMode,
 }
 
 /// Records an "allow always" rule outside the panel (in the project config).
@@ -572,8 +573,8 @@ pub struct AgentPanel {
     goal_prompt: GoalPrompt,
     /// The handoff-brief texts, passed to the agent for `/handoff`.
     handoff_prompt: HandoffPrompt,
-    /// Fold blocks to a preview by default; passed to each transcript.
-    autofold: bool,
+    /// When blocks fold; passed to each transcript.
+    fold: FoldMode,
     /// The worker still has the prompt of the other plan-ness: a mode
     /// switch during a run could not update it, `AgentEnd` retries.
     prompt_stale: bool,
@@ -766,7 +767,7 @@ impl AgentPanel {
             setup.hooks.as_ref(),
             backend.as_ref(),
             checkpoints.clone(),
-            setup.autofold,
+            setup.fold,
             session.as_ref(),
             &blocked,
         );
@@ -832,7 +833,7 @@ impl AgentPanel {
             plan_prompt: setup.plan_prompt,
             goal_prompt: setup.goal_prompt,
             handoff_prompt: setup.handoff_prompt,
-            autofold: setup.autofold,
+            fold: setup.fold,
             prompt_stale: false,
             shown_system: String::new(),
             persist_rule: setup.persist_rule,
@@ -956,7 +957,7 @@ impl AgentPanel {
             self.hooks.as_ref(),
             self.backend.as_ref(),
             self.checkpoints.clone(),
-            self.autofold,
+            self.fold,
             session.as_ref(),
             &blocked,
         );
@@ -4749,7 +4750,7 @@ fn spawn_runtime(
     extra_hooks: Option<&HooksFactory>,
     backend: Option<&BackendFactory>,
     checkpoints: Option<Arc<Mutex<CheckpointStore>>>,
-    autofold: bool,
+    fold: FoldMode,
     session: Option<&Session>,
     blocked: &Blocked,
 ) -> Spawned {
@@ -4772,7 +4773,7 @@ fn spawn_runtime(
     }
 
     let mut transcript = Transcript::default();
-    transcript.set_autofold(autofold);
+    transcript.set_fold(fold);
     let history = session
         .map(|s| s.context_messages_with_times(compaction_prompts))
         .unwrap_or_default();
@@ -6361,7 +6362,7 @@ mod tests {
             persist_rule: None,
             session_dir: None,
             session: None,
-            autofold: true,
+            fold: FoldMode::OnFinish,
         }
     }
 

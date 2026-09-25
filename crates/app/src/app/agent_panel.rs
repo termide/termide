@@ -22,7 +22,7 @@ use termide_agent_web::{web_tools, Web, WebConfig};
 use termide_config::{AiSettings, Connection, WebSettings};
 use termide_panel_agent::{
     AgentCatalog, AgentEntry, AgentPanel, AgentPanelSetup, AgentProfile, BackendFactory,
-    ConnectionCatalog, ConnectionChoice, ConnectionEntry, HooksFactory,
+    ConnectionCatalog, ConnectionChoice, ConnectionEntry, FoldMode, HooksFactory,
 };
 
 use super::App;
@@ -747,7 +747,11 @@ fn agent_setup(
         plan_prompt,
         goal_prompt,
         handoff_prompt,
-        autofold: settings.autofold,
+        fold: match settings.fold_blocks {
+            termide_config::FoldBlocks::Immediately => FoldMode::Immediately,
+            termide_config::FoldBlocks::OnFinish => FoldMode::OnFinish,
+            termide_config::FoldBlocks::Never => FoldMode::Never,
+        },
         persist_rule: Some(persist_rule),
         session_dir,
         session,

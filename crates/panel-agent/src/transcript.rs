@@ -36,9 +36,22 @@ fn fold_split(total: usize) -> (usize, usize) {
     (hidden, tail_start)
 }
 
+/// When reasoning and tool calls fold to their one-line headline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FoldMode {
+    /// Folded from the start, while they are still running.
+    #[default]
+    Immediately,
+    /// In full while they run, folded once they finish.
+    OnFinish,
+    /// Never folded; every block shows in full.
+    Never,
+}
+
 /// Whether `item` is still being produced: reasoning that is streaming, or a
-/// tool call that has not returned. A live block always shows in full,
-/// whatever its fold flag says; the flag takes effect once it finishes.
+/// tool call that has not returned. Unless blocks fold immediately, a live
+/// block shows in full whatever its fold flag says; the flag takes effect
+/// once it finishes.
 fn is_live(item: &Item) -> bool {
     match item {
         Item::Thinking { streaming, .. } | Item::Assistant { streaming, .. } => *streaming,
@@ -55,8 +68,11 @@ fn is_live(item: &Item) -> bool {
 /// fold only past
 /// [`FOLD_THRESHOLD`] lines. A block with nothing to hide shows in full and
 /// ignores the collapse flag, so it carries no fold marker.
-fn is_foldable(item: &Item) -> bool {
-    if is_live(item) {
+fn is_foldable(item: &Item, fold: FoldMode) -> bool {
+    if is_live(item)
+        && !(fold == FoldMode::Immediately
+            && matches!(item, Item::Thinking { .. } | Item::Tool { .. }))
+    {
         return false;
     }
     match item {
@@ -66,10 +82,15 @@ fn is_foldable(item: &Item) -> bool {
         // Finished reasoning folds to its first line, so any of it has detail
         // worth hiding: the rest of the text and the full cost lines.
         Item::Thinking { text, .. } => !text.trim().is_empty(),
-        Item::Tool { call, result, .. } => {
-            let output = result
-                .as_ref()
-                .is_some_and(|r| !r.plain_text().trim().is_empty());
+        Item::Tool {
+            call, result, live, ..
+        } => {
+            // A running call's output so far counts too: it folds away when
+            // blocks fold immediately.
+            let output = match result {
+                Some(result) => !result.plain_text().trim().is_empty(),
+                None => live.as_ref().is_some_and(|live| !live.trim().is_empty()),
+            };
             let command = shell_command(call).map_or(0, |c| c.lines().count());
             output || command > 1
         }
@@ -183,11 +204,12 @@ struct Cached {
     lines: Vec<Line<'static>>,
 }
 
+#[derive(Default)]
 pub struct Transcript {
     items: Vec<Item>,
-    /// Whether new blocks fold to a preview by default. Off shows everything
-    /// expanded, the pre-fold behaviour, for users who want it.
-    autofold: bool,
+    /// When reasoning and tool calls fold; `Never` shows everything
+    /// expanded.
+    fold: FoldMode,
     /// Whether each item hides its detail (thinking / full output / the rest
     /// of a long message). Parallel to `items`. The assistant's answer always
     /// shows; collapsing only folds its thinking away.
@@ -204,25 +226,10 @@ pub struct Transcript {
     live_footer: Vec<Line<'static>>,
 }
 
-impl Default for Transcript {
-    fn default() -> Self {
-        Self {
-            items: Vec::new(),
-            autofold: true,
-            collapsed: Vec::new(),
-            cache: Vec::new(),
-            flat: Vec::new(),
-            line_item: Vec::new(),
-            flat_dirty: false,
-            live_footer: Vec::new(),
-        }
-    }
-}
-
 impl Transcript {
-    /// Set whether new blocks fold by default (before any is pushed).
-    pub fn set_autofold(&mut self, autofold: bool) {
-        self.autofold = autofold;
+    /// Set when blocks fold (before any is pushed).
+    pub fn set_fold(&mut self, fold: FoldMode) {
+        self.fold = fold;
     }
 
     #[must_use]
@@ -234,8 +241,8 @@ impl Transcript {
         // Everything folds by default except an annotation (a notice, a run's
         // closing line);
         // an item's primary content still shows, only its detail is hidden.
-        // With autofold off nothing folds.
-        let collapsed = self.autofold && !is_annotation(&item);
+        // Set never to fold, nothing does.
+        let collapsed = self.fold != FoldMode::Never && !is_annotation(&item);
         self.items.push(item);
         self.collapsed.push(collapsed);
         self.cache.push(None);
@@ -591,7 +598,10 @@ impl Transcript {
     fn foldable(&self, index: usize) -> bool {
         match self.cache.get(index) {
             Some(Some(cached)) => cached.foldable,
-            _ => self.items.get(index).is_some_and(is_foldable),
+            _ => self
+                .items
+                .get(index)
+                .is_some_and(|item| is_foldable(item, self.fold)),
         }
     }
 
@@ -662,6 +672,7 @@ impl Transcript {
                 let (lines, foldable) = render_item(
                     &self.items[index],
                     self.collapsed[index],
+                    self.fold,
                     width,
                     colors,
                     is_light,
@@ -1192,11 +1203,12 @@ fn tool_headline(
 fn render_item(
     item: &Item,
     collapsed: bool,
+    fold: FoldMode,
     width: u16,
     colors: &ThemeColors,
     is_light: bool,
 ) -> (Vec<Line<'static>>, bool) {
-    let mut foldable = is_foldable(item);
+    let mut foldable = is_foldable(item, fold);
     // Only reasoning can be foldable yet fit one row unfolded: a foldable tool
     // call has output or a second command line below its headline.
     if foldable && matches!(item, Item::Thinking { .. }) {
@@ -1355,8 +1367,21 @@ fn render_body(
                 head.push(Span::styled(if collapsed { "▸ " } else { "▾ " }, dim));
             }
             if collapsed {
-                let first = reasoning.lines().next().unwrap_or("").to_string();
-                head.push(Span::styled(first, dim));
+                // Still streaming, the headline follows the reasoning: its
+                // latest line, not the first.
+                let streaming = matches!(
+                    item,
+                    Item::Thinking {
+                        streaming: true,
+                        ..
+                    }
+                );
+                let line = if streaming {
+                    reasoning.lines().rev().find(|l| !l.trim().is_empty())
+                } else {
+                    reasoning.lines().next()
+                };
+                head.push(Span::styled(line.unwrap_or("").to_string(), dim));
                 // One `🕒` total, as a tool call shows; unfolded, it splits
                 // into the prefill and generation lines.
                 let meta = cost.as_ref().map_or_else(Vec::new, |cost| {
@@ -1837,6 +1862,7 @@ mod tests {
     fn items_render_and_cache_per_width() {
         let colors = ThemeColors::default();
         let mut transcript = Transcript::default();
+        transcript.set_fold(FoldMode::OnFinish);
         transcript.push(Item::User {
             text: "Fix the bug".into(),
             at: String::new(),
@@ -1923,7 +1949,7 @@ mod tests {
     #[test]
     fn autofold_off_leaves_every_block_expanded() {
         let mut transcript = Transcript::default();
-        transcript.set_autofold(false);
+        transcript.set_fold(FoldMode::Never);
         transcript.push(Item::User {
             text: "hi".into(),
             at: String::new(),
@@ -2050,6 +2076,7 @@ mod tests {
     fn finished_reasoning_folds_to_one_line_without_a_rule() {
         let colors = ThemeColors::default();
         let mut transcript = Transcript::default();
+        transcript.set_fold(FoldMode::OnFinish);
         transcript.stream_thinking("a quick thought\nand a second one");
         let lines = text_of(transcript.lines(60, &colors, false));
         // Streaming: all of it, no marker, no dividing rule.
@@ -2090,6 +2117,7 @@ mod tests {
     fn unfolded_reasoning_keeps_its_line_breaks() {
         let colors = ThemeColors::default();
         let mut transcript = Transcript::default();
+        transcript.set_fold(FoldMode::OnFinish);
         transcript.stream_thinking("first step\nsecond step\n\nafter a gap");
         let lines = text_of(transcript.lines(60, &colors, false));
         let lines: Vec<&str> = lines.iter().map(|l| l.trim_end()).collect();
@@ -2310,9 +2338,35 @@ mod tests {
     }
 
     #[test]
+    fn folding_immediately_keeps_running_blocks_to_one_line() {
+        let colors = ThemeColors::default();
+        let mut transcript = Transcript::default();
+        assert_eq!(transcript.fold, FoldMode::Immediately);
+        transcript.stream_thinking("a first thought\nthe latest one");
+        let lines = text_of(transcript.lines(60, &colors, false));
+        // Streaming reasoning is one row, following its latest line.
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains("▸ the latest one"), "{lines:?}");
+        transcript.push(Item::Tool {
+            call: call("bash", json!({ "command": "cargo build" })),
+            result: None,
+            live: Some("Compiling a\nCompiling b\n".into()),
+            at: String::new(),
+            duration_ms: None,
+            waited_ms: None,
+            waiting: false,
+        });
+        let lines = text_of(transcript.lines(60, &colors, false));
+        // The running call is its headline alone, its output folded away.
+        assert!(lines.iter().any(|l| l.contains("cargo build")), "{lines:?}");
+        assert!(!lines.iter().any(|l| l.contains("Compiling")), "{lines:?}");
+    }
+
+    #[test]
     fn a_running_tool_shows_in_full_then_folds_to_one_line() {
         let colors = ThemeColors::default();
         let mut transcript = Transcript::default();
+        transcript.set_fold(FoldMode::OnFinish);
         transcript.push(Item::Tool {
             call: call("bash", json!({ "command": "cargo build" })),
             result: None,
@@ -2374,7 +2428,7 @@ mod tests {
     fn an_edit_result_is_colored_like_a_diff() {
         let colors = ThemeColors::default();
         let mut transcript = Transcript::default();
-        transcript.set_autofold(false);
+        transcript.set_fold(FoldMode::Never);
         let body = "Edited a.rs (1 replacement).\n\n--- a/a.rs\n+++ b/a.rs\n\
                     @@ -1,2 +1,2 @@\n keep\n-old\n+new\n--- dashes\n";
         transcript.push(Item::Tool {

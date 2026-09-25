@@ -202,7 +202,7 @@ pub(super) fn fields_for_tab(tab: SettingsTab) -> Vec<FieldDescriptor> {
             },
             FieldDescriptor {
                 label: t.settings_agent_autofold(),
-                field_type: FieldType::Bool,
+                field_type: FieldType::Enum,
             },
             FieldDescriptor {
                 label: t.settings_web_backend(),
@@ -302,7 +302,7 @@ pub(super) fn get_field_value(config: &Config, tab: SettingsTab, index: usize) -
                 .output_limit()
                 .map_or_else(|| "(no limit)".to_string(), |n| n.to_string()),
             1 => bool_str(config.ai.prefer_reasoning),
-            2 => bool_str(config.ai.autofold),
+            2 => fold_blocks_label(config.ai.fold_blocks),
             3 => config.ai.web.backend.clone(),
             4 => config.ai.web.engine.clone(),
             5 => config.ai.web.display.clone(),
@@ -393,11 +393,11 @@ pub(super) fn toggle_field(config: &mut Config, tab: SettingsTab, index: usize) 
                     !config.file_manager.dir_size_in_wide_view;
             }
         }
-        SettingsTab::Ai => match index {
-            1 => config.ai.prefer_reasoning = !config.ai.prefer_reasoning,
-            2 => config.ai.autofold = !config.ai.autofold,
-            _ => {}
-        },
+        SettingsTab::Ai => {
+            if index == 1 {
+                config.ai.prefer_reasoning = !config.ai.prefer_reasoning;
+            }
+        }
         _ => {}
     }
 }
@@ -451,6 +451,17 @@ pub(super) fn enum_options(config: &Config, tab: SettingsTab, index: usize) -> O
                 .collect();
             (values.clone(), values, config.logging.min_level.clone())
         }
+        (SettingsTab::Ai, 2) => {
+            let values: Vec<String> = termide_config::FoldBlocks::ALL
+                .iter()
+                .map(|f| f.label().to_string())
+                .collect();
+            let labels = termide_config::FoldBlocks::ALL
+                .iter()
+                .map(|f| fold_blocks_label(*f))
+                .collect();
+            (values, labels, config.ai.fold_blocks.label().to_string())
+        }
         (SettingsTab::Ai, 3) => {
             let values = strings(&termide_config::WEB_BACKENDS);
             (values.clone(), values, config.ai.web.backend.clone())
@@ -496,12 +507,46 @@ pub(super) fn apply_enum_value(config: &mut Config, tab: SettingsTab, index: usi
             }
         }
         (SettingsTab::Logging, 1) => config.logging.min_level = value.to_string(),
+        (SettingsTab::Ai, 2) => {
+            if let Some(fold) = termide_config::FoldBlocks::ALL
+                .into_iter()
+                .find(|f| f.label() == value)
+            {
+                config.ai.fold_blocks = fold;
+            }
+        }
         (SettingsTab::Ai, 3) => config.ai.web.backend = value.to_string(),
         (SettingsTab::Ai, 4) => config.ai.web.engine = value.to_string(),
         (SettingsTab::Ai, 5) => config.ai.web.display = value.to_string(),
         (SettingsTab::Ai, AI_PERMISSION_MODE_FIELD) => config.ai.set_permission_mode(value),
         _ => {}
     }
+}
+
+/// A fold mode's localized name.
+fn fold_blocks_label(fold: termide_config::FoldBlocks) -> String {
+    let t = i18n::t();
+    match fold {
+        termide_config::FoldBlocks::Immediately => t.settings_agent_fold_immediately(),
+        termide_config::FoldBlocks::OnFinish => t.settings_agent_fold_on_finish(),
+        termide_config::FoldBlocks::Never => t.settings_agent_fold_never(),
+    }
+    .to_string()
+}
+
+/// Step the fold mode to the next (or previous) one, wrapping.
+fn cycle_fold_blocks(config: &mut Config, forward: bool) {
+    let all = termide_config::FoldBlocks::ALL;
+    let pos = all
+        .iter()
+        .position(|f| *f == config.ai.fold_blocks)
+        .unwrap_or(0);
+    let len = all.len();
+    config.ai.fold_blocks = all[if forward {
+        (pos + 1) % len
+    } else {
+        (pos + len - 1) % len
+    }];
 }
 
 /// The AI tab's field for the permission mode new sessions start in.
@@ -605,6 +650,7 @@ pub(super) fn cycle_enum_forward(config: &mut Config, tab: SettingsTab, index: u
             }
         }
         SettingsTab::Ai => match index {
+            2 => cycle_fold_blocks(config, true),
             3..=5 => cycle_web_field(config, index, true),
             AI_PERMISSION_MODE_FIELD => cycle_permission_mode(config, true),
             _ => {}
@@ -654,6 +700,7 @@ pub(super) fn cycle_enum_backward(config: &mut Config, tab: SettingsTab, index: 
             }
         }
         SettingsTab::Ai => match index {
+            2 => cycle_fold_blocks(config, false),
             3..=5 => cycle_web_field(config, index, false),
             AI_PERMISSION_MODE_FIELD => cycle_permission_mode(config, false),
             _ => {}
@@ -777,6 +824,27 @@ mod enum_option_tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn blocks_fold_immediately_on_finish_or_never() {
+        let mut config = Config::default();
+        let options = enum_options(&config, SettingsTab::Ai, 2).unwrap();
+        assert_eq!(options.values, ["immediately", "on-finish", "never"]);
+        assert_eq!(options.current, Some(0));
+        assert_eq!(
+            get_field_value(&config, SettingsTab::Ai, 2),
+            i18n::t().settings_agent_fold_immediately()
+        );
+        apply_enum_value(&mut config, SettingsTab::Ai, 2, "never");
+        assert_eq!(config.ai.fold_blocks, termide_config::FoldBlocks::Never);
+        cycle_enum_forward(&mut config, SettingsTab::Ai, 2);
+        assert_eq!(
+            config.ai.fold_blocks,
+            termide_config::FoldBlocks::Immediately
+        );
+        cycle_enum_backward(&mut config, SettingsTab::Ai, 2);
+        assert_eq!(config.ai.fold_blocks, termide_config::FoldBlocks::Never);
     }
 
     #[test]

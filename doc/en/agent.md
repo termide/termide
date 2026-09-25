@@ -21,7 +21,7 @@ the panel refuses to open and says so.
 connection = "local"               # the one new sessions start on; else the first by name
 max_tokens_per_turn = 0            # default: no limit, the model decides
 prefer_reasoning = true            # default; send reasoning_effort to models that support it
-autofold = true                    # fold each block to a preview
+fold_blocks = "immediately"        # immediately (default) | on-finish | never
 
 [ai.connections.local]
 provider = "openai_compatible"     # openai_compatible (default), anthropic_compatible, claude_code, codex
@@ -67,8 +67,13 @@ cursor moves by character and word, `Shift` or a mouse drag selects, and
 
 The API key is read from the environment variable named by `api_key_env`, so
 the configuration file never holds a secret. Local servers usually need no key
-at all; leave the variable unset. `autofold = false` shows every block expanded
-instead of folded to a preview. With `max_tokens_per_turn` at zero or below no
+at all; leave the variable unset. `fold_blocks` decides when reasoning and tool
+calls fold to their one-line headline: `immediately` folds them while they
+still run (a running reasoning block shows its latest line), `on-finish` shows
+them in full until they finish, `never` leaves every block expanded; a
+selected block unfolds with `Enter` or a second click either way. The settings modal offers it as
+**Fold blocks**. An older `autofold = false` reads as `never`, `true` as
+`on-finish`. With `max_tokens_per_turn` at zero or below no
 output limit is sent and the model decides how long to reply; the Anthropic API
 requires one, so there it becomes a generous 32000.
 

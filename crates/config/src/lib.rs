@@ -29,9 +29,9 @@ pub use settings::{builtin_web_engines, WEB_BACKENDS, WEB_DISPLAYS};
 pub use settings::{is_cli_provider, permission_modes};
 pub use settings::{
     AiSettings, Config, Connection, CustomLanguage, DatabaseSettings, EditorSettings,
-    FileManagerSettings, GeneralSettings, GitDiffSettings, GitLogSettings, GitStatusSettings,
-    HighlightSettings, IconMode, LegacyConfig, LinkOpen, LoggingSettings, LspServerSettings,
-    LspSettings, TerminalSettings, VfsSettings, ViewerSettings, WebSettings,
+    FileManagerSettings, FoldBlocks, GeneralSettings, GitDiffSettings, GitLogSettings,
+    GitStatusSettings, HighlightSettings, IconMode, LegacyConfig, LinkOpen, LoggingSettings,
+    LspServerSettings, LspSettings, TerminalSettings, VfsSettings, ViewerSettings, WebSettings,
     DEFAULT_CONTEXT_WINDOW_FALLBACK,
 };
 pub use xdg::{get_config_dir, get_data_dir};
@@ -92,6 +92,26 @@ const LEGACY_AI_CONNECTION_KEYS: [&str; 5] = [
 /// The connection a file written before `[ai.connections]` describes.
 const LEGACY_AI_CONNECTION: &str = "default";
 
+/// Read an `[ai]` table written by an earlier version in today's shape.
+fn migrate_ai(value: &mut toml::Value) {
+    migrate_ai_connection(value);
+    migrate_ai_autofold(value);
+}
+
+/// `[ai] autofold = true/false` became `fold_blocks`: folded once a block
+/// finishes, or never.
+fn migrate_ai_autofold(value: &mut toml::Value) {
+    let Some(ai) = value.get_mut("ai").and_then(toml::Value::as_table_mut) else {
+        return;
+    };
+    let Some(autofold) = ai.remove("autofold").and_then(|v| v.as_bool()) else {
+        return;
+    };
+    let fold = if autofold { "on-finish" } else { "never" };
+    ai.entry("fold_blocks")
+        .or_insert_with(|| toml::Value::String(fold.to_string()));
+}
+
 /// Move a pre-connections `[ai]` endpoint into a connection of its own:
 /// `provider`, `base_url`, `model`, `api_key_env` and
 /// `context_window_fallback` become `[ai.connections.default]`, and new
@@ -139,7 +159,7 @@ impl Config {
 
             // Try parsing as new structured format first
             let parsed = toml::from_str::<toml::Value>(&original_content).and_then(|mut value| {
-                migrate_ai_connection(&mut value);
+                migrate_ai(&mut value);
                 value.try_into()
             });
             let mut config: Self = match parsed {
@@ -205,7 +225,7 @@ impl Config {
                 .and_then(|s| toml::from_str::<toml::Value>(&s).ok())
             {
                 Some(mut global_value) => {
-                    migrate_ai_connection(&mut global_value);
+                    migrate_ai(&mut global_value);
                     merge_partial(&mut value, &global_value);
                 }
                 None => log::warn!(
@@ -228,7 +248,7 @@ impl Config {
                 .and_then(|s| toml::from_str::<toml::Value>(&s).ok())
             {
                 Some(mut project_value) => {
-                    migrate_ai_connection(&mut project_value);
+                    migrate_ai(&mut project_value);
                     merge_partial(&mut value, &project_value);
                 }
                 None => log::warn!(
@@ -271,7 +291,7 @@ impl Config {
     pub fn load_from(path: &std::path::Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)?;
         let mut value: toml::Value = toml::from_str(&content)?;
-        migrate_ai_connection(&mut value);
+        migrate_ai(&mut value);
         let mut config: Self = value.try_into()?;
         config.normalize();
         Ok(config)
@@ -495,9 +515,19 @@ mod ai_connection_migration_tests {
 
     #[test]
     fn without_the_old_fields_there_are_no_connections() {
-        let config = migrated("[ai]\nautofold = false\n");
+        let config = migrated("[ai]\nmax_tokens_per_turn = 1\n");
         assert!(config.ai.connections.is_empty());
         assert_eq!(config.ai.default_connection(), None);
+    }
+
+    #[test]
+    fn the_old_fold_switch_becomes_its_mode() {
+        let config = migrated("[ai]\nautofold = false\n");
+        assert_eq!(config.ai.fold_blocks, FoldBlocks::Never);
+        let config = migrated("[ai]\nautofold = true\n");
+        assert_eq!(config.ai.fold_blocks, FoldBlocks::OnFinish);
+        let config = migrated("[ai]\n");
+        assert_eq!(config.ai.fold_blocks, FoldBlocks::Immediately);
     }
 
     #[test]

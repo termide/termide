@@ -619,7 +619,7 @@ chat; in the chat `↑`/`↓` move the cursor (a tinted row) and other keys are
 swallowed so they do not type into the unfocused input. Fold state lives in
 the `Transcript` (`collapsed` parallel to `items`), not in the item, so the
 same key toggles any kind; folding by default is a setting
-(`[ai].autofold`, off shows everything expanded) surfaced in the settings
+(`[ai].fold_blocks`: `immediately`, `on-finish` or `never`) surfaced in the settings
 modal's Agent section alongside every other agent setting, and the block
 labels are localised through `crates/i18n`; the transcript renders through `crates/richtext`
 so answers get real Markdown with syntax-highlighted code, and lines are

@@ -689,6 +689,12 @@ pub trait Translation: Send + Sync {
     fn settings_agent_max_tokens(&self) -> &str;
     fn settings_agent_reasoning(&self) -> &str;
     fn settings_agent_autofold(&self) -> &str;
+    /// Settings modal: fold mode — reasoning and tool calls fold at once.
+    fn settings_agent_fold_immediately(&self) -> &str;
+    /// Settings modal: fold mode — they fold once they finish.
+    fn settings_agent_fold_on_finish(&self) -> &str;
+    /// Settings modal: fold mode — they never fold.
+    fn settings_agent_fold_never(&self) -> &str;
     /// Settings modal: the row that adds a connection.
     fn settings_ai_add_connection(&self) -> &str;
     /// Settings modal: the action that deletes the open connection.
