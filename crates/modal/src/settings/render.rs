@@ -13,7 +13,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::base::button_style;
 
-use super::fields::{fields_for_tab, get_field_value, ContentRow, FieldDescriptor, FieldType};
+use super::fields::{fields_for_tab, ContentRow, FieldDescriptor, FieldType};
 use super::kb::{get_kb_value, kb_binding_names};
 use super::{
     button_labels, button_spans, FocusArea, KbMode, LspMode, SettingsModal, SettingsTab,
@@ -235,8 +235,14 @@ impl SettingsModal {
             return;
         }
 
-        // Regular tab: title + grouped fields.
-        let title = self.active_tab.label();
+        // Regular tab: title + grouped fields. The connection page names the
+        // connection it has open.
+        let title = match self.open_connection_name() {
+            Some(name) if self.field_tab() == SettingsTab::Connection => {
+                format!("{} › {name}", self.active_tab.label())
+            }
+            _ => self.active_tab.label(),
+        };
         let area = Self::render_section_title(area, buf, theme, &title);
 
         let rows = self.content_rows();
@@ -248,8 +254,8 @@ impl SettingsModal {
         let visible_rows = area.height as usize;
         self.clamp_scroll(visible_rows);
 
-        let fields = fields_for_tab(self.active_tab);
-        let label_width = label_column_width(self.active_tab, area.width);
+        let fields = fields_for_tab(self.field_tab());
+        let label_width = label_column_width(self.field_tab(), area.width);
         let value_x = area.x as usize + 2 + label_width;
         let max_value_width = (area.x as usize + area.width as usize).saturating_sub(value_x);
 
@@ -320,6 +326,103 @@ impl SettingsModal {
 
                     let display_value = fit_width(value, max_value_width);
                     buf.set_string(value_x as u16, y, &display_value, value_style);
+                    // A refused name says why, after the name kept.
+                    let refused = self
+                        .connection_edit
+                        .as_ref()
+                        .and_then(|edit| edit.error.as_deref())
+                        .filter(|_| {
+                            self.field_tab() == SettingsTab::Connection
+                                && field_idx == super::connection::NAME
+                                && !self.editing
+                        });
+                    if let Some(error) = refused {
+                        let x = value_x + display_value.width() + 2;
+                        let room = (area.x as usize + area.width as usize).saturating_sub(x);
+                        buf.set_string(
+                            x as u16,
+                            y,
+                            fit_width(error.to_string(), room),
+                            Style::default().fg(theme.error),
+                        );
+                    }
+                }
+                ContentRow::ConnectionButtons => {
+                    let chosen = self.connection_edit.as_ref().map_or(0, |edit| edit.button);
+                    let labels = super::connection::connection_buttons();
+                    let spans = super::connection::connection_button_spans(area.x as usize + 2);
+                    for (index, (label, (x, _))) in labels.iter().zip(spans).enumerate() {
+                        let style = if is_focused {
+                            let style = Style::default().fg(theme.selected_fg);
+                            if index == chosen {
+                                style.add_modifier(Modifier::BOLD | Modifier::REVERSED)
+                            } else {
+                                style
+                            }
+                        } else if index == super::connection::DELETE {
+                            Style::default().fg(theme.error)
+                        } else {
+                            Style::default().fg(theme.accented_fg)
+                        };
+                        buf.set_string(x as u16, y, label, style);
+                    }
+                }
+                ContentRow::ConnectionAdd => {
+                    let label = i18n::t().settings_ai_add_connection();
+                    let style = if is_focused {
+                        Style::default()
+                            .fg(theme.selected_fg)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(theme.accented_fg)
+                    };
+                    buf.set_string(area.x + 2, y, label, style);
+                }
+                ContentRow::Connection(index) => {
+                    let Some(name) = self.connection_name(index) else {
+                        continue;
+                    };
+                    let connection = &self.config.ai.connections[&name];
+                    // The one new sessions start on is marked, radio-style.
+                    let mark = if self.config.ai.default_connection() == Some(name.as_str()) {
+                        '●'
+                    } else {
+                        '○'
+                    };
+                    let focused_fg = |fg| {
+                        if is_focused {
+                            Style::default().fg(theme.selected_fg)
+                        } else {
+                            Style::default().fg(fg)
+                        }
+                    };
+                    buf.set_string(
+                        area.x + 2,
+                        y,
+                        fit_width(format!("{mark} {name}"), label_width),
+                        focused_fg(theme.fg).add_modifier(if is_focused {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
+                    );
+                    let kind = super::fields::provider_label(&connection.provider);
+                    let summary = if connection.model.is_empty() {
+                        kind
+                    } else {
+                        format!("{kind} · {}", connection.model)
+                    };
+                    let summary = fit_width(summary, max_value_width.saturating_sub(8));
+                    buf.set_string(value_x as u16, y, &summary, focused_fg(theme.disabled));
+                    if is_focused {
+                        let del_x = (area.x as usize + area.width as usize).saturating_sub(6);
+                        buf.set_string(
+                            del_x as u16,
+                            y,
+                            "[Del]",
+                            Style::default().fg(theme.accented_fg),
+                        );
+                    }
                 }
                 ContentRow::LspAddServer => {
                     let label = i18n::t().settings_lsp_add_server();
@@ -427,7 +530,7 @@ impl SettingsModal {
 
     /// Format a field value for display, with visual indicators.
     fn format_field_value(&self, desc: &FieldDescriptor, index: usize) -> String {
-        let raw = get_field_value(&self.config, self.active_tab, index);
+        let raw = self.field_value(index);
         match desc.field_type {
             FieldType::Bool => termide_ui::checkbox(raw == "true").to_string(),
             FieldType::Enum => {

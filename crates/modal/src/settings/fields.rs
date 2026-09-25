@@ -34,7 +34,7 @@ pub(super) struct FieldDescriptor {
 }
 
 /// A single renderable row in the content area.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ContentRow {
     /// Non-selectable group header.
     Header(&'static str),
@@ -46,6 +46,13 @@ pub(super) enum ContentRow {
     LspAddServer,
     /// LSP: existing server (index into `lsp_server_keys`).
     LspServer(usize),
+    /// AI: a connection (index into `ai.connections`, which keeps its names
+    /// sorted); opens its page.
+    Connection(usize),
+    /// AI: "+ Add connection" action row.
+    ConnectionAdd,
+    /// Connection page: the buttons back to the list and deleting it.
+    ConnectionButtons,
 }
 
 impl ContentRow {
@@ -186,28 +193,6 @@ pub(super) fn fields_for_tab(tab: SettingsTab) -> Vec<FieldDescriptor> {
         }],
         SettingsTab::Ai => vec![
             FieldDescriptor {
-                label: t.settings_agent_provider(),
-                field_type: FieldType::Enum,
-            },
-            FieldDescriptor {
-                label: t.settings_agent_base_url(),
-                field_type: FieldType::OptionalText,
-            },
-            FieldDescriptor {
-                // A dropdown: the endpoint's models when the panel has fetched
-                // them (with a "type an id" escape), just the escape otherwise.
-                label: t.settings_agent_model(),
-                field_type: FieldType::Enum,
-            },
-            FieldDescriptor {
-                label: t.settings_agent_api_key_env(),
-                field_type: FieldType::OptionalText,
-            },
-            FieldDescriptor {
-                label: t.settings_agent_context_window(),
-                field_type: FieldType::OptionalNumber,
-            },
-            FieldDescriptor {
                 label: t.settings_agent_max_tokens(),
                 field_type: FieldType::Number,
             },
@@ -240,6 +225,7 @@ pub(super) fn fields_for_tab(tab: SettingsTab) -> Vec<FieldDescriptor> {
                 field_type: FieldType::Enum,
             },
         ],
+        SettingsTab::Connection => super::connection::connection_fields(),
         SettingsTab::Keybindings => vec![],
     }
 }
@@ -311,44 +297,33 @@ pub(super) fn get_field_value(config: &Config, tab: SettingsTab, index: usize) -
             _ => String::new(),
         },
         SettingsTab::Ai => match index {
-            0 => provider_label(&config.ai.provider),
-            1 => empty_or(&config.ai.base_url),
-            2 => empty_or(&config.ai.model),
-            3 => empty_or(&config.ai.api_key_env),
-            4 => config.ai.context_window_fallback.map_or_else(
-                || {
-                    format!(
-                        "(default {})",
-                        termide_config::DEFAULT_CONTEXT_WINDOW_FALLBACK
-                    )
-                },
-                |n| n.to_string(),
-            ),
-            5 => config
+            0 => config
                 .ai
                 .output_limit()
                 .map_or_else(|| "(no limit)".to_string(), |n| n.to_string()),
-            6 => bool_str(config.ai.prefer_reasoning),
-            7 => bool_str(config.ai.autofold),
-            8 => config.ai.web.backend.clone(),
-            9 => config.ai.web.engine.clone(),
-            12 => permission_mode_label(config.ai.permission_mode()),
-            10 => config.ai.web.display.clone(),
-            11 => {
+            1 => bool_str(config.ai.prefer_reasoning),
+            2 => bool_str(config.ai.autofold),
+            3 => config.ai.web.backend.clone(),
+            4 => config.ai.web.engine.clone(),
+            5 => config.ai.web.display.clone(),
+            6 => {
                 if config.ai.web.chrome_path.is_empty() {
                     "(auto)".to_string()
                 } else {
                     config.ai.web.chrome_path.clone()
                 }
             }
+            AI_PERMISSION_MODE_FIELD => permission_mode_label(config.ai.permission_mode()),
             _ => String::new(),
         },
+        // Read from the open connection by the modal, not the config alone.
+        SettingsTab::Connection => String::new(),
         SettingsTab::Keybindings => String::new(),
     }
 }
 
 /// A string field's value, or the `(unset)` placeholder when it is empty.
-fn empty_or(value: &str) -> String {
+pub(super) fn empty_or(value: &str) -> String {
     if value.is_empty() {
         "(unset)".to_string()
     } else {
@@ -358,7 +333,7 @@ fn empty_or(value: &str) -> String {
 
 /// Display label for a provider value: the wire protocol is stored, but the
 /// row shows that the endpoint is free-form (base_url picks the real server).
-fn provider_label(value: &str) -> String {
+pub(super) fn provider_label(value: &str) -> String {
     match value {
         "anthropic_compatible" | "anthropic" => "Anthropic compatible".to_string(),
         "openai_compatible" | "openai" => "OpenAI compatible".to_string(),
@@ -379,33 +354,7 @@ pub(super) const PROVIDER_VALUES: [&str; 4] = [
     "openai_compatible",
 ];
 
-pub(super) use termide_config::is_cli_provider;
-
-/// Reset the fields a CLI-adapter provider does not use back to their defaults,
-/// so they disappear from the transcript UI and from the saved config (only
-/// non-default values are written). The endpoint, model and auth all live in
-/// the CLI, not here.
-fn clear_cli_irrelevant_ai_fields(config: &mut Config) {
-    let defaults = termide_config::AiSettings::default();
-    config.ai.base_url = defaults.base_url;
-    // `model` is kept: for a CLI provider it is the model pre-selected on the
-    // agent's own login, applied over ACP once the session starts.
-    config.ai.api_key_env = defaults.api_key_env;
-    config.ai.context_window_fallback = defaults.context_window_fallback;
-    config.ai.max_tokens_per_turn = defaults.max_tokens_per_turn;
-    config.ai.prefer_reasoning = defaults.prefer_reasoning;
-}
-
-/// Apply a provider change: store it, and when it is a CLI adapter, clear the
-/// fields it does not use.
-fn set_ai_provider(config: &mut Config, provider: &str) {
-    config.ai.provider = provider.to_string();
-    if is_cli_provider(provider) {
-        clear_cli_irrelevant_ai_fields(config);
-    }
-}
-
-fn bool_str(v: bool) -> String {
+pub(super) fn bool_str(v: bool) -> String {
     if v {
         "true".to_string()
     } else {
@@ -445,8 +394,8 @@ pub(super) fn toggle_field(config: &mut Config, tab: SettingsTab, index: usize) 
             }
         }
         SettingsTab::Ai => match index {
-            6 => config.ai.prefer_reasoning = !config.ai.prefer_reasoning,
-            7 => config.ai.autofold = !config.ai.autofold,
+            1 => config.ai.prefer_reasoning = !config.ai.prefer_reasoning,
+            2 => config.ai.autofold = !config.ai.autofold,
             _ => {}
         },
         _ => {}
@@ -502,19 +451,11 @@ pub(super) fn enum_options(config: &Config, tab: SettingsTab, index: usize) -> O
                 .collect();
             (values.clone(), values, config.logging.min_level.clone())
         }
-        (SettingsTab::Ai, 0) => {
-            // OpenAI/Anthropic compatible are wire protocols the built-in loop
-            // speaks (base_url picks the actual server); Claude Code and Codex
-            // drive their CLI over ACP. Listed by label, alphabetically.
-            let values: Vec<String> = PROVIDER_VALUES.iter().map(|s| s.to_string()).collect();
-            let labels: Vec<String> = PROVIDER_VALUES.iter().map(|v| provider_label(v)).collect();
-            (values, labels, config.ai.provider.clone())
-        }
-        (SettingsTab::Ai, 8) => {
+        (SettingsTab::Ai, 3) => {
             let values = strings(&termide_config::WEB_BACKENDS);
             (values.clone(), values, config.ai.web.backend.clone())
         }
-        (SettingsTab::Ai, 9) => {
+        (SettingsTab::Ai, 4) => {
             // The shipped engines, plus a user-defined one when it is set.
             let mut values = strings(&termide_config::builtin_web_engines());
             if !values.contains(&config.ai.web.engine) {
@@ -522,7 +463,7 @@ pub(super) fn enum_options(config: &Config, tab: SettingsTab, index: usize) -> O
             }
             (values.clone(), values, config.ai.web.engine.clone())
         }
-        (SettingsTab::Ai, 10) => {
+        (SettingsTab::Ai, 5) => {
             let values = strings(&termide_config::WEB_DISPLAYS);
             (values.clone(), values, config.ai.web.display.clone())
         }
@@ -555,18 +496,16 @@ pub(super) fn apply_enum_value(config: &mut Config, tab: SettingsTab, index: usi
             }
         }
         (SettingsTab::Logging, 1) => config.logging.min_level = value.to_string(),
-        (SettingsTab::Ai, 0) => set_ai_provider(config, value),
-        (SettingsTab::Ai, 2) => config.ai.model = value.to_string(),
-        (SettingsTab::Ai, 8) => config.ai.web.backend = value.to_string(),
-        (SettingsTab::Ai, 9) => config.ai.web.engine = value.to_string(),
-        (SettingsTab::Ai, 10) => config.ai.web.display = value.to_string(),
+        (SettingsTab::Ai, 3) => config.ai.web.backend = value.to_string(),
+        (SettingsTab::Ai, 4) => config.ai.web.engine = value.to_string(),
+        (SettingsTab::Ai, 5) => config.ai.web.display = value.to_string(),
         (SettingsTab::Ai, AI_PERMISSION_MODE_FIELD) => config.ai.set_permission_mode(value),
         _ => {}
     }
 }
 
 /// The AI tab's field for the permission mode new sessions start in.
-pub(super) const AI_PERMISSION_MODE_FIELD: usize = 12;
+pub(super) const AI_PERMISSION_MODE_FIELD: usize = 7;
 
 /// A permission mode's localized name, as the agent panel's mode picker
 /// shows it.
@@ -595,7 +534,7 @@ fn strings(values: &[&str]) -> Vec<String> {
 
 /// Step a string enum field through `options`, wrapping; a value outside
 /// the list starts from the first option.
-fn step_value(value: &mut String, options: &[String], forward: bool) {
+pub(super) fn step_value(value: &mut String, options: &[String], forward: bool) {
     let len = options.len();
     if len == 0 {
         return;
@@ -608,45 +547,23 @@ fn step_value(value: &mut String, options: &[String], forward: bool) {
     *value = options[next].clone();
 }
 
-/// Cycle one of the AI tab's web enum fields (8 to 10).
+/// Cycle one of the AI tab's web enum fields (3 to 5).
 fn cycle_web_field(config: &mut Config, index: usize, forward: bool) {
     let Some(options) = enum_options(config, SettingsTab::Ai, index) else {
         return;
     };
     let field = match index {
-        8 => &mut config.ai.web.backend,
-        9 => &mut config.ai.web.engine,
-        10 => &mut config.ai.web.display,
+        3 => &mut config.ai.web.backend,
+        4 => &mut config.ai.web.engine,
+        5 => &mut config.ai.web.display,
         _ => return,
     };
     step_value(field, &options.values, forward);
 }
 
-/// The AI `model` field's index in the AI tab, and the dropdown value that
-/// stands for "type an id by hand" instead of choosing a listed model.
-pub(super) const AI_MODEL_FIELD: usize = 2;
+/// The model dropdown's value that stands for "type an id by hand" instead
+/// of choosing a listed model.
 pub(super) const MODEL_TYPE_SENTINEL: &str = "\u{0}type-a-model-id";
-
-/// The dropdown for the AI `model` field: the fetched models (with the current
-/// value kept present), then a "type an id" escape that opens inline editing.
-/// With no fetched models — a CLI provider, or an endpoint that cannot list —
-/// only the current value and the escape show, so typing still works.
-pub(super) fn ai_model_enum_options(config: &Config, model_options: &[String]) -> EnumOptions {
-    let current = config.ai.model.clone();
-    let mut values: Vec<String> = model_options.to_vec();
-    if !current.is_empty() && !values.contains(&current) {
-        values.insert(0, current.clone());
-    }
-    let mut labels: Vec<String> = values.clone();
-    values.push(MODEL_TYPE_SENTINEL.to_string());
-    labels.push(i18n::t().agent_model_other().to_string());
-    let current_index = values.iter().position(|v| *v == current);
-    EnumOptions {
-        values,
-        labels,
-        current: current_index,
-    }
-}
 
 /// Cycle an enum field to the next variant.
 pub(super) fn cycle_enum_forward(config: &mut Config, tab: SettingsTab, index: usize) {
@@ -688,34 +605,12 @@ pub(super) fn cycle_enum_forward(config: &mut Config, tab: SettingsTab, index: u
             }
         }
         SettingsTab::Ai => match index {
-            0 => cycle_ai_provider(config, true),
-            8..=10 => cycle_web_field(config, index, true),
+            3..=5 => cycle_web_field(config, index, true),
             AI_PERMISSION_MODE_FIELD => cycle_permission_mode(config, true),
             _ => {}
         },
         _ => {}
     }
-}
-
-/// Step the AI provider to the next (or previous) value in the dropdown order,
-/// wrapping, and clear the CLI-irrelevant fields when it lands on one.
-fn cycle_ai_provider(config: &mut Config, forward: bool) {
-    let pos = PROVIDER_VALUES
-        .iter()
-        .position(|v| *v == config.ai.provider)
-        // Legacy short names (`openai`, `anthropic`) map to their compatible
-        // value so the step lands somewhere sensible.
-        .unwrap_or_else(|| match config.ai.provider.as_str() {
-            "anthropic" => 0,
-            _ => PROVIDER_VALUES.len() - 1,
-        });
-    let len = PROVIDER_VALUES.len();
-    let next = if forward {
-        (pos + 1) % len
-    } else {
-        (pos + len - 1) % len
-    };
-    set_ai_provider(config, PROVIDER_VALUES[next]);
 }
 
 /// Cycle an enum field to the previous variant.
@@ -759,8 +654,7 @@ pub(super) fn cycle_enum_backward(config: &mut Config, tab: SettingsTab, index: 
             }
         }
         SettingsTab::Ai => match index {
-            0 => cycle_ai_provider(config, false),
-            8..=10 => cycle_web_field(config, index, false),
+            3..=5 => cycle_web_field(config, index, false),
             AI_PERMISSION_MODE_FIELD => cycle_permission_mode(config, false),
             _ => {}
         },
@@ -818,28 +712,27 @@ mod field_index_tests {
         let fields = fields_for_tab(SettingsTab::Ai);
         assert_eq!(
             fields.len(),
-            13,
+            8,
             "the permission mode follows the web fields"
         );
-        assert!(matches!(fields[11].field_type, FieldType::OptionalText));
-        assert!(matches!(fields[12].field_type, FieldType::Enum));
+        assert!(matches!(fields[6].field_type, FieldType::OptionalText));
+        assert!(matches!(fields[7].field_type, FieldType::Enum));
 
-        assert_eq!(get_field_value(&config, SettingsTab::Ai, 8), "auto");
-        assert_eq!(get_field_value(&config, SettingsTab::Ai, 9), "duckduckgo");
-        assert_eq!(get_field_value(&config, SettingsTab::Ai, 10), "headless");
-        assert_eq!(get_field_value(&config, SettingsTab::Ai, 11), "(auto)");
+        assert_eq!(get_field_value(&config, SettingsTab::Ai, 3), "auto");
+        assert_eq!(get_field_value(&config, SettingsTab::Ai, 4), "duckduckgo");
+        assert_eq!(get_field_value(&config, SettingsTab::Ai, 5), "headless");
+        assert_eq!(get_field_value(&config, SettingsTab::Ai, 6), "(auto)");
 
-        apply_enum_value(&mut config, SettingsTab::Ai, 9, "bing");
+        apply_enum_value(&mut config, SettingsTab::Ai, 4, "bing");
         assert_eq!(config.ai.web.engine, "bing");
-        cycle_enum_forward(&mut config, SettingsTab::Ai, 8);
+        cycle_enum_forward(&mut config, SettingsTab::Ai, 3);
         assert_eq!(config.ai.web.backend, "chrome");
-        cycle_enum_backward(&mut config, SettingsTab::Ai, 10);
+        cycle_enum_backward(&mut config, SettingsTab::Ai, 5);
         assert_eq!(config.ai.web.display, "visible");
-        assert_eq!(config.ai.provider, Config::default().ai.provider);
 
         // A user-defined engine stays selectable.
         config.ai.web.engine = "intranet".into();
-        let options = enum_options(&config, SettingsTab::Ai, 9).unwrap();
+        let options = enum_options(&config, SettingsTab::Ai, 4).unwrap();
         assert_eq!(options.values.last().map(String::as_str), Some("intranet"));
         assert_eq!(options.current, Some(options.values.len() - 1));
     }
@@ -863,6 +756,7 @@ mod enum_option_tests {
             SettingsTab::Lsp,
             SettingsTab::Logging,
             SettingsTab::Vfs,
+            SettingsTab::Ai,
         ];
 
         for tab in tabs {
@@ -886,64 +780,6 @@ mod enum_option_tests {
     }
 
     #[test]
-    fn ai_provider_lists_all_four_sorted_by_label() {
-        let config = Config::default();
-        let options = enum_options(&config, SettingsTab::Ai, 0).unwrap();
-        assert_eq!(
-            options.values,
-            vec![
-                "anthropic_compatible",
-                "claude_code",
-                "codex",
-                "openai_compatible"
-            ]
-        );
-        assert_eq!(
-            options.labels,
-            vec![
-                "Anthropic compatible",
-                "Claude Code",
-                "Codex",
-                "OpenAI compatible"
-            ]
-        );
-        // Labels are in alphabetical order.
-        let mut sorted = options.labels.clone();
-        sorted.sort();
-        assert_eq!(options.labels, sorted);
-    }
-
-    #[test]
-    fn choosing_a_cli_provider_clears_the_unused_fields() {
-        let mut config = Config::default();
-        config.ai.base_url = "https://example/v1".into();
-        config.ai.model = "gpt-5".into();
-        config.ai.api_key_env = "MY_KEY".into();
-        config.ai.context_window_fallback = Some(123);
-        config.ai.max_tokens_per_turn = 999;
-        config.ai.prefer_reasoning = true;
-
-        apply_enum_value(&mut config, SettingsTab::Ai, 0, "claude_code");
-
-        assert_eq!(config.ai.provider, "claude_code");
-        let defaults = termide_config::AiSettings::default();
-        assert_eq!(config.ai.base_url, defaults.base_url);
-        // The model is kept — it is the model to pre-select on the CLI agent.
-        assert_eq!(config.ai.model, "gpt-5");
-        assert_eq!(config.ai.api_key_env, defaults.api_key_env);
-        assert_eq!(
-            config.ai.context_window_fallback,
-            defaults.context_window_fallback
-        );
-        assert_eq!(config.ai.max_tokens_per_turn, defaults.max_tokens_per_turn);
-        assert_eq!(config.ai.prefer_reasoning, defaults.prefer_reasoning);
-        // A wire-protocol provider leaves the fields alone.
-        config.ai.model = "gpt-5".into();
-        apply_enum_value(&mut config, SettingsTab::Ai, 0, "openai_compatible");
-        assert_eq!(config.ai.model, "gpt-5");
-    }
-
-    #[test]
     fn the_permission_mode_for_new_sessions_is_chosen_from_the_four() {
         let mut config = Config::default();
         let field = AI_PERMISSION_MODE_FIELD;
@@ -964,20 +800,6 @@ mod enum_option_tests {
         assert_eq!(config.ai.permission_mode(), "ask");
         cycle_enum_backward(&mut config, SettingsTab::Ai, field);
         assert_eq!(config.ai.permission_mode(), "plan");
-    }
-
-    #[test]
-    fn cycling_the_provider_wraps_through_every_value() {
-        let mut config = Config::default();
-        config.ai.provider = "anthropic_compatible".into();
-        cycle_enum_backward(&mut config, SettingsTab::Ai, 0);
-        // Backward from the first wraps to the last.
-        assert_eq!(config.ai.provider, "openai_compatible");
-        cycle_enum_forward(&mut config, SettingsTab::Ai, 0);
-        assert_eq!(config.ai.provider, "anthropic_compatible");
-        cycle_enum_forward(&mut config, SettingsTab::Ai, 0);
-        // Landing on a CLI provider clears the unused fields.
-        assert_eq!(config.ai.provider, "claude_code");
     }
 
     /// Choosing from the dropdown and cycling with Left/Right must write the

@@ -183,21 +183,27 @@ impl App {
         let project_override_active =
             termide_config::project_config_path(&self.project_root).exists();
         let modal = SettingsModal::new(config, project_override_active);
-        // Fetch the provider's models off-thread; the loop feeds them into the
-        // modal's model dropdown when they arrive.
-        self.settings_model_fetch =
-            super::agent_panel::spawn_settings_model_fetch(&self.state.config.ai);
+        self.settings_model_fetch = None;
         self.state.set_pending_action(
             crate::state::PendingAction::Settings,
             ActiveModal::Settings(Box::new(modal)),
         );
     }
 
-    /// Feed the off-thread model list into the open settings modal once it
-    /// arrives; drop the fetch if the modal has since closed. Cheap and safe to
-    /// call every loop — a no-op with no fetch in flight.
+    /// Start the model fetch the settings modal asks for when it opens a
+    /// connection, and feed the list into the modal once it arrives; drop the
+    /// fetch if the modal has since closed. Cheap and safe to call every loop
+    /// — a no-op with nothing asked and no fetch in flight.
     pub(super) fn poll_settings_model_fetch(&mut self) {
         use termide_modal::ActiveModal;
+        if let Some(ActiveModal::Settings(modal)) = self.state.active_modal.as_mut() {
+            // A newer request replaces the fetch in flight: its list is for a
+            // connection no longer open.
+            if let Some(connection) = modal.take_model_fetch_request() {
+                self.settings_model_fetch =
+                    super::agent_panel::spawn_settings_model_fetch(&connection);
+            }
+        }
         if self.settings_model_fetch.is_none() {
             return;
         }

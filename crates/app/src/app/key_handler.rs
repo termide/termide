@@ -327,6 +327,7 @@ impl App {
 
         // Apply config update if present (legacy, still used by Editor)
         if let Some(new_config) = config_update {
+            super::agent_panel::publish_ai_settings(&new_config.ai);
             self.state.config = Arc::new(new_config.clone());
             self.state.set_theme(&new_config.general.theme);
             self.state

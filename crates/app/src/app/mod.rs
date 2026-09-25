@@ -495,6 +495,7 @@ impl App {
         } else {
             config.save_global()?;
         }
+        agent_panel::publish_ai_settings(&config.ai);
         self.state.config = std::sync::Arc::new(config);
         Ok(())
     }

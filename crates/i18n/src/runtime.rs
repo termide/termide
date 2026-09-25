@@ -448,8 +448,8 @@ impl Translation for RuntimeTranslation {
         agent_unit_days,
         agent_unit_tok_per_sec,
         agent_tool_bash,
-        agent_pick_provider,
-        agent_notice_profile_before_first,
+        agent_pick_connection,
+        agent_notice_connection_before_first,
         agent_toolset_title,
         agent_toolset_prompt,
         agent_toolset_builtin,
@@ -471,6 +471,12 @@ impl Translation for RuntimeTranslation {
         settings_agent_reasoning,
         settings_agent_autofold,
         settings_agent_permission_mode,
+        settings_ai_add_connection,
+        settings_ai_delete_connection,
+        settings_ai_connection_back,
+        settings_ai_connection_name,
+        settings_ai_connection_default,
+        settings_ai_connection_name_taken,
         settings_web_backend,
         menu_ai_show_browser,
         menu_ai_hide_browser,
@@ -836,12 +842,12 @@ impl Translation for RuntimeTranslation {
         )
     }
 
-    fn agent_notice_provider_fmt(&self, name: &str) -> String {
-        self.format("agent_notice_provider_fmt", &[("name", name)])
+    fn agent_notice_connection_fmt(&self, name: &str) -> String {
+        self.format("agent_notice_connection_fmt", &[("name", name)])
     }
 
-    fn agent_notice_no_profile_fmt(&self, name: &str) -> String {
-        self.format("agent_notice_no_profile_fmt", &[("name", name)])
+    fn agent_notice_no_connection_fmt(&self, name: &str) -> String {
+        self.format("agent_notice_no_connection_fmt", &[("name", name)])
     }
 
     fn agent_toolset_mcp_fmt(&self, server: &str) -> String {

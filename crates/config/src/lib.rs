@@ -28,11 +28,11 @@ pub use keybindings::{
 pub use settings::{builtin_web_engines, WEB_BACKENDS, WEB_DISPLAYS};
 pub use settings::{is_cli_provider, permission_modes};
 pub use settings::{
-    AiSettings, Config, CustomLanguage, DatabaseSettings, EditorSettings, FileManagerSettings,
-    GeneralSettings, GitDiffSettings, GitLogSettings, GitStatusSettings, HighlightSettings,
-    IconMode, LegacyConfig, LinkOpen, LoggingSettings, LspServerSettings, LspSettings,
-    ProviderProfile, TerminalSettings, VfsSettings, ViewerSettings, WebSettings,
-    DEFAULT_CONTEXT_WINDOW_FALLBACK, DEFAULT_PROVIDER_PROFILE,
+    AiSettings, Config, Connection, CustomLanguage, DatabaseSettings, EditorSettings,
+    FileManagerSettings, GeneralSettings, GitDiffSettings, GitLogSettings, GitStatusSettings,
+    HighlightSettings, IconMode, LegacyConfig, LinkOpen, LoggingSettings, LspServerSettings,
+    LspSettings, TerminalSettings, VfsSettings, ViewerSettings, WebSettings,
+    DEFAULT_CONTEXT_WINDOW_FALLBACK,
 };
 pub use xdg::{get_config_dir, get_data_dir};
 
@@ -80,6 +80,48 @@ pub fn project_config_path(project_root: &Path) -> PathBuf {
     project_root.join(".termide").join("config.toml")
 }
 
+/// The fields `[ai]` described its single endpoint with before connections.
+const LEGACY_AI_CONNECTION_KEYS: [&str; 5] = [
+    "provider",
+    "base_url",
+    "model",
+    "api_key_env",
+    "context_window_fallback",
+];
+
+/// The connection a file written before `[ai.connections]` describes.
+const LEGACY_AI_CONNECTION: &str = "default";
+
+/// Move a pre-connections `[ai]` endpoint into a connection of its own:
+/// `provider`, `base_url`, `model`, `api_key_env` and
+/// `context_window_fallback` become `[ai.connections.default]`, and new
+/// sessions start on it unless `[ai] connection` names another. A file
+/// without them is left as it is; the next save writes the new shape.
+fn migrate_ai_connection(value: &mut toml::Value) {
+    let Some(ai) = value.get_mut("ai").and_then(toml::Value::as_table_mut) else {
+        return;
+    };
+    let mut legacy = toml::value::Table::new();
+    for key in LEGACY_AI_CONNECTION_KEYS {
+        if let Some(field) = ai.remove(key) {
+            legacy.insert(key.to_string(), field);
+        }
+    }
+    if legacy.is_empty() {
+        return;
+    }
+    let connections = ai
+        .entry("connections")
+        .or_insert_with(|| toml::Value::Table(Default::default()));
+    if let Some(connections) = connections.as_table_mut() {
+        connections
+            .entry(LEGACY_AI_CONNECTION)
+            .or_insert(toml::Value::Table(legacy));
+    }
+    ai.entry("connection")
+        .or_insert_with(|| toml::Value::String(LEGACY_AI_CONNECTION.to_string()));
+}
+
 impl Config {
     /// Load configuration from the global file.
     ///
@@ -96,7 +138,11 @@ impl Config {
             let original_content = std::fs::read_to_string(&config_path)?;
 
             // Try parsing as new structured format first
-            let mut config: Self = match toml::from_str(&original_content) {
+            let parsed = toml::from_str::<toml::Value>(&original_content).and_then(|mut value| {
+                migrate_ai_connection(&mut value);
+                value.try_into()
+            });
+            let mut config: Self = match parsed {
                 Ok(config) => config,
                 Err(_) => {
                     // Legacy flat format → migrate. Save the converted result so the
@@ -158,7 +204,10 @@ impl Config {
                 .ok()
                 .and_then(|s| toml::from_str::<toml::Value>(&s).ok())
             {
-                Some(global_value) => merge_partial(&mut value, &global_value),
+                Some(mut global_value) => {
+                    migrate_ai_connection(&mut global_value);
+                    merge_partial(&mut value, &global_value);
+                }
                 None => log::warn!(
                     "Failed to parse global config at {} — starting from defaults",
                     global_path.display()
@@ -178,7 +227,10 @@ impl Config {
                 .ok()
                 .and_then(|s| toml::from_str::<toml::Value>(&s).ok())
             {
-                Some(project_value) => merge_partial(&mut value, &project_value),
+                Some(mut project_value) => {
+                    migrate_ai_connection(&mut project_value);
+                    merge_partial(&mut value, &project_value);
+                }
                 None => log::warn!(
                     "Failed to parse project config at {} — using global only",
                     project_path.display()
@@ -218,7 +270,9 @@ impl Config {
     /// and does not auto-save normalized content back.
     pub fn load_from(path: &std::path::Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)?;
-        let mut config: Self = toml::from_str(&content)?;
+        let mut value: toml::Value = toml::from_str(&content)?;
+        migrate_ai_connection(&mut value);
+        let mut config: Self = value.try_into()?;
         config.normalize();
         Ok(config)
     }
@@ -381,5 +435,85 @@ mod save_baseline_tests {
 
         let reloaded = Config::load_from(&path).unwrap();
         assert_eq!(reloaded.general.theme, "dracula");
+    }
+}
+
+#[cfg(test)]
+mod ai_connection_migration_tests {
+    use super::*;
+
+    fn migrated(text: &str) -> Config {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, text).unwrap();
+        Config::load_from(&path).unwrap()
+    }
+
+    #[test]
+    fn a_single_endpoint_in_ai_becomes_the_default_connection() {
+        let config = migrated(
+            r#"
+            [ai]
+            provider = "openai_compatible"
+            model = "qwen"
+            max_tokens_per_turn = 0
+            "#,
+        );
+        assert_eq!(config.ai.default_connection(), Some("default"));
+        let connection = &config.ai.connections["default"];
+        assert_eq!(connection.model, "qwen");
+        // What the file left out keeps the default it had.
+        assert_eq!(connection.base_url, Connection::default().base_url);
+        assert_eq!(config.ai.max_tokens_per_turn, 0);
+        // Saved, the file has the new shape only.
+        let saved = toml::to_string(&toml::Value::try_from(&config).unwrap()).unwrap();
+        assert!(saved.contains("[ai.connections.default]"), "{saved}");
+    }
+
+    #[test]
+    fn a_saved_connection_keeps_only_the_fields_it_sets() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut config = Config::default();
+        config.normalize();
+        let baseline = config.clone();
+        config.ai.connections.insert(
+            "Codex".into(),
+            Connection {
+                provider: "codex".into(),
+                ..Connection::default()
+            },
+        );
+        config.save_to(&path, &baseline).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            saved.trim(),
+            "[ai.connections.Codex]\nprovider = \"codex\"",
+            "{saved}"
+        );
+    }
+
+    #[test]
+    fn without_the_old_fields_there_are_no_connections() {
+        let config = migrated("[ai]\nautofold = false\n");
+        assert!(config.ai.connections.is_empty());
+        assert_eq!(config.ai.default_connection(), None);
+    }
+
+    #[test]
+    fn a_named_default_and_an_existing_connection_are_kept() {
+        let config = migrated(
+            r#"
+            [ai]
+            model = "old"
+            connection = "cloud"
+            [ai.connections.cloud]
+            provider = "anthropic_compatible"
+            [ai.connections.default]
+            model = "kept"
+            "#,
+        );
+        assert_eq!(config.ai.default_connection(), Some("cloud"));
+        assert_eq!(config.ai.connections["default"].model, "kept");
     }
 }

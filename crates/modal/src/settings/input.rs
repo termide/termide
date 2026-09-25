@@ -117,7 +117,7 @@ impl SettingsModal {
     /// cursor, and the switch stayed put.
     pub(super) fn activate_current_row(&mut self) {
         let field_desc = match self.current_row() {
-            Some(ContentRow::Field(i)) => fields_for_tab(self.active_tab).get(i).copied(),
+            Some(ContentRow::Field(i)) => fields_for_tab(self.field_tab()).get(i).copied(),
             _ => None,
         };
 
@@ -126,7 +126,7 @@ impl SettingsModal {
                 if let Some(d) = field_desc {
                     match d.field_type {
                         FieldType::Bool => {
-                            toggle_field(&mut self.config, self.active_tab, field_idx);
+                            self.toggle(field_idx);
                             self.mark_dirty();
                         }
                         FieldType::Enum => self.open_enum_picker(field_idx),
@@ -136,6 +136,13 @@ impl SettingsModal {
                     }
                 }
             }
+            Some(ContentRow::ConnectionAdd) => self.add_connection(),
+            Some(ContentRow::Connection(index)) => {
+                if let Some(name) = self.connection_name(index) {
+                    self.open_connection(name);
+                }
+            }
+            Some(ContentRow::ConnectionButtons) => self.press_connection_button(),
             Some(ContentRow::LspAddServer) => {
                 self.lsp_edit_fields = Default::default();
                 self.lsp_edit_index = None;
@@ -198,12 +205,7 @@ impl SettingsModal {
                 self.start_edit();
                 return;
             }
-            apply_enum_value(
-                &mut self.config,
-                self.active_tab,
-                picker.field_index,
-                &value,
-            );
+            self.apply_enum(picker.field_index, &value);
             self.mark_dirty();
         }
     }
@@ -268,7 +270,6 @@ impl SettingsModal {
         if self.active_tab == SettingsTab::Lsp && self.lsp_mode == LspMode::ServerEdit {
             return self.handle_lsp_edit_key(key);
         }
-
         // An open dropdown owns the keyboard until it closes.
         if self.handle_enum_picker_key(key) {
             return Ok(None);
@@ -276,7 +277,7 @@ impl SettingsModal {
 
         let current = self.current_row();
         let field_desc = match current {
-            Some(ContentRow::Field(i)) => fields_for_tab(self.active_tab).get(i).copied(),
+            Some(ContentRow::Field(i)) => fields_for_tab(self.field_tab()).get(i).copied(),
             _ => None,
         };
 
@@ -295,6 +296,8 @@ impl SettingsModal {
             KeyCode::Tab => {
                 self.focus = FocusArea::Buttons;
             }
+            // The connection page goes back to the list it was opened from.
+            KeyCode::Esc if self.connection_edit.is_some() => self.close_connection(),
             KeyCode::BackTab | KeyCode::Esc => {
                 self.focus = FocusArea::Sidebar;
             }
@@ -304,6 +307,13 @@ impl SettingsModal {
                 ))));
             }
             KeyCode::Enter | KeyCode::Char(' ') => self.activate_current_row(),
+            KeyCode::Delete if matches!(current, Some(ContentRow::Connection(_))) => {
+                if let Some(ContentRow::Connection(index)) = current {
+                    if let Some(name) = self.connection_name(index) {
+                        self.delete_connection(&name);
+                    }
+                }
+            }
             KeyCode::Delete => {
                 if let Some(ContentRow::LspServer(idx)) = current {
                     if idx < self.lsp_server_keys.len() {
@@ -314,10 +324,13 @@ impl SettingsModal {
                     }
                 }
             }
+            KeyCode::Left | KeyCode::Right if current == Some(ContentRow::ConnectionButtons) => {
+                self.step_connection_button(key.code == KeyCode::Right);
+            }
             KeyCode::Left => {
                 if let (Some(ContentRow::Field(field_idx)), Some(d)) = (current, field_desc) {
                     if d.field_type == FieldType::Enum {
-                        cycle_enum_backward(&mut self.config, self.active_tab, field_idx);
+                        self.cycle(field_idx, false);
                         self.mark_dirty();
                     }
                 }
@@ -325,7 +338,7 @@ impl SettingsModal {
             KeyCode::Right => {
                 if let (Some(ContentRow::Field(field_idx)), Some(d)) = (current, field_desc) {
                     if d.field_type == FieldType::Enum {
-                        cycle_enum_forward(&mut self.config, self.active_tab, field_idx);
+                        self.cycle(field_idx, true);
                         self.mark_dirty();
                     }
                 }
@@ -333,6 +346,31 @@ impl SettingsModal {
             _ => {}
         }
         Ok(None)
+    }
+
+    /// Toggle a switch of the tab the content shows.
+    fn toggle(&mut self, index: usize) {
+        match self.field_tab() {
+            SettingsTab::Connection => self.toggle_connection_field(index),
+            tab => toggle_field(&mut self.config, tab, index),
+        }
+    }
+
+    /// Store a dropdown choice in a field of the tab the content shows.
+    fn apply_enum(&mut self, index: usize, value: &str) {
+        match self.field_tab() {
+            SettingsTab::Connection => self.apply_connection_enum(index, value),
+            tab => apply_enum_value(&mut self.config, tab, index, value),
+        }
+    }
+
+    /// Step an enum field of the tab the content shows.
+    fn cycle(&mut self, index: usize, forward: bool) {
+        match self.field_tab() {
+            SettingsTab::Connection => self.cycle_connection_field(index, forward),
+            tab if forward => cycle_enum_forward(&mut self.config, tab, index),
+            tab => cycle_enum_backward(&mut self.config, tab, index),
+        }
     }
 
     /// Handle keys in LSP server edit form.
@@ -434,7 +472,7 @@ impl SettingsModal {
             }
             KeyCode::Char(c) => {
                 if let Some(field_idx) = self.current_field_idx() {
-                    let fields = fields_for_tab(self.active_tab);
+                    let fields = fields_for_tab(self.field_tab());
                     if let Some(d) = fields.get(field_idx) {
                         if matches!(d.field_type, FieldType::Number | FieldType::OptionalNumber) {
                             if c.is_ascii_digit() {
@@ -504,6 +542,9 @@ impl SettingsModal {
                 defaults.normalize();
                 self.config = defaults;
                 self.mark_dirty();
+                // The connection the page had open is gone with the rest.
+                self.connection_edit = None;
+                self.enum_picker = None;
                 self.field_cursor = 0;
                 self.content_scroll = 0;
                 self.editing = false;

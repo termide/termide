@@ -852,6 +852,7 @@ impl App {
                                         e
                                     ));
                                 } else {
+                                    super::agent_panel::publish_ai_settings(&cfg.ai);
                                     self.state.config = std::sync::Arc::new(cfg);
                                     log::info!(
                                         "Created project override at {}",
@@ -882,6 +883,9 @@ impl App {
                             Ok(()) => {
                                 log::info!("Removed project override at {}", path.display());
                                 // Effective config falls back to defaults+global.
+                                super::agent_panel::publish_ai_settings(
+                                    &self.state.global_baseline.ai,
+                                );
                                 self.state.config =
                                     std::sync::Arc::clone(&self.state.global_baseline);
                             }

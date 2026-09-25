@@ -10,65 +10,76 @@ Open it with `Alt+A`, from **Windows → Agent**, or from the command palette
 
 ## Configuring a model
 
-The agent talks to any OpenAI-compatible endpoint, or to Anthropic's Messages
-API. The OpenAI protocol covers local servers (llama.cpp, Ollama, vLLM, omlx)
-and most hosted gateways, OpenAI and OpenRouter among them. Without a
-configured model the panel refuses to open and says so.
+The agent reaches a model through a **connection**: an OpenAI-compatible
+endpoint, Anthropic's Messages API, or a CLI agent. The OpenAI protocol covers
+local servers (llama.cpp, Ollama, vLLM, omlx) and most hosted gateways, OpenAI
+and OpenRouter among them. There are no connections by default; until one with
+a model exists, the panel refuses to open and says so.
 
 ```toml
 [ai]
-provider = "openai_compatible"   # openai_compatible (default), anthropic_compatible, claude_code, codex
+connection = "local"               # the one new sessions start on; else the first by name
+max_tokens_per_turn = 4096         # 0 or negative: no limit, the model decides
+prefer_reasoning = false           # send reasoning_effort to models that support it
+autofold = true                    # fold each block to a preview by default
+
+[ai.connections.local]
+provider = "openai_compatible"     # openai_compatible (default), anthropic_compatible, claude_code, codex
 base_url = "http://127.0.0.1:10000/v1"
 model = "Qwen3.8-Flash-Next-oQ4e-mtp"
-# context_window_fallback = 32000   # used only when the server does not report a window
-max_tokens_per_turn = 4096          # 0 or negative: no limit, the model decides
-prefer_reasoning = false            # send reasoning_effort to models that support it
-api_key_env = "OPENAI_API_KEY"   # name of the variable, never the key itself
-autofold = true              # fold each block to a preview by default
-```
+# api_key_env = "OPENAI_API_KEY"   # name of the variable, never the key itself
+# context_window_fallback = 32000  # used only when the server does not report a window
 
-Every one of these lives under an **AI** section in the settings modal too
-(the gear, or the command palette), so you can change the provider, model,
-context window and the rest without editing the file. The model is a dropdown:
-it fills with the endpoint's models (fetched in the background when the modal
-opens), and its last entry, "Enter a model id…", lets you type one by hand when
-the endpoint cannot list them. The API key is read from
-the environment variable named by `api_key_env`, so the configuration file
-never holds a secret. Local servers usually need no key at all; leave the
-variable unset. `autofold = false` shows every block expanded instead of
-folded to a preview. With `max_tokens_per_turn` at zero or below no output
-limit is sent and the model decides how long to reply; the Anthropic API
-requires one, so there it becomes a generous 32000.
-
-The `[ai]` fields describe one endpoint, the profile named `default`. More
-endpoints — a local server and a hosted model, say — go in named provider
-profiles:
-
-```toml
-[ai.providers.cloud]
+[ai.connections.cloud]
 provider = "anthropic_compatible"
 model = "claude-sonnet-5"
 api_key_env = "ANTHROPIC_API_KEY"
-context_window_fallback = 200000   # optional
 
-[ai.providers.codex]
+[ai.connections.codex]
 provider = "codex"                 # a CLI agent needs nothing else
 ```
 
-A profile carries only the connection — `provider`, `base_url`, `model`,
-`api_key_env`, `context_window_fallback` — and what it leaves out takes that
-field's default, not the `[ai]` value (a hosted profile does not inherit a
-local server's address). Everything else, the permissions, compaction and the
-rest, stays the `[ai]` one. The banner's `provider` line and the status bar's
-**Provider** chip switch the session to another profile: its endpoint and its
-model replace the ones in use, the agent restarts on the same log and carries
-the conversation over, and delegated tasks follow. A CLI agent (`claude_code`,
-`codex`) does not take over a conversation, so a switch to or from one works
-only before the first request. The session log records the profile, so a
-reopened session reconnects to it, as long as it is still in the config.
+A connection carries `provider`, `base_url`, `model`, `api_key_env` and
+`context_window_fallback`; what it leaves out takes that field's default.
+Everything else in `[ai]` — the output limit, reasoning, permissions,
+compaction and the rest — applies whichever connection a session runs on.
+
+The settings modal (the gear, or the command palette) has all of it under
+**AI**. **Connections** comes first: each row names a connection with its
+provider and model, the one new sessions start on marked `●`. `Enter` or a
+click opens a connection on a page of its own — name, provider, base URL, API
+key variable, model, context window and **Use by default** (new sessions start
+on it) — and **[ Back to list ]** or `Esc` returns to the list;
+**+ Add connection** adds an OpenAI-compatible one, and
+**[ Delete connection ]** on the page, or `Del` on its row, removes one. A new
+connection is named after its provider until you name it. The model is a
+dropdown: it fills with the connection's models, fetched in the background
+when its page opens, and its last entry, "Enter a model id…", lets you type one
+by hand when the endpoint cannot list them.
+
+The API key is read from the environment variable named by `api_key_env`, so
+the configuration file never holds a secret. Local servers usually need no key
+at all; leave the variable unset. `autofold = false` shows every block expanded
+instead of folded to a preview. With `max_tokens_per_turn` at zero or below no
+output limit is sent and the model decides how long to reply; the Anthropic API
+requires one, so there it becomes a generous 32000.
+
+A configuration written before connections, with `provider`, `base_url`,
+`model`, `api_key_env` or `context_window_fallback` directly under `[ai]`, is
+read as one connection named `default` that new sessions start on; the next
+save from the settings modal writes it in the new shape.
+
+The banner's `connection` line and the status bar's **Connection** chip switch
+the session to another connection: its endpoint and its model replace the ones
+in use, the agent restarts on the same log and carries the conversation over,
+and delegated tasks follow. A CLI agent (`claude_code`, `codex`) does not take
+over a conversation, so a switch to or from one works only before the first
+request. The session log records the connection, so a reopened session
+reconnects to it while it is still in the config, and to the one new sessions
+start on otherwise.
 
 For a hosted OpenAI-compatible endpoint, keep `provider = "openai_compatible"` and point
-`base_url` and `api_key_env` at it, for example OpenAI itself
+the connection's `base_url` and `api_key_env` at it, for example OpenAI itself
 (`https://api.openai.com/v1`, `OPENAI_API_KEY`) or OpenRouter
 (`https://openrouter.ai/api/v1`, `OPENROUTER_API_KEY`). For an Anthropic
 subscription set `provider = "anthropic_compatible"`, drop `base_url` (the API root is
@@ -81,8 +92,9 @@ of the built-in loop talking to a model endpoint, the panel drives that tool's
 own CLI as an [external agent](#external-agents) over ACP
 (`@zed-industries/claude-code-acp` / `@zed-industries/codex-acp`, run through
 `npx`). The CLI owns the endpoint and the sign-in — its own subscription or
-API key — so `base_url` and `api_key_env` in `[ai]` do not apply; the settings
-modal hides them for these providers and clears them from the file. `model` is
+API key — so the connection's `base_url`, `api_key_env` and context window do
+not apply; the settings modal hides them for these providers and clears them
+from the file. `model` is
 kept: it is the model **pre-selected** on the agent — applied over ACP once the
 session starts — and at runtime the **Model** chip lists and switches the
 agent's own models. The
@@ -103,9 +115,9 @@ instead. Give a session a name of your own through the panel's `[≡]` menu →
 **Rename session**, and the title shows that name from then on.
 
 A fresh session greets you with a banner: a small logo on the left and, on the
-right, what the agent is set up with — its provider, model, agent name, the
-tools it may use and the directory it works in. The model, the agent and the
-tools are shown bold in the accent colour: a click on any opens the same
+right, what the agent is set up with — its connection, model, agent name, the
+tools it may use and the directory it works in. The connection, the model, the
+agent and the tools are shown bold in the accent colour: a click on any opens the same
 picker its status-bar chip does, so you can set the session up before you
 start. The banner gives way to the conversation as soon as you send your first
 message.
@@ -302,11 +314,11 @@ written to a file whose path the tool reports, and you still see the raw
 stream live in the panel.
 
 The status chips run, left to right: the agent, the permission mode, a
-**Reasoning** toggle (`on`/`off`), the provider (`OpenAI Compatible`) and the
-model. The session's token totals (`↑` input / `↓` output) and the context
+**Reasoning** toggle (`on`/`off`), the connection with its protocol
+(`local · OpenAI Compatible`) and the model. The session's token totals (`↑` input / `↓` output) and the context
 window — tokens used of the window with a fill bar, `35k/262k ▰▰▱▱▱▱▱▱` — sit
 flush right; on a narrow terminal the chips on the left are cut, never these.
-Agent, mode, reasoning and model are buttons, and the same entries sit in the
+Agent, mode, reasoning, connection and model are buttons, and the same entries sit in the
 `[≡]` menu. Clicking **Reasoning** asks the model to reason (extended thinking
 / `reasoning_effort`) from the next request; the choice is remembered in the
 session, so a resume comes back with it. What the agent is doing right now is

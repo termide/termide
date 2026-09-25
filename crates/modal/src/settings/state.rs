@@ -5,7 +5,8 @@ use ratatui::layout::Rect;
 use termide_config::Config;
 use termide_i18n as i18n;
 
-use super::fields::{fields_for_tab, get_field_value, is_cli_provider, ContentRow, FieldType};
+use super::connection;
+use super::fields::{fields_for_tab, get_field_value, ContentRow, FieldType};
 use super::kb::KB_SECTIONS;
 use super::{
     FocusArea, KbMode, LspMode, SettingsModal, SettingsTab, SidebarRow, BUTTON_APPLY,
@@ -40,6 +41,8 @@ impl SettingsModal {
             lsp_server_keys,
             lsp_edit_fields: Default::default(),
             lsp_edit_cursor: 0,
+            connection_edit: None,
+            model_fetch_request: None,
             kb_mode: KbMode::Bindings,
             kb_section: 0,
             kb_cursor: 0,
@@ -59,23 +62,29 @@ impl SettingsModal {
         m
     }
 
-    /// Provide the AI provider's model list (fetched off-thread by the app),
-    /// so the model field's dropdown lists them.
+    /// Provide the open connection's model list (fetched off-thread by the
+    /// app), so the model field's dropdown lists them.
     pub fn set_model_options(&mut self, models: Vec<String>) {
         self.model_options = models;
     }
 
-    /// The dropdown options for a field: the fetched model list for the AI
-    /// `model` field, the pure config-derived options for every other.
+    /// The dropdown options for a field of the tab the content shows.
     pub(super) fn enum_options_for(
         &self,
         field_index: usize,
     ) -> Option<crate::settings::fields::EnumOptions> {
-        use crate::settings::fields::{ai_model_enum_options, enum_options, AI_MODEL_FIELD};
-        if self.active_tab == SettingsTab::Ai && field_index == AI_MODEL_FIELD {
-            return Some(ai_model_enum_options(&self.config, &self.model_options));
+        match self.field_tab() {
+            SettingsTab::Connection => self.connection_enum_options(field_index),
+            tab => crate::settings::fields::enum_options(&self.config, tab, field_index),
         }
-        enum_options(&self.config, self.active_tab, field_index)
+    }
+
+    /// A field's value, as its row shows it, in the tab the content shows.
+    pub(super) fn field_value(&self, index: usize) -> String {
+        match self.field_tab() {
+            SettingsTab::Connection => self.connection_value(index),
+            tab => get_field_value(&self.config, tab, index),
+        }
     }
 
     fn sorted_server_keys(config: &Config) -> Vec<String> {
@@ -146,6 +155,7 @@ impl SettingsModal {
         match row {
             SidebarRow::Leaf(tab) => {
                 self.active_tab = tab;
+                self.connection_edit = None;
                 self.content_scroll = 0;
                 self.editing = false;
                 self.field_cursor = self.first_selectable_row();
@@ -238,7 +248,7 @@ impl SettingsModal {
     /// Field indices reference `fields_for_tab(self.active_tab)`.
     pub(super) fn content_rows(&self) -> Vec<ContentRow> {
         use ContentRow::*;
-        match self.active_tab {
+        match self.field_tab() {
             SettingsTab::General => vec![
                 Header("Appearance"),
                 Field(1), // theme
@@ -306,45 +316,29 @@ impl SettingsModal {
             }
             SettingsTab::Logging => vec![Field(0), Field(1)],
             SettingsTab::Vfs => vec![Field(0)],
-            SettingsTab::Ai if is_cli_provider(&self.config.ai.provider) => vec![
-                // A CLI adapter (Claude Code, Codex) brings its own endpoint and
-                // auth, so those fields do not apply; the model is kept as the
-                // one to pre-select on the agent over ACP.
-                Header("Backend"),
-                Field(0), // provider
-                Field(2), // model (pre-selected over ACP)
-                Spacer,
-                // Its tool calls ask through the panel too, under the same mode.
-                Header("Permissions"),
-                Field(12), // permission mode for new sessions
-                Spacer,
-                Header("Transcript"),
-                Field(7), // autofold
-            ],
-            SettingsTab::Ai => vec![
-                Header("Endpoint"),
-                Field(0), // provider
-                Field(1), // base_url
-                Field(3), // api_key_env
-                Spacer,
-                Header("Model"),
-                Field(2), // model
-                Field(4), // context_window
-                Field(5), // max_tokens
-                Field(6), // reasoning
-                Spacer,
-                Header("Permissions"),
-                Field(12), // permission mode for new sessions
-                Spacer,
-                Header("Transcript"),
-                Field(7), // autofold
-                Spacer,
-                Header("Web"),
-                Field(8),  // web backend
-                Field(9),  // search engine
-                Field(10), // browser display
-                Field(11), // browser executable
-            ],
+            SettingsTab::Ai => {
+                let mut rows = self.connection_list_rows();
+                rows.extend([
+                    Spacer,
+                    Header("Model"),
+                    Field(0), // max_tokens
+                    Field(1), // reasoning
+                    Spacer,
+                    Header("Permissions"),
+                    Field(7), // permission mode for new sessions
+                    Spacer,
+                    Header("Transcript"),
+                    Field(2), // autofold
+                    Spacer,
+                    Header("Web"),
+                    Field(3), // web backend
+                    Field(4), // search engine
+                    Field(5), // browser display
+                    Field(6), // browser executable
+                ]);
+                rows
+            }
+            SettingsTab::Connection => self.connection_page_rows(),
             SettingsTab::Keybindings => Vec::new(),
         }
     }
@@ -411,7 +405,7 @@ impl SettingsModal {
 
     /// Commit the current edit buffer to the config.
     pub(super) fn commit_edit(&mut self) {
-        let tab = self.active_tab;
+        let tab = self.field_tab();
         let Some(field_idx) = self.current_field_idx() else {
             self.editing = false;
             return;
@@ -444,12 +438,10 @@ impl SettingsModal {
                 self.apply_optional_number(tab, field_idx, val);
                 self.dirty = true;
             }
-            // The AI model field: an enum, but its typed-id escape commits text.
-            FieldType::Enum
-                if tab == SettingsTab::Ai
-                    && field_idx == crate::settings::fields::AI_MODEL_FIELD =>
-            {
-                self.config.ai.model = self.edit_buffer.trim().to_string();
+            // The model field: an enum, but its typed-id escape commits text.
+            FieldType::Enum if tab == SettingsTab::Connection && field_idx == connection::MODEL => {
+                let text = self.edit_buffer.clone();
+                self.apply_connection_text(field_idx, &text);
                 self.dirty = true;
             }
             _ => {}
@@ -467,20 +459,20 @@ impl SettingsModal {
         let Some(field_idx) = self.current_field_idx() else {
             return;
         };
-        let fields = fields_for_tab(self.active_tab);
+        let fields = fields_for_tab(self.field_tab());
         let Some(desc) = fields.get(field_idx) else {
             return;
         };
-        // The AI model field is an enum but its "type an id" escape edits it
+        // The model field is an enum but its "type an id" escape edits it
         // inline like a text field.
-        let is_model = self.active_tab == SettingsTab::Ai
-            && field_idx == crate::settings::fields::AI_MODEL_FIELD;
+        let is_model =
+            self.field_tab() == SettingsTab::Connection && field_idx == connection::MODEL;
         match desc.field_type {
             FieldType::Bool => return,
             FieldType::Enum if !is_model => return,
             _ => {}
         }
-        self.edit_buffer = get_field_value(&self.config, self.active_tab, field_idx);
+        self.edit_buffer = self.field_value(field_idx);
         // Strip "(auto)" / "(none)" placeholders
         if self.edit_buffer.starts_with('(') {
             self.edit_buffer.clear();
@@ -519,7 +511,7 @@ impl SettingsModal {
                 }
             }
             SettingsTab::Ai => {
-                if index == 5 {
+                if index == 0 {
                     self.config.ai.max_tokens_per_turn = i64::try_from(val).unwrap_or(i64::MAX);
                 }
             }
@@ -529,8 +521,8 @@ impl SettingsModal {
 
     /// Apply an optional-number field (`None` means "(auto)").
     fn apply_optional_number(&mut self, tab: SettingsTab, index: usize, val: Option<u64>) {
-        if tab == SettingsTab::Ai && index == 4 {
-            self.config.ai.context_window_fallback = val;
+        if tab == SettingsTab::Connection && index == connection::CONTEXT_WINDOW {
+            self.apply_connection_window(val);
         }
     }
 
@@ -554,13 +546,12 @@ impl SettingsModal {
                     }
                 }
             }
-            SettingsTab::Ai => match index {
-                1 => self.config.ai.base_url = text.to_string(),
-                2 => self.config.ai.model = text.to_string(),
-                3 => self.config.ai.api_key_env = text.to_string(),
-                11 => self.config.ai.web.chrome_path = text.to_string(),
-                _ => {}
-            },
+            SettingsTab::Ai => {
+                if index == 6 {
+                    self.config.ai.web.chrome_path = text.to_string();
+                }
+            }
+            SettingsTab::Connection => self.apply_connection_text(index, text),
             _ => {}
         }
     }
@@ -610,58 +601,6 @@ mod content_row_tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn a_cli_provider_hides_the_endpoint_and_model_fields() {
-        let mut config = Config::default();
-        config.ai.provider = "claude_code".to_string();
-        let mut modal = SettingsModal::new(config, false);
-        modal.active_tab = SettingsTab::Ai;
-
-        let rendered: Vec<usize> = modal
-            .content_rows()
-            .into_iter()
-            .filter_map(|row| match row {
-                ContentRow::Field(i) => Some(i),
-                _ => None,
-            })
-            .collect();
-        // Provider (0), the pre-selected model (2), the permission mode (12)
-        // and autofold (7) apply; the endpoint/auth/window fields are hidden.
-        assert_eq!(rendered, vec![0, 2, 12, 7]);
-    }
-
-    #[test]
-    fn the_ai_model_field_lists_fetched_models_with_a_typed_id_escape() {
-        let mut modal = SettingsModal::new(Config::default(), false);
-        modal.active_tab = SettingsTab::Ai;
-        modal.config.ai.model = "current-m".into();
-
-        // With no fetched list: just the current value and the "type an id"
-        // escape.
-        let options = modal.enum_options_for(2).unwrap();
-        assert_eq!(options.values.len(), 2);
-        assert_eq!(options.current, Some(0));
-        assert_eq!(
-            options.values.last().unwrap(),
-            crate::settings::fields::MODEL_TYPE_SENTINEL
-        );
-
-        // Once models arrive they are listed, the current kept present, and the
-        // escape stays last.
-        modal.set_model_options(vec!["a".into(), "b".into()]);
-        let options = modal.enum_options_for(2).unwrap();
-        assert_eq!(
-            options.values,
-            vec![
-                "current-m".to_string(),
-                "a".to_string(),
-                "b".to_string(),
-                crate::settings::fields::MODEL_TYPE_SENTINEL.to_string(),
-            ]
-        );
-        assert_eq!(options.current, Some(0));
     }
 }
 

@@ -15,6 +15,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::{Modal, ModalResult};
 
+mod connection;
 mod fields;
 mod input;
 mod kb;
@@ -42,6 +43,9 @@ pub enum SettingsTab {
     Logging,
     Vfs,
     Ai,
+    /// One AI connection, opened from the AI tab: not in the sidebar, it
+    /// names the fields of the page that edits it.
+    Connection,
     Keybindings,
 }
 
@@ -71,7 +75,7 @@ impl SettingsTab {
             SettingsTab::Lsp => t.settings_tab_lsp().to_string(),
             SettingsTab::Logging => t.settings_tab_logging().to_string(),
             SettingsTab::Vfs => t.settings_tab_vfs().to_string(),
-            SettingsTab::Ai => t.settings_tab_agent().to_string(),
+            SettingsTab::Ai | SettingsTab::Connection => t.settings_tab_agent().to_string(),
             SettingsTab::Keybindings => t.settings_tab_keybindings().to_string(),
         }
     }
@@ -224,6 +228,13 @@ pub struct SettingsModal {
     /// Which field (0-3) is focused in the LSP edit form.
     lsp_edit_cursor: usize,
 
+    // --- AI connections ---
+    /// The connection page, while one is open from the AI tab.
+    connection_edit: Option<connection::ConnectionEdit>,
+    /// The connection whose models the app should fetch for the model
+    /// dropdown, taken with [`SettingsModal::take_model_fetch_request`].
+    model_fetch_request: Option<termide_config::Connection>,
+
     // --- Keybindings tab ---
     kb_mode: KbMode,
     /// Which section (0-6) is selected.
@@ -244,7 +255,7 @@ pub struct SettingsModal {
     /// the modal result handler routes the third-button click.
     project_override_active: bool,
 
-    /// The AI provider's models, fetched off-thread after the modal opens and
+    /// The open connection's models, fetched off-thread by the app and
     /// pushed in with [`SettingsModal::set_model_options`]; empty until they
     /// arrive (or when the endpoint cannot list them), when the model field
     /// falls back to typing an id.
@@ -477,6 +488,22 @@ impl Modal for SettingsModal {
                     let rows = self.content_rows();
                     if idx < rows.len() && rows[idx].is_selectable() {
                         self.field_cursor = idx;
+                        // The buttons row acts on the button under the click;
+                        // the gap between them does nothing.
+                        if rows[idx] == fields::ContentRow::ConnectionButtons {
+                            let column = mouse.column as usize;
+                            let spans =
+                                connection::connection_button_spans(content_area.x as usize + 2);
+                            let Some(button) = spans
+                                .iter()
+                                .position(|(start, end)| (*start..*end).contains(&column))
+                            else {
+                                return Ok(None);
+                            };
+                            if let Some(edit) = self.connection_edit.as_mut() {
+                                edit.button = button;
+                            }
+                        }
                         // Clicking a control operates it, the way Enter does.
                         // Moving the cursor and leaving the switch alone looks
                         // like the click was ignored.

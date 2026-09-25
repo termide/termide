@@ -86,40 +86,20 @@ pub struct Config {
     pub ai: AiSettings,
 }
 
-/// AI settings: which model to talk to and what it may do.
+/// AI settings: the connections to models and what the agent may do.
 ///
-/// The provider is any OpenAI-compatible endpoint, which covers local
-/// servers (llama.cpp, Ollama, vLLM, omlx) and most gateways. The API key is
-/// read from `api_key_env` rather than stored here, so the config file never
-/// holds a secret.
+/// A connection (`[ai.connections.<name>]`) is one endpoint and model, or a
+/// CLI agent; everything else here applies whichever one a session runs on.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiSettings {
-    /// Wire protocol: `openai_compatible` (the default, for omlx, OpenAI,
-    /// OpenRouter and most gateways) or `anthropic_compatible` (the Messages
-    /// API). The value is the protocol; `base_url` picks the actual endpoint.
-    #[serde(default = "agent_defaults::provider")]
-    pub provider: String,
-
-    /// Base URL including the API prefix, e.g. `http://127.0.0.1:10000/v1`.
-    /// For `anthropic_compatible` it is left at the default unless a gateway is
-    /// used.
-    #[serde(default = "agent_defaults::base_url")]
-    pub base_url: String,
-
-    /// Model id as the endpoint expects it. Empty disables the panel.
+    /// The connection new sessions start on. Empty, or naming none that
+    /// exists, falls back to the first by name.
     #[serde(default)]
-    pub model: String,
+    pub connection: String,
 
-    /// Environment variable holding the API key; empty for local servers.
-    #[serde(default = "agent_defaults::api_key_env")]
-    pub api_key_env: String,
-
-    /// Fallback context window in tokens, used only when the provider does not
-    /// report a model's window (a local server's `max_model_len`). Unset falls
-    /// back to [`agent_defaults::context_window`]. The provider's reported
-    /// window always wins.
+    /// The connections, by name.
     #[serde(default)]
-    pub context_window_fallback: Option<u64>,
+    pub connections: std::collections::BTreeMap<String, Connection>,
 
     /// Upper bound on the model's output tokens per turn (one response). Zero
     /// or a negative number sets no bound and leaves the length to the model.
@@ -147,34 +127,76 @@ pub struct AiSettings {
     /// The web tools (`fetch`, `web_search`).
     #[serde(default)]
     pub web: WebSettings,
-
-    /// Named provider profiles (`[ai.providers.<name>]`): other endpoints and
-    /// models a session can switch to. The `[ai]` fields above are the
-    /// profile named [`DEFAULT_PROVIDER_PROFILE`].
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub providers: std::collections::BTreeMap<String, ProviderProfile>,
 }
 
-/// The name of the provider profile the `[ai]` fields themselves make up.
-pub const DEFAULT_PROVIDER_PROFILE: &str = "default";
-
-/// A named provider profile: how to reach one endpoint and which model to
-/// ask there. What it leaves out takes the same default as the `[ai]` field
-/// of the same name, not that field's value — a cloud profile does not
-/// inherit a local server's address.
+/// One connection to a model: the wire protocol or CLI agent, where it
+/// listens, the key and the model. The API key is read from `api_key_env`
+/// rather than stored, so the config file never holds a secret.
+///
+/// Only what a connection sets is written: a new one is a table the
+/// defaults do not have, so the diff-against-defaults save would otherwise
+/// write every field, the ones its provider ignores included.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProviderProfile {
-    /// Wire protocol or CLI agent, as `[ai] provider`.
+pub struct Connection {
+    /// `openai_compatible` (omlx, llama.cpp, OpenAI, OpenRouter and most
+    /// gateways), `anthropic_compatible` (the Messages API), or a CLI agent
+    /// driven over ACP: `claude_code`, `codex`.
     #[serde(default = "agent_defaults::provider")]
     pub provider: String,
-    #[serde(default = "agent_defaults::base_url")]
+    /// Base URL including the API prefix, e.g. `http://127.0.0.1:10000/v1`.
+    /// For `anthropic_compatible` it is left at the default unless a gateway
+    /// is used.
+    #[serde(
+        default = "agent_defaults::base_url",
+        skip_serializing_if = "agent_defaults::is_base_url"
+    )]
     pub base_url: String,
-    #[serde(default)]
+    /// Model id as the endpoint expects it; for a CLI agent, the model to
+    /// pre-select on its own login.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub model: String,
-    #[serde(default = "agent_defaults::api_key_env")]
+    /// Environment variable holding the API key; empty for local servers.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub api_key_env: String,
-    #[serde(default)]
+    /// Fallback context window in tokens, used only when the provider does
+    /// not report a model's window. Unset falls back to
+    /// [`DEFAULT_CONTEXT_WINDOW_FALLBACK`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window_fallback: Option<u64>,
+}
+
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            provider: agent_defaults::provider(),
+            base_url: agent_defaults::base_url(),
+            model: String::new(),
+            api_key_env: String::new(),
+            context_window_fallback: None,
+        }
+    }
+}
+
+impl Connection {
+    /// The context window to start with, until the provider reports one.
+    #[must_use]
+    pub fn effective_context_window(&self) -> u64 {
+        self.context_window_fallback
+            .unwrap_or(DEFAULT_CONTEXT_WINDOW_FALLBACK)
+    }
+
+    /// Whether it drives a CLI agent over ACP rather than an endpoint.
+    #[must_use]
+    pub fn is_cli(&self) -> bool {
+        is_cli_provider(&self.provider)
+    }
+
+    /// Whether a session can run on it: a CLI agent brings its own model, an
+    /// endpoint needs one named.
+    #[must_use]
+    pub fn is_usable(&self) -> bool {
+        self.is_cli() || !self.model.trim().is_empty()
+    }
 }
 
 /// `[ai.web]`: how the agent's web tools reach the web.
@@ -236,12 +258,14 @@ mod web_defaults {
 }
 
 impl AiSettings {
-    /// The context window to start with: the configured cap when set, else the
-    /// fallback used until the provider's real `max_model_len` is known.
+    /// The name of the connection new sessions start on: `connection` when it
+    /// exists, else the first by name; `None` with no connections at all.
     #[must_use]
-    pub fn effective_context_window(&self) -> u64 {
-        self.context_window_fallback
-            .unwrap_or(DEFAULT_CONTEXT_WINDOW_FALLBACK)
+    pub fn default_connection(&self) -> Option<&str> {
+        if self.connections.contains_key(&self.connection) {
+            return Some(self.connection.as_str());
+        }
+        self.connections.keys().next().map(String::as_str)
     }
 
     /// The per-turn output bound to request, `None` when the setting is zero
@@ -251,39 +275,6 @@ impl AiSettings {
         u64::try_from(self.max_tokens_per_turn)
             .ok()
             .filter(|&n| n > 0)
-    }
-
-    /// Every provider profile's name, [`DEFAULT_PROVIDER_PROFILE`] (the
-    /// `[ai]` fields) first.
-    #[must_use]
-    pub fn profile_names(&self) -> Vec<String> {
-        std::iter::once(DEFAULT_PROVIDER_PROFILE.to_string())
-            .chain(
-                self.providers
-                    .keys()
-                    .filter(|name| name.as_str() != DEFAULT_PROVIDER_PROFILE)
-                    .cloned(),
-            )
-            .collect()
-    }
-
-    /// These settings with profile `name`'s connection (provider, endpoint,
-    /// key, model, context window) in place of the `[ai]` fields, everything
-    /// else kept; `None` for a profile that does not exist.
-    #[must_use]
-    pub fn with_profile(&self, name: &str) -> Option<AiSettings> {
-        if name == DEFAULT_PROVIDER_PROFILE {
-            return Some(self.clone());
-        }
-        let profile = self.providers.get(name)?;
-        Some(AiSettings {
-            provider: profile.provider.clone(),
-            base_url: profile.base_url.clone(),
-            model: profile.model.clone(),
-            api_key_env: profile.api_key_env.clone(),
-            context_window_fallback: profile.context_window_fallback,
-            ..self.clone()
-        })
     }
 
     /// The permission mode new sessions start in, as configuration spells it
@@ -326,18 +317,14 @@ pub fn is_cli_provider(provider: &str) -> bool {
 impl Default for AiSettings {
     fn default() -> Self {
         Self {
-            provider: agent_defaults::provider(),
-            base_url: agent_defaults::base_url(),
-            model: String::new(),
-            api_key_env: agent_defaults::api_key_env(),
-            context_window_fallback: None,
+            connection: String::new(),
+            connections: std::collections::BTreeMap::new(),
             max_tokens_per_turn: agent_defaults::max_tokens(),
             prefer_reasoning: false,
             permissions: termide_agent_core::PermissionRules::default(),
             compaction: termide_agent_core::CompactionPolicy::default(),
             autofold: agent_defaults::autofold(),
             web: WebSettings::default(),
-            providers: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -696,17 +683,13 @@ fn default_theme_name() -> String {
 
 mod agent_defaults {
     pub fn provider() -> String {
-        // Unset by default: the user picks a provider (and a model) before the
-        // AI panel will open, rather than silently defaulting to one.
-        String::new()
+        "openai_compatible".to_string()
     }
     pub fn base_url() -> String {
         "http://127.0.0.1:10000/v1".to_string()
     }
-    pub fn api_key_env() -> String {
-        // No key by default: local servers need none, and the right variable
-        // depends on the provider, so the user names it when using a hosted one.
-        String::new()
+    pub fn is_base_url(value: &str) -> bool {
+        value == base_url()
     }
     pub fn max_tokens() -> i64 {
         4_096
@@ -1047,30 +1030,60 @@ mod ai_settings_tests {
     use super::*;
 
     #[test]
-    fn a_provider_profile_replaces_the_connection_and_keeps_the_rest() {
-        let parsed: AiSettings = toml::from_str(
+    fn new_sessions_start_on_the_named_connection_or_the_first() {
+        let mut parsed: AiSettings = toml::from_str(
             r#"
+            connection = "local"
+            [connections.local]
             model = "local-model"
-            max_tokens_per_turn = 1000
-            [providers.cloud]
+            [connections.cloud]
             provider = "anthropic_compatible"
             model = "claude-x"
-            api_key_env = "ANTHROPIC_API_KEY"
             "#,
         )
         .unwrap();
-        assert_eq!(parsed.profile_names(), ["default", "cloud"]);
-        let default = parsed.with_profile(DEFAULT_PROVIDER_PROFILE).unwrap();
-        assert_eq!(default.model, "local-model");
-        let cloud = parsed.with_profile("cloud").unwrap();
-        assert_eq!(cloud.provider, "anthropic_compatible");
-        assert_eq!(cloud.model, "claude-x");
-        assert_eq!(cloud.api_key_env, "ANTHROPIC_API_KEY");
-        // Not the `[ai]` endpoint: the protocol's own default applies.
-        assert_eq!(cloud.base_url, agent_defaults::base_url());
-        // The rest of `[ai]` carries over.
-        assert_eq!(cloud.max_tokens_per_turn, 1000);
-        assert!(parsed.with_profile("missing").is_none());
+        assert_eq!(parsed.default_connection(), Some("local"));
+        let local = &parsed.connections["local"];
+        // What a connection leaves out takes the field's own default.
+        assert_eq!(local.provider, "openai_compatible");
+        assert_eq!(local.base_url, agent_defaults::base_url());
+        parsed.connection = "gone".into();
+        assert_eq!(parsed.default_connection(), Some("cloud"));
+        assert_eq!(AiSettings::default().default_connection(), None);
+    }
+
+    #[test]
+    fn a_connection_writes_only_what_it_sets() {
+        let cli = Connection {
+            provider: "claude_code".into(),
+            ..Connection::default()
+        };
+        assert_eq!(
+            toml::to_string(&cli).unwrap().trim(),
+            r#"provider = "claude_code""#
+        );
+        let local = Connection {
+            model: "qwen".into(),
+            ..Connection::default()
+        };
+        let text = toml::to_string(&local).unwrap();
+        assert_eq!(
+            text.trim(),
+            "provider = \"openai_compatible\"\nmodel = \"qwen\""
+        );
+        // What it leaves out reads back as the default.
+        assert_eq!(toml::from_str::<Connection>(&text).unwrap(), local);
+    }
+
+    #[test]
+    fn a_connection_is_usable_with_a_model_or_as_a_cli_agent() {
+        let mut connection = Connection::default();
+        assert!(!connection.is_usable());
+        connection.provider = "codex".into();
+        assert!(connection.is_usable());
+        connection.provider = "openai_compatible".into();
+        connection.model = "m".into();
+        assert!(connection.is_usable());
     }
 
     #[test]

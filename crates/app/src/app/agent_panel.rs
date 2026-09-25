@@ -19,23 +19,23 @@ use termide_agent_mcp::Connections;
 use termide_agent_providers::{AnthropicProvider, Compat, OpenAiCompatProvider};
 use termide_agent_tools::{builtin_tools, SkillTool, SubagentRun, TaskTool};
 use termide_agent_web::{web_tools, Web, WebConfig};
-use termide_config::{AiSettings, WebSettings};
+use termide_config::{AiSettings, Connection, WebSettings};
 use termide_panel_agent::{
     AgentCatalog, AgentEntry, AgentPanel, AgentPanelSetup, AgentProfile, BackendFactory,
-    HooksFactory, ProviderCatalog, ProviderChoice, ProviderEntry,
+    ConnectionCatalog, ConnectionChoice, ConnectionEntry, HooksFactory,
 };
 
 use super::App;
 
 impl App {
     /// Open a new agent panel. Like a new terminal, each call opens another
-    /// one, so several agents can work in a project at once. Reports a status
-    /// message instead of opening when no model is configured.
+    /// one, so several agents can work in a project at once. Reports an
+    /// error instead of opening when there is no connection to run on.
     pub(in crate::app) fn handle_open_agent(&mut self) -> Result<()> {
         self.close_help_panels();
 
         let settings = self.state.config.ai.clone();
-        if settings.provider.trim().is_empty() || settings.model.trim().is_empty() {
+        if usable_connection(&settings).is_none() {
             let t = termide_i18n::t();
             self.show_error_modal(t.agent_not_configured().to_string());
             return Ok(());
@@ -63,8 +63,8 @@ impl App {
     }
 }
 
-/// Rebuild an agent panel saved in a project layout. `None` when no model
-/// is configured any more; a session log that has gone missing starts a
+/// Rebuild an agent panel saved in a project layout. `None` when there is
+/// no connection to run on any more; a session log that has gone missing starts a
 /// fresh session in the same project, an agent definition that has gone
 /// missing falls back to the default one.
 pub(crate) fn restore_agent_panel(
@@ -73,8 +73,8 @@ pub(crate) fn restore_agent_panel(
     session: Option<PathBuf>,
     agent: Option<String>,
 ) -> Option<AgentPanel> {
-    if settings.provider.trim().is_empty() || settings.model.trim().is_empty() {
-        log::warn!("agent panel not restored: [ai] provider and model must be set");
+    if usable_connection(settings).is_none() {
+        log::warn!("agent panel not restored: no [ai.connections] entry to run on");
         return None;
     }
     // Exclusive: if this session is already open in another restored panel,
@@ -377,42 +377,70 @@ struct Active {
 
 type ActiveSlot = Arc<std::sync::RwLock<Active>>;
 
-/// The provider profiles of `[ai]` for the panel's picker, built on demand.
-struct Profiles {
+/// The `[ai]` settings as last applied while termide runs. A panel's
+/// connection picker reads them from here, so a connection added in the
+/// settings modal is offered by the panels already open; `None` until the
+/// settings change after startup. Global because panels restored from a
+/// layout are built away from the `App`.
+static APPLIED_AI: std::sync::RwLock<Option<AiSettings>> = std::sync::RwLock::new(None);
+
+/// Record `settings` as the applied `[ai]` settings for open panels.
+pub(crate) fn publish_ai_settings(settings: &AiSettings) {
+    *APPLIED_AI
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(settings.clone());
+}
+
+/// The connections of `[ai]` for the panel's picker, built on demand.
+struct AiConnections {
+    /// The settings the panel was built with, until others are applied.
     settings: AiSettings,
     /// Shared with the subagent runner, so a switch reaches delegated tasks.
     active: ActiveSlot,
 }
 
-impl ProviderCatalog for Profiles {
-    fn list(&self) -> Vec<ProviderEntry> {
-        self.settings
-            .profile_names()
-            .into_iter()
-            .filter_map(|name| {
-                let profile = self.settings.with_profile(&name)?;
-                Some(ProviderEntry {
-                    name,
-                    kind: profile.provider,
-                    model: profile.model,
-                })
+impl AiConnections {
+    /// The settings applied last, else those the panel was built with.
+    fn settings(&self) -> AiSettings {
+        APPLIED_AI
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .unwrap_or_else(|| self.settings.clone())
+    }
+}
+
+impl ConnectionCatalog for AiConnections {
+    fn list(&self) -> Vec<ConnectionEntry> {
+        self.settings()
+            .connections
+            .iter()
+            .map(|(name, connection)| ConnectionEntry {
+                name: name.clone(),
+                kind: connection.provider.clone(),
+                model: connection.model.clone(),
             })
             .collect()
     }
 
-    fn build(&self, name: &str, agent: &str) -> Option<ProviderChoice> {
-        let profile = self.settings.with_profile(name)?;
-        Some(ProviderChoice {
+    fn build(&self, name: &str, agent: &str) -> Option<ConnectionChoice> {
+        let settings = self.settings();
+        let connection = settings.connections.get(name)?;
+        Some(ConnectionChoice {
             name: name.to_string(),
-            kind: profile.provider.clone(),
-            provider: build_provider(&profile, api_key_of(&profile)),
-            model: profile.model.clone(),
-            context_window: profile.effective_context_window(),
-            backend: cli_provider_backend(&profile.provider, agent),
+            kind: connection.provider.clone(),
+            provider: build_provider(
+                connection,
+                settings.prefer_reasoning,
+                api_key_of(connection),
+            ),
+            model: connection.model.clone(),
+            context_window: connection.effective_context_window(),
+            backend: cli_provider_backend(&connection.provider, agent),
         })
     }
 
-    fn activate(&self, choice: &ProviderChoice) {
+    fn activate(&self, choice: &ConnectionChoice) {
         *self
             .active
             .write()
@@ -424,18 +452,32 @@ impl ProviderCatalog for Profiles {
     }
 }
 
-/// The provider profile `session` ran on, when it recorded one that still
-/// exists in `settings`; `None` runs on the `[ai]` fields.
-fn session_profile(settings: &AiSettings, session: Option<&Session>) -> Option<String> {
-    session
-        .and_then(Session::current_provider_profile)
-        .filter(|name| settings.with_profile(name).is_some())
+/// The connection new sessions start on, when there is one a session can
+/// run on.
+fn usable_connection(settings: &AiSettings) -> Option<(&str, &Connection)> {
+    let name = settings.default_connection()?;
+    let connection = &settings.connections[name];
+    connection.is_usable().then_some((name, connection))
 }
 
-/// The API key the settings name, read from its environment variable.
-fn api_key_of(settings: &AiSettings) -> Option<String> {
-    (!settings.api_key_env.is_empty())
-        .then(|| std::env::var(&settings.api_key_env).ok())
+/// The connection `session` runs on: the one it recorded while that still
+/// exists, else the one new sessions start on.
+fn session_connection(
+    settings: &AiSettings,
+    session: Option<&Session>,
+) -> Option<(String, Connection)> {
+    let recorded = session
+        .and_then(Session::current_connection)
+        .filter(|name| settings.connections.contains_key(name));
+    let name = recorded.or_else(|| settings.default_connection().map(str::to_string))?;
+    let connection = settings.connections[&name].clone();
+    Some((name, connection))
+}
+
+/// The API key the connection names, read from its environment variable.
+fn api_key_of(connection: &Connection) -> Option<String> {
+    (!connection.api_key_env.is_empty())
+        .then(|| std::env::var(&connection.api_key_env).ok())
         .flatten()
 }
 
@@ -577,41 +619,21 @@ impl Subagents {
 /// `agent`: the provider, the model, the tools, the system prompt and where
 /// the session logs live.
 fn agent_setup(
-    base: &AiSettings,
+    settings: &AiSettings,
     cwd: PathBuf,
     project_root: &Path,
     agent: &str,
     session: Option<Session>,
 ) -> AgentPanelSetup {
-    let recorded_profile = session_profile(base, session.as_ref());
-    let profile_name = recorded_profile
-        .clone()
-        .unwrap_or_else(|| termide_config::DEFAULT_PROVIDER_PROFILE.to_string());
-    let settings_owned = base
-        .with_profile(&profile_name)
-        .unwrap_or_else(|| base.clone());
-    let settings = &settings_owned;
-    let api_key = api_key_of(settings);
-    // A resumed session records the provider type it ran on; honor it over the
-    // current config so reopening a session rebuilds the right provider. An
-    // older session (or one recorded before this) has no usable type and falls
-    // back to the configured provider.
-    let provider_kind = session
-        .as_ref()
-        .filter(|_| recorded_profile.is_none())
-        .and_then(Session::current_model)
-        .map(|m| m.provider)
-        .filter(|p| {
-            p == "openai_compatible"
-                || p == "anthropic_compatible"
-                || termide_config::is_cli_provider(p)
-        })
-        .unwrap_or_else(|| settings.provider.clone());
-    let provider_settings = AiSettings {
-        provider: provider_kind.clone(),
-        ..settings.clone()
-    };
-    let provider: Arc<dyn Provider> = build_provider(&provider_settings, api_key);
+    // Callers open a panel only with a connection to run on.
+    let (connection_name, connection) =
+        session_connection(settings, session.as_ref()).unwrap_or_default();
+    let provider_kind = connection.provider.clone();
+    let provider: Arc<dyn Provider> = build_provider(
+        &connection,
+        settings.prefer_reasoning,
+        api_key_of(&connection),
+    );
 
     let mut catalog = FsCatalog::new(&cwd, project_root);
     let web = shared_web(&settings.web, &catalog.dirs);
@@ -620,8 +642,8 @@ fn agent_setup(
     // defaults, so a delegated agent runs like the panel would run it.
     let active: ActiveSlot = Arc::new(std::sync::RwLock::new(Active {
         provider: Arc::clone(&provider),
-        model: settings.model.clone(),
-        context_window: settings.effective_context_window(),
+        model: connection.model.clone(),
+        context_window: connection.effective_context_window(),
     }));
     catalog.subagents = Some(Arc::new(Subagents {
         active: Arc::clone(&active),
@@ -660,8 +682,8 @@ fn agent_setup(
     };
     let model = ModelSpec {
         provider: "agent".to_string(),
-        id: profile.model.unwrap_or_else(|| settings.model.clone()),
-        context_window: settings.effective_context_window(),
+        id: profile.model.unwrap_or_else(|| connection.model.clone()),
+        context_window: connection.effective_context_window(),
         max_tokens: settings.output_limit(),
         reasoning: settings.prefer_reasoning,
     };
@@ -692,11 +714,11 @@ fn agent_setup(
         hooks,
         backend,
         provider_backend,
-        providers: Some(Arc::new(Profiles {
-            settings: base.clone(),
+        connections: Some(Arc::new(AiConnections {
+            settings: settings.clone(),
             active,
         })),
-        profile: profile_name,
+        connection: connection_name,
         provider,
         provider_kind,
         model,
@@ -746,14 +768,15 @@ pub fn run_agent_headless(
     let quiet = output != HeadlessOutput::Text;
     let stream = output == HeadlessOutput::StreamJson;
 
-    if settings.provider.trim().is_empty() || settings.model.trim().is_empty() {
-        eprintln!("termide: AI is not configured (set [ai] provider and model)");
+    let Some((_, connection)) = usable_connection(settings) else {
+        eprintln!("termide: AI is not configured (add an [ai.connections] entry with a model)");
         return 1;
-    }
-    let api_key = (!settings.api_key_env.is_empty())
-        .then(|| std::env::var(&settings.api_key_env).ok())
-        .flatten();
-    let provider = build_provider(settings, api_key);
+    };
+    let provider = build_provider(
+        connection,
+        settings.prefer_reasoning,
+        api_key_of(connection),
+    );
 
     let global = termide_config::get_config_dir()
         .ok()
@@ -792,8 +815,8 @@ pub fn run_agent_headless(
             .spec
             .model
             .clone()
-            .unwrap_or_else(|| settings.model.clone()),
-        context_window: settings.effective_context_window(),
+            .unwrap_or_else(|| connection.model.clone()),
+        context_window: connection.effective_context_window(),
         max_tokens: settings.output_limit(),
         reasoning: settings.prefer_reasoning,
     };
@@ -961,9 +984,6 @@ fn stop_label(reason: StopReason) -> &'static str {
     }
 }
 
-/// The provider named by `settings.provider`: the Anthropic Messages API, or
-/// the OpenAI-compatible endpoint for everything else. An unknown name falls
-/// back to OpenAI-compatible with a warning.
 /// The ACP backend for a CLI-adapter provider (`claude_code`, `codex`): the
 /// panel drives the tool's own ACP adapter, which signs in with the user's CLI
 /// login (a subscription or an API key — the adapter's concern, not ours).
@@ -990,19 +1010,16 @@ fn cli_provider_backend(provider: &str, agent: &str) -> Option<BackendFactory> {
     }) as BackendFactory)
 }
 
-/// Start an off-thread `list_models` for the settings modal's model dropdown.
-/// `None` for a CLI-adapter provider (its models come over ACP at runtime) or
-/// when no provider is configured. The receiver is polled by the app loop.
+/// Start an off-thread `list_models` for the settings modal's model dropdown
+/// of `connection`. `None` for a CLI agent (its models come over ACP at
+/// runtime). The receiver is polled by the app loop.
 pub(crate) fn spawn_settings_model_fetch(
-    settings: &AiSettings,
+    connection: &Connection,
 ) -> Option<std::sync::mpsc::Receiver<Result<Vec<termide_agent_core::ModelInfo>, String>>> {
-    if settings.provider.trim().is_empty() || termide_config::is_cli_provider(&settings.provider) {
+    if connection.is_cli() {
         return None;
     }
-    let api_key = (!settings.api_key_env.is_empty())
-        .then(|| std::env::var(&settings.api_key_env).ok())
-        .flatten();
-    let provider = build_provider(settings, api_key);
+    let provider = build_provider(connection, false, api_key_of(connection));
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let _ = tx.send(provider.list_models());
@@ -1010,7 +1027,16 @@ pub(crate) fn spawn_settings_model_fetch(
     Some(rx)
 }
 
-fn build_provider(settings: &AiSettings, api_key: Option<String>) -> Arc<dyn Provider> {
+/// The provider `connection` names: the Anthropic Messages API, or the
+/// OpenAI-compatible endpoint for everything else (asking it for reasoning
+/// effort when `reasoning`). An unknown name falls back to OpenAI-compatible
+/// with a warning.
+fn build_provider(
+    connection: &Connection,
+    reasoning: bool,
+    api_key: Option<String>,
+) -> Arc<dyn Provider> {
+    let settings = connection;
     match settings.provider.trim().to_ascii_lowercase().as_str() {
         // A CLI-adapter provider runs over ACP; the built-in model provider is
         // unused, but something must be returned. A quiet OpenAI-compatible
@@ -1041,7 +1067,7 @@ fn build_provider(settings: &AiSettings, api_key: Option<String>) -> Arc<dyn Pro
                 OpenAiCompatProvider::new("agent", settings.base_url.clone())
                     .with_api_key(api_key)
                     .with_compat(Compat {
-                        reasoning_effort: settings.prefer_reasoning,
+                        reasoning_effort: reasoning,
                         ..Compat::default()
                     }),
             )
@@ -1052,7 +1078,7 @@ fn build_provider(settings: &AiSettings, api_key: Option<String>) -> Arc<dyn Pro
 /// The shipped default base URL, used to tell "left at default" from "set on
 /// purpose" when picking a provider.
 fn default_openai_base_url() -> String {
-    AiSettings::default().base_url
+    Connection::default().base_url
 }
 
 /// Persist an "allow always" rule as `[ai.permissions.<tool>]` in the
@@ -1127,49 +1153,56 @@ fn merge_permission_rule(path: &Path, tool: &str, pattern: &str, decision: Decis
 mod tests {
     use super::*;
 
+    /// A local endpoint (the one new sessions start on) and a hosted one.
     fn with_cloud() -> AiSettings {
         let mut settings = AiSettings {
-            model: "local".into(),
+            connection: "local".into(),
             ..AiSettings::default()
         };
-        settings.providers.insert(
+        settings.connections.insert(
+            "local".into(),
+            Connection {
+                model: "local-model".into(),
+                ..Connection::default()
+            },
+        );
+        settings.connections.insert(
             "cloud".into(),
-            termide_config::ProviderProfile {
+            Connection {
                 provider: "anthropic_compatible".into(),
-                base_url: String::new(),
                 model: "claude-x".into(),
-                api_key_env: String::new(),
                 context_window_fallback: Some(200_000),
+                ..Connection::default()
             },
         );
         settings
     }
 
     #[test]
-    fn provider_profiles_build_and_hand_their_provider_to_delegated_tasks() {
+    fn connections_build_and_hand_their_provider_to_delegated_tasks() {
         let settings = with_cloud();
-        let first = build_provider(&settings, None);
+        let local = &settings.connections["local"];
         let active: ActiveSlot = Arc::new(std::sync::RwLock::new(Active {
-            provider: first,
-            model: settings.model.clone(),
-            context_window: settings.effective_context_window(),
+            provider: build_provider(local, false, None),
+            model: local.model.clone(),
+            context_window: local.effective_context_window(),
         }));
-        let profiles = Profiles {
+        let connections = AiConnections {
             settings,
             active: Arc::clone(&active),
         };
-        let names: Vec<String> = profiles.list().into_iter().map(|e| e.name).collect();
-        assert_eq!(names, ["default", "cloud"]);
-        let cloud = profiles.build("cloud", DEFAULT_AGENT).unwrap();
+        let names: Vec<String> = connections.list().into_iter().map(|e| e.name).collect();
+        assert_eq!(names, ["cloud", "local"]);
+        let cloud = connections.build("cloud", DEFAULT_AGENT).unwrap();
         assert_eq!(cloud.kind, "anthropic_compatible");
         assert_eq!(
             (cloud.model.as_str(), cloud.context_window),
             ("claude-x", 200_000)
         );
         assert!(cloud.backend.is_none(), "an endpoint, not a CLI agent");
-        assert!(profiles.build("missing", DEFAULT_AGENT).is_none());
+        assert!(connections.build("missing", DEFAULT_AGENT).is_none());
         // Switching to it moves what a delegated task runs on.
-        profiles.activate(&cloud);
+        connections.activate(&cloud);
         let now = active.read().unwrap().clone();
         assert_eq!(
             (now.model.as_str(), now.context_window),
@@ -1178,21 +1211,43 @@ mod tests {
     }
 
     #[test]
-    fn a_session_reopens_on_the_profile_it_recorded_while_it_exists() {
+    fn an_open_panel_offers_the_connections_applied_since() {
+        let mut built_with = with_cloud();
+        built_with.connections.remove("cloud");
+        let local = &built_with.connections["local"];
+        let connections = AiConnections {
+            active: Arc::new(std::sync::RwLock::new(Active {
+                provider: build_provider(local, false, None),
+                model: local.model.clone(),
+                context_window: local.effective_context_window(),
+            })),
+            settings: built_with,
+        };
+        // Applying the settings modal adds `cloud`; the panel offers it at
+        // once. (The same settings the other tests build with, since the
+        // applied ones are shared across the process.)
+        publish_ai_settings(&with_cloud());
+        let names: Vec<String> = connections.list().into_iter().map(|e| e.name).collect();
+        assert_eq!(names, ["cloud", "local"]);
+        assert!(connections.build("cloud", DEFAULT_AGENT).is_some());
+    }
+
+    #[test]
+    fn a_session_reopens_on_the_connection_it_recorded_while_it_exists() {
         let dir = tempfile::tempdir().unwrap();
         let mut session = Session::create(dir.path(), dir.path()).unwrap();
-        let settings = with_cloud();
-        assert_eq!(session_profile(&settings, Some(&session)), None);
-        session.append_provider_change("cloud").unwrap();
-        assert_eq!(
-            session_profile(&settings, Some(&session)),
-            Some("cloud".to_string())
-        );
-        // A profile since removed from the config falls back to `[ai]`.
-        assert_eq!(
-            session_profile(&AiSettings::default(), Some(&session)),
-            None
-        );
+        let mut settings = with_cloud();
+        let name = |settings: &AiSettings, session: &Session| {
+            session_connection(settings, Some(session)).map(|(name, _)| name)
+        };
+        // Nothing recorded: the one new sessions start on.
+        assert_eq!(name(&settings, &session).as_deref(), Some("local"));
+        session.append_connection_change("cloud").unwrap();
+        assert_eq!(name(&settings, &session).as_deref(), Some("cloud"));
+        // A connection since removed falls back to the one new sessions use.
+        settings.connections.remove("cloud");
+        assert_eq!(name(&settings, &session).as_deref(), Some("local"));
+        assert_eq!(name(&AiSettings::default(), &session), None);
     }
 
     #[test]
@@ -1251,9 +1306,14 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), broken);
     }
     #[test]
-    fn restore_is_skipped_without_a_configured_model() {
-        let settings = AiSettings::default();
-        assert!(settings.model.is_empty());
+    fn restore_is_skipped_without_a_connection_to_run_on() {
+        let mut settings = AiSettings::default();
+        assert!(restore_agent_panel(&settings, PathBuf::from("/tmp"), None, None).is_none());
+        // An endpoint with no model named is no better.
+        settings
+            .connections
+            .insert("local".into(), Connection::default());
+        assert!(usable_connection(&settings).is_none());
         assert!(restore_agent_panel(&settings, PathBuf::from("/tmp"), None, None).is_none());
     }
 

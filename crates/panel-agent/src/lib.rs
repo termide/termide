@@ -68,8 +68,8 @@ const NEW_SESSION_ACTION: &str = "agent_new_session";
 const RESUME_ACTION: &str = "agent_resume";
 /// Status chip and context-menu action that opens the model picker.
 const MODEL_ACTION: &str = "agent_model";
-/// Status/banner action that switches the provider profile.
-const PROVIDER_ACTION: &str = "agent_provider";
+/// Status/banner action that switches the connection.
+const CONNECTION_ACTION: &str = "agent_connection";
 /// Input action carrying a model id typed by hand.
 const MODEL_INPUT_ACTION: &str = "agent_model_input";
 /// Status chip and context-menu action that opens the permission-mode picker.
@@ -187,13 +187,13 @@ pub struct AgentPanelSetup {
     pub hooks: Option<HooksFactory>,
     /// An external agent to drive instead of the built-in loop.
     pub backend: Option<BackendFactory>,
-    /// The CLI agent (Claude Code, Codex) the provider profile drives over
+    /// The CLI agent (Claude Code, Codex) the connection drives over
     /// ACP, if it names one; it wins over an agent definition's own backend.
     pub provider_backend: Option<BackendFactory>,
-    /// The provider profiles a session can switch to; `None` offers none.
-    pub providers: Option<Arc<dyn ProviderCatalog>>,
-    /// The provider profile in use (`default` for the `[ai]` fields).
-    pub profile: String,
+    /// The connections a session can switch to; `None` offers none.
+    pub connections: Option<Arc<dyn ConnectionCatalog>>,
+    /// The connection in use.
+    pub connection: String,
     pub provider: Arc<dyn Provider>,
     /// The provider's wire-protocol type (e.g. `openai_compatible`), recorded
     /// in the session log so a resume can rebuild the right provider.
@@ -233,21 +233,21 @@ pub type HooksFactory = Arc<dyn Fn() -> Box<dyn Hooks> + Send + Sync>;
 pub type BackendFactory =
     Arc<dyn Fn(BackendSetup) -> Result<Box<dyn Backend>, String> + Send + Sync>;
 
-/// One provider profile the picker offers.
+/// One connection the picker offers.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderEntry {
+pub struct ConnectionEntry {
     pub name: String,
     /// Its wire protocol or CLI agent, as `[ai] provider` spells it.
     pub kind: String,
     pub model: String,
 }
 
-/// A provider profile made ready for an agent to run on.
-pub struct ProviderChoice {
+/// A connection made ready for an agent to run on.
+pub struct ConnectionChoice {
     pub name: String,
     pub kind: String,
     pub provider: Arc<dyn Provider>,
-    /// The profile's model and context window; the rest of the spec (output
+    /// The connection's model and context window; the rest of the spec (output
     /// bound, reasoning) is the panel's own.
     pub model: String,
     pub context_window: u64,
@@ -255,15 +255,15 @@ pub struct ProviderChoice {
     pub backend: Option<BackendFactory>,
 }
 
-/// The app's provider profiles (`[ai]` and `[ai.providers.<name>]`); the
+/// The app's connections (`[ai.connections.<name>]`); the
 /// panel only chooses among them.
-pub trait ProviderCatalog: Send + Sync {
-    fn list(&self) -> Vec<ProviderEntry>;
-    /// Profile `name` built for `agent`; `None` when it does not exist.
-    fn build(&self, name: &str, agent: &str) -> Option<ProviderChoice>;
+pub trait ConnectionCatalog: Send + Sync {
+    fn list(&self) -> Vec<ConnectionEntry>;
+    /// Connection `name` built for `agent`; `None` when it does not exist.
+    fn build(&self, name: &str, agent: &str) -> Option<ConnectionChoice>;
     /// The panel switched to `choice`: what it hands off (a delegated task)
     /// follows. The default hands nothing off.
-    fn activate(&self, _choice: &ProviderChoice) {}
+    fn activate(&self, _choice: &ConnectionChoice) {}
 }
 
 /// One agent the picker offers.
@@ -548,14 +548,14 @@ pub struct AgentPanel {
     // Kept to rebuild the agent when switching sessions.
     hooks: Option<HooksFactory>,
     backend: Option<BackendFactory>,
-    /// The provider profile's CLI agent, kept apart from `backend` so a
+    /// The connection's CLI agent, kept apart from `backend` so a
     /// rebuilt agent profile does not drop it.
     provider_backend: Option<BackendFactory>,
-    providers: Option<Arc<dyn ProviderCatalog>>,
-    /// The provider profile in use.
-    profile: String,
-    /// The profiles the picker last offered, in its order.
-    provider_choices: Vec<ProviderEntry>,
+    connections: Option<Arc<dyn ConnectionCatalog>>,
+    /// The connection in use.
+    connection: String,
+    /// The connections the picker last offered, in its order.
+    connection_choices: Vec<ConnectionEntry>,
     provider: Arc<dyn Provider>,
     tools: ToolRegistry,
     rules: PermissionRules,
@@ -818,9 +818,9 @@ impl AgentPanel {
             hooks: setup.hooks,
             backend,
             provider_backend: setup.provider_backend.clone(),
-            providers: setup.providers.clone(),
-            profile: setup.profile.clone(),
-            provider_choices: Vec::new(),
+            connections: setup.connections.clone(),
+            connection: setup.connection.clone(),
+            connection_choices: Vec::new(),
             provider: setup.provider,
             provider_kind: setup.provider_kind,
             tools,
@@ -2902,50 +2902,46 @@ impl AgentPanel {
         true
     }
 
-    /// Continue the session on another model of the same endpoint. The
-    /// context window follows the endpoint's figure when it gave one and
-    /// stays as configured otherwise; the token limit is always the
-    /// configured one. Refused while a run is in flight.
-    /// The provider as the banner and the chip show it: the profile's name
-    /// beside the protocol, the protocol alone for the `[ai]` one.
-    fn provider_display(&self) -> String {
+    /// The connection as the banner and the chip show it: its name beside
+    /// the protocol.
+    fn connection_display(&self) -> String {
         let kind = provider_label(&self.provider_kind);
-        if self.profile == termide_config::DEFAULT_PROVIDER_PROFILE {
+        if self.connection.is_empty() {
             kind.to_string()
         } else {
-            format!("{} · {kind}", self.profile)
+            format!("{} · {kind}", self.connection)
         }
     }
 
-    /// Run the session on provider profile `name`: its endpoint and its
+    /// Run the session on connection `name`: its endpoint and its
     /// model, the rest of the session kept. The agent restarts on the same
     /// log, so a built-in loop carries the conversation over; a CLI agent
     /// does not, so switching to or from one is refused once it has begun.
-    fn switch_profile(&mut self, name: &str) -> bool {
-        if name == self.profile {
+    fn switch_connection(&mut self, name: &str) -> bool {
+        if name == self.connection {
             return true;
         }
         let t = termide_i18n::t();
-        let Some(providers) = self.providers.clone() else {
+        let Some(connections) = self.connections.clone() else {
             return false;
         };
         if self.is_busy() {
             self.notice(t.agent_notice_busy(), NoticeKind::Warn);
             return false;
         }
-        let Some(choice) = providers.build(name, &self.agent) else {
-            self.notice(t.agent_notice_no_profile_fmt(name), NoticeKind::Warn);
+        let Some(choice) = connections.build(name, &self.agent) else {
+            self.notice(t.agent_notice_no_connection_fmt(name), NoticeKind::Warn);
             return false;
         };
         if (choice.backend.is_some() || self.external) && !self.is_fresh() {
-            self.notice(t.agent_notice_profile_before_first(), NoticeKind::Warn);
+            self.notice(t.agent_notice_connection_before_first(), NoticeKind::Warn);
             return false;
         }
-        providers.activate(&choice);
+        connections.activate(&choice);
         self.provider = Arc::clone(&choice.provider);
         self.provider_kind = choice.kind.clone();
-        self.profile = choice.name.clone();
-        // The profile's model replaces the one in use: another endpoint seldom
+        self.connection = choice.name.clone();
+        // The connection's model replaces the one in use: another endpoint seldom
         // serves the same id.
         let model = ModelSpec {
             id: choice.model.clone(),
@@ -2962,7 +2958,7 @@ impl AgentPanel {
                 .and_then(|profile| profile.backend)
         });
         if let Some(session) = &mut self.session {
-            let written = session.append_provider_change(name).and_then(|_| {
+            let written = session.append_connection_change(name).and_then(|_| {
                 session.append_model_change(
                     &choice.kind,
                     &self.model.id,
@@ -2979,11 +2975,15 @@ impl AgentPanel {
         // The silent window probe asks the new endpoint.
         self.context_probe = (!self.external).then(|| spawn_model_list(Arc::clone(&self.provider)));
         if !fresh {
-            self.notice(t.agent_notice_provider_fmt(name), NoticeKind::Info);
+            self.notice(t.agent_notice_connection_fmt(name), NoticeKind::Info);
         }
         true
     }
 
+    /// Continue the session on another model of the same endpoint. The
+    /// context window follows the endpoint's figure when it gave one and
+    /// stays as configured otherwise; the token limit is always the
+    /// configured one. Refused while a run is in flight.
     fn switch_model(&mut self, id: &str, context_window: Option<u64>) -> bool {
         let id = id.trim();
         if id.is_empty() {
@@ -4084,18 +4084,18 @@ impl AgentPanel {
         let dim = Style::default().fg(colors.disabled);
         let fg = Style::default().fg(colors.fg);
         // A re-pickable value (model, agent, tools) is drawn bold in the
-        // accent colour, so it reads as clickable; a fixed one (provider, cwd)
+        // accent colour, so it reads as clickable; a fixed one (cwd)
         // is plain. The click itself is wired through `banner_hits` below.
         let link = Style::default()
             .fg(colors.info)
             .add_modifier(Modifier::BOLD);
         let field = |name: &str, value: String, clickable: bool| -> Line<'static> {
             Line::from(vec![
-                Span::styled(format!("{name:<9}"), dim),
+                Span::styled(format!("{name:<12}"), dim),
                 Span::styled(value, if clickable { link } else { fg }),
             ])
         };
-        let cwd = shorten_path(&self.cwd, (info_w as usize).saturating_sub(9));
+        let cwd = shorten_path(&self.cwd, (info_w as usize).saturating_sub(12));
         // Each entry is a line and, when it names a choice that can be re-picked
         // by clicking, the status action that click triggers.
         let info: Vec<(Line<'static>, Option<&'static str>)> = vec![
@@ -4104,11 +4104,11 @@ impl AgentPanel {
             (Line::from(""), None),
             (
                 field(
-                    "provider",
-                    self.provider_display(),
-                    self.providers.is_some(),
+                    "connection",
+                    self.connection_display(),
+                    self.connections.is_some(),
                 ),
-                self.providers.is_some().then_some(PROVIDER_ACTION),
+                self.connections.is_some().then_some(CONNECTION_ACTION),
             ),
             (
                 field("model", self.model.id.clone(), true),
@@ -4975,16 +4975,16 @@ impl Panel for AgentPanel {
                 on_submit: InputAction::Custom(RENAME_ACTION.to_string()),
             }],
             DELETE_SESSION_ACTION => self.ask_delete_session(),
-            PROVIDER_ACTION => {
-                let Some(providers) = &self.providers else {
+            CONNECTION_ACTION => {
+                let Some(connections) = &self.connections else {
                     return Vec::new();
                 };
-                self.provider_choices = providers.list();
+                self.connection_choices = connections.list();
                 let options = self
-                    .provider_choices
+                    .connection_choices
                     .iter()
                     .map(|entry| {
-                        let mark = current_mark(entry.name == self.profile);
+                        let mark = current_mark(entry.name == self.connection);
                         let model = if entry.model.is_empty() {
                             String::new()
                         } else {
@@ -4998,9 +4998,9 @@ impl Panel for AgentPanel {
                     })
                     .collect();
                 vec![PanelEvent::ShowSelect {
-                    title: t.agent_pick_provider().to_string(),
+                    title: t.agent_pick_connection().to_string(),
                     options,
-                    on_select: SelectAction::Custom(PROVIDER_ACTION.to_string()),
+                    on_select: SelectAction::Custom(CONNECTION_ACTION.to_string()),
                 }]
             }
             // An external agent brings its own tools; nothing of ours to list.
@@ -5925,11 +5925,11 @@ impl Panel for AgentPanel {
                 }
                 CommandResult::Handled(true)
             }
-            PanelCommand::SelectionMade { action, index } if action == PROVIDER_ACTION => {
-                if let Some(entry) = self.provider_choices.get(index).cloned() {
-                    self.switch_profile(&entry.name);
+            PanelCommand::SelectionMade { action, index } if action == CONNECTION_ACTION => {
+                if let Some(entry) = self.connection_choices.get(index).cloned() {
+                    self.switch_connection(&entry.name);
                 }
-                self.provider_choices.clear();
+                self.connection_choices.clear();
                 self.pending_events.push(PanelEvent::NeedsRedraw);
                 CommandResult::Handled(true)
             }
@@ -5984,15 +5984,15 @@ impl Panel for AgentPanel {
         if self.external {
             // An external agent has its own model and permission model.
             segments.push(StatusSegment::new(" (acp)", SegmentKind::Label));
-            // A CLI agent is a provider profile too: the way back is here.
-            if self.providers.is_some() {
+            // A CLI agent is a connection too: the way back is here.
+            if self.connections.is_some() {
                 segments.extend([
                     sep(),
-                    StatusSegment::clickable("Provider: ", SegmentKind::Label, PROVIDER_ACTION),
+                    StatusSegment::clickable("Connection: ", SegmentKind::Label, CONNECTION_ACTION),
                     StatusSegment::clickable(
-                        self.provider_display(),
+                        self.connection_display(),
                         SegmentKind::Active,
-                        PROVIDER_ACTION,
+                        CONNECTION_ACTION,
                     ),
                 ]);
             }
@@ -6019,11 +6019,11 @@ impl Panel for AgentPanel {
                     TOOLSET_ACTION,
                 ),
                 sep(),
-                StatusSegment::clickable("Provider: ", SegmentKind::Label, PROVIDER_ACTION),
+                StatusSegment::clickable("Connection: ", SegmentKind::Label, CONNECTION_ACTION),
                 StatusSegment::clickable(
-                    self.provider_display(),
+                    self.connection_display(),
                     SegmentKind::Active,
-                    PROVIDER_ACTION,
+                    CONNECTION_ACTION,
                 ),
             ]);
         }
@@ -6295,8 +6295,8 @@ mod tests {
             hooks: None,
             backend: None,
             provider_backend: None,
-            providers: None,
-            profile: "default".into(),
+            connections: None,
+            connection: "local".into(),
             provider,
             provider_kind: "openai_compatible".into(),
             model: ModelSpec {
@@ -6821,7 +6821,7 @@ mod tests {
             |segs: &[StatusSegment]| segs.iter().map(|s| s.text.as_str()).collect::<String>();
         assert_eq!(
             text(&segments[..split]),
-            " Agent: default │ Mode: ask │ Reasoning: off │ Tools: 0/0 │ Provider: OpenAI Compatible │ Model: m"
+            " Agent: default │ Mode: ask │ Reasoning: off │ Tools: 0/0 │ Connection: local · OpenAI Compatible │ Model: m"
         );
         assert_eq!(text(&segments[split + 1..]), "↑100 ↓20 120/1k ▰▱▱▱▱▱▱▱ ");
     }
@@ -7905,7 +7905,7 @@ mod tests {
         let mut panel = panel(vec![]);
         let all = render_text(&mut panel, 60, 16).join("\n");
         assert!(all.contains("termide"), "{all}");
-        for label in ["provider", "model", "agent", "cwd"] {
+        for label in ["connection", "model", "agent", "cwd"] {
             assert!(all.contains(label), "missing {label}: {all}");
         }
         // The banner is the empty-state: once a turn runs, real content shows.
@@ -8236,18 +8236,18 @@ mod tests {
         assert_eq!(worker.join().unwrap(), PermissionAnswer::AllowSession);
     }
 
-    /// Three provider profiles: `[ai]`, another endpoint, and a CLI agent.
-    struct Profiles;
+    /// Three connections: a local endpoint, a hosted one, and a CLI agent.
+    struct Connections;
 
-    impl ProviderCatalog for Profiles {
-        fn list(&self) -> Vec<ProviderEntry> {
+    impl ConnectionCatalog for Connections {
+        fn list(&self) -> Vec<ConnectionEntry> {
             [
-                ("default", "openai_compatible", "m"),
+                ("local", "openai_compatible", "m"),
                 ("cloud", "anthropic_compatible", "claude-x"),
                 ("cli", "codex", ""),
             ]
             .into_iter()
-            .map(|(name, kind, model)| ProviderEntry {
+            .map(|(name, kind, model)| ConnectionEntry {
                 name: name.into(),
                 kind: kind.into(),
                 model: model.into(),
@@ -8255,14 +8255,14 @@ mod tests {
             .collect()
         }
 
-        fn build(&self, name: &str, _agent: &str) -> Option<ProviderChoice> {
+        fn build(&self, name: &str, _agent: &str) -> Option<ConnectionChoice> {
             let entry = self.list().into_iter().find(|entry| entry.name == name)?;
             let backend: Option<BackendFactory> = (entry.kind == "codex").then(|| {
                 Arc::new(|setup: BackendSetup| {
                     Ok(Box::new(External::new(setup)) as Box<dyn Backend>)
                 }) as BackendFactory
             });
-            Some(ProviderChoice {
+            Some(ConnectionChoice {
                 name: entry.name,
                 kind: entry.kind,
                 provider: Arc::new(Scripted::new(vec![])),
@@ -8273,42 +8273,39 @@ mod tests {
         }
     }
 
-    fn profiled_panel(dir: &std::path::Path) -> AgentPanel {
+    fn connected_panel(dir: &std::path::Path) -> AgentPanel {
         AgentPanel::new(AgentPanelSetup {
             session_dir: Some(dir.to_path_buf()),
-            providers: Some(Arc::new(Profiles)),
+            connections: Some(Arc::new(Connections)),
             ..setup(vec![])
         })
     }
 
     #[test]
-    fn the_provider_picker_switches_the_profile_and_its_model() {
+    fn the_connection_picker_switches_the_endpoint_and_its_model() {
         let dir = tempfile::tempdir().unwrap();
-        let mut panel = profiled_panel(dir.path());
-        let events = panel.handle_status_action(PROVIDER_ACTION);
+        let mut panel = connected_panel(dir.path());
+        let events = panel.handle_status_action(CONNECTION_ACTION);
         let Some(PanelEvent::ShowSelect { options, .. }) = events.first() else {
             panic!("a picker, got {events:?}");
         };
-        assert!(options[0].starts_with("● default"), "{options:?}");
+        assert!(options[0].starts_with("● local"), "{options:?}");
         assert!(options[1].contains("cloud") && options[1].contains("claude-x"));
         panel.handle_command(PanelCommand::SelectionMade {
-            action: PROVIDER_ACTION.to_string(),
+            action: CONNECTION_ACTION.to_string(),
             index: 1,
         });
-        // The profile's endpoint and model replace the ones in use.
-        assert_eq!(panel.profile, "cloud");
+        // The connection's endpoint and model replace the ones in use.
+        assert_eq!(panel.connection, "cloud");
         assert_eq!(panel.provider_kind, "anthropic_compatible");
         assert_eq!(panel.model.id, "claude-x");
         assert_eq!(panel.model.context_window, 200_000);
         assert!(!panel.external);
-        // The chip names the profile beside its protocol.
-        assert_eq!(panel.provider_display(), "cloud · Anthropic Compatible");
+        // The chip names the connection beside its protocol.
+        assert_eq!(panel.connection_display(), "cloud · Anthropic Compatible");
         // The log keeps it, so a reopened session reconnects there.
         let session = Session::open(panel.session_path().unwrap()).unwrap();
-        assert_eq!(
-            session.current_provider_profile(),
-            Some("cloud".to_string())
-        );
+        assert_eq!(session.current_connection(), Some("cloud".to_string()));
         assert_eq!(
             session.current_model().map(|m| m.id),
             Some("claude-x".to_string())
@@ -8316,24 +8313,24 @@ mod tests {
     }
 
     #[test]
-    fn a_cli_agent_profile_is_taken_on_only_before_the_first_request() {
+    fn a_cli_agent_connection_is_taken_on_only_before_the_first_request() {
         let dir = tempfile::tempdir().unwrap();
-        let mut panel = profiled_panel(dir.path());
+        let mut panel = connected_panel(dir.path());
         panel.transcript.push(Item::User {
             text: "go".into(),
             at: String::new(),
         });
         // Mid-conversation the CLI agent would not see it: refused.
-        assert!(!panel.switch_profile("cli"));
-        assert_eq!(panel.profile, "default");
+        assert!(!panel.switch_connection("cli"));
+        assert_eq!(panel.connection, "local");
         assert!(panel.transcript.items().iter().any(|item| matches!(
             item,
-            Item::Notice { text, .. } if text == termide_i18n::t().agent_notice_profile_before_first()
+            Item::Notice { text, .. } if text == termide_i18n::t().agent_notice_connection_before_first()
         )));
         // In a fresh session it drives the CLI agent over ACP.
         let dir = tempfile::tempdir().unwrap();
-        let mut fresh = profiled_panel(dir.path());
-        assert!(fresh.switch_profile("cli"));
+        let mut fresh = connected_panel(dir.path());
+        assert!(fresh.switch_connection("cli"));
         assert!(fresh.external);
         assert_eq!(fresh.provider_kind, "codex");
     }

@@ -582,14 +582,14 @@ pub trait Translation: Send + Sync {
     fn agent_notice_model_list_unavailable_fmt(&self, error: &str) -> String;
     fn agent_notice_mcp_error_fmt(&self, source: &str, error: &str) -> String;
     fn agent_notice_mcp_connected_fmt(&self, source: &str, count: usize) -> String;
-    /// Agent provider picker: its title.
-    fn agent_pick_provider(&self) -> &str;
+    /// Agent connection picker: its title.
+    fn agent_pick_connection(&self) -> &str;
     /// Agent notice: switching to or from a CLI agent is refused mid-session.
-    fn agent_notice_profile_before_first(&self) -> &str;
-    /// Agent notice: the session now runs on provider profile `name`.
-    fn agent_notice_provider_fmt(&self, name: &str) -> String;
-    /// Agent notice: there is no provider profile `name`.
-    fn agent_notice_no_profile_fmt(&self, name: &str) -> String;
+    fn agent_notice_connection_before_first(&self) -> &str;
+    /// Agent notice: the session now runs on connection `name`.
+    fn agent_notice_connection_fmt(&self, name: &str) -> String;
+    /// Agent notice: there is no connection `name`.
+    fn agent_notice_no_connection_fmt(&self, name: &str) -> String;
     /// Agent toolset checklist: its title.
     fn agent_toolset_title(&self) -> &str;
     /// Agent toolset checklist: the hint under the title.
@@ -684,6 +684,20 @@ pub trait Translation: Send + Sync {
     fn settings_agent_max_tokens(&self) -> &str;
     fn settings_agent_reasoning(&self) -> &str;
     fn settings_agent_autofold(&self) -> &str;
+    /// Settings modal: the row that adds a connection.
+    fn settings_ai_add_connection(&self) -> &str;
+    /// Settings modal: the action that deletes the open connection.
+    fn settings_ai_delete_connection(&self) -> &str;
+    /// Settings modal: the action that leaves a connection's page for the
+    /// list.
+    fn settings_ai_connection_back(&self) -> &str;
+    /// Settings modal: the connection's name field.
+    fn settings_ai_connection_name(&self) -> &str;
+    /// Settings modal: the switch that makes a connection the default, the
+    /// one new sessions start on.
+    fn settings_ai_connection_default(&self) -> &str;
+    /// Settings modal: a connection left without a name, or with another's.
+    fn settings_ai_connection_name_taken(&self) -> &str;
     /// Settings modal: the permission mode new agent sessions start in.
     fn settings_agent_permission_mode(&self) -> &str;
     /// Settings modal: AI tab, web tools field labels.
