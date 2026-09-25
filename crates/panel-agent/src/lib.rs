@@ -1774,7 +1774,11 @@ impl AgentPanel {
         // line waits for the finished block. Only while tokens stream: once a
         // tool runs the message's first token is still known (the cost needs
         // it), but nothing is being generated.
-        if let (Phase::Generating, Some(first_token)) = (activity.phase, activity.first_token) {
+        // An external agent sends its text in bursts and reports no tokens, so
+        // there is no generation to time: none is shown for it.
+        if let (Phase::Generating, Some(first_token), false) =
+            (activity.phase, activity.first_token, self.external)
+        {
             let gen_ms = first_token.elapsed().as_millis() as u32;
             let tokens = activity.est_tokens();
             lines.push(transcript::right_meta(
@@ -1933,10 +1937,14 @@ impl AgentPanel {
                         self.session_output += assistant.usage.output;
                         // A call that failed before its first token (no network,
                         // say) went through no prefill or generation: it has
-                        // no cost to show, only its time and failure.
+                        // no cost to show, only its time and failure. Nor has
+                        // an external agent's message: its first text arrives
+                        // with the message's start and it reports no tokens, so
+                        // prefill, generation and speed would all be made up.
                         let cost = self
                             .activity
                             .as_ref()
+                            .filter(|_| !self.external)
                             .filter(|a| a.first_token.is_some() || assistant.usage.total() > 0)
                             .map(|a| a.cost(assistant.usage.input, assistant.usage.output));
                         let at = now_hms();
@@ -9328,6 +9336,11 @@ mod tests {
             let mut events = self.events.lock().unwrap();
             events.push(AgentEvent::AgentStart);
             events.push(AgentEvent::MessageEnd(Message::User(message)));
+            // Like an ACP adapter: the message starts with its first text.
+            events.push(AgentEvent::MessageStart);
+            events.push(AgentEvent::MessageUpdate(StreamEvent::TextDelta(
+                "from outside".into(),
+            )));
             events.push(AgentEvent::MessageEnd(Message::Assistant(
                 AssistantMessage {
                     content: vec![AssistantContent::Text {
@@ -9410,6 +9423,10 @@ mod tests {
             .items()
             .iter()
             .any(|i| matches!(i, Item::Assistant { text, .. } if text == "from outside")));
+        // It reports no tokens and times no prefill: no made-up indicators.
+        assert!(panel.transcript().items().iter().all(
+            |i| !matches!(i, Item::Assistant { text, cost: Some(_), .. } if text == "from outside")
+        ));
         // The log records both the switch and the external agent's answer.
         let session = Session::open(panel.session_path().unwrap()).unwrap();
         assert_eq!(session.current_agent().as_deref(), Some("outside"));
