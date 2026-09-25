@@ -163,9 +163,17 @@ impl SettingsModal {
     }
 
     /// Add an OpenAI-compatible connection and open it.
+    /// The first one becomes the default; a later one leaves the default
+    /// where it was, pinned by name so it cannot move to the newcomer.
     pub(super) fn add_connection(&mut self) {
         let connection = Connection::default();
         let name = self.unused_name(provider_slug(&connection.provider), None);
+        self.config.ai.connection = self
+            .config
+            .ai
+            .default_connection()
+            .unwrap_or(&name)
+            .to_string();
         self.config.ai.connections.insert(name.clone(), connection);
         self.mark_dirty();
         self.show_connection(name, true);
@@ -241,8 +249,16 @@ impl SettingsModal {
         if self.config.ai.connections.remove(name).is_none() {
             return;
         }
+        // The default moves to the first left, named, so it stays put.
         if self.config.ai.connection == name {
-            self.config.ai.connection.clear();
+            self.config.ai.connection = self
+                .config
+                .ai
+                .connections
+                .keys()
+                .next()
+                .cloned()
+                .unwrap_or_default();
         }
         if self.open_connection_name() == Some(name) {
             self.connection_edit = None;
@@ -294,9 +310,7 @@ impl SettingsModal {
                 },
                 |n| n.to_string(),
             ),
-            DEFAULT => {
-                bool_str(Some(self.config.ai.connection.as_str()) == self.open_connection_name())
-            }
+            DEFAULT => bool_str(self.config.ai.default_connection() == self.open_connection_name()),
             _ => String::new(),
         }
     }
@@ -321,18 +335,23 @@ impl SettingsModal {
     }
 
     /// Toggle the page's switch: whether new sessions start on this
-    /// connection. Off everywhere, they start on the first by name.
+    /// connection. Exactly one is the default: turned off, the default moves
+    /// to the first other connection by name; the only one stays on.
     pub(super) fn toggle_connection_field(&mut self, index: usize) {
-        if index == DEFAULT {
-            if let Some(name) = self.open_connection_name().map(str::to_string) {
-                if self.config.ai.connection == name {
-                    self.config.ai.connection.clear();
-                } else {
-                    self.config.ai.connection = name;
-                }
-                self.mark_dirty();
-            }
+        if index != DEFAULT {
+            return;
         }
+        let Some(name) = self.open_connection_name().map(str::to_string) else {
+            return;
+        };
+        if self.config.ai.default_connection() != Some(name.as_str()) {
+            self.config.ai.connection = name;
+        } else if let Some(other) = self.config.ai.connections.keys().find(|n| **n != name) {
+            self.config.ai.connection = other.clone();
+        } else {
+            return;
+        }
+        self.mark_dirty();
     }
 
     /// The choices of the page's dropdowns: the provider, and the model.
@@ -587,15 +606,11 @@ mod tests {
         press(&mut modal, KeyCode::Enter);
         assert_eq!(modal.open_connection_name(), Some("openai"));
         assert!(modal.dirty);
-        // The only one, so new sessions start on it, but it is not marked the
-        // default until chosen; the switch goes on and off again.
-        assert_eq!(modal.config.ai.default_connection(), Some("openai"));
-        assert_eq!(modal.connection_value(DEFAULT), "false");
-        modal.toggle_connection_field(DEFAULT);
+        // The first one is the default, and as the only one it stays so.
+        assert_eq!(modal.config.ai.connection, "openai");
         assert_eq!(modal.connection_value(DEFAULT), "true");
         modal.toggle_connection_field(DEFAULT);
-        assert_eq!(modal.connection_value(DEFAULT), "false");
-        assert!(modal.config.ai.connection.is_empty());
+        assert_eq!(modal.connection_value(DEFAULT), "true");
 
         // A CLI agent: renamed with it, and its endpoint fields go.
         edit(&mut modal, BASE_URL, "https://example/v1");
@@ -612,11 +627,28 @@ mod tests {
         assert_eq!(modal.open_connection_name(), Some("mine"));
         let names: Vec<_> = modal.config.ai.connections.keys().cloned().collect();
         assert_eq!(names, ["mine"]);
+        // A second one, first by name, leaves the default where it was; its
+        // switch takes it over, and turned off hands it back.
+        press(&mut modal, KeyCode::Esc);
+        focus(&mut modal, ContentRow::ConnectionAdd);
+        press(&mut modal, KeyCode::Enter);
+        modal.apply_connection_enum(PROVIDER, "anthropic_compatible");
+        assert_eq!(modal.open_connection_name(), Some("anthropic"));
+        assert_eq!(modal.config.ai.default_connection(), Some("mine"));
+        assert_eq!(modal.connection_value(DEFAULT), "false");
+        modal.toggle_connection_field(DEFAULT);
+        assert_eq!(modal.config.ai.default_connection(), Some("anthropic"));
+        modal.toggle_connection_field(DEFAULT);
+        assert_eq!(modal.config.ai.default_connection(), Some("mine"));
+        // Backspace, like Esc, goes back to the list.
+        press(&mut modal, KeyCode::Backspace);
+        assert!(modal.connection_edit.is_none());
     }
 
     #[test]
     fn a_name_that_is_empty_or_taken_is_refused() {
         let mut config = with_local();
+        config.ai.connection = "local".into();
         config
             .ai
             .connections
@@ -706,12 +738,12 @@ mod tests {
         press(&mut modal, KeyCode::Right);
         press(&mut modal, KeyCode::Enter);
         assert!(modal.connection_edit.is_none());
-        assert!(modal.config.ai.connection.is_empty());
-        assert_eq!(modal.config.ai.default_connection(), Some("local"));
+        assert_eq!(modal.config.ai.connection, "local");
         // And from the list with Del.
         focus(&mut modal, ContentRow::Connection(0));
         press(&mut modal, KeyCode::Delete);
         assert!(modal.config.ai.connections.is_empty());
+        assert!(modal.config.ai.connection.is_empty());
         assert_eq!(modal.current_row(), Some(ContentRow::ConnectionAdd));
     }
 
@@ -837,6 +869,25 @@ mod tests {
         assert_eq!(modal.edit_input.selected_text(), Some("x"));
         type_text(&mut modal, "host");
         press(&mut modal, KeyCode::Enter);
+
+        // A double click on a field selects all of it, the first click being
+        // the one that opens it for editing.
+        let name_y = screen(&mut modal)
+            .iter()
+            .position(|row| row.contains(i18n::t().settings_ai_connection_name()))
+            .unwrap() as u16;
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: area.x + 1,
+            row: name_y,
+            modifiers: KeyModifiers::NONE,
+        };
+        modal.handle_mouse(click, Rect::default()).unwrap();
+        assert!(modal.editing);
+        screen(&mut modal);
+        modal.handle_mouse(click, Rect::default()).unwrap();
+        assert_eq!(modal.edit_input.selected_text(), Some("local"));
+        press(&mut modal, KeyCode::Esc);
         assert_eq!(
             modal.config.ai.connections["local"].base_url,
             "http://host/v1"

@@ -36,6 +36,7 @@ impl SettingsModal {
             edit_input: termide_ui::TextInput::new(),
             edit_area: None,
             field_drag: false,
+            clicks: termide_ui::ClickTracker::new(),
             reset_available: false,
             enum_picker: None,
             lsp_mode: LspMode::Fields,

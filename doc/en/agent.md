@@ -49,9 +49,12 @@ The settings modal (the gear, or the command palette) has all of it under
 provider and model, the one new sessions start on marked `●`. `Enter` or a
 click opens a connection on a page of its own — name, provider, base URL, API
 key variable, model, context window and **Use by default** (new sessions start
-on it) — and **[ Back to list ]** or `Esc` returns to the list;
+on it) — and **[ Back to list ]**, `Esc` or `Backspace` returns to the list;
 **+ Add connection** adds an OpenAI-compatible one, and
-**[ Delete connection ]** on the page, or `Del` on its row, removes one. A new
+**[ Delete connection ]** on the page, or `Del` on its row, removes one.
+Exactly one connection is the default: the first one added is, a later one
+takes over only when you tick its switch, and turning the switch off (or
+deleting the default) hands it to the first other connection by name. A new
 connection is named after its provider until you name it. The model is a
 dropdown: **Auto — the provider's choice** first, then the connection's
 models, fetched in the background when its page opens, and last "Enter a model

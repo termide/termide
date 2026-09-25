@@ -299,7 +299,9 @@ impl SettingsModal {
                 self.focus = FocusArea::Buttons;
             }
             // The connection page goes back to the list it was opened from.
-            KeyCode::Esc if self.connection_edit.is_some() => self.close_connection(),
+            KeyCode::Esc | KeyCode::Backspace if self.connection_edit.is_some() => {
+                self.close_connection();
+            }
             KeyCode::BackTab | KeyCode::Esc => {
                 self.focus = FocusArea::Sidebar;
             }
@@ -494,14 +496,17 @@ impl SettingsModal {
     }
 
     /// Presses and drags on a text field being edited: a press places the
-    /// cursor, starting a selection that a drag extends. Returns whether the
-    /// event was the field's. A press elsewhere commits an inline edit first
-    /// and goes on to whatever it landed on.
+    /// cursor, starting a selection that a drag extends, and a double click
+    /// (its first press may be the one that opened the field) selects the
+    /// whole text. Returns whether the event was the field's. A press
+    /// elsewhere commits an inline edit first and goes on to whatever it
+    /// landed on.
     pub(super) fn handle_field_mouse(&mut self, mouse: MouseEvent) -> bool {
         let point = (mouse.column, mouse.row).into();
         let lsp_form = self.active_tab == SettingsTab::Lsp && self.lsp_mode == LspMode::ServerEdit;
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
+                let presses = self.clicks.click(mouse.row);
                 let hit = if lsp_form {
                     self.lsp_field_areas
                         .iter()
@@ -524,6 +529,11 @@ impl SettingsModal {
                 };
                 self.focus = FocusArea::Content;
                 let input = self.mouse_input();
+                if presses >= 2 {
+                    input.select_all();
+                    self.field_drag = false;
+                    return true;
+                }
                 let pos = screen_x_to_char_pos(input.text(), (mouse.column - area.x) as usize);
                 input.set_cursor_with_selection_start(pos);
                 self.field_drag = true;
