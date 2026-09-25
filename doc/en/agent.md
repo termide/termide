@@ -180,10 +180,14 @@ pages stops after the current one. The calls it leaves unrun wait for
 run. A run stopped with `/pause` gets a pause line instead, `‖ 1m12s`: it counts
 how long the pause has lasted, its `‖` marked while the pause is on, and
 keeps that length, dimmed, once the run continues. A continued run's clock goes on from the
-original request, so its total includes the pause. Clicking the run clock
-pauses the run, like `/pause`; clicking the pause line continues it, like `/continue`. While a pause waits for the
-current step to finish, clicking its notice in the state strip or sending
-`/continue` withdraws it and the run goes on.
+original request, so its total includes the pause. The run controls sit at the
+right end of the prompt box's top border, in view whatever the transcript's
+scroll: `[‖]` pauses the run, like `/pause`, and `[■]` stops it, like `Esc`,
+while the agent works; once a pause is asked for, `[▶]` takes the place of
+`[‖]` and withdraws it (so does clicking its notice in the state strip, or
+`/continue`); while paused, `[▶]` continues the run, as does clicking the pause line or
+`/continue`, and `[■]` gives the paused run up (the calls it left unrun are
+closed by the next request).
 
 The closing line is one kind of annotation — a line that marks a moment in the
 conversation rather than holding content. The others are the panel's notices:

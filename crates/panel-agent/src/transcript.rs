@@ -498,13 +498,6 @@ impl Transcript {
         }
     }
 
-    /// Whether flattened line `line` is the live run clock: the last row of
-    /// the footer shown while the agent works.
-    #[must_use]
-    pub fn is_clock_line(&self, line: usize) -> bool {
-        !self.live_footer.is_empty() && line + 1 == self.flat.len()
-    }
-
     /// Whether flattened line `line` shows the pause the transcript ends on.
     #[must_use]
     pub fn is_live_pause_line(&self, line: usize) -> bool {

@@ -272,6 +272,18 @@ enum Phase {
     Compact,
 }
 
+/// A run control on the prompt box's top border.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunButton {
+    /// `[‖]`: pause at the next step, like `/pause`.
+    Pause,
+    /// `[▶]`: resume a paused run, or withdraw a pause not reached yet, like
+    /// `/continue`.
+    Continue,
+    /// `[■]`: stop the run, like `Esc`.
+    Stop,
+}
+
 /// Live state of the current run: the phase, when it started, and enough to
 /// estimate the generation speed until the authoritative `Usage` arrives.
 #[derive(Debug, Clone, Copy)]
@@ -515,6 +527,9 @@ pub struct AgentPanel {
     /// The screen row of the state strip's pause line, a click target that
     /// continues the run.
     pause_row: Option<u16>,
+    /// The run controls last put on the prompt's border, in order, so a
+    /// click maps back to one.
+    run_buttons: Vec<RunButton>,
     /// Texts of the steering messages sent while the agent works, oldest
     /// first, shown in the state strip until the agent takes them. Kept in
     /// step with the runtime's steering count (`QueueUpdate`).
@@ -690,6 +705,7 @@ impl AgentPanel {
             pause_start: None,
             resuming: false,
             pause_row: None,
+            run_buttons: Vec::new(),
             queued_texts: VecDeque::new(),
             queued: (0, 0),
             context_tokens: 0,
@@ -902,12 +918,7 @@ impl AgentPanel {
     /// A click on transcript line `line`: focus the chat and select the block
     /// there; a second click on the block already selected folds/unfolds it.
     fn click_line(&mut self, line: usize) -> Vec<PanelEvent> {
-        // The live run clock pauses the run; a pause's ticking line resumes
-        // it.
-        if self.transcript.is_clock_line(line) {
-            self.request_pause();
-            return vec![PanelEvent::NeedsRedraw];
-        }
+        // A pause's ticking line resumes the run.
         if self.paused && self.pause_start.is_some() && self.transcript.is_live_pause_line(line) {
             self.resume();
             return vec![PanelEvent::NeedsRedraw];
@@ -1475,6 +1486,17 @@ impl AgentPanel {
                 NoticeKind::Warn,
             ),
         }
+    }
+
+    /// Give up a paused run: nothing is running, so there is nothing to
+    /// abort; the pause ends where it stood, and so do a loop or goal it was
+    /// part of. The calls it left unrun are closed by the next request.
+    fn stop_paused(&mut self) {
+        self.paused = false;
+        self.run_start = None;
+        self.loop_task = None;
+        self.goal_task = None;
+        self.end_pause();
     }
 
     /// Freeze the pause's line at the pause's length, once it is over.
@@ -3617,8 +3639,38 @@ impl AgentPanel {
         }
     }
 
+    /// The run controls the current state offers: pause and stop while the
+    /// agent works, continue in place of pause once a pause is asked for or
+    /// has taken effect, none while idle.
+    fn run_buttons(&self) -> Vec<RunButton> {
+        let paused = self.paused && !self.is_busy();
+        if paused || (self.is_busy() && self.pause_requested) {
+            vec![RunButton::Continue, RunButton::Stop]
+        } else if self.is_busy() {
+            vec![RunButton::Pause, RunButton::Stop]
+        } else {
+            Vec::new()
+        }
+    }
+
     fn render_input(&mut self, area: Rect, buf: &mut Buffer, focused: bool) {
         let colors = self.colors;
+        // The run controls sit at the right end of the top border, always in
+        // view whatever the transcript's scroll.
+        self.run_buttons = self.run_buttons();
+        let buttons = self
+            .run_buttons
+            .iter()
+            .map(|button| {
+                let (label, color) = match button {
+                    RunButton::Pause => ("[‖]", colors.info),
+                    RunButton::Continue => ("[▶]", colors.success),
+                    RunButton::Stop => ("[■]", colors.error),
+                };
+                (label.to_string(), Style::default().fg(color))
+            })
+            .collect();
+        self.input.set_border_buttons(buttons);
         // The bar's top border is the divider from the content above and
         // brightens while the input is focused; the agent's name lives in the
         // panel title, not here.
@@ -4932,6 +4984,25 @@ impl Panel for AgentPanel {
         // every click, and because a release must reach the bar to end a drag
         // that started in it — even after the pointer has been dragged up into
         // the transcript. A pending question keeps its clicks to itself.
+        // A run control on the prompt's border acts on the press.
+        if matches!(event.kind, MouseEventKind::Down(MouseButton::Left)) {
+            let button = self
+                .input
+                .border_button_at(event.column, event.row)
+                .and_then(|index| self.run_buttons.get(index).copied());
+            if let Some(button) = button {
+                match button {
+                    RunButton::Pause => {
+                        self.request_pause();
+                    }
+                    RunButton::Continue if self.paused && !self.is_busy() => self.resume(),
+                    RunButton::Continue => self.cancel_pause(),
+                    RunButton::Stop if self.paused && !self.is_busy() => self.stop_paused(),
+                    RunButton::Stop => self.abort(),
+                }
+                return vec![PanelEvent::NeedsRedraw];
+            }
+        }
         if self.pending.is_none() && self.press.is_none() && self.input.mouse_hits(event) {
             self.input.handle_mouse(event);
             match event.kind {
@@ -5723,62 +5794,79 @@ mod tests {
     }
 
     #[test]
-    fn clicks_on_the_run_clock_pause_and_on_the_pause_resume() {
+    fn the_prompt_border_carries_the_run_controls() {
         let mut panel = AgentPanel::new(setup(vec![]));
-        panel.apply(AgentEvent::AgentStart);
-        panel.apply(AgentEvent::MessageStart);
-        let rows = render_text(&mut panel, 40, 12);
-        let area = panel.transcript_area;
-        let y = rows
-            .iter()
-            .position(|r| {
-                transcript::RUN_FRAMES
-                    .iter()
-                    .any(|f| r.trim_start().starts_with(f))
-            })
-            .expect("the run clock is on screen") as u16;
-        let click = |panel: &mut AgentPanel, row| {
-            for kind in [
-                MouseEventKind::Down(MouseButton::Left),
-                MouseEventKind::Up(MouseButton::Left),
-            ] {
-                panel.handle_mouse(
-                    MouseEvent {
-                        kind,
-                        column: area.x + 30,
-                        row,
-                        modifiers: KeyModifiers::NONE,
-                    },
-                    area,
-                );
-            }
+        let (width, height) = (40, 12);
+        // The controls on the border, as text, and a click on one by glyph.
+        let border = |panel: &mut AgentPanel| {
+            let rows = render_text(panel, width, height);
+            rows[panel.input_area.y as usize].clone()
         };
-        click(&mut panel, y);
-        assert!(panel.pause_requested, "a click on the clock asks to pause");
-        // A click on the strip's pending-pause line withdraws it.
-        let _ = render_text(&mut panel, 40, 12);
+        let click = |panel: &mut AgentPanel, glyph: &str| {
+            let row = border(panel);
+            let col = row[..row.find(glyph).expect("the control is on the border")]
+                .chars()
+                .count() as u16;
+            panel.handle_mouse(
+                MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: col,
+                    row: panel.input_area.y,
+                    modifiers: KeyModifiers::NONE,
+                },
+                Rect::new(0, 0, width, height),
+            );
+        };
+        // Idle: no controls.
+        assert!(!border(&mut panel).contains('['));
+        // Working: pause and stop.
+        panel.apply(AgentEvent::AgentStart);
+        let row = border(&mut panel);
+        assert!(row.ends_with("[‖][■]─"), "{row:?}");
+        click(&mut panel, "[‖]");
+        assert!(panel.pause_requested, "the pause control asks to pause");
+        // A pause asked for: continue withdraws it.
+        assert!(border(&mut panel).contains("[▶][■]"));
+        click(&mut panel, "[▶]");
+        assert!(
+            !panel.pause_requested,
+            "continue withdraws the pending pause"
+        );
+        // The strip's pending-pause line withdraws it too.
+        click(&mut panel, "[‖]");
+        let _ = render_text(&mut panel, width, height);
         let row = panel.pause_row.expect("the strip shows the pending pause");
-        click(&mut panel, row);
-        assert!(!panel.pause_requested, "the pending pause is withdrawn");
-        // `/continue` withdraws a pending pause too.
-        click(&mut panel, y);
-        assert!(panel.pause_requested);
+        panel.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 2,
+                row,
+                modifiers: KeyModifiers::NONE,
+            },
+            Rect::new(0, 0, width, height),
+        );
+        assert!(!panel.pause_requested);
+        // `/continue` withdraws a pending pause as well.
+        click(&mut panel, "[‖]");
         type_text(&mut panel, "/continue");
         panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
         assert!(
             !panel.pause_requested,
             "/continue withdraws the pending pause"
         );
-        // Asked again, the pause goes ahead.
-        click(&mut panel, y);
-        assert!(panel.pause_requested);
-        // Once paused, the pause's line is the target that resumes.
+        // Paused: continue alone, and the pause's line resumes too.
+        click(&mut panel, "[‖]");
         panel.apply(AgentEvent::Paused);
         panel.apply(AgentEvent::AgentEnd);
-        let _ = render_text(&mut panel, 40, 12);
+        assert!(border(&mut panel).contains("[▶][■]"));
         let line = panel.transcript.line_count() - 1;
         assert!(panel.transcript.is_live_pause_line(line));
-        assert!(!panel.transcript.is_clock_line(line));
+        // Stop while paused gives the run up: no controls, the pause rests.
+        click(&mut panel, "[■]");
+        assert!(!panel.paused);
+        assert!(panel.pause_start.is_none());
+        assert!(!border(&mut panel).contains('['));
+        assert!(!panel.transcript.is_live_pause_line(line));
     }
 
     fn type_text(panel: &mut AgentPanel, text: &str) {

@@ -99,6 +99,11 @@ pub struct InputBar {
     status: Option<String>,
     /// The top border and its slots, or `None` for a borderless bar.
     border: Option<BorderSlots>,
+    /// Clickable labels drawn at the right end of the top border (a run's
+    /// pause and stop, say), each with its own style.
+    border_buttons: Vec<(String, Style)>,
+    /// Rendered border-button areas, parallel to `border_buttons`.
+    border_button_areas: Vec<Rect>,
     /// Placeholder shown in an empty multi-line field while the bar is idle.
     placeholder: Option<String>,
     /// Rendered field areas, parallel to `fields`, for mouse hit-testing; a
@@ -130,6 +135,8 @@ impl InputBar {
             focus: 0,
             status: None,
             border: None,
+            border_buttons: Vec::new(),
+            border_button_areas: Vec::new(),
             placeholder: None,
             field_areas: Vec::new(),
             control_areas: Vec::new(),
@@ -297,6 +304,22 @@ impl InputBar {
 
     pub fn set_status(&mut self, status: Option<String>) {
         self.status = status;
+    }
+
+    /// Set the clickable labels at the right end of the top border, in order;
+    /// [`InputBar::border_button_at`] tells which one a click lands on. An
+    /// empty list removes them.
+    pub fn set_border_buttons(&mut self, buttons: Vec<(String, Style)>) {
+        self.border_buttons = buttons;
+    }
+
+    /// The border button under (`col`, `row`), as an index into the list
+    /// given to [`InputBar::set_border_buttons`].
+    #[must_use]
+    pub fn border_button_at(&self, col: u16, row: u16) -> Option<usize> {
+        self.border_button_areas
+            .iter()
+            .position(|area| hit(*area, col, row))
     }
 
     pub fn set_border_slots(&mut self, left: impl Into<String>, right: impl Into<String>) {
@@ -558,13 +581,47 @@ impl InputBar {
     pub fn render(&mut self, area: Rect, buf: &mut Buffer, colors: &ThemeColors, active: bool) {
         self.field_areas.clear();
         self.control_areas.clear();
+        self.border_button_areas.clear();
         if area.width == 0 || area.height == 0 {
             return;
         }
         let focus = self.focus();
         let mut y = area.y;
         if let Some(border) = &self.border {
-            render_border(area, y, buf, colors, active, &border.left, &border.right);
+            // Buttons sit side by side at the right end (their brackets set
+            // them apart), one short of the edge; the right slot's text moves
+            // left of them.
+            let widths: Vec<u16> = self
+                .border_buttons
+                .iter()
+                .map(|(label, _)| str_display_width(label) as u16)
+                .collect();
+            let reserve = widths.iter().sum::<u16>() + u16::from(!widths.is_empty());
+            let fits = reserve + 2 < area.width;
+            let reserve = if fits { reserve } else { 0 };
+            render_border(
+                area,
+                y,
+                buf,
+                colors,
+                active,
+                &border.left,
+                &border.right,
+                reserve,
+            );
+            if fits {
+                let mut x = area.x + area.width - reserve;
+                for ((label, style), w) in self.border_buttons.iter().zip(widths) {
+                    buf.set_string(x, y, label, *style);
+                    self.border_button_areas.push(Rect {
+                        x,
+                        y,
+                        width: w,
+                        height: 1,
+                    });
+                    x += w;
+                }
+            }
             y += 1;
         }
 
@@ -742,7 +799,9 @@ fn edit_field_input(field: &mut FieldInput, key: KeyEvent) -> FieldEdit {
 }
 
 /// Draw a top border `───` with the left text just after the corner and the
-/// right text just before it.
+/// right text just before it, or before the `reserve` columns the border
+/// buttons take at the right end.
+#[allow(clippy::too_many_arguments)]
 fn render_border(
     area: Rect,
     y: u16,
@@ -751,6 +810,7 @@ fn render_border(
     active: bool,
     left: &str,
     right: &str,
+    reserve: u16,
 ) {
     let border_color = if active {
         colors.border_focused
@@ -771,8 +831,8 @@ fn render_border(
     }
     if !right.is_empty() {
         let w = str_display_width(right) as u16;
-        if w + 1 < area.width {
-            buf.set_string(area.x + area.width - 1 - w, y, right, label_style);
+        if w + 1 + reserve < area.width {
+            buf.set_string(area.x + area.width - 1 - w - reserve, y, right, label_style);
         }
     }
 }
@@ -1405,6 +1465,26 @@ mod tests {
         // stay plain.
         assert_eq!(buf[(13, 0)].bg, colors.fg);
         assert_ne!(buf[(15, 0)].bg, colors.fg);
+    }
+
+    #[test]
+    fn border_buttons_sit_at_the_right_end_and_report_their_clicks() {
+        let mut b = InputBar::new(vec![])
+            .with_multiline_field("")
+            .with_border("", "hint");
+        let style = Style::default();
+        b.set_border_buttons(vec![("[a]".into(), style), ("[b]".into(), style)]);
+        let area = Rect::new(0, 0, 20, b.height());
+        let mut buf = Buffer::empty(area);
+        b.render(area, &mut buf, &ThemeColors::default(), true);
+        let row: String = (0..20).map(|x| buf[(x, 0)].symbol().to_string()).collect();
+        // Side by side, one border cell short of the edge; the right slot's
+        // text moves left of them.
+        assert!(row.ends_with("hint─[a][b]─"), "{row:?}");
+        assert_eq!(b.border_button_at(13, 0), Some(0));
+        assert_eq!(b.border_button_at(16, 0), Some(1));
+        assert_eq!(b.border_button_at(19, 0), None);
+        assert_eq!(b.border_button_at(16, 1), None);
     }
 
     #[test]
