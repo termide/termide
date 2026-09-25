@@ -153,9 +153,9 @@ command (dim) behind the `$ ` prompt, wrapped to the width. A file tool reads as
 localized action in the same accent, then its path (`< Read src/main.rs`); a
 web tool likewise, with the URL or the query (`↓ Fetch https://docs.rs`,
 `? Search ratatui scrollbar`); any other tool as its name and a summary. The reasoning is its own
-block above the answer, and its text wraps to the width. The system prompt and
-each annotation open with a dim dashed rule that sets them apart from the block
-before. A blank line follows your message and another precedes the answer; the
+block above the answer, and its text wraps to the width. Only the system prompt
+opens with a dim dashed rule that sets it apart from the block before; an
+annotation has none, its glyph marks it. A blank line follows your message and another precedes the answer; the
 reasoning and tool calls in between stack with no gap. A folded block is marked
 with `▸`, an unfolded one with `▾`, right after its type glyph (`@ ▸`, `$ ▸`,
 `# ▸`) or a file tool's action (`< Read ▸ src/main.rs`).
@@ -186,8 +186,7 @@ conversation rather than holding content. The others are the panel's notices:
 `·` for information (a model switch, a finished compaction), `!` for a warning
 (a stopped goal, a busy agent), `✗` for an error outside a block (a failed
 compaction, an MCP error). An error inside a turn stays in its answer block.
-Annotations never fold. A notice's text wraps to the width under a dashed rule,
-which consecutive notices share; the chat cursor can stop on a notice, so an
+Annotations never fold. A notice's text wraps to the width under its glyph; the chat cursor can stop on a notice, so an
 error can be selected and copied like a block, while it passes over a run's
 closing line.
 

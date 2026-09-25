@@ -173,9 +173,6 @@ pub enum Item {
 struct Cached {
     width: u16,
     is_light: bool,
-    /// Whether the item followed a notice when rendered: consecutive notices
-    /// share one rule, so a changed neighbour re-renders it.
-    after_notice: bool,
     /// Whether the item folds at this width (see [`render_item`]).
     foldable: bool,
     lines: Vec<Line<'static>>,
@@ -597,14 +594,10 @@ impl Transcript {
         let (lead, trail) = match self.items.get(index)? {
             Item::User { .. } => (1, 1),
             Item::System { .. } | Item::Assistant { .. } => (1, 0),
-            // A notice after another shares its rule, so has none to skip.
-            Item::Notice { .. } => {
-                let shares = index
-                    .checked_sub(1)
-                    .is_some_and(|prev| matches!(self.items[prev], Item::Notice { .. }));
-                (usize::from(!shares), 0)
-            }
-            Item::Thinking { .. } | Item::Tool { .. } | Item::RunEnd { .. } => (0, 0),
+            Item::Thinking { .. }
+            | Item::Tool { .. }
+            | Item::Notice { .. }
+            | Item::RunEnd { .. } => (0, 0),
         };
         let (first, last) = (first + lead, last.saturating_sub(trail));
         (first <= last).then_some((first, last))
@@ -621,37 +614,21 @@ impl Transcript {
     pub fn lines(&mut self, width: u16, colors: &ThemeColors, is_light: bool) -> &[Line<'static>] {
         let width = width.max(1);
         for index in 0..self.items.len() {
-            let after_notice = index
-                .checked_sub(1)
-                .is_some_and(|prev| matches!(self.items[prev], Item::Notice { .. }));
             let stale = match &self.cache[index] {
-                Some(cached) => {
-                    cached.width != width
-                        || cached.is_light != is_light
-                        || cached.after_notice != after_notice
-                }
+                Some(cached) => cached.width != width || cached.is_light != is_light,
                 None => true,
             };
             if stale {
-                let (mut lines, foldable) = render_item(
+                let (lines, foldable) = render_item(
                     &self.items[index],
                     self.collapsed[index],
                     width,
                     colors,
                     is_light,
                 );
-                // A run of notices sits under one rule: the ones after the
-                // first drop their own.
-                if after_notice
-                    && matches!(self.items[index], Item::Notice { .. })
-                    && !lines.is_empty()
-                {
-                    lines.remove(0);
-                }
                 self.cache[index] = Some(Cached {
                     width,
                     is_light,
-                    after_notice,
                     foldable,
                     lines,
                 });
@@ -1538,8 +1515,9 @@ fn render_body(
                 NoticeKind::Warn => ("!", colors.warning, colors.warning),
                 NoticeKind::Error => ("✗", colors.error, colors.error),
             };
-            let mut lines = vec![separator(width, colors)];
-            lines.extend(annotation(
+            // No rule: a notice marks a moment in the flow, as the steps
+            // around it do, and its glyph sets it apart.
+            annotation(
                 Span::styled(
                     format!("{glyph} "),
                     Style::default()
@@ -1552,8 +1530,7 @@ fn render_body(
                 width,
                 colors,
                 is_light,
-            ));
-            lines
+            )
         }
         Item::RunEnd {
             elapsed_ms,
@@ -2308,7 +2285,7 @@ mod tests {
     }
 
     #[test]
-    fn consecutive_notices_share_one_rule() {
+    fn notices_carry_no_rule() {
         let colors = ThemeColors::default();
         let mut transcript = Transcript::default();
         transcript.push(Item::Assistant {
@@ -2336,16 +2313,15 @@ mod tests {
         });
         let rule = |lines: &[String]| lines.iter().filter(|l| l.starts_with('╌')).count();
         let lines = text_of(transcript.lines(40, &colors, false));
-        // The answer opens with a blank line and the run's closing line has no
-        // rule; the two notices share one.
+        // The answer opens with a blank line; neither the run's closing line
+        // nor the notices draw a rule: each notice is its glyph and text.
         assert_eq!(lines[0], "", "{lines:?}");
-        assert_eq!(rule(&lines), 1, "{lines:?}");
+        assert_eq!(rule(&lines), 0, "{lines:?}");
         let n = lines.len();
-        assert!(lines[n - 4].trim().starts_with("✻ ") && lines[n - 4].ends_with('✗'));
-        assert!(lines[n - 3].starts_with('╌'), "{lines:?}");
+        assert!(lines[n - 3].trim().starts_with("✻ ") && lines[n - 3].ends_with('✗'));
         assert_eq!(lines[n - 2], "! goal stopped");
         assert_eq!(lines[n - 1], "· queue cleared");
-        // A block after the group opens its own rule again.
+        // A long notice wraps under its glyph.
         transcript.push(Item::User {
             text: "next".into(),
             at: String::new(),
@@ -2359,7 +2335,7 @@ mod tests {
             .iter()
             .position(|l| l.starts_with("· a long"))
             .unwrap();
-        assert!(lines[at - 1].starts_with('╌'));
+        assert!(!lines[at - 1].starts_with('╌'));
         assert!(lines[at + 1].starts_with("  "), "{lines:?}");
         assert!(lines.iter().all(|l| width_of(l) <= 20), "{lines:?}");
     }
