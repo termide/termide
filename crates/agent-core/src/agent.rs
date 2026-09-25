@@ -39,8 +39,9 @@ pub struct AgentConfig {
 struct Queues {
     steering: VecDeque<UserMessage>,
     follow_up: VecDeque<UserMessage>,
-    /// A graceful pause was asked for: the loop stops at the next turn
-    /// boundary, leaving the run resumable, unlike an abrupt cancel.
+    /// A graceful pause was asked for: the loop stops before the next tool
+    /// call or model call, leaving the run resumable, unlike an abrupt
+    /// cancel.
     paused: bool,
 }
 
@@ -478,14 +479,24 @@ impl Agent {
         cancel: &CancelToken,
         emit: &mut dyn FnMut(AgentEvent),
     ) {
+        // Calls a pause left unrun are not resumed by a new request; each
+        // still needs a result, or the provider rejects the transcript.
+        for call in self.unanswered_calls() {
+            let result = ToolResultMessage::error(
+                &call,
+                "Not run: the run was paused before this call, and a new request took its place.",
+            );
+            self.push(Message::ToolResult(result), emit);
+        }
         let mut initial = vec![prompt];
         initial.extend(self.drain_steering(emit));
-        self.run_from(initial, hooks, cancel, emit);
+        self.run_from(initial, false, hooks, cancel, emit);
     }
 
     /// Resume a paused run: continue the loop on the existing transcript with
-    /// no new user message, so the model answers the last tool results (or
-    /// carries on where it left off).
+    /// no new user message — first running the tool calls the pause left
+    /// unrun, then letting the model answer the results (or carry on where
+    /// it left off).
     pub fn resume(
         &mut self,
         hooks: &mut dyn Hooks,
@@ -493,7 +504,7 @@ impl Agent {
         emit: &mut dyn FnMut(AgentEvent),
     ) {
         let initial = self.drain_steering(emit);
-        self.run_from(initial, hooks, cancel, emit);
+        self.run_from(initial, true, hooks, cancel, emit);
     }
 
     /// The loop shared by [`Agent::run`] and [`Agent::resume`]: drive turns
@@ -501,6 +512,7 @@ impl Agent {
     fn run_from(
         &mut self,
         mut pending: Vec<UserMessage>,
+        resuming: bool,
         hooks: &mut dyn Hooks,
         cancel: &CancelToken,
         emit: &mut dyn FnMut(AgentEvent),
@@ -509,6 +521,17 @@ impl Agent {
         // it starts.
         self.queues.clear_pause();
         emit(AgentEvent::AgentStart);
+
+        // A resumed run first runs what the pause left of the last step.
+        if resuming {
+            let calls = self.unanswered_calls();
+            if self.run_calls(&calls, false, hooks, cancel, emit) && self.queues.take_pause() {
+                emit(AgentEvent::Paused);
+                self.queues.clear_pause();
+                emit(AgentEvent::AgentEnd);
+                return;
+            }
+        }
 
         'outer: loop {
             loop {
@@ -590,8 +613,43 @@ impl Agent {
             return TurnOutcome::Halt;
         }
 
-        for call in &calls {
-            let result = if stop_reason == StopReason::Length {
+        // A pause asked for mid-step stops before the next call; the loop then
+        // sees the pause and stops, and a resume runs the rest.
+        self.run_calls(
+            &calls,
+            stop_reason == StopReason::Length,
+            hooks,
+            cancel,
+            emit,
+        );
+
+        emit(AgentEvent::TurnEnd);
+
+        if cancel.is_cancelled() || hooks.should_stop_after_turn(&assistant) {
+            return TurnOutcome::Halt;
+        }
+        TurnOutcome::Continue {
+            had_tool_calls: !calls.is_empty(),
+        }
+    }
+
+    /// Run `calls` in order, pushing each result. Stops before a call once a
+    /// pause has been asked for, leaving it and the rest unanswered for a
+    /// resume to run; returns whether it stopped so. `truncated` calls come
+    /// from a reply cut off by the output limit and are refused, not run.
+    fn run_calls(
+        &mut self,
+        calls: &[ToolCall],
+        truncated: bool,
+        hooks: &mut dyn Hooks,
+        cancel: &CancelToken,
+        emit: &mut dyn FnMut(AgentEvent),
+    ) -> bool {
+        for call in calls {
+            if !truncated && !cancel.is_cancelled() && self.queues.is_paused() {
+                return true;
+            }
+            let result = if truncated {
                 ToolResultMessage::error(
                     call,
                     "The response was cut off by the output limit, so the tool call arguments may be incomplete. The call was not executed.",
@@ -605,15 +663,35 @@ impl Agent {
             });
             self.push(Message::ToolResult(result), emit);
         }
+        false
+    }
 
-        emit(AgentEvent::TurnEnd);
-
-        if cancel.is_cancelled() || hooks.should_stop_after_turn(&assistant) {
-            return TurnOutcome::Halt;
-        }
-        TurnOutcome::Continue {
-            had_tool_calls: !calls.is_empty(),
-        }
+    /// The tool calls of the last assistant message that have no result yet:
+    /// those a pause stopped before, including across a restart, since the
+    /// transcript itself records them.
+    fn unanswered_calls(&self) -> Vec<ToolCall> {
+        let Some(index) = self
+            .messages
+            .iter()
+            .rposition(|m| matches!(m, Message::Assistant(_)))
+        else {
+            return Vec::new();
+        };
+        let Message::Assistant(assistant) = &self.messages[index] else {
+            return Vec::new();
+        };
+        let answered: Vec<&str> = self.messages[index + 1..]
+            .iter()
+            .filter_map(|m| match m {
+                Message::ToolResult(result) => Some(result.tool_call_id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assistant
+            .tool_calls()
+            .filter(|call| !answered.contains(&call.id.as_str()))
+            .cloned()
+            .collect()
     }
 
     fn execute_call(
@@ -1402,6 +1480,83 @@ mod tests {
             roles(agent.messages()),
             vec!["user", "assistant", "tool_result", "assistant"]
         );
+    }
+
+    /// Two calls in one step, the first asking to pause: the pause stops
+    /// before the second instead of waiting out the whole step.
+    fn pausing_agent(
+        replies: Vec<AssistantMessage>,
+    ) -> (Agent, Arc<EchoTool>, Arc<ScriptedProvider>) {
+        let mut registry = ToolRegistry::new();
+        let provider = Arc::new(ScriptedProvider::new(replies));
+        let mut agent = Agent::new(provider.clone(), registry.clone(), model(), "/tmp".into());
+        let echo = Arc::new(EchoTool {
+            executed: Default::default(),
+            steer_on_execute: None,
+            pause_on_execute: Some(agent.queues()),
+        });
+        registry.insert(echo.clone());
+        *agent.tools_mut() = registry;
+        (agent, echo, provider)
+    }
+
+    fn two_calls() -> AssistantMessage {
+        tool_reply(
+            vec![
+                ("c1", "echo", json!({ "text": "a" })),
+                ("c2", "echo", json!({ "text": "b" })),
+            ],
+            StopReason::ToolUse,
+        )
+    }
+
+    #[test]
+    fn a_pause_stops_between_the_calls_of_a_step_and_resume_runs_the_rest() {
+        let (mut agent, echo, provider) =
+            pausing_agent(vec![two_calls(), text_reply("done after resume")]);
+        let events = collect(&mut agent, "go", &mut NoHooks);
+        assert!(events.contains(&AgentEvent::Paused));
+        // Only the first call ran; the second waits, unanswered.
+        assert_eq!(*echo.executed.lock().unwrap(), vec!["c1"]);
+        assert_eq!(
+            roles(agent.messages()),
+            vec!["user", "assistant", "tool_result"]
+        );
+
+        // Resuming runs the waiting call first, then asks the model.
+        let mut resumed = Vec::new();
+        agent.resume(&mut NoHooks, &CancelToken::new(), &mut |e| resumed.push(e));
+        assert_eq!(*echo.executed.lock().unwrap(), vec!["c1", "c2"]);
+        assert_eq!(provider.seen_requests().len(), 2);
+        assert_eq!(
+            roles(agent.messages()),
+            vec![
+                "user",
+                "assistant",
+                "tool_result",
+                "tool_result",
+                "assistant"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_new_request_over_a_pause_answers_the_calls_it_left() {
+        let (mut agent, echo, provider) = pausing_agent(vec![two_calls(), text_reply("fresh")]);
+        collect(&mut agent, "go", &mut NoHooks);
+        // A new request instead of a resume: the waiting call is not run, but
+        // still gets a result, so the transcript stays valid.
+        collect(&mut agent, "something else", &mut NoHooks);
+        assert_eq!(*echo.executed.lock().unwrap(), vec!["c1"]);
+        let seen = provider.seen_requests();
+        assert_eq!(
+            roles(&seen[1]),
+            vec!["user", "assistant", "tool_result", "tool_result", "user"]
+        );
+        assert!(agent.messages().iter().any(|m| matches!(
+            m,
+            Message::ToolResult(r) if r.tool_call_id == "c2" && r.is_error
+        )));
     }
 
     #[test]

@@ -169,7 +169,11 @@ answer's meta (`✻ 3m41s`); any other run keeps it as a closing line after its
 last block, with the time it ended and how — `✻ 3m41s · 21:03:41 ✗` for a
 failed or aborted run.
 
-A run stopped with `/pause` gets a pause line instead, `‖ 1m12s`: it counts
+`/pause` takes effect as soon as the tool call or model reply in progress
+finishes — not at the end of the whole step, so a step that fetches several
+pages stops after the current one. The calls it leaves unrun wait for
+`/continue`, which runs them first; a new request instead closes them as not
+run. A run stopped with `/pause` gets a pause line instead, `‖ 1m12s`: it counts
 how long the pause has lasted, its `‖` marked while the pause is on, and
 keeps that length, dimmed, once the run continues. A continued run's clock goes on from the
 original request, so its total includes the pause. Clicking the run clock
