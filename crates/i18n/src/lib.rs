@@ -476,6 +476,8 @@ pub trait Translation: Send + Sync {
     // Agent panel — delete-session confirmation
     /// The delete-session card's question (`{label}` is the session)
     fn agent_delete_confirm_fmt(&self, label: &str) -> String;
+    /// Agent delete confirmation: how an unnamed session is named in it.
+    fn agent_delete_this_session(&self) -> &str;
 
     // Agent panel — undo confirmation
     /// The undo card's question (`{changed}` names the changed files)

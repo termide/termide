@@ -449,6 +449,7 @@ impl Translation for RuntimeTranslation {
         agent_unit_tok_per_sec,
         agent_tool_bash,
         agent_pick_connection,
+        agent_delete_this_session,
         agent_notice_connection_before_first,
         agent_notice_model_pending,
         agent_toolset_title,

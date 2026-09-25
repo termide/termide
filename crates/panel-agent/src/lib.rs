@@ -3667,12 +3667,12 @@ impl AgentPanel {
             self.notice(termide_i18n::t().agent_notice_busy(), NoticeKind::Warn);
             return vec![PanelEvent::NeedsRedraw];
         }
-        let label = self
+        let t = termide_i18n::t();
+        let name = self
             .session
             .as_ref()
             .and_then(Session::name)
-            .map(str::to_string)
-            .unwrap_or_else(|| "this session".to_string());
+            .map(str::to_string);
         let id = self
             .session
             .as_ref()
@@ -3680,11 +3680,15 @@ impl AgentPanel {
             .and_then(Path::file_stem)
             .and_then(|s| s.to_str())
             .unwrap_or_default();
-        let confirm = termide_i18n::t().agent_delete_confirm_fmt(&label);
-        let message = if id.is_empty() {
-            confirm
-        } else {
-            format!("{confirm}\n{label} · {id}")
+        let label = name
+            .clone()
+            .unwrap_or_else(|| t.agent_delete_this_session().to_string());
+        let confirm = t.agent_delete_confirm_fmt(&label);
+        // The log's id under the question, after the name when it has one.
+        let message = match (name, id.is_empty()) {
+            (_, true) => confirm,
+            (Some(name), false) => format!("{confirm}\n{name} · {id}"),
+            (None, false) => format!("{confirm}\n{id}"),
         };
         vec![PanelEvent::ShowConfirm {
             message,
@@ -7859,9 +7863,23 @@ mod tests {
         // F8 asks through an app confirmation modal — nothing is deleted yet,
         // and the panel raises no in-panel card of its own.
         let events = panel.handle_key(chord(KeyCode::F(8), KeyModifiers::NONE));
-        let Some(PanelEvent::ShowConfirm { on_confirm, .. }) = events.first() else {
+        let Some(PanelEvent::ShowConfirm {
+            on_confirm,
+            message,
+        }) = events.first()
+        else {
             panic!("F8 should raise a confirmation modal, got {events:?}");
         };
+        // An unnamed session is named in the UI language, its id below.
+        let t = termide_i18n::t();
+        let id = first_path.file_stem().unwrap().to_str().unwrap();
+        assert_eq!(
+            *message,
+            format!(
+                "{}\n{id}",
+                t.agent_delete_confirm_fmt(t.agent_delete_this_session())
+            )
+        );
         assert!(
             matches!(on_confirm, ConfirmAction::Custom(a) if a == DELETE_SESSION_ACTION),
             "{on_confirm:?}"
