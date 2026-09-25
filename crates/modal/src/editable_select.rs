@@ -196,8 +196,9 @@ impl EditableSelectModal {
         // 4. Input field width based on max option (not current input)
         let min_input_width = max_option_len + 5; // +5 for arrow and padding
 
-        // 5. Options list width (with "▶ " prefix)
-        let max_option_width = max_option_len + 2;
+        // 5. Options list width, with one column of padding (the row under
+        // the cursor is inverted, so it needs no `▶` marker)
+        let max_option_width = max_option_len + 1;
 
         // 6. Buttons width: "[ OK ]    [ Cancel ]" = ~21 characters
         let buttons_width = 21;
@@ -370,7 +371,7 @@ impl Modal for EditableSelectModal {
                 .skip(scroll_offset)
                 .take(visible_end - scroll_offset)
                 .map(|(idx, option)| {
-                    let prefix = if idx == selected_idx { "▶ " } else { "  " };
+                    let prefix = " ";
 
                     let style = if idx == selected_idx {
                         Style::default()

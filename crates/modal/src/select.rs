@@ -54,7 +54,9 @@ impl SelectModal {
     fn calculate_modal_width(&self, screen_width: u16) -> u16 {
         let title_width = self.title.len() as u16 + 2;
         let prompt_width = max_line_width(&self.prompt);
-        let items_width = max_item_width(&self.items, 2); // "▶ " prefix
+        // One column of padding: the row under the cursor is inverted, so it
+        // needs no `▶` marker beside it.
+        let items_width = max_item_width(&self.items, 1);
 
         calculate_modal_width(
             [title_width, prompt_width, items_width].into_iter(),
@@ -101,7 +103,7 @@ impl Modal for SelectModal {
             .iter()
             .enumerate()
             .map(|(idx, label)| {
-                let prefix = if idx == self.cursor { "▶ " } else { "  " };
+                let prefix = " ";
 
                 let style = if idx == self.cursor {
                     Style::default()
@@ -203,5 +205,28 @@ impl Modal for SelectModal {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_row_under_the_cursor_needs_no_marker() {
+        let mut modal = SelectModal::single("Mode", "", vec!["● ask".into(), "  auto".into()]);
+        modal.set_cursor(1);
+        let area = Rect::new(0, 0, 40, 12);
+        let mut buf = Buffer::empty(area);
+        modal.render(area, &mut buf, &Theme::default());
+        let rows: Vec<String> = (0..area.height)
+            .map(|y| (0..area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+        // Inverted, the cursor row reads as the others do: one column of
+        // padding, no `▶`, so the current value's `●` stands alone.
+        assert!(rows.iter().all(|r| !r.contains('▶')), "{rows:?}");
+        let row = rows.iter().find(|r| r.contains("auto")).unwrap();
+        assert!(row.contains("│   auto"), "{row:?}");
+        assert!(rows.iter().any(|r| r.contains("│ ● ask")), "{rows:?}");
     }
 }
