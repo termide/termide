@@ -783,15 +783,17 @@ mod enum_option_tests {
     fn the_permission_mode_for_new_sessions_is_chosen_from_the_four() {
         let mut config = Config::default();
         let field = AI_PERMISSION_MODE_FIELD;
-        // Ask by default, shown by its localized name.
-        assert_eq!(config.ai.permission_mode(), "ask");
+        // Auto by default, shown by its localized name.
+        assert_eq!(config.ai.permission_mode(), "auto");
         let options = enum_options(&config, SettingsTab::Ai, field).unwrap();
         assert_eq!(options.values, ["ask", "accept-edits", "auto", "plan"]);
-        assert_eq!(options.current, Some(0));
+        assert_eq!(options.current, Some(2));
         assert_eq!(
             get_field_value(&config, SettingsTab::Ai, field),
-            i18n::t().agent_mode_ask()
+            i18n::t().agent_mode_auto()
         );
+        apply_enum_value(&mut config, SettingsTab::Ai, field, "ask");
+        assert_eq!(config.ai.permission_mode(), "ask");
         apply_enum_value(&mut config, SettingsTab::Ai, field, "auto");
         assert_eq!(config.ai.permission_mode(), "auto");
         cycle_enum_forward(&mut config, SettingsTab::Ai, field);

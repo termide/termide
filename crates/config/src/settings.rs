@@ -108,11 +108,15 @@ pub struct AiSettings {
 
     /// Prefer reasoning: request `reasoning_effort` / extended thinking from
     /// models that support it (ignored by models that do not).
-    #[serde(default)]
+    #[serde(default = "agent_defaults::reasoning")]
     pub prefer_reasoning: bool,
 
     /// Permission rules: a mode plus one `pattern = decision` table per tool.
-    #[serde(default)]
+    /// New sessions start in `auto` unless the file names another mode.
+    #[serde(
+        default = "agent_defaults::permissions",
+        deserialize_with = "agent_defaults::deserialize_permissions"
+    )]
     pub permissions: termide_agent_core::PermissionRules,
 
     /// Context compaction policy.
@@ -313,8 +317,8 @@ impl Default for AiSettings {
             connection: String::new(),
             connections: std::collections::BTreeMap::new(),
             max_tokens_per_turn: agent_defaults::max_tokens(),
-            prefer_reasoning: false,
-            permissions: termide_agent_core::PermissionRules::default(),
+            prefer_reasoning: agent_defaults::reasoning(),
+            permissions: agent_defaults::permissions(),
             compaction: termide_agent_core::CompactionPolicy::default(),
             autofold: agent_defaults::autofold(),
             web: WebSettings::default(),
@@ -685,7 +689,46 @@ mod agent_defaults {
         value == base_url()
     }
     pub fn max_tokens() -> i64 {
-        4_096
+        // No bound: the model decides how long to answer.
+        0
+    }
+    pub fn reasoning() -> bool {
+        true
+    }
+    pub fn permissions() -> termide_agent_core::PermissionRules {
+        termide_agent_core::PermissionRules {
+            mode: termide_agent_core::Mode::Auto,
+            ..Default::default()
+        }
+    }
+    /// `[ai.permissions]` with its mode defaulting to `auto` rather than the
+    /// agent library's own `ask`, so a file that only adds rules keeps the
+    /// mode new sessions start in.
+    pub fn deserialize_permissions<'de, D>(
+        deserializer: D,
+    ) -> Result<termide_agent_core::PermissionRules, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::Deserialize;
+        #[derive(Deserialize)]
+        struct Rules {
+            #[serde(default = "auto")]
+            mode: termide_agent_core::Mode,
+            #[serde(flatten, default)]
+            tools: std::collections::BTreeMap<
+                String,
+                std::collections::BTreeMap<String, termide_agent_core::Decision>,
+            >,
+        }
+        fn auto() -> termide_agent_core::Mode {
+            termide_agent_core::Mode::Auto
+        }
+        let rules = Rules::deserialize(deserializer)?;
+        Ok(termide_agent_core::PermissionRules {
+            mode: rules.mode,
+            tools: rules.tools,
+        })
     }
     pub fn autofold() -> bool {
         true
@@ -1069,8 +1112,30 @@ mod ai_settings_tests {
     }
 
     #[test]
+    fn new_sessions_reason_and_run_in_auto_unless_the_file_says_otherwise() {
+        let defaults = AiSettings::default();
+        assert!(defaults.prefer_reasoning);
+        assert_eq!(defaults.permissions.mode, termide_agent_core::Mode::Auto);
+        // A file that only adds a rule keeps the mode.
+        let parsed: AiSettings =
+            toml::from_str("[permissions.bash]\n\"ls *\" = \"allow\"\n").unwrap();
+        assert_eq!(parsed.permissions.mode, termide_agent_core::Mode::Auto);
+        assert_eq!(
+            parsed.permissions.evaluate("bash", "ls -la"),
+            Some(termide_agent_core::Decision::Allow)
+        );
+        let parsed: AiSettings =
+            toml::from_str("prefer_reasoning = false\n[permissions]\nmode = \"ask\"\n").unwrap();
+        assert_eq!(parsed.permissions.mode, termide_agent_core::Mode::Ask);
+        assert!(!parsed.prefer_reasoning);
+    }
+
+    #[test]
     fn a_non_positive_output_limit_means_none() {
         let mut settings = AiSettings::default();
+        // No bound by default: the model decides.
+        assert_eq!(settings.output_limit(), None);
+        settings.max_tokens_per_turn = 4096;
         assert_eq!(settings.output_limit(), Some(4096));
         settings.max_tokens_per_turn = 0;
         assert_eq!(settings.output_limit(), None);

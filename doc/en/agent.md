@@ -19,9 +19,9 @@ the panel refuses to open and says so.
 ```toml
 [ai]
 connection = "local"               # the one new sessions start on; else the first by name
-max_tokens_per_turn = 4096         # 0 or negative: no limit, the model decides
-prefer_reasoning = false           # send reasoning_effort to models that support it
-autofold = true                    # fold each block to a preview by default
+max_tokens_per_turn = 0            # default: no limit, the model decides
+prefer_reasoning = true            # default; send reasoning_effort to models that support it
+autofold = true                    # fold each block to a preview
 
 [ai.connections.local]
 provider = "openai_compatible"     # openai_compatible (default), anthropic_compatible, claude_code, codex
@@ -455,7 +455,7 @@ search starts returning nothing, the selectors in its file need updating; a
 file of your own with a new name adds an engine. The keys are described in
 the shipped files.
 
-Both tools ask for permission by default. "Allow always" for `fetch` allows
+In `ask` mode both tools ask for permission. "Allow always" for `fetch` allows
 the whole site (`https://docs.rs/*`), for `web_search` every query. Neither
 changes anything on your machine, so both work in plan mode.
 
@@ -484,7 +484,7 @@ Rules live per tool. Among the rules that match, the strictest wins, so a
 
 ```toml
 [ai.permissions]
-mode = "ask"        # ask | accept-edits | auto | plan — what new sessions start in
+mode = "auto"       # ask | accept-edits | auto (default) | plan — what new sessions start in
 
 [ai.permissions.bash]
 "cargo *"     = "allow"
@@ -507,16 +507,16 @@ on either half stops the whole command. Command substitution (`$(…)`, backtick
 is never allowed automatically.
 
 The mode decides what happens to anything no rule covers. `mode` in the
-configuration is the starting point every new session takes (`ask` unless you
+configuration is the starting point every new session takes (`auto` unless you
 change it), also set from the settings modal's **AI** section under
 Permissions; the panel's **Mode** chip and `Shift+Tab` change it for the
 current panel only.
 
-- **ask** (the default) asks before every change and every command.
+- **ask** asks before every change and every command.
 - **accept-edits** also lets the agent edit and create files inside the project
   without asking; shell commands still ask.
-- **auto** allows everything. Use it only where a mistake costs nothing, such
-  as a container or a scratch checkout.
+- **auto** (the default) allows everything; the rules' `deny` and `ask` still
+  apply. Pick **ask** or **accept-edits** where a mistake would cost something.
 - **plan** allows nothing that changes anything: the agent reads, searches
   and runs look-only commands, then answers with a plan. See below.
 
@@ -1015,7 +1015,7 @@ termide --prompt "count the TODOs in src" --output json
 
 No one is watching to answer a permission card, so a headless run does only
 what the rules and the mode already allow: anything that would ask is refused
-with a reason the model reads. For unattended work set `mode = "auto"` in the
-configuration, or add `allow` rules for the exact commands and paths the task
-needs. Plan mode has no meaning without the panel and is treated as `ask`,
+with a reason the model reads. In the default `auto` mode that is only what a
+rule marks `ask`; under `ask` or `accept-edits`, add `allow` rules for the
+exact commands and paths the task needs. Plan mode has no meaning without the panel and is treated as `ask`,
 and an external (`[acp]`) agent cannot be run this way.
