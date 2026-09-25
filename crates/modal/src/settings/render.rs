@@ -307,11 +307,25 @@ impl SettingsModal {
                     let label_text = truncate_str(desc.label, label_width);
                     buf.set_string(area.x + 2, y, label_text, label_style);
 
-                    let value = if self.editing && is_focused {
-                        format!("{}_", self.edit_buffer)
-                    } else {
-                        self.format_field_value(desc, field_idx)
-                    };
+                    // Being edited, the value is the shared input field, with
+                    // its cursor and selection.
+                    if self.editing && is_focused {
+                        let width = max_value_width.saturating_sub(1) as u16;
+                        crate::base::render_input_field(
+                            buf,
+                            value_x as u16,
+                            y,
+                            width,
+                            self.edit_input.text(),
+                            self.edit_input.cursor_pos(),
+                            self.edit_input.selection_range(),
+                            true,
+                            theme,
+                        );
+                        self.edit_area = Some(Rect::new(value_x as u16, y, width, 1));
+                        continue;
+                    }
+                    let value = self.format_field_value(desc, field_idx);
 
                     let value_style = if is_focused {
                         Style::default().fg(theme.selected_fg)
@@ -478,7 +492,7 @@ impl SettingsModal {
     }
 
     /// Render the LSP server edit form.
-    fn render_lsp_edit_form(&self, area: Rect, buf: &mut Buffer, theme: &Theme) {
+    fn render_lsp_edit_form(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         let labels = [
             "Language:",
             "Command:",
@@ -491,6 +505,7 @@ impl SettingsModal {
             .saturating_sub(val_x)
             .saturating_sub(2);
 
+        self.lsp_field_areas.clear();
         for (i, label) in labels.iter().enumerate() {
             let y = area.y + 1 + i as u16;
             if y >= area.y + area.height {
@@ -506,18 +521,20 @@ impl SettingsModal {
             };
             buf.set_string(x as u16, y, label, label_style);
 
-            let value = if is_focused {
-                format!("{}_", self.lsp_edit_fields[i])
-            } else {
-                self.lsp_edit_fields[i].clone()
-            };
-            let display_val = fit_width(value, max_val);
-            let val_style = if is_focused {
-                Style::default().fg(theme.accented_fg)
-            } else {
-                Style::default().fg(theme.fg)
-            };
-            buf.set_string(val_x as u16, y, &display_val, val_style);
+            let field = &self.lsp_edit_fields[i];
+            crate::base::render_input_field(
+                buf,
+                val_x as u16,
+                y,
+                max_val as u16,
+                field.text(),
+                field.cursor_pos(),
+                field.selection_range(),
+                is_focused,
+                theme,
+            );
+            self.lsp_field_areas
+                .push(Rect::new(val_x as u16, y, max_val as u16, 1));
         }
 
         // Hint line

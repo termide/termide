@@ -33,7 +33,9 @@ impl SettingsModal {
             field_cursor: 0,
             content_scroll: 0,
             editing: false,
-            edit_buffer: String::new(),
+            edit_input: termide_ui::TextInput::new(),
+            edit_area: None,
+            field_drag: false,
             reset_available: false,
             enum_picker: None,
             lsp_mode: LspMode::Fields,
@@ -41,6 +43,7 @@ impl SettingsModal {
             lsp_server_keys,
             lsp_edit_fields: Default::default(),
             lsp_edit_cursor: 0,
+            lsp_field_areas: Vec::new(),
             connection_edit: None,
             model_fetch_request: None,
             kb_mode: KbMode::Bindings,
@@ -418,19 +421,20 @@ impl SettingsModal {
 
         match desc.field_type {
             FieldType::Number => {
-                let val = self.edit_buffer.parse::<u64>().unwrap_or(0);
+                let val = self.edit_input.text().parse::<u64>().unwrap_or(0);
                 self.apply_number(tab, field_idx, val);
                 self.dirty = true;
             }
             FieldType::OptionalText => {
-                let text = self.edit_buffer.clone();
+                let text = self.edit_input.text().to_string();
                 self.apply_text(tab, field_idx, &text);
                 self.dirty = true;
             }
             FieldType::OptionalNumber => {
                 // Empty or zero clears the field back to "(auto)".
                 let val = self
-                    .edit_buffer
+                    .edit_input
+                    .text()
                     .trim()
                     .parse::<u64>()
                     .ok()
@@ -440,7 +444,7 @@ impl SettingsModal {
             }
             // The model field: an enum, but its typed-id escape commits text.
             FieldType::Enum if tab == SettingsTab::Connection && field_idx == connection::MODEL => {
-                let text = self.edit_buffer.clone();
+                let text = self.edit_input.text().to_string();
                 self.apply_connection_text(field_idx, &text);
                 self.dirty = true;
             }
@@ -472,11 +476,12 @@ impl SettingsModal {
             FieldType::Enum if !is_model => return,
             _ => {}
         }
-        self.edit_buffer = self.field_value(field_idx);
+        let mut value = self.field_value(field_idx);
         // Strip "(auto)" / "(none)" placeholders
-        if self.edit_buffer.starts_with('(') {
-            self.edit_buffer.clear();
+        if value.starts_with('(') {
+            value.clear();
         }
+        self.edit_input = termide_ui::TextInput::with_text(value);
         self.editing = true;
     }
 

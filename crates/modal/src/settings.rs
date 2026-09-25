@@ -203,8 +203,13 @@ pub struct SettingsModal {
     // --- Editing ---
     /// True when a text/number field is being edited inline.
     editing: bool,
-    /// Current edit buffer for text/number fields.
-    edit_buffer: String,
+    /// The text/number field being edited: the shared single-line input, so
+    /// selection, word moves, the clipboard and undo work as everywhere else.
+    edit_input: termide_ui::TextInput,
+    /// Where the edited value was last drawn, for clicks and drags on it.
+    edit_area: Option<Rect>,
+    /// A press on a text field is being dragged: the drag selects in it.
+    field_drag: bool,
 
     /// Whether the config differs from the shipped defaults, i.e. whether
     /// "Reset to Defaults" has anything to do. Cached because rendering must
@@ -224,9 +229,11 @@ pub struct SettingsModal {
     /// Sorted server language names for stable indexing.
     lsp_server_keys: Vec<String>,
     /// Inline edit form for LSP server: [language, command, args, root_markers].
-    lsp_edit_fields: [String; 4],
+    lsp_edit_fields: [termide_ui::TextInput; 4],
     /// Which field (0-3) is focused in the LSP edit form.
     lsp_edit_cursor: usize,
+    /// Where each LSP form field was last drawn, for clicks and drags.
+    lsp_field_areas: Vec<Rect>,
 
     // --- AI connections ---
     /// The connection page, while one is open from the AI tab.
@@ -392,6 +399,10 @@ impl Modal for SettingsModal {
         }
     }
 
+    fn handle_paste(&mut self, text: &str) -> bool {
+        self.paste_into_edit(text)
+    }
+
     fn handle_mouse(
         &mut self,
         mouse: MouseEvent,
@@ -429,6 +440,10 @@ impl Modal for SettingsModal {
                     _ => {}
                 }
             }
+        }
+
+        if self.handle_field_mouse(mouse) {
+            return Ok(None);
         }
 
         if mouse.kind == MouseEventKind::ScrollUp {

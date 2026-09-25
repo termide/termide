@@ -55,7 +55,9 @@ on it) — and **[ Back to list ]** or `Esc` returns to the list;
 connection is named after its provider until you name it. The model is a
 dropdown: it fills with the connection's models, fetched in the background
 when its page opens, and its last entry, "Enter a model id…", lets you type one
-by hand when the endpoint cannot list them.
+by hand when the endpoint cannot list them. Text fields edit like every input in termide: the
+cursor moves by character and word, `Shift` or a mouse drag selects, and
+`Ctrl+C`/`Ctrl+X`/`Ctrl+V`, `Ctrl+A` and undo work.
 
 The API key is read from the environment variable named by `api_key_env`, so
 the configuration file never holds a secret. Local servers usually need no key

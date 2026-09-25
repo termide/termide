@@ -542,7 +542,7 @@ mod tests {
     fn edit(modal: &mut SettingsModal, field: usize, text: &str) {
         focus(modal, ContentRow::Field(field));
         press(modal, KeyCode::Enter);
-        modal.edit_buffer.clear();
+        modal.edit_input.set_text("");
         type_text(modal, text);
         press(modal, KeyCode::Enter);
     }
@@ -713,7 +713,7 @@ mod tests {
         focus(&mut modal, ContentRow::Field(MODEL));
         modal.commit_enum_picker();
         assert!(modal.editing);
-        modal.edit_buffer = "typed".into();
+        modal.edit_input.set_text("typed");
         press(&mut modal, KeyCode::Enter);
         assert_eq!(modal.config.ai.connections["local"].model, "typed");
 
@@ -764,6 +764,56 @@ mod tests {
             .handle_mouse(click(column_of(&shown[y], &delete) + 1), Rect::default())
             .unwrap();
         assert!(modal.config.ai.connections.is_empty());
+    }
+
+    #[test]
+    fn a_text_field_edits_with_selection_by_key_and_mouse() {
+        let mut modal = ai_modal(with_local());
+        modal.open_connection("local".into());
+        focus(&mut modal, ContentRow::Field(BASE_URL));
+        press(&mut modal, KeyCode::Enter);
+        assert!(modal.editing);
+        assert_eq!(modal.edit_input.text(), Connection::default().base_url);
+        // Shift+Home selects back to the start; typing replaces the selection.
+        let shift =
+            |code| termide_core::KeyChord::identity(KeyEvent::new(code, KeyModifiers::SHIFT));
+        modal.handle_key(shift(KeyCode::Home)).unwrap();
+        type_text(&mut modal, "http://x/v1");
+        assert_eq!(modal.edit_input.text(), "http://x/v1");
+
+        // A press on the field places the cursor, a drag selects.
+        let shown = screen(&mut modal);
+        let area = modal.edit_area.expect("drawn as an input field");
+        assert!(shown[area.y as usize].contains("http://x/v1"));
+        let at = |kind, column: u16| MouseEvent {
+            kind,
+            column,
+            row: area.y,
+            modifiers: KeyModifiers::NONE,
+        };
+        let down = at(MouseEventKind::Down(MouseButton::Left), area.x + 7);
+        modal.handle_mouse(down, Rect::default()).unwrap();
+        assert_eq!(modal.edit_input.cursor_pos(), 7);
+        let drag = at(MouseEventKind::Drag(MouseButton::Left), area.x + 8);
+        modal.handle_mouse(drag, Rect::default()).unwrap();
+        assert_eq!(modal.edit_input.selected_text(), Some("x"));
+        type_text(&mut modal, "host");
+        press(&mut modal, KeyCode::Enter);
+        assert_eq!(
+            modal.config.ai.connections["local"].base_url,
+            "http://host/v1"
+        );
+
+        // A number field keeps digits, pasted ones too.
+        focus(&mut modal, ContentRow::Field(CONTEXT_WINDOW));
+        press(&mut modal, KeyCode::Enter);
+        assert!(modal.handle_paste("64 000 tokens"));
+        type_text(&mut modal, "x");
+        press(&mut modal, KeyCode::Enter);
+        assert_eq!(
+            modal.config.ai.connections["local"].context_window_fallback,
+            Some(64_000)
+        );
     }
 
     #[test]

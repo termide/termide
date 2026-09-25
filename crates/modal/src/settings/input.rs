@@ -2,9 +2,10 @@
 //! edit form, inline field editing, buttons, and keybinding capture.
 
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use termide_config::{Config, KeyBinding, LspServerSettings};
 
+use crate::base::screen_x_to_char_pos;
 use crate::ModalResult;
 
 use super::fields::{
@@ -158,7 +159,8 @@ impl SettingsModal {
                             srv.command.clone(),
                             srv.args.join(", "),
                             srv.root_markers.join(", "),
-                        ];
+                        ]
+                        .map(termide_ui::TextInput::with_text);
                         self.lsp_edit_index = Some(idx);
                         self.lsp_edit_cursor = 0;
                         self.lsp_mode = LspMode::ServerEdit;
@@ -396,20 +398,16 @@ impl SettingsModal {
                     self.lsp_edit_cursor - 1
                 };
             }
-            KeyCode::Backspace => {
-                self.lsp_edit_fields[self.lsp_edit_cursor].pop();
+            _ => {
+                termide_ui::edit_text_input(&mut self.lsp_edit_fields[self.lsp_edit_cursor], key);
             }
-            KeyCode::Char(c) => {
-                self.lsp_edit_fields[self.lsp_edit_cursor].push(c);
-            }
-            _ => {}
         }
         Ok(None)
     }
 
     /// Commit the LSP server edit form.
     fn commit_lsp_edit(&mut self) {
-        let lang = self.lsp_edit_fields[0].trim().to_string();
+        let lang = self.lsp_edit_fields[0].text().trim().to_string();
         if lang.is_empty() {
             return;
         }
@@ -424,20 +422,22 @@ impl SettingsModal {
             }
         }
 
-        let command = self.lsp_edit_fields[1].trim().to_string();
-        let args: Vec<String> = if self.lsp_edit_fields[2].trim().is_empty() {
+        let command = self.lsp_edit_fields[1].text().trim().to_string();
+        let args: Vec<String> = if self.lsp_edit_fields[2].text().trim().is_empty() {
             vec![]
         } else {
             self.lsp_edit_fields[2]
+                .text()
                 .split(',')
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect()
         };
-        let root_markers: Vec<String> = if self.lsp_edit_fields[3].trim().is_empty() {
+        let root_markers: Vec<String> = if self.lsp_edit_fields[3].text().trim().is_empty() {
             vec![]
         } else {
             self.lsp_edit_fields[3]
+                .text()
                 .split(',')
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
@@ -461,32 +461,123 @@ impl SettingsModal {
         key: KeyEvent,
     ) -> Result<Option<ModalResult<SettingsResult>>> {
         match key.code {
-            KeyCode::Enter => {
-                self.commit_edit();
-            }
-            KeyCode::Esc => {
-                self.cancel_edit();
-            }
-            KeyCode::Backspace => {
-                self.edit_buffer.pop();
-            }
-            KeyCode::Char(c) => {
-                if let Some(field_idx) = self.current_field_idx() {
-                    let fields = fields_for_tab(self.field_tab());
-                    if let Some(d) = fields.get(field_idx) {
-                        if matches!(d.field_type, FieldType::Number | FieldType::OptionalNumber) {
-                            if c.is_ascii_digit() {
-                                self.edit_buffer.push(c);
-                            }
-                        } else {
-                            self.edit_buffer.push(c);
-                        }
-                    }
+            KeyCode::Enter => self.commit_edit(),
+            KeyCode::Esc => self.cancel_edit(),
+            // A number field takes digits only, typed or pasted.
+            KeyCode::Char(c)
+                if self.editing_number()
+                    && !c.is_ascii_digit()
+                    && !key.modifiers.contains(KeyModifiers::CONTROL) => {}
+            _ => {
+                if termide_ui::edit_text_input(&mut self.edit_input, key)
+                    == termide_ui::FieldEdit::Edited
+                {
+                    self.keep_digits();
                 }
             }
-            _ => {}
         }
         Ok(None)
+    }
+
+    /// Paste into the field being edited.
+    pub(super) fn paste_into_edit(&mut self, text: &str) -> bool {
+        if self.active_tab == SettingsTab::Lsp && self.lsp_mode == LspMode::ServerEdit {
+            self.lsp_edit_fields[self.lsp_edit_cursor].paste(text);
+            return true;
+        }
+        if !self.editing {
+            return false;
+        }
+        self.edit_input.paste(text);
+        self.keep_digits();
+        true
+    }
+
+    /// Presses and drags on a text field being edited: a press places the
+    /// cursor, starting a selection that a drag extends. Returns whether the
+    /// event was the field's. A press elsewhere commits an inline edit first
+    /// and goes on to whatever it landed on.
+    pub(super) fn handle_field_mouse(&mut self, mouse: MouseEvent) -> bool {
+        let point = (mouse.column, mouse.row).into();
+        let lsp_form = self.active_tab == SettingsTab::Lsp && self.lsp_mode == LspMode::ServerEdit;
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                let hit = if lsp_form {
+                    self.lsp_field_areas
+                        .iter()
+                        .position(|area| area.contains(point))
+                        .map(|index| {
+                            self.lsp_edit_cursor = index;
+                            self.lsp_field_areas[index]
+                        })
+                } else if self.editing {
+                    let area = self.edit_area.filter(|area| area.contains(point));
+                    if area.is_none() {
+                        self.commit_edit();
+                    }
+                    area
+                } else {
+                    None
+                };
+                let Some(area) = hit else {
+                    return false;
+                };
+                self.focus = FocusArea::Content;
+                let input = self.mouse_input();
+                let pos = screen_x_to_char_pos(input.text(), (mouse.column - area.x) as usize);
+                input.set_cursor_with_selection_start(pos);
+                self.field_drag = true;
+                true
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.field_drag => {
+                let area = if lsp_form {
+                    self.lsp_field_areas.get(self.lsp_edit_cursor).copied()
+                } else {
+                    self.edit_area
+                };
+                if let Some(area) = area {
+                    let x = mouse.column.saturating_sub(area.x) as usize;
+                    let input = self.mouse_input();
+                    let pos = screen_x_to_char_pos(input.text(), x);
+                    input.extend_selection_to(pos);
+                }
+                true
+            }
+            MouseEventKind::Up(MouseButton::Left) if self.field_drag => {
+                self.field_drag = false;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The text field a click or drag works on.
+    fn mouse_input(&mut self) -> &mut termide_ui::TextInput {
+        if self.active_tab == SettingsTab::Lsp && self.lsp_mode == LspMode::ServerEdit {
+            &mut self.lsp_edit_fields[self.lsp_edit_cursor]
+        } else {
+            &mut self.edit_input
+        }
+    }
+
+    /// Whether the field being edited holds a number.
+    fn editing_number(&self) -> bool {
+        self.current_field_idx()
+            .and_then(|index| fields_for_tab(self.field_tab()).get(index).copied())
+            .is_some_and(|d| matches!(d.field_type, FieldType::Number | FieldType::OptionalNumber))
+    }
+
+    /// Drop what is not a digit from a number field, as a paste can bring.
+    fn keep_digits(&mut self) {
+        if !self.editing_number() {
+            return;
+        }
+        let text = self.edit_input.text();
+        if text.chars().all(|c| c.is_ascii_digit()) {
+            return;
+        }
+        let digits: String = text.chars().filter(char::is_ascii_digit).collect();
+        self.edit_input.set_text(digits);
     }
 
     pub(super) fn handle_buttons_key(
