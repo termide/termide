@@ -22,7 +22,7 @@ use termide_agent_web::{web_tools, Web, WebConfig};
 use termide_config::{AiSettings, WebSettings};
 use termide_panel_agent::{
     AgentCatalog, AgentEntry, AgentPanel, AgentPanelSetup, AgentProfile, BackendFactory,
-    HooksFactory,
+    HooksFactory, ProviderCatalog, ProviderChoice, ProviderEntry,
 };
 
 use super::App;
@@ -366,15 +366,86 @@ fn restrict_tools(tools: &mut ToolRegistry, allowed: &Option<Vec<String>>, agent
 /// behind the `task` tool. It shares the provider and the permission rules
 /// with the panel, but has no one to prompt, so anything the rules and mode
 /// do not already allow is refused.
-struct Subagents {
+/// The provider the panel runs on right now, with its model and context
+/// window: what a delegated task inherits. A profile switch updates it.
+#[derive(Clone)]
+struct Active {
     provider: Arc<dyn Provider>,
+    model: String,
+    context_window: u64,
+}
+
+type ActiveSlot = Arc<std::sync::RwLock<Active>>;
+
+/// The provider profiles of `[ai]` for the panel's picker, built on demand.
+struct Profiles {
+    settings: AiSettings,
+    /// Shared with the subagent runner, so a switch reaches delegated tasks.
+    active: ActiveSlot,
+}
+
+impl ProviderCatalog for Profiles {
+    fn list(&self) -> Vec<ProviderEntry> {
+        self.settings
+            .profile_names()
+            .into_iter()
+            .filter_map(|name| {
+                let profile = self.settings.with_profile(&name)?;
+                Some(ProviderEntry {
+                    name,
+                    kind: profile.provider,
+                    model: profile.model,
+                })
+            })
+            .collect()
+    }
+
+    fn build(&self, name: &str, agent: &str) -> Option<ProviderChoice> {
+        let profile = self.settings.with_profile(name)?;
+        Some(ProviderChoice {
+            name: name.to_string(),
+            kind: profile.provider.clone(),
+            provider: build_provider(&profile, api_key_of(&profile)),
+            model: profile.model.clone(),
+            context_window: profile.effective_context_window(),
+            backend: cli_provider_backend(&profile.provider, agent),
+        })
+    }
+
+    fn activate(&self, choice: &ProviderChoice) {
+        *self
+            .active
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Active {
+            provider: Arc::clone(&choice.provider),
+            model: choice.model.clone(),
+            context_window: choice.context_window,
+        };
+    }
+}
+
+/// The provider profile `session` ran on, when it recorded one that still
+/// exists in `settings`; `None` runs on the `[ai]` fields.
+fn session_profile(settings: &AiSettings, session: Option<&Session>) -> Option<String> {
+    session
+        .and_then(Session::current_provider_profile)
+        .filter(|name| settings.with_profile(name).is_some())
+}
+
+/// The API key the settings name, read from its environment variable.
+fn api_key_of(settings: &AiSettings) -> Option<String> {
+    (!settings.api_key_env.is_empty())
+        .then(|| std::env::var(&settings.api_key_env).ok())
+        .flatten()
+}
+
+struct Subagents {
+    active: ActiveSlot,
     dirs: AgentDirs,
     web: Arc<Web>,
     cwd: PathBuf,
     project_root: PathBuf,
     rules: PermissionRules,
-    default_model: String,
-    context_window: u64,
     max_tokens: Option<u64>,
     reasoning: bool,
     compaction: CompactionPolicy,
@@ -409,14 +480,19 @@ impl Subagents {
         options.soul = definition.soul.as_deref();
         let system_prompt = build_system_prompt(&options);
 
+        let active = self
+            .active
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         let model = ModelSpec {
             provider: "agent".to_string(),
             id: definition
                 .spec
                 .model
                 .clone()
-                .unwrap_or_else(|| self.default_model.clone()),
-            context_window: self.context_window,
+                .unwrap_or_else(|| active.model.clone()),
+            context_window: active.context_window,
             max_tokens: self.max_tokens,
             reasoning: self.reasoning,
         };
@@ -424,7 +500,7 @@ impl Subagents {
         if let Some(mode) = definition.spec.mode {
             rules.mode = mode;
         }
-        let mut agent = Agent::new(Arc::clone(&self.provider), tools, model, self.cwd.clone())
+        let mut agent = Agent::new(Arc::clone(&active.provider), tools, model, self.cwd.clone())
             .with_system_prompt(system_prompt)
             .with_compaction(self.compaction);
         let mut hooks = PermissionHooks::new(
@@ -501,23 +577,28 @@ impl Subagents {
 /// `agent`: the provider, the model, the tools, the system prompt and where
 /// the session logs live.
 fn agent_setup(
-    settings: &AiSettings,
+    base: &AiSettings,
     cwd: PathBuf,
     project_root: &Path,
     agent: &str,
     session: Option<Session>,
 ) -> AgentPanelSetup {
-    let api_key = if settings.api_key_env.is_empty() {
-        None
-    } else {
-        std::env::var(&settings.api_key_env).ok()
-    };
+    let recorded_profile = session_profile(base, session.as_ref());
+    let profile_name = recorded_profile
+        .clone()
+        .unwrap_or_else(|| termide_config::DEFAULT_PROVIDER_PROFILE.to_string());
+    let settings_owned = base
+        .with_profile(&profile_name)
+        .unwrap_or_else(|| base.clone());
+    let settings = &settings_owned;
+    let api_key = api_key_of(settings);
     // A resumed session records the provider type it ran on; honor it over the
     // current config so reopening a session rebuilds the right provider. An
     // older session (or one recorded before this) has no usable type and falls
     // back to the configured provider.
     let provider_kind = session
         .as_ref()
+        .filter(|_| recorded_profile.is_none())
         .and_then(Session::current_model)
         .map(|m| m.provider)
         .filter(|p| {
@@ -537,15 +618,18 @@ fn agent_setup(
     catalog.web = Some(Arc::clone(&web));
     // The subagent runner shares the provider, the rules and the model
     // defaults, so a delegated agent runs like the panel would run it.
+    let active: ActiveSlot = Arc::new(std::sync::RwLock::new(Active {
+        provider: Arc::clone(&provider),
+        model: settings.model.clone(),
+        context_window: settings.effective_context_window(),
+    }));
     catalog.subagents = Some(Arc::new(Subagents {
-        provider: Arc::clone(&provider) as Arc<dyn Provider>,
+        active: Arc::clone(&active),
         dirs: catalog.dirs.clone(),
         web,
         cwd: cwd.clone(),
         project_root: project_root.to_path_buf(),
         rules: settings.permissions.clone(),
-        default_model: settings.model.clone(),
-        context_window: settings.effective_context_window(),
         max_tokens: settings.output_limit(),
         reasoning: settings.prefer_reasoning,
         compaction: settings.compaction,
@@ -589,7 +673,8 @@ fn agent_setup(
     // A CLI-adapter provider (Claude Code, Codex) is an explicit choice of
     // backend, so it drives its own ACP adapter — over any `[acp]` the agent
     // definition might carry. Otherwise the agent's own backend (if any) wins.
-    let backend = cli_provider_backend(&provider_kind, &agent).or(profile.backend);
+    let provider_backend = cli_provider_backend(&provider_kind, &agent);
+    let backend = provider_backend.clone().or(profile.backend);
 
     // Session logs are filed by the directory the panel works in, under the
     // same `ai/` directory as the agents: `<config>/ai/sessions/<path>/`.
@@ -606,6 +691,12 @@ fn agent_setup(
         late_tools: profile.late_tools,
         hooks,
         backend,
+        provider_backend,
+        providers: Some(Arc::new(Profiles {
+            settings: base.clone(),
+            active,
+        })),
+        profile: profile_name,
         provider,
         provider_kind,
         model,
@@ -1035,6 +1126,74 @@ fn merge_permission_rule(path: &Path, tool: &str, pattern: &str, decision: Decis
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn with_cloud() -> AiSettings {
+        let mut settings = AiSettings {
+            model: "local".into(),
+            ..AiSettings::default()
+        };
+        settings.providers.insert(
+            "cloud".into(),
+            termide_config::ProviderProfile {
+                provider: "anthropic_compatible".into(),
+                base_url: String::new(),
+                model: "claude-x".into(),
+                api_key_env: String::new(),
+                context_window_fallback: Some(200_000),
+            },
+        );
+        settings
+    }
+
+    #[test]
+    fn provider_profiles_build_and_hand_their_provider_to_delegated_tasks() {
+        let settings = with_cloud();
+        let first = build_provider(&settings, None);
+        let active: ActiveSlot = Arc::new(std::sync::RwLock::new(Active {
+            provider: first,
+            model: settings.model.clone(),
+            context_window: settings.effective_context_window(),
+        }));
+        let profiles = Profiles {
+            settings,
+            active: Arc::clone(&active),
+        };
+        let names: Vec<String> = profiles.list().into_iter().map(|e| e.name).collect();
+        assert_eq!(names, ["default", "cloud"]);
+        let cloud = profiles.build("cloud", DEFAULT_AGENT).unwrap();
+        assert_eq!(cloud.kind, "anthropic_compatible");
+        assert_eq!(
+            (cloud.model.as_str(), cloud.context_window),
+            ("claude-x", 200_000)
+        );
+        assert!(cloud.backend.is_none(), "an endpoint, not a CLI agent");
+        assert!(profiles.build("missing", DEFAULT_AGENT).is_none());
+        // Switching to it moves what a delegated task runs on.
+        profiles.activate(&cloud);
+        let now = active.read().unwrap().clone();
+        assert_eq!(
+            (now.model.as_str(), now.context_window),
+            ("claude-x", 200_000)
+        );
+    }
+
+    #[test]
+    fn a_session_reopens_on_the_profile_it_recorded_while_it_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), dir.path()).unwrap();
+        let settings = with_cloud();
+        assert_eq!(session_profile(&settings, Some(&session)), None);
+        session.append_provider_change("cloud").unwrap();
+        assert_eq!(
+            session_profile(&settings, Some(&session)),
+            Some("cloud".to_string())
+        );
+        // A profile since removed from the config falls back to `[ai]`.
+        assert_eq!(
+            session_profile(&AiSettings::default(), Some(&session)),
+            None
+        );
+    }
 
     #[test]
     fn cli_providers_get_an_acp_backend() {

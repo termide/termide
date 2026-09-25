@@ -448,6 +448,8 @@ impl Translation for RuntimeTranslation {
         agent_unit_days,
         agent_unit_tok_per_sec,
         agent_tool_bash,
+        agent_pick_provider,
+        agent_notice_profile_before_first,
         agent_toolset_title,
         agent_toolset_prompt,
         agent_toolset_builtin,
@@ -832,6 +834,14 @@ impl Translation for RuntimeTranslation {
             "agent_notice_mcp_error_fmt",
             &[("source", source), ("error", error)],
         )
+    }
+
+    fn agent_notice_provider_fmt(&self, name: &str) -> String {
+        self.format("agent_notice_provider_fmt", &[("name", name)])
+    }
+
+    fn agent_notice_no_profile_fmt(&self, name: &str) -> String {
+        self.format("agent_notice_no_profile_fmt", &[("name", name)])
     }
 
     fn agent_toolset_mcp_fmt(&self, server: &str) -> String {

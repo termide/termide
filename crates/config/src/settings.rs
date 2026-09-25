@@ -147,6 +147,34 @@ pub struct AiSettings {
     /// The web tools (`fetch`, `web_search`).
     #[serde(default)]
     pub web: WebSettings,
+
+    /// Named provider profiles (`[ai.providers.<name>]`): other endpoints and
+    /// models a session can switch to. The `[ai]` fields above are the
+    /// profile named [`DEFAULT_PROVIDER_PROFILE`].
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub providers: std::collections::BTreeMap<String, ProviderProfile>,
+}
+
+/// The name of the provider profile the `[ai]` fields themselves make up.
+pub const DEFAULT_PROVIDER_PROFILE: &str = "default";
+
+/// A named provider profile: how to reach one endpoint and which model to
+/// ask there. What it leaves out takes the same default as the `[ai]` field
+/// of the same name, not that field's value — a cloud profile does not
+/// inherit a local server's address.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderProfile {
+    /// Wire protocol or CLI agent, as `[ai] provider`.
+    #[serde(default = "agent_defaults::provider")]
+    pub provider: String,
+    #[serde(default = "agent_defaults::base_url")]
+    pub base_url: String,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default = "agent_defaults::api_key_env")]
+    pub api_key_env: String,
+    #[serde(default)]
+    pub context_window_fallback: Option<u64>,
 }
 
 /// `[ai.web]`: how the agent's web tools reach the web.
@@ -225,6 +253,39 @@ impl AiSettings {
             .filter(|&n| n > 0)
     }
 
+    /// Every provider profile's name, [`DEFAULT_PROVIDER_PROFILE`] (the
+    /// `[ai]` fields) first.
+    #[must_use]
+    pub fn profile_names(&self) -> Vec<String> {
+        std::iter::once(DEFAULT_PROVIDER_PROFILE.to_string())
+            .chain(
+                self.providers
+                    .keys()
+                    .filter(|name| name.as_str() != DEFAULT_PROVIDER_PROFILE)
+                    .cloned(),
+            )
+            .collect()
+    }
+
+    /// These settings with profile `name`'s connection (provider, endpoint,
+    /// key, model, context window) in place of the `[ai]` fields, everything
+    /// else kept; `None` for a profile that does not exist.
+    #[must_use]
+    pub fn with_profile(&self, name: &str) -> Option<AiSettings> {
+        if name == DEFAULT_PROVIDER_PROFILE {
+            return Some(self.clone());
+        }
+        let profile = self.providers.get(name)?;
+        Some(AiSettings {
+            provider: profile.provider.clone(),
+            base_url: profile.base_url.clone(),
+            model: profile.model.clone(),
+            api_key_env: profile.api_key_env.clone(),
+            context_window_fallback: profile.context_window_fallback,
+            ..self.clone()
+        })
+    }
+
     /// The permission mode new sessions start in, as configuration spells it
     /// (`ask`, `accept-edits`, `auto`, `plan`).
     #[must_use]
@@ -276,6 +337,7 @@ impl Default for AiSettings {
             compaction: termide_agent_core::CompactionPolicy::default(),
             autofold: agent_defaults::autofold(),
             web: WebSettings::default(),
+            providers: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -983,6 +1045,33 @@ impl Config {
 #[cfg(test)]
 mod ai_settings_tests {
     use super::*;
+
+    #[test]
+    fn a_provider_profile_replaces_the_connection_and_keeps_the_rest() {
+        let parsed: AiSettings = toml::from_str(
+            r#"
+            model = "local-model"
+            max_tokens_per_turn = 1000
+            [providers.cloud]
+            provider = "anthropic_compatible"
+            model = "claude-x"
+            api_key_env = "ANTHROPIC_API_KEY"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(parsed.profile_names(), ["default", "cloud"]);
+        let default = parsed.with_profile(DEFAULT_PROVIDER_PROFILE).unwrap();
+        assert_eq!(default.model, "local-model");
+        let cloud = parsed.with_profile("cloud").unwrap();
+        assert_eq!(cloud.provider, "anthropic_compatible");
+        assert_eq!(cloud.model, "claude-x");
+        assert_eq!(cloud.api_key_env, "ANTHROPIC_API_KEY");
+        // Not the `[ai]` endpoint: the protocol's own default applies.
+        assert_eq!(cloud.base_url, agent_defaults::base_url());
+        // The rest of `[ai]` carries over.
+        assert_eq!(cloud.max_tokens_per_turn, 1000);
+        assert!(parsed.with_profile("missing").is_none());
+    }
 
     #[test]
     fn a_non_positive_output_limit_means_none() {

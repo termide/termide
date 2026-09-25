@@ -40,6 +40,33 @@ folded to a preview. With `max_tokens_per_turn` at zero or below no output
 limit is sent and the model decides how long to reply; the Anthropic API
 requires one, so there it becomes a generous 32000.
 
+The `[ai]` fields describe one endpoint, the profile named `default`. More
+endpoints — a local server and a hosted model, say — go in named provider
+profiles:
+
+```toml
+[ai.providers.cloud]
+provider = "anthropic_compatible"
+model = "claude-sonnet-5"
+api_key_env = "ANTHROPIC_API_KEY"
+context_window_fallback = 200000   # optional
+
+[ai.providers.codex]
+provider = "codex"                 # a CLI agent needs nothing else
+```
+
+A profile carries only the connection — `provider`, `base_url`, `model`,
+`api_key_env`, `context_window_fallback` — and what it leaves out takes that
+field's default, not the `[ai]` value (a hosted profile does not inherit a
+local server's address). Everything else, the permissions, compaction and the
+rest, stays the `[ai]` one. The banner's `provider` line and the status bar's
+**Provider** chip switch the session to another profile: its endpoint and its
+model replace the ones in use, the agent restarts on the same log and carries
+the conversation over, and delegated tasks follow. A CLI agent (`claude_code`,
+`codex`) does not take over a conversation, so a switch to or from one works
+only before the first request. The session log records the profile, so a
+reopened session reconnects to it, as long as it is still in the config.
+
 For a hosted OpenAI-compatible endpoint, keep `provider = "openai_compatible"` and point
 `base_url` and `api_key_env` at it, for example OpenAI itself
 (`https://api.openai.com/v1`, `OPENAI_API_KEY`) or OpenRouter

@@ -100,6 +100,10 @@ pub enum EntryKind {
     /// and MCP servers (`mcp:<name>`), kept out of the model's context or
     /// refused, so a reopened session comes back with the same set.
     Toolset { disabled: Vec<String> },
+    /// The provider profile (`[ai.providers.<name>]`, or `default`) the
+    /// branch runs on from here, so a reopened session reconnects to the
+    /// same endpoint.
+    ProviderChange { profile: String },
     /// The user undid a request: the branch continues from this entry's
     /// parent, the undone messages stay in the file on a dead branch.
     Rewind,
@@ -444,7 +448,8 @@ impl Session {
                 | EntryKind::AgentChange { .. }
                 | EntryKind::Rewind
                 | EntryKind::ReasoningChange { .. }
-                | EntryKind::Toolset { .. } => {}
+                | EntryKind::Toolset { .. }
+                | EntryKind::ProviderChange { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
                 } => {
@@ -477,7 +482,8 @@ impl Session {
                 | EntryKind::AgentChange { .. }
                 | EntryKind::Rewind
                 | EntryKind::ReasoningChange { .. }
-                | EntryKind::Toolset { .. } => {}
+                | EntryKind::Toolset { .. }
+                | EntryKind::ProviderChange { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
                 } => {
@@ -551,7 +557,8 @@ impl Session {
                 | EntryKind::AgentChange { .. }
                 | EntryKind::Rewind
                 | EntryKind::ReasoningChange { .. }
-                | EntryKind::Toolset { .. } => None,
+                | EntryKind::Toolset { .. }
+                | EntryKind::ProviderChange { .. } => None,
             })
     }
 
@@ -584,6 +591,24 @@ impl Session {
 
     pub fn append_reasoning_change(&mut self, reasoning: bool) -> std::io::Result<String> {
         self.append(EntryKind::ReasoningChange { reasoning })
+    }
+
+    pub fn append_provider_change(&mut self, profile: &str) -> std::io::Result<String> {
+        self.append(EntryKind::ProviderChange {
+            profile: profile.to_string(),
+        })
+    }
+
+    /// The provider profile recorded last on the current branch, if any.
+    #[must_use]
+    pub fn current_provider_profile(&self) -> Option<String> {
+        self.branch()
+            .into_iter()
+            .rev()
+            .find_map(|entry| match &entry.kind {
+                EntryKind::ProviderChange { profile } => Some(profile.clone()),
+                _ => None,
+            })
     }
 
     pub fn append_toolset(&mut self, disabled: &[String]) -> std::io::Result<String> {
@@ -679,7 +704,8 @@ impl From<&Session> for SessionSummary {
             | EntryKind::AgentChange { .. }
             | EntryKind::Rewind
             | EntryKind::ReasoningChange { .. }
-            | EntryKind::Toolset { .. } => None,
+            | EntryKind::Toolset { .. }
+            | EntryKind::ProviderChange { .. } => None,
         });
         let first_prompt = messages.clone().find_map(|m| match m {
             Message::User(user) => Some(user.plain_text()),
@@ -919,6 +945,19 @@ mod tests {
         // An untimed entry writes no `timing` key, so older logs read the same.
         let text = std::fs::read_to_string(session.path()).unwrap();
         assert_eq!(text.matches("\"timing\"").count(), 1, "{text}");
+    }
+
+    #[test]
+    fn the_provider_profile_survives_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
+        assert_eq!(session.current_provider_profile(), None);
+        session.append_provider_change("cloud").unwrap();
+        let reopened = Session::open(session.path()).unwrap();
+        assert_eq!(
+            reopened.current_provider_profile(),
+            Some("cloud".to_string())
+        );
     }
 
     #[test]

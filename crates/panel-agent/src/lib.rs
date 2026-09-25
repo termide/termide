@@ -68,6 +68,8 @@ const NEW_SESSION_ACTION: &str = "agent_new_session";
 const RESUME_ACTION: &str = "agent_resume";
 /// Status chip and context-menu action that opens the model picker.
 const MODEL_ACTION: &str = "agent_model";
+/// Status/banner action that switches the provider profile.
+const PROVIDER_ACTION: &str = "agent_provider";
 /// Input action carrying a model id typed by hand.
 const MODEL_INPUT_ACTION: &str = "agent_model_input";
 /// Status chip and context-menu action that opens the permission-mode picker.
@@ -185,6 +187,13 @@ pub struct AgentPanelSetup {
     pub hooks: Option<HooksFactory>,
     /// An external agent to drive instead of the built-in loop.
     pub backend: Option<BackendFactory>,
+    /// The CLI agent (Claude Code, Codex) the provider profile drives over
+    /// ACP, if it names one; it wins over an agent definition's own backend.
+    pub provider_backend: Option<BackendFactory>,
+    /// The provider profiles a session can switch to; `None` offers none.
+    pub providers: Option<Arc<dyn ProviderCatalog>>,
+    /// The provider profile in use (`default` for the `[ai]` fields).
+    pub profile: String,
     pub provider: Arc<dyn Provider>,
     /// The provider's wire-protocol type (e.g. `openai_compatible`), recorded
     /// in the session log so a resume can rebuild the right provider.
@@ -223,6 +232,39 @@ pub type HooksFactory = Arc<dyn Fn() -> Box<dyn Hooks> + Send + Sync>;
 /// Starts an external agent (ACP) in place of the built-in loop.
 pub type BackendFactory =
     Arc<dyn Fn(BackendSetup) -> Result<Box<dyn Backend>, String> + Send + Sync>;
+
+/// One provider profile the picker offers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderEntry {
+    pub name: String,
+    /// Its wire protocol or CLI agent, as `[ai] provider` spells it.
+    pub kind: String,
+    pub model: String,
+}
+
+/// A provider profile made ready for an agent to run on.
+pub struct ProviderChoice {
+    pub name: String,
+    pub kind: String,
+    pub provider: Arc<dyn Provider>,
+    /// The profile's model and context window; the rest of the spec (output
+    /// bound, reasoning) is the panel's own.
+    pub model: String,
+    pub context_window: u64,
+    /// The CLI agent it drives over ACP instead of the built-in loop.
+    pub backend: Option<BackendFactory>,
+}
+
+/// The app's provider profiles (`[ai]` and `[ai.providers.<name>]`); the
+/// panel only chooses among them.
+pub trait ProviderCatalog: Send + Sync {
+    fn list(&self) -> Vec<ProviderEntry>;
+    /// Profile `name` built for `agent`; `None` when it does not exist.
+    fn build(&self, name: &str, agent: &str) -> Option<ProviderChoice>;
+    /// The panel switched to `choice`: what it hands off (a delegated task)
+    /// follows. The default hands nothing off.
+    fn activate(&self, _choice: &ProviderChoice) {}
+}
 
 /// One agent the picker offers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -506,6 +548,14 @@ pub struct AgentPanel {
     // Kept to rebuild the agent when switching sessions.
     hooks: Option<HooksFactory>,
     backend: Option<BackendFactory>,
+    /// The provider profile's CLI agent, kept apart from `backend` so a
+    /// rebuilt agent profile does not drop it.
+    provider_backend: Option<BackendFactory>,
+    providers: Option<Arc<dyn ProviderCatalog>>,
+    /// The provider profile in use.
+    profile: String,
+    /// The profiles the picker last offered, in its order.
+    provider_choices: Vec<ProviderEntry>,
     provider: Arc<dyn Provider>,
     tools: ToolRegistry,
     rules: PermissionRules,
@@ -677,7 +727,7 @@ impl AgentPanel {
             system_prompt = profile.system_prompt;
             tools = profile.tools;
             late_tools = profile.late_tools;
-            backend = profile.backend;
+            backend = setup.provider_backend.clone().or(profile.backend);
             offered = Some((profile.offered, profile.skills));
             if let Some(mode) = profile.mode {
                 setup.rules.mode = mode;
@@ -767,6 +817,10 @@ impl AgentPanel {
             pending_events: Vec::new(),
             hooks: setup.hooks,
             backend,
+            provider_backend: setup.provider_backend.clone(),
+            providers: setup.providers.clone(),
+            profile: setup.profile.clone(),
+            provider_choices: Vec::new(),
             provider: setup.provider,
             provider_kind: setup.provider_kind,
             tools,
@@ -867,7 +921,7 @@ impl AgentPanel {
             system_prompt = profile.system_prompt;
             tools = profile.tools;
             self.late_tools = profile.late_tools;
-            self.backend = profile.backend;
+            self.backend = self.provider_backend.clone().or(profile.backend);
             self.waiting_tools.clear();
             self.mcp_arrived.clear();
             self.offered_tools = profile.offered;
@@ -2852,6 +2906,84 @@ impl AgentPanel {
     /// context window follows the endpoint's figure when it gave one and
     /// stays as configured otherwise; the token limit is always the
     /// configured one. Refused while a run is in flight.
+    /// The provider as the banner and the chip show it: the profile's name
+    /// beside the protocol, the protocol alone for the `[ai]` one.
+    fn provider_display(&self) -> String {
+        let kind = provider_label(&self.provider_kind);
+        if self.profile == termide_config::DEFAULT_PROVIDER_PROFILE {
+            kind.to_string()
+        } else {
+            format!("{} · {kind}", self.profile)
+        }
+    }
+
+    /// Run the session on provider profile `name`: its endpoint and its
+    /// model, the rest of the session kept. The agent restarts on the same
+    /// log, so a built-in loop carries the conversation over; a CLI agent
+    /// does not, so switching to or from one is refused once it has begun.
+    fn switch_profile(&mut self, name: &str) -> bool {
+        if name == self.profile {
+            return true;
+        }
+        let t = termide_i18n::t();
+        let Some(providers) = self.providers.clone() else {
+            return false;
+        };
+        if self.is_busy() {
+            self.notice(t.agent_notice_busy(), NoticeKind::Warn);
+            return false;
+        }
+        let Some(choice) = providers.build(name, &self.agent) else {
+            self.notice(t.agent_notice_no_profile_fmt(name), NoticeKind::Warn);
+            return false;
+        };
+        if (choice.backend.is_some() || self.external) && !self.is_fresh() {
+            self.notice(t.agent_notice_profile_before_first(), NoticeKind::Warn);
+            return false;
+        }
+        providers.activate(&choice);
+        self.provider = Arc::clone(&choice.provider);
+        self.provider_kind = choice.kind.clone();
+        self.profile = choice.name.clone();
+        // The profile's model replaces the one in use: another endpoint seldom
+        // serves the same id.
+        let model = ModelSpec {
+            id: choice.model.clone(),
+            context_window: choice.context_window,
+            ..self.model.clone()
+        };
+        self.configured_model = model.clone();
+        self.model = model;
+        self.model_choices.clear();
+        self.provider_backend = choice.backend.clone();
+        self.backend = self.provider_backend.clone().or_else(|| {
+            self.catalog
+                .resolve(&self.agent)
+                .and_then(|profile| profile.backend)
+        });
+        if let Some(session) = &mut self.session {
+            let written = session.append_provider_change(name).and_then(|_| {
+                session.append_model_change(
+                    &choice.kind,
+                    &self.model.id,
+                    Some(self.model.context_window),
+                )
+            });
+            if let Err(error) = written {
+                log::warn!("agent session write failed: {error}");
+            }
+        }
+        let fresh = self.is_fresh();
+        let session = self.session.take();
+        self.switch_session(session);
+        // The silent window probe asks the new endpoint.
+        self.context_probe = (!self.external).then(|| spawn_model_list(Arc::clone(&self.provider)));
+        if !fresh {
+            self.notice(t.agent_notice_provider_fmt(name), NoticeKind::Info);
+        }
+        true
+    }
+
     fn switch_model(&mut self, id: &str, context_window: Option<u64>) -> bool {
         let id = id.trim();
         if id.is_empty() {
@@ -3970,7 +4102,14 @@ impl AgentPanel {
             (Line::styled("termide", accent), None),
             (Line::styled("coding agent", dim), None),
             (Line::from(""), None),
-            (field("provider", self.provider_kind.clone(), false), None),
+            (
+                field(
+                    "provider",
+                    self.provider_display(),
+                    self.providers.is_some(),
+                ),
+                self.providers.is_some().then_some(PROVIDER_ACTION),
+            ),
             (
                 field("model", self.model.id.clone(), true),
                 Some(MODEL_ACTION),
@@ -4836,6 +4975,34 @@ impl Panel for AgentPanel {
                 on_submit: InputAction::Custom(RENAME_ACTION.to_string()),
             }],
             DELETE_SESSION_ACTION => self.ask_delete_session(),
+            PROVIDER_ACTION => {
+                let Some(providers) = &self.providers else {
+                    return Vec::new();
+                };
+                self.provider_choices = providers.list();
+                let options = self
+                    .provider_choices
+                    .iter()
+                    .map(|entry| {
+                        let mark = current_mark(entry.name == self.profile);
+                        let model = if entry.model.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" · {}", entry.model)
+                        };
+                        format!(
+                            "{mark}{} — {}{model}",
+                            entry.name,
+                            provider_label(&entry.kind)
+                        )
+                    })
+                    .collect();
+                vec![PanelEvent::ShowSelect {
+                    title: t.agent_pick_provider().to_string(),
+                    options,
+                    on_select: SelectAction::Custom(PROVIDER_ACTION.to_string()),
+                }]
+            }
             // An external agent brings its own tools; nothing of ours to list.
             TOOLSET_ACTION if self.external => Vec::new(),
             TOOLSET_ACTION => vec![PanelEvent::ShowChecklist {
@@ -5758,6 +5925,14 @@ impl Panel for AgentPanel {
                 }
                 CommandResult::Handled(true)
             }
+            PanelCommand::SelectionMade { action, index } if action == PROVIDER_ACTION => {
+                if let Some(entry) = self.provider_choices.get(index).cloned() {
+                    self.switch_profile(&entry.name);
+                }
+                self.provider_choices.clear();
+                self.pending_events.push(PanelEvent::NeedsRedraw);
+                CommandResult::Handled(true)
+            }
             PanelCommand::SelectionMade { action, index } if action == MODEL_ACTION => {
                 let choice = self.model_choices.get(index).cloned();
                 self.model_choices.clear();
@@ -5809,6 +5984,18 @@ impl Panel for AgentPanel {
         if self.external {
             // An external agent has its own model and permission model.
             segments.push(StatusSegment::new(" (acp)", SegmentKind::Label));
+            // A CLI agent is a provider profile too: the way back is here.
+            if self.providers.is_some() {
+                segments.extend([
+                    sep(),
+                    StatusSegment::clickable("Provider: ", SegmentKind::Label, PROVIDER_ACTION),
+                    StatusSegment::clickable(
+                        self.provider_display(),
+                        SegmentKind::Active,
+                        PROVIDER_ACTION,
+                    ),
+                ]);
+            }
         } else {
             segments.extend([
                 sep(),
@@ -5832,8 +6019,12 @@ impl Panel for AgentPanel {
                     TOOLSET_ACTION,
                 ),
                 sep(),
-                StatusSegment::new("Provider: ", SegmentKind::Label),
-                StatusSegment::new(provider_label(&self.provider_kind), SegmentKind::Value),
+                StatusSegment::clickable("Provider: ", SegmentKind::Label, PROVIDER_ACTION),
+                StatusSegment::clickable(
+                    self.provider_display(),
+                    SegmentKind::Active,
+                    PROVIDER_ACTION,
+                ),
             ]);
         }
         // The agent's model over ACP, when it advertised any: clickable to
@@ -6103,6 +6294,9 @@ mod tests {
             late_tools: None,
             hooks: None,
             backend: None,
+            provider_backend: None,
+            providers: None,
+            profile: "default".into(),
             provider,
             provider_kind: "openai_compatible".into(),
             model: ModelSpec {
@@ -8040,6 +8234,108 @@ mod tests {
         click(&mut panel, y);
         assert!(panel.pending.is_none());
         assert_eq!(worker.join().unwrap(), PermissionAnswer::AllowSession);
+    }
+
+    /// Three provider profiles: `[ai]`, another endpoint, and a CLI agent.
+    struct Profiles;
+
+    impl ProviderCatalog for Profiles {
+        fn list(&self) -> Vec<ProviderEntry> {
+            [
+                ("default", "openai_compatible", "m"),
+                ("cloud", "anthropic_compatible", "claude-x"),
+                ("cli", "codex", ""),
+            ]
+            .into_iter()
+            .map(|(name, kind, model)| ProviderEntry {
+                name: name.into(),
+                kind: kind.into(),
+                model: model.into(),
+            })
+            .collect()
+        }
+
+        fn build(&self, name: &str, _agent: &str) -> Option<ProviderChoice> {
+            let entry = self.list().into_iter().find(|entry| entry.name == name)?;
+            let backend: Option<BackendFactory> = (entry.kind == "codex").then(|| {
+                Arc::new(|setup: BackendSetup| {
+                    Ok(Box::new(External::new(setup)) as Box<dyn Backend>)
+                }) as BackendFactory
+            });
+            Some(ProviderChoice {
+                name: entry.name,
+                kind: entry.kind,
+                provider: Arc::new(Scripted::new(vec![])),
+                model: entry.model,
+                context_window: 200_000,
+                backend,
+            })
+        }
+    }
+
+    fn profiled_panel(dir: &std::path::Path) -> AgentPanel {
+        AgentPanel::new(AgentPanelSetup {
+            session_dir: Some(dir.to_path_buf()),
+            providers: Some(Arc::new(Profiles)),
+            ..setup(vec![])
+        })
+    }
+
+    #[test]
+    fn the_provider_picker_switches_the_profile_and_its_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut panel = profiled_panel(dir.path());
+        let events = panel.handle_status_action(PROVIDER_ACTION);
+        let Some(PanelEvent::ShowSelect { options, .. }) = events.first() else {
+            panic!("a picker, got {events:?}");
+        };
+        assert!(options[0].starts_with("● default"), "{options:?}");
+        assert!(options[1].contains("cloud") && options[1].contains("claude-x"));
+        panel.handle_command(PanelCommand::SelectionMade {
+            action: PROVIDER_ACTION.to_string(),
+            index: 1,
+        });
+        // The profile's endpoint and model replace the ones in use.
+        assert_eq!(panel.profile, "cloud");
+        assert_eq!(panel.provider_kind, "anthropic_compatible");
+        assert_eq!(panel.model.id, "claude-x");
+        assert_eq!(panel.model.context_window, 200_000);
+        assert!(!panel.external);
+        // The chip names the profile beside its protocol.
+        assert_eq!(panel.provider_display(), "cloud · Anthropic Compatible");
+        // The log keeps it, so a reopened session reconnects there.
+        let session = Session::open(panel.session_path().unwrap()).unwrap();
+        assert_eq!(
+            session.current_provider_profile(),
+            Some("cloud".to_string())
+        );
+        assert_eq!(
+            session.current_model().map(|m| m.id),
+            Some("claude-x".to_string())
+        );
+    }
+
+    #[test]
+    fn a_cli_agent_profile_is_taken_on_only_before_the_first_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut panel = profiled_panel(dir.path());
+        panel.transcript.push(Item::User {
+            text: "go".into(),
+            at: String::new(),
+        });
+        // Mid-conversation the CLI agent would not see it: refused.
+        assert!(!panel.switch_profile("cli"));
+        assert_eq!(panel.profile, "default");
+        assert!(panel.transcript.items().iter().any(|item| matches!(
+            item,
+            Item::Notice { text, .. } if text == termide_i18n::t().agent_notice_profile_before_first()
+        )));
+        // In a fresh session it drives the CLI agent over ACP.
+        let dir = tempfile::tempdir().unwrap();
+        let mut fresh = profiled_panel(dir.path());
+        assert!(fresh.switch_profile("cli"));
+        assert!(fresh.external);
+        assert_eq!(fresh.provider_kind, "codex");
     }
 
     #[test]

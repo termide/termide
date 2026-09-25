@@ -582,6 +582,14 @@ pub trait Translation: Send + Sync {
     fn agent_notice_model_list_unavailable_fmt(&self, error: &str) -> String;
     fn agent_notice_mcp_error_fmt(&self, source: &str, error: &str) -> String;
     fn agent_notice_mcp_connected_fmt(&self, source: &str, count: usize) -> String;
+    /// Agent provider picker: its title.
+    fn agent_pick_provider(&self) -> &str;
+    /// Agent notice: switching to or from a CLI agent is refused mid-session.
+    fn agent_notice_profile_before_first(&self) -> &str;
+    /// Agent notice: the session now runs on provider profile `name`.
+    fn agent_notice_provider_fmt(&self, name: &str) -> String;
+    /// Agent notice: there is no provider profile `name`.
+    fn agent_notice_no_profile_fmt(&self, name: &str) -> String;
     /// Agent toolset checklist: its title.
     fn agent_toolset_title(&self) -> &str;
     /// Agent toolset checklist: the hint under the title.
