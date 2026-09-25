@@ -57,6 +57,21 @@ impl FieldInput {
             FieldInput::Multi(area) => (area.line_count().max(1)) as u16,
         }
     }
+
+    /// Rows the field takes drawn `width` wide behind `label`: an area's long
+    /// lines wrap onto more rows than it has lines, as its render wraps them.
+    fn rows_at(&self, label: &str, width: u16) -> u16 {
+        match self {
+            FieldInput::Line(_) => 1,
+            FieldInput::Multi(area) => {
+                let prompt = if label.is_empty() { "› " } else { label };
+                let text_width = width
+                    .saturating_sub(str_display_width(prompt) as u16)
+                    .max(1);
+                wrapped_row_count(&area.text(), text_width as usize).max(1) as u16
+            }
+        }
+    }
 }
 
 /// The left and right text embedded in the bar's top border.
@@ -644,7 +659,9 @@ impl InputBar {
             }
             // A multi-line field takes what it needs but no more than is left,
             // scrolling within that; a single-line field takes one row.
-            let rows = self.fields[i].rows().min(budget);
+            let rows = self.fields[i]
+                .rows_at(&self.labels[i], area.width)
+                .min(budget);
             let field_area = Rect {
                 x: area.x,
                 y,
@@ -1465,6 +1482,21 @@ mod tests {
         // stay plain.
         assert_eq!(buf[(13, 0)].bg, colors.fg);
         assert_ne!(buf[(15, 0)].bg, colors.fg);
+    }
+
+    #[test]
+    fn a_wrapped_multiline_field_fills_the_rows_it_wraps_onto() {
+        let mut b = InputBar::new(vec![]).with_multiline_field("");
+        // Two logical lines, each wrapping onto two rows of a 12-wide field.
+        b.set_field_text(0, "aaaaaaaaaaaaaaa\nbbbbbbbbbbbbbbb");
+        let area = Rect::new(0, 0, 12, 4);
+        let mut buf = Buffer::empty(area);
+        b.render(area, &mut buf, &ThemeColors::default(), true);
+        let rows: Vec<String> = (0..4)
+            .map(|y| (0..12).map(|x| buf[(x, y)].symbol().to_string()).collect())
+            .collect();
+        // All four rows carry text: the field is as tall as it wraps.
+        assert!(rows[3].contains('b'), "{rows:?}");
     }
 
     #[test]
