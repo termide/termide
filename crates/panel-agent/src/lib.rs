@@ -3951,12 +3951,12 @@ impl AgentPanel {
             .add_modifier(Modifier::BOLD);
         let dim = Style::default().fg(colors.disabled);
         let fg = Style::default().fg(colors.fg);
-        // A re-pickable value (model, agent) is drawn in the accent colour and
-        // underlined, so it reads as clickable; a fixed one (provider, cwd) is
-        // plain. The click itself is wired through `banner_hits` below.
+        // A re-pickable value (model, agent, tools) is drawn bold in the
+        // accent colour, so it reads as clickable; a fixed one (provider, cwd)
+        // is plain. The click itself is wired through `banner_hits` below.
         let link = Style::default()
             .fg(colors.info)
-            .add_modifier(Modifier::UNDERLINED);
+            .add_modifier(Modifier::BOLD);
         let field = |name: &str, value: String, clickable: bool| -> Line<'static> {
             Line::from(vec![
                 Span::styled(format!("{name:<9}"), dim),
@@ -7835,6 +7835,22 @@ mod tests {
             .items()
             .iter()
             .any(|i| matches!(i, Item::Notice { text, .. } if text.contains("gpt-6-next"))));
+    }
+
+    #[test]
+    fn a_re_pickable_banner_value_is_bold_not_underlined() {
+        let mut panel = panel(vec![]);
+        let buf = render_buf(&mut panel, 60, 16);
+        let (x, y) = (0..16u16)
+            .find_map(|y| {
+                let row: String = (0..60u16).map(|x| buf[(x, y)].symbol()).collect();
+                row.find("default")
+                    .map(|at| (row[..at].chars().count() as u16, y))
+            })
+            .expect("the agent's name is on the banner");
+        let cell = &buf[(x, y)];
+        assert!(cell.modifier.contains(Modifier::BOLD));
+        assert!(!cell.modifier.contains(Modifier::UNDERLINED));
     }
 
     #[test]

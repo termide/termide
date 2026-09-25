@@ -78,7 +78,7 @@ instead. Give a session a name of your own through the panel's `[≡]` menu →
 A fresh session greets you with a banner: a small logo on the left and, on the
 right, what the agent is set up with — its provider, model, agent name, the
 tools it may use and the directory it works in. The model, the agent and the
-tools are shown underlined in the accent colour: a click on any opens the same
+tools are shown bold in the accent colour: a click on any opens the same
 picker its status-bar chip does, so you can set the session up before you
 start. The banner gives way to the conversation as soon as you send your first
 message.
