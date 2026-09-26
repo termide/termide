@@ -489,7 +489,26 @@ fn session_connection(
     let recorded = session
         .and_then(Session::current_connection)
         .filter(|name| settings.connections.contains_key(name));
-    let name = recorded.or_else(|| settings.default_connection().map(str::to_string))?;
+    // A log that names no connection (one begun before connections were
+    // recorded) still names the provider its model ran on: a connection of
+    // that provider fits it, the one new sessions start on first.
+    let by_provider = || {
+        let provider = session.and_then(Session::current_model)?.provider;
+        settings
+            .default_connection()
+            .filter(|name| settings.connections[*name].provider == provider)
+            .or_else(|| {
+                settings
+                    .connections
+                    .iter()
+                    .find(|(_, c)| c.provider == provider)
+                    .map(|(name, _)| name.as_str())
+            })
+            .map(str::to_string)
+    };
+    let name = recorded
+        .or_else(by_provider)
+        .or_else(|| settings.default_connection().map(str::to_string))?;
     let connection = settings.connections[&name].clone();
     Some((name, connection))
 }
@@ -1301,6 +1320,32 @@ mod tests {
         settings.connections.remove("cloud");
         assert_eq!(name(&settings, &session).as_deref(), Some("local"));
         assert_eq!(name(&AiSettings::default(), &session), None);
+    }
+
+    /// A log from before connections were recorded: its model ran on Claude
+    /// Code, so it reopens on the Claude Code connection, not on the default
+    /// endpoint with Claude's model id.
+    #[test]
+    fn a_log_without_a_connection_reopens_on_one_of_its_provider() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), dir.path()).unwrap();
+        session
+            .append_model_change("claude_code", "opus[1m]", None)
+            .unwrap();
+        let mut settings = with_cloud();
+        settings.connections.insert(
+            "claude".into(),
+            Connection {
+                provider: "claude_code".into(),
+                ..Connection::default()
+            },
+        );
+        let reopened = session_connection(&settings, Some(&session)).map(|(name, _)| name);
+        assert_eq!(reopened.as_deref(), Some("claude"));
+        // No connection of that provider left: the one new sessions start on.
+        settings.connections.remove("claude");
+        let reopened = session_connection(&settings, Some(&session)).map(|(name, _)| name);
+        assert_eq!(reopened.as_deref(), Some("local"));
     }
 
     #[test]

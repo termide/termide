@@ -704,6 +704,7 @@ impl AgentPanel {
             start_session(
                 setup.session_dir.as_deref(),
                 &setup.cwd,
+                &setup.connection,
                 &setup.provider_kind,
                 &setup.model,
                 &setup.agent,
@@ -910,6 +911,7 @@ impl AgentPanel {
             start_session(
                 self.session_dir.as_deref(),
                 &self.cwd,
+                &self.connection,
                 &self.provider_kind,
                 &self.model,
                 &self.agent,
@@ -4705,6 +4707,7 @@ fn current_mark(current: bool) -> &'static str {
 fn start_session(
     dir: Option<&std::path::Path>,
     cwd: &std::path::Path,
+    connection: &str,
     provider: &str,
     model: &ModelSpec,
     agent: &str,
@@ -4716,6 +4719,13 @@ fn start_session(
             return None;
         }
     };
+    // The connection first: a reopened session goes back to it, and the
+    // model after it is that connection's.
+    if !connection.is_empty() {
+        if let Err(error) = session.append_connection_change(connection) {
+            log::warn!("agent session write failed: {error}");
+        }
+    }
     if let Err(error) = session.append_model_change(provider, &model.id, Some(model.context_window))
     {
         log::warn!("agent session write failed: {error}");
@@ -8637,6 +8647,18 @@ mod tests {
             connections: Some(Arc::new(Connections)),
             ..setup(vec![])
         })
+    }
+
+    #[test]
+    fn a_new_session_records_the_connection_it_starts_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut panel = connected_panel(dir.path());
+        let first = Session::open(panel.session_path().unwrap()).unwrap();
+        assert_eq!(first.current_connection(), Some("local".to_string()));
+        // A new session in the panel too.
+        panel.switch_session(None);
+        let second = Session::open(panel.session_path().unwrap()).unwrap();
+        assert_eq!(second.current_connection(), Some("local".to_string()));
     }
 
     #[test]
