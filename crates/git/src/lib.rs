@@ -26,7 +26,8 @@ pub mod diff;
 // Re-export from internal modules
 pub use blame::{get_blame_async, BlameEntry};
 pub use branches::{
-    checkout_branch, get_ahead_behind, get_all_branches, get_branches, get_current_branch,
+    branch_label, checkout_branch, get_ahead_behind, get_ahead_behind_of, get_all_branches,
+    get_branch_list, get_branches, get_current_branch, linked_worktrees, BranchInfo,
 };
 pub use command::{network_command, SshAuth};
 pub use commits::{

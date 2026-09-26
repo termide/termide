@@ -15,3 +15,6 @@ similar.workspace = true
 # Workspace crates
 termide-ui = { path = "../ui" }
 termide-i18n = { path = "../i18n" }
+
+[dev-dependencies]
+tempfile.workspace = true

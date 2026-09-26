@@ -146,6 +146,18 @@ impl RepoManager {
         }
     }
 
+    /// Select the repository at `path`. Returns `false`, keeping the
+    /// selection, when it is not in the list.
+    pub fn select_path(&mut self, path: &Path) -> bool {
+        match self.repos.iter().position(|r| r == path) {
+            Some(index) => {
+                self.selected = index;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Select the next repository (wrapping to first).
     pub fn select_next(&mut self) {
         if !self.repos.is_empty() {
