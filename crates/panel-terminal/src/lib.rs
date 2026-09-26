@@ -1365,7 +1365,8 @@ impl Panel for Terminal {
             | PanelCommand::ChecklistDone { .. }
             | PanelCommand::InputSubmitted { .. }
             | PanelCommand::Confirmed { .. }
-            | PanelCommand::UpdateRepoPaths { .. } => CommandResult::None,
+            | PanelCommand::UpdateRepoPaths { .. }
+            | PanelCommand::ShowGitLog { .. } => CommandResult::None,
 
             PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
             PanelCommand::SetScrollOffset { offset, .. } => {

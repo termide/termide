@@ -645,6 +645,7 @@ impl Translation for RuntimeTranslation {
         git_unstage_all_btn,
         git_revert_all_btn,
         git_log_btn,
+        git_checkout_btn,
         git_revert_all_confirm,
         git_checkout_not_impl,
         git_no_remote_url,
@@ -1477,6 +1478,17 @@ impl Translation for RuntimeTranslation {
 
     fn git_checkout_error_fmt(&self, error: &str) -> String {
         self.format("git_checkout_error_fmt", &[("error", error)])
+    }
+
+    fn git_branch_not_checked_out_fmt(&self, ahead: usize, behind: usize, base: &str) -> String {
+        self.format(
+            "git_branch_not_checked_out_fmt",
+            &[
+                ("ahead", &ahead.to_string()),
+                ("behind", &behind.to_string()),
+                ("base", base),
+            ],
+        )
     }
 
     fn git_init_failed_fmt(&self, error: &str) -> String {

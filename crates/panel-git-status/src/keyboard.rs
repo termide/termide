@@ -13,8 +13,6 @@ impl GitStatusPanel {
     /// Handle a key chord. Trait `Panel::handle_key` delegates here.
     pub(crate) fn on_key(&mut self, chord: KeyChord) -> Vec<PanelEvent> {
         let key = chord.raw;
-        // Clear status message on any key
-        self.status_message = None;
 
         // Repo dropdown filter: intercept printable keys while the dropdown is
         // open so typing narrows the list instead of triggering hotkeys.
@@ -153,7 +151,7 @@ impl GitStatusPanel {
         }
         if self.hotkeys.matches("refresh", &key) {
             self.refresh();
-            self.status_message = Some(termide_i18n::t().git_refreshed().to_string());
+            self.status_message = Some((termide_i18n::t().git_refreshed().to_string(), false));
             if let Some(repo) = self.repo_manager.current() {
                 use termide_core::event::{GitOperationType, PanelEvent};
                 return vec![PanelEvent::GitOperation {

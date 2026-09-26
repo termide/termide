@@ -378,14 +378,10 @@ impl GitStatusPanel {
                     } else {
                         Some(self.dropdown_cursor)
                     };
-                    if let Some(idx) = idx {
-                        if idx != self.repo_manager.selected_index() {
-                            self.repo_manager.select(idx);
-                            self.refresh();
-                        }
-                    }
+                    let events = idx.map(|idx| self.select_repo(idx)).unwrap_or_default();
                     self.repo_dropdown_open = false;
                     self.reset_repo_filter();
+                    return events;
                 } else {
                     self.repo_dropdown_open = true;
                     self.branch_dropdown_open = false;
@@ -398,7 +394,7 @@ impl GitStatusPanel {
                 if self.branch_dropdown_open {
                     // When filtering, resolve the highlighted position to a real
                     // branch index; if the filter matches nothing, close without
-                    // checking out instead of falling back to index 0.
+                    // changing the view instead of falling back to index 0.
                     let idx = if self.show_branch_filter {
                         self.filtered_branch_indices()
                             .get(self.dropdown_cursor)
@@ -406,20 +402,15 @@ impl GitStatusPanel {
                     } else {
                         Some(self.dropdown_cursor)
                     };
-                    if let Some(idx) = idx {
-                        self.switch_to_branch(idx);
-                    }
+                    let events = idx.map(|idx| self.view_branch(idx)).unwrap_or_default();
                     self.branch_dropdown_open = false;
                     self.reset_branch_filter();
+                    return events;
                 } else {
                     self.branch_dropdown_open = true;
                     self.repo_dropdown_open = false;
                     self.reset_repo_filter();
-                    self.dropdown_cursor = self
-                        .branches
-                        .iter()
-                        .position(|b| Some(b.as_str()) == self.branch.as_deref())
-                        .unwrap_or(0);
+                    self.dropdown_cursor = self.shown_branch_index();
                 }
                 vec![]
             }

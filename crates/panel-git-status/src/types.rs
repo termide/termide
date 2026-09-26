@@ -86,6 +86,8 @@ pub enum Button {
     UnstageAll,
     /// Revert all local changes (with confirmation)
     RevertAll,
+    /// Check the viewed branch out into the main copy
+    Checkout,
     /// Open Git Log panel
     Log,
     /// Show all diffs in Git Diff panel
@@ -113,6 +115,7 @@ impl Button {
             Button::StageAll => t.git_stage_all_btn().to_string(),
             Button::UnstageAll => t.git_unstage_all_btn().to_string(),
             Button::RevertAll => t.git_revert_all_btn().to_string(),
+            Button::Checkout => t.git_checkout_btn().to_string(),
             Button::Log => t.git_log_btn().to_string(),
             Button::Diff => t.git_action_diff().to_string(),
             Button::Commit => t.git_action_commit().to_string(),

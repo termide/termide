@@ -292,11 +292,8 @@ impl GitLogPanel {
                 &theme,
             );
         } else if self.branch_dropdown_open {
-            let branches = self.branches.clone();
-            let current_branch_idx = branches
-                .iter()
-                .position(|b| Some(b.as_str()) == self.branch.as_deref())
-                .unwrap_or(0);
+            let branches = self.branch_labels();
+            let current_branch_idx = self.shown_branch_index();
             let dropdown_y = content_area.y + 1;
             let max_h = content_area.height.saturating_sub(3);
             // Use actual branch selector x (set during header render above)

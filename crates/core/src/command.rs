@@ -126,6 +126,14 @@ pub enum PanelCommand<'a> {
         paths: Vec<PathBuf>,
     },
 
+    /// Show a repository's history in a git log panel, of `branch` or, when
+    /// `None`, of HEAD. Sent when a git status panel opens the log.
+    /// Response: `CommandResult::NeedsRedraw(bool)`
+    ShowGitLog {
+        repo_path: PathBuf,
+        branch: Option<String>,
+    },
+
     // === Clipboard commands ===
     /// Copy the panel's current selection / focused item to the clipboard.
     /// Routed from the global `copy` keybinding to the focused panel; the

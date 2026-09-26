@@ -845,6 +845,7 @@ impl Panel for FileManager {
             | PanelCommand::CloseWithoutSaving
             | PanelCommand::SetGitOperationInProgress { .. }
             | PanelCommand::UpdateRepoPaths { .. }
+            | PanelCommand::ShowGitLog { .. }
             | PanelCommand::SelectionMade { .. }
             | PanelCommand::ChecklistDone { .. }
             | PanelCommand::InputSubmitted { .. }

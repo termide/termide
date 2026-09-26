@@ -630,8 +630,11 @@ pub enum PanelEvent {
         file_path: Option<PathBuf>,
     },
 
-    /// Open git log panel for repository
-    OpenGitLog { repo_path: PathBuf },
+    /// Open git log panel for repository, showing `branch` (`None` = HEAD)
+    OpenGitLog {
+        repo_path: PathBuf,
+        branch: Option<String>,
+    },
 
     // === Clipboard ===
     /// Copy text to clipboard

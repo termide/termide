@@ -232,7 +232,13 @@ impl GitStatusPanel {
         let unstaged_files_end = unstaged_files_start + self.unstaged_item_count();
         let staged_header_line = unstaged_files_end;
         let staged_files_start = staged_header_line + 1;
-        let total_virtual_lines = self.total_virtual_lines();
+        // A branch checked out nowhere has no files to list, only a note.
+        let unchecked = self.viewing_unchecked_branch();
+        let total_virtual_lines = if unchecked {
+            0
+        } else {
+            self.total_virtual_lines()
+        };
 
         // Clamp scroll offset
         let max_scroll = total_virtual_lines.saturating_sub(files_area_height);
@@ -258,8 +264,8 @@ impl GitStatusPanel {
         let repo_width = repo_selector.render(content_area.x, y, content_area.width / 2, buf);
 
         let branch_name = self
-            .branch
-            .clone()
+            .shown_branch()
+            .map(str::to_string)
             .unwrap_or_else(|| t.git_branch_detached().to_string());
         let branch_focused = self.current_section == Section::BranchSelector && is_focused;
         let branch_x = content_area.x + repo_width + 2;
@@ -288,6 +294,20 @@ impl GitStatusPanel {
         };
 
         let files_active = self.current_section == Section::Files && is_focused;
+
+        if unchecked && files_area_height > 0 {
+            let note = t.git_branch_not_checked_out_fmt(
+                self.ahead,
+                self.behind,
+                self.branch.as_deref().unwrap_or("HEAD"),
+            );
+            buf.set_string(
+                content_area.x + 1,
+                files_y,
+                truncate_to_width_str(&note, files_width.saturating_sub(1) as usize),
+                Style::default().fg(theme.disabled),
+            );
+        }
 
         // Render visible virtual lines
         for screen_row in 0..files_area_height {
@@ -490,18 +510,14 @@ impl GitStatusPanel {
             let dropdown_y = content_area.y + 1;
             let max_dropdown_height = content_area.height.saturating_sub(3) as usize;
 
+            let current_branch_idx = self.shown_branch_index();
             if self.show_branch_filter {
                 // Filtered dropdown: render filter row + filtered branch list
                 let filtered_indices = self.filtered_branch_indices();
                 let filtered_branches: Vec<String> = filtered_indices
                     .iter()
-                    .map(|&i| self.branches[i].clone())
+                    .map(|&i| self.branch_label(i))
                     .collect();
-                let current_branch_idx = self
-                    .branches
-                    .iter()
-                    .position(|b| Some(b.as_str()) == self.branch.as_deref())
-                    .unwrap_or(0);
                 let selected_pos = filtered_indices
                     .iter()
                     .position(|&i| i == current_branch_idx);
@@ -522,12 +538,10 @@ impl GitStatusPanel {
                 self.branch_dropdown_area = Some(area);
             } else {
                 // Normal dropdown (no filter)
-                let current_branch_idx = self
-                    .branches
-                    .iter()
-                    .position(|b| Some(b.as_str()) == self.branch.as_deref())
-                    .unwrap_or(0);
-                let visible_count = self.branches.len().min(max_dropdown_height);
+                let labels: Vec<String> = (0..self.branches.len())
+                    .map(|i| self.branch_label(i))
+                    .collect();
+                let visible_count = labels.len().min(max_dropdown_height);
                 let scroll_offset = if self.dropdown_cursor >= visible_count {
                     self.dropdown_cursor - visible_count + 1
                 } else {
@@ -538,7 +552,7 @@ impl GitStatusPanel {
                     branch_x,
                     branch_max_width,
                     content_area.x + content_area.width,
-                    &self.branches,
+                    &labels,
                 );
                 self.branch_dropdown_area = Some(Rect {
                     x: dropdown_x,
@@ -547,7 +561,7 @@ impl GitStatusPanel {
                     height: visible_count as u16 + 2,
                 });
                 render_simple_dropdown(
-                    &self.branches,
+                    &labels,
                     current_branch_idx,
                     self.dropdown_cursor,
                     dropdown_x,

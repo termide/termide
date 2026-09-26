@@ -14,7 +14,7 @@
 use anyhow::Result;
 
 use super::App;
-use termide_core::PanelEvent;
+use termide_core::{PanelCommand, PanelEvent};
 
 mod file_view;
 mod git_ops;
@@ -326,8 +326,16 @@ impl App {
                 self.event_open_git_diff(repo_path, commit_hash, file_path)?;
             }
 
-            PanelEvent::OpenGitLog { repo_path: _ } => {
+            PanelEvent::OpenGitLog { repo_path, branch } => {
                 self.handle_open_git_log()?;
+                // The log panel is focused now, found or just created.
+                if let Some(panel) = self
+                    .layout_manager
+                    .active_panel_mut()
+                    .filter(|p| p.name() == "git_log")
+                {
+                    panel.handle_command(PanelCommand::ShowGitLog { repo_path, branch });
+                }
             }
 
             PanelEvent::OpenStashDropdown {

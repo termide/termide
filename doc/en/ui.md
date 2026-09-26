@@ -126,6 +126,24 @@ The layout adapts to the terminal width, showing more panel groups on wider scre
 - help — `Alt+H`
 - journal — `Alt+L`
 
+The **git status** panel has two selectors on top: the repository and the
+branch. The branch list holds local branches and remote ones without a local
+twin; `●` marks the branch checked out in the repository's main copy, `⧉` one
+checked out in a linked worktree (worktree directories are not listed as
+repositories of their own). Choosing a branch never checks it out — it only
+changes what the panel shows:
+
+- a branch checked out in the main copy or a worktree shows that working copy's
+  changes, and staging, committing, diff, push and pull act in it;
+- a branch checked out nowhere shows how far it is ahead of and behind the
+  main copy's branch, with a `[Checkout]` button that checks it out into the
+  main copy. When git refuses (uncommitted changes in the way, say), its message
+  is shown as an error.
+
+`[Log]` opens the git log on the same repository and branch. The log's own
+branch selector marks branches the same way and only picks whose history to
+show; after a checkout a log that follows HEAD moves to the new branch.
+
 The **git log** panel draws the commit graph with box-drawing pseudographics
 (`● │ ├ ╮ ╯`) laid out from each commit's parents, with each lane coloured so a
 branch can be followed by colour. To fall back to git's native ASCII `--graph`

@@ -19,6 +19,7 @@ use types::FileTree;
 pub use types::{Button, Section, Selection};
 
 use std::any::Any;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crossterm::event::MouseEvent;
@@ -46,10 +47,15 @@ pub struct GitStatusPanel {
     repo_manager: RepoManager,
     /// Scrollbar drawn by the last render, for mouse thumb dragging.
     scrollbars: termide_core::ScrollBars,
-    /// Current branch name
+    /// Branch checked out in the repository's main working copy
     branch: Option<String>,
     /// Available branches for current repo
     branches: Vec<String>,
+    /// Branch the panel shows when it is not the main copy's — one checked
+    /// out in a linked worktree, or one checked out nowhere
+    viewed: Option<String>,
+    /// Branches checked out in a linked worktree, with its directory
+    worktrees: HashMap<String, PathBuf>,
     /// Ahead/behind counts
     ahead: usize,
     behind: usize,
@@ -71,8 +77,9 @@ pub struct GitStatusPanel {
     cached_theme: ThemeColors,
     /// Last render area (for mouse handling)
     last_area: Rect,
-    /// Status message
-    status_message: Option<String>,
+    /// Message for the app status bar and whether it is an error; `tick()`
+    /// hands it over
+    status_message: Option<(String, bool)>,
     /// Is repo dropdown expanded
     repo_dropdown_open: bool,
     /// Is branch dropdown expanded
@@ -181,6 +188,8 @@ impl GitStatusPanel {
             repo_manager,
             branch: None,
             branches: Vec::new(),
+            viewed: None,
+            worktrees: HashMap::new(),
             ahead: 0,
             behind: 0,
             unstaged_files: Vec::new(),
@@ -248,6 +257,27 @@ impl GitStatusPanel {
         self.modal_request.take()
     }
 
+    /// The branch the panel shows: the viewed one, else the main copy's.
+    pub(crate) fn shown_branch(&self) -> Option<&str> {
+        self.viewed.as_deref().or(self.branch.as_deref())
+    }
+
+    /// The working copy the panel shows and acts in: the viewed branch's
+    /// worktree, else the repository's main copy. `None` without a
+    /// repository or when the viewed branch is checked out nowhere.
+    pub(crate) fn work_dir(&self) -> Option<PathBuf> {
+        refresh::resolve_work_dir(
+            self.repo_manager.current()?,
+            self.viewed.as_deref(),
+            &self.worktrees,
+        )
+    }
+
+    /// Whether the panel shows a branch checked out in no working copy.
+    pub(crate) fn viewing_unchecked_branch(&self) -> bool {
+        self.repo_manager.current().is_some() && self.work_dir().is_none()
+    }
+
     /// Get disk space information for the current repository.
     pub fn get_disk_space_info(&self) -> Option<termide_system_monitor::DiskSpaceInfo> {
         self.repo_manager
@@ -275,10 +305,16 @@ impl Panel for GitStatusPanel {
             .map(git::get_repo_name)
             .unwrap_or_else(|| t.git_no_repo().to_string());
         let detached = t.git_branch_detached().to_string();
-        let branch = self.branch.as_deref().unwrap_or(&detached);
+        let branch = self.shown_branch().unwrap_or(&detached);
 
-        let uncommitted = self.unstaged_files.len() + self.staged_files.len();
-        let status = format!("*{} ↑{} ↓{}", uncommitted, self.ahead, self.behind);
+        // A branch checked out nowhere has no working copy to count, and its
+        // ahead/behind is against HEAD, not its upstream.
+        let status = if self.viewing_unchecked_branch() {
+            String::new()
+        } else {
+            let uncommitted = self.unstaged_files.len() + self.staged_files.len();
+            format!("*{} ↑{} ↓{}", uncommitted, self.ahead, self.behind)
+        };
 
         if self.is_loading {
             let spinner = spinner_frame();
@@ -292,6 +328,8 @@ impl Panel for GitStatusPanel {
             )
         } else {
             format!("{} ({}) {}", repo_name, branch, status)
+                .trim_end()
+                .to_string()
         }
     }
 
@@ -373,9 +411,12 @@ impl Panel for GitStatusPanel {
     fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
         match cmd {
             PanelCommand::OnGitUpdate { repo_paths } => {
-                // Check if current repo is in the updated list
+                // Check if current repo or the shown worktree is in the updated list
                 if let Some(current_repo) = self.repo_manager.current() {
-                    let should_refresh = git::repo_paths_overlap(current_repo, repo_paths);
+                    let should_refresh = git::repo_paths_overlap(current_repo, repo_paths)
+                        || self
+                            .work_dir()
+                            .is_some_and(|dir| git::repo_paths_overlap(&dir, repo_paths));
                     if should_refresh {
                         self.refresh();
                         return CommandResult::NeedsRedraw(true);
@@ -386,7 +427,11 @@ impl Panel for GitStatusPanel {
             PanelCommand::OnFsUpdate { changed_path } => {
                 // Refresh on file changes within current repo
                 if let Some(current_repo) = self.repo_manager.current() {
-                    if changed_path.starts_with(current_repo) {
+                    if changed_path.starts_with(current_repo)
+                        || self
+                            .work_dir()
+                            .is_some_and(|dir| changed_path.starts_with(dir))
+                    {
                         self.refresh();
                         return CommandResult::NeedsRedraw(true);
                     }
@@ -443,11 +488,11 @@ impl Panel for GitStatusPanel {
             }
             PanelCommand::GetFsWatchInfo => {
                 // Return watch info so the app watcher registers the repo root.
-                // current_path is the repo root (used by app to call find_repo_root).
+                // current_path is the shown working copy (used by app to call
+                // find_repo_root), so a worktree outside the repo is watched too.
                 let current_path = self
-                    .repo_manager
-                    .current()
-                    .map(|p| p.to_path_buf())
+                    .work_dir()
+                    .or_else(|| self.repo_manager.current().map(|p| p.to_path_buf()))
                     .or_else(|| self.initial_paths.first().cloned())
                     .unwrap_or_default();
                 CommandResult::FsWatchInfo {
@@ -514,11 +559,16 @@ impl Panel for GitStatusPanel {
     }
 
     fn get_working_directory(&self) -> Option<PathBuf> {
-        self.repo_manager.current().map(|p| p.to_path_buf())
+        self.work_dir()
+            .or_else(|| self.repo_manager.current().map(|p| p.to_path_buf()))
     }
 
     fn tick(&mut self) -> Vec<PanelEvent> {
         let mut events = Vec::new();
+
+        if let Some((message, is_error)) = self.status_message.take() {
+            events.push(PanelEvent::SetStatusMessage { message, is_error });
+        }
 
         // Repository discovery (submodules, and nested repos under a non-repo
         // root) runs in the background; pull its result in here so the repo

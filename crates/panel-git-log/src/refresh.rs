@@ -1,5 +1,7 @@
 //! Async commit-log refresh: worker dispatch, result polling, and state reset.
 
+use std::collections::HashSet;
+
 use termide_git::{self as git, CommitInfo};
 
 use crate::GitLogPanel;
@@ -8,6 +10,7 @@ use crate::GitLogPanel;
 pub(crate) struct GitLogRefreshResult {
     pub(crate) branch: Option<String>,
     pub(crate) branches: Vec<String>,
+    pub(crate) worktrees: HashSet<String>,
     pub(crate) commits: Vec<CommitInfo>,
 }
 
@@ -23,6 +26,7 @@ impl GitLogPanel {
     pub(crate) fn clear_git_state(&mut self) {
         self.branch = None;
         self.branches.clear();
+        self.worktrees.clear();
         self.selected_branch = None;
         self.commits.clear();
         self.selected = 0;
@@ -50,7 +54,9 @@ impl GitLogPanel {
         self.refresh_rx = Some(rx);
         std::thread::spawn(move || {
             let branch = git::get_current_branch(&repo);
-            let branches = git::get_all_branches(&repo);
+            let list = git::get_branch_list(&repo);
+            let worktrees = git::linked_worktrees(&repo, &list).into_keys().collect();
+            let branches = list.into_iter().map(|b| b.name).collect();
             let commits = if unicode_graph {
                 git::get_log_graph_unicode(&repo, count, selected_branch.as_deref())
             } else {
@@ -59,6 +65,7 @@ impl GitLogPanel {
             let _ = tx.send(GitLogRefreshResult {
                 branch,
                 branches,
+                worktrees,
                 commits,
             });
         });
@@ -84,6 +91,7 @@ impl GitLogPanel {
 
         self.branch = result.branch;
         self.branches = result.branches;
+        self.worktrees = result.worktrees;
 
         // If the previously selected branch no longer exists, reset to HEAD
         if let Some(ref b) = self.selected_branch {

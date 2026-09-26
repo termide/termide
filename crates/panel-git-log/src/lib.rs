@@ -10,6 +10,7 @@ mod selection;
 use refresh::GitLogRefreshResult;
 
 use std::any::Any;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -53,6 +54,8 @@ pub struct GitLogPanel {
     branches: Vec<String>,
     /// Selected branch to view log for (None = current HEAD)
     selected_branch: Option<String>,
+    /// Branches checked out in a linked worktree
+    worktrees: HashSet<String>,
     /// Whether the repo dropdown is open
     repo_dropdown_open: bool,
     /// Whether the branch dropdown is open
@@ -140,6 +143,7 @@ impl GitLogPanel {
             branch: None,
             branches: Vec::new(),
             selected_branch: None,
+            worktrees: HashSet::new(),
             repo_dropdown_open: false,
             branch_dropdown_open: false,
             dropdown_cursor: 0,
@@ -177,6 +181,42 @@ impl GitLogPanel {
         Self::create(RepoManager::for_repo(repo_path))
     }
 
+    /// Index into `self.branches` of the branch whose history is shown.
+    pub(crate) fn shown_branch_index(&self) -> usize {
+        let shown = self.selected_branch.as_deref().or(self.branch.as_deref());
+        self.branches
+            .iter()
+            .position(|b| Some(b.as_str()) == shown)
+            .unwrap_or(0)
+    }
+
+    /// Branch dropdown labels: `●` marks HEAD, `⧉` a branch checked out in
+    /// a linked worktree.
+    pub(crate) fn branch_labels(&self) -> Vec<String> {
+        self.branches
+            .iter()
+            .map(|name| {
+                git::branch_label(
+                    name,
+                    self.branch.as_deref() == Some(name.as_str()),
+                    self.worktrees.contains(name),
+                )
+            })
+            .collect()
+    }
+
+    /// Show `branch` (`None` = HEAD) of the repository at `repo_path`; a
+    /// repository not in the list leaves the selection as it is.
+    fn show(&mut self, repo_path: &Path, branch: Option<String>) {
+        if self.repo_manager.select_path(repo_path) {
+            self.selected_branch = branch;
+        }
+        self.branch_dropdown_open = false;
+        self.repo_dropdown_open = false;
+        self.selected = 0;
+        self.refresh();
+    }
+
     /// Update repository list based on new paths from panels
     pub fn update_repos(&mut self, paths: &[PathBuf]) {
         if self.repo_manager.update(paths) {
@@ -201,7 +241,11 @@ impl Panel for GitLogPanel {
             .current()
             .map(git::get_repo_name)
             .unwrap_or_else(|| t.git_no_repo().to_string());
-        let branch = self.branch.as_deref().unwrap_or(t.git_branch_detached());
+        let branch = self
+            .selected_branch
+            .as_deref()
+            .or(self.branch.as_deref())
+            .unwrap_or(t.git_branch_detached());
         t.git_log_title_fmt(&repo_name, branch)
     }
 
@@ -247,6 +291,10 @@ impl Panel for GitLogPanel {
             }
             PanelCommand::UpdateRepoPaths { paths } => {
                 self.update_repos(&paths);
+                CommandResult::NeedsRedraw(true)
+            }
+            PanelCommand::ShowGitLog { repo_path, branch } => {
+                self.show(&repo_path, branch);
                 CommandResult::NeedsRedraw(true)
             }
             // Live watcher updates: a commit / ref / rebase touches `.git` and
@@ -461,11 +509,7 @@ impl Panel for GitLogPanel {
                             self.branch_dropdown_open = false;
                             self.refresh();
                         } else {
-                            self.dropdown_cursor = self
-                                .branches
-                                .iter()
-                                .position(|b| Some(b.as_str()) == self.branch.as_deref())
-                                .unwrap_or(0);
+                            self.dropdown_cursor = self.shown_branch_index();
                             self.branch_dropdown_open = true;
                         }
                     }
@@ -552,11 +596,7 @@ impl Panel for GitLogPanel {
                         if row == area.y && col >= area.x && col < area.x + area.width {
                             self.current_section = Section::BranchSelector;
                             if !was_branch_open {
-                                self.dropdown_cursor = self
-                                    .branches
-                                    .iter()
-                                    .position(|b| Some(b.as_str()) == self.branch.as_deref())
-                                    .unwrap_or(0);
+                                self.dropdown_cursor = self.shown_branch_index();
                                 self.branch_dropdown_open = true;
                             }
                             return vec![];
@@ -586,11 +626,7 @@ impl Panel for GitLogPanel {
                         if self.branch_dropdown_open {
                             self.branch_dropdown_open = false;
                         } else {
-                            self.dropdown_cursor = self
-                                .branches
-                                .iter()
-                                .position(|b| Some(b.as_str()) == self.branch.as_deref())
-                                .unwrap_or(0);
+                            self.dropdown_cursor = self.shown_branch_index();
                             self.branch_dropdown_open = true;
                         }
                         return vec![];

@@ -1035,6 +1035,7 @@ pub trait Translation: Send + Sync {
     fn git_unstage_all_btn(&self) -> &str;
     fn git_revert_all_btn(&self) -> &str;
     fn git_log_btn(&self) -> &str;
+    fn git_checkout_btn(&self) -> &str;
     fn git_revert_all_confirm(&self) -> &str;
     fn git_checkout_not_impl(&self) -> &str;
     fn git_no_remote_url(&self) -> &str;
@@ -1045,6 +1046,9 @@ pub trait Translation: Send + Sync {
     fn git_action_error_fmt(&self, action: &str, error: &str) -> String;
     fn git_switched_to_fmt(&self, branch: &str) -> String;
     fn git_checkout_error_fmt(&self, error: &str) -> String;
+    /// A branch checked out nowhere: how far it is from `base`, the branch
+    /// checked out in the main copy.
+    fn git_branch_not_checked_out_fmt(&self, ahead: usize, behind: usize, base: &str) -> String;
     fn git_init_failed_fmt(&self, error: &str) -> String;
     fn git_log_title_fmt(&self, repo: &str, branch: &str) -> String;
     fn git_diff_title_commit_fmt(

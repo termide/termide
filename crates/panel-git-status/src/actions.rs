@@ -35,7 +35,7 @@ impl GitStatusPanel {
             _ => return vec![], // Headers, directories, or nothing selected
         };
 
-        let Some(repo_path) = self.repo_manager.current().map(|p| p.to_path_buf()) else {
+        let Some(repo_path) = self.work_dir() else {
             return vec![];
         };
 
@@ -59,7 +59,7 @@ impl GitStatusPanel {
     pub(crate) fn initiate_revert_all(&mut self) -> Vec<PanelEvent> {
         let t = termide_i18n::t();
 
-        let Some(repo_path) = self.repo_manager.current().map(|p| p.to_path_buf()) else {
+        let Some(repo_path) = self.work_dir() else {
             return vec![];
         };
 
@@ -97,7 +97,7 @@ impl GitStatusPanel {
             return vec![];
         };
 
-        let Some(repo_path) = self.repo_manager.current() else {
+        let Some(repo_path) = self.work_dir() else {
             return vec![];
         };
 
@@ -117,16 +117,17 @@ impl GitStatusPanel {
         if files.is_empty() {
             return;
         }
-        if let Some(repo) = self.repo_manager.current() {
-            match op(repo, &files) {
+        if let Some(repo) = self.work_dir() {
+            match op(&repo, &files) {
                 Ok(()) => {
                     let t = termide_i18n::t();
-                    self.status_message = Some(t.git_action_files_fmt(action, files.len()));
+                    self.status_message =
+                        Some((t.git_action_files_fmt(action, files.len()), false));
                     self.refresh();
                 }
                 Err(e) => {
                     let t = termide_i18n::t();
-                    self.status_message = Some(t.git_action_error_fmt(action, &e));
+                    self.status_message = Some((t.git_action_error_fmt(action, &e), true));
                 }
             }
         }
@@ -200,7 +201,7 @@ impl GitStatusPanel {
             return vec![];
         };
 
-        let Some(repo_path) = self.repo_manager.current().map(|p| p.to_path_buf()) else {
+        let Some(repo_path) = self.work_dir() else {
             return vec![];
         };
 
@@ -262,22 +263,65 @@ impl GitStatusPanel {
         vec![]
     }
 
-    /// Switch to a different branch
-    pub(crate) fn switch_to_branch(&mut self, branch_idx: usize) {
-        if let Some(branch_name) = self.branches.get(branch_idx) {
-            if let Some(repo) = self.repo_manager.current() {
-                let branch_name = branch_name.clone();
-                match git::checkout_branch(repo, &branch_name) {
-                    Ok(()) => {
-                        let t = termide_i18n::t();
-                        self.status_message = Some(t.git_switched_to_fmt(&branch_name));
-                        self.refresh();
-                    }
-                    Err(e) => {
-                        let t = termide_i18n::t();
-                        self.status_message = Some(t.git_checkout_error_fmt(&e));
-                    }
-                }
+    /// Show another branch: the working copy it is checked out in, or — for
+    /// one checked out nowhere — how far it is from HEAD. Nothing is checked
+    /// out.
+    pub(crate) fn view_branch(&mut self, branch_idx: usize) -> Vec<PanelEvent> {
+        let Some(name) = self.branches.get(branch_idx).cloned() else {
+            return vec![];
+        };
+        let viewed = (self.branch.as_deref() != Some(name.as_str())).then_some(name);
+        if viewed == self.viewed {
+            return vec![];
+        }
+        self.viewed = viewed;
+        self.show_new_view()
+    }
+
+    /// Select another repository, back on its main copy.
+    pub(crate) fn select_repo(&mut self, repo_idx: usize) -> Vec<PanelEvent> {
+        if repo_idx == self.repo_manager.selected_index() {
+            return vec![];
+        }
+        self.repo_manager.select(repo_idx);
+        self.viewed = None;
+        self.worktrees.clear();
+        self.show_new_view()
+    }
+
+    /// Drop the previous working copy's files and load the new view. The
+    /// app re-registers watchers so a worktree outside the repository is
+    /// watched too.
+    fn show_new_view(&mut self) -> Vec<PanelEvent> {
+        self.unstaged_files.clear();
+        self.staged_files.clear();
+        self.rebuild_trees();
+        self.cursor = 0;
+        self.scroll_offset = 0;
+        self.selected_button = 0;
+        self.watched_root = None;
+        self.refresh();
+        vec![PanelEvent::WorkingDirectoryChanged]
+    }
+
+    /// Check the viewed branch out into the repository's main copy.
+    fn checkout_viewed(&mut self) {
+        let (Some(repo), Some(name)) = (
+            self.repo_manager.current().map(Path::to_path_buf),
+            self.viewed.clone(),
+        ) else {
+            return;
+        };
+        let t = termide_i18n::t();
+        match git::checkout_branch(&repo, &name) {
+            Ok(()) => {
+                self.status_message = Some((t.git_switched_to_fmt(&name), false));
+                self.viewed = None;
+                self.selected_button = 0;
+                self.refresh();
+            }
+            Err(e) => {
+                self.status_message = Some((t.git_checkout_error_fmt(&e), true));
             }
         }
     }
@@ -291,6 +335,13 @@ impl GitStatusPanel {
             if !self.initial_paths.is_empty() {
                 buttons.push(Button::Init);
             }
+            return buttons;
+        }
+
+        // A branch checked out nowhere offers to check it out, and its history
+        if self.viewing_unchecked_branch() {
+            buttons.push(Button::Checkout);
+            buttons.push(Button::Log);
             return buttons;
         }
 
@@ -373,17 +424,22 @@ impl GitStatusPanel {
                 vec![]
             }
             Button::RevertAll => self.initiate_revert_all(),
+            Button::Checkout => {
+                self.checkout_viewed();
+                vec![]
+            }
             Button::Log => {
                 if let Some(repo) = self.repo_manager.current() {
                     vec![PanelEvent::OpenGitLog {
                         repo_path: repo.to_path_buf(),
+                        branch: self.viewed.clone(),
                     }]
                 } else {
                     vec![]
                 }
             }
             Button::Diff => {
-                if let Some(repo) = self.repo_manager.current() {
+                if let Some(repo) = self.work_dir() {
                     vec![PanelEvent::OpenGitDiff {
                         repo_path: repo.to_path_buf(),
                         commit_hash: None,
@@ -394,12 +450,16 @@ impl GitStatusPanel {
                 }
             }
             Button::Commit => {
-                if let Some(repo) = self.repo_manager.current() {
+                if let Some(repo) = self.work_dir() {
                     let staged_count = self.staged_files.len();
-                    let repo_name = git::get_repo_name(repo);
+                    let repo_name = self
+                        .repo_manager
+                        .current()
+                        .map(git::get_repo_name)
+                        .unwrap_or_default();
                     let branch_name = self
-                        .branch
-                        .clone()
+                        .shown_branch()
+                        .map(str::to_string)
                         .unwrap_or_else(|| termide_i18n::t().git_branch_detached().to_string());
                     let modal =
                         termide_modal::CommitModal::new(staged_count, repo_name, branch_name);
@@ -413,7 +473,7 @@ impl GitStatusPanel {
                 vec![]
             }
             Button::Pull => {
-                if let Some(repo) = self.repo_manager.current() {
+                if let Some(repo) = self.work_dir() {
                     vec![PanelEvent::GitOperation {
                         operation: GitOperationType::Pull,
                         repo_path: repo.to_path_buf(),
@@ -423,7 +483,7 @@ impl GitStatusPanel {
                 }
             }
             Button::Push => {
-                if let Some(repo) = self.repo_manager.current() {
+                if let Some(repo) = self.work_dir() {
                     vec![PanelEvent::GitOperation {
                         operation: GitOperationType::Push,
                         repo_path: repo.to_path_buf(),
@@ -437,9 +497,7 @@ impl GitStatusPanel {
                 vec![PanelEvent::CancelGitOperation]
             }
             Button::Stash(_) => {
-                if let (Some(repo), Some(area)) =
-                    (self.repo_manager.current(), self.stash_button_area)
-                {
+                if let (Some(repo), Some(area)) = (self.work_dir(), self.stash_button_area) {
                     let has_changes =
                         !self.unstaged_files.is_empty() || !self.staged_files.is_empty();
                     vec![PanelEvent::OpenStashDropdown {
@@ -461,16 +519,178 @@ impl GitStatusPanel {
                             self.refresh();
                             let t = termide_i18n::t();
                             self.status_message =
-                                Some(t.git_init_success(&path.display().to_string()));
+                                Some((t.git_init_success(&path.display().to_string()), false));
                         }
                         Err(e) => {
                             let t = termide_i18n::t();
-                            self.status_message = Some(t.git_init_failed_fmt(&e));
+                            self.status_message = Some((t.git_init_failed_fmt(&e), true));
                         }
                     }
                 }
                 vec![]
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+
+    use termide_core::{Panel, PanelEvent};
+
+    use crate::types::Button;
+    use crate::GitStatusPanel;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(["-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+    }
+
+    /// A repository on `main` with `side` one commit ahead and checked out
+    /// nowhere, and `wt` checked out in a linked worktree next to it that
+    /// holds an untracked file.
+    fn repo() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+        let root = tempfile::tempdir().unwrap();
+        let root_path = std::fs::canonicalize(root.path()).unwrap();
+        let repo = root_path.join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "one"]);
+        git(&repo, &["checkout", "-q", "-b", "side"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "two"]);
+        git(&repo, &["checkout", "-q", "main"]);
+        let worktree = root_path.join("wt");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "wt",
+                worktree.to_str().unwrap(),
+            ],
+        );
+        std::fs::write(worktree.join("new.txt"), "x").unwrap();
+        (root, repo, worktree)
+    }
+
+    fn settle(panel: &mut GitStatusPanel) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while panel.refresh_rx.is_some() || panel.refresh_pending {
+            assert!(Instant::now() < deadline, "refresh never landed");
+            panel.poll_refresh();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    fn index_of(panel: &GitStatusPanel, name: &str) -> usize {
+        panel.branches.iter().position(|b| b == name).unwrap()
+    }
+
+    fn status_events(panel: &mut GitStatusPanel) -> Vec<(String, bool)> {
+        panel
+            .tick()
+            .into_iter()
+            .filter_map(|e| match e {
+                PanelEvent::SetStatusMessage { message, is_error } => Some((message, is_error)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Choosing a branch checked out nowhere only shows it; the Checkout
+    /// button is what moves the main copy onto it.
+    #[test]
+    fn a_branch_checked_out_nowhere_is_shown_until_checked_out() {
+        let (_root, repo, _worktree) = repo();
+        let mut panel = GitStatusPanel::new_for_repo(repo.clone());
+        settle(&mut panel);
+        assert_eq!(panel.branch.as_deref(), Some("main"));
+
+        panel.view_branch(index_of(&panel, "side"));
+        settle(&mut panel);
+        assert_eq!(
+            termide_git::get_current_branch(&repo).as_deref(),
+            Some("main")
+        );
+        assert!(panel.viewing_unchecked_branch());
+        assert_eq!((panel.ahead, panel.behind), (1, 0));
+        assert_eq!(
+            panel.get_visible_buttons(),
+            vec![Button::Checkout, Button::Log]
+        );
+
+        panel.selected_button = 0;
+        panel.execute_button();
+        settle(&mut panel);
+        assert_eq!(
+            termide_git::get_current_branch(&repo).as_deref(),
+            Some("side")
+        );
+        assert_eq!(panel.viewed, None);
+        assert_eq!(panel.shown_branch(), Some("side"));
+        let messages = status_events(&mut panel);
+        assert!(matches!(&messages[..], [(_, false)]), "{messages:?}");
+    }
+
+    /// A branch checked out in a linked worktree shows that working copy,
+    /// and the panel acts in it.
+    #[test]
+    fn a_worktree_branch_shows_its_working_copy() {
+        let (_root, repo, worktree) = repo();
+        let mut panel = GitStatusPanel::new_for_repo(repo.clone());
+        settle(&mut panel);
+        assert!(panel.unstaged_files.is_empty());
+        assert!(panel.branch_label(index_of(&panel, "wt")).ends_with(" ⧉"));
+        assert!(panel
+            .branch_label(index_of(&panel, "main"))
+            .starts_with('●'));
+
+        let events = panel.view_branch(index_of(&panel, "wt"));
+        assert!(matches!(&events[..], [PanelEvent::WorkingDirectoryChanged]));
+        settle(&mut panel);
+        let work_dir = panel.work_dir().map(|d| std::fs::canonicalize(d).unwrap());
+        assert_eq!(work_dir, Some(worktree.clone()));
+        let files: Vec<_> = panel.unstaged_files.iter().map(|f| &f.path).collect();
+        assert_eq!(files, vec![Path::new("new.txt")]);
+
+        // Back on the main copy's branch the worktree's files are gone.
+        panel.view_branch(index_of(&panel, "main"));
+        settle(&mut panel);
+        assert_eq!(panel.viewed, None);
+        assert!(panel.unstaged_files.is_empty());
+    }
+
+    /// git refuses to check out a branch another worktree holds; its words
+    /// reach the user as an error instead of vanishing.
+    #[test]
+    fn a_refused_checkout_reports_the_error() {
+        let (_root, repo, _worktree) = repo();
+        let mut panel = GitStatusPanel::new_for_repo(repo.clone());
+        settle(&mut panel);
+        // Force the view onto the worktree's branch as if it were checked
+        // out nowhere, the way a stale worktree list would.
+        panel.viewed = Some("wt".to_string());
+        panel.worktrees.clear();
+        panel.checkout_viewed();
+        let messages = status_events(&mut panel);
+        assert!(
+            matches!(&messages[..], [(text, true)] if text.contains("wt")),
+            "{messages:?}"
+        );
+        assert_eq!(
+            termide_git::get_current_branch(&repo).as_deref(),
+            Some("main")
+        );
     }
 }

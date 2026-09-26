@@ -70,8 +70,10 @@ impl GitStatusPanel {
                                 } else {
                                     clicked_idx
                                 };
-                                self.repo_manager.select(repo_idx);
-                                self.refresh();
+                                let events = self.select_repo(repo_idx);
+                                self.repo_dropdown_open = false;
+                                self.reset_repo_filter();
+                                return events;
                             }
                             self.repo_dropdown_open = false;
                             self.reset_repo_filter();
@@ -106,7 +108,10 @@ impl GitStatusPanel {
                                 } else {
                                     clicked_idx
                                 };
-                                self.switch_to_branch(branch_idx);
+                                let events = self.view_branch(branch_idx);
+                                self.branch_dropdown_open = false;
+                                self.reset_branch_filter();
+                                return events;
                             }
                             self.branch_dropdown_open = false;
                             self.reset_branch_filter();
@@ -193,11 +198,7 @@ impl GitStatusPanel {
                         self.repo_dropdown_open = false;
                         self.branch_dropdown_open = !self.branch_dropdown_open;
                         if self.branch_dropdown_open {
-                            self.dropdown_cursor = self
-                                .branches
-                                .iter()
-                                .position(|b| Some(b.as_str()) == self.branch.as_deref())
-                                .unwrap_or(0);
+                            self.dropdown_cursor = self.shown_branch_index();
                         }
                     }
                     // Reset click state for non-file areas

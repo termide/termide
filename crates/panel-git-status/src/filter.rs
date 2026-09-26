@@ -21,6 +21,26 @@ impl GitStatusPanel {
         }
     }
 
+    /// Index into `self.branches` of the branch the panel shows.
+    pub(crate) fn shown_branch_index(&self) -> usize {
+        let shown = self.shown_branch();
+        self.branches
+            .iter()
+            .position(|b| Some(b.as_str()) == shown)
+            .unwrap_or(0)
+    }
+
+    /// Dropdown label of the branch at `idx`: `●` marks the main copy's
+    /// branch, `⧉` one checked out in a linked worktree.
+    pub(crate) fn branch_label(&self, idx: usize) -> String {
+        let name = &self.branches[idx];
+        git::branch_label(
+            name,
+            self.branch.as_deref() == Some(name.as_str()),
+            self.worktrees.contains_key(name),
+        )
+    }
+
     /// Reset the branch filter state.
     pub(crate) fn reset_branch_filter(&mut self) {
         self.branch_filter.clear();

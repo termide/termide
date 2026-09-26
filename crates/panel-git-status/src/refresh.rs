@@ -1,7 +1,7 @@
 //! Async git-status refresh, state recomputation, and file-tree rebuilding.
 
-use std::collections::HashSet;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use termide_git::{self as git, StagedFile, UnstagedFile};
 
@@ -14,13 +14,33 @@ use crate::GitStatusPanel;
 /// ready, so the panel never blocks on a slow `git status --porcelain`
 /// over a large repository.
 pub(crate) struct GitStatusRefreshResult {
+    /// The `viewed` branch the worker was started for; a result for another
+    /// one is stale.
+    pub(crate) requested: Option<String>,
     pub(crate) branch: Option<String>,
     pub(crate) branches: Vec<String>,
+    /// `requested`, dropped when it is gone or is the main copy's branch now.
+    pub(crate) viewed: Option<String>,
+    pub(crate) worktrees: HashMap<String, PathBuf>,
     pub(crate) ahead: usize,
     pub(crate) behind: usize,
     pub(crate) unstaged_files: Vec<UnstagedFile>,
     pub(crate) staged_files: Vec<StagedFile>,
     pub(crate) stash_count: usize,
+}
+
+/// The working copy that shows `viewed`: its linked worktree, or the main
+/// copy `repo` when no branch is viewed. `None` when `viewed` is checked out
+/// nowhere.
+pub(crate) fn resolve_work_dir(
+    repo: &Path,
+    viewed: Option<&str>,
+    worktrees: &HashMap<String, PathBuf>,
+) -> Option<PathBuf> {
+    match viewed {
+        None => Some(repo.to_path_buf()),
+        Some(branch) => worktrees.get(branch).cloned(),
+    }
 }
 
 impl GitStatusPanel {
@@ -36,6 +56,8 @@ impl GitStatusPanel {
     pub(crate) fn clear_git_state(&mut self) {
         self.branch = None;
         self.branches.clear();
+        self.viewed = None;
+        self.worktrees.clear();
         self.ahead = 0;
         self.behind = 0;
         self.unstaged_files.clear();
@@ -81,18 +103,38 @@ impl GitStatusPanel {
         // treats as "nothing to apply" so the new worker's result wins.
         let (tx, rx) = std::sync::mpsc::channel();
         self.refresh_rx = Some(rx);
+        let requested = self.viewed.clone();
         std::thread::spawn(move || {
             let branch = git::get_current_branch(&repo);
-            let branches = git::get_all_branches(&repo);
-            let (ahead, behind) = git::get_ahead_behind(&repo);
-            let mut unstaged_files = git::get_unstaged_files(&repo);
-            let mut staged_files = git::get_staged_files(&repo);
+            let list = git::get_branch_list(&repo);
+            let worktrees = git::linked_worktrees(&repo, &list);
+            let viewed = requested.clone().filter(|name| {
+                Some(name) != branch.as_ref() && list.iter().any(|b| &b.name == name)
+            });
+            let branches = list.into_iter().map(|b| b.name).collect();
+            let (ahead, behind, mut unstaged_files, mut staged_files) =
+                match resolve_work_dir(&repo, viewed.as_deref(), &worktrees) {
+                    Some(dir) => {
+                        let (ahead, behind) = git::get_ahead_behind(&dir);
+                        let unstaged = git::get_unstaged_files(&dir);
+                        let staged = git::get_staged_files(&dir);
+                        (ahead, behind, unstaged, staged)
+                    }
+                    None => {
+                        let name = viewed.as_deref().unwrap_or("HEAD");
+                        let (ahead, behind) = git::get_ahead_behind_of(&repo, name);
+                        (ahead, behind, Vec::new(), Vec::new())
+                    }
+                };
             let stash_count = git::stash_list(&repo).len();
             unstaged_files.sort_by(|a, b| a.path.cmp(&b.path));
             staged_files.sort_by(|a, b| a.path.cmp(&b.path));
             let _ = tx.send(GitStatusRefreshResult {
+                requested,
                 branch,
                 branches,
+                viewed,
+                worktrees,
                 ahead,
                 behind,
                 unstaged_files,
@@ -121,8 +163,18 @@ impl GitStatusPanel {
         };
         self.refresh_rx = None;
 
+        // The view changed while the worker ran: its snapshot shows another
+        // working copy.
+        if result.requested != self.viewed {
+            self.refresh_pending = false;
+            self.refresh();
+            return false;
+        }
+
         self.branch = result.branch;
         self.branches = result.branches;
+        self.viewed = result.viewed;
+        self.worktrees = result.worktrees;
         self.ahead = result.ahead;
         self.behind = result.behind;
         self.unstaged_files = result.unstaged_files;
@@ -157,17 +209,19 @@ impl GitStatusPanel {
     /// Lightweight refresh of only the data used by `title()`.
     /// Skips branch listing, sorting, and cursor adjustment.
     pub(crate) fn refresh_title_data(&mut self) {
-        let repo = match self.repo_manager.current() {
-            Some(r) => r.to_path_buf(),
-            None => return,
+        let Some(repo) = self.repo_manager.current().map(Path::to_path_buf) else {
+            return;
         };
-
         self.branch = git::get_current_branch(&repo);
-        let (ahead, behind) = git::get_ahead_behind(&repo);
+        // A branch checked out nowhere has no working copy to count.
+        let Some(dir) = self.work_dir() else {
+            return;
+        };
+        let (ahead, behind) = git::get_ahead_behind(&dir);
         self.ahead = ahead;
         self.behind = behind;
-        self.unstaged_files = git::get_unstaged_files(&repo);
-        self.staged_files = git::get_staged_files(&repo);
+        self.unstaged_files = git::get_unstaged_files(&dir);
+        self.staged_files = git::get_staged_files(&dir);
     }
 
     /// Build the node list of a section tree from file entries.

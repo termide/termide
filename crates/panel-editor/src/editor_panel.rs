@@ -779,7 +779,8 @@ impl Panel for Editor {
             | PanelCommand::ChecklistDone { .. }
             | PanelCommand::InputSubmitted { .. }
             | PanelCommand::Confirmed { .. }
-            | PanelCommand::UpdateRepoPaths { .. } => CommandResult::None,
+            | PanelCommand::UpdateRepoPaths { .. }
+            | PanelCommand::ShowGitLog { .. } => CommandResult::None,
         }
     }
 
