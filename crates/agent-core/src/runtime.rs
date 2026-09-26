@@ -158,6 +158,12 @@ pub trait Backend: Send {
     fn current_model(&self) -> Option<String> {
         None
     }
+    /// How full the context is and how large it is, `(used, size)` in tokens,
+    /// when the backend reports it (an ACP agent's `usage_update`). The
+    /// built-in loop's figures come from its own messages instead.
+    fn context_usage(&self) -> Option<(u64, u64)> {
+        None
+    }
     /// Whether the session's permission mode means something to this backend:
     /// the built-in loop, or an external agent whose calls termide judges or
     /// whose own modes the panel's are mapped onto. The default — an external

@@ -674,6 +674,8 @@ pub struct AgentPanel {
     activity: Option<Activity>,
     /// Session token totals from `Usage`: input (prefill) and output.
     session_input: u64,
+    /// Prompt tokens the cache served this session.
+    session_cached: u64,
     session_output: u64,
     /// Bytes of shell output before and after cleaning, summed over the
     /// session, for the "output cleaned" diagnostic in the summary.
@@ -882,6 +884,7 @@ impl AgentPanel {
             context_tokens: 0,
             activity: None,
             session_input: 0,
+            session_cached: 0,
             session_output: 0,
             clean_raw_bytes: 0,
             clean_out_bytes: 0,
@@ -1943,7 +1946,10 @@ impl AgentPanel {
                         if assistant.usage.total() > 0 {
                             self.context_tokens = assistant.usage.total();
                         }
-                        self.session_input += assistant.usage.input;
+                        // What the cache served is counted apart from what is
+                        // billed in full.
+                        self.session_input += assistant.usage.uncached();
+                        self.session_cached += assistant.usage.cache_read;
                         self.session_output += assistant.usage.output;
                         // A call that failed before its first token (no network,
                         // say) went through no prefill or generation: it has
@@ -2954,6 +2960,22 @@ impl AgentPanel {
         true
     }
 
+    /// The session's token totals: `↑` the prompt tokens billed in full
+    /// (uncached input and cache writes), `↻` those the cache served (when
+    /// any), `↓` the output.
+    fn token_totals(&self) -> String {
+        let cached = if self.session_cached > 0 {
+            format!(" ↻{}", format_tokens(self.session_cached))
+        } else {
+            String::new()
+        };
+        format!(
+            "↑{}{cached} ↓{}",
+            format_tokens(self.session_input),
+            format_tokens(self.session_output)
+        )
+    }
+
     /// The model as the banner and the chip show it: `auto` while it is left
     /// to the provider and not known yet.
     fn model_display(&self) -> String {
@@ -3803,14 +3825,7 @@ impl AgentPanel {
             rows.push(("Compactions".into(), compactions.to_string()));
         }
         rows.push(("Messages".into(), messages.to_string()));
-        rows.push((
-            "Tokens".into(),
-            format!(
-                "↑{} ↓{}",
-                format_tokens(self.session_input),
-                format_tokens(self.session_output)
-            ),
-        ));
+        rows.push(("Tokens".into(), self.token_totals()));
         rows.push((
             "Context".into(),
             format!(
@@ -5898,6 +5913,14 @@ impl Panel for AgentPanel {
                     changed = true;
                 }
             }
+            // The context's fill and size, as the agent reports them.
+            if let Some((used, size)) = self.runtime.context_usage() {
+                if (used, size) != (self.context_tokens, self.model.context_window) {
+                    self.context_tokens = used;
+                    self.model.context_window = size;
+                    changed = true;
+                }
+            }
         }
         // A loop whose wait has elapsed starts its next iteration once the
         // panel is free (no run in flight, no card waiting for an answer).
@@ -6156,19 +6179,18 @@ impl Panel for AgentPanel {
                 SegmentKind::Inactive,
             ));
         }
-        // Session token totals: ↑ input (prefill), ↓ output (generated), for
-        // an external agent too when it reports them.
-        if self.session_input > 0 || self.session_output > 0 {
+        // Session token totals, for an external agent too when it reports
+        // them.
+        if self.session_input > 0 || self.session_cached > 0 || self.session_output > 0 {
             segments.push(StatusSegment::new(
-                format!(
-                    "↑{} ↓{} ",
-                    format_tokens(self.session_input),
-                    format_tokens(self.session_output)
-                ),
+                format!("{} ", self.token_totals()),
                 SegmentKind::Value,
             ));
         }
-        if !self.external && self.model.context_window > 0 {
+        // An external agent's window is known once it reports it; until then
+        // the configured fallback would mislead.
+        let window_known = !self.external || self.runtime.context_usage().is_some();
+        if window_known && self.model.context_window > 0 {
             let percent = ((self.context_tokens * 100) / self.model.context_window).min(100);
             let kind = if percent >= 80 {
                 SegmentKind::Warn
@@ -9683,6 +9705,9 @@ mod tests {
         fn set_mode(&self, mode: Mode) {
             self.modes.lock().unwrap().push(mode);
         }
+        fn context_usage(&self) -> Option<(u64, u64)> {
+            Some((975, 1_000_000))
+        }
         fn into_agent(self: Box<Self>) -> Option<Agent> {
             None
         }
@@ -9726,10 +9751,46 @@ mod tests {
                     .collect::<Vec<_>>()
             );
         }
+        // The context's fill and size come from the agent's report.
+        panel.tick();
+        assert_eq!(
+            (panel.context_tokens, panel.model.context_window),
+            (975, 1_000_000)
+        );
         // The Mode chip is there, and a switch reaches the agent.
         assert_eq!(chip(&panel, MODE_ACTION), "configured");
         panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));
         assert_eq!(*modes.lock().unwrap(), vec![Mode::All]);
+    }
+
+    #[test]
+    fn token_totals_keep_the_cache_apart_from_what_is_billed_in_full() {
+        let mut billed = panel(vec![]);
+        billed.apply(AgentEvent::AgentStart);
+        billed.apply(AgentEvent::MessageEnd(Message::Assistant(
+            AssistantMessage {
+                usage: Usage {
+                    input: 4,
+                    output: 63,
+                    cache_read: 919,
+                    cache_write: 1009,
+                },
+                ..reply("ok")
+            },
+        )));
+        // Written to the cache is billed in full; read from it is apart.
+        assert_eq!(billed.token_totals(), "↑1k ↻919 ↓63");
+        let texts: Vec<String> = billed
+            .status_segments()
+            .into_iter()
+            .map(|s| s.text)
+            .collect();
+        assert!(texts.iter().any(|t| t.contains("↻919")), "{texts:?}");
+        // No cache, no cache figure.
+        let mut plain = panel(vec![]);
+        plain.session_input = 12;
+        plain.session_output = 3;
+        assert_eq!(plain.token_totals(), "↑12 ↓3");
     }
 
     #[test]

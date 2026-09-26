@@ -88,6 +88,9 @@ struct Shared {
     mcp_server: Mutex<Option<McpServer>>,
     /// Calls announced without their arguments yet, by id.
     announced: Mutex<HashMap<String, Value>>,
+    /// The context's fill and size, `(used, size)`, as `usage_update` last
+    /// reported them.
+    context: Mutex<Option<(u64, u64)>>,
     /// The panel's live permission mode.
     mode: ModeHandle,
 }
@@ -176,6 +179,7 @@ impl AcpRuntime {
             host_tools: Mutex::new(setup.host_tools),
             mcp_server: Mutex::new(None),
             announced: Mutex::new(HashMap::new()),
+            context: Mutex::new(None),
             mode: setup.mode,
         });
         let for_reader = Arc::clone(&shared);
@@ -276,6 +280,10 @@ impl Backend for AcpRuntime {
 
     fn current_model(&self) -> Option<String> {
         self.shared.current_model.lock().unwrap().clone()
+    }
+
+    fn context_usage(&self) -> Option<(u64, u64)> {
+        *self.shared.context.lock().unwrap()
     }
 
     /// Claude Code's calls of termide's tools, and its permission requests,
@@ -848,6 +856,12 @@ impl Shared {
                 }
                 if is_finished(update) {
                     self.finish_tool_call(update);
+                }
+            }
+            "usage_update" => {
+                if let (Some(used), Some(size)) = (update["used"].as_u64(), update["size"].as_u64())
+                {
+                    *self.context.lock().unwrap() = Some((used, size));
                 }
             }
             "current_model_update" => {
@@ -1482,6 +1496,22 @@ mod tests {
         assert!(events
             .iter()
             .any(|e| matches!(e, AgentEvent::ToolExecutionEnd { .. })));
+    }
+
+    #[test]
+    fn the_reported_context_fill_and_size_are_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, _) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::Codex,
+            None,
+            ModeHandle::new(Mode::default()),
+        );
+        assert_eq!(runtime.context_usage(), None);
+        runtime
+            .shared
+            .on_update(&json!({ "sessionUpdate": "usage_update", "used": 975, "size": 1_000_000 }));
+        assert_eq!(runtime.context_usage(), Some((975, 1_000_000)));
     }
 
     #[test]

@@ -47,6 +47,14 @@ pub struct Usage {
 }
 
 impl Usage {
+    /// The prompt tokens not served from the cache, billed at the full
+    /// input price or above: the uncached input and what was written to the
+    /// cache.
+    #[must_use]
+    pub fn uncached(&self) -> u64 {
+        self.input.saturating_add(self.cache_write)
+    }
+
     /// Every token that counted against the context window.
     #[must_use]
     pub fn total(&self) -> u64 {

@@ -348,9 +348,14 @@ stream live in the panel.
 
 The status chips run, left to right: the agent, the permission mode, a
 **Reasoning** toggle (`on`/`off`), the connection with its protocol
-(`local · OpenAI Compatible`) and the model. The session's token totals (`↑` input / `↓` output) and the context
-window — tokens used of the window with a fill bar, `35k/262k ▰▰▱▱▱▱▱▱` — sit
-flush right; on a narrow terminal the chips on the left are cut, never these.
+(`local · OpenAI Compatible`) and the model. The session's token totals and
+the context window sit flush right; on a narrow terminal the chips on the left
+are cut, never these. The totals are `↑` the prompt tokens billed in full (the
+uncached input and what was written to the prompt cache), `↻` those the cache
+served, shown once there are any, and `↓` the output: `↑2.1k ↻48k ↓900`. The
+window is the tokens used of it with a fill bar, `35k/262k ▰▰▱▱▱▱▱▱`; for
+Claude Code and Codex both come from what the agent reports, and the window
+shows once it has.
 Agent, mode, reasoning, connection and model are buttons, and the same entries sit in the
 `[≡]` menu. Clicking **Reasoning** asks the model to reason (extended thinking
 / `reasoning_effort`) from the next request; the choice is remembered in the
