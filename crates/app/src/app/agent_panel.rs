@@ -10,8 +10,8 @@ use termide_agent_acp::AcpRuntime;
 use termide_agent_core::{
     build_system_prompt, discover_context_files, ensure_global_layout, AcpConfig, Agent, AgentDirs,
     AgentEvent, AutoDenyPrompter, CancelToken, CompactionPolicy, Decision, Message, ModelSpec,
-    PermissionHooks, PermissionRules, PromptOptions, Provider, Session, StopReason, StreamEvent,
-    ToolRegistry, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
+    PermissionHooks, PermissionRules, PersistScope, PromptOptions, Provider, Session, StopReason,
+    StreamEvent, ToolRegistry, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
 };
 use termide_agent_core::{subject_of, Mode, ToolContext};
 use termide_agent_hooks::CommandHooks;
@@ -141,6 +141,12 @@ impl FsCatalog {
 }
 
 impl AgentCatalog for FsCatalog {
+    fn set_mode(&self, mode: Mode) {
+        if let Some(subagents) = &self.subagents {
+            subagents.mode.set(mode);
+        }
+    }
+
     fn prompts(&self) -> Vec<termide_agent_core::PromptTemplate> {
         self.dirs.prompts()
     }
@@ -501,6 +507,9 @@ struct Subagents {
     cwd: PathBuf,
     project_root: PathBuf,
     rules: PermissionRules,
+    /// The session's live permission mode, which a delegated task runs in
+    /// unless its definition names its own.
+    mode: termide_agent_core::ModeHandle,
     max_tokens: Option<u64>,
     reasoning: bool,
     compaction: CompactionPolicy,
@@ -556,9 +565,7 @@ impl Subagents {
             reasoning: self.reasoning,
         };
         let mut rules = self.rules.clone();
-        if let Some(mode) = definition.spec.mode {
-            rules.mode = mode;
-        }
+        rules.mode = definition.spec.mode.unwrap_or_else(|| self.mode.get());
         let mut agent = Agent::new(Arc::clone(&active.provider), tools, model, self.cwd.clone())
             .with_system_prompt(system_prompt)
             .with_compaction(self.compaction);
@@ -669,6 +676,7 @@ fn agent_setup(
         cwd: cwd.clone(),
         project_root: project_root.to_path_buf(),
         rules: settings.permissions.clone(),
+        mode: termide_agent_core::ModeHandle::new(settings.permissions.mode),
         max_tokens: settings.output_limit(),
         reasoning: settings.prefer_reasoning,
         compaction: settings.compaction,
@@ -851,10 +859,10 @@ pub fn run_agent_headless(
         rules.mode = mode;
     }
     // Plan mode is a UI affordance (it waits for a card); headless has no
-    // one to accept a plan, so treat it as ask.
+    // one to accept a plan, so the configured rules decide instead.
     if rules.mode == Mode::Plan {
-        eprintln!("termide: plan mode has no meaning without the panel; using ask");
-        rules.mode = Mode::Ask;
+        eprintln!("termide: plan mode has no meaning without the panel; using configured");
+        rules.mode = Mode::Configured;
     }
 
     let mut agent = Agent::new(Arc::clone(&provider), tools, model, cwd.to_path_buf())
@@ -1110,23 +1118,33 @@ fn default_openai_base_url() -> String {
 }
 
 /// Persist an "allow always" rule as `[ai.permissions.<tool>]` in the
-/// project's `.termide/config.toml`.
+/// project's `.termide/config.toml` or the global configuration.
 ///
 /// The rule is merged into the document rather than appended, so a repeated
 /// grant updates it in place instead of writing a second `[ai.permissions.…]`
 /// table (two tables of the same name are invalid TOML and would break the
 /// whole file). `toml_edit` keeps the file's other settings, comments and
 /// layout intact.
-fn persist_rule(tool: &str, pattern: &str, decision: Decision) {
-    let Ok(cwd) = std::env::current_dir() else {
-        return;
+fn persist_rule(tool: &str, pattern: &str, decision: Decision, scope: PersistScope) {
+    let path = match scope {
+        PersistScope::Project => match std::env::current_dir() {
+            Ok(cwd) => termide_config::project_config_path(&cwd),
+            Err(_) => return,
+        },
+        PersistScope::Global => match termide_config::Config::config_file_path() {
+            Ok(path) => path,
+            Err(error) => {
+                log::warn!("cannot find the global configuration: {error}");
+                return;
+            }
+        },
     };
-    let dir = cwd.join(".termide");
-    if let Err(error) = std::fs::create_dir_all(&dir) {
-        log::warn!("cannot create {}: {error}", dir.display());
-        return;
+    if let Some(dir) = path.parent() {
+        if let Err(error) = std::fs::create_dir_all(dir) {
+            log::warn!("cannot create {}: {error}", dir.display());
+            return;
+        }
     }
-    let path = dir.join("config.toml");
     if let Err(error) = merge_permission_rule(&path, tool, pattern, decision) {
         log::warn!(
             "cannot record the permission rule in {}: {error}",
@@ -1404,7 +1422,7 @@ mod tests {
         assert!(review.system_prompt.starts_with("You review.\n\n- read:"));
         assert_eq!(review.tools.names(), ["read", "bash"]);
         assert_eq!(review.model.as_deref(), Some("big"));
-        assert_eq!(review.mode, Some(termide_agent_core::Mode::Auto));
+        assert_eq!(review.mode, Some(termide_agent_core::Mode::All));
 
         let default = catalog.resolve(DEFAULT_AGENT).unwrap();
         assert_eq!(default.tools.len(), 4);

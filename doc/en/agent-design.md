@@ -274,18 +274,25 @@ actionability waits, not screenshots and coordinates.
 
 Decision: **rules plus a mode**. Rules are `deny`, `ask`, `allow` lists keyed by
 tool and an argument pattern (`bash: "git push *"`, `edit: "src/**"`), evaluated
-deny → ask → allow. The mode decides unresolved calls: `ask` (default),
-`accept-edits` (edits inside the project pass, shell asks), `auto` (everything
-passes, for containers). Prompt answers: allow once, allow for the session,
-allow always (writes a rule to the project `.termide` config), deny. This is the
-Claude Code / OpenCode shape with ACP's answer set; it stays small and is
-data-driven, so the panel and a future ACP client render the same prompt.
+deny → ask → allow. The mode decides which rules count and what unresolved
+calls do: `ask` (everything asks, configured `allow` rules set aside), `plan`
+(reads and the web pass, changes are refused), `edit` (edits inside the
+project and the web pass, commands ask), `configured` (default: the rules
+decide, the rest asks) and `all` (everything passes). A rule's `deny` and
+`ask` hold in every mode, so a stricter mode never protects less; answers
+given for the session count everywhere but in `all`, and "allow always" is
+offered only in `configured`, the one mode the configured rules count in.
+Prompt answers: allow once, allow for the session, allow always in the project
+or everywhere (a rule in the project `.termide` or the global config), deny,
+deny for the session. This is the Claude Code / OpenCode shape with ACP's
+answer set; it stays small and is data-driven, so the panel and a future ACP
+client render the same prompt.
 
 Chosen TOML shape (OpenCode-style tables, so "allow always" appends one key):
 
 ```toml
 [ai.permissions]
-mode = "ask"        # ask | accept-edits | auto
+mode = "configured" # ask | plan | edit | configured | all
 
 [ai.permissions.bash]
 "git status*" = "allow"

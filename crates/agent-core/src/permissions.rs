@@ -1,10 +1,12 @@
 //! Permission rules and the hook that enforces them.
 //!
 //! Rules live per tool as `pattern = decision` tables; among the rules that
-//! match a call the strictest wins (`deny` over `ask` over `allow`). Calls no
-//! rule covers fall to the mode: `ask` prompts, `accept-edits` lets file
-//! tools work inside the project, `auto` allows everything. Reading inside
-//! the project and a short list of read-only shell commands never prompt.
+//! match a call the strictest wins (`deny` over `ask` over `allow`). The mode
+//! decides which rules count and what happens to calls none covers: only
+//! `configured` takes the configured `allow` rules, every mode keeps their
+//! `deny` and `ask`, and answers given "for this session" count everywhere
+//! but in `all`. Reading inside the project, loading a skill and a short list
+//! of read-only shell commands never prompt.
 //!
 //! Shell commands are split on `&&`, `||`, `;`, `|` and newlines; every part
 //! must be allowed for the whole to pass, while a `deny` or `ask` on any part
@@ -26,46 +28,56 @@ use crate::cancel::CancelToken;
 use crate::message::ToolCall;
 use crate::tool::ToolContext;
 
-/// What happens to calls no rule covers.
+/// Which rules count and what happens to calls none covers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Mode {
-    /// Prompt for everything except project reads and read-only commands.
-    #[default]
+    /// Ask about everything but project reads and read-only commands; the
+    /// configured `allow` rules do not count.
     Ask,
-    /// Also let `edit` and `write` inside the project run without a prompt.
-    AcceptEdits,
-    /// Allow everything; for containers and unattended runs.
-    Auto,
-    /// Read only: the agent explores and answers with a plan; every tool
-    /// that could change something is refused, whatever the rules say.
+    /// Read only, the web included: the agent explores and answers with a
+    /// plan; every tool that could change something is refused.
     Plan,
+    /// Also edit and write inside the project, and use the web, without a
+    /// prompt; commands still ask. The configured `allow` rules do not count.
+    #[serde(alias = "accept-edits")]
+    Edit,
+    /// The configured rules decide, and "allow always" adds to them; what
+    /// none covers asks.
+    #[default]
+    Configured,
+    /// Allow everything the rules do not refuse or send to a prompt.
+    #[serde(alias = "auto")]
+    All,
 }
 
 impl Mode {
-    /// Every mode, in the order the UI cycles through them.
-    pub const ALL: [Mode; 4] = [Mode::Ask, Mode::AcceptEdits, Mode::Auto, Mode::Plan];
+    /// Every mode, in the order the UI lists and cycles through them.
+    pub const ALL: [Mode; 5] = [
+        Mode::Ask,
+        Mode::Plan,
+        Mode::Edit,
+        Mode::Configured,
+        Mode::All,
+    ];
 
     /// The kebab-case spelling used in configuration and the status bar.
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
             Mode::Ask => "ask",
-            Mode::AcceptEdits => "accept-edits",
-            Mode::Auto => "auto",
             Mode::Plan => "plan",
+            Mode::Edit => "edit",
+            Mode::Configured => "configured",
+            Mode::All => "all",
         }
     }
 
-    /// The mode after this one, wrapping from `plan` back to `ask`.
+    /// The mode after this one, wrapping from `all` back to `ask`.
     #[must_use]
     pub fn next(self) -> Mode {
-        match self {
-            Mode::Ask => Mode::AcceptEdits,
-            Mode::AcceptEdits => Mode::Auto,
-            Mode::Auto => Mode::Plan,
-            Mode::Plan => Mode::Ask,
-        }
+        let index = Mode::ALL.iter().position(|m| *m == self).unwrap_or(0);
+        Mode::ALL[(index + 1) % Mode::ALL.len()]
     }
 }
 
@@ -158,33 +170,61 @@ pub enum Decision {
     Deny,
 }
 
+/// One `pattern = decision` table per tool.
+pub type RuleTables = BTreeMap<String, BTreeMap<String, Decision>>;
+
 /// `[ai.permissions]`: a mode plus one `pattern = decision` table per tool.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PermissionRules {
     #[serde(default)]
     pub mode: Mode,
     #[serde(flatten, default)]
-    pub tools: BTreeMap<String, BTreeMap<String, Decision>>,
+    pub tools: RuleTables,
+    /// Answers given "for this session", kept apart from the configured
+    /// rules because they count in modes those do not; never written out.
+    #[serde(skip)]
+    pub session: RuleTables,
 }
 
 impl PermissionRules {
     pub fn add(&mut self, tool: &str, pattern: &str, decision: Decision) {
-        self.tools
-            .entry(tool.to_string())
-            .or_default()
-            .insert(pattern.to_string(), decision);
+        add_rule(&mut self.tools, tool, pattern, decision);
     }
 
-    /// Strictest decision among the rules of `tool` that match `subject`.
+    /// Record an answer given for this session.
+    pub fn add_session(&mut self, tool: &str, pattern: &str, decision: Decision) {
+        add_rule(&mut self.session, tool, pattern, decision);
+    }
+
+    /// Strictest decision among the configured rules of `tool` that match
+    /// `subject`.
     #[must_use]
     pub fn evaluate(&self, tool: &str, subject: &str) -> Option<Decision> {
-        self.tools
-            .get(tool)?
-            .iter()
-            .filter(|(pattern, _)| wildcard_match(pattern, subject))
-            .map(|(_, decision)| *decision)
-            .max()
+        evaluate_rules(&self.tools, tool, subject)
     }
+
+    /// Strictest decision among this session's answers for `tool` that match
+    /// `subject`.
+    #[must_use]
+    pub fn evaluate_session(&self, tool: &str, subject: &str) -> Option<Decision> {
+        evaluate_rules(&self.session, tool, subject)
+    }
+}
+
+fn add_rule(tables: &mut RuleTables, tool: &str, pattern: &str, decision: Decision) {
+    tables
+        .entry(tool.to_string())
+        .or_default()
+        .insert(pattern.to_string(), decision);
+}
+
+fn evaluate_rules(tables: &RuleTables, tool: &str, subject: &str) -> Option<Decision> {
+    tables
+        .get(tool)?
+        .iter()
+        .filter(|(pattern, _)| wildcard_match(pattern, subject))
+        .map(|(_, decision)| *decision)
+        .max()
 }
 
 /// Glob-style match: `*` spans any text (slashes included), `?` one
@@ -230,20 +270,38 @@ pub struct PermissionRequest {
     /// The command line or the project-relative path being acted on.
     pub subject: String,
     pub call: ToolCall,
-    /// Rule pattern offered for "allow for the session" and "allow always".
+    /// Rule pattern offered for the answers that last beyond this call.
     pub suggested_pattern: String,
+    /// Whether "allow always" is on offer: only in `configured` mode, which
+    /// is the one the configured rules count in, and only with somewhere to
+    /// write the rule.
+    pub can_persist: bool,
 }
 
-/// The answers of a permission prompt: ACP's four, plus a denial that tells
-/// the model what to do instead.
+/// The answers of a permission prompt: once, for the session or always
+/// (in the project's configuration or the global one), a denial for now or
+/// for the session, and a denial that tells the model what to do instead.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PermissionAnswer {
     AllowOnce,
     AllowSession,
+    /// Allowed, and the rule written to the project's configuration.
     AllowAlways,
+    /// Allowed, and the rule written to the global configuration.
+    AllowAlwaysGlobal,
     Deny,
+    DenySession,
     /// Denied, with the user's words returned to the model as the reason.
     DenyWithReason(String),
+}
+
+/// Where an "allow always" rule is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersistScope {
+    /// The project's `.termide/config.toml`.
+    Project,
+    /// The global configuration.
+    Global,
 }
 
 /// Blocks on the agent thread until the user answers.
@@ -331,14 +389,14 @@ impl PermissionPrompter for ChannelPrompter {
 }
 
 /// Called when the user chose "allow always", so the host can persist the
-/// rule to the project configuration.
-pub type PersistRule = Box<dyn FnMut(&str, &str, Decision) + Send>;
+/// rule to the configuration `scope` names.
+pub type PersistRule = Box<dyn FnMut(&str, &str, Decision, PersistScope) + Send>;
 
 /// [`Hooks`] implementation that evaluates rules and prompts through a
 /// [`PermissionPrompter`].
 pub struct PermissionHooks {
+    /// The configured rules and this session's answers.
     rules: PermissionRules,
-    session: PermissionRules,
     /// The live mode; `rules.mode` is only its initial value.
     mode: ModeHandle,
     prompter: Box<dyn PermissionPrompter>,
@@ -351,7 +409,6 @@ impl PermissionHooks {
         Self {
             mode: ModeHandle::new(rules.mode),
             rules,
-            session: PermissionRules::default(),
             prompter,
             persist: None,
         }
@@ -363,8 +420,9 @@ impl PermissionHooks {
         self
     }
 
-    /// The configured rules plus any "allow always" grants. The mode in
-    /// them is the starting one; [`PermissionHooks::mode`] is the live one.
+    /// The configured rules plus any "allow always" grants, and this
+    /// session's answers. The mode in them is the starting one;
+    /// [`PermissionHooks::mode`] is the live one.
     #[must_use]
     pub fn rules(&self) -> &PermissionRules {
         &self.rules
@@ -386,19 +444,27 @@ impl PermissionHooks {
         self.mode.clone()
     }
 
-    /// The verdict before any prompt: rules, then session grants, then the
-    /// mode and the built-in safe defaults.
+    /// The verdict before any prompt: the rules that count in the mode
+    /// (the strictest wins), then the mode's own answer and the built-in
+    /// safe defaults.
     #[must_use]
     pub fn decide(&self, call: &ToolCall, ctx: &ToolContext) -> Decision {
         let subject = subject_of(call, ctx);
-        let rule = |text: &str| {
-            self.rules
-                .evaluate(&call.name, text)
-                .into_iter()
-                .chain(self.session.evaluate(&call.name, text))
-                .max()
-        };
         let mode = self.mode.get();
+        let rule = |text: &str| {
+            // The configured rules count in full only in `configured`;
+            // elsewhere they can only tighten. This session's answers count
+            // everywhere but in `all`, which allows what they would.
+            let configured = self
+                .rules
+                .evaluate(&call.name, text)
+                .filter(|d| mode == Mode::Configured || *d != Decision::Allow);
+            let session = self
+                .rules
+                .evaluate_session(&call.name, text)
+                .filter(|_| mode != Mode::All);
+            configured.into_iter().chain(session).max()
+        };
 
         if call.name == "bash" {
             let parsed = split_shell(&subject);
@@ -414,10 +480,12 @@ impl PermissionHooks {
                 let decision = match rule(part) {
                     Some(Decision::Allow) if parsed.has_substitution => Decision::Ask,
                     Some(decision) => decision,
-                    None if mode == Mode::Auto => Decision::Allow,
+                    None if mode == Mode::All => Decision::Allow,
                     None if !parsed.has_substitution && is_read_only_command(part) => {
                         Decision::Allow
                     }
+                    // Plan mode refuses a command that could change something.
+                    None if mode == Mode::Plan => Decision::Deny,
                     None => Decision::Ask,
                 };
                 verdict = verdict.max(decision);
@@ -428,14 +496,18 @@ impl PermissionHooks {
         if let Some(decision) = rule(&subject) {
             return decision;
         }
-        match call.name.as_str() {
-            _ if mode == Mode::Auto => Decision::Allow,
-            "read" if inside_project(call, ctx) => Decision::Allow,
+        let inside = inside_project(call, ctx);
+        match (mode, call.name.as_str()) {
+            (Mode::All, _) => Decision::Allow,
+            (_, "read") if inside => Decision::Allow,
             // Loads a skill's own text, which may live outside the project.
-            "skill" => Decision::Allow,
-            "edit" | "write" if mode == Mode::AcceptEdits && inside_project(call, ctx) => {
-                Decision::Allow
-            }
+            (_, "skill") => Decision::Allow,
+            (Mode::Plan | Mode::Edit, "fetch" | "web_search") => Decision::Allow,
+            (Mode::Edit, "edit" | "write") if inside => Decision::Allow,
+            // Plan mode asks before reading outside the project and refuses
+            // what could change something.
+            (Mode::Plan, "read") => Decision::Ask,
+            (Mode::Plan, _) => Decision::Deny,
             _ => Decision::Ask,
         }
     }
@@ -445,21 +517,48 @@ impl Hooks for PermissionHooks {
     fn before_tool_call(&mut self, call: &ToolCall, ctx: &ToolContext) -> ToolDecision {
         match self.decide(call, ctx) {
             Decision::Allow => ToolDecision::Allow,
+            Decision::Deny if self.mode.get() == Mode::Plan => ToolDecision::Block {
+                reason: PLAN_MODE_REASON.into(),
+            },
             Decision::Deny => ToolDecision::Block {
                 reason: "denied by the permission rules".into(),
             },
             Decision::Ask => {
                 let subject = subject_of(call, ctx);
+                let can_persist = self.mode.get() == Mode::Configured && self.persist.is_some();
                 let request = PermissionRequest {
                     tool: call.name.clone(),
                     suggested_pattern: suggested_pattern(&call.name, &subject),
                     subject,
                     call: call.clone(),
+                    can_persist,
+                };
+                let persist = |hooks: &mut Self, scope: PersistScope| {
+                    if !can_persist {
+                        // Not on offer here: it lasts for the session.
+                        hooks.rules.add_session(
+                            &request.tool,
+                            &request.suggested_pattern,
+                            Decision::Allow,
+                        );
+                        return;
+                    }
+                    hooks
+                        .rules
+                        .add(&request.tool, &request.suggested_pattern, Decision::Allow);
+                    if let Some(persist) = &mut hooks.persist {
+                        persist(
+                            &request.tool,
+                            &request.suggested_pattern,
+                            Decision::Allow,
+                            scope,
+                        );
+                    }
                 };
                 match self.prompter.ask(&request) {
                     PermissionAnswer::AllowOnce => ToolDecision::Allow,
                     PermissionAnswer::AllowSession => {
-                        self.session.add(
+                        self.rules.add_session(
                             &request.tool,
                             &request.suggested_pattern,
                             Decision::Allow,
@@ -467,16 +566,26 @@ impl Hooks for PermissionHooks {
                         ToolDecision::Allow
                     }
                     PermissionAnswer::AllowAlways => {
-                        self.rules
-                            .add(&request.tool, &request.suggested_pattern, Decision::Allow);
-                        if let Some(persist) = &mut self.persist {
-                            persist(&request.tool, &request.suggested_pattern, Decision::Allow);
-                        }
+                        persist(self, PersistScope::Project);
+                        ToolDecision::Allow
+                    }
+                    PermissionAnswer::AllowAlwaysGlobal => {
+                        persist(self, PersistScope::Global);
                         ToolDecision::Allow
                     }
                     PermissionAnswer::Deny => ToolDecision::Block {
                         reason: "denied by the user".into(),
                     },
+                    PermissionAnswer::DenySession => {
+                        self.rules.add_session(
+                            &request.tool,
+                            &request.suggested_pattern,
+                            Decision::Deny,
+                        );
+                        ToolDecision::Block {
+                            reason: "denied by the user for this session".into(),
+                        }
+                    }
                     PermissionAnswer::DenyWithReason(reason) => ToolDecision::Block {
                         reason: format!("denied by the user: {reason}"),
                     },
@@ -765,7 +874,7 @@ mod tests {
     fn toml_shape_round_trips() {
         let rules = rules(
             r#"
-            mode = "accept-edits"
+            mode = "edit"
             [bash]
             "git status*" = "allow"
             "git push*" = "ask"
@@ -775,7 +884,7 @@ mod tests {
             ".env" = "deny"
             "#,
         );
-        assert_eq!(rules.mode, Mode::AcceptEdits);
+        assert_eq!(rules.mode, Mode::Edit);
         assert_eq!(
             rules.evaluate("bash", "git push origin main"),
             Some(Decision::Ask)
@@ -784,7 +893,14 @@ mod tests {
         assert_eq!(rules.evaluate("edit", "README.md"), None);
         let text = toml::to_string(&rules).unwrap();
         assert_eq!(toml::from_str::<PermissionRules>(&text).unwrap(), rules);
-        assert_eq!(PermissionRules::default().mode, Mode::Ask);
+        assert_eq!(PermissionRules::default().mode, Mode::Configured);
+        // The earlier names still read.
+        assert_eq!(rules_of_mode("accept-edits"), Mode::Edit);
+        assert_eq!(rules_of_mode("auto"), Mode::All);
+    }
+
+    fn rules_of_mode(mode: &str) -> Mode {
+        rules(&format!("mode = \"{mode}\"")).mode
     }
 
     #[test]
@@ -817,68 +933,82 @@ mod tests {
         assert!(wildcard_match("*", ""));
     }
 
+    /// Every mode against every kind of call, with configured rules that
+    /// allow a command and an edit, and deny a secret: the table the
+    /// documentation gives.
     #[test]
-    fn mode_defaults_for_file_tools() {
-        let (ask, _) = hooks(PermissionRules::default(), vec![]);
-        assert_eq!(
-            ask.decide(&call("read", json!({ "path": "src/a.rs" })), &ctx()),
-            Decision::Allow
-        );
-        assert_eq!(
-            ask.decide(&call("read", json!({ "path": "/etc/passwd" })), &ctx()),
-            Decision::Ask
-        );
-        assert_eq!(
-            ask.decide(&call("read", json!({ "path": "../other/x" })), &ctx()),
-            Decision::Ask
-        );
-        assert_eq!(
-            ask.decide(&call("edit", json!({ "path": "src/a.rs" })), &ctx()),
-            Decision::Ask
-        );
+    fn each_mode_decides_by_its_table() {
+        use Decision::{Allow, Ask, Deny};
+        let read_in = call("read", json!({ "path": "src/a.rs" }));
+        let read_out = call("read", json!({ "path": "/etc/passwd" }));
+        let web = call("fetch", json!({ "url": "https://docs.rs/x" }));
+        let edit_in = call("edit", json!({ "path": "src/a.rs" }));
+        let edit_out = call("write", json!({ "path": "/tmp/x" }));
+        let secret = call("edit", json!({ "path": ".env" }));
+        let look = bash("git status");
+        let build = bash("cargo build");
+        let other = bash("make install");
+        let mcp = call("fs__search", json!({ "query": "x" }));
+        let calls = [
+            &read_in, &read_out, &web, &edit_in, &edit_out, &secret, &look, &build, &other, &mcp,
+        ];
+        let table = [
+            (
+                Mode::Ask,
+                [Allow, Ask, Ask, Ask, Ask, Deny, Allow, Ask, Ask, Ask],
+            ),
+            (
+                Mode::Plan,
+                [Allow, Ask, Allow, Deny, Deny, Deny, Allow, Deny, Deny, Deny],
+            ),
+            (
+                Mode::Edit,
+                [Allow, Ask, Allow, Allow, Ask, Deny, Allow, Ask, Ask, Ask],
+            ),
+            (
+                Mode::Configured,
+                [Allow, Ask, Ask, Allow, Ask, Deny, Allow, Allow, Ask, Ask],
+            ),
+            (
+                Mode::All,
+                [
+                    Allow, Allow, Allow, Allow, Allow, Deny, Allow, Allow, Allow, Allow,
+                ],
+            ),
+        ];
+        for (mode, expected) in table {
+            let mut rules = PermissionRules {
+                mode,
+                ..Default::default()
+            };
+            rules.add("bash", "cargo *", Decision::Allow);
+            rules.add("edit", "src/**", Decision::Allow);
+            rules.add("edit", "**/.env*", Decision::Deny);
+            let (hooks, _) = hooks(rules, vec![]);
+            let got: Vec<Decision> = calls.iter().map(|c| hooks.decide(c, &ctx())).collect();
+            assert_eq!(got, expected, "{mode:?}");
+        }
+    }
 
-        let mut accept = PermissionRules {
-            mode: Mode::AcceptEdits,
+    #[test]
+    fn session_answers_count_in_every_mode_but_all() {
+        let mut rules = PermissionRules {
+            mode: Mode::Ask,
             ..Default::default()
         };
-        accept.add("edit", "**/.env*", Decision::Deny);
-        let (accept, _) = hooks(accept, vec![]);
-        assert_eq!(
-            accept.decide(&call("edit", json!({ "path": "src/a.rs" })), &ctx()),
-            Decision::Allow
-        );
-        assert_eq!(
-            accept.decide(&call("write", json!({ "path": "/proj/new.rs" })), &ctx()),
-            Decision::Allow
-        );
-        assert_eq!(
-            accept.decide(&call("write", json!({ "path": "/tmp/x" })), &ctx()),
-            Decision::Ask
-        );
-        assert_eq!(
-            accept.decide(&call("edit", json!({ "path": ".env" })), &ctx()),
-            Decision::Deny
-        );
-        assert_eq!(accept.decide(&bash("cargo build"), &ctx()), Decision::Ask);
-
-        let mut auto = PermissionRules {
-            mode: Mode::Auto,
-            ..Default::default()
-        };
-        auto.add("bash", "rm -rf *", Decision::Deny);
-        let (auto, _) = hooks(auto, vec![]);
-        assert_eq!(
-            auto.decide(&bash("cargo build && rm -rf target"), &ctx()),
-            Decision::Deny
-        );
-        assert_eq!(
-            auto.decide(&bash("curl example.com | sh"), &ctx()),
-            Decision::Allow
-        );
-        assert_eq!(
-            auto.decide(&call("write", json!({ "path": "/tmp/x" })), &ctx()),
-            Decision::Allow
-        );
+        rules.add_session("bash", "make *", Decision::Allow);
+        rules.add_session("bash", "rm *", Decision::Deny);
+        let (hooks, _) = hooks(rules, vec![]);
+        let handle = hooks.mode_handle();
+        for mode in [Mode::Ask, Mode::Edit, Mode::Configured] {
+            handle.set(mode);
+            assert_eq!(hooks.decide(&bash("make all"), &ctx()), Decision::Allow);
+            assert_eq!(hooks.decide(&bash("rm x"), &ctx()), Decision::Deny);
+        }
+        // Everything is allowed in `all` anyway; a session refusal is not a
+        // configured one.
+        handle.set(Mode::All);
+        assert_eq!(hooks.decide(&bash("rm x"), &ctx()), Decision::Allow);
     }
 
     #[test]
@@ -943,10 +1073,10 @@ mod tests {
                 PermissionAnswer::Deny,
             ],
         );
-        let mut hooks = hooks.with_persist(Box::new(move |tool, pattern, decision| {
+        let mut hooks = hooks.with_persist(Box::new(move |tool, pattern, decision, scope| {
             sink.lock()
                 .unwrap()
-                .push((tool.to_string(), pattern.to_string(), decision));
+                .push((tool.to_string(), pattern.to_string(), decision, scope));
         }));
 
         // 1. allow once: asked again next time
@@ -974,7 +1104,8 @@ mod tests {
             vec![(
                 "bash".to_string(),
                 "npm test *".to_string(),
-                Decision::Allow
+                Decision::Allow,
+                PersistScope::Project
             )]
         );
         assert_eq!(
@@ -990,6 +1121,47 @@ mod tests {
         assert_eq!(asked[0].suggested_pattern, "cargo build *");
         assert_eq!(asked[3].subject, "a");
         assert_eq!(asked[3].suggested_pattern, "a");
+        assert!(asked.iter().all(|request| request.can_persist));
+    }
+
+    #[test]
+    fn always_is_offered_only_in_configured_mode_and_goes_where_asked() {
+        let persisted = Arc::new(Mutex::new(Vec::new()));
+        let sink = persisted.clone();
+        let (hooks, asked) = hooks(
+            PermissionRules::default(),
+            vec![
+                PermissionAnswer::AllowAlwaysGlobal,
+                PermissionAnswer::DenySession,
+                PermissionAnswer::AllowAlways,
+            ],
+        );
+        let mut hooks = hooks.with_persist(Box::new(move |_, pattern, _, scope| {
+            sink.lock().unwrap().push((pattern.to_string(), scope));
+        }));
+        hooks.before_tool_call(&bash("npm test"), &ctx());
+        let refused = hooks.before_tool_call(&bash("make install"), &ctx());
+        assert!(matches!(refused, ToolDecision::Block { reason } if reason.contains("session")));
+        // Refused for the session: not asked again.
+        assert_eq!(
+            hooks.decide(&bash("make install DESTDIR=x"), &ctx()),
+            Decision::Deny
+        );
+        assert_eq!(
+            *persisted.lock().unwrap(),
+            vec![("npm test *".to_string(), PersistScope::Global)]
+        );
+        // Outside `configured`, "always" is not on offer, and an answer that
+        // says it anyway lasts for the session only.
+        hooks.set_mode(Mode::Ask);
+        hooks.before_tool_call(&bash("cargo build"), &ctx());
+        assert!(!asked.lock().unwrap()[2].can_persist);
+        assert_eq!(persisted.lock().unwrap().len(), 1);
+        assert_eq!(
+            hooks.decide(&bash("cargo build --release"), &ctx()),
+            Decision::Allow
+        );
+        assert_eq!(hooks.rules().evaluate("bash", "cargo build"), None);
     }
 
     #[test]
@@ -1077,21 +1249,21 @@ mod tests {
             }),
         );
         let handle = hooks.mode_handle();
-        assert_eq!(handle.get(), Mode::Ask);
+        assert_eq!(handle.get(), Mode::Configured);
         assert_eq!(
             hooks.decide(&call("write", json!({ "path": "a" })), &ctx()),
             Decision::Ask
         );
 
-        handle.set(Mode::AcceptEdits);
-        assert_eq!(hooks.mode(), Mode::AcceptEdits);
+        handle.set(Mode::Edit);
+        assert_eq!(hooks.mode(), Mode::Edit);
         assert_eq!(
             hooks.decide(&call("write", json!({ "path": "a" })), &ctx()),
             Decision::Allow
         );
         assert_eq!(hooks.decide(&bash("cargo build"), &ctx()), Decision::Ask);
 
-        handle.set(Mode::Auto);
+        handle.set(Mode::All);
         assert_eq!(hooks.decide(&bash("cargo build"), &ctx()), Decision::Allow);
         assert_eq!(
             hooks.before_tool_call(&bash("cargo build"), &ctx()),
@@ -1099,11 +1271,11 @@ mod tests {
         );
         assert!(asked.lock().unwrap().is_empty());
 
-        assert_eq!(Mode::Ask.next(), Mode::AcceptEdits);
-        assert_eq!(Mode::Auto.next(), Mode::Plan);
-        assert_eq!(Mode::Plan.next(), Mode::Ask);
-        assert_eq!(Mode::AcceptEdits.label(), "accept-edits");
-        assert_eq!(Mode::Plan.label(), "plan");
+        assert_eq!(Mode::Ask.next(), Mode::Plan);
+        assert_eq!(Mode::Configured.next(), Mode::All);
+        assert_eq!(Mode::All.next(), Mode::Ask);
+        assert_eq!(Mode::Edit.label(), "edit");
+        assert_eq!(Mode::Configured.label(), "configured");
     }
     #[test]
     fn loading_a_skill_never_asks() {
@@ -1168,7 +1340,7 @@ mod tests {
         ));
 
         // Any other mode: the guard steps aside, the rules decide.
-        mode.set(Mode::Auto);
+        mode.set(Mode::All);
         assert!(!blocked(
             &mut guard,
             &call("edit", json!({ "path": "src/main.rs" }))
@@ -1192,6 +1364,7 @@ mod prompter_tests {
                 arguments: json!({ "command": "git push" }),
             },
             suggested_pattern: "git push *".into(),
+            can_persist: true,
         }
     }
 

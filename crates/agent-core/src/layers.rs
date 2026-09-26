@@ -792,7 +792,7 @@ mod tests {
         let spec = dirs.spec("review");
         assert_eq!(spec.description, "Reviews diffs");
         assert_eq!(spec.model.as_deref(), Some("big"));
-        assert_eq!(spec.mode, Some(Mode::AcceptEdits));
+        assert_eq!(spec.mode, Some(Mode::Edit));
         assert_eq!(
             spec.tools,
             Some(vec!["read".to_string(), "bash".to_string()])

@@ -557,10 +557,11 @@ pub(super) const AI_PERMISSION_MODE_FIELD: usize = 7;
 fn permission_mode_label(mode: &str) -> String {
     let t = i18n::t();
     match mode {
-        "accept-edits" => t.agent_mode_accept_edits(),
-        "auto" => t.agent_mode_auto(),
+        "ask" => t.agent_mode_ask(),
         "plan" => t.agent_mode_plan(),
-        _ => t.agent_mode_ask(),
+        "edit" => t.agent_mode_edit(),
+        "all" => t.agent_mode_all(),
+        _ => t.agent_mode_configured(),
     }
     .to_string()
 }
@@ -848,28 +849,28 @@ mod enum_option_tests {
     }
 
     #[test]
-    fn the_permission_mode_for_new_sessions_is_chosen_from_the_four() {
+    fn the_permission_mode_for_new_sessions_is_chosen_from_the_five() {
         let mut config = Config::default();
         let field = AI_PERMISSION_MODE_FIELD;
-        // Auto by default, shown by its localized name.
-        assert_eq!(config.ai.permission_mode(), "auto");
+        // Configured by default, shown by its localized name.
+        assert_eq!(config.ai.permission_mode(), "configured");
         let options = enum_options(&config, SettingsTab::Ai, field).unwrap();
-        assert_eq!(options.values, ["ask", "accept-edits", "auto", "plan"]);
-        assert_eq!(options.current, Some(2));
+        assert_eq!(options.values, ["ask", "plan", "edit", "configured", "all"]);
+        assert_eq!(options.current, Some(3));
         assert_eq!(
             get_field_value(&config, SettingsTab::Ai, field),
-            i18n::t().agent_mode_auto()
+            i18n::t().agent_mode_configured()
         );
-        apply_enum_value(&mut config, SettingsTab::Ai, field, "ask");
-        assert_eq!(config.ai.permission_mode(), "ask");
-        apply_enum_value(&mut config, SettingsTab::Ai, field, "auto");
-        assert_eq!(config.ai.permission_mode(), "auto");
+        apply_enum_value(&mut config, SettingsTab::Ai, field, "edit");
+        assert_eq!(config.ai.permission_mode(), "edit");
         cycle_enum_forward(&mut config, SettingsTab::Ai, field);
-        assert_eq!(config.ai.permission_mode(), "plan");
+        assert_eq!(config.ai.permission_mode(), "configured");
+        cycle_enum_forward(&mut config, SettingsTab::Ai, field);
+        assert_eq!(config.ai.permission_mode(), "all");
         cycle_enum_forward(&mut config, SettingsTab::Ai, field);
         assert_eq!(config.ai.permission_mode(), "ask");
         cycle_enum_backward(&mut config, SettingsTab::Ai, field);
-        assert_eq!(config.ai.permission_mode(), "plan");
+        assert_eq!(config.ai.permission_mode(), "all");
     }
 
     /// Choosing from the dropdown and cycling with Left/Right must write the

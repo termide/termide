@@ -446,12 +446,14 @@ pub trait Translation: Send + Sync {
     fn agent_models_loading(&self) -> &str;
     /// Permission-mode picker: ask
     fn agent_mode_ask(&self) -> &str;
-    /// Permission-mode picker: accept-edits
-    fn agent_mode_accept_edits(&self) -> &str;
-    /// Permission-mode picker: auto
-    fn agent_mode_auto(&self) -> &str;
-    /// Agent panel: the plan permission mode (read only, plan first)
+    /// Permission-mode picker: plan (read only and the web, plan first)
     fn agent_mode_plan(&self) -> &str;
+    /// Permission-mode picker: edit
+    fn agent_mode_edit(&self) -> &str;
+    /// Permission-mode picker: configured
+    fn agent_mode_configured(&self) -> &str;
+    /// Permission-mode picker: all
+    fn agent_mode_all(&self) -> &str;
     /// Agent panel context menu: open the assembled system prompt
     fn agent_show_prompt(&self) -> &str;
     /// Agent panel context menu and `/usage`: the session-info modal title
@@ -466,8 +468,12 @@ pub trait Translation: Send + Sync {
     fn agent_perm_allow_session(&self) -> &str;
     /// Permission answer: allow it always (a rule is saved)
     fn agent_perm_allow_always(&self) -> &str;
+    /// Permission card: allow always, recorded in the global configuration.
+    fn agent_perm_allow_always_global(&self) -> &str;
     /// Permission answer: refuse this call
     fn agent_perm_deny(&self) -> &str;
+    /// Permission card: deny for the rest of this session.
+    fn agent_perm_deny_session(&self) -> &str;
     /// Permission card: refuse and give the agent a reason
     fn agent_perm_deny_reason(&self) -> &str;
     /// Permission card: cancel and stop the run
@@ -498,8 +504,8 @@ pub trait Translation: Send + Sync {
     fn agent_plan_carry_title(&self) -> &str;
     /// Plan card: carry it out, accepting edits
     fn agent_plan_accept_edits(&self) -> &str;
-    /// Plan card: carry it out, asking before each change
-    fn agent_plan_ask_each(&self) -> &str;
+    /// Plan card: carry it out under the configured rules
+    fn agent_plan_configured(&self) -> &str;
     /// Plan card: cancel and keep planning
     fn agent_plan_keep(&self) -> &str;
 

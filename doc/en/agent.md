@@ -181,7 +181,7 @@ you have named or sent even one message to is always kept.
 | `Shift+arrows`, `Shift+Home`/`End`, `Ctrl+Shift+arrows` | Extend the prompt selection by character, to the line edges, by word |
 | `Ctrl+Left` / `Ctrl+Right` | Word-by-word navigation in the prompt |
 | `Ctrl+Z` / `Ctrl+Y`, `Ctrl+Shift+Z` | Undo / redo a prompt edit |
-| `Shift+Tab` | Cycle the permission mode: ask → accept-edits → auto → plan |
+| `Shift+Tab` | Cycle the permission mode: ask → plan → edit → configured → all |
 | `F2` | Rename this session (the same prompt as the `[≡]` menu) |
 | `F3` | Open the session-info modal (model, agent, mode, directory, created/last-active times, messages, compactions, tokens, context, how much shell output was cleaned); also `/usage` and the `[≡]` menu |
 | `F4` | Roll the session back to before a chosen checkpoint |
@@ -464,9 +464,9 @@ search starts returning nothing, the selectors in its file need updating; a
 file of your own with a new name adds an engine. The keys are described in
 the shipped files.
 
-In `ask` mode both tools ask for permission. "Allow always" for `fetch` allows
-the whole site (`https://docs.rs/*`), for `web_search` every query. Neither
-changes anything on your machine, so both work in plan mode.
+In `plan` and `edit` both tools run without asking; in `ask` and, without a
+rule, in `configured` they ask. "Allow" beyond once for `fetch` covers the
+whole site (`https://docs.rs/*`), for `web_search` every query.
 
 A file the agent edits while it is open in an editor is reloaded there at
 once, cursor and scroll position kept, unless that editor has unsaved changes;
@@ -479,21 +479,25 @@ Nothing that changes your project happens without your say-so. When the agent
 wants to do something that is not already allowed, a card appears in the
 panel above the input. Its title is the intent — "Agent wants to run bash:" —
 and under it, dim, exactly what that is (the command or path); a long one
-folds to five lines that a click unfolds. Six rows follow: allow once, allow
-for this session, allow always, deny, **deny and tell the agent why** (a
-sentence you type, returned to the model as the reason, so it can take another
-way), and **stop the run**. `↑`/`↓` and `Enter`, or the digits `1`–`6`, answer
-it; a click picks a row and a second click (or `Enter`) confirms it, so a
-stray click cannot answer; `Esc` stops the run. The status line announces the
-question too, so a panel that is not in focus does not ask unseen. "Allow
-always" appends a rule to `.termide/config.toml` in the project.
+folds to five lines that a click unfolds. The rows follow: allow once, allow
+for this session, in `configured` mode also allow always in this project and
+allow always everywhere, then deny, deny for this session, **deny and tell the
+agent why** (a sentence you type, returned to the model as the reason, so it
+can take another way), and **stop the run**. The rows that outlast the call
+name the pattern they record (`cargo build *`, a site, a path). `↑`/`↓` and
+`Enter`, or the row's digit, answer it; a click picks a row and a second click
+(or `Enter`) confirms it, so a stray click cannot answer; `Esc` stops the run.
+The status line announces the question too, so a panel that is not in focus
+does not ask unseen. "In this project" appends the rule to
+`.termide/config.toml` in the project, "everywhere" to the global
+configuration; answers for the session live until the panel closes.
 
 Rules live per tool. Among the rules that match, the strictest wins, so a
 `deny` always beats an `allow`:
 
 ```toml
 [ai.permissions]
-mode = "auto"       # ask | accept-edits | auto (default) | plan — what new sessions start in
+mode = "configured" # ask | plan | edit | configured (default) | all — what new sessions start in
 
 [ai.permissions.bash]
 "cargo *"     = "allow"
@@ -515,24 +519,42 @@ per part: `cargo build && rm -rf target` needs both halves allowed, and a deny
 on either half stops the whole command. Command substitution (`$(…)`, backticks)
 is never allowed automatically.
 
-The mode decides what happens to anything no rule covers. `mode` in the
-configuration is the starting point every new session takes (`auto` unless you
-change it), also set from the settings modal's **AI** section under
-Permissions; the panel's **Mode** chip and `Shift+Tab` change it for the
-current panel only.
+The mode decides which rules count and what happens to anything none covers.
+`mode` in the configuration is the starting point every new session takes
+(`configured` unless you change it), also set from the settings modal's **AI**
+section under Permissions; the panel's **Mode** chip and `Shift+Tab` change it
+for the current panel only.
 
-- **ask** asks before every change and every command.
-- **accept-edits** also lets the agent edit and create files inside the project
-  without asking; shell commands still ask.
-- **auto** (the default) allows everything; the rules' `deny` and `ask` still
-  apply. Pick **ask** or **accept-edits** where a mistake would cost something.
-- **plan** allows nothing that changes anything: the agent reads, searches
-  and runs look-only commands, then answers with a plan. See below.
+- **ask** asks about everything; the configured `allow` rules do not count,
+  only your answers in this session do.
+- **plan** reads and uses the web, and refuses anything that could change
+  something; the agent answers with a plan. See below.
+- **edit** also edits and creates files inside the project without asking;
+  commands, MCP tools and files outside the project ask. The configured
+  `allow` rules do not count.
+- **configured** (the default) follows the configured rules and your answers
+  in this session, asks about the rest, and is the one mode that offers
+  "allow always".
+- **all** allows everything.
 
-Two things never ask in any mode: reading a file inside the project, and a
-short list of commands that only look at things (`ls`, `cat`, `rg`,
-`git status`, `find` without `-delete` or `-exec`, and similar). A redirection
-in the command disqualifies it.
+| | ask | plan | edit | configured | all |
+|---|---|---|---|---|---|
+| read inside the project | ✓ | ✓ | ✓ | ✓ | ✓ |
+| read outside it | ? | ? | ? | rules / ? | ✓ |
+| web | ? | ✓ | ✓ | rules / ? | ✓ |
+| edit inside the project | ? | ✗ | ✓ | rules / ? | ✓ |
+| edit outside it | ? | ✗ | ? | rules / ? | ✓ |
+| look-only command | ✓ | ✓ | ✓ | ✓ | ✓ |
+| other command, MCP tool | ? | ✗ | ? | rules / ? | ✓ |
+
+✓ runs, ? asks, ✗ is refused, "rules / ?" follows a matching rule and asks
+without one. Whatever the mode, a rule's `deny` refuses and its `ask` asks:
+the modes set the configured `allow` rules aside, never the refusals. Your
+answers for the session count in every mode but `all`.
+
+The look-only commands are a short list that only look at things (`ls`,
+`cat`, `rg`, `git status`, `find` without `-delete` or `-exec`, and similar);
+a redirection in the command disqualifies it. Loading a skill never asks.
 
 ### Plan mode
 
@@ -541,21 +563,21 @@ For a task you want to see thought through before a line changes, switch to
 `mode = "plan"`). While it is on, the instructions from `system/plan.md` are
 added to the system prompt, and every tool call that could change something
 is refused with a message the model reads, whatever the rules, the session
-grants or a hook's approval say: `edit`, `write`, MCP tools, and any shell
-command that is not on the look-only list. Reading and `skill` stay as in
-`ask`.
+answers or a hook's approval say: `edit`, `write`, MCP tools, and any shell
+command that is not on the look-only list. Reading inside the project, the
+web and `skill` run without asking; reading outside it asks.
 
 When the agent answers, a card asks what to do with the plan:
 
 ```
 ┌ Plan mode: carry the plan out? ────┐
 │ 1. Yes, accepting edits            │
-│ 2. Yes, asking before each change  │
+│ 2. Yes, under the configured rules │
 │ 3. Keep planning                   │
 └────────────────────────────────────┘
 ```
 
-The first two leave plan mode for accept-edits or ask and send the request
+The first two leave plan mode for edit or configured and send the request
 named in the front matter of `system/plan.md` (`request:`), so the same
 session goes on to carry the plan out with it in context; the third (or
 `Esc`) keeps plan mode, and whatever you type next refines the plan. The
@@ -647,7 +669,7 @@ too. Beside it an `agent.toml` may set, every field optional:
 ```toml
 description = "Reviews diffs and points at risks"
 model = "Qwen3.8-27B-MTPLX-Optimized-Quality"   # at the configured endpoint
-mode = "accept-edits"                            # ask | accept-edits | auto | plan
+mode = "edit"                                    # ask | plan | edit | configured | all
 tools = ["read", "bash"]                         # a subset of the built-in tools
 ```
 
@@ -668,9 +690,10 @@ or a focused searcher does its work without filling the session, the way
 Claude Code's `Task` tool and OpenCode's sub-sessions do.
 
 The delegate does not see the conversation, so the calling agent must put
-everything into the prompt. It runs with no one to prompt, so it can only do
-what the permission rules and the current mode already allow: anything that
-would otherwise ask is refused with a reason it reads. External (`[acp]`)
+everything into the prompt. It runs in the session's current mode, unless its
+`agent.toml` names one, with no one to prompt, so it can only do what the
+rules and that mode already allow: anything that would otherwise ask is
+refused with a reason it reads. External (`[acp]`)
 agents cannot be delegates, and a subagent gets no `task` tool of its own, so
 delegation does not nest. A run that will not stop is cut off after fifty
 model calls.
@@ -903,8 +926,9 @@ Every schema travels with every request, so a server with dozens of tools is
 worth narrowing with `tools`; the log says so when a server has more than
 twenty and no such list.
 
-An MCP tool asks for permission like any other tool that no rule covers,
-except in `auto` mode. "Allow always" writes a rule for the tool name:
+An MCP tool asks for permission like a command: it runs in `all`, is refused
+in `plan`, and asks elsewhere unless a rule covers it in `configured`. "Allow
+always" writes a rule for the tool name:
 
 ```toml
 [ai.permissions.github__search_issues]
@@ -1024,7 +1048,8 @@ termide --prompt "count the TODOs in src" --output json
 
 No one is watching to answer a permission card, so a headless run does only
 what the rules and the mode already allow: anything that would ask is refused
-with a reason the model reads. In the default `auto` mode that is only what a
-rule marks `ask`; under `ask` or `accept-edits`, add `allow` rules for the
-exact commands and paths the task needs. Plan mode has no meaning without the panel and is treated as `ask`,
-and an external (`[acp]`) agent cannot be run this way.
+with a reason the model reads. In the default `configured` mode, add `allow`
+rules for the exact commands and paths the task needs, or set `mode = "all"`
+for unattended work. Plan mode has no meaning without the panel and is
+treated as `configured`, and an external (`[acp]`) agent cannot be run this
+way.

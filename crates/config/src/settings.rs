@@ -111,12 +111,9 @@ pub struct AiSettings {
     #[serde(default = "agent_defaults::reasoning")]
     pub prefer_reasoning: bool,
 
-    /// Permission rules: a mode plus one `pattern = decision` table per tool.
-    /// New sessions start in `auto` unless the file names another mode.
-    #[serde(
-        default = "agent_defaults::permissions",
-        deserialize_with = "agent_defaults::deserialize_permissions"
-    )]
+    /// Permission rules: a mode (`configured` unless the file names another)
+    /// plus one `pattern = decision` table per tool.
+    #[serde(default)]
     pub permissions: termide_agent_core::PermissionRules,
 
     /// Context compaction policy.
@@ -350,7 +347,7 @@ impl Default for AiSettings {
             connections: std::collections::BTreeMap::new(),
             max_tokens_per_turn: agent_defaults::max_tokens(),
             prefer_reasoning: agent_defaults::reasoning(),
-            permissions: agent_defaults::permissions(),
+            permissions: termide_agent_core::PermissionRules::default(),
             compaction: termide_agent_core::CompactionPolicy::default(),
             fold_blocks: FoldBlocks::default(),
             web: WebSettings::default(),
@@ -726,41 +723,6 @@ mod agent_defaults {
     }
     pub fn reasoning() -> bool {
         true
-    }
-    pub fn permissions() -> termide_agent_core::PermissionRules {
-        termide_agent_core::PermissionRules {
-            mode: termide_agent_core::Mode::Auto,
-            ..Default::default()
-        }
-    }
-    /// `[ai.permissions]` with its mode defaulting to `auto` rather than the
-    /// agent library's own `ask`, so a file that only adds rules keeps the
-    /// mode new sessions start in.
-    pub fn deserialize_permissions<'de, D>(
-        deserializer: D,
-    ) -> Result<termide_agent_core::PermissionRules, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use serde::Deserialize;
-        #[derive(Deserialize)]
-        struct Rules {
-            #[serde(default = "auto")]
-            mode: termide_agent_core::Mode,
-            #[serde(flatten, default)]
-            tools: std::collections::BTreeMap<
-                String,
-                std::collections::BTreeMap<String, termide_agent_core::Decision>,
-            >,
-        }
-        fn auto() -> termide_agent_core::Mode {
-            termide_agent_core::Mode::Auto
-        }
-        let rules = Rules::deserialize(deserializer)?;
-        Ok(termide_agent_core::PermissionRules {
-            mode: rules.mode,
-            tools: rules.tools,
-        })
     }
 }
 
@@ -1141,21 +1103,27 @@ mod ai_settings_tests {
     }
 
     #[test]
-    fn new_sessions_reason_and_run_in_auto_unless_the_file_says_otherwise() {
+    fn new_sessions_reason_and_follow_the_configured_rules() {
         let defaults = AiSettings::default();
         assert!(defaults.prefer_reasoning);
-        assert_eq!(defaults.permissions.mode, termide_agent_core::Mode::Auto);
+        assert_eq!(
+            defaults.permissions.mode,
+            termide_agent_core::Mode::Configured
+        );
         // A file that only adds a rule keeps the mode.
         let parsed: AiSettings =
             toml::from_str("[permissions.bash]\n\"ls *\" = \"allow\"\n").unwrap();
-        assert_eq!(parsed.permissions.mode, termide_agent_core::Mode::Auto);
+        assert_eq!(
+            parsed.permissions.mode,
+            termide_agent_core::Mode::Configured
+        );
         assert_eq!(
             parsed.permissions.evaluate("bash", "ls -la"),
             Some(termide_agent_core::Decision::Allow)
         );
         let parsed: AiSettings =
-            toml::from_str("prefer_reasoning = false\n[permissions]\nmode = \"ask\"\n").unwrap();
-        assert_eq!(parsed.permissions.mode, termide_agent_core::Mode::Ask);
+            toml::from_str("prefer_reasoning = false\n[permissions]\nmode = \"auto\"\n").unwrap();
+        assert_eq!(parsed.permissions.mode, termide_agent_core::Mode::All);
         assert!(!parsed.prefer_reasoning);
     }
 

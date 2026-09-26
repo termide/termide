@@ -26,10 +26,10 @@ use termide_agent_core::{
     BackendSetup, CancelToken, ChainedHooks, CheckpointHooks, CheckpointStore, CommandScript,
     CompactionPolicy, CompactionPrompts, Decision, EntryKind, GoalPrompt, HandoffPrompt, Hooks,
     LateTools, LoggedMessage, Message, Mode, ModeHandle, ModelInfo, ModelSpec, PermissionAnswer,
-    PermissionEnvelope, PermissionHooks, PermissionRules, PersistRule, PlanGuard, PlanPrompt,
-    PromptTemplate, Provider, Session, SessionSummary, StopReason, StreamEvent, Timing, Tool,
-    ToolCall, ToolContext, ToolDecision, ToolRegistry, ToolResultMessage, ToolUpdate, UserMessage,
-    DEFAULT_AGENT,
+    PermissionEnvelope, PermissionHooks, PermissionRules, PersistRule, PersistScope, PlanGuard,
+    PlanPrompt, PromptTemplate, Provider, Session, SessionSummary, StopReason, StreamEvent, Timing,
+    Tool, ToolCall, ToolContext, ToolDecision, ToolRegistry, ToolResultMessage, ToolUpdate,
+    UserMessage, DEFAULT_AGENT,
 };
 use termide_agent_core::{AgentRuntime, PromptError};
 use termide_config::Config;
@@ -127,6 +127,8 @@ enum Pending {
     Permission {
         envelope: PermissionEnvelope,
         form: ChoiceForm,
+        /// What each of the form's rows answers, in their order.
+        answers: Vec<PermissionAnswer>,
     },
     Command {
         script: CommandScript,
@@ -224,8 +226,9 @@ pub struct AgentPanelSetup {
     pub fold: FoldMode,
 }
 
-/// Records an "allow always" rule outside the panel (in the project config).
-pub type PersistFn = fn(&str, &str, Decision);
+/// Records an "allow always" rule outside the panel, in the project's or the
+/// global configuration.
+pub type PersistFn = fn(&str, &str, Decision, PersistScope);
 
 /// Makes the extra hooks of one agent (command hooks from `hooks.toml`).
 pub type HooksFactory = Arc<dyn Fn() -> Box<dyn Hooks> + Send + Sync>;
@@ -325,6 +328,10 @@ pub trait AgentCatalog: Send + Sync {
     fn commands(&self) -> Vec<CommandScript> {
         Vec::new()
     }
+    /// The session's permission mode is now `mode`: what the catalog runs
+    /// on the session's behalf (a delegated task) follows. The default runs
+    /// nothing.
+    fn set_mode(&self, _mode: Mode) {}
 }
 
 /// What the agent is doing right now, for the live activity indicators.
@@ -781,6 +788,7 @@ impl AgentPanel {
             && termide_config::is_cli_provider(&setup.provider_kind)
             && !model.id.is_empty())
         .then(|| model.id.clone());
+        setup.catalog.set_mode(mode.get());
         Self {
             runtime,
             external,
@@ -979,6 +987,7 @@ impl AgentPanel {
         self.agent = agent;
         self.system_prompt = system_prompt;
         self.tools = tools;
+        self.catalog.set_mode(mode.get());
         self.mode = mode;
         self.model_choices.clear();
         self.model_fetch = None;
@@ -2158,25 +2167,36 @@ impl AgentPanel {
             } else {
                 base
             };
-            // The four answers in the order the form shows them; `permission_answer`
-            // maps the chosen index back, so the order here is load-bearing.
-            let labels = [
-                t.agent_perm_allow_once(),
-                t.agent_perm_allow_session(),
-                t.agent_perm_allow_always(),
-                t.agent_perm_deny(),
+            // The answers the form offers, each with its row. "Always" is on
+            // offer only where the configured rules count; the rows that
+            // outlast this call name the pattern they record.
+            let pattern = &request.suggested_pattern;
+            let mut rows: Vec<(PermissionAnswer, String)> = vec![
+                (
+                    PermissionAnswer::AllowOnce,
+                    t.agent_perm_allow_once().to_string(),
+                ),
+                (
+                    PermissionAnswer::AllowSession,
+                    format!("{} ({pattern})", t.agent_perm_allow_session()),
+                ),
             ];
-            let options = labels
-                .iter()
-                .enumerate()
-                .map(|(index, label)| {
-                    if index == 2 {
-                        format!("{label} ({})", request.suggested_pattern)
-                    } else {
-                        (*label).to_string()
-                    }
-                })
-                .collect();
+            if request.can_persist {
+                rows.push((
+                    PermissionAnswer::AllowAlways,
+                    format!("{} ({pattern})", t.agent_perm_allow_always()),
+                ));
+                rows.push((
+                    PermissionAnswer::AllowAlwaysGlobal,
+                    format!("{} ({pattern})", t.agent_perm_allow_always_global()),
+                ));
+            }
+            rows.push((PermissionAnswer::Deny, t.agent_perm_deny().to_string()));
+            rows.push((
+                PermissionAnswer::DenySession,
+                format!("{} ({pattern})", t.agent_perm_deny_session()),
+            ));
+            let (answers, options): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
             let mut form = ChoiceForm::new(title, options)
                 .with_custom(t.agent_perm_deny_reason())
                 .with_cancel(t.agent_perm_stop());
@@ -2187,7 +2207,11 @@ impl AgentPanel {
                 message: status,
                 is_error: false,
             });
-            self.pending = Some(Pending::Permission { envelope, form });
+            self.pending = Some(Pending::Permission {
+                envelope,
+                form,
+                answers,
+            });
             // The question pauses the running call until it is answered.
             let before = self.running_tool_wait();
             self.permission_wait = Some((Instant::now(), before));
@@ -2269,16 +2293,25 @@ impl AgentPanel {
         // Mirror a lasting grant into the panel's own rules so rebuilding the
         // agent (undo, a model or agent switch) carries it, not just the hooks
         // on the worker thread. "Always" is also written to the configuration
-        // by the persist callback; "for this session" lives only here.
+        // by the persist callback, where it is on offer; "for this session"
+        // lives only here.
         let request = &envelope.request;
+        let pattern = &request.suggested_pattern;
         match answer {
-            PermissionAnswer::AllowAlways => {
-                self.rules
-                    .add(&request.tool, &request.suggested_pattern, Decision::Allow);
+            PermissionAnswer::AllowAlways | PermissionAnswer::AllowAlwaysGlobal
+                if request.can_persist =>
+            {
+                self.rules.add(&request.tool, pattern, Decision::Allow);
             }
-            PermissionAnswer::AllowSession => {
+            PermissionAnswer::AllowAlways
+            | PermissionAnswer::AllowAlwaysGlobal
+            | PermissionAnswer::AllowSession => {
                 self.session_rules
-                    .add(&request.tool, &request.suggested_pattern, Decision::Allow);
+                    .add(&request.tool, pattern, Decision::Allow);
+            }
+            PermissionAnswer::DenySession => {
+                self.session_rules
+                    .add(&request.tool, pattern, Decision::Deny);
             }
             _ => {}
         }
@@ -2287,16 +2320,13 @@ impl AgentPanel {
         true
     }
 
-    /// The rules the agent runs under: the configured and "always" rules, plus
-    /// this session's "allow for the session" grants. Rebuilt into every agent
-    /// the panel spawns so a grant survives a rebuild.
+    /// The rules the agent runs under: the configured and "always" rules, and
+    /// apart from them this session's answers, which count in modes the
+    /// configured rules do not. Rebuilt into every agent the panel spawns so
+    /// an answer survives a rebuild.
     fn effective_rules(&self) -> PermissionRules {
         let mut rules = self.rules.clone();
-        for (tool, patterns) in &self.session_rules.tools {
-            for (pattern, decision) in patterns {
-                rules.add(tool, pattern, *decision);
-            }
-        }
+        rules.session = self.session_rules.tools.clone();
         rules
     }
 
@@ -2414,9 +2444,10 @@ impl AgentPanel {
             .map(|mode| {
                 let text = match mode {
                     Mode::Ask => t.agent_mode_ask(),
-                    Mode::AcceptEdits => t.agent_mode_accept_edits(),
-                    Mode::Auto => t.agent_mode_auto(),
                     Mode::Plan => t.agent_mode_plan(),
+                    Mode::Edit => t.agent_mode_edit(),
+                    Mode::Configured => t.agent_mode_configured(),
+                    Mode::All => t.agent_mode_all(),
                 };
                 format!("{}{text}", current_mark(*mode == current))
             })
@@ -2434,6 +2465,7 @@ impl AgentPanel {
         let was_plan = self.mode.get() == Mode::Plan;
         self.mode.set(mode);
         self.rules.mode = mode;
+        self.catalog.set_mode(mode);
         if was_plan != (mode == Mode::Plan) {
             self.sync_system_prompt();
         }
@@ -2657,7 +2689,7 @@ impl AgentPanel {
             t.agent_plan_carry_title(),
             vec![
                 t.agent_plan_accept_edits().to_string(),
-                t.agent_plan_ask_each().to_string(),
+                t.agent_plan_configured().to_string(),
             ],
         )
         .with_cancel(t.agent_plan_keep());
@@ -2909,6 +2941,7 @@ impl AgentPanel {
         if let Some(mode) = profile.mode {
             self.mode.set(mode);
             self.rules.mode = mode;
+            self.catalog.set_mode(mode);
         }
         self.agent = name.to_string();
         if !self.is_fresh() {
@@ -3552,8 +3585,12 @@ impl AgentPanel {
         match (&self.pending, action) {
             (_, ChoiceAction::Handled) => {}
             (_, ChoiceAction::NotHandled) => return false,
-            (Some(Pending::Permission { .. }), ChoiceAction::Chosen(index)) => {
-                self.answer_permission(Self::permission_answer(index));
+            (Some(Pending::Permission { answers, .. }), ChoiceAction::Chosen(index)) => {
+                let answer = answers
+                    .get(index)
+                    .cloned()
+                    .unwrap_or(PermissionAnswer::Deny);
+                self.answer_permission(answer);
             }
             (Some(Pending::Permission { .. }), ChoiceAction::Custom(reason)) => {
                 self.answer_permission(PermissionAnswer::DenyWithReason(reason));
@@ -3573,7 +3610,12 @@ impl AgentPanel {
                     2 => {
                         self.rules.add("command", &script.name, Decision::Allow);
                         if let Some(persist) = self.persist_rule {
-                            persist("command", &script.name, Decision::Allow);
+                            persist(
+                                "command",
+                                &script.name,
+                                Decision::Allow,
+                                PersistScope::Project,
+                            );
                         }
                     }
                     3 => return true,
@@ -3595,9 +3637,9 @@ impl AgentPanel {
             (Some(Pending::Plan { .. }), ChoiceAction::Chosen(index)) => {
                 self.pending = None;
                 let mode = if index == 0 {
-                    Mode::AcceptEdits
+                    Mode::Edit
                 } else {
-                    Mode::Ask
+                    Mode::Configured
                 };
                 let events = self.carry_out_plan(mode);
                 self.pending_events.extend(events);
@@ -4013,16 +4055,6 @@ impl AgentPanel {
                 true
             }
             Some(Err(mpsc::TryRecvError::Empty)) | None => false,
-        }
-    }
-
-    /// The question a permission form's option `index` answers with.
-    fn permission_answer(index: usize) -> PermissionAnswer {
-        match index {
-            0 => PermissionAnswer::AllowOnce,
-            1 => PermissionAnswer::AllowSession,
-            2 => PermissionAnswer::AllowAlways,
-            _ => PermissionAnswer::Deny,
         }
     }
 
@@ -6308,7 +6340,7 @@ mod tests {
                     system_prompt: "You review diffs.".into(),
                     tools: ToolRegistry::new(),
                     model: Some("big".into()),
-                    mode: Some(Mode::AcceptEdits),
+                    mode: Some(Mode::Edit),
                     late_tools: None,
                     backend: None,
                     offered: Vec::new(),
@@ -6866,7 +6898,7 @@ mod tests {
             |segs: &[StatusSegment]| segs.iter().map(|s| s.text.as_str()).collect::<String>();
         assert_eq!(
             text(&segments[..split]),
-            " Agent: default │ Mode: ask │ Reasoning: off │ Tools: 0/0 │ Connection: local · OpenAI Compatible │ Model: m"
+            " Agent: default │ Mode: configured │ Reasoning: off │ Tools: 0/0 │ Connection: local · OpenAI Compatible │ Model: m"
         );
         assert_eq!(text(&segments[split + 1..]), "↑100 ↓20 120/1k ▰▱▱▱▱▱▱▱ ");
     }
@@ -8184,6 +8216,7 @@ mod tests {
                     arguments: serde_json::json!({ "command": "git push" }),
                 },
                 suggested_pattern: "git push *".into(),
+                can_persist: true,
             })
         });
 
@@ -8205,7 +8238,12 @@ mod tests {
             let form = panel.pending.as_ref().unwrap().form();
             assert_eq!(form.title(), "Agent wants to run bash:");
             assert_eq!(form.detail(), Some("git push"));
-            assert_eq!(form.options()[2], "Allow always (git push *)");
+            assert_eq!(
+                form.options()[2],
+                "Allow always in this project (git push *)"
+            );
+            assert_eq!(form.options()[3], "Allow always everywhere (git push *)");
+            assert_eq!(form.options()[5], "Deny for this session (git push *)");
         }
         assert!(panel.captures_escape());
         let rows = render_text(&mut panel, 60, 14);
@@ -8233,6 +8271,7 @@ mod tests {
                 arguments: serde_json::json!({ "path": "src/x.rs" }),
             },
             suggested_pattern: "src/x.rs".into(),
+            can_persist: true,
         };
         let asked = request.clone();
         let worker = std::thread::spawn(move || {
@@ -8256,11 +8295,11 @@ mod tests {
             let form = panel.pending.as_ref().unwrap().form();
             assert_eq!(
                 form.height(60),
-                10,
-                "a detail line and divider, four answers, a reason row and a stop row"
+                12,
+                "a detail line and divider, six answers, a reason row and a stop row"
             );
         }
-        panel.handle_key(chord(KeyCode::Char('5'), KeyModifiers::NONE));
+        panel.handle_key(chord(KeyCode::Char('7'), KeyModifiers::NONE));
         type_text(&mut panel, "edit the test instead");
         panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(
@@ -8271,6 +8310,42 @@ mod tests {
             )
         );
         let _ = request;
+    }
+
+    #[test]
+    fn always_is_not_offered_where_the_configured_rules_do_not_count() {
+        let mut panel = panel(vec![]);
+        let (mut prompter, rx) = permission_channel(CancelToken::new());
+        panel.permission_rx = rx;
+        let worker = std::thread::spawn(move || {
+            prompter.ask(&termide_agent_core::PermissionRequest {
+                tool: "bash".into(),
+                subject: "make".into(),
+                call: termide_agent_core::ToolCall {
+                    id: "c".into(),
+                    name: "bash".into(),
+                    arguments: serde_json::json!({ "command": "make" }),
+                },
+                suggested_pattern: "make *".into(),
+                can_persist: false,
+            })
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while panel.pending.is_none() {
+            panel.tick();
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let options = panel.pending.as_ref().unwrap().form().options().to_vec();
+        assert_eq!(options.len(), 4, "{options:?}");
+        assert!(options.iter().all(|o| !o.contains("always")), "{options:?}");
+        // The last row refuses for the session.
+        panel.handle_key(chord(KeyCode::Char('4'), KeyModifiers::NONE));
+        assert_eq!(worker.join().unwrap(), PermissionAnswer::DenySession);
+        assert_eq!(
+            panel.effective_rules().evaluate_session("bash", "make all"),
+            Some(Decision::Deny)
+        );
     }
 
     #[test]
@@ -8288,6 +8363,7 @@ mod tests {
                     arguments: serde_json::json!({ "command": "git push" }),
                 },
                 suggested_pattern: "git push *".into(),
+                can_persist: true,
             })
         });
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -8600,10 +8676,12 @@ mod tests {
                     subject: "cat notes.txt".into(),
                     call: call.clone(),
                     suggested_pattern: "cat *".into(),
+                    can_persist: true,
                 },
                 reply,
             },
             form: ChoiceForm::new("", vec![]),
+            answers: Vec::new(),
         });
         panel.permission_wait = Some((Instant::now() - Duration::from_secs(5), 0));
         panel.tick();
@@ -8650,24 +8728,32 @@ mod tests {
                             arguments: serde_json::json!({ "command": "cat notes.txt" }),
                         },
                         suggested_pattern: "cat *".into(),
+                        can_persist: true,
                     },
                     reply,
                 },
                 form: ChoiceForm::new("", vec![]),
+                answers: Vec::new(),
             });
         };
 
         // "Allow for the session" lands in the session rules, which
-        // `effective_rules` — what every rebuilt agent starts from — includes,
-        // but the persistent rules do not.
+        // `effective_rules` — what every rebuilt agent starts from — carries
+        // apart from the persistent rules; "deny for the session" too.
         let mut session = panel(vec![]);
         pending(&mut session);
         assert!(session.answer_permission(PermissionAnswer::AllowSession));
         assert_eq!(
-            session.effective_rules().evaluate("bash", "cat x"),
+            session.effective_rules().evaluate_session("bash", "cat x"),
             Some(Decision::Allow)
         );
-        assert_eq!(session.rules.evaluate("bash", "cat x"), None);
+        assert_eq!(session.effective_rules().evaluate("bash", "cat x"), None);
+        pending(&mut session);
+        assert!(session.answer_permission(PermissionAnswer::DenySession));
+        assert_eq!(
+            session.effective_rules().evaluate_session("bash", "cat x"),
+            Some(Decision::Deny)
+        );
 
         // "Allow always" lands in the persistent rules.
         let mut always = panel(vec![]);
@@ -8679,20 +8765,51 @@ mod tests {
         );
     }
 
+    /// A catalog that records the modes the panel reports.
+    struct ModeWatcher(Arc<Mutex<Vec<Mode>>>);
+
+    impl AgentCatalog for ModeWatcher {
+        fn list(&self) -> Vec<AgentEntry> {
+            Agents.list()
+        }
+        fn resolve(&self, name: &str) -> Option<AgentProfile> {
+            Agents.resolve(name)
+        }
+        fn set_mode(&self, mode: Mode) {
+            self.0.lock().unwrap().push(mode);
+        }
+    }
+
+    #[test]
+    fn delegated_tasks_follow_the_session_mode() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mut panel = AgentPanel::new(AgentPanelSetup {
+            catalog: Arc::new(ModeWatcher(Arc::clone(&seen))),
+            ..setup(vec![])
+        });
+        // Told the starting mode, then every change.
+        panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));
+        assert!(panel.switch_agent("review"));
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![Mode::Configured, Mode::All, Mode::Edit]
+        );
+    }
+
     #[test]
     fn mode_switches_from_the_chip_and_with_shift_tab() {
         let mut panel = panel(vec![]);
         let hooks_mode = panel.mode.clone();
-        assert_eq!(chip(&panel, MODE_ACTION), "ask");
+        assert_eq!(chip(&panel, MODE_ACTION), "configured");
 
         // Shift+Tab cycles and reports the new mode in the status line.
         let events = panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));
         assert!(events.iter().any(|e| matches!(
             e,
-            PanelEvent::SetStatusMessage { message, .. } if message.ends_with("accept-edits")
+            PanelEvent::SetStatusMessage { message, .. } if message.ends_with("all")
         )));
-        assert_eq!(chip(&panel, MODE_ACTION), "accept-edits");
-        assert_eq!(hooks_mode.get(), Mode::AcceptEdits);
+        assert_eq!(chip(&panel, MODE_ACTION), "all");
+        assert_eq!(hooks_mode.get(), Mode::All);
 
         // The chip opens a picker with the current mode marked.
         let events = panel.handle_status_action(MODE_ACTION);
@@ -8700,31 +8817,31 @@ mod tests {
         let PanelEvent::ShowSelect { options, .. } = picker else {
             panic!("expected a picker, got {picker:?}");
         };
-        assert_eq!(options.len(), 4);
-        assert!(options[1].starts_with("● accept-edits"), "{:?}", options[1]);
-        assert!(options[3].starts_with("  plan"), "{:?}", options[3]);
+        assert_eq!(options.len(), 5);
+        assert!(options[4].starts_with("● all"), "{:?}", options[4]);
+        assert!(options[1].starts_with("  plan"), "{:?}", options[1]);
         assert!(matches!(
             select(&mut panel, picker, 2),
             CommandResult::Handled(true)
         ));
-        assert_eq!(chip(&panel, MODE_ACTION), "auto");
-        assert_eq!(hooks_mode.get(), Mode::Auto);
+        assert_eq!(chip(&panel, MODE_ACTION), "edit");
+        assert_eq!(hooks_mode.get(), Mode::Edit);
         let events = panel.tick();
         assert!(events.iter().any(|e| matches!(
             e,
-            PanelEvent::SetStatusMessage { message, .. } if message.ends_with("auto")
+            PanelEvent::SetStatusMessage { message, .. } if message.ends_with("edit")
         )));
 
-        // Cycling passes plan and wraps, and a rebuilt agent starts in the
+        // Cycling wraps from all to ask, and a rebuilt agent starts in the
         // chosen mode.
         panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));
-        assert_eq!(chip(&panel, MODE_ACTION), "plan");
+        panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));
+        assert_eq!(chip(&panel, MODE_ACTION), "all");
         panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));
         assert_eq!(chip(&panel, MODE_ACTION), "ask");
-        panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));
         panel.switch_session(None);
-        assert_eq!(chip(&panel, MODE_ACTION), "accept-edits");
-        assert_eq!(panel.mode.get(), Mode::AcceptEdits);
+        assert_eq!(chip(&panel, MODE_ACTION), "ask");
+        assert_eq!(panel.mode.get(), Mode::Ask);
     }
 
     #[test]
@@ -9005,7 +9122,7 @@ mod tests {
 
         assert_eq!(chip(&panel, AGENT_ACTION), "review");
         assert_eq!(chip(&panel, MODEL_ACTION), "big");
-        assert_eq!(chip(&panel, MODE_ACTION), "accept-edits");
+        assert_eq!(chip(&panel, MODE_ACTION), "edit");
         assert_eq!(panel.system_prompt, "You review diffs.");
         // A fresh session keeps its banner: the switch leaves no notice (it is
         // still applied and recorded, checked below on resume).
@@ -9047,7 +9164,7 @@ mod tests {
         panel.switch_agent("default");
         assert_eq!(panel.system_prompt, "default prompt");
         assert_eq!(chip(&panel, MODEL_ACTION), "big", "the model stays");
-        assert_eq!(chip(&panel, MODE_ACTION), "accept-edits", "the mode stays");
+        assert_eq!(chip(&panel, MODE_ACTION), "edit", "the mode stays");
         panel.session_choices = panel.session_list();
         let index = panel
             .session_choices
@@ -9414,7 +9531,7 @@ mod tests {
             .iter()
             .any(|e| matches!(e, PanelEvent::ShowSelect { .. })));
         panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));
-        assert_eq!(panel.mode.get(), Mode::Ask);
+        assert_eq!(panel.mode.get(), Mode::Configured);
 
         type_text(&mut panel, "go");
         panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
@@ -9436,7 +9553,7 @@ mod tests {
         // Back to the built-in loop.
         assert!(panel.switch_agent("default"));
         assert!(!panel.external);
-        assert_eq!(chip(&panel, MODE_ACTION), "ask");
+        assert_eq!(chip(&panel, MODE_ACTION), "configured");
     }
 
     /// An external agent that advertises two models and records the one picked.
@@ -9868,7 +9985,7 @@ mod tests {
         panel.offer_plan();
         panel.handle_key(chord(KeyCode::Char('1'), KeyModifiers::NONE));
         let _ = panel.tick();
-        assert_eq!(panel.mode.get(), Mode::AcceptEdits);
+        assert_eq!(panel.mode.get(), Mode::Edit);
         settle(&mut panel);
         let users: Vec<&str> = panel
             .transcript()
