@@ -26,9 +26,8 @@ use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 
 use render::Rendered;
 use termide_core::{
-    CommandResult, Config, HotkeyTable, InputAction, KeyChord, LinkOpen, Panel, PanelCommand,
-    PanelEvent, PanelState, RenderContext, SegmentKind, StatusSegment, Theme, ThemeColors,
-    WidthPreference,
+    CommandResult, Config, HotkeyTable, KeyChord, LinkOpen, Panel, PanelCommand, PanelEvent,
+    PanelState, RenderContext, SegmentKind, StatusSegment, Theme, ThemeColors, WidthPreference,
 };
 use termide_modal::FindBar;
 use termide_ui::ScrollBar;
@@ -203,25 +202,6 @@ impl MarkdownPanel {
             }
         }
         self.layout_width = 0; // force re-layout
-    }
-
-    /// Build the "go to path" input request, seeded with this file's directory
-    /// so relative entries resolve naturally.
-    fn goto_path_event(&self) -> PanelEvent {
-        let base = self
-            .file_path
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_default();
-        let mut initial = base.display().to_string();
-        if !initial.is_empty() {
-            initial.push('/');
-        }
-        PanelEvent::ShowInput {
-            prompt: "Go to path".to_string(),
-            initial_value: initial,
-            on_submit: InputAction::ViewPath { base_dir: base },
-        }
     }
 }
 
@@ -427,11 +407,6 @@ impl Panel for MarkdownPanel {
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let page = (self.viewport_height() as i32 - 1).max(1);
-
-        // Ctrl+G: "go to path" — type a path to open it in the right viewer.
-        if ctrl && key.code == KeyCode::Char('g') {
-            return vec![self.goto_path_event()];
-        }
 
         // Ctrl+R: re-read from disk (pick up external edits), keeping position.
         if ctrl && key.code == KeyCode::Char('r') {

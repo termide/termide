@@ -799,6 +799,11 @@ impl App {
     /// system-resource / LSP-completion / modal-spinner updates.
     fn poll_background(&mut self) {
         self.poll_settings_model_fetch();
+        if let Some(termide_modal::ActiveModal::Input(modal)) = self.state.active_modal.as_mut() {
+            if modal.poll_suggestions() {
+                self.state.needs_redraw = true;
+            }
+        }
         // Adaptive tick rate: slow down polling when idle
         if self.state.last_activity.elapsed()
             > Duration::from_millis(termide_config::constants::IDLE_THRESHOLD_MS)

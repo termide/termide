@@ -485,7 +485,6 @@ help_desc_tree_search = "ট্রিতে ইনক্রিমেন্টা
 help_desc_viewer_copy = "নির্বাচন কপি করুন"
 help_desc_viewer_external = "বাহ্যিক ব্রাউজারে লিঙ্ক খুলুন"
 help_desc_viewer_follow = "লিঙ্ক অনুসরণ করুন (প্যানেলে)"
-help_desc_viewer_goto = "পথ বা URL-এ যান"
 help_desc_viewer_history = "ওয়েব ইতিহাস পিছনে / সামনে"
 help_desc_viewer_reload = "ডিস্ক থেকে পুনরায় লোড করুন"
 help_desc_viewer_search = "অনুসন্ধান"

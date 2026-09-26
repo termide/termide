@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use termide_core::{InputAction, LinkOpen, PanelEvent};
+use termide_core::{LinkOpen, PanelEvent};
 
 use crate::HtmlPanel;
 use termide_ui::text_utils::is_image_path;
@@ -91,24 +91,5 @@ impl HtmlPanel {
             return vec![PanelEvent::NavigateUrl(self.history[self.hist_idx].clone())];
         }
         vec![]
-    }
-
-    /// Build the "go to path" input request, seeded with this file's directory
-    /// so relative entries resolve naturally.
-    pub(crate) fn goto_path_event(&self) -> PanelEvent {
-        let base = self
-            .file_path
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_default();
-        let mut initial = base.display().to_string();
-        if !initial.is_empty() {
-            initial.push('/');
-        }
-        PanelEvent::ShowInput {
-            prompt: "Go to path".to_string(),
-            initial_value: initial,
-            on_submit: InputAction::ViewPath { base_dir: base },
-        }
     }
 }

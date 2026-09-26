@@ -21,7 +21,7 @@ authentication setup.
 | `←` / `h`       | Collapse directory (tree view)              |
 | `/`              | In-tree incremental search                  |
 | `Ctrl+\`          | Open directory switcher                    |
-| `Ctrl+G`          | Go to path/URL                             |
+| `Ctrl+G`          | Go to path/URL, with [suggestions](ui.md#open-prompt); a file is selected in its directory |
 | `Alt+B`           | Add bookmark                               |
 | `Tab`             | Go to next panel                           |
 | `Shift+Tab`       | Go to previous panel                       |

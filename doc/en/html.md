@@ -78,7 +78,7 @@ The preview has a movable cursor and supports text selection:
 
 The **Windows ▸ Open…** menu item opens a universal prompt (a discoverable
 entry point) that accepts a file path, a directory, a database URL, or an
-`http(s)://` address; `Ctrl+G` in any viewer does the same. `Ctrl+G` with an
+`http(s)://` address; `Ctrl+G` from any panel does the same. `Ctrl+G` with an
 `http(s)://` address fetches the document in the background
 and opens it routed by `Content-Type` (HTML → this viewer, Markdown → the
 Markdown viewer, other text → shown verbatim). The fetch is deliberately

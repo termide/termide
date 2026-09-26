@@ -156,19 +156,31 @@ impl App {
                 self.handle_open_agent()?;
             }
             TOOLS_SUBMENU_OPEN => {
-                // Universal opener: the entered value is routed by type — a file
-                // (by extension), a directory (file manager), a database URL
-                // (DB viewer), or an http(s) address (fetched into a viewer).
                 self.state.close_menu();
-                let base = std::env::current_dir().unwrap_or_default();
-                self.event_show_input(
-                    termide_i18n::t().tools_open_prompt().to_string(),
-                    String::new(),
-                    termide_core::InputAction::ViewPath { base_dir: base },
-                );
+                self.open_path_prompt();
             }
             _ => {}
         }
         Ok(())
+    }
+}
+
+impl App {
+    /// The universal opener (Windows ▸ Open…, `Ctrl+G`): the entered value
+    /// is routed by type — a file (by extension), a directory (file
+    /// manager), a database URL (DB viewer), or an http(s) address (fetched
+    /// into a viewer). Relative paths are taken from the focused panel's
+    /// directory, else the project root.
+    pub(in crate::app) fn open_path_prompt(&mut self) {
+        let base_dir = self
+            .layout_manager
+            .active_panel()
+            .and_then(|panel| panel.get_working_directory())
+            .unwrap_or_else(|| self.project_root.clone());
+        self.event_show_input(
+            termide_i18n::t().tools_open_prompt().to_string(),
+            String::new(),
+            termide_core::InputAction::ViewPath { base_dir },
+        );
     }
 }

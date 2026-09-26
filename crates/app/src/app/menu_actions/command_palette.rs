@@ -62,6 +62,14 @@ impl App {
                 },
             ),
             (
+                "open_path",
+                CommandEntry {
+                    label: "Open Path or URL".into(),
+                    category: "Panels",
+                    keybinding: kb_str(&kb.open_path),
+                },
+            ),
+            (
                 "open_preferences",
                 CommandEntry {
                     label: "Open Preferences".into(),

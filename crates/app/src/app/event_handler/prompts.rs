@@ -139,11 +139,17 @@ impl App {
             on_submit,
             termide_core::InputAction::GitSshPassphrase { .. }
         );
-        let modal = if is_password {
+        let mut modal = if is_password {
             InputModal::new("SSH Passphrase", prompt).password()
         } else {
             InputModal::with_default("Input", prompt, &initial_value)
         };
+        if let PendingAction::ViewPath { base_dir } = &pending_action {
+            modal.set_suggestions(Box::new(crate::app::modal::PathSuggestions::new(
+                base_dir.clone(),
+                self.project_root.clone(),
+            )));
+        }
         self.state
             .set_pending_action(pending_action, ActiveModal::Input(Box::new(modal)));
     }

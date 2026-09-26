@@ -405,11 +405,6 @@ impl Panel for HtmlPanel {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let page = (self.viewport_height() as i32 - 1).max(1);
 
-        // Ctrl+G: "go to path" — type a path to open it in the right viewer.
-        if ctrl && key.code == KeyCode::Char('g') {
-            return vec![self.goto_path_event()];
-        }
-
         // Ctrl+R: re-read from disk (pick up external edits), keeping position.
         if ctrl && key.code == KeyCode::Char('r') {
             let (top, cursor) = (self.top, self.cursor);
@@ -620,7 +615,6 @@ impl Panel for HtmlPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use termide_core::InputAction;
     use termide_html::render_html;
     use termide_modal::FindField;
 
@@ -713,26 +707,6 @@ mod tests {
         let first = p.cursor;
         p.step_match(true);
         assert_ne!(p.cursor, first, "next match should move the cursor");
-    }
-
-    #[test]
-    fn ctrl_g_requests_go_to_path() {
-        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-        let mut p = panel_from("<p>hi</p>");
-        let evs = p.handle_key(KeyChord::identity(KeyEvent::new(
-            KeyCode::Char('g'),
-            KeyModifiers::CONTROL,
-        )));
-        assert!(
-            matches!(
-                evs.as_slice(),
-                [PanelEvent::ShowInput {
-                    on_submit: InputAction::ViewPath { .. },
-                    ..
-                }]
-            ),
-            "{evs:?}"
-        );
     }
 
     #[test]

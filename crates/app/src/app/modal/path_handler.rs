@@ -1,6 +1,8 @@
 //! Path-related modal result handlers: goto-path, follow-symlink, chmod/permissions,
 //! and batch-copy symlink flag live-sync.
 
+use std::path::Path;
+
 use anyhow::Result;
 
 use crate::app::App;
@@ -98,22 +100,40 @@ impl App {
         Ok(())
     }
 
-    /// Handle go to path/URL result
-    pub(in crate::app) fn handle_goto_path(&mut self, value: Box<dyn std::any::Any>) -> Result<()> {
-        if let Some(path_str) = value.downcast_ref::<String>() {
-            if path_str.is_empty() {
-                return Ok(());
-            }
-
-            // Navigate to the path using VFS URL support
-            if let Some(panel) = self.layout_manager.active_panel_mut() {
-                if let Some(fm) = panel.as_file_manager_mut() {
-                    // Try to navigate - errors are silently ignored for now
-                    let _ = fm.navigate_to_url(path_str);
-                    self.state.needs_watcher_registration = true;
-                }
+    /// Handle the file manager's "go to path" result. A URL (`sftp://…`)
+    /// goes to the VFS as typed; a local path is taken from the panel's
+    /// directory, and a file is shown selected in its directory.
+    pub(in crate::app) fn handle_goto_path(
+        &mut self,
+        current_directory: &Path,
+        value: Box<dyn std::any::Any>,
+    ) -> Result<()> {
+        let Some(input) = value.downcast_ref::<String>() else {
+            return Ok(());
+        };
+        let input = input.trim();
+        if input.is_empty() {
+            return Ok(());
+        }
+        let Some(fm) = self
+            .layout_manager
+            .active_panel_mut()
+            .and_then(|panel| panel.as_file_manager_mut())
+        else {
+            return Ok(());
+        };
+        // Navigation errors are not reported; the panel stays where it was.
+        if input.contains("://") {
+            let _ = fm.navigate_to_url(input);
+        } else {
+            let path = super::path_suggestions::resolve_typed_path(input, current_directory);
+            if path.is_file() {
+                fm.navigate_to_file(&path);
+            } else {
+                let _ = fm.navigate_to(path);
             }
         }
+        self.state.needs_watcher_registration = true;
         Ok(())
     }
 

@@ -13,4 +13,7 @@ mod confirm_handler;
 mod git_handler;
 mod input_handler;
 mod path_handler;
+mod path_suggestions;
 mod select_handler;
+
+pub(in crate::app) use path_suggestions::PathSuggestions;

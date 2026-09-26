@@ -68,7 +68,7 @@ pub use info::{InfoModal, ModalValue, SegmentStyle, StyledSegment};
 pub use info_action::{
     ActionButton, InfoActionModal, InfoActionResult, PermAccess, PermissionsState,
 };
-pub use input::InputModal;
+pub use input::{InputModal, Suggest};
 pub use rename_pattern::RenamePatternModal;
 pub use save_as::{SaveAsModal, SaveAsResult};
 pub use select::SelectModal;

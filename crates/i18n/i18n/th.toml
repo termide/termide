@@ -485,7 +485,6 @@ help_desc_tree_search = "ค้นหาแบบเพิ่มทีละส�
 help_desc_viewer_copy = "คัดลอกส่วนที่เลือก"
 help_desc_viewer_external = "เปิดลิงก์ในเบราว์เซอร์ภายนอก"
 help_desc_viewer_follow = "ไปตามลิงก์ (ในแผง)"
-help_desc_viewer_goto = "ไปยังพาธหรือ URL"
 help_desc_viewer_history = "ประวัติเว็บ ย้อนกลับ / ไปข้างหน้า"
 help_desc_viewer_reload = "โหลดใหม่จากดิสก์"
 help_desc_viewer_search = "ค้นหา"

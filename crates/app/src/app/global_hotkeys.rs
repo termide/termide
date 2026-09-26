@@ -35,6 +35,7 @@ pub(super) fn build_global_hotkey_table(kb: &GlobalKeybindings) -> HotkeyTable {
     t.insert("open_git_log", &kb.open_git_log);
     t.insert("open_bookmark_add", &kb.open_bookmark_add);
     t.insert("open_command_palette", &kb.open_command_palette);
+    t.insert("open_path", &kb.open_path);
 
     // Navigation
     t.insert("prev_group", &kb.prev_group);
@@ -172,6 +173,9 @@ impl App {
             self.handle_open_command_palette()?;
             return Ok(true);
         }
+        if table.matches("open_path", key) {
+            return Ok(self.handle_open_path_hotkey());
+        }
 
         // Navigation
         if table.matches("prev_group", key) {
@@ -283,6 +287,19 @@ impl App {
         Ok(false)
     }
 
+    /// Open the path prompt, unless the key belongs to the focused panel: the
+    /// file manager has its own "go to path" on it, and a terminal passes it
+    /// on to the program running there. `false` lets the key fall through.
+    fn handle_open_path_hotkey(&mut self) -> bool {
+        if let Some(panel) = self.layout_manager.active_panel_mut() {
+            if panel.as_file_manager_mut().is_some() || panel.as_terminal_mut().is_some() {
+                return false;
+            }
+        }
+        self.open_path_prompt();
+        true
+    }
+
     /// Route a clipboard command (`Copy`/`Cut`/`Paste`) to the focused panel.
     /// Returns `true` when the panel consumed it (so the originating key is
     /// swallowed), `false` to let the key fall through to normal handling.
@@ -324,6 +341,7 @@ impl App {
             "open_git_log" => self.handle_open_git_log()?,
             "open_bookmark_add" => self.handle_add_bookmark()?,
             "open_command_palette" => self.handle_open_command_palette()?,
+            "open_path" => self.open_path_prompt(),
             "close_panel" => self.handle_close_panel_request()?,
             "toggle_stack" => self.toggle_panel_stacking(),
             "swap_left" => self.handle_swap_panel_left()?,

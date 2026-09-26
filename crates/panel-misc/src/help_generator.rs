@@ -177,6 +177,10 @@ impl HelpGenerator {
                 description: t.help_desc_command_palette().to_string(),
             },
             HelpEntry {
+                keys: Self::format_keys(&kb.open_path),
+                description: t.help_desc_open_path().to_string(),
+            },
+            HelpEntry {
                 keys: Self::format_keys(&kb.copy),
                 description: t.help_desc_edit_copy().to_string(),
             },
@@ -831,10 +835,6 @@ impl HelpGenerator {
             HelpEntry {
                 keys: toggle,
                 description: t.help_desc_viewer_toggle().to_string(),
-            },
-            HelpEntry {
-                keys: "Ctrl+G".to_string(),
-                description: t.help_desc_viewer_goto().to_string(),
             },
             HelpEntry {
                 keys: "Ctrl+F".to_string(),

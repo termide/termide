@@ -74,6 +74,10 @@ pub struct GlobalKeybindings {
     #[serde(alias = "detach_session")]
     pub detach_instance: Option<KeyBinding>,
     pub open_command_palette: Option<KeyBinding>,
+    /// Open a file, directory or URL through the prompt with suggestions.
+    /// The file manager keeps the key for its own "go to path", and a
+    /// terminal passes it on to the program running in it.
+    pub open_path: Option<KeyBinding>,
 
     // Clipboard (routed to the focused panel, which copies/cuts/pastes
     // according to its own capabilities).
@@ -487,6 +491,7 @@ impl GlobalKeybindings {
         // (`Ω`), reported as `Shift+Ω` with no ALT bit at all.
         set_default!(detach_instance, "Alt+D");
         set_default!(open_command_palette, "Ctrl+P");
+        set_default!(open_path, "Ctrl+G");
 
         // Clipboard (routed to the focused panel)
         set_default!(copy, "Ctrl+C");

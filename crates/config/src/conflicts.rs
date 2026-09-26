@@ -149,6 +149,7 @@ pub fn enumerate_bindings(config: &Config) -> Vec<(BindingLocation, ParsedKeyBin
         "open_command_palette",
         &g.open_command_palette,
     );
+    push(&mut out, "general", "open_path", &g.open_path);
     push(&mut out, "general", "copy", &g.copy);
     push(&mut out, "general", "cut", &g.cut);
     push(&mut out, "general", "paste", &g.paste);

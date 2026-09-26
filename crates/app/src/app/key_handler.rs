@@ -369,6 +369,15 @@ impl App {
             _ => {}
         }
 
+        if let (PendingAction::GoToPath { current_directory }, ActiveModal::Input(input)) =
+            (&action, &mut modal)
+        {
+            input.set_suggestions(Box::new(crate::app::modal::PathSuggestions::new(
+                current_directory.clone(),
+                self.project_root.clone(),
+            )));
+        }
+
         // Handle navigation actions without modal window
         match action {
             PendingAction::NextPanel => {

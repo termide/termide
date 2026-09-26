@@ -85,6 +85,7 @@ pub(super) fn kb_binding_names(section: usize) -> &'static [&'static str] {
             "quit",
             "detach_instance",
             "open_command_palette",
+            "open_path",
             "copy",
             "cut",
             "paste",
@@ -214,6 +215,7 @@ pub(super) fn get_kb_value(config: &Config, section: usize, name: &str) -> Strin
             quit,
             detach_instance,
             open_command_palette,
+            open_path,
             copy,
             cut,
             paste
@@ -377,6 +379,7 @@ pub(super) fn set_kb_value(config: &mut Config, section: usize, name: &str, valu
             quit,
             detach_instance,
             open_command_palette,
+            open_path,
             copy,
             cut,
             paste

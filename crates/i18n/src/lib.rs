@@ -206,6 +206,7 @@ pub trait Translation: Send + Sync {
     fn help_desc_delete_generic(&self) -> &str;
     fn help_desc_open_bookmark_add(&self) -> &str;
     fn help_desc_command_palette(&self) -> &str;
+    fn help_desc_open_path(&self) -> &str;
     fn help_desc_stage_file(&self) -> &str;
     fn help_desc_unstage_file(&self) -> &str;
     fn help_desc_terminal_copy(&self) -> &str;
@@ -281,7 +282,6 @@ pub trait Translation: Send + Sync {
     fn help_desc_vim_panel_nav(&self) -> &str;
     fn help_section_viewers(&self) -> &str;
     fn help_desc_viewer_toggle(&self) -> &str;
-    fn help_desc_viewer_goto(&self) -> &str;
     fn help_desc_viewer_search(&self) -> &str;
     fn help_desc_viewer_reload(&self) -> &str;
     fn help_desc_viewer_copy(&self) -> &str;

@@ -14,8 +14,10 @@ use crate::base::{button_style, render_input_field, render_modal_block, screen_x
 use crate::input_keys::{handle_input_key, InputKeyResult};
 
 use termide_config::constants::MODAL_BUTTON_SPACING;
+use termide_core::ThemeColors;
 use termide_i18n as i18n;
 use termide_theme::Theme;
+use termide_ui::{CompletionItem, CompletionList};
 
 use crate::{
     calculate_modal_width, centered_rect_with_size, max_line_width, Modal, ModalResult,
@@ -28,6 +30,41 @@ enum FocusArea {
     Input,
     Checkbox(usize),
     Buttons,
+}
+
+/// Where an input modal's suggestions come from. The modal asks again every
+/// time its text changes; `poll` lets a source take in work it runs in the
+/// background, such as walking a project.
+pub trait Suggest: Send {
+    /// Suggestions for `text`, best first. A suggestion's `value` is what
+    /// accepting it puts in the field (`Tab`) or submits (`Enter`).
+    fn suggest(&mut self, text: &str) -> Vec<CompletionItem>;
+
+    /// Take in background work that has finished; `true` when `suggest`
+    /// may now answer differently.
+    fn poll(&mut self) -> bool {
+        false
+    }
+}
+
+/// Rows the suggestion list always takes, so the modal keeps its size (and
+/// its input its place) while the list grows and shrinks under typing.
+const SUGGESTION_ROWS: usize = 8;
+
+/// Width the modal gets for suggestions, typically paths.
+const SUGGESTION_WIDTH: u16 = 72;
+
+struct Suggestions {
+    source: Box<dyn Suggest>,
+    list: CompletionList,
+}
+
+impl std::fmt::Debug for Suggestions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Suggestions")
+            .field("items", &self.list.len())
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +88,8 @@ pub struct InputModal {
     last_checkbox_areas: Vec<(usize, Rect)>,
     /// Whether to mask input with asterisks (password mode).
     is_password: bool,
+    /// A list under the input that follows the typed text.
+    suggestions: Option<Suggestions>,
 }
 
 impl InputModal {
@@ -67,6 +106,7 @@ impl InputModal {
             checkboxes: Vec::new(),
             last_checkbox_areas: Vec::new(),
             is_password: false,
+            suggestions: None,
         }
     }
 
@@ -87,6 +127,7 @@ impl InputModal {
             checkboxes: Vec::new(),
             last_checkbox_areas: Vec::new(),
             is_password: false,
+            suggestions: None,
         }
     }
 
@@ -95,6 +136,88 @@ impl InputModal {
     pub fn password(mut self) -> Self {
         self.is_password = true;
         self
+    }
+
+    /// Show suggestions from `source` under the input.
+    pub fn with_suggestions(mut self, source: Box<dyn Suggest>) -> Self {
+        self.set_suggestions(source);
+        self
+    }
+
+    /// Show suggestions from `source` under the input, for a modal built
+    /// elsewhere.
+    pub fn set_suggestions(&mut self, source: Box<dyn Suggest>) {
+        self.suggestions = Some(Suggestions {
+            source,
+            list: CompletionList::new(Vec::new())
+                .with_max_rows(SUGGESTION_ROWS)
+                .below_input(),
+        });
+        self.refresh_suggestions();
+    }
+
+    /// Let the suggestion source take in background work; `true` when the
+    /// list changed and the modal needs a redraw.
+    pub fn poll_suggestions(&mut self) -> bool {
+        let Some(suggestions) = self.suggestions.as_mut() else {
+            return false;
+        };
+        if !suggestions.source.poll() {
+            return false;
+        }
+        self.refresh_suggestions();
+        true
+    }
+
+    /// Ask the source again for the current text; the best one is selected.
+    fn refresh_suggestions(&mut self) {
+        if let Some(suggestions) = self.suggestions.as_mut() {
+            let items = suggestions.source.suggest(self.input_handler.text());
+            suggestions.list.set_items(items);
+            suggestions.list.select(0);
+        }
+    }
+
+    /// The selected suggestion's value, while the list shows any.
+    fn selected_suggestion(&self) -> Option<String> {
+        self.suggestions
+            .as_ref()
+            .and_then(|s| s.list.selected_item())
+            .map(|item| item.value.clone())
+    }
+
+    /// Submit the selected suggestion, else the typed text (an empty field
+    /// cancels).
+    fn confirm(&self) -> ModalResult<String> {
+        if let Some(value) = self.selected_suggestion() {
+            return ModalResult::Confirmed(value);
+        }
+        if self.input_handler.is_empty() {
+            ModalResult::Cancelled
+        } else {
+            ModalResult::Confirmed(self.input_handler.text().to_string())
+        }
+    }
+
+    /// The keys the suggestion list takes while the input has focus and the
+    /// list shows something: `Up`/`Down` move, `Tab` puts the selection in
+    /// the field (a directory then lists its contents). `None` for any other
+    /// key.
+    fn handle_suggestion_key(&mut self, code: KeyCode) -> Option<()> {
+        if self.focus != FocusArea::Input {
+            return None;
+        }
+        let suggestions = self.suggestions.as_mut().filter(|s| !s.list.is_empty())?;
+        match code {
+            KeyCode::Up => suggestions.list.select_up(),
+            KeyCode::Down => suggestions.list.select_down(),
+            KeyCode::Tab => {
+                let value = suggestions.list.selected_item()?.value.clone();
+                self.input_handler.set_text(value);
+            }
+            _ => return None,
+        }
+        Some(())
     }
 
     /// Add an optional checkbox to the modal
@@ -133,6 +256,11 @@ impl InputModal {
         let prompt_width = max_line_width(&self.prompt);
         let buttons_width = 21u16; // "[ OK ]    [ Cancel ]"
         let input_width = self.input_handler.text().chars().count() as u16 + 20;
+        let suggestion_width = if self.suggestions.is_some() {
+            SUGGESTION_WIDTH
+        } else {
+            0
+        };
         let checkbox_width = self
             .checkboxes
             .iter()
@@ -147,11 +275,12 @@ impl InputModal {
                 buttons_width,
                 input_width,
                 checkbox_width,
+                suggestion_width,
             ]
             .into_iter(),
             screen_width,
             ModalWidthConfig {
-                wide: false,
+                wide: self.suggestions.is_some(),
                 double_border: true,
             },
         );
@@ -167,9 +296,18 @@ impl InputModal {
         } else {
             self.visible_checkbox_indices().len() as u16 + 1
         };
-        let height = (1 + prompt_lines + 3 + checkbox_height + 1 + 1).min(screen_height);
+        let height = (1 + prompt_lines + 3 + self.suggestion_rows() + checkbox_height + 1 + 1)
+            .min(screen_height);
 
         (width, height)
+    }
+
+    fn suggestion_rows(&self) -> u16 {
+        if self.suggestions.is_some() {
+            SUGGESTION_ROWS as u16
+        } else {
+            0
+        }
     }
 
     fn visible_checkbox_indices(&self) -> Vec<usize> {
@@ -247,6 +385,142 @@ impl InputModal {
     }
 }
 
+impl InputModal {
+    fn handle_key_inner(
+        &mut self,
+        chord: termide_core::KeyChord,
+    ) -> Result<Option<ModalResult<String>>> {
+        let key = chord.raw;
+        // Escape always cancels
+        if key.code == KeyCode::Esc {
+            return Ok(Some(ModalResult::Cancelled));
+        }
+
+        if self.handle_suggestion_key(key.code).is_some() {
+            return Ok(None);
+        }
+
+        // Tab navigation (works from any focus)
+        if key.code == KeyCode::Tab {
+            self.focus_next();
+            return Ok(None);
+        }
+        if key.code == KeyCode::BackTab {
+            self.focus_prev();
+            return Ok(None);
+        }
+
+        match self.focus {
+            FocusArea::Input => {
+                // Try common input handling first
+                match handle_input_key(&mut self.input_handler, key) {
+                    InputKeyResult::Handled | InputKeyResult::TextModified => {
+                        return Ok(None);
+                    }
+                    InputKeyResult::NotHandled => {}
+                }
+
+                // Modal-specific handling
+                match key.code {
+                    KeyCode::Down => {
+                        self.focus_next();
+                        Ok(None)
+                    }
+                    KeyCode::Enter => {
+                        // Confirm input (or cancel if empty)
+                        Ok(Some(self.confirm()))
+                    }
+                    _ => Ok(None),
+                }
+            }
+            FocusArea::Checkbox(checkbox_idx) => {
+                // Space toggles checkbox — must come before handle_input_key which would eat it
+                if key.code == KeyCode::Char(' ') {
+                    if let Some(checkbox) = self.checkboxes.get_mut(checkbox_idx) {
+                        checkbox.checked = !checkbox.checked;
+                    }
+                    return Ok(None);
+                }
+
+                // Handle text input keys for quick typing
+                match handle_input_key(&mut self.input_handler, key) {
+                    InputKeyResult::Handled | InputKeyResult::TextModified => {
+                        self.focus = FocusArea::Input;
+                        return Ok(None);
+                    }
+                    InputKeyResult::NotHandled => {}
+                }
+
+                match key.code {
+                    KeyCode::Up => {
+                        self.focus = self
+                            .previous_visible_checkbox_before(checkbox_idx)
+                            .map(FocusArea::Checkbox)
+                            .unwrap_or(FocusArea::Input);
+                        Ok(None)
+                    }
+                    KeyCode::Down => {
+                        self.focus = self
+                            .next_visible_checkbox_after(checkbox_idx)
+                            .map(FocusArea::Checkbox)
+                            .unwrap_or(FocusArea::Buttons);
+                        Ok(None)
+                    }
+                    KeyCode::Enter => Ok(Some(self.confirm())),
+                    _ => Ok(None),
+                }
+            }
+            FocusArea::Buttons => {
+                // Handle navigation keys first (before input handler steals Left/Right)
+                match key.code {
+                    KeyCode::Left => {
+                        // Move to previous button (wrap around)
+                        self.selected_button = if self.selected_button == 0 { 1 } else { 0 };
+                        return Ok(None);
+                    }
+                    KeyCode::Right => {
+                        // Move to next button (wrap around)
+                        self.selected_button = if self.selected_button == 1 { 0 } else { 1 };
+                        return Ok(None);
+                    }
+                    KeyCode::Up => {
+                        self.focus_prev();
+                        return Ok(None);
+                    }
+                    KeyCode::Enter => {
+                        // Execute selected button action
+                        return if self.selected_button == 0 {
+                            // OK button
+                            if self.input_handler.is_empty() {
+                                Ok(Some(ModalResult::Cancelled))
+                            } else {
+                                Ok(Some(ModalResult::Confirmed(
+                                    self.input_handler.text().to_string(),
+                                )))
+                            }
+                        } else {
+                            // Cancel button
+                            Ok(Some(ModalResult::Cancelled))
+                        };
+                    }
+                    _ => {}
+                }
+
+                // Handle text input keys — typing switches back to input
+                match handle_input_key(&mut self.input_handler, key) {
+                    InputKeyResult::Handled | InputKeyResult::TextModified => {
+                        self.focus = FocusArea::Input;
+                        return Ok(None);
+                    }
+                    InputKeyResult::NotHandled => {}
+                }
+
+                Ok(None)
+            }
+        }
+    }
+}
+
 impl Modal for InputModal {
     type Result = String;
 
@@ -271,6 +545,10 @@ impl Modal for InputModal {
             constraints.push(Constraint::Length(prompt_lines)); // Prompt
         }
         constraints.push(Constraint::Length(3)); // Input
+        let suggestion_rows = self.suggestion_rows();
+        if suggestion_rows > 0 {
+            constraints.push(Constraint::Length(suggestion_rows));
+        }
         let visible_checkboxes = self.visible_checkbox_indices();
         for _ in &visible_checkboxes {
             constraints.push(Constraint::Length(1));
@@ -329,6 +607,14 @@ impl Modal for InputModal {
         );
         chunk_idx += 1;
 
+        if suggestion_rows > 0 {
+            if let Some(suggestions) = self.suggestions.as_mut() {
+                let colors = ThemeColors::from(theme);
+                suggestions.list.render(chunks[chunk_idx], buf, &colors);
+            }
+            chunk_idx += 1;
+        }
+
         // Render checkbox if present
         self.last_checkbox_areas.clear();
         if !visible_checkboxes.is_empty() {
@@ -383,144 +669,12 @@ impl Modal for InputModal {
         &mut self,
         chord: termide_core::KeyChord,
     ) -> Result<Option<ModalResult<Self::Result>>> {
-        let key = chord.raw;
-        // Escape always cancels
-        if key.code == KeyCode::Esc {
-            return Ok(Some(ModalResult::Cancelled));
+        let before = self.input_handler.text().to_string();
+        let result = self.handle_key_inner(chord)?;
+        if result.is_none() && self.input_handler.text() != before {
+            self.refresh_suggestions();
         }
-
-        // Tab navigation (works from any focus)
-        if key.code == KeyCode::Tab {
-            self.focus_next();
-            return Ok(None);
-        }
-        if key.code == KeyCode::BackTab {
-            self.focus_prev();
-            return Ok(None);
-        }
-
-        match self.focus {
-            FocusArea::Input => {
-                // Try common input handling first
-                match handle_input_key(&mut self.input_handler, key) {
-                    InputKeyResult::Handled | InputKeyResult::TextModified => {
-                        return Ok(None);
-                    }
-                    InputKeyResult::NotHandled => {}
-                }
-
-                // Modal-specific handling
-                match key.code {
-                    KeyCode::Down => {
-                        self.focus_next();
-                        Ok(None)
-                    }
-                    KeyCode::Enter => {
-                        // Confirm input (or cancel if empty)
-                        if self.input_handler.is_empty() {
-                            Ok(Some(ModalResult::Cancelled))
-                        } else {
-                            Ok(Some(ModalResult::Confirmed(
-                                self.input_handler.text().to_string(),
-                            )))
-                        }
-                    }
-                    _ => Ok(None),
-                }
-            }
-            FocusArea::Checkbox(checkbox_idx) => {
-                // Space toggles checkbox — must come before handle_input_key which would eat it
-                if key.code == KeyCode::Char(' ') {
-                    if let Some(checkbox) = self.checkboxes.get_mut(checkbox_idx) {
-                        checkbox.checked = !checkbox.checked;
-                    }
-                    return Ok(None);
-                }
-
-                // Handle text input keys for quick typing
-                match handle_input_key(&mut self.input_handler, key) {
-                    InputKeyResult::Handled | InputKeyResult::TextModified => {
-                        self.focus = FocusArea::Input;
-                        return Ok(None);
-                    }
-                    InputKeyResult::NotHandled => {}
-                }
-
-                match key.code {
-                    KeyCode::Up => {
-                        self.focus = self
-                            .previous_visible_checkbox_before(checkbox_idx)
-                            .map(FocusArea::Checkbox)
-                            .unwrap_or(FocusArea::Input);
-                        Ok(None)
-                    }
-                    KeyCode::Down => {
-                        self.focus = self
-                            .next_visible_checkbox_after(checkbox_idx)
-                            .map(FocusArea::Checkbox)
-                            .unwrap_or(FocusArea::Buttons);
-                        Ok(None)
-                    }
-                    KeyCode::Enter => {
-                        if self.input_handler.is_empty() {
-                            Ok(Some(ModalResult::Cancelled))
-                        } else {
-                            Ok(Some(ModalResult::Confirmed(
-                                self.input_handler.text().to_string(),
-                            )))
-                        }
-                    }
-                    _ => Ok(None),
-                }
-            }
-            FocusArea::Buttons => {
-                // Handle navigation keys first (before input handler steals Left/Right)
-                match key.code {
-                    KeyCode::Left => {
-                        // Move to previous button (wrap around)
-                        self.selected_button = if self.selected_button == 0 { 1 } else { 0 };
-                        return Ok(None);
-                    }
-                    KeyCode::Right => {
-                        // Move to next button (wrap around)
-                        self.selected_button = if self.selected_button == 1 { 0 } else { 1 };
-                        return Ok(None);
-                    }
-                    KeyCode::Up => {
-                        self.focus_prev();
-                        return Ok(None);
-                    }
-                    KeyCode::Enter => {
-                        // Execute selected button action
-                        return if self.selected_button == 0 {
-                            // OK button
-                            if self.input_handler.is_empty() {
-                                Ok(Some(ModalResult::Cancelled))
-                            } else {
-                                Ok(Some(ModalResult::Confirmed(
-                                    self.input_handler.text().to_string(),
-                                )))
-                            }
-                        } else {
-                            // Cancel button
-                            Ok(Some(ModalResult::Cancelled))
-                        };
-                    }
-                    _ => {}
-                }
-
-                // Handle text input keys — typing switches back to input
-                match handle_input_key(&mut self.input_handler, key) {
-                    InputKeyResult::Handled | InputKeyResult::TextModified => {
-                        self.focus = FocusArea::Input;
-                        return Ok(None);
-                    }
-                    InputKeyResult::NotHandled => {}
-                }
-
-                Ok(None)
-            }
-        }
+        Ok(result)
     }
 
     fn handle_mouse(
@@ -529,6 +683,27 @@ impl Modal for InputModal {
         _modal_area: Rect,
     ) -> Result<Option<ModalResult<Self::Result>>> {
         use crossterm::event::{MouseButton, MouseEventKind};
+
+        if let Some(suggestions) = self.suggestions.as_mut() {
+            match mouse.kind {
+                MouseEventKind::ScrollUp => {
+                    suggestions.list.select_up();
+                    return Ok(None);
+                }
+                MouseEventKind::ScrollDown => {
+                    suggestions.list.select_down();
+                    return Ok(None);
+                }
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if let Some(index) = suggestions.list.hit(mouse.column, mouse.row) {
+                        suggestions.list.select(index);
+                        self.focus = FocusArea::Input;
+                        return Ok(Some(self.confirm()));
+                    }
+                }
+                _ => {}
+            }
+        }
 
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
@@ -627,6 +802,7 @@ impl Modal for InputModal {
 
     fn handle_paste(&mut self, text: &str) -> bool {
         self.input_handler.paste(text);
+        self.refresh_suggestions();
         true
     }
 }
@@ -656,5 +832,115 @@ mod tests {
         modal.checkboxes[1].checked = true;
         assert!(modal.is_checkbox_checked());
         assert!(modal.is_secondary_checkbox_checked());
+    }
+
+    /// Suggests the words that start with the typed text; `poll` adds one
+    /// more word, as a background walk finishing would.
+    struct Words {
+        words: Vec<&'static str>,
+        late: Option<&'static str>,
+    }
+
+    impl Suggest for Words {
+        fn suggest(&mut self, text: &str) -> Vec<CompletionItem> {
+            self.words
+                .iter()
+                .filter(|w| !text.is_empty() && w.starts_with(text))
+                .map(|w| CompletionItem::new(*w))
+                .collect()
+        }
+
+        fn poll(&mut self) -> bool {
+            match self.late.take() {
+                Some(word) => {
+                    self.words.push(word);
+                    true
+                }
+                None => false,
+            }
+        }
+    }
+
+    fn words_modal() -> InputModal {
+        InputModal::new("Open", "").with_suggestions(Box::new(Words {
+            words: vec!["src/", "src/main.rs", "Cargo.toml"],
+            late: Some("src/lib.rs"),
+        }))
+    }
+
+    fn press(modal: &mut InputModal, code: KeyCode) -> Option<ModalResult<String>> {
+        let key = crossterm::event::KeyEvent::new(code, crossterm::event::KeyModifiers::NONE);
+        modal
+            .handle_key(termide_core::KeyChord::identity(key))
+            .unwrap()
+    }
+
+    fn type_text(modal: &mut InputModal, text: &str) {
+        for ch in text.chars() {
+            press(modal, KeyCode::Char(ch));
+        }
+    }
+
+    fn confirmed(result: Option<ModalResult<String>>) -> Option<String> {
+        match result {
+            Some(ModalResult::Confirmed(value)) => Some(value),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn suggestions_follow_the_text_and_enter_takes_the_selected_one() {
+        let mut modal = words_modal();
+        type_text(&mut modal, "src");
+        press(&mut modal, KeyCode::Down);
+        assert_eq!(
+            confirmed(press(&mut modal, KeyCode::Enter)).as_deref(),
+            Some("src/main.rs")
+        );
+    }
+
+    #[test]
+    fn with_nothing_suggested_enter_submits_the_typed_text() {
+        let mut modal = words_modal();
+        type_text(&mut modal, "https://example.com");
+        assert_eq!(
+            confirmed(press(&mut modal, KeyCode::Enter)).as_deref(),
+            Some("https://example.com")
+        );
+    }
+
+    #[test]
+    fn tab_puts_the_selection_in_the_field_and_asks_again() {
+        let mut modal = words_modal();
+        type_text(&mut modal, "Ca");
+        press(&mut modal, KeyCode::Tab);
+        assert_eq!(modal.input_handler.text(), "Cargo.toml");
+        assert_eq!(modal.focus, FocusArea::Input, "Tab completed, focus stayed");
+
+        let mut empty = words_modal();
+        press(&mut empty, KeyCode::Tab);
+        assert_eq!(empty.focus, FocusArea::Buttons, "no list: Tab moves focus");
+    }
+
+    #[test]
+    fn poll_takes_in_background_results() {
+        let mut modal = words_modal();
+        type_text(&mut modal, "src/l");
+        assert!(modal.selected_suggestion().is_none());
+        assert!(modal.poll_suggestions());
+        assert_eq!(modal.selected_suggestion().as_deref(), Some("src/lib.rs"));
+        assert!(!modal.poll_suggestions(), "nothing new");
+    }
+
+    #[test]
+    fn the_modal_keeps_its_height_while_the_list_changes() {
+        let mut modal = words_modal();
+        let empty = modal.calculate_modal_size(120, 40);
+        type_text(&mut modal, "s");
+        assert_eq!(modal.calculate_modal_size(120, 40), empty);
+        assert_eq!(
+            empty.1,
+            InputModal::new("Open", "").calculate_modal_size(120, 40).1 + SUGGESTION_ROWS as u16
+        );
     }
 }

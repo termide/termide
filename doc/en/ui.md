@@ -296,6 +296,7 @@ The disk window lists one row per storage pool, with the filesystem type as a se
 | `Alt+N`           | Start a new project                        |
 | `Alt+B`           | Add bookmark                               |
 | `Ctrl+P`          | Open command palette                       |
+| `Ctrl+G`          | Open a file, directory or URL              |
 | `Alt+1-9`         | Jump to panel by number                    |
 
 ### Command palette
@@ -307,6 +308,28 @@ fzf's syntax — space-separated words must all match, `'word` matches
 literally, `^word` at the start, `word$` at the end, and `!word` excludes.
 Lower-case letters match either case; an upper-case letter matches only
 itself.
+
+### Open prompt
+
+`Ctrl+G` (or **Windows ▸ Open…**) asks for a file path, a directory, a
+database URL or an `http(s)://` address and opens it in the matching panel.
+It works from every panel except two: the file manager keeps `Ctrl+G` for its
+own *Go to path* (which offers the same suggestions), and a terminal passes it
+on to the program running there. A relative path is taken from the focused
+panel's directory.
+
+A list under the input follows what you type:
+
+- a name (`hpprov`) is matched fuzzily against the project's files — what git
+  ignores and `.git` itself left out — best match first, with the same syntax
+  as the [command palette](#command-palette);
+- a path (`/`, `~/`, `./`, `../`) completes from its directory, directories
+  first;
+- a URL gets no list.
+
+`↑` / `↓` pick a suggestion, `Tab` puts it in the input (a directory then
+lists its contents), and `Enter` opens it — or the typed text when the list is
+empty. A click opens a suggestion.
 
 ### Caps Lock
 

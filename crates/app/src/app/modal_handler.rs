@@ -609,10 +609,8 @@ impl App {
                     self.reopen_bookmarks_menu(result_group, result_is_project, selected);
                 }
                 // Go to path/URL
-                PendingAction::GoToPath {
-                    current_directory: _,
-                } => {
-                    self.handle_goto_path(value)?;
+                PendingAction::GoToPath { current_directory } => {
+                    self.handle_goto_path(&current_directory, value)?;
                 }
                 // VFS message / connection-error recovery dialog. Plain "OK"
                 // modals return id "ok" (ignored); the dead-session dialog

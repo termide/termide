@@ -28,7 +28,7 @@ There are two more ways to open a database without a bookmark:
 - **Open a local SQLite file directly.** Press `Enter` or `F3` on a `.db` /
   `.sqlite` / `.sqlite3` / `.db3` file in the file manager — it opens in the
   database viewer instead of the hex viewer.
-- **Windows ▸ Open…** (or `Ctrl+G` in a viewer) accepts a connection URL
+- **Windows ▸ Open…** (or `Ctrl+G`) accepts a connection URL
   (`sqlite://` / `postgres://` / `mysql://`) as well as a file path, a
   directory, or an `http(s)://` address, and routes it to the matching viewer.
 

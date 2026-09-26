@@ -42,6 +42,7 @@ fn collect_global_reserved_hotkeys(kb: &GlobalKeybindings) -> Vec<ReservedHotkey
     push_reserved_hotkeys(&mut reserved, &kb.open_git_log);
     push_reserved_hotkeys(&mut reserved, &kb.open_bookmark_add);
     push_reserved_hotkeys(&mut reserved, &kb.open_command_palette);
+    push_reserved_hotkeys(&mut reserved, &kb.open_path);
     push_reserved_hotkeys(&mut reserved, &kb.prev_group);
     push_reserved_hotkeys(&mut reserved, &kb.next_group);
     push_reserved_hotkeys(&mut reserved, &kb.prev_panel);

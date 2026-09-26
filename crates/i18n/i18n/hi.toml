@@ -485,7 +485,6 @@ help_desc_tree_search = "ट्री में वृद्धिशील ख�
 help_desc_viewer_copy = "चयन कॉपी करें"
 help_desc_viewer_external = "लिंक बाहरी ब्राउज़र में खोलें"
 help_desc_viewer_follow = "लिंक पर जाएँ (पैनल में)"
-help_desc_viewer_goto = "पथ या URL पर जाएँ"
 help_desc_viewer_history = "वेब इतिहास पीछे / आगे"
 help_desc_viewer_reload = "डिस्क से पुनः लोड करें"
 help_desc_viewer_search = "खोजें"
