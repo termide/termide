@@ -200,7 +200,7 @@ impl DbPanel {
     /// Open a panel for `url`. `label` is the bookmark description (falls back to
     /// a sanitized URL). Connection starts immediately in the background.
     pub fn new(url: impl Into<String>, label: impl Into<String>) -> Self {
-        let url = url.into();
+        let url = url.into().trim().to_string();
         let label_in = label.into();
         let backend = DbBackend::from_url(&url).unwrap_or(DbBackend::Sqlite);
         let label = if label_in.is_empty() {
@@ -1065,6 +1065,13 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         panic!("panel did not reach the expected state");
+    }
+
+    #[test]
+    fn new_trims_the_url() {
+        let (_dir, url) = fixture();
+        let panel = DbPanel::new(format!(" {url} "), "");
+        assert_eq!(panel.url, url);
     }
 
     fn open_table(url: &str, table: &str) -> DbPanel {

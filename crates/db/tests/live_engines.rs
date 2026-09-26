@@ -15,7 +15,8 @@
 //!     cargo test -p termide-db --test live_engines -- --nocapture
 //! ```
 //!
-//! Each test creates and drops its own `termide_it_users` table.
+//! Each test creates and drops its own table (`termide_it_users`,
+//! `termide_it_catalog`), so they can run in parallel against one database.
 
 use termide_db::{Condition, DbConnection, DbValue, FilterOp, PageRequest, SortDir, TypeCategory};
 
@@ -65,6 +66,19 @@ fn assert_browse(conn: &DbConnection, active_is_bool: bool) {
         .unwrap()
         .unwrap();
     assert_eq!(filtered, 2, "case-insensitive contains should match 2 rows");
+
+    // LIKE wildcards in the operand match literally: no name contains `_`.
+    let literal = vec![Condition {
+        column: "name".into(),
+        op: FilterOp::Contains,
+        value: Some(DbValue::Text("_".into())),
+    }];
+    let none = conn
+        .count("termide_it_users", literal)
+        .recv()
+        .unwrap()
+        .unwrap();
+    assert_eq!(none, 0, "`_` should not act as a wildcard");
 
     let page = conn
         .page(PageRequest {
@@ -184,6 +198,80 @@ fn mysql_browse_filter_sort() {
     rt.block_on(async {
         let pool = sqlx::MySqlPool::connect(&url).await.unwrap();
         sqlx::query("DROP TABLE termide_it_users")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+    });
+}
+
+/// MySQL 8 reports several `information_schema` columns as binary strings
+/// (`VARBINARY`, `LONGBLOB`), which sqlx refuses to decode as `String`. Every
+/// catalog query must still come back populated rather than silently empty.
+#[test]
+fn mysql_catalog_decodes_information_schema() {
+    let Some(url) = env_url("TERMIDE_TEST_MYSQL_URL") else {
+        eprintln!("skip: set TERMIDE_TEST_MYSQL_URL to run the MySQL test");
+        return;
+    };
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let pool = sqlx::MySqlPool::connect(&url).await.unwrap();
+        sqlx::query("DROP TABLE IF EXISTS termide_it_catalog")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE termide_it_catalog (\
+             id INT NOT NULL, part INT NOT NULL, label VARCHAR(50), \
+             PRIMARY KEY (id, part))",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+    });
+
+    let conn = DbConnection::connect(&url).unwrap();
+
+    let databases = conn.list_databases().recv().unwrap().unwrap();
+    assert!(
+        databases.iter().any(|d| d == "information_schema"),
+        "databases should be listed, got {databases:?}"
+    );
+
+    let tables = conn.list_tables().recv().unwrap().unwrap();
+    assert!(
+        tables.iter().any(|t| t == "termide_it_catalog"),
+        "table should be listed, got {tables:?}"
+    );
+
+    let cols = conn.columns("termide_it_catalog").recv().unwrap().unwrap();
+    let described: Vec<(&str, TypeCategory, bool)> = cols
+        .iter()
+        .map(|c| (c.name.as_str(), c.category, c.nullable))
+        .collect();
+    assert_eq!(
+        described,
+        vec![
+            ("id", TypeCategory::Number, false),
+            ("part", TypeCategory::Number, false),
+            ("label", TypeCategory::Text, true),
+        ]
+    );
+
+    let key = conn
+        .primary_key("termide_it_catalog")
+        .recv()
+        .unwrap()
+        .unwrap();
+    assert_eq!(key, vec!["id", "part"]);
+    drop(conn);
+
+    rt.block_on(async {
+        let pool = sqlx::MySqlPool::connect(&url).await.unwrap();
+        sqlx::query("DROP TABLE termide_it_catalog")
             .execute(&pool)
             .await
             .unwrap();

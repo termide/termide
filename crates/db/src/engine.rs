@@ -115,23 +115,24 @@ pub(crate) async fn list_tables(pool: &Pool) -> Result<Vec<String>, DbError> {
              ORDER BY table_name"
         }
         Pool::MySql(_) => {
-            "SELECT table_name FROM information_schema.tables \
+            // Cast to CHAR: MySQL 8 reports `table_name` as VARBINARY, which
+            // doesn't decode straight to String.
+            "SELECT CAST(table_name AS CHAR) FROM information_schema.tables \
              WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE' \
              ORDER BY table_name"
         }
     };
-    let names = match pool {
+    match pool {
         Pool::Sqlite(p) => collect_first_column(sqlx::query(sql).fetch_all(p).await?),
         Pool::Postgres(p) => collect_first_column(sqlx::query(sql).fetch_all(p).await?),
         Pool::MySql(p) => collect_first_column(sqlx::query(sql).fetch_all(p).await?),
-    };
-    Ok(names)
+    }
 }
 
 /// List databases/schemas the connection can switch to. SQLite has none.
 pub(crate) async fn list_databases(pool: &Pool) -> Result<Vec<String>, DbError> {
-    let names = match pool {
-        Pool::Sqlite(_) => Vec::new(),
+    match pool {
+        Pool::Sqlite(_) => Ok(Vec::new()),
         Pool::Postgres(p) => {
             // Cast to text: `datname` is the `name` type, which doesn't decode
             // straight to String.
@@ -140,12 +141,13 @@ pub(crate) async fn list_databases(pool: &Pool) -> Result<Vec<String>, DbError> 
             collect_first_column(sqlx::query(sql).fetch_all(p).await?)
         }
         Pool::MySql(p) => {
-            let sql = "SELECT schema_name FROM information_schema.schemata \
+            // Cast to CHAR: MySQL 8 reports `schema_name` as VARBINARY, which
+            // doesn't decode straight to String.
+            let sql = "SELECT CAST(schema_name AS CHAR) FROM information_schema.schemata \
                        ORDER BY schema_name";
             collect_first_column(sqlx::query(sql).fetch_all(p).await?)
         }
-    };
-    Ok(names)
+    }
 }
 
 /// Describe a table's columns: name + inferred [`TypeCategory`]. Comes from the
@@ -159,19 +161,18 @@ pub(crate) async fn columns(pool: &Pool, table: &str) -> Result<Vec<ColumnInfo>,
                 quote_ident(DbBackend::Sqlite, table)
             );
             let rows = sqlx::query(&sql).fetch_all(p).await?;
-            Ok(rows
-                .iter()
+            rows.iter()
                 .map(|r| {
-                    let name: String = r.try_get("name").unwrap_or_default();
-                    let ty: String = r.try_get("type").unwrap_or_default();
-                    let notnull: i64 = r.try_get("notnull").unwrap_or(0);
-                    ColumnInfo {
+                    let name: String = r.try_get("name")?;
+                    let ty: String = r.try_get("type")?;
+                    let notnull: i64 = r.try_get("notnull")?;
+                    Ok(ColumnInfo {
                         name,
                         category: sqlite_category(&ty),
                         nullable: notnull == 0,
-                    }
+                    })
                 })
-                .collect())
+                .collect()
         }
         Pool::Postgres(p) => {
             let sql = "SELECT column_name::text AS column_name, data_type::text AS data_type, \
@@ -180,39 +181,41 @@ pub(crate) async fn columns(pool: &Pool, table: &str) -> Result<Vec<ColumnInfo>,
                        WHERE table_schema = current_schema() AND table_name = $1 \
                        ORDER BY ordinal_position";
             let rows = sqlx::query(sql).bind(table).fetch_all(p).await?;
-            Ok(rows
-                .iter()
+            rows.iter()
                 .map(|r| {
-                    let name: String = r.try_get("column_name").unwrap_or_default();
-                    let ty: String = r.try_get("data_type").unwrap_or_default();
-                    let nullable: String = r.try_get("is_nullable").unwrap_or_default();
-                    ColumnInfo {
+                    let name: String = r.try_get("column_name")?;
+                    let ty: String = r.try_get("data_type")?;
+                    let nullable: String = r.try_get("is_nullable")?;
+                    Ok(ColumnInfo {
                         name,
                         category: pg_category(&ty),
                         nullable: nullable.eq_ignore_ascii_case("yes"),
-                    }
+                    })
                 })
-                .collect())
+                .collect()
         }
         Pool::MySql(p) => {
-            let sql = "SELECT column_name, data_type, is_nullable \
+            // Cast to CHAR: MySQL 8 reports some of these as binary strings
+            // (`data_type` is LONGBLOB), which don't decode straight to String.
+            let sql = "SELECT CAST(column_name AS CHAR) AS column_name, \
+                              CAST(data_type AS CHAR) AS data_type, \
+                              CAST(is_nullable AS CHAR) AS is_nullable \
                        FROM information_schema.columns \
                        WHERE table_schema = DATABASE() AND table_name = ? \
                        ORDER BY ordinal_position";
             let rows = sqlx::query(sql).bind(table).fetch_all(p).await?;
-            Ok(rows
-                .iter()
+            rows.iter()
                 .map(|r| {
-                    let name: String = r.try_get("column_name").unwrap_or_default();
-                    let ty: String = r.try_get("data_type").unwrap_or_default();
-                    let nullable: String = r.try_get("is_nullable").unwrap_or_default();
-                    ColumnInfo {
+                    let name: String = r.try_get("column_name")?;
+                    let ty: String = r.try_get("data_type")?;
+                    let nullable: String = r.try_get("is_nullable")?;
+                    Ok(ColumnInfo {
                         name,
                         category: mysql_category(&ty),
                         nullable: nullable.eq_ignore_ascii_case("yes"),
-                    }
+                    })
                 })
-                .collect())
+                .collect()
         }
     }
 }
@@ -229,14 +232,13 @@ pub(crate) async fn primary_key(pool: &Pool, table: &str) -> Result<Vec<String>,
             );
             let rows = sqlx::query(&sql).fetch_all(p).await?;
             // `pk` is the 1-based position within the key, 0 for other columns.
-            let mut keyed: Vec<(i64, String)> = rows
-                .iter()
-                .filter_map(|r| {
-                    let pk: i64 = r.try_get("pk").unwrap_or(0);
-                    let name: String = r.try_get("name").unwrap_or_default();
-                    (pk > 0).then_some((pk, name))
-                })
-                .collect();
+            let mut keyed = Vec::new();
+            for r in &rows {
+                let pk: i64 = r.try_get("pk")?;
+                if pk > 0 {
+                    keyed.push((pk, r.try_get::<String, _>("name")?));
+                }
+            }
             keyed.sort_by_key(|(pos, _)| *pos);
             Ok(keyed.into_iter().map(|(_, name)| name).collect())
         }
@@ -251,18 +253,17 @@ pub(crate) async fn primary_key(pool: &Pool, table: &str) -> Result<Vec<String>,
                          AND tc.table_schema = current_schema() \
                          AND tc.table_name = $1 \
                        ORDER BY kcu.ordinal_position";
-            Ok(collect_first_column(
-                sqlx::query(sql).bind(table).fetch_all(p).await?,
-            ))
+            collect_first_column(sqlx::query(sql).bind(table).fetch_all(p).await?)
         }
         Pool::MySql(p) => {
-            let sql = "SELECT column_name FROM information_schema.key_column_usage \
+            // Cast to CHAR, like the other MySQL catalog queries: MySQL 8 may
+            // report information_schema strings as binary.
+            let sql = "SELECT CAST(column_name AS CHAR) \
+                       FROM information_schema.key_column_usage \
                        WHERE table_schema = DATABASE() AND table_name = ? \
                          AND constraint_name = 'PRIMARY' \
                        ORDER BY ordinal_position";
-            Ok(collect_first_column(
-                sqlx::query(sql).bind(table).fetch_all(p).await?,
-            ))
+            collect_first_column(sqlx::query(sql).bind(table).fetch_all(p).await?)
         }
     }
 }
@@ -408,11 +409,12 @@ fn placeholder(backend: DbBackend, idx: usize) -> String {
     }
 }
 
-/// Escape LIKE wildcards so user input matches literally (with `ESCAPE '\'`).
+/// Escape LIKE wildcards so user input matches literally (with `ESCAPE '!'`).
+///
+/// `!` rather than `\`: MySQL treats a backslash inside a string literal as an
+/// escape, so `ESCAPE '\'` is an unterminated literal there.
 fn escape_like(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_")
+    s.replace('!', "!!").replace('%', "!%").replace('_', "!_")
 }
 
 /// Build the ` WHERE …` clause (with leading space) plus the ordered bind
@@ -440,7 +442,7 @@ fn build_where(backend: DbBackend, conds: &[Condition]) -> (String, Vec<DbValue>
                 };
                 let ph = placeholder(backend, idx);
                 idx += 1;
-                parts.push(format!("{col} {like} {ph} ESCAPE '\\'"));
+                parts.push(format!("{col} {like} {ph} ESCAPE '!'"));
                 let raw = match &c.value {
                     Some(DbValue::Text(s)) => s.clone(),
                     Some(v) => v.display(),
@@ -564,13 +566,13 @@ fn mysql_category(data_type: &str) -> TypeCategory {
     }
 }
 
-fn collect_first_column<R: Row>(rows: Vec<R>) -> Vec<String>
+fn collect_first_column<R: Row>(rows: Vec<R>) -> Result<Vec<String>, DbError>
 where
     for<'a> String: sqlx::Decode<'a, R::Database> + sqlx::Type<R::Database>,
     usize: sqlx::ColumnIndex<R>,
 {
     rows.iter()
-        .filter_map(|r| r.try_get::<String, _>(0).ok())
+        .map(|r| Ok(r.try_get::<String, _>(0)?))
         .collect()
 }
 

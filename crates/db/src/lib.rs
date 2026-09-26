@@ -690,6 +690,17 @@ mod tests {
             .unwrap();
         assert_eq!(total, 2);
 
+        // Wildcards and the escape character itself match literally.
+        for needle in ["%", "_", "!"] {
+            let literal = vec![Condition {
+                column: "name".into(),
+                op: FilterOp::Contains,
+                value: Some(DbValue::Text(needle.into())),
+            }];
+            let n = conn.count("users", literal).recv().unwrap().unwrap();
+            assert_eq!(n, 0, "{needle:?} should match literally");
+        }
+
         let page = conn
             .page(PageRequest {
                 table: "users".into(),
