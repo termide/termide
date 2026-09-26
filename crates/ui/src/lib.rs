@@ -10,6 +10,7 @@ pub mod completion_list;
 pub mod config;
 pub mod diff_style;
 pub mod field_edit;
+pub mod fuzzy;
 pub mod grapheme_utils;
 pub mod input_bar;
 pub mod path_utils;

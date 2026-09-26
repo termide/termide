@@ -13,6 +13,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::base::render_modal_block;
 use termide_theme::Theme;
+use termide_ui::fuzzy::{highlight, rank, Query};
 
 use crate::{calculate_modal_width, centered_rect_with_size, Modal, ModalResult, ModalWidthConfig};
 
@@ -61,27 +62,16 @@ impl CommandPaletteModal {
         }
     }
 
-    /// Recompute `filtered_indices` from the current filter value.
+    /// Recompute `filtered_indices` from the current filter value: every
+    /// entry whose label, category or keybinding matches, best match first.
     fn apply_filter(&mut self) {
-        let f = self.filter.to_lowercase();
-        if f.is_empty() {
-            self.filtered_indices = (0..self.entries.len()).collect();
-        } else {
-            self.filtered_indices = self
-                .entries
+        let mut query = Query::fuzzy(&self.filter);
+        self.filtered_indices = rank(
+            self.entries
                 .iter()
-                .enumerate()
-                .filter(|(_, e)| {
-                    e.label.to_lowercase().contains(&f)
-                        || e.category.to_lowercase().contains(&f)
-                        || e.keybinding.to_lowercase().contains(&f)
-                })
-                .map(|(i, _)| i)
-                .collect();
-        }
-        self.cursor = self
-            .cursor
-            .min(self.filtered_indices.len().saturating_sub(1));
+                .map(|e| query.score_any(&[&e.label, e.category, &e.keybinding])),
+        );
+        self.cursor = 0;
         self.scroll_offset = 0;
         self.adjust_scroll();
     }
@@ -222,6 +212,7 @@ impl Modal for CommandPaletteModal {
             .unwrap_or(0);
         let right_cols_w = if max_cat_w > 0 { max_cat_w + 2 } else { 0 }
             + if max_kb_w > 0 { max_kb_w + 2 } else { 0 };
+        let mut query = Query::fuzzy(&self.filter);
 
         for (pos, &entry_idx) in self
             .filtered_indices
@@ -271,11 +262,15 @@ impl Modal for CommandPaletteModal {
                 .saturating_sub(prefix_w + label_w + right_cols_w)
                 .max(1);
 
-            let mut spans = vec![
-                Span::styled(prefix, label_style),
-                Span::styled(entry.label.clone(), label_style),
-                Span::styled(" ".repeat(gap), label_style),
-            ];
+            // A command found by its category or keybinding has no hits in
+            // the label.
+            let positions = query.positions(&entry.label).unwrap_or_default();
+            let hit_style = label_style
+                .fg(theme.accented_fg)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+            let mut spans = vec![Span::styled(prefix, label_style)];
+            spans.extend(highlight(&entry.label, &positions, label_style, hit_style));
+            spans.push(Span::styled(" ".repeat(gap), label_style));
             if max_cat_w > 0 {
                 let cat_text = format!("{:>width$}  ", entry.category, width = max_cat_w);
                 spans.push(Span::styled(cat_text, category_style));
@@ -407,5 +402,88 @@ impl Modal for CommandPaletteModal {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyEvent, KeyModifiers};
+
+    fn entry(label: &str, category: &'static str, keybinding: &str) -> CommandEntry {
+        CommandEntry {
+            label: label.into(),
+            category,
+            keybinding: keybinding.into(),
+        }
+    }
+
+    fn palette() -> CommandPaletteModal {
+        CommandPaletteModal::new(vec![
+            entry("Open Git Status", "Git", "Alt+G"),
+            entry("Toggle Stack", "Layout", "Alt+Backspace"),
+            entry("Open Git Log", "Git", "Alt+C"),
+            entry("Quit", "App", "Alt+Q"),
+        ])
+    }
+
+    fn type_text(modal: &mut CommandPaletteModal, text: &str) {
+        for ch in text.chars() {
+            let key = KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE);
+            modal
+                .handle_key(termide_core::KeyChord::identity(key))
+                .unwrap();
+        }
+    }
+
+    fn labels(modal: &CommandPaletteModal) -> Vec<&str> {
+        modal
+            .filtered_indices
+            .iter()
+            .map(|&i| modal.entries[i].label.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn filters_by_subsequence_best_match_first() {
+        let mut modal = palette();
+        type_text(&mut modal, "gitlog");
+        assert_eq!(labels(&modal), ["Open Git Log"]);
+    }
+
+    #[test]
+    fn matches_category_and_keybinding_too() {
+        let mut modal = palette();
+        type_text(&mut modal, "layout");
+        assert_eq!(labels(&modal), ["Toggle Stack"]);
+
+        let mut modal = palette();
+        type_text(&mut modal, "alt+q");
+        assert_eq!(labels(&modal)[0], "Quit");
+    }
+
+    #[test]
+    fn a_new_filter_puts_the_cursor_on_the_best_match() {
+        let mut modal = palette();
+        modal.cursor_end();
+        type_text(&mut modal, "git");
+        assert_eq!(modal.cursor, 0);
+        assert!(labels(&modal).iter().all(|l| l.contains("Git")));
+    }
+
+    #[test]
+    fn renders_the_matched_label_graphemes_highlighted() {
+        let mut modal = palette();
+        type_text(&mut modal, "quit");
+        let area = Rect::new(0, 0, 80, 20);
+        let mut buf = Buffer::empty(area);
+        let theme = Theme::default();
+        modal.render(area, &mut buf, &theme);
+        let cell = (0..area.height)
+            .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+            .find(|&(x, y)| buf[(x, y)].symbol() == "Q")
+            .map(|(x, y)| buf[(x, y)].clone())
+            .expect("the Quit row is drawn");
+        assert!(cell.modifier.contains(Modifier::UNDERLINED));
     }
 }

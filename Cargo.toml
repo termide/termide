@@ -33,6 +33,7 @@ regex = "1.12"
 notify = { version = "6.1", default-features = false, features = ["macos_fsevent"] }
 notify-debouncer-mini = "0.4"
 ignore = "0.4"
+nucleo-matcher = "0.3"
 sysinfo = "0.31"
 starship-battery = "0.11"
 chrono = { version = "0.4", features = ["serde"] }

@@ -12,6 +12,7 @@ ratatui.workspace = true
 crossterm.workspace = true
 anyhow.workspace = true
 regex.workspace = true
+nucleo-matcher.workspace = true
 unicode-segmentation.workspace = true
 unicode-width.workspace = true
 dirs.workspace = true

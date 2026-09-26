@@ -298,6 +298,16 @@ The disk window lists one row per storage pool, with the filesystem type as a se
 | `Ctrl+P`          | Open command palette                       |
 | `Alt+1-9`         | Jump to panel by number                    |
 
+### Command palette
+
+`Ctrl+P` lists every command. Typing filters it with a fuzzy match against the
+command name, its category and its keybinding, best match first, with the
+matched letters highlighted: `gitlog` finds *Open Git Log*. The filter takes
+fzf's syntax — space-separated words must all match, `'word` matches
+literally, `^word` at the start, `word$` at the end, and `!word` excludes.
+Lower-case letters match either case; an upper-case letter matches only
+itself.
+
 ### Caps Lock
 
 Termide opts into the [Kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/) via `KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES | REPORT_ALTERNATE_KEYS | REPORT_EVENT_TYPES`. `REPORT_EVENT_TYPES` exposes `KeyEventState::CAPS_LOCK`, which the hotkey matcher uses to ignore the spurious `Shift` modifier that X11/Linux terminals attach to every letter event while Caps Lock is on.
