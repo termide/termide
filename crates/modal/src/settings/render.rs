@@ -48,6 +48,30 @@ fn label_column_width(tab: SettingsTab, area_width: u16) -> usize {
     (widest + GAP).clamp(MIN, cap)
 }
 
+/// `text` broken into lines of at most `width` columns, at spaces.
+fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        let needed = if line.is_empty() {
+            word.width()
+        } else {
+            line.width() + 1 + word.width()
+        };
+        if needed > width && !line.is_empty() {
+            lines.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
 /// Truncate `s` to at most `max_chars` Unicode scalar values, safe for UTF-8 slicing.
 /// `value` cut to `max` display columns with a trailing `…` when it does not
 /// fit. Widths, not bytes: a byte cut lands inside a multi-byte character
@@ -485,6 +509,26 @@ impl SettingsModal {
                         );
                     }
                 }
+            }
+        }
+
+        // What a CLI agent's connection runs differently, under its page.
+        if let Some(hint) = self.connection_hint() {
+            let shown = rows.len().saturating_sub(self.content_scroll);
+            let top = area.y as usize + shown + 1;
+            let bottom = area.y as usize + area.height as usize;
+            let width = area.width.saturating_sub(4) as usize;
+            for (i, line) in wrap_words(hint, width).into_iter().enumerate() {
+                let y = top + i;
+                if y >= bottom {
+                    break;
+                }
+                buf.set_string(
+                    area.x + 2,
+                    y as u16,
+                    line,
+                    Style::default().fg(theme.disabled),
+                );
             }
         }
 

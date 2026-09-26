@@ -4856,6 +4856,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "termide-agent-core",
+ "termide-agent-mcp",
 ]
 
 [[package]]

@@ -12,6 +12,7 @@ log.workspace = true
 serde_json.workspace = true
 
 termide-agent-core = { path = "../agent-core" }
+termide-agent-mcp = { path = "../agent-mcp" }
 
 [dev-dependencies]
 tempfile.workspace = true

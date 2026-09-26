@@ -289,6 +289,18 @@ impl SettingsModal {
             .expect("some suffix is free")
     }
 
+    /// What the open connection runs differently from a model termide talks
+    /// to directly: a CLI agent keeps its own conversation loop, and Codex its
+    /// prompt and tools too. `None` for an endpoint, which termide runs whole.
+    pub(super) fn connection_hint(&self) -> Option<&'static str> {
+        let t = i18n::t();
+        match self.edited()?.provider.as_str() {
+            "claude_code" => Some(t.settings_ai_connection_hint_claude_code()),
+            "codex" => Some(t.settings_ai_connection_hint_codex()),
+            _ => None,
+        }
+    }
+
     /// A connection page field's value as the row shows it.
     pub(super) fn connection_value(&self, index: usize) -> String {
         let Some(connection) = self.edited() else {
@@ -903,6 +915,39 @@ mod tests {
             modal.config.ai.connections["local"].context_window_fallback,
             Some(64_000)
         );
+    }
+
+    #[test]
+    fn a_cli_agents_page_says_what_it_runs_differently() {
+        let mut config = with_local();
+        config.ai.connections.insert(
+            "claude".into(),
+            Connection {
+                provider: "claude_code".into(),
+                ..Connection::default()
+            },
+        );
+        let mut modal = ai_modal(config);
+        modal.open_connection("claude".into());
+        let hint = i18n::t().settings_ai_connection_hint_claude_code();
+        let first_words: String = hint
+            .split_whitespace()
+            .take(4)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let shown = screen(&mut modal);
+        let buttons = shown
+            .iter()
+            .position(|row| row.contains(&connection_buttons()[0]))
+            .unwrap();
+        let hint_row = shown
+            .iter()
+            .position(|row| row.contains(&first_words))
+            .unwrap_or_else(|| panic!("no hint: {shown:?}"));
+        assert!(hint_row > buttons, "under the buttons");
+        // An endpoint termide runs whole has none.
+        modal.open_connection("local".into());
+        assert!(modal.connection_hint().is_none());
     }
 
     #[test]

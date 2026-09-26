@@ -8,10 +8,11 @@ use std::sync::Arc;
 use anyhow::Result;
 use termide_agent_acp::AcpRuntime;
 use termide_agent_core::{
-    build_system_prompt, discover_context_files, ensure_global_layout, AcpConfig, Agent, AgentDirs,
-    AgentEvent, AutoDenyPrompter, CancelToken, CompactionPolicy, Decision, Message, ModelSpec,
-    PermissionHooks, PermissionRules, PersistScope, PromptOptions, Provider, Session, StopReason,
-    StreamEvent, ToolRegistry, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
+    build_system_prompt, discover_context_files, ensure_global_layout, AcpConfig, AcpFlavor, Agent,
+    AgentDirs, AgentEvent, AutoDenyPrompter, CancelToken, CompactionPolicy, Decision, Message,
+    ModelSpec, PermissionHooks, PermissionRules, PersistScope, PromptOptions, Provider, Session,
+    StopReason, StreamEvent, ToolRegistry, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR,
+    SESSIONS_DIR,
 };
 use termide_agent_core::{subject_of, Mode, ToolContext};
 use termide_agent_hooks::CommandHooks;
@@ -1023,9 +1024,14 @@ fn stop_label(reason: StopReason) -> &'static str {
 /// login (a subscription or an API key — the adapter's concern, not ours).
 /// `None` for any other provider, so the built-in loop is used.
 fn cli_provider_backend(provider: &str, agent: &str) -> Option<BackendFactory> {
-    let package = match provider {
-        "claude_code" => "@agentclientprotocol/claude-agent-acp@latest",
-        "codex" => "@agentclientprotocol/codex-acp@latest",
+    // Claude Code takes termide's prompt and tools in place of its own; Codex
+    // keeps its own and has termide's permission mode mapped onto its modes.
+    let (package, flavor) = match provider {
+        "claude_code" => (
+            "@agentclientprotocol/claude-agent-acp@latest",
+            AcpFlavor::ClaudeCode,
+        ),
+        "codex" => ("@agentclientprotocol/codex-acp@latest", AcpFlavor::Codex),
         _ => return None,
     };
     // The adapters ship on npm; `npx -y` fetches on first use. `@latest`,
@@ -1038,6 +1044,7 @@ fn cli_provider_backend(provider: &str, agent: &str) -> Option<BackendFactory> {
         args: vec!["-y".to_string(), package.to_string()],
         env: std::collections::BTreeMap::new(),
         timeout_secs: 120,
+        flavor,
     };
     let agent = agent.to_string();
     Some(Arc::new(move |setup: termide_agent_core::BackendSetup| {

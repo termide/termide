@@ -112,8 +112,27 @@ from the file. `model` is
 kept: it is the model **pre-selected** on the agent — applied over ACP once the
 session starts — and at runtime the **Model** chip lists and switches the
 agent's own models. The
-tool must be installed and signed in first (`npx` on `PATH`). This is the
-built-in shortcut for what an agent's own `[acp]` table does by hand.
+tool must be installed and signed in first (`npx` on `PATH`).
+
+termide takes these agents as far as they let it, so a session runs the same
+whichever connection it is on:
+
+- **Claude Code** gets termide's system prompt in place of its own and calls
+  termide's tools, served to it over a local MCP server, in place of its own.
+  Its built-in tools and its own settings — their rules, hooks, `CLAUDE.md`
+  and MCP servers — are left out. Every call runs in termide, through the same
+  checks as the built-in loop's: the permission mode, the rules, the session
+  answers, plan mode and the `/undo` checkpoints.
+- **Codex** keeps its own system prompt and tools; termide puts it in the
+  modes that match the panel's (`ask` and `configured`: ask for approval,
+  `plan`: that plus its plan collaboration mode, `edit`: approve for me,
+  `all`: full access) and decides what it asks.
+
+Both keep their own conversation loop: they compact their context themselves,
+a run cannot pause between steps, and there is no prefill or generation
+timing (token totals show when the agent reports them, as Claude Code does).
+The **Mode** chip works for both. The settings modal says the same under a
+connection's page.
 
 ## Using the panel
 

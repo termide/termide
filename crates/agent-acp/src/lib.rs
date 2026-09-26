@@ -25,10 +25,16 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use termide_agent_core::{
-    expand_env, now_millis, AcpConfig, Agent, AgentEvent, AssistantContent, AssistantMessage,
-    Backend, BackendModel, BackendSetup, CancelToken, Hooks, Message, PermissionHooks, PromptError,
-    StopReason, StreamEvent, ToolCall, ToolContext, ToolDecision, ToolResultMessage, UserMessage,
+    expand_env, now_millis, AcpConfig, AcpFlavor, Agent, AgentEvent, AssistantContent,
+    AssistantMessage, Backend, BackendModel, BackendSetup, CancelToken, Hooks, HostTools, Message,
+    Mode, ModeHandle, PermissionHooks, PromptError, StopReason, StreamEvent, ToolCall, ToolContext,
+    ToolDecision, ToolResultMessage, Usage, UserMessage,
 };
+use termide_agent_mcp::{McpServer, SERVER_NAME};
+
+/// How the calls of termide's tools reach the transcript from Claude Code:
+/// named after the MCP server that serves them.
+const HOST_TOOL_PREFIX: &str = "mcp__termide__";
 
 /// The protocol version requested.
 pub const PROTOCOL_VERSION: u64 = 1;
@@ -72,6 +78,18 @@ struct Shared {
     /// agent offers its models that way (`configOptions`) rather than as
     /// `models`; a switch then goes through `session/set_config_option`.
     model_option: Mutex<Option<String>>,
+    /// Which adapter this is.
+    flavor: AcpFlavor,
+    /// termide's system prompt, for an adapter that takes it.
+    system_prompt: String,
+    /// termide's tools, until the handshake serves them.
+    host_tools: Mutex<Option<HostTools>>,
+    /// The server of termide's tools, alive as long as the agent.
+    mcp_server: Mutex<Option<McpServer>>,
+    /// Calls announced without their arguments yet, by id.
+    announced: Mutex<HashMap<String, Value>>,
+    /// The panel's live permission mode.
+    mode: ModeHandle,
 }
 
 pub struct AcpRuntime {
@@ -107,7 +125,14 @@ impl AcpRuntime {
                 }
             });
         }
-        let runtime = Self::from_streams(name, stdout, stdin, setup, config.timeout_secs);
+        let runtime = Self::from_streams(
+            name,
+            stdout,
+            stdin,
+            setup,
+            config.timeout_secs,
+            config.flavor,
+        );
         *runtime.shared.child.lock().unwrap() = Some(child);
         Ok(runtime)
     }
@@ -119,6 +144,7 @@ impl AcpRuntime {
         writer: impl Write + Send + 'static,
         setup: BackendSetup,
         timeout_secs: u64,
+        flavor: AcpFlavor,
     ) -> Self {
         let (events_tx, events) = mpsc::channel();
         let shared = Arc::new(Shared {
@@ -131,7 +157,8 @@ impl AcpRuntime {
             busy: AtomicBool::new(false),
             cancel: setup.cancel,
             hooks: Mutex::new({
-                let mut hooks = PermissionHooks::new(setup.rules, Box::new(setup.prompter));
+                let mut hooks = PermissionHooks::new(setup.rules, Box::new(setup.prompter))
+                    .with_mode_handle(setup.mode.clone());
                 if let Some(persist) = setup.persist {
                     hooks = hooks.with_persist(persist);
                 }
@@ -144,6 +171,12 @@ impl AcpRuntime {
             models: Mutex::new(Vec::new()),
             current_model: Mutex::new(None),
             model_option: Mutex::new(None),
+            flavor,
+            system_prompt: setup.system_prompt,
+            host_tools: Mutex::new(setup.host_tools),
+            mcp_server: Mutex::new(None),
+            announced: Mutex::new(HashMap::new()),
+            mode: setup.mode,
         });
         let for_reader = Arc::clone(&shared);
         std::thread::spawn(move || for_reader.read_loop(reader));
@@ -245,6 +278,21 @@ impl Backend for AcpRuntime {
         self.shared.current_model.lock().unwrap().clone()
     }
 
+    /// Claude Code's calls of termide's tools, and its permission requests,
+    /// are judged here; Codex's modes are mapped from the panel's. Another
+    /// agent answers to its own configuration.
+    fn follows_mode(&self) -> bool {
+        self.shared.flavor != AcpFlavor::Generic
+    }
+
+    fn set_mode(&self, mode: Mode) {
+        // The hooks read the shared handle; Codex is told, off the UI thread.
+        if self.shared.flavor == AcpFlavor::Codex {
+            let shared = Arc::clone(&self.shared);
+            std::thread::spawn(move || shared.apply_mode(mode));
+        }
+    }
+
     fn select_model(&self, model_id: String) -> Result<(), String> {
         let session_id = match &*self.shared.conn.lock().unwrap() {
             Conn::Ready { session_id } => session_id.clone(),
@@ -304,13 +352,8 @@ impl Shared {
             }),
             timeout,
         );
-        let result = outcome.and_then(|_| {
-            self.request(
-                "session/new",
-                json!({ "cwd": self.cwd, "mcpServers": [] }),
-                timeout,
-            )
-        });
+        let params = self.new_session_params();
+        let result = outcome.and_then(|_| self.request("session/new", params, timeout));
         let conn = match result {
             Ok(value) => match value["sessionId"].as_str() {
                 Some(id) => {
@@ -323,8 +366,74 @@ impl Shared {
             },
             Err(error) => Conn::Failed(error),
         };
+        let ready = matches!(conn, Conn::Ready { .. });
         *self.conn.lock().unwrap() = conn;
+        if ready && self.flavor == AcpFlavor::Codex {
+            self.apply_mode(self.mode.get());
+        }
         self.kick();
+    }
+
+    /// `session/new`'s parameters. Claude Code gets termide's tools from
+    /// termide's MCP server in place of its own, termide's system prompt in
+    /// place of its own, none of its own settings (their rules, hooks,
+    /// `CLAUDE.md`, MCP servers), and leave to run termide's tools without
+    /// asking, since termide judges each call as it runs it. Without the
+    /// server it keeps its own tools, so it still has some.
+    fn new_session_params(&self) -> Value {
+        let mut params = json!({ "cwd": self.cwd, "mcpServers": [] });
+        if self.flavor != AcpFlavor::ClaudeCode {
+            return params;
+        }
+        let mut options = json!({ "settingSources": [], "strictMcpConfig": true });
+        if let Some(host) = self.host_tools.lock().unwrap().take() {
+            match McpServer::start(host.tools, host.hooks, self.cwd.clone()) {
+                Ok(server) => {
+                    params["mcpServers"] = json!([{
+                        "type": "http",
+                        "name": SERVER_NAME,
+                        "url": server.url(),
+                        "headers": [
+                            { "name": "Authorization", "value": format!("Bearer {}", server.token()) }
+                        ],
+                    }]);
+                    options["tools"] = json!([]);
+                    options["allowedTools"] = json!([format!("mcp__{SERVER_NAME}")]);
+                    *self.mcp_server.lock().unwrap() = Some(server);
+                }
+                Err(error) => log::warn!("cannot serve termide's tools to {}: {error}", self.name),
+            }
+        }
+        params["_meta"] = json!({
+            "systemPrompt": self.system_prompt,
+            "claudeCode": { "options": options },
+        });
+        params
+    }
+
+    /// Put Codex in the modes that match the panel's `mode`: its approval
+    /// preset, and its plan collaboration mode for `plan`. `ask` and
+    /// `configured` have it ask about everything, so termide's rules and the
+    /// user decide.
+    fn apply_mode(&self, mode: Mode) {
+        let session_id = match &*self.conn.lock().unwrap() {
+            Conn::Ready { session_id } => session_id.clone(),
+            _ => return,
+        };
+        let (approval, collaboration) = codex_modes(mode);
+        for (config_id, value) in [("mode", approval), ("collaboration_mode", collaboration)] {
+            let set = self.request(
+                "session/set_config_option",
+                json!({ "sessionId": session_id, "configId": config_id, "value": value }),
+                Duration::from_secs(30),
+            );
+            if let Err(error) = set {
+                log::warn!(
+                    "acp {}: cannot set {config_id} to {value}: {error}",
+                    self.name
+                );
+            }
+        }
     }
 
     /// Record the models an agent advertises in a `session/new`/`load` result,
@@ -455,7 +564,8 @@ impl Shared {
             Ok(_) if stop == StopReason::Aborted => Some("aborted".to_string()),
             Ok(_) => None,
         };
-        self.close_message(stop, error);
+        let usage = result.as_ref().map(usage_of).unwrap_or_default();
+        self.close_message_with(stop, error, usage);
         let _ = self.events.send(AgentEvent::TurnEnd);
         if self.cancel.is_cancelled() {
             self.queue.lock().unwrap().clear();
@@ -471,6 +581,12 @@ impl Shared {
     /// Finish the assistant message being streamed, or make one for an
     /// error, so the transcript and the log get a complete message.
     fn close_message(&self, stop: StopReason, error: Option<String>) {
+        self.close_message_with(stop, error, Usage::default());
+    }
+
+    /// [`Self::close_message`], with the turn's token usage when the agent
+    /// reported it.
+    fn close_message_with(&self, stop: StopReason, error: Option<String>, usage: Usage) {
         let text = self.open_message.lock().unwrap().take();
         if text.is_none() && error.is_none() {
             return;
@@ -480,7 +596,7 @@ impl Shared {
                 .map(|text| vec![AssistantContent::Text { text }])
                 .unwrap_or_default(),
             stop_reason: stop,
-            usage: Default::default(),
+            usage,
             provider: "acp".into(),
             model: self
                 .current_model
@@ -700,21 +816,37 @@ impl Shared {
             "tool_call" => {
                 // Text streamed so far becomes its own message before the call.
                 self.close_message(StopReason::ToolUse, None);
+                // A call announced before its arguments are known (Claude Code
+                // streams them) waits for the update that brings them, so it
+                // shows with its command or path.
+                if !has_arguments(update) && !is_finished(update) {
+                    let id = update["toolCallId"].as_str().unwrap_or("").to_string();
+                    self.announced.lock().unwrap().insert(id, update.clone());
+                    return;
+                }
                 let _ = self.events.send(AgentEvent::ToolExecutionStart {
                     call: tool_call_of(update),
                 });
-                if matches!(
-                    update["status"].as_str(),
-                    Some("completed") | Some("failed")
-                ) {
+                if is_finished(update) {
                     self.finish_tool_call(update);
                 }
             }
             "tool_call_update" => {
-                if matches!(
-                    update["status"].as_str(),
-                    Some("completed") | Some("failed")
-                ) {
+                let id = update["toolCallId"].as_str().unwrap_or("");
+                if has_arguments(update) || is_finished(update) {
+                    let announced = self.announced.lock().unwrap().remove(id);
+                    if let Some(mut call) = announced {
+                        for (key, value) in update.as_object().into_iter().flatten() {
+                            if !value.is_null() {
+                                call[key] = value.clone();
+                            }
+                        }
+                        let _ = self.events.send(AgentEvent::ToolExecutionStart {
+                            call: tool_call_of(&call),
+                        });
+                    }
+                }
+                if is_finished(update) {
                     self.finish_tool_call(update);
                 }
             }
@@ -760,12 +892,21 @@ impl Shared {
 /// arguments when the agent gives no raw input.
 fn tool_call_of(update: &Value) -> ToolCall {
     let title = update["title"].as_str().unwrap_or("").to_string();
-    let kind = update["kind"].as_str().unwrap_or("other").to_string();
     let mut arguments = update
         .get("rawInput")
         .filter(|v| v.is_object())
         .cloned()
         .unwrap_or_else(|| json!({}));
+    // A call of termide's own tool shows as that tool, as the built-in loop
+    // shows it.
+    if let Some(name) = title.strip_prefix(HOST_TOOL_PREFIX) {
+        return ToolCall {
+            id: update["toolCallId"].as_str().unwrap_or("").to_string(),
+            name: name.to_string(),
+            arguments,
+        };
+    }
+    let kind = update["kind"].as_str().unwrap_or("other").to_string();
     if !title.is_empty() {
         arguments["title"] = json!(title);
     }
@@ -773,6 +914,43 @@ fn tool_call_of(update: &Value) -> ToolCall {
         id: update["toolCallId"].as_str().unwrap_or("").to_string(),
         name: kind,
         arguments,
+    }
+}
+
+/// The token usage a `session/prompt` result reports, when it does.
+fn usage_of(result: &Value) -> Usage {
+    let usage = &result["usage"];
+    let count = |key: &str| usage[key].as_u64().unwrap_or(0);
+    Usage {
+        input: count("inputTokens"),
+        output: count("outputTokens"),
+        cache_read: count("cachedReadTokens"),
+        cache_write: count("cachedWriteTokens"),
+    }
+}
+
+/// Whether a tool call update carries the call's arguments.
+fn has_arguments(update: &Value) -> bool {
+    update["rawInput"]
+        .as_object()
+        .is_some_and(|input| !input.is_empty())
+}
+
+/// Whether a tool call update reports the call done.
+fn is_finished(update: &Value) -> bool {
+    matches!(
+        update["status"].as_str(),
+        Some("completed") | Some("failed")
+    )
+}
+
+/// Codex's approval preset and collaboration mode for the panel's `mode`.
+fn codex_modes(mode: Mode) -> (&'static str, &'static str) {
+    match mode {
+        Mode::Ask | Mode::Configured => ("read-only", "default"),
+        Mode::Plan => ("read-only", "plan"),
+        Mode::Edit => ("agent", "default"),
+        Mode::All => ("agent-full-access", "default"),
     }
 }
 
@@ -1048,8 +1226,12 @@ mod tests {
                 cancel,
                 rules: PermissionRules::default(),
                 persist: None,
+                mode: ModeHandle::new(Mode::default()),
+                system_prompt: String::new(),
+                host_tools: None,
             },
             5,
+            AcpFlavor::Generic,
         );
         (runtime, permissions)
     }
@@ -1117,6 +1299,258 @@ mod tests {
         )
     }
 
+    /// An agent that records every message it gets and answers the
+    /// handshake and `session/set_config_option`.
+    fn recording_agent(
+        dir: PathBuf,
+        flavor: AcpFlavor,
+        host_tools: Option<HostTools>,
+        mode: ModeHandle,
+    ) -> (AcpRuntime, Arc<Mutex<Vec<Value>>>) {
+        let (to_agent_rx, to_agent_tx) = pipe().unwrap();
+        let (from_agent_rx, from_agent_tx) = pipe().unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let record = Arc::clone(&seen);
+        std::thread::spawn(move || {
+            let mut out = from_agent_tx;
+            let mut send = |value: Value| writeln!(out, "{value}").unwrap();
+            let mut reader = BufReader::new(to_agent_rx).lines();
+            while let Some(Ok(line)) = reader.next() {
+                let message: Value = serde_json::from_str(&line).unwrap();
+                record.lock().unwrap().push(message.clone());
+                let id = message["id"].clone();
+                let result = match message["method"].as_str() {
+                    Some("initialize") => json!({ "protocolVersion": 1, "agentCapabilities": {} }),
+                    Some("session/new") => json!({ "sessionId": "s1" }),
+                    Some(_) => json!({}),
+                    None => continue,
+                };
+                send(json!({ "jsonrpc": "2.0", "id": id, "result": result }));
+            }
+        });
+        let cancel = CancelToken::new();
+        let (prompter, _permissions) = permission_channel(cancel.clone());
+        let runtime = AcpRuntime::from_streams(
+            "fake",
+            from_agent_rx,
+            to_agent_tx,
+            BackendSetup {
+                cwd: dir,
+                prompter,
+                cancel,
+                rules: PermissionRules::default(),
+                persist: None,
+                mode,
+                system_prompt: "termide's prompt".into(),
+                host_tools,
+            },
+            5,
+            flavor,
+        );
+        (runtime, seen)
+    }
+
+    /// Wait until the agent has seen a message matching `wanted`.
+    fn seen_where(seen: &Arc<Mutex<Vec<Value>>>, wanted: impl Fn(&Value) -> bool) -> Vec<Value> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let found: Vec<Value> = seen
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|m| wanted(m))
+                .cloned()
+                .collect();
+            if !found.is_empty() {
+                return found;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "never seen: {:?}",
+                seen.lock().unwrap()
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    struct Echo;
+
+    impl termide_agent_core::Tool for Echo {
+        fn name(&self) -> &str {
+            "echo"
+        }
+        fn description(&self) -> &str {
+            "Say it back"
+        }
+        fn parameters(&self) -> Value {
+            json!({ "type": "object" })
+        }
+        fn execute(
+            &self,
+            call: &ToolCall,
+            _ctx: &ToolContext,
+            _on_update: &mut dyn FnMut(termide_agent_core::ToolUpdate),
+            _cancel: &CancelToken,
+        ) -> ToolResultMessage {
+            ToolResultMessage::text(call, "echoed")
+        }
+    }
+
+    #[test]
+    fn claude_code_gets_termides_prompt_and_tools_and_none_of_its_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut tools = termide_agent_core::ToolRegistry::new();
+        tools.insert(Arc::new(Echo));
+        let host = HostTools {
+            tools,
+            hooks: Box::new(termide_agent_core::NoHooks),
+        };
+        let (runtime, seen) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::ClaudeCode,
+            Some(host),
+            ModeHandle::new(Mode::default()),
+        );
+        let new = seen_where(&seen, |m| m["method"] == "session/new").remove(0);
+        let params = &new["params"];
+        assert_eq!(params["_meta"]["systemPrompt"], "termide's prompt");
+        let options = &params["_meta"]["claudeCode"]["options"];
+        assert_eq!(options["tools"], json!([]));
+        assert_eq!(options["settingSources"], json!([]));
+        assert_eq!(options["allowedTools"], json!(["mcp__termide"]));
+        let server = &params["mcpServers"][0];
+        assert_eq!(server["type"], "http");
+        assert_eq!(server["name"], "termide");
+        assert!(server["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("http://127.0.0.1:"));
+        assert!(server["headers"][0]["value"]
+            .as_str()
+            .unwrap()
+            .starts_with("Bearer "));
+        assert!(runtime.follows_mode());
+        // Its calls of termide's tools show under their own names.
+        let call = tool_call_of(&json!({
+            "toolCallId": "t1", "title": "mcp__termide__bash", "kind": "other",
+            "rawInput": { "command": "ls" }
+        }));
+        assert_eq!(
+            (call.name.as_str(), &call.arguments),
+            ("bash", &json!({ "command": "ls" }))
+        );
+    }
+
+    #[test]
+    fn a_call_announced_without_arguments_shows_once_they_arrive() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, _) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::ClaudeCode,
+            None,
+            ModeHandle::new(Mode::default()),
+        );
+        let shared = &runtime.shared;
+        shared.on_update(&json!({ "sessionUpdate": "tool_call", "toolCallId": "t1",
+            "title": "mcp__termide__bash", "kind": "other", "rawInput": {}, "status": "pending" }));
+        let starts = |events: &[AgentEvent]| -> Vec<ToolCall> {
+            events
+                .iter()
+                .filter_map(|e| match e {
+                    AgentEvent::ToolExecutionStart { call } => Some(call.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert!(
+            starts(&runtime.drain()).is_empty(),
+            "not before its arguments"
+        );
+        shared.on_update(
+            &json!({ "sessionUpdate": "tool_call_update", "toolCallId": "t1",
+            "title": "mcp__termide__bash", "rawInput": { "command": "ls" } }),
+        );
+        shared.on_update(
+            &json!({ "sessionUpdate": "tool_call_update", "toolCallId": "t1",
+            "status": "completed", "content": [] }),
+        );
+        let events = runtime.drain();
+        let started = starts(&events);
+        assert_eq!(started.len(), 1, "{events:?}");
+        assert_eq!(started[0].name, "bash");
+        assert_eq!(started[0].arguments, json!({ "command": "ls" }));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ToolExecutionEnd { .. })));
+    }
+
+    #[test]
+    fn a_turns_reported_usage_is_read() {
+        let usage = usage_of(&json!({ "stopReason": "end_turn", "usage": {
+            "inputTokens": 4, "outputTokens": 63, "cachedReadTokens": 919,
+            "cachedWriteTokens": 1009, "totalTokens": 1995 } }));
+        assert_eq!(
+            (
+                usage.input,
+                usage.output,
+                usage.cache_read,
+                usage.cache_write
+            ),
+            (4, 63, 919, 1009)
+        );
+        assert_eq!(
+            usage_of(&json!({ "stopReason": "end_turn" })),
+            Usage::default()
+        );
+    }
+
+    #[test]
+    fn codex_is_put_in_the_modes_that_match_the_panels() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, seen) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::Codex,
+            None,
+            ModeHandle::new(Mode::Configured),
+        );
+        let option = |config: &'static str, value: &'static str| {
+            move |m: &Value| {
+                m["method"] == "session/set_config_option"
+                    && m["params"]["configId"] == config
+                    && m["params"]["value"] == value
+            }
+        };
+        // At start: everything asks, so termide decides.
+        seen_where(&seen, option("mode", "read-only"));
+        seen_where(&seen, option("collaboration_mode", "default"));
+        let new = seen_where(&seen, |m| m["method"] == "session/new").remove(0);
+        assert!(
+            new["params"].get("_meta").is_none(),
+            "Codex keeps its prompt"
+        );
+        runtime.set_mode(Mode::All);
+        seen_where(&seen, option("mode", "agent-full-access"));
+        runtime.set_mode(Mode::Plan);
+        seen_where(&seen, option("collaboration_mode", "plan"));
+    }
+
+    #[test]
+    fn another_agent_is_left_to_its_own_configuration() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, seen) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::Generic,
+            None,
+            ModeHandle::new(Mode::default()),
+        );
+        let new = seen_where(&seen, |m| m["method"] == "session/new").remove(0);
+        assert_eq!(
+            new["params"],
+            json!({ "cwd": dir.path(), "mcpServers": [] })
+        );
+        assert!(!runtime.follows_mode());
+    }
+
     fn models_agent_with(dir: PathBuf, advertised: Value) -> AcpRuntime {
         let (to_agent_rx, to_agent_tx) = pipe().unwrap();
         let (from_agent_rx, from_agent_tx) = pipe().unwrap();
@@ -1161,8 +1595,12 @@ mod tests {
                 cancel,
                 rules: PermissionRules::default(),
                 persist: None,
+                mode: ModeHandle::new(Mode::default()),
+                system_prompt: String::new(),
+                host_tools: None,
             },
             5,
+            AcpFlavor::Generic,
         )
     }
 
@@ -1309,8 +1747,12 @@ mod tests {
                 cancel,
                 rules: PermissionRules::default(),
                 persist: None,
+                mode: ModeHandle::new(Mode::default()),
+                system_prompt: String::new(),
+                host_tools: None,
             },
             1,
+            AcpFlavor::Generic,
         );
         // The handshake fails as soon as the agent's closed stdout is read.
         // Racing that, the first prompt is either accepted (and the failure

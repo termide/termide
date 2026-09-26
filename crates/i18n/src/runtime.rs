@@ -483,6 +483,8 @@ impl Translation for RuntimeTranslation {
         settings_ai_delete_connection,
         settings_ai_connection_back,
         settings_ai_model_auto,
+        settings_ai_connection_hint_claude_code,
+        settings_ai_connection_hint_codex,
         settings_ai_connection_name,
         settings_ai_connection_default,
         settings_ai_connection_name_taken,

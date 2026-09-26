@@ -343,6 +343,9 @@ pub struct PermissionEnvelope {
     pub reply: Sender<PermissionAnswer>,
 }
 
+/// Cloneable, so the hooks of calls that come in another way — tools served
+/// to an external agent — ask on the same channel the panel answers.
+#[derive(Clone)]
 pub struct ChannelPrompter {
     tx: Sender<PermissionEnvelope>,
     cancel: CancelToken,
@@ -412,6 +415,14 @@ impl PermissionHooks {
             prompter,
             persist: None,
         }
+    }
+
+    /// Follow `mode` instead of a mode of its own: hooks that judge another
+    /// source of calls under the same switch the panel flips.
+    #[must_use]
+    pub fn with_mode_handle(mut self, mode: ModeHandle) -> Self {
+        self.mode = mode;
+        self
     }
 
     #[must_use]

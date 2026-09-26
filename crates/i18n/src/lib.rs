@@ -711,6 +711,10 @@ pub trait Translation: Send + Sync {
     /// Settings modal: the model choice that leaves the model to the
     /// provider (its first listed; a CLI agent's own default).
     fn settings_ai_model_auto(&self) -> &str;
+    /// Settings modal: what a Claude Code connection runs differently.
+    fn settings_ai_connection_hint_claude_code(&self) -> &str;
+    /// Settings modal: what a Codex connection runs differently.
+    fn settings_ai_connection_hint_codex(&self) -> &str;
     /// Settings modal: the connection's name field.
     fn settings_ai_connection_name(&self) -> &str;
     /// Settings modal: the switch that makes a connection the default, the

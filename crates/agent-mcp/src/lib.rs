@@ -1,4 +1,5 @@
-//! MCP client of the termide coding agent: tools from servers over stdio.
+//! MCP client of the termide coding agent: tools from servers over stdio;
+//! and the server that serves termide's own tools to an external agent.
 //!
 //! Servers are started in the background when a panel opens, one thread
 //! each, because an `npx` server can take seconds to come up and the UI
@@ -8,6 +9,7 @@
 //! panel-side consumer; requests on it are serialised.
 
 mod client;
+mod server;
 mod tool;
 
 use std::collections::{BTreeMap, HashMap};
@@ -17,6 +19,7 @@ use std::sync::{Arc, Mutex, Once};
 use termide_agent_core::{LateTools, McpServerConfig, Tool};
 
 pub use client::{McpClient, McpToolInfo, PROTOCOL_VERSION};
+pub use server::{McpServer, SERVER_NAME};
 pub use tool::{tool_name, McpTool};
 
 /// Above this many tools from one server without a `tools` filter, the

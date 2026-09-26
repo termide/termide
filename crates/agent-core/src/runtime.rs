@@ -14,8 +14,9 @@ use crate::agent::{Agent, AgentEvent, Hooks, QueueHandle};
 use crate::cancel::CancelToken;
 use crate::compaction::CompactionReason;
 use crate::message::UserMessage;
-use crate::permissions::{ChannelPrompter, PermissionRules, PersistRule};
+use crate::permissions::{ChannelPrompter, Mode, ModeHandle, PermissionRules, PersistRule};
 use crate::provider::ModelSpec;
+use crate::tool::ToolRegistry;
 use std::path::PathBuf;
 
 /// Why a prompt was not accepted.
@@ -79,9 +80,25 @@ pub struct BackendSetup {
     /// session's grants): read-only commands and rules an external agent's
     /// permission requests match are answered without troubling the user.
     pub rules: PermissionRules,
+    /// The panel's live permission mode, which those decisions follow.
+    pub mode: ModeHandle,
     /// Persists an "allow always" grant to the configuration, as for the
     /// built-in agent; `None` when there is nowhere to write it.
     pub persist: Option<PersistRule>,
+    /// termide's system prompt for the agent, for a backend that takes it in
+    /// place of its own.
+    pub system_prompt: String,
+    /// termide's tools, for a backend that has the agent call them in place
+    /// of its own; `None` offers none.
+    pub host_tools: Option<HostTools>,
+}
+
+/// termide's tools served to an external agent, and the hooks every call
+/// runs through: the built-in loop's chain, the permission decisions
+/// included, so a call is judged the same whoever's model made it.
+pub struct HostTools {
+    pub tools: ToolRegistry,
+    pub hooks: Box<dyn Hooks>,
 }
 
 /// What the panel drives: the built-in agent on its worker thread, or an
@@ -141,6 +158,16 @@ pub trait Backend: Send {
     fn current_model(&self) -> Option<String> {
         None
     }
+    /// Whether the session's permission mode means something to this backend:
+    /// the built-in loop, or an external agent whose calls termide judges or
+    /// whose own modes the panel's are mapped onto. The default — an external
+    /// agent answering only to its own configuration — does not follow it.
+    fn follows_mode(&self) -> bool {
+        false
+    }
+    /// The session's permission mode is now `mode`. The built-in loop reads
+    /// the shared handle; an external agent maps it onto its own modes.
+    fn set_mode(&self, _mode: Mode) {}
     /// Switch the backend's model for the runs that follow, reporting the
     /// agent's own error on failure. The built-in loop changes model through
     /// [`Backend::update`] instead; the default here says it is unsupported.
@@ -154,6 +181,11 @@ pub trait Backend: Send {
 impl Backend for AgentRuntime {
     fn prompt(&self, message: UserMessage) -> Result<(), PromptError> {
         AgentRuntime::prompt(self, message)
+    }
+
+    /// The loop's hooks read the shared mode handle.
+    fn follows_mode(&self) -> bool {
+        true
     }
     fn steer(&self, message: UserMessage) {
         AgentRuntime::steer(self, message);

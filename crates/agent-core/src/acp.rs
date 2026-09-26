@@ -28,6 +28,25 @@ pub struct AcpConfig {
     /// Seconds to wait for the agent to start and open a session.
     #[serde(default = "default_timeout")]
     pub timeout_secs: u64,
+    /// Which adapter this is, when termide knows it; set by the provider,
+    /// never by a file.
+    #[serde(skip)]
+    pub flavor: AcpFlavor,
+}
+
+/// An ACP adapter termide knows how to take further than the protocol: the
+/// CLI agents a connection names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AcpFlavor {
+    /// Any agent: driven over plain ACP, answering to its own configuration.
+    #[default]
+    Generic,
+    /// Claude Code's adapter: it takes termide's system prompt and tools in
+    /// place of its own, and leaves every permission decision to termide.
+    ClaudeCode,
+    /// Codex's adapter: it keeps its prompt and tools, and termide maps the
+    /// permission mode onto Codex's modes.
+    Codex,
 }
 
 fn default_timeout() -> u64 {

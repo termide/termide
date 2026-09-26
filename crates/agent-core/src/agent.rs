@@ -155,6 +155,53 @@ pub enum ToolDecision {
     Block { reason: String },
 }
 
+/// Run one tool call as the loop does: the hooks' `before_tool_call` first
+/// (which may block it, rewrite its arguments or approve it), then the tool
+/// itself. Shared with whatever else runs termide's tools for a model — the
+/// MCP server that serves them to an external agent — so a call is judged the
+/// same wherever it comes from. `after_tool_call` is the caller's, since the
+/// loop runs it for results that never reach a tool too.
+pub fn execute_tool(
+    tools: &ToolRegistry,
+    call: &ToolCall,
+    hooks: &mut dyn Hooks,
+    cwd: &std::path::Path,
+    cancel: &CancelToken,
+    on_update: &mut dyn FnMut(ToolUpdate),
+) -> ToolResultMessage {
+    let ctx = ToolContext {
+        cwd: cwd.to_path_buf(),
+    };
+    if cancel.is_cancelled() {
+        return ToolResultMessage::error(call, "The run was cancelled before this tool ran.");
+    }
+    let Some(tool) = tools.get(&call.name) else {
+        log::warn!("model requested unknown tool `{}`", call.name);
+        return ToolResultMessage::error(
+            call,
+            format!(
+                "Unknown tool `{}`. Available tools: {}.",
+                call.name,
+                tools.names().join(", ")
+            ),
+        );
+    };
+    let effective = match hooks.before_tool_call(call, &ctx) {
+        ToolDecision::Allow | ToolDecision::Approve { arguments: None } => call.clone(),
+        ToolDecision::Replace { arguments }
+        | ToolDecision::Approve {
+            arguments: Some(arguments),
+        } => ToolCall {
+            arguments,
+            ..call.clone()
+        },
+        ToolDecision::Block { reason } => {
+            return ToolResultMessage::error(call, format!("Tool call blocked: {reason}"));
+        }
+    };
+    tool.execute(&effective, &ctx, on_update, cancel)
+}
+
 /// Extension points of the loop. All methods have permissive defaults.
 ///
 /// Hooks run on the agent thread, so a permission prompt may block here
@@ -708,40 +755,6 @@ impl Agent {
         emit: &mut dyn FnMut(AgentEvent),
     ) -> ToolResultMessage {
         emit(AgentEvent::ToolExecutionStart { call: call.clone() });
-        let ctx = ToolContext {
-            cwd: self.cwd.clone(),
-        };
-
-        if cancel.is_cancelled() {
-            return ToolResultMessage::error(call, "The run was cancelled before this tool ran.");
-        }
-
-        let Some(tool) = self.tools.get(&call.name) else {
-            log::warn!("model requested unknown tool `{}`", call.name);
-            return ToolResultMessage::error(
-                call,
-                format!(
-                    "Unknown tool `{}`. Available tools: {}.",
-                    call.name,
-                    self.tools.names().join(", ")
-                ),
-            );
-        };
-
-        let effective = match hooks.before_tool_call(call, &ctx) {
-            ToolDecision::Allow | ToolDecision::Approve { arguments: None } => call.clone(),
-            ToolDecision::Replace { arguments }
-            | ToolDecision::Approve {
-                arguments: Some(arguments),
-            } => ToolCall {
-                arguments,
-                ..call.clone()
-            },
-            ToolDecision::Block { reason } => {
-                return ToolResultMessage::error(call, format!("Tool call blocked: {reason}"));
-            }
-        };
-
         let tool_call_id = call.id.clone();
         let mut on_update = |update: ToolUpdate| {
             emit(AgentEvent::ToolExecutionUpdate {
@@ -749,7 +762,7 @@ impl Agent {
                 update,
             });
         };
-        tool.execute(&effective, &ctx, &mut on_update, cancel)
+        execute_tool(&self.tools, call, hooks, &self.cwd, cancel, &mut on_update)
     }
 
     fn call_model(

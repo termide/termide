@@ -25,11 +25,11 @@ use termide_agent_core::{
     civil_date, now_millis, permission_channel, Agent, AgentEvent, Backend, BackendModel,
     BackendSetup, CancelToken, ChainedHooks, CheckpointHooks, CheckpointStore, CommandScript,
     CompactionPolicy, CompactionPrompts, Decision, EntryKind, GoalPrompt, HandoffPrompt, Hooks,
-    LateTools, LoggedMessage, Message, Mode, ModeHandle, ModelInfo, ModelSpec, PermissionAnswer,
-    PermissionEnvelope, PermissionHooks, PermissionRules, PersistRule, PersistScope, PlanGuard,
-    PlanPrompt, PromptTemplate, Provider, Session, SessionSummary, StopReason, StreamEvent, Timing,
-    Tool, ToolCall, ToolContext, ToolDecision, ToolRegistry, ToolResultMessage, ToolUpdate,
-    UserMessage, DEFAULT_AGENT,
+    HostTools, LateTools, LoggedMessage, Message, Mode, ModeHandle, ModelInfo, ModelSpec,
+    PermissionAnswer, PermissionEnvelope, PermissionHooks, PermissionRules, PersistRule,
+    PersistScope, PlanGuard, PlanPrompt, PromptTemplate, Provider, Session, SessionSummary,
+    StopReason, StreamEvent, Timing, Tool, ToolCall, ToolContext, ToolDecision, ToolRegistry,
+    ToolResultMessage, ToolUpdate, UserMessage, DEFAULT_AGENT,
 };
 use termide_agent_core::{AgentRuntime, PromptError};
 use termide_config::Config;
@@ -2466,6 +2466,7 @@ impl AgentPanel {
         self.mode.set(mode);
         self.rules.mode = mode;
         self.catalog.set_mode(mode);
+        self.runtime.set_mode(mode);
         if was_plan != (mode == Mode::Plan) {
             self.sync_system_prompt();
         }
@@ -4803,6 +4804,28 @@ fn spawn_runtime(
     if let Some(persist) = persist_rule {
         hooks = hooks.with_persist(Box::new(persist) as PersistRule);
     }
+    // The chain every call of termide's tools runs through, before the
+    // permission decision: what the session switched off goes first, refused
+    // whatever else would allow it; then plan mode's guard, so nothing — not
+    // even a hook's approval — changes a file while it is on; then the
+    // checkpoint recorder, so no call that runs is missed; then the command
+    // hooks, which may block or approve before anyone is asked, and whose
+    // rewritten arguments are what the rules then judge.
+    let guards = |checkpoints: Option<Arc<Mutex<CheckpointStore>>>| {
+        let mut chain: Vec<Box<dyn Hooks>> = vec![
+            Box::new(ToolsetGuard {
+                blocked: Arc::clone(blocked),
+            }),
+            Box::new(PlanGuard::new(mode.clone())),
+        ];
+        if let Some(store) = checkpoints {
+            chain.push(Box::new(CheckpointHooks::new(store)));
+        }
+        if let Some(factory) = extra_hooks {
+            chain.push(factory());
+        }
+        chain
+    };
 
     let mut transcript = Transcript::default();
     transcript.set_fold(fold);
@@ -4819,12 +4842,29 @@ fn spawn_runtime(
         // and the same rules, so it builds permission hooks that decide its
         // requests exactly as the built-in agent's do.
         let (external_prompter, external_rx) = permission_channel(cancel.clone());
+        // termide's tools, for an agent that calls them in place of its own:
+        // each call runs through the built-in loop's chain, asking on the
+        // same channel under the same live mode.
+        let mut host_permissions =
+            PermissionHooks::new(backend_rules.clone(), Box::new(external_prompter.clone()))
+                .with_mode_handle(mode.clone());
+        if let Some(persist) = persist_rule {
+            host_permissions = host_permissions.with_persist(Box::new(persist) as PersistRule);
+        }
+        let mut host_chain = guards(checkpoints.clone());
+        host_chain.push(Box::new(host_permissions));
         match factory(BackendSetup {
             cwd: cwd.to_path_buf(),
             prompter: external_prompter,
             cancel: cancel.clone(),
             rules: backend_rules,
             persist: persist_rule.map(|f| Box::new(f) as PersistRule),
+            mode: mode.clone(),
+            system_prompt: system_prompt.to_string(),
+            host_tools: Some(HostTools {
+                tools: tools.clone(),
+                hooks: Box::new(ChainedHooks::new(host_chain)),
+            }),
         }) {
             Ok(runtime) => {
                 if !messages.is_empty() {
@@ -4861,24 +4901,7 @@ fn spawn_runtime(
     .with_goal_prompt(goal_prompt.clone())
     .with_handoff_prompt(handoff_prompt.clone())
     .with_messages(messages);
-    // What the session switched off goes first: it is refused whatever else
-    // would allow it. Then plan mode's guard: nothing, not even a hook's
-    // approval, changes a file while it is on. Then the checkpoint recorder,
-    // so no call that runs is missed; then the command hooks, which may block
-    // or approve before anyone is asked, and whose rewritten arguments are
-    // what the rules then judge.
-    let mut chain: Vec<Box<dyn Hooks>> = vec![
-        Box::new(ToolsetGuard {
-            blocked: Arc::clone(blocked),
-        }),
-        Box::new(PlanGuard::new(mode.clone())),
-    ];
-    if let Some(store) = checkpoints {
-        chain.push(Box::new(CheckpointHooks::new(store)));
-    }
-    if let Some(factory) = extra_hooks {
-        chain.push(factory());
-    }
+    let mut chain = guards(checkpoints);
     chain.push(Box::new(hooks));
     let hooks: Box<dyn Hooks> = Box::new(ChainedHooks::new(chain));
     let runtime = AgentRuntime::spawn_with_cancel(agent, hooks, cancel);
@@ -5127,7 +5150,7 @@ impl Panel for AgentPanel {
             UNDO_ACTION => self.ask_undo(),
             AGENT_ACTION => vec![self.agent_picker()],
             MODEL_ACTION if self.external => self.acp_model_picker(),
-            MODE_ACTION if self.external => {
+            MODE_ACTION if self.external && !self.runtime.follows_mode() => {
                 self.notice(PromptError::Unsupported.to_string(), NoticeKind::Warn);
                 vec![PanelEvent::NeedsRedraw]
             }
@@ -5564,7 +5587,7 @@ impl Panel for AgentPanel {
                 let expand = !self.transcript.any_expanded();
                 self.transcript.set_all_expanded(expand);
             }
-            KeyCode::BackTab if !self.external => {
+            KeyCode::BackTab if !self.external || self.runtime.follows_mode() => {
                 let next = self.mode.get().next();
                 return vec![self.set_mode(next), PanelEvent::NeedsRedraw];
             }
@@ -6059,8 +6082,20 @@ impl Panel for AgentPanel {
             StatusSegment::clickable(self.agent.clone(), SegmentKind::Active, AGENT_ACTION),
         ];
         if self.external {
-            // An external agent has its own model and permission model.
+            // An external agent has its own model and permission model, unless
+            // termide judges its calls or maps its modes.
             segments.push(StatusSegment::new(" (acp)", SegmentKind::Label));
+            if self.runtime.follows_mode() {
+                segments.extend([
+                    sep(),
+                    StatusSegment::clickable("Mode: ", SegmentKind::Label, MODE_ACTION),
+                    StatusSegment::clickable(
+                        self.mode.get().label(),
+                        SegmentKind::Active,
+                        MODE_ACTION,
+                    ),
+                ]);
+            }
             // A CLI agent is a connection too: the way back is here.
             if self.connections.is_some() {
                 segments.extend([
@@ -6121,8 +6156,9 @@ impl Panel for AgentPanel {
                 SegmentKind::Inactive,
             ));
         }
-        // Session token totals: ↑ input (prefill), ↓ output (generated).
-        if !self.external && (self.session_input > 0 || self.session_output > 0) {
+        // Session token totals: ↑ input (prefill), ↓ output (generated), for
+        // an external agent too when it reports them.
+        if self.session_input > 0 || self.session_output > 0 {
             segments.push(StatusSegment::new(
                 format!(
                     "↑{} ↓{} ",
@@ -9610,6 +9646,90 @@ mod tests {
         fn into_agent(self: Box<Self>) -> Option<Agent> {
             None
         }
+    }
+
+    /// An external agent that follows the panel's mode and records it.
+    struct ModeBackend {
+        modes: Arc<Mutex<Vec<Mode>>>,
+        setup_mode: Mode,
+        prompt: String,
+        tools: Vec<String>,
+    }
+
+    impl Backend for ModeBackend {
+        fn prompt(&self, _message: UserMessage) -> Result<(), PromptError> {
+            Ok(())
+        }
+        fn steer(&self, _message: UserMessage) {}
+        fn queue_lens(&self) -> (usize, usize) {
+            (0, 0)
+        }
+        fn abort(&self) {}
+        fn is_busy(&self) -> bool {
+            false
+        }
+        fn drain(&self) -> Vec<AgentEvent> {
+            Vec::new()
+        }
+        fn update(&self, _update: Box<dyn FnOnce(&mut Agent) + Send>) -> Result<(), PromptError> {
+            Err(PromptError::Unsupported)
+        }
+        fn compact(&self, _focus: Option<String>) -> Result<(), PromptError> {
+            Err(PromptError::Unsupported)
+        }
+        fn follows_mode(&self) -> bool {
+            true
+        }
+        fn set_mode(&self, mode: Mode) {
+            self.modes.lock().unwrap().push(mode);
+        }
+        fn into_agent(self: Box<Self>) -> Option<Agent> {
+            None
+        }
+    }
+
+    #[test]
+    fn an_external_agent_that_follows_the_mode_gets_termides_prompt_tools_and_mode() {
+        let seen: Arc<Mutex<Option<ModeBackend>>> = Arc::new(Mutex::new(None));
+        let modes = Arc::new(Mutex::new(Vec::new()));
+        let (for_factory, modes_for_factory) = (Arc::clone(&seen), Arc::clone(&modes));
+        let mut panel = AgentPanel::new(AgentPanelSetup {
+            backend: Some(Arc::new(move |setup: BackendSetup| {
+                let backend = |modes| ModeBackend {
+                    modes,
+                    setup_mode: setup.mode.get(),
+                    prompt: setup.system_prompt.clone(),
+                    tools: setup
+                        .host_tools
+                        .as_ref()
+                        .map(|host| host.tools.names().iter().map(|n| n.to_string()).collect())
+                        .unwrap_or_default(),
+                };
+                *for_factory.lock().unwrap() = Some(backend(Arc::new(Mutex::new(Vec::new()))));
+                Ok(Box::new(backend(Arc::clone(&modes_for_factory))) as Box<dyn Backend>)
+            })),
+            ..setup(vec![])
+        });
+        assert!(panel.external);
+        {
+            let seen = seen.lock().unwrap();
+            let handed = seen.as_ref().unwrap();
+            assert_eq!(handed.setup_mode, Mode::Configured);
+            assert_eq!(handed.prompt, panel.system_prompt);
+            assert_eq!(
+                handed.tools,
+                panel
+                    .tools
+                    .names()
+                    .iter()
+                    .map(|n| n.to_string())
+                    .collect::<Vec<_>>()
+            );
+        }
+        // The Mode chip is there, and a switch reaches the agent.
+        assert_eq!(chip(&panel, MODE_ACTION), "configured");
+        panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));
+        assert_eq!(*modes.lock().unwrap(), vec![Mode::All]);
     }
 
     #[test]

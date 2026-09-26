@@ -38,10 +38,10 @@ pub mod runtime;
 pub mod session;
 pub mod tool;
 
-pub use acp::AcpConfig;
+pub use acp::{AcpConfig, AcpFlavor};
 pub use agent::{
-    Agent, AgentConfig, AgentEvent, ChainedHooks, Hooks, NoHooks, QueueHandle, QueueMode,
-    ToolDecision,
+    execute_tool, Agent, AgentConfig, AgentEvent, ChainedHooks, Hooks, NoHooks, QueueHandle,
+    QueueMode, ToolDecision,
 };
 pub use cancel::CancelToken;
 pub use checkpoints::{CheckpointHooks, CheckpointStore, SavedFile, Undone};
@@ -73,7 +73,7 @@ pub use permissions::{
 };
 pub use plan::{PlanPrompt, SEED_PLAN};
 pub use provider::{ModelInfo, ModelSpec, Provider, Request, StreamEvent, ThinkingLevel, ToolSpec};
-pub use runtime::{AgentRuntime, Backend, BackendModel, BackendSetup, PromptError};
+pub use runtime::{AgentRuntime, Backend, BackendModel, BackendSetup, HostTools, PromptError};
 pub use session::{
     Entry, EntryKind, LoggedMessage, Session, SessionHeader, SessionModel, SessionSummary, Timing,
 };
