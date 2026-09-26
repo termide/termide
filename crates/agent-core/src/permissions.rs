@@ -788,16 +788,29 @@ struct ParsedShell {
     has_substitution: bool,
 }
 
-/// Split a command line into its simple commands, honouring quotes.
+/// Split a command line into its simple commands, honouring quotes,
+/// backslash escapes and here-documents: the text of a `<<EOF` body is data
+/// for the command before it, not commands of its own, so it is skipped —
+/// though an unquoted delimiter's body still expands substitutions.
 fn split_shell(command: &str) -> ParsedShell {
     let mut parsed = ParsedShell::default();
     let mut current = String::new();
     let mut quote: Option<char> = None;
+    // Here-documents opened on the current line: delimiter, whether tabs
+    // are stripped (`<<-`), whether the body expands (unquoted delimiter).
+    let mut heredocs: Vec<(String, bool, bool)> = Vec::new();
     let chars: Vec<char> = command.chars().collect();
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
         if let Some(q) = quote {
+            if c == '\\' && q == '"' && i + 1 < chars.len() {
+                // An escaped character inside double quotes, `\"` included.
+                current.push(c);
+                current.push(chars[i + 1]);
+                i += 2;
+                continue;
+            }
             if c == q {
                 quote = None;
             } else if q == '"' && (c == '`' || (c == '$' && chars.get(i + 1) == Some(&'('))) {
@@ -809,6 +822,15 @@ fn split_shell(command: &str) -> ParsedShell {
             continue;
         }
         match c {
+            '\\' if i + 1 < chars.len() => {
+                // An escaped character stands for itself; an escaped newline
+                // continues the line.
+                if chars[i + 1] != '\n' {
+                    current.push(c);
+                    current.push(chars[i + 1]);
+                }
+                i += 1;
+            }
             '\'' | '"' => {
                 quote = Some(c);
                 current.push(c);
@@ -821,6 +843,13 @@ fn split_shell(command: &str) -> ParsedShell {
                 parsed.has_substitution = true;
                 current.push(c);
             }
+            '<' if chars.get(i + 1) == Some(&'<') && chars.get(i + 2) != Some(&'<') => {
+                let (heredoc, end) = heredoc_at(&chars, i);
+                current.extend(&chars[i..end]);
+                heredocs.extend(heredoc);
+                i = end;
+                continue;
+            }
             '&' if chars.get(i + 1) == Some(&'&') => {
                 push_part(&mut parsed.parts, &mut current);
                 i += 1;
@@ -830,6 +859,11 @@ fn split_shell(command: &str) -> ParsedShell {
                 if chars.get(i + 1) == Some(&'|') {
                     i += 1;
                 }
+            }
+            '\n' if !heredocs.is_empty() => {
+                push_part(&mut parsed.parts, &mut current);
+                i = skip_heredocs(&chars, i + 1, &mut heredocs, &mut parsed);
+                continue;
             }
             ';' | '\n' => push_part(&mut parsed.parts, &mut current),
             _ => current.push(c),
@@ -841,6 +875,82 @@ fn split_shell(command: &str) -> ParsedShell {
         parsed.parts.push(command.trim().to_string());
     }
     parsed
+}
+
+/// The here-document `<<` at `start` opens, and where its operator and
+/// delimiter end: `(delimiter, strip tabs, expands)`, or `None` when no
+/// delimiter follows.
+fn heredoc_at(chars: &[char], start: usize) -> (Option<(String, bool, bool)>, usize) {
+    let mut j = start + 2;
+    let strip = chars.get(j) == Some(&'-');
+    if strip {
+        j += 1;
+    }
+    while chars.get(j).is_some_and(|c| *c == ' ' || *c == '\t') {
+        j += 1;
+    }
+    let mut delimiter = String::new();
+    let mut quoted = false;
+    while let Some(&c) = chars.get(j) {
+        match c {
+            '\'' | '"' => {
+                quoted = true;
+                j += 1;
+                while let Some(&inner) = chars.get(j) {
+                    j += 1;
+                    if inner == c {
+                        break;
+                    }
+                    delimiter.push(inner);
+                }
+            }
+            '\\' => {
+                quoted = true;
+                j += 1;
+            }
+            c if c.is_whitespace() || ";|&<>()".contains(c) => break,
+            c => {
+                delimiter.push(c);
+                j += 1;
+            }
+        }
+    }
+    let heredoc = (!delimiter.is_empty()).then_some((delimiter, strip, !quoted));
+    (heredoc, j)
+}
+
+/// Skip the bodies of the here-documents opened on the line just ended,
+/// from `start`, each up to its delimiter line; returns where the commands
+/// go on. An unquoted delimiter's body that substitutes marks the command.
+fn skip_heredocs(
+    chars: &[char],
+    start: usize,
+    heredocs: &mut Vec<(String, bool, bool)>,
+    parsed: &mut ParsedShell,
+) -> usize {
+    let mut i = start;
+    for (delimiter, strip, expands) in heredocs.drain(..) {
+        while i < chars.len() {
+            let end = chars[i..]
+                .iter()
+                .position(|c| *c == '\n')
+                .map_or(chars.len(), |n| i + n);
+            let line: String = chars[i..end].iter().collect();
+            i = (end + 1).min(chars.len());
+            let line = if strip {
+                line.trim_start_matches('\t')
+            } else {
+                line.as_str()
+            };
+            if line == delimiter {
+                break;
+            }
+            if expands && (line.contains("$(") || line.contains('`')) {
+                parsed.has_substitution = true;
+            }
+        }
+    }
+    i
 }
 
 /// One part of a command line as the rules see it.
@@ -1397,6 +1507,39 @@ mod tests {
         for write in ["ls > out", "ls 2>err.txt", "echo x >> log", "cat x 2> err"] {
             assert!(!is_read_only_command(write), "{write}");
         }
+    }
+
+    /// An inline script is one command, not the shell commands its lines
+    /// would be.
+    #[test]
+    fn an_inline_script_is_not_split_into_commands() {
+        let parts = |command: &str| split_shell(command).parts;
+        // A here-document's body is skipped, whatever it holds.
+        assert_eq!(
+            parts("python3 - <<'EOF'\nimport os; print(os.getcwd())\nif x | y:\n    pass\nEOF"),
+            vec!["python3 - <<'EOF'"]
+        );
+        // The commands after it are commands again.
+        assert_eq!(
+            parts("cat <<EOF > notes.txt\nsome; text\nEOF\nls -la"),
+            vec!["cat <<EOF > notes.txt", "ls -la"]
+        );
+        assert_eq!(
+            parts("cat <<-EOF\n\tbody\n\tEOF\npwd"),
+            vec!["cat <<-EOF", "pwd"]
+        );
+        // An escaped quote does not end a quoted script.
+        assert_eq!(
+            parts("python3 -c \"print(\\\"a; b\\\")\nx = 1 | 2\""),
+            vec!["python3 -c \"print(\\\"a; b\\\")\nx = 1 | 2\""]
+        );
+        assert_eq!(parts("echo a\\;b && ls"), vec!["echo a\\;b", "ls"]);
+        // A here-string is one word.
+        assert_eq!(parts("cat <<< \"a;b\""), vec!["cat <<< \"a;b\""]);
+        // An unquoted delimiter's body still expands a substitution; a quoted
+        // one's does not.
+        assert!(split_shell("cat <<EOF\n$(rm -rf x)\nEOF").has_substitution);
+        assert!(!split_shell("cat <<'EOF'\n$(rm -rf x)\nEOF").has_substitution);
     }
 
     #[test]

@@ -542,7 +542,9 @@ In a pattern, `*` stands for any text and a leading `**/` is optional, so
 `**/.env*` also matches `.env` in the project root. Shell commands are matched
 per part: `cargo build && rm -rf target` needs both halves allowed, and a deny
 on either half stops the whole command. Command substitution (`$(…)`, backticks)
-is never allowed automatically.
+is never allowed automatically. An inline script is one command, not the
+commands its lines would be: a quoted script (escaped quotes included) and
+the body of a here-document (`python3 - <<'EOF'`) are the command's data.
 
 A command's parts are judged in the directory they run in: termide follows
 `cd`, `pushd` and `popd` through the line, and a program named by a path is
