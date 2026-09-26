@@ -419,6 +419,7 @@ agent_perm_allow_always = "Разрешать всегда в этом прое�
 agent_perm_allow_always_global = "Разрешать всегда везде"
 agent_perm_deny = "Отклонить"
 agent_perm_deny_session = "Отклонять в этой сессии"
+agent_perm_part_once = "только на этот раз"
 agent_perm_deny_reason = "Отклонить и указать причину агенту"
 agent_perm_stop = "Остановить выполнение"
 # Agent panel — undo card

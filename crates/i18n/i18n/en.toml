@@ -412,6 +412,7 @@ agent_perm_allow_always = "Allow always in this project"
 agent_perm_allow_always_global = "Allow always everywhere"
 agent_perm_deny = "Deny"
 agent_perm_deny_session = "Deny for this session"
+agent_perm_part_once = "this time only"
 agent_perm_deny_reason = "Deny and tell the agent why"
 agent_perm_stop = "Stop the run"
 # Agent panel — undo card

@@ -2175,21 +2175,23 @@ impl AgentPanel {
             } else {
                 base
             };
-            // The answers the form offers, each with its row. "Always" is on
-            // offer only where the configured rules count; the rows that
-            // outlast this call name the pattern they record.
+            // The answers the form offers, each with its row. The rows that
+            // outlast this call name the rules they record, and show only
+            // when there is one to record; "always" only where the
+            // configured rules count.
             let pattern = &request.suggested_pattern;
-            let mut rows: Vec<(PermissionAnswer, String)> = vec![
-                (
-                    PermissionAnswer::AllowOnce,
-                    t.agent_perm_allow_once().to_string(),
-                ),
-                (
+            let remember = request.can_remember();
+            let mut rows: Vec<(PermissionAnswer, String)> = vec![(
+                PermissionAnswer::AllowOnce,
+                t.agent_perm_allow_once().to_string(),
+            )];
+            if remember {
+                rows.push((
                     PermissionAnswer::AllowSession,
                     format!("{} ({pattern})", t.agent_perm_allow_session()),
-                ),
-            ];
-            if request.can_persist {
+                ));
+            }
+            if remember && request.can_persist {
                 rows.push((
                     PermissionAnswer::AllowAlways,
                     format!("{} ({pattern})", t.agent_perm_allow_always()),
@@ -2200,16 +2202,18 @@ impl AgentPanel {
                 ));
             }
             rows.push((PermissionAnswer::Deny, t.agent_perm_deny().to_string()));
-            rows.push((
-                PermissionAnswer::DenySession,
-                format!("{} ({pattern})", t.agent_perm_deny_session()),
-            ));
+            if remember {
+                rows.push((
+                    PermissionAnswer::DenySession,
+                    format!("{} ({pattern})", t.agent_perm_deny_session()),
+                ));
+            }
             let (answers, options): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
             let mut form = ChoiceForm::new(title, options)
                 .with_custom(t.agent_perm_deny_reason())
                 .with_cancel(t.agent_perm_stop());
             if has_subject {
-                form = form.with_detail(request.subject.clone());
+                form = form.with_detail(permission_detail(request));
             }
             events.push(PanelEvent::SetStatusMessage {
                 message: status,
@@ -2304,24 +2308,25 @@ impl AgentPanel {
         // by the persist callback, where it is on offer; "for this session"
         // lives only here.
         let request = &envelope.request;
-        let pattern = &request.suggested_pattern;
-        match answer {
-            PermissionAnswer::AllowAlways | PermissionAnswer::AllowAlwaysGlobal
-                if request.can_persist =>
-            {
-                self.rules.add(&request.tool, pattern, Decision::Allow);
+        for pattern in request.patterns() {
+            match answer {
+                PermissionAnswer::AllowAlways | PermissionAnswer::AllowAlwaysGlobal
+                    if request.can_persist =>
+                {
+                    self.rules.add(&request.tool, &pattern, Decision::Allow);
+                }
+                PermissionAnswer::AllowAlways
+                | PermissionAnswer::AllowAlwaysGlobal
+                | PermissionAnswer::AllowSession => {
+                    self.session_rules
+                        .add(&request.tool, &pattern, Decision::Allow);
+                }
+                PermissionAnswer::DenySession => {
+                    self.session_rules
+                        .add(&request.tool, &pattern, Decision::Deny);
+                }
+                _ => {}
             }
-            PermissionAnswer::AllowAlways
-            | PermissionAnswer::AllowAlwaysGlobal
-            | PermissionAnswer::AllowSession => {
-                self.session_rules
-                    .add(&request.tool, pattern, Decision::Allow);
-            }
-            PermissionAnswer::DenySession => {
-                self.session_rules
-                    .add(&request.tool, pattern, Decision::Deny);
-            }
-            _ => {}
         }
         self.end_permission_wait();
         let _ = envelope.reply.send(answer);
@@ -4932,6 +4937,27 @@ fn spawn_runtime(
         mode,
         external: false,
     }
+}
+
+/// A permission card's detail: what the agent wants to do and, for a
+/// command of several parts, the parts the question is about, one a line,
+/// those no rule can be recorded for marked as answered this time only.
+fn permission_detail(request: &termide_agent_core::PermissionRequest) -> String {
+    let several =
+        termide_agent_core::shell_parts(&request.subject, std::path::Path::new("/")).len() > 1;
+    if request.tool != "bash" || !several || request.parts.is_empty() {
+        return request.subject.clone();
+    }
+    let once = termide_i18n::t().agent_perm_part_once();
+    let parts: Vec<String> = request
+        .parts
+        .iter()
+        .map(|part| match part.pattern {
+            Some(_) => format!("• {}", part.text),
+            None => format!("• {} ({once})", part.text),
+        })
+        .collect();
+    format!("{}\n\n{}", request.subject, parts.join("\n"))
 }
 
 /// Mirror a session's message into transcript items when a session is
@@ -8280,6 +8306,10 @@ mod tests {
                 },
                 suggested_pattern: "git push *".into(),
                 can_persist: true,
+                parts: vec![termide_agent_core::AskedPart {
+                    text: "git push".into(),
+                    pattern: Some("git push *".into()),
+                }],
             })
         });
 
@@ -8335,6 +8365,7 @@ mod tests {
             },
             suggested_pattern: "src/x.rs".into(),
             can_persist: true,
+            parts: Vec::new(),
         };
         let asked = request.clone();
         let worker = std::thread::spawn(move || {
@@ -8376,6 +8407,96 @@ mod tests {
     }
 
     #[test]
+    fn a_compound_command_card_lists_the_parts_it_asks_about() {
+        let mut panel = panel(vec![]);
+        let (mut prompter, rx) = permission_channel(CancelToken::new());
+        panel.permission_rx = rx;
+        let command = "cd $BUILD && ./run && make install";
+        let worker = std::thread::spawn(move || {
+            prompter.ask(&termide_agent_core::PermissionRequest {
+                tool: "bash".into(),
+                subject: command.into(),
+                call: termide_agent_core::ToolCall {
+                    id: "c".into(),
+                    name: "bash".into(),
+                    arguments: serde_json::json!({ "command": command }),
+                },
+                suggested_pattern: "make install *".into(),
+                can_persist: true,
+                parts: vec![
+                    termide_agent_core::AskedPart {
+                        text: "./run".into(),
+                        pattern: None,
+                    },
+                    termide_agent_core::AskedPart {
+                        text: "make install".into(),
+                        pattern: Some("make install *".into()),
+                    },
+                ],
+            })
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while panel.pending.is_none() {
+            panel.tick();
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let form = panel.pending.as_ref().unwrap().form();
+        let detail = form.detail().unwrap().to_string();
+        assert!(detail.starts_with(command), "{detail}");
+        let once = termide_i18n::t().agent_perm_part_once();
+        assert!(detail.contains(&format!("• ./run ({once})")), "{detail}");
+        assert!(detail.contains("• make install\n") || detail.ends_with("• make install"));
+        // The recorded rule is the part's that can have one.
+        assert!(
+            form.options()[1].contains("(make install *)"),
+            "{:?}",
+            form.options()
+        );
+        panel.handle_key(chord(KeyCode::Char('2'), KeyModifiers::NONE));
+        assert_eq!(worker.join().unwrap(), PermissionAnswer::AllowSession);
+        assert_eq!(
+            panel
+                .effective_rules()
+                .evaluate_session("bash", "make install x"),
+            Some(Decision::Allow)
+        );
+        assert_eq!(
+            panel.effective_rules().evaluate_session("bash", "./run"),
+            None
+        );
+
+        // With no part a rule can stand for, nothing is offered to remember.
+        let (mut prompter, rx) = permission_channel(CancelToken::new());
+        panel.permission_rx = rx;
+        let worker = std::thread::spawn(move || {
+            prompter.ask(&termide_agent_core::PermissionRequest {
+                tool: "bash".into(),
+                subject: "cd $BUILD && ./run".into(),
+                call: termide_agent_core::ToolCall {
+                    id: "d".into(),
+                    name: "bash".into(),
+                    arguments: serde_json::json!({ "command": "cd $BUILD && ./run" }),
+                },
+                suggested_pattern: String::new(),
+                can_persist: true,
+                parts: vec![termide_agent_core::AskedPart {
+                    text: "./run".into(),
+                    pattern: None,
+                }],
+            })
+        });
+        while panel.pending.is_none() {
+            panel.tick();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let options = panel.pending.as_ref().unwrap().form().options().to_vec();
+        assert_eq!(options.len(), 2, "allow once and deny only: {options:?}");
+        panel.handle_key(chord(KeyCode::Char('1'), KeyModifiers::NONE));
+        assert_eq!(worker.join().unwrap(), PermissionAnswer::AllowOnce);
+    }
+
+    #[test]
     fn always_is_not_offered_where_the_configured_rules_do_not_count() {
         let mut panel = panel(vec![]);
         let (mut prompter, rx) = permission_channel(CancelToken::new());
@@ -8391,6 +8512,10 @@ mod tests {
                 },
                 suggested_pattern: "make *".into(),
                 can_persist: false,
+                parts: vec![termide_agent_core::AskedPart {
+                    text: "make".into(),
+                    pattern: Some("make *".into()),
+                }],
             })
         });
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -8427,6 +8552,10 @@ mod tests {
                 },
                 suggested_pattern: "git push *".into(),
                 can_persist: true,
+                parts: vec![termide_agent_core::AskedPart {
+                    text: "git push".into(),
+                    pattern: Some("git push *".into()),
+                }],
             })
         });
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -8740,6 +8869,10 @@ mod tests {
                     call: call.clone(),
                     suggested_pattern: "cat *".into(),
                     can_persist: true,
+                    parts: vec![termide_agent_core::AskedPart {
+                        text: "cat notes.txt".into(),
+                        pattern: Some("cat *".into()),
+                    }],
                 },
                 reply,
             },
@@ -8792,6 +8925,10 @@ mod tests {
                         },
                         suggested_pattern: "cat *".into(),
                         can_persist: true,
+                        parts: vec![termide_agent_core::AskedPart {
+                            text: "cat notes.txt".into(),
+                            pattern: Some("cat *".into()),
+                        }],
                     },
                     reply,
                 },

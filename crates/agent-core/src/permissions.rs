@@ -276,6 +276,42 @@ pub struct PermissionRequest {
     /// is the one the configured rules count in, and only with somewhere to
     /// write the rule.
     pub can_persist: bool,
+    /// For a shell command, the parts the question is about — those no rule
+    /// or safe default settles — each with the rule an answer can record for
+    /// it; empty for other tools, whose `suggested_pattern` is the rule.
+    pub parts: Vec<AskedPart>,
+}
+
+/// A part of a command line the user is asked about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AskedPart {
+    pub text: String,
+    /// The rule an answer beyond this call records; `None` when none can
+    /// stand for it (its program's directory is unknown, or it runs a
+    /// command substitution), so it is answered for this call only.
+    pub pattern: Option<String>,
+}
+
+impl PermissionRequest {
+    /// The rules an answer beyond this call records, one per part for a
+    /// shell command.
+    #[must_use]
+    pub fn patterns(&self) -> Vec<String> {
+        if self.tool == "bash" {
+            self.parts
+                .iter()
+                .filter_map(|p| p.pattern.clone())
+                .collect()
+        } else {
+            vec![self.suggested_pattern.clone()]
+        }
+    }
+
+    /// Whether an answer can outlast this call: some rule can be recorded.
+    #[must_use]
+    pub fn can_remember(&self) -> bool {
+        !self.patterns().is_empty()
+    }
 }
 
 /// The answers of a permission prompt: once, for the session or always
@@ -462,49 +498,11 @@ impl PermissionHooks {
     pub fn decide(&self, call: &ToolCall, ctx: &ToolContext) -> Decision {
         let subject = subject_of(call, ctx);
         let mode = self.mode.get();
-        let rule = |text: &str| {
-            // The configured rules count in full only in `configured`;
-            // elsewhere they can only tighten. This session's answers count
-            // everywhere but in `all`, which allows what they would.
-            let configured = self
-                .rules
-                .evaluate(&call.name, text)
-                .filter(|d| mode == Mode::Configured || *d != Decision::Allow);
-            let session = self
-                .rules
-                .evaluate_session(&call.name, text)
-                .filter(|_| mode != Mode::All);
-            configured.into_iter().chain(session).max()
-        };
-
         if call.name == "bash" {
-            let parsed = split_shell(&subject);
-            let mut verdict = Decision::Allow;
-            // Whole-command rules can tighten but never loosen a multi-part
-            // command: each part must earn its own allow.
-            if parsed.parts.len() > 1 {
-                if let Some(whole) = rule(&subject).filter(|d| *d != Decision::Allow) {
-                    verdict = verdict.max(whole);
-                }
-            }
-            for part in &parsed.parts {
-                let decision = match rule(part) {
-                    Some(Decision::Allow) if parsed.has_substitution => Decision::Ask,
-                    Some(decision) => decision,
-                    None if mode == Mode::All => Decision::Allow,
-                    None if !parsed.has_substitution && is_read_only_command(part) => {
-                        Decision::Allow
-                    }
-                    // Plan mode refuses a command that could change something.
-                    None if mode == Mode::Plan => Decision::Deny,
-                    None => Decision::Ask,
-                };
-                verdict = verdict.max(decision);
-            }
-            return verdict;
+            return self.judge_command(&subject, ctx).0;
         }
 
-        if let Some(decision) = rule(&subject) {
+        if let Some(decision) = self.rule(&call.name, &subject) {
             return decision;
         }
         let inside = inside_project(call, ctx);
@@ -524,6 +522,93 @@ impl PermissionHooks {
     }
 }
 
+impl PermissionHooks {
+    /// The strictest decision among the rules that count in the mode for
+    /// `tool` and `text`.
+    fn rule(&self, tool: &str, text: &str) -> Option<Decision> {
+        let mode = self.mode.get();
+        // The configured rules count in full only in `configured`; elsewhere
+        // they can only tighten. This session's answers count everywhere but
+        // in `all`, which allows what they would.
+        let configured = self
+            .rules
+            .evaluate(tool, text)
+            .filter(|d| mode == Mode::Configured || *d != Decision::Allow);
+        let session = self
+            .rules
+            .evaluate_session(tool, text)
+            .filter(|_| mode != Mode::All);
+        configured.into_iter().chain(session).max()
+    }
+
+    /// A shell command's verdict, and the parts it asks about. Each part is
+    /// judged on its own, as written and with its program's path resolved;
+    /// a whole-command rule can tighten a multi-part command but never
+    /// loosen it, since each part must earn its own allow.
+    fn judge_command(&self, command: &str, ctx: &ToolContext) -> (Decision, Vec<AskedPart>) {
+        let mode = self.mode.get();
+        let substituted = split_shell(command).has_substitution;
+        let parts = shell_parts(command, &ctx.cwd);
+        let mut verdict = Decision::Allow;
+        if parts.len() > 1 {
+            if let Some(whole) = self.rule("bash", command).filter(|d| *d != Decision::Allow) {
+                verdict = verdict.max(whole);
+            }
+        }
+        let mut asked = Vec::new();
+        for part in parts {
+            let matched = self
+                .rule("bash", &part.text)
+                .into_iter()
+                .chain(self.rule("bash", &part.resolved))
+                .max();
+            let decision = match matched {
+                // A rule cannot vouch for a substitution, nor for a program
+                // whose directory is unknown.
+                Some(Decision::Allow) if substituted || !part.savable => Decision::Ask,
+                Some(decision) => decision,
+                None if mode == Mode::All => Decision::Allow,
+                None if !substituted && is_read_only_command(&part.text) => Decision::Allow,
+                // Plan mode refuses a command that could change something.
+                None if mode == Mode::Plan => Decision::Deny,
+                None => Decision::Ask,
+            };
+            if decision == Decision::Ask {
+                asked.push(AskedPart {
+                    pattern: part
+                        .savable
+                        .then(|| suggested_pattern("bash", &part.resolved)),
+                    text: part.text,
+                });
+            }
+            verdict = verdict.max(decision);
+        }
+        (verdict, asked)
+    }
+
+    /// Record `decision` for every rule `request`'s answer stands for, for
+    /// the session or (`scope`) in the configuration.
+    fn remember(
+        &mut self,
+        request: &PermissionRequest,
+        decision: Decision,
+        scope: Option<PersistScope>,
+    ) {
+        for pattern in request.patterns() {
+            match scope {
+                Some(scope) if request.can_persist => {
+                    self.rules.add(&request.tool, &pattern, decision);
+                    if let Some(persist) = &mut self.persist {
+                        persist(&request.tool, &pattern, decision, scope);
+                    }
+                }
+                // "Always" not on offer here: it lasts for the session.
+                _ => self.rules.add_session(&request.tool, &pattern, decision),
+            }
+        }
+    }
+}
+
 impl Hooks for PermissionHooks {
     fn before_tool_call(&mut self, call: &ToolCall, ctx: &ToolContext) -> ToolDecision {
         match self.decide(call, ctx) {
@@ -537,62 +622,47 @@ impl Hooks for PermissionHooks {
             Decision::Ask => {
                 let subject = subject_of(call, ctx);
                 let can_persist = self.mode.get() == Mode::Configured && self.persist.is_some();
+                let parts = if call.name == "bash" {
+                    self.judge_command(&subject, ctx).1
+                } else {
+                    Vec::new()
+                };
+                let suggested = if call.name == "bash" {
+                    parts
+                        .iter()
+                        .filter_map(|p| p.pattern.clone())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                } else {
+                    suggested_pattern(&call.name, &subject)
+                };
                 let request = PermissionRequest {
                     tool: call.name.clone(),
-                    suggested_pattern: suggested_pattern(&call.name, &subject),
+                    suggested_pattern: suggested,
                     subject,
                     call: call.clone(),
                     can_persist,
-                };
-                let persist = |hooks: &mut Self, scope: PersistScope| {
-                    if !can_persist {
-                        // Not on offer here: it lasts for the session.
-                        hooks.rules.add_session(
-                            &request.tool,
-                            &request.suggested_pattern,
-                            Decision::Allow,
-                        );
-                        return;
-                    }
-                    hooks
-                        .rules
-                        .add(&request.tool, &request.suggested_pattern, Decision::Allow);
-                    if let Some(persist) = &mut hooks.persist {
-                        persist(
-                            &request.tool,
-                            &request.suggested_pattern,
-                            Decision::Allow,
-                            scope,
-                        );
-                    }
+                    parts,
                 };
                 match self.prompter.ask(&request) {
                     PermissionAnswer::AllowOnce => ToolDecision::Allow,
                     PermissionAnswer::AllowSession => {
-                        self.rules.add_session(
-                            &request.tool,
-                            &request.suggested_pattern,
-                            Decision::Allow,
-                        );
+                        self.remember(&request, Decision::Allow, None);
                         ToolDecision::Allow
                     }
                     PermissionAnswer::AllowAlways => {
-                        persist(self, PersistScope::Project);
+                        self.remember(&request, Decision::Allow, Some(PersistScope::Project));
                         ToolDecision::Allow
                     }
                     PermissionAnswer::AllowAlwaysGlobal => {
-                        persist(self, PersistScope::Global);
+                        self.remember(&request, Decision::Allow, Some(PersistScope::Global));
                         ToolDecision::Allow
                     }
                     PermissionAnswer::Deny => ToolDecision::Block {
                         reason: "denied by the user".into(),
                     },
                     PermissionAnswer::DenySession => {
-                        self.rules.add_session(
-                            &request.tool,
-                            &request.suggested_pattern,
-                            Decision::Deny,
-                        );
+                        self.remember(&request, Decision::Deny, None);
                         ToolDecision::Block {
                             reason: "denied by the user for this session".into(),
                         }
@@ -773,6 +843,114 @@ fn split_shell(command: &str) -> ParsedShell {
     parsed
 }
 
+/// One part of a command line as the rules see it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellPart {
+    /// As written.
+    pub text: String,
+    /// With the program's path resolved against the directory the earlier
+    /// `cd`s left — project-relative inside the project, absolute outside —
+    /// so a rule means the same program wherever the command started; the
+    /// text itself for a program found on `PATH` or in an unknown directory.
+    pub resolved: String,
+    /// Whether a rule can be recorded for it: not when its program's
+    /// directory is unknown, nor when it runs a command substitution.
+    pub savable: bool,
+}
+
+/// Split `command` into its parts, following `cd`, `pushd` and `popd` from
+/// `cwd` so each part's program resolves against the directory it runs in.
+/// A `cd` that cannot be followed (a variable, `-`, a substitution, a
+/// subshell) leaves the directory unknown for the parts after it.
+#[must_use]
+pub fn shell_parts(command: &str, cwd: &Path) -> Vec<ShellPart> {
+    let mut dir = Some(normalize(cwd));
+    let mut stack: Vec<Option<std::path::PathBuf>> = Vec::new();
+    split_shell(command)
+        .parts
+        .into_iter()
+        .map(|text| {
+            let substitution = text.contains("$(") || text.contains('`');
+            let mut words = text.split_whitespace();
+            let head = words.next().unwrap_or("");
+            let rest = &text.trim_start()[head.len()..];
+            let (resolved, known) = match resolve_program(head, dir.as_deref(), cwd) {
+                Some(program) => (format!("{program}{rest}"), true),
+                None if head.contains('/') => (text.clone(), false),
+                None => (text.clone(), true),
+            };
+            match head {
+                "cd" => dir = change_dir(dir.as_deref(), words.next()),
+                "pushd" => {
+                    stack.push(dir.clone());
+                    dir = change_dir(dir.as_deref(), words.next());
+                }
+                "popd" => dir = stack.pop().flatten(),
+                _ => {}
+            }
+            // A subshell's `cd` may or may not last; do not guess.
+            if text.starts_with('(') || text.ends_with(')') {
+                dir = None;
+            }
+            ShellPart {
+                savable: known && !substitution,
+                text,
+                resolved,
+            }
+        })
+        .collect()
+}
+
+/// The home directory, for `~`.
+fn home() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME").map(std::path::PathBuf::from)
+}
+
+/// Where `cd target` leads from `dir`; `None` when it cannot be told.
+fn change_dir(dir: Option<&Path>, target: Option<&str>) -> Option<std::path::PathBuf> {
+    let target = target.unwrap_or("~");
+    let quoted = target.starts_with(['"', '\'']);
+    if quoted && !(target.len() > 1 && target.ends_with(&target[..1])) {
+        return None; // a quoted path with spaces, split apart
+    }
+    let target = target.trim_matches(['"', '\'']);
+    if target == "-" || target.contains(['$', '`', '(', '*', '?']) {
+        return None;
+    }
+    let path = if target == "~" {
+        home()?
+    } else if let Some(rest) = target.strip_prefix("~/") {
+        home()?.join(rest)
+    } else if Path::new(target).is_absolute() {
+        std::path::PathBuf::from(target)
+    } else {
+        dir?.join(target)
+    };
+    Some(normalize(&path))
+}
+
+/// A program named by a path, resolved from `dir` and shown as file tools
+/// show paths: project-relative inside `project`, absolute outside. `None`
+/// for a bare name (found on `PATH`) or a relative path from an unknown
+/// directory.
+fn resolve_program(head: &str, dir: Option<&Path>, project: &Path) -> Option<String> {
+    if !head.contains('/') {
+        return None;
+    }
+    let head = head.trim_matches(['"', '\'']);
+    let path = if Path::new(head).is_absolute() {
+        std::path::PathBuf::from(head)
+    } else if let Some(rest) = head.strip_prefix("~/") {
+        home()?.join(rest)
+    } else {
+        dir?.join(head)
+    };
+    Some(relative_to_project(
+        &normalize(&path).to_string_lossy(),
+        project,
+    ))
+}
+
 fn push_part(parts: &mut Vec<String>, current: &mut String) {
     let part = current.trim().to_string();
     if !part.is_empty() {
@@ -781,10 +959,44 @@ fn push_part(parts: &mut Vec<String>, current: &mut String) {
     current.clear();
 }
 
+/// `part` without the redirections that write no file: one stream pointed
+/// at another (`2>&1`, `>&2`) or at `/dev/null`, either spelled in one word
+/// or with the target apart (`2> /dev/null`).
+fn without_harmless_redirections(part: &str) -> String {
+    let words: Vec<&str> = part.split_whitespace().collect();
+    let mut kept = Vec::with_capacity(words.len());
+    let mut i = 0;
+    while i < words.len() {
+        let word = words[i];
+        let target = word
+            .trim_start_matches(|c: char| c.is_ascii_digit() || c == '&')
+            .trim_start_matches(">>")
+            .trim_start_matches('>');
+        let is_redirection = word
+            .trim_start_matches(|c: char| c.is_ascii_digit() || c == '&')
+            .starts_with('>');
+        if is_redirection && target.is_empty() && words.get(i + 1) == Some(&"/dev/null") {
+            i += 2;
+            continue;
+        }
+        let harmless = target == "/dev/null"
+            || target
+                .strip_prefix('&')
+                .is_some_and(|fd| !fd.is_empty() && fd.chars().all(|c| c.is_ascii_digit()));
+        if !(is_redirection && harmless) {
+            kept.push(word);
+        }
+        i += 1;
+    }
+    kept.join(" ")
+}
+
 /// Commands that only read state and cannot write files even with unusual
-/// flags; redirections disqualify a command.
+/// flags; a redirection into a file disqualifies a command, while pointing
+/// one stream at another (`2>&1`) or at `/dev/null` does not.
 #[must_use]
 pub fn is_read_only_command(part: &str) -> bool {
+    let part = without_harmless_redirections(part);
     if part.contains('>') || part.contains("<(") {
         return false;
     }
@@ -792,10 +1004,12 @@ pub fn is_read_only_command(part: &str) -> bool {
     let Some(head) = words.next() else {
         return false;
     };
-    const PLAIN: [&str; 30] = [
+    // `cd`, `pushd` and `popd` only move the rest of the one command line.
+    const PLAIN: [&str; 33] = [
         "ls", "cat", "head", "tail", "wc", "pwd", "echo", "rg", "grep", "egrep", "fgrep", "which",
         "file", "stat", "tree", "du", "sort", "uniq", "cut", "tr", "basename", "dirname",
-        "realpath", "env", "printenv", "date", "whoami", "uname", "true", "false",
+        "realpath", "env", "printenv", "date", "whoami", "uname", "true", "false", "cd", "pushd",
+        "popd",
     ];
     if PLAIN.contains(&head) {
         return true;
@@ -1058,6 +1272,131 @@ mod tests {
         assert_eq!(decide("find . -name '*.rs'"), Decision::Allow);
         assert_eq!(decide("find . -delete"), Decision::Ask);
         assert_eq!(decide("git log | head"), Decision::Allow);
+    }
+
+    #[test]
+    fn parts_resolve_their_program_from_the_directory_cd_left() {
+        let resolved = |command: &str| -> Vec<(String, bool)> {
+            shell_parts(command, Path::new("/proj"))
+                .into_iter()
+                .map(|p| (p.resolved, p.savable))
+                .collect()
+        };
+        // Outside the project: absolute; inside: project-relative.
+        assert_eq!(
+            resolved("cd /tmp && ./astro/bin/pip install x && cd /proj/src && ./tool -v"),
+            vec![
+                ("cd /tmp".to_string(), true),
+                ("/tmp/astro/bin/pip install x".to_string(), true),
+                ("cd /proj/src".to_string(), true),
+                ("src/tool -v".to_string(), true),
+            ]
+        );
+        // `pushd` and `popd` are followed too; a bare name stays as written.
+        assert_eq!(
+            resolved("pushd /opt && popd && ./x; make"),
+            vec![
+                ("pushd /opt".to_string(), true),
+                ("popd".to_string(), true),
+                ("x".to_string(), true),
+                ("make".to_string(), true),
+            ]
+        );
+        // A `cd` that cannot be followed leaves the directory unknown, and a
+        // relative program after it has no rule to be saved under.
+        for unknown in [
+            "cd $DIR && ./run",
+            "cd - && ./run",
+            "cd \"my dir\" && ./run",
+        ] {
+            let parts = resolved(unknown);
+            assert_eq!(parts[1], ("./run".to_string(), false), "{unknown}");
+        }
+        // A substitution is never saved either.
+        assert!(!resolved("echo $(date)")[0].1);
+    }
+
+    /// The command from a real session: it asked about `cd *`, the first
+    /// part, and asked again next time, since the rest stayed unanswered.
+    #[test]
+    fn a_compound_command_asks_about_each_part_left_and_remembers_each() {
+        let command = "cd /tmp && python3 -m venv astro && ./astro/bin/pip install -q pyswisseph 2>&1 | tail -3; ./astro/bin/python -c \"import swisseph;print(swisseph.version)\"";
+        let (mut hooks, asked) = hooks(
+            PermissionRules::default(),
+            vec![PermissionAnswer::AllowSession],
+        );
+        assert_eq!(
+            hooks.before_tool_call(&bash(command), &ctx()),
+            ToolDecision::Allow
+        );
+        let request = asked.lock().unwrap()[0].clone();
+        // `cd` and `tail` only look; the rest is asked about, each with its
+        // own rule, the programs resolved.
+        let patterns: Vec<String> = request
+            .parts
+            .iter()
+            .filter_map(|p| p.pattern.clone())
+            .collect();
+        assert_eq!(
+            patterns,
+            [
+                "python3 *",
+                "/tmp/astro/bin/pip *",
+                "/tmp/astro/bin/python *"
+            ]
+        );
+        assert_eq!(request.parts[0].text, "python3 -m venv astro");
+        assert!(request.can_remember());
+        // The same command, and another with the same programs, pass now.
+        assert_eq!(hooks.decide(&bash(command), &ctx()), Decision::Allow);
+        assert_eq!(
+            hooks.decide(&bash("cd /tmp/astro && ./bin/pip list"), &ctx()),
+            Decision::Allow
+        );
+        assert_eq!(asked.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_part_from_an_unknown_directory_is_answered_for_this_call_only() {
+        let (mut hooks, asked) = hooks(
+            PermissionRules::default(),
+            vec![PermissionAnswer::AllowSession],
+        );
+        hooks.before_tool_call(&bash("cd $BUILD && ./run"), &ctx());
+        let request = asked.lock().unwrap()[0].clone();
+        assert_eq!(request.parts.len(), 1);
+        assert_eq!(request.parts[0].pattern, None);
+        assert!(!request.can_remember());
+        // Nothing was recorded, so it asks again.
+        assert_eq!(
+            hooks.decide(&bash("cd $BUILD && ./run"), &ctx()),
+            Decision::Ask
+        );
+        // And a rule written for the text cannot vouch for it.
+        let mut rules = PermissionRules::default();
+        rules.add("bash", "./run*", Decision::Allow);
+        let (hooks, _) = super::tests::hooks(rules, vec![]);
+        assert_eq!(
+            hooks.decide(&bash("cd $BUILD && ./run"), &ctx()),
+            Decision::Ask
+        );
+    }
+
+    #[test]
+    fn pointing_a_stream_elsewhere_is_not_writing_a_file() {
+        for look in [
+            "ls 2>&1",
+            "rg TODO 2>/dev/null",
+            "ls 2> /dev/null",
+            "cat x &>/dev/null",
+            "echo hi >&2",
+            "cd /tmp",
+        ] {
+            assert!(is_read_only_command(look), "{look}");
+        }
+        for write in ["ls > out", "ls 2>err.txt", "echo x >> log", "cat x 2> err"] {
+            assert!(!is_read_only_command(write), "{write}");
+        }
     }
 
     #[test]
@@ -1376,6 +1715,7 @@ mod prompter_tests {
             },
             suggested_pattern: "git push *".into(),
             can_persist: true,
+            parts: Vec::new(),
         }
     }
 

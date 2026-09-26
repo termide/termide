@@ -544,6 +544,17 @@ per part: `cargo build && rm -rf target` needs both halves allowed, and a deny
 on either half stops the whole command. Command substitution (`$(…)`, backticks)
 is never allowed automatically.
 
+A command's parts are judged in the directory they run in: termide follows
+`cd`, `pushd` and `popd` through the line, and a program named by a path is
+matched as the resolved path — project-relative inside the project, absolute
+outside — as well as as written, so `cd /tmp && ./venv/bin/pip install x`
+matches `/tmp/venv/bin/pip *`. The card asks only about the parts no rule or
+look-only default settles, lists them under the command, and an answer for
+the session or for always records a rule for each. A part whose directory
+cannot be told (after `cd $DIR`, `cd -` or a subshell) or that runs a
+substitution is marked "this time only": no rule is recorded for it, and
+when no part can have one, the card offers only allow once and deny.
+
 The mode decides which rules count and what happens to anything none covers.
 `mode` in the configuration is the starting point every new session takes
 (`configured` unless you change it), also set from the settings modal's **AI**
@@ -578,8 +589,9 @@ the modes set the configured `allow` rules aside, never the refusals. Your
 answers for the session count in every mode but `all`.
 
 The look-only commands are a short list that only look at things (`ls`,
-`cat`, `rg`, `git status`, `find` without `-delete` or `-exec`, and similar);
-a redirection in the command disqualifies it. Loading a skill never asks.
+`cat`, `rg`, `git status`, `find` without `-delete` or `-exec`, `cd`, and
+similar); a redirection into a file disqualifies it, while pointing a stream
+at another (`2>&1`) or at `/dev/null` does not. Loading a skill never asks.
 
 ### Plan mode
 

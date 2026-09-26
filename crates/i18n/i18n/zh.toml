@@ -393,6 +393,7 @@ agent_perm_allow_always = "在此项目中始终允许"
 agent_perm_allow_always_global = "在所有地方始终允许"
 agent_perm_deny = "拒绝"
 agent_perm_deny_session = "本会话中拒绝"
+agent_perm_part_once = "仅此一次"
 agent_perm_deny_reason = "拒绝并告知代理原因"
 agent_perm_stop = "停止运行"
 # Agent panel — undo card
