@@ -24,6 +24,7 @@ use command_dispatch::build_fm_hotkey_table;
 use dir_load::{AsyncDirReloadResult, PendingDirLoad};
 use expansion::PendingExpand;
 pub use file_info::FileInfo;
+pub use file_search::project_files;
 use navigation::NavigationState;
 pub use operations::CreateOutcome;
 use search_bar::{BarFocus, SearchBarKind};

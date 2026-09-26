@@ -16,6 +16,7 @@ mod result_tree;
 mod search_worker;
 
 use result_tree::{build_tree_nodes, TreeBuildItem};
+pub use search_worker::project_files;
 use search_worker::{search_content, search_files};
 
 /// Content-header hit-test columns (must match the renderer): the

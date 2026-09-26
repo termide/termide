@@ -3,9 +3,11 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use ignore::{Walk, WalkBuilder};
 use regex::RegexBuilder;
 use termide_core::util::is_binary_file;
 use termide_git::{GitStatus, GitStatusCache};
+use termide_ui::fuzzy::Query;
 
 use super::{ContentResult, FileResult};
 
@@ -26,9 +28,10 @@ struct NameMatcher {
     case_sensitive: bool,
     /// Some only in name-regex mode; matched against the name / relative path.
     regex: Option<regex::Regex>,
-    /// Glob/substring needle, case-folded when Case is off.
+    /// Glob over the case-folded mask when Case is off.
     glob: Option<glob::Pattern>,
-    needle: String,
+    /// The mask as a plain "contains", for a name mask without wildcards.
+    substring: Query,
 }
 
 impl NameMatcher {
@@ -46,17 +49,14 @@ impl NameMatcher {
         } else {
             None
         };
-        // Fold case into the needle when Case is off so pattern and candidate
+        // Fold case into the glob when Case is off so pattern and candidate
         // are compared in the same case.
-        let needle = if case_sensitive {
-            mask.to_string()
-        } else {
-            mask.to_lowercase()
-        };
         let glob = if use_regex {
             None
+        } else if case_sensitive {
+            glob::Pattern::new(mask).ok()
         } else {
-            glob::Pattern::new(&needle).ok()
+            glob::Pattern::new(&mask.to_lowercase()).ok()
         };
         Some(Self {
             has_path_sep: mask.contains('/') || mask.contains('\\'),
@@ -64,12 +64,12 @@ impl NameMatcher {
             case_sensitive,
             regex,
             glob,
-            needle,
+            substring: Query::substring(mask, case_sensitive),
         })
     }
 
     /// `Some(matched)`, or `None` when the entry has no usable file name.
-    fn matches(&self, path: &Path, relative_path: &str) -> Option<bool> {
+    fn matches(&mut self, path: &Path, relative_path: &str) -> Option<bool> {
         if let Some(re) = self.regex.as_ref() {
             // Match the path when the pattern spans separators, else the name.
             return Some(if self.has_path_sep {
@@ -94,12 +94,46 @@ impl NameMatcher {
                 name.to_lowercase()
             };
             self.glob.as_ref().map(|g| g.matches(&hay)).unwrap_or(false)
-        } else if self.case_sensitive {
-            name.contains(&self.needle)
         } else {
-            name.to_lowercase().contains(&self.needle)
+            self.substring.score(&name).is_some()
         })
     }
+}
+
+/// Every entry under `base`, hidden ones included. With `respect_gitignore`
+/// the walk leaves out what git ignores and the `.git` directory itself, as
+/// a project-wide search wants; without it, it sees everything, as a search
+/// of the directory on screen does.
+fn walker(base: &Path, respect_gitignore: bool) -> Walk {
+    let mut builder = WalkBuilder::new(base);
+    builder
+        .hidden(false)
+        .git_ignore(respect_gitignore)
+        .git_global(respect_gitignore)
+        .git_exclude(respect_gitignore);
+    if respect_gitignore {
+        builder.filter_entry(|entry| entry.file_name() != ".git");
+    }
+    builder.build()
+}
+
+/// The files under `root` a project-wide search offers, as paths relative to
+/// `root`: what git ignores and `.git` left out, at most `limit` of them.
+pub fn project_files(root: &Path, cancel: &AtomicBool, limit: usize) -> Vec<String> {
+    let mut files = Vec::new();
+    for entry in walker(root, true) {
+        if cancel.load(Ordering::Relaxed) || files.len() >= limit {
+            break;
+        }
+        let Ok(entry) = entry else { continue };
+        if !entry.file_type().is_some_and(|t| t.is_file()) {
+            continue;
+        }
+        if let Ok(relative) = entry.path().strip_prefix(root) {
+            files.push(relative.display().to_string());
+        }
+    }
+    files
 }
 
 pub(super) fn search_files(
@@ -110,19 +144,12 @@ pub(super) fn search_files(
     cancel: &AtomicBool,
     git_cache: Option<&GitStatusCache>,
 ) -> Vec<FileResult> {
-    use ignore::WalkBuilder;
-
-    let Some(matcher) = NameMatcher::new(mask, use_regex, case_sensitive) else {
+    let Some(mut matcher) = NameMatcher::new(mask, use_regex, case_sensitive) else {
         return Vec::new();
     };
     let mut results = Vec::new();
 
-    let walker = WalkBuilder::new(base_path)
-        .hidden(false)
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .build();
+    let walker = walker(base_path, false);
 
     for entry in walker {
         if cancel.load(Ordering::Relaxed) {
@@ -184,8 +211,6 @@ pub(super) fn search_content(
     git_cache: Option<&GitStatusCache>,
     max_file_size: u64,
 ) -> Vec<ContentResult> {
-    use ignore::WalkBuilder;
-
     let regex = match RegexBuilder::new(content_pattern)
         .case_insensitive(!case_sensitive)
         .build()
@@ -196,7 +221,7 @@ pub(super) fn search_content(
 
     // The mask filters file names with the same rules (and Case toggle) as the
     // name search; the content `regex` above is what honors case for matches.
-    let matcher = match NameMatcher::new(mask, false, case_sensitive) {
+    let mut matcher = match NameMatcher::new(mask, false, case_sensitive) {
         Some(m) => m,
         None => return Vec::new(),
     };
@@ -204,12 +229,7 @@ pub(super) fn search_content(
     let min_size = content_pattern.len() as u64;
     let mut results = Vec::new();
 
-    let walker = WalkBuilder::new(base_path)
-        .hidden(false)
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .build();
+    let walker = walker(base_path, false);
 
     for entry in walker {
         if cancel.load(Ordering::Relaxed) {
@@ -379,5 +399,34 @@ mod tests {
         );
         // Regex, case-sensitive: only the uppercase README.
         assert_eq!(names(r"^README", true, true), vec!["README.md"]);
+    }
+
+    #[test]
+    fn project_files_leave_out_what_git_ignores_and_the_git_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for path in [
+            ".git/HEAD",
+            ".github/workflows/ci.yml",
+            "src/main.rs",
+            "target/debug/app",
+            "notes.log",
+        ] {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "").unwrap();
+        }
+        std::fs::write(root.join(".gitignore"), "target/\n*.log\n").unwrap();
+
+        let never = AtomicBool::new(false);
+        let mut files = project_files(root, &never, 100);
+        files.sort();
+        assert_eq!(
+            files,
+            [".github/workflows/ci.yml", ".gitignore", "src/main.rs"],
+            "hidden files stay, ignored ones and .git go"
+        );
+        assert_eq!(project_files(root, &never, 1).len(), 1, "capped");
+        assert!(project_files(root, &AtomicBool::new(true), 100).is_empty());
     }
 }
