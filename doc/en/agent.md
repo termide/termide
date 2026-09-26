@@ -272,7 +272,8 @@ while the agent works; once a pause is asked for, `[▶]` takes the place of
 `[‖]` and withdraws it (so does clicking its notice in the state strip, or
 `/continue`); while paused, `[▶]` continues the run, as does clicking the pause line or
 `/continue`, and `[■]` gives the paused run up (the calls it left unrun are
-closed by the next request).
+closed by the next request). Claude Code and Codex run their own loop, which
+cannot stop between steps: they show `[■]` alone, and `/pause` says so.
 
 The closing line is one kind of annotation — a line that marks a moment in the
 conversation rather than holding content. The others are the panel's notices:

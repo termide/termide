@@ -1270,7 +1270,9 @@ impl AgentPanel {
             }
             Some((PAUSE_COMMAND, _)) => {
                 self.clear_input();
-                if !self.request_pause() {
+                if !self.runtime.can_pause() {
+                    self.notice(PromptError::Unsupported.to_string(), NoticeKind::Info);
+                } else if !self.request_pause() {
                     self.notice(
                         termide_i18n::t().agent_notice_nothing_to_pause(),
                         NoticeKind::Info,
@@ -1662,7 +1664,7 @@ impl AgentPanel {
     /// Ask the running agent to pause at its next step boundary. Returns
     /// whether a run was there to pause.
     fn request_pause(&mut self) -> bool {
-        if !self.is_busy() {
+        if !self.is_busy() || !self.runtime.can_pause() {
             return false;
         }
         // The state strip shows the pending pause until the run reaches a
@@ -3476,7 +3478,7 @@ impl AgentPanel {
             }
         }
         // Run control is offered only when it applies.
-        if self.is_busy() && PAUSE_COMMAND.starts_with(prefix) {
+        if self.is_busy() && self.runtime.can_pause() && PAUSE_COMMAND.starts_with(prefix) {
             items.push(
                 CompletionItem::new(PAUSE_COMMAND)
                     .with_label(format!("/{PAUSE_COMMAND}"))
@@ -4271,8 +4273,11 @@ impl AgentPanel {
         let paused = self.paused && !self.is_busy();
         if paused || (self.is_busy() && self.pause_requested) {
             vec![RunButton::Continue, RunButton::Stop]
-        } else if self.is_busy() {
+        } else if self.is_busy() && self.runtime.can_pause() {
             vec![RunButton::Pause, RunButton::Stop]
+        } else if self.is_busy() {
+            // An external agent runs its own loop: it can be stopped, not paused.
+            vec![RunButton::Stop]
         } else {
             Vec::new()
         }
@@ -9757,6 +9762,11 @@ mod tests {
             (panel.context_tokens, panel.model.context_window),
             (975, 1_000_000)
         );
+        // Its own loop cannot pause between steps: a run shows stop alone.
+        panel.busy = true;
+        assert_eq!(panel.run_buttons(), vec![RunButton::Stop]);
+        assert!(!panel.request_pause());
+        panel.busy = false;
         // The Mode chip is there, and a switch reaches the agent.
         assert_eq!(chip(&panel, MODE_ACTION), "configured");
         panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));

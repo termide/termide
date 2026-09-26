@@ -119,6 +119,11 @@ pub trait Backend: Send {
     }
     /// Ask the active run to stop.
     fn abort(&self);
+    /// Whether a run can pause at a step boundary: the built-in loop can; an
+    /// external agent, which runs its own loop, cannot.
+    fn can_pause(&self) -> bool {
+        false
+    }
     /// Ask the active run to pause gracefully at the next step boundary; the
     /// default is a no-op (an external agent has no such control).
     fn pause(&self) {}
@@ -191,6 +196,10 @@ impl Backend for AgentRuntime {
 
     /// The loop's hooks read the shared mode handle.
     fn follows_mode(&self) -> bool {
+        true
+    }
+
+    fn can_pause(&self) -> bool {
         true
     }
     fn steer(&self, message: UserMessage) {
