@@ -82,8 +82,6 @@ pub struct Dropdown<'a> {
     x: u16,
     y: u16,
     theme: &'a Theme,
-    max_visible: usize,
-    scroll_offset: usize,
 }
 
 /// On-screen width of a dropdown holding `items`, borders included.
@@ -115,6 +113,94 @@ pub fn dropdown_width(items: &[DropdownItem]) -> u16 {
     (max_label_len + shortcut_column + 6).min(48) as u16
 }
 
+/// Where a dropdown list is actually drawn once it is fitted to the screen.
+///
+/// Renderers draw from it and mouse handlers hit-test against it, so a click
+/// always lands on the row that is displayed under the cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListGeometry {
+    /// On-screen rectangle, borders included, clamped to the screen.
+    pub area: Rect,
+    /// Index of the first item shown in the first row.
+    pub scroll_offset: usize,
+}
+
+impl ListGeometry {
+    /// Fit a list of `item_count` rows, `width` columns wide and showing at
+    /// most `max_visible` rows, at (`x`, `y`) inside `screen`.
+    ///
+    /// The box is shrunk to the screen and moved left or up when it would
+    /// overflow, and the scroll offset keeps `selected` visible.
+    pub fn compute(
+        width: u16,
+        item_count: usize,
+        max_visible: usize,
+        selected: usize,
+        x: u16,
+        y: u16,
+        screen: Rect,
+    ) -> Self {
+        let width = width.min(screen.width).max(1);
+        let height = ((item_count.min(max_visible) + 2) as u16)
+            .min(screen.height)
+            .max(1);
+        let visible = height.saturating_sub(2) as usize;
+        let scroll_offset = if visible == 0 {
+            0
+        } else {
+            (selected + 1)
+                .saturating_sub(visible)
+                .min(item_count.saturating_sub(visible))
+        };
+        let x = x.min(screen.right().saturating_sub(width)).max(screen.x);
+        let y = y.min(screen.bottom().saturating_sub(height)).max(screen.y);
+        Self {
+            area: Rect {
+                x,
+                y,
+                width,
+                height,
+            },
+            scroll_offset,
+        }
+    }
+
+    /// Number of item rows visible between the borders.
+    pub fn visible_count(&self) -> usize {
+        self.area.height.saturating_sub(2) as usize
+    }
+
+    /// Index of the item under the screen cell (`x`, `y`), or `None` when the
+    /// cell is outside the list or on its top or bottom border.
+    pub fn item_at(&self, x: u16, y: u16) -> Option<usize> {
+        let inside = x >= self.area.x
+            && x < self.area.right()
+            && y > self.area.y
+            && y < self.area.bottom().saturating_sub(1);
+        inside.then(|| self.scroll_offset + (y - self.area.y - 1) as usize)
+    }
+}
+
+/// On-screen geometry of a [`Dropdown`] holding `items`, requested at
+/// (`x`, `y`) with `selected` highlighted and fitted to `screen`.
+pub fn dropdown_geometry(
+    items: &[DropdownItem],
+    selected: usize,
+    x: u16,
+    y: u16,
+    screen: Rect,
+) -> ListGeometry {
+    ListGeometry::compute(
+        dropdown_width(items),
+        items.len(),
+        MAX_VISIBLE_ITEMS,
+        selected,
+        x,
+        y,
+        screen,
+    )
+}
+
 impl<'a> Dropdown<'a> {
     pub fn new(
         items: &'a [DropdownItem],
@@ -123,22 +209,12 @@ impl<'a> Dropdown<'a> {
         y: u16,
         theme: &'a Theme,
     ) -> Self {
-        let max_visible = MAX_VISIBLE_ITEMS.min(items.len());
-        // Calculate scroll offset to keep selected item visible
-        let scroll_offset = if selected >= max_visible {
-            selected - max_visible + 1
-        } else {
-            0
-        };
-
         Self {
             items,
             selected,
             x,
             y,
             theme,
-            max_visible,
-            scroll_offset,
         }
     }
 
@@ -149,8 +225,13 @@ impl<'a> Dropdown<'a> {
 
     /// Get the height of this dropdown
     pub fn height(&self) -> u16 {
-        let visible_count = self.items.len().min(self.max_visible);
+        let visible_count = self.items.len().min(MAX_VISIBLE_ITEMS);
         (visible_count + 2) as u16 // +2 for borders
+    }
+
+    /// On-screen geometry of this dropdown once fitted to `screen`.
+    pub fn geometry(&self, screen: Rect) -> ListGeometry {
+        dropdown_geometry(self.items, self.selected, self.x, self.y, screen)
     }
 
     pub fn render(&self, buf: &mut Buffer) {
@@ -158,25 +239,16 @@ impl<'a> Dropdown<'a> {
             return;
         }
 
-        // Clamp to the buffer so a dropdown taller/wider than the terminal
-        // never renders past its edges (that panics ratatui — issue #25). The
-        // per-row item loop below already stops at the inner height, so a
-        // shrunken box just shows fewer rows.
-        let width = self.width().min(buf.area.width).max(1);
-        let height = self.height().min(buf.area.height).max(1);
-
-        // Check screen boundaries
-        let max_x = buf.area.width.saturating_sub(width);
-        let max_y = buf.area.height.saturating_sub(height);
-        let x = self.x.min(max_x);
-        let y = self.y.min(max_y);
-
-        let area = Rect {
+        let geometry = self.geometry(buf.area);
+        let area = geometry.area;
+        let Rect {
             x,
             y,
             width,
             height,
-        };
+        } = area;
+        let scroll_offset = geometry.scroll_offset;
+        let visible_count = geometry.visible_count();
 
         // Clear area under dropdown
         Clear.render(area, buf);
@@ -204,12 +276,12 @@ impl<'a> Dropdown<'a> {
         }
 
         // Get visible items
-        let visible_end = (self.scroll_offset + self.max_visible).min(self.items.len());
-        let visible_items = &self.items[self.scroll_offset..visible_end];
+        let visible_end = (scroll_offset + visible_count).min(self.items.len());
+        let visible_items = &self.items[scroll_offset..visible_end];
 
         // Render rows
         for (i, item) in visible_items.iter().enumerate() {
-            let actual_index = self.scroll_offset + i;
+            let actual_index = scroll_offset + i;
             let is_selected = actual_index == self.selected;
 
             let row_y = inner.y + i as u16;
@@ -298,14 +370,13 @@ impl<'a> Dropdown<'a> {
         }
 
         // Render scrollbar on right edge (inside border)
-        let visible_count = self.items.len().min(self.max_visible);
         let theme_colors = ThemeColors::from(self.theme);
         ScrollBar::render(
             buf,
             x + width - 1,            // Right border position
             y + 1,                    // Inside top border
             height.saturating_sub(2), // Inside borders
-            self.scroll_offset,
+            scroll_offset,
             visible_count,
             self.items.len(),
             &theme_colors,
@@ -875,12 +946,7 @@ pub fn panel_action_dropdown_position(
     screen_w: u16,
     screen_h: u16,
 ) -> (u16, u16) {
-    let width = items
-        .iter()
-        .map(|i| i.label.chars().count())
-        .max()
-        .unwrap_or(0) as u16
-        + 6;
+    let width = dropdown_width(items);
     let height = items.len() as u16 + 2;
     let x = anchor_x.min(screen_w.saturating_sub(width));
     let y = anchor_y

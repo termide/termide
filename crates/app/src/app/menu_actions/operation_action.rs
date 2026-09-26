@@ -41,9 +41,15 @@ impl App {
             self.state.terminal.height,
         );
 
-        if let Some(index) =
-            super::super::mouse::submenu::hit_dropdown_item(x, y, dropdown_x, dropdown_y, &items)
-        {
+        if let Some(index) = super::super::mouse::submenu::hit_dropdown_item(
+            x,
+            y,
+            dropdown_x,
+            dropdown_y,
+            &items,
+            self.state.ui.operation_action_menu.selected,
+            self.screen_rect(),
+        ) {
             self.state.ui.operation_action_menu.selected = index;
             self.execute_operation_action_menu_action()?;
             return Ok(());

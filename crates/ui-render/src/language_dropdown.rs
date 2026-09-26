@@ -16,6 +16,8 @@ use termide_i18n as i18n;
 use termide_theme::Theme;
 use termide_ui::{render_text_cells, str_display_width, ScrollBar};
 
+use crate::dropdown::ListGeometry;
+
 /// Language dropdown with live preview on cursor navigation
 pub struct LanguageDropdown<'a> {
     /// Language list: (code, native name)
@@ -28,23 +30,38 @@ pub struct LanguageDropdown<'a> {
     y: u16,
     /// App theme for borders
     app_theme: &'a Theme,
-    /// Maximum visible items (for scrolling)
-    max_visible: usize,
-    /// Scroll offset
-    scroll_offset: usize,
+}
+
+const MAX_VISIBLE: usize = 15;
+
+fn language_dropdown_width(languages: &[(&str, &str)]) -> u16 {
+    let max_name_len = languages
+        .iter()
+        .map(|(_, name)| str_display_width(name))
+        .max()
+        .unwrap_or(10);
+    // " " + name + padding
+    (max_name_len + 4).min(30) as u16
+}
+
+/// On-screen geometry of a [`LanguageDropdown`], requested at (`x`, `y`) with
+/// `selected` highlighted and fitted to `screen`.
+pub fn language_dropdown_geometry(selected: usize, x: u16, y: u16, screen: Rect) -> ListGeometry {
+    let languages = i18n::get_language_list();
+    ListGeometry::compute(
+        language_dropdown_width(&languages),
+        languages.len(),
+        MAX_VISIBLE,
+        selected,
+        x,
+        y,
+        screen,
+    )
 }
 
 impl<'a> LanguageDropdown<'a> {
     pub fn new(selected: usize, x: u16, y: u16, app_theme: &'a Theme) -> Self {
         let languages = i18n::get_language_list();
-
-        // Calculate scroll offset to keep selected item visible
-        let max_visible = 15;
-        let scroll_offset = if selected >= max_visible {
-            selected - max_visible + 1
-        } else {
-            0
-        };
 
         Self {
             languages,
@@ -52,26 +69,17 @@ impl<'a> LanguageDropdown<'a> {
             x,
             y,
             app_theme,
-            max_visible,
-            scroll_offset,
         }
     }
 
     /// Get the width of this dropdown
     pub fn width(&self) -> u16 {
-        let max_name_len = self
-            .languages
-            .iter()
-            .map(|(_, name)| str_display_width(name))
-            .max()
-            .unwrap_or(10);
-        // " " + name + padding
-        (max_name_len + 4).min(30) as u16
+        language_dropdown_width(&self.languages)
     }
 
     /// Get the height of this dropdown
     pub fn height(&self) -> u16 {
-        let items_count = self.languages.len().min(self.max_visible);
+        let items_count = self.languages.len().min(MAX_VISIBLE);
         (items_count + 2) as u16 // +2 for borders
     }
 
@@ -90,24 +98,24 @@ impl<'a> LanguageDropdown<'a> {
             return;
         }
 
-        // Clamp to the buffer so a list taller/wider than the terminal never
-        // renders past its edges (that panics ratatui — issue #25). The per-row
-        // loop below already stops at the inner height.
-        let width = self.width().min(buf.area.width).max(1);
-        let height = self.height().min(buf.area.height).max(1);
-
-        // Check screen boundaries
-        let max_x = buf.area.width.saturating_sub(width);
-        let max_y = buf.area.height.saturating_sub(height);
-        let x = self.x.min(max_x);
-        let y = self.y.min(max_y);
-
-        let area = Rect {
+        let geometry = ListGeometry::compute(
+            self.width(),
+            self.languages.len(),
+            MAX_VISIBLE,
+            self.selected,
+            self.x,
+            self.y,
+            buf.area,
+        );
+        let area = geometry.area;
+        let Rect {
             x,
             y,
             width,
             height,
-        };
+        } = area;
+        let scroll_offset = geometry.scroll_offset;
+        let visible_count = geometry.visible_count();
 
         // Clear area under dropdown
         Clear.render(area, buf);
@@ -127,11 +135,11 @@ impl<'a> LanguageDropdown<'a> {
         };
 
         // Get visible items
-        let visible_end = (self.scroll_offset + self.max_visible).min(self.languages.len());
-        let visible_items = &self.languages[self.scroll_offset..visible_end];
+        let visible_end = (scroll_offset + visible_count).min(self.languages.len());
+        let visible_items = &self.languages[scroll_offset..visible_end];
 
         for (i, (_code, name)) in visible_items.iter().enumerate() {
-            let actual_index = self.scroll_offset + i;
+            let actual_index = scroll_offset + i;
             let is_selected = actual_index == self.selected;
 
             let item_style = if is_selected {
@@ -167,14 +175,13 @@ impl<'a> LanguageDropdown<'a> {
         }
 
         // Render scrollbar on right edge (inside border)
-        let visible_count = self.languages.len().min(self.max_visible);
         let theme_colors = ThemeColors::from(self.app_theme);
         ScrollBar::render(
             buf,
             x + width - 1,            // Right border position
             y + 1,                    // Inside top border
             height.saturating_sub(2), // Inside borders
-            self.scroll_offset,
+            scroll_offset,
             visible_count,
             self.languages.len(),
             &theme_colors,

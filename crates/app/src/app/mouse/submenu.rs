@@ -4,16 +4,17 @@
 //! dispatches here based on which menu is currently open.
 
 use anyhow::Result;
+use ratatui::layout::Rect;
 use std::sync::Arc;
-use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
 use termide_i18n as i18n;
 use termide_theme::Theme;
 use termide_ui_render::{
-    dropdown_width, get_ai_agent_choice_items, get_ai_items, get_bookmarks_group_items,
-    get_bookmarks_items, get_commands_group_items, get_commands_items, get_menu_item_x_position,
-    get_options_items, get_projects_items, get_shell_items, get_tools_items, AI_MENU_INDEX,
+    dropdown_geometry, dropdown_width, get_ai_agent_choice_items, get_ai_items,
+    get_bookmarks_group_items, get_bookmarks_items, get_commands_group_items, get_commands_items,
+    get_menu_item_x_position, get_options_items, get_projects_items, get_shell_items,
+    get_tools_items, language_dropdown_geometry, theme_dropdown_geometry, AI_MENU_INDEX,
     BOOKMARKS_MENU_INDEX, COMMANDS_MENU_INDEX, OPTIONS_MENU_INDEX, PROJECTS_MENU_INDEX,
     WINDOWS_MENU_INDEX,
 };
@@ -28,19 +29,17 @@ pub(in crate::app) fn hit_dropdown_item(
     menu_x: u16,
     dropdown_y: u16,
     items: &[termide_ui_render::DropdownItem],
+    selected: usize,
+    screen: Rect,
 ) -> Option<usize> {
-    let width = dropdown_width(items);
-    let height = items.len() as u16 + 2; // +2 for borders
-    if x >= menu_x && x < menu_x + width && y >= dropdown_y && y < dropdown_y + height {
-        let item_index = y.saturating_sub(dropdown_y + 1) as usize;
-        if item_index < items.len() {
-            return Some(item_index);
-        }
-    }
-    None
+    dropdown_geometry(items, selected, menu_x, dropdown_y, screen).item_at(x, y)
 }
 
 impl App {
+    pub(in crate::app) fn screen_rect(&self) -> Rect {
+        Rect::new(0, 0, self.state.terminal.width, self.state.terminal.height)
+    }
+
     /// Handle click on Options submenu dropdown
     /// Returns true if click was handled
     pub(in crate::app) fn handle_submenu_click(&mut self, x: u16, y: u16) -> Result<bool> {
@@ -54,7 +53,7 @@ impl App {
             Some(&self.state.config.general.keybindings),
         );
         let options_width = dropdown_width(&options_items);
-        let options_height = options_items.len() as u16 + 2; // +2 for borders
+        let screen = self.screen_rect();
 
         // Check if nested submenu (Themes) is open
         if self.state.ui.nested_submenu.open && self.state.ui.options_submenu.selected == 0 {
@@ -63,25 +62,14 @@ impl App {
             let nested_y = dropdown_y + 1;
 
             let theme_names = Theme::all_theme_names();
-            let nested_width = theme_names.iter().map(|n| n.width()).max().unwrap_or(10) as u16 + 6;
-            // Must match ThemeDropdown::max_visible
-            let max_visible = 25;
-            let nested_height = theme_names.len().min(max_visible) as u16 + 2;
-
-            // Check click on theme dropdown
-            if x >= nested_x
-                && x < nested_x + nested_width
-                && y >= nested_y
-                && y < nested_y + nested_height
-            {
-                // Calculate scroll offset same as ThemeDropdown
-                let scroll_offset = if self.state.ui.nested_submenu.selected >= max_visible {
-                    self.state.ui.nested_submenu.selected - max_visible + 1
-                } else {
-                    0
-                };
-                let item_y = y.saturating_sub(nested_y + 1); // -1 for top border
-                let item_index = scroll_offset + item_y as usize;
+            let geometry = theme_dropdown_geometry(
+                &theme_names,
+                self.state.ui.nested_submenu.selected,
+                nested_x,
+                nested_y,
+                screen,
+            );
+            if let Some(item_index) = geometry.item_at(x, y) {
                 if item_index < theme_names.len() {
                     // Clear preview state - theme is confirmed
                     self.state.ui.theme_preview_original = None;
@@ -102,30 +90,13 @@ impl App {
             let nested_y = dropdown_y + 2; // Language is at index 1
 
             let languages = i18n::get_language_list();
-            let nested_width = languages
-                .iter()
-                .map(|(_, name)| name.width())
-                .max()
-                .unwrap_or(10) as u16
-                + 4;
-            // Must match LanguageDropdown::max_visible
-            let max_visible = 15;
-            let nested_height = languages.len().min(max_visible) as u16 + 2;
-
-            // Check click on language dropdown
-            if x >= nested_x
-                && x < nested_x + nested_width
-                && y >= nested_y
-                && y < nested_y + nested_height
-            {
-                // Calculate scroll offset same as LanguageDropdown
-                let scroll_offset = if self.state.ui.nested_submenu.selected >= max_visible {
-                    self.state.ui.nested_submenu.selected - max_visible + 1
-                } else {
-                    0
-                };
-                let item_y = y.saturating_sub(nested_y + 1); // -1 for top border
-                let item_index = scroll_offset + item_y as usize;
+            let geometry = language_dropdown_geometry(
+                self.state.ui.nested_submenu.selected,
+                nested_x,
+                nested_y,
+                screen,
+            );
+            if let Some(item_index) = geometry.item_at(x, y) {
                 if item_index < languages.len() {
                     // Clear preview state - language is confirmed
                     self.state.ui.language_preview_original = None;
@@ -140,64 +111,61 @@ impl App {
         }
 
         // Check click on Options dropdown
-        if x >= menu_x
-            && x < menu_x + options_width
-            && y >= dropdown_y
-            && y < dropdown_y + options_height
-        {
-            let item_y = y.saturating_sub(dropdown_y + 1); // -1 for top border
-            let item_index = item_y as usize;
-            if item_index < options_items.len() {
-                self.state.ui.options_submenu.selected = item_index;
-                // Themes and Language toggle their nested dropdown on a second
-                // click, which the keyboard path has no equivalent for; every
-                // other entry is dispatched by `execute_submenu_action` so that
-                // clicking and pressing Enter can never disagree about what an
-                // item does.
-                match options_items[item_index].key.as_str() {
-                    "themes" => {
-                        if self.state.ui.nested_submenu.open
-                            && self.state.ui.options_submenu.selected == 0
-                        {
-                            if let Some(original_name) = self.state.ui.theme_preview_original.take()
-                            {
-                                self.state.theme = Theme::get_by_name(&original_name);
-                            }
-                            self.state.close_nested_submenu();
-                        } else {
-                            let theme_names = Theme::all_theme_names();
-                            let current_idx = theme_names
-                                .iter()
-                                .position(|n| n == self.state.theme.name)
-                                .unwrap_or(0);
-                            self.state.ui.theme_preview_original =
-                                Some(self.state.theme.name.to_string());
-                            self.state.open_nested_submenu(current_idx);
+        if let Some(item_index) = hit_dropdown_item(
+            x,
+            y,
+            menu_x,
+            dropdown_y,
+            &options_items,
+            self.state.ui.options_submenu.selected,
+            screen,
+        ) {
+            self.state.ui.options_submenu.selected = item_index;
+            // Themes and Language toggle their nested dropdown on a second
+            // click, which the keyboard path has no equivalent for; every
+            // other entry is dispatched by `execute_submenu_action` so that
+            // clicking and pressing Enter can never disagree about what an
+            // item does.
+            match options_items[item_index].key.as_str() {
+                "themes" => {
+                    if self.state.ui.nested_submenu.open
+                        && self.state.ui.options_submenu.selected == 0
+                    {
+                        if let Some(original_name) = self.state.ui.theme_preview_original.take() {
+                            self.state.theme = Theme::get_by_name(&original_name);
                         }
+                        self.state.close_nested_submenu();
+                    } else {
+                        let theme_names = Theme::all_theme_names();
+                        let current_idx = theme_names
+                            .iter()
+                            .position(|n| n == self.state.theme.name)
+                            .unwrap_or(0);
+                        self.state.ui.theme_preview_original =
+                            Some(self.state.theme.name.to_string());
+                        self.state.open_nested_submenu(current_idx);
                     }
-                    "language" => {
-                        use termide_i18n as i18n;
-                        use termide_ui_render::find_current_language_index;
-                        if self.state.ui.nested_submenu.open
-                            && self.state.ui.options_submenu.selected == 1
-                        {
-                            if let Some(original_lang) =
-                                self.state.ui.language_preview_original.take()
-                            {
-                                let _ = i18n::set_language(&original_lang);
-                            }
-                            self.state.close_nested_submenu();
-                        } else {
-                            let current_idx = find_current_language_index();
-                            self.state.ui.language_preview_original =
-                                Some(i18n::current_language());
-                            self.state.open_nested_submenu(current_idx);
-                        }
-                    }
-                    _ => self.execute_submenu_action()?,
                 }
-                return Ok(true);
+                "language" => {
+                    use termide_i18n as i18n;
+                    use termide_ui_render::find_current_language_index;
+                    if self.state.ui.nested_submenu.open
+                        && self.state.ui.options_submenu.selected == 1
+                    {
+                        if let Some(original_lang) = self.state.ui.language_preview_original.take()
+                        {
+                            let _ = i18n::set_language(&original_lang);
+                        }
+                        self.state.close_nested_submenu();
+                    } else {
+                        let current_idx = find_current_language_index();
+                        self.state.ui.language_preview_original = Some(i18n::current_language());
+                        self.state.open_nested_submenu(current_idx);
+                    }
+                }
+                _ => self.execute_submenu_action()?,
             }
+            return Ok(true);
         }
 
         // Click outside dropdowns - close all menus
@@ -210,7 +178,15 @@ impl App {
     pub(in crate::app) fn handle_sessions_submenu_click(&mut self, x: u16, y: u16) -> Result<bool> {
         let menu_x = get_menu_item_x_position(PROJECTS_MENU_INDEX);
         let items = get_projects_items(Some(&self.state.config.general.keybindings));
-        if let Some(index) = hit_dropdown_item(x, y, menu_x, 1, &items) {
+        if let Some(index) = hit_dropdown_item(
+            x,
+            y,
+            menu_x,
+            1,
+            &items,
+            self.state.ui.projects_submenu.selected,
+            self.screen_rect(),
+        ) {
             self.state.ui.projects_submenu.selected = index;
             self.execute_projects_submenu_action()?;
             return Ok(true);
@@ -237,7 +213,15 @@ impl App {
                 let parent_width = dropdown_width(&items);
                 let nested_x = menu_x + parent_width;
                 let nested_y = dropdown_y + 1 + self.state.ui.tools_submenu.selected as u16;
-                if let Some(index) = hit_dropdown_item(x, y, nested_x, nested_y, &shell_items) {
+                if let Some(index) = hit_dropdown_item(
+                    x,
+                    y,
+                    nested_x,
+                    nested_y,
+                    &shell_items,
+                    self.state.ui.tools_nested.selected,
+                    self.screen_rect(),
+                ) {
                     if let Some(shell) = self.state.cache.shells.get(index) {
                         let shell_path = shell.path.clone();
                         // Copy-on-write: mutate in-place if single owner, else clone
@@ -257,7 +241,15 @@ impl App {
         }
 
         // Check click on Tools main dropdown
-        if let Some(index) = hit_dropdown_item(x, y, menu_x, 1, &items) {
+        if let Some(index) = hit_dropdown_item(
+            x,
+            y,
+            menu_x,
+            1,
+            &items,
+            self.state.ui.tools_submenu.selected,
+            self.screen_rect(),
+        ) {
             self.state.ui.tools_submenu.selected = index;
             self.execute_tools_submenu_action()?;
             return Ok(true);
@@ -287,8 +279,15 @@ impl App {
                     let parent_width = dropdown_width(&parent_items);
                     let nested_x = menu_x + parent_width;
                     let nested_y = 2 + self.state.ui.commands_submenu.selected as u16;
-                    if let Some(index) = hit_dropdown_item(x, y, nested_x, nested_y, &nested_items)
-                    {
+                    if let Some(index) = hit_dropdown_item(
+                        x,
+                        y,
+                        nested_x,
+                        nested_y,
+                        &nested_items,
+                        self.state.ui.commands_nested.selected,
+                        self.screen_rect(),
+                    ) {
                         self.state.ui.commands_nested.selected = index;
                         self.execute_commands_nested_action()?;
                         return Ok(true);
@@ -300,7 +299,15 @@ impl App {
         // Check click on Commands main dropdown
         let menu_x = get_menu_item_x_position(COMMANDS_MENU_INDEX);
         let commands_items = get_commands_items(&registry);
-        if let Some(index) = hit_dropdown_item(x, y, menu_x, 1, &commands_items) {
+        if let Some(index) = hit_dropdown_item(
+            x,
+            y,
+            menu_x,
+            1,
+            &commands_items,
+            self.state.ui.commands_submenu.selected,
+            self.screen_rect(),
+        ) {
             self.state.ui.commands_submenu.selected = index;
             self.execute_commands_submenu_action()?;
             return Ok(true);
@@ -329,17 +336,30 @@ impl App {
                         let choice_items = get_ai_agent_choice_items();
                         let choice_x = nested_x + dropdown_width(&nested_items);
                         let choice_y = nested_y + 1 + self.state.ui.ai_nested.selected as u16;
-                        if let Some(index) =
-                            hit_dropdown_item(x, y, choice_x, choice_y, &choice_items)
-                        {
+                        if let Some(index) = hit_dropdown_item(
+                            x,
+                            y,
+                            choice_x,
+                            choice_y,
+                            &choice_items,
+                            self.state.ui.ai_agent_choice.selected,
+                            self.screen_rect(),
+                        ) {
                             self.state.ui.ai_agent_choice.selected = index;
                             self.execute_ai_agent_choice_action()?;
                             return Ok(true);
                         }
                     }
 
-                    if let Some(index) = hit_dropdown_item(x, y, nested_x, nested_y, &nested_items)
-                    {
+                    if let Some(index) = hit_dropdown_item(
+                        x,
+                        y,
+                        nested_x,
+                        nested_y,
+                        &nested_items,
+                        self.state.ui.ai_nested.selected,
+                        self.screen_rect(),
+                    ) {
                         self.state.ui.ai_nested.selected = index;
                         self.execute_ai_nested_action(&section)?;
                         return Ok(true);
@@ -349,7 +369,15 @@ impl App {
         }
 
         // The AI main dropdown (the four sections).
-        if let Some(index) = hit_dropdown_item(x, y, menu_x, 1, &ai_items) {
+        if let Some(index) = hit_dropdown_item(
+            x,
+            y,
+            menu_x,
+            1,
+            &ai_items,
+            self.state.ui.ai_submenu.selected,
+            self.screen_rect(),
+        ) {
             self.state.ui.ai_submenu.selected = index;
             self.open_ai_selected_section();
             return Ok(true);
@@ -366,22 +394,15 @@ impl App {
             self.state.stash.has_changes,
         );
         if let Some(btn_area) = self.state.ui.stash_button_area {
-            // Calculate actual dropdown position (same clamp logic as Dropdown::render)
-            let dropdown_width = items
-                .iter()
-                .map(|i| i.label.chars().count())
-                .max()
-                .unwrap_or(0) as u16
-                + 6;
-            let dropdown_height = items.len().min(20) as u16 + 2;
-            let screen_w = self.state.terminal.width;
-            let screen_h = self.state.terminal.height;
-            let dropdown_x = btn_area.x.min(screen_w.saturating_sub(dropdown_width));
-            let dropdown_y = btn_area
-                .bottom()
-                .min(screen_h.saturating_sub(dropdown_height));
-
-            if let Some(index) = hit_dropdown_item(x, y, dropdown_x, dropdown_y, &items) {
+            if let Some(index) = hit_dropdown_item(
+                x,
+                y,
+                btn_area.x,
+                btn_area.bottom(),
+                &items,
+                self.state.ui.stash_submenu.selected,
+                self.screen_rect(),
+            ) {
                 self.state.ui.stash_submenu.selected = index;
                 self.execute_stash_submenu_action()?;
                 return Ok(());
@@ -420,8 +441,15 @@ impl App {
                     let parent_width = dropdown_width(&bookmarks_items);
                     let nested_x = menu_x + parent_width;
                     let nested_y = 2 + self.state.ui.bookmarks_submenu.selected as u16;
-                    if let Some(index) = hit_dropdown_item(x, y, nested_x, nested_y, &nested_items)
-                    {
+                    if let Some(index) = hit_dropdown_item(
+                        x,
+                        y,
+                        nested_x,
+                        nested_y,
+                        &nested_items,
+                        self.state.ui.bookmarks_nested.selected,
+                        self.screen_rect(),
+                    ) {
                         self.state.ui.bookmarks_nested.selected = index;
                         self.execute_bookmarks_nested_action()?;
                         return Ok(true);
@@ -432,7 +460,15 @@ impl App {
 
         // Check click on Bookmarks main dropdown
         let menu_x = get_menu_item_x_position(BOOKMARKS_MENU_INDEX);
-        if let Some(index) = hit_dropdown_item(x, y, menu_x, 1, &bookmarks_items) {
+        if let Some(index) = hit_dropdown_item(
+            x,
+            y,
+            menu_x,
+            1,
+            &bookmarks_items,
+            self.state.ui.bookmarks_submenu.selected,
+            self.screen_rect(),
+        ) {
             self.state.ui.bookmarks_submenu.selected = index;
             self.execute_bookmarks_submenu_action()?;
             return Ok(true);
@@ -447,6 +483,8 @@ impl App {
 mod tests {
     use super::*;
     use termide_ui_render::DropdownItem;
+
+    const SCREEN: Rect = Rect::new(0, 0, 120, 40);
 
     // Regression: `hit_dropdown_item` sized dropdowns as `label + 4`, while
     // `Dropdown` draws them `label + shortcut column + 6` wide. Clicks on the
@@ -465,9 +503,12 @@ mod tests {
         let width = dropdown_width(&items);
 
         // On the "Alt+F" text of the "Files" row (index 2, below the border).
-        assert_eq!(hit_dropdown_item(width - 4, 3, 0, 0, &items), Some(2));
+        assert_eq!(
+            hit_dropdown_item(width - 4, 3, 0, 0, &items, 0, SCREEN),
+            Some(2)
+        );
         // One column past the right border.
-        assert_eq!(hit_dropdown_item(width, 3, 0, 0, &items), None);
+        assert_eq!(hit_dropdown_item(width, 3, 0, 0, &items, 0, SCREEN), None);
     }
 
     #[test]
@@ -481,8 +522,20 @@ mod tests {
 
         // Last column inside the right border, on the "Bash" row.
         assert_eq!(
-            hit_dropdown_item(x0 + width - 2, y0 + 2, x0, y0, &shells),
+            hit_dropdown_item(x0 + width - 2, y0 + 2, x0, y0, &shells, 0, SCREEN),
             Some(1)
         );
+    }
+
+    #[test]
+    fn click_on_dropdown_pushed_up_by_short_terminal_selects_the_drawn_row() {
+        let items: Vec<DropdownItem> = (0..11)
+            .map(|i| DropdownItem::new(format!("Item {i}"), format!("item{i}")))
+            .collect();
+        let screen = Rect::new(0, 0, 80, 12);
+
+        assert_eq!(hit_dropdown_item(2, 1, 0, 1, &items, 0, screen), Some(0));
+        assert_eq!(hit_dropdown_item(2, 4, 0, 1, &items, 0, screen), Some(3));
+        assert_eq!(hit_dropdown_item(2, 10, 0, 1, &items, 10, screen), Some(10));
     }
 }

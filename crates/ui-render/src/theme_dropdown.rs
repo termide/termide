@@ -17,6 +17,8 @@ use termide_core::ThemeColors;
 use termide_theme::Theme;
 use termide_ui::ScrollBar;
 
+use crate::dropdown::ListGeometry;
+
 /// Theme dropdown with live preview on cursor navigation
 pub struct ThemeDropdown<'a> {
     /// Theme names to display
@@ -29,10 +31,34 @@ pub struct ThemeDropdown<'a> {
     y: u16,
     /// App theme for borders
     app_theme: &'a Theme,
-    /// Maximum visible items (for scrolling)
-    max_visible: usize,
-    /// Scroll offset
-    scroll_offset: usize,
+}
+
+const MAX_VISIBLE: usize = 25;
+
+fn theme_dropdown_width(theme_names: &[String]) -> u16 {
+    let max_name_len = theme_names.iter().map(|n| n.width()).max().unwrap_or(10);
+    // "▶ " + name + padding
+    (max_name_len + 4).min(30) as u16
+}
+
+/// On-screen geometry of a [`ThemeDropdown`] listing `theme_names`, requested
+/// at (`x`, `y`) with `selected` highlighted and fitted to `screen`.
+pub fn theme_dropdown_geometry(
+    theme_names: &[String],
+    selected: usize,
+    x: u16,
+    y: u16,
+    screen: Rect,
+) -> ListGeometry {
+    ListGeometry::compute(
+        theme_dropdown_width(theme_names),
+        theme_names.len(),
+        MAX_VISIBLE,
+        selected,
+        x,
+        y,
+        screen,
+    )
 }
 
 impl<'a> ThemeDropdown<'a> {
@@ -43,40 +69,23 @@ impl<'a> ThemeDropdown<'a> {
         y: u16,
         app_theme: &'a Theme,
     ) -> Self {
-        // Calculate scroll offset to keep selected item visible
-        let max_visible = 25;
-        let scroll_offset = if selected >= max_visible {
-            selected - max_visible + 1
-        } else {
-            0
-        };
-
         Self {
             theme_names,
             selected,
             x,
             y,
             app_theme,
-            max_visible,
-            scroll_offset,
         }
     }
 
     /// Get the width of this dropdown
     pub fn width(&self) -> u16 {
-        let max_name_len = self
-            .theme_names
-            .iter()
-            .map(|n| n.width())
-            .max()
-            .unwrap_or(10);
-        // "▶ " + name + padding
-        (max_name_len + 4).min(30) as u16
+        theme_dropdown_width(self.theme_names)
     }
 
     /// Get the height of this dropdown
     pub fn height(&self) -> u16 {
-        let items_count = self.theme_names.len().min(self.max_visible);
+        let items_count = self.theme_names.len().min(MAX_VISIBLE);
         (items_count + 2) as u16 // +2 for borders
     }
 
@@ -86,42 +95,17 @@ impl<'a> ThemeDropdown<'a> {
         }
 
         let total = self.theme_names.len();
-        let width = self.width().min(buf.area.width).max(1);
-
-        // Clamp the box to the terminal: with many themes the list can be
-        // taller than the screen, and rendering past the bottom panics ratatui
-        // (issue #25). The box is at most as tall as the screen; the visible
-        // window shrinks and the rest scrolls.
-        let desired_height = self.height();
-        let height = desired_height.min(buf.area.height).max(1);
-        let visible_count = height.saturating_sub(2) as usize; // rows for items
-
-        // Recompute the scroll window for the (possibly shrunken) viewport so
-        // the selected theme stays visible.
-        let max_scroll = total.saturating_sub(visible_count);
-        let scroll_offset = if visible_count == 0 {
-            0
-        } else if self.selected < self.scroll_offset {
-            self.selected
-        } else if self.selected >= self.scroll_offset + visible_count {
-            self.selected + 1 - visible_count
-        } else {
-            self.scroll_offset
-        }
-        .min(max_scroll);
-
-        // Check screen boundaries
-        let max_x = buf.area.width.saturating_sub(width);
-        let max_y = buf.area.height.saturating_sub(height);
-        let x = self.x.min(max_x);
-        let y = self.y.min(max_y);
-
-        let area = Rect {
+        let geometry =
+            theme_dropdown_geometry(self.theme_names, self.selected, self.x, self.y, buf.area);
+        let area = geometry.area;
+        let Rect {
             x,
             y,
             width,
             height,
-        };
+        } = area;
+        let scroll_offset = geometry.scroll_offset;
+        let visible_count = geometry.visible_count();
 
         // Clear area under dropdown
         Clear.render(area, buf);
