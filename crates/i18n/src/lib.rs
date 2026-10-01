@@ -607,6 +607,14 @@ pub trait Translation: Send + Sync {
     fn agent_cmd_desc_goal(&self) -> &str;
     fn agent_cmd_desc_handoff(&self) -> &str;
     fn agent_cmd_desc_usage(&self) -> &str;
+    fn agent_cmd_desc_mcp(&self) -> &str;
+    fn agent_toolset_buttons_hint(&self) -> &str;
+    fn agent_hint_mcp(&self) -> &str;
+    fn agent_notice_mcp_none(&self) -> &str;
+    fn agent_notice_mcp_usage(&self) -> &str;
+    fn agent_mcp_status_connecting(&self) -> &str;
+    fn agent_mcp_status_needs_login(&self) -> &str;
+    fn agent_mcp_status_signing_in(&self) -> &str;
     fn agent_cmd_desc_prompt(&self) -> &str;
 
     // Agent panel — transient notices (static)
@@ -725,6 +733,16 @@ pub trait Translation: Send + Sync {
     fn agent_notice_model_list_unavailable_fmt(&self, error: &str) -> String;
     fn agent_notice_mcp_error_fmt(&self, source: &str, error: &str) -> String;
     fn agent_notice_mcp_connected_fmt(&self, source: &str, count: usize) -> String;
+    fn agent_mcp_status_ready_fmt(&self, count: usize) -> String;
+    fn agent_mcp_status_failed_fmt(&self, error: &str) -> String;
+    fn agent_notice_mcp_status_fmt(&self, source: &str, status: &str) -> String;
+    fn agent_notice_mcp_reload_fmt(&self, started: &str, removed: &str, kept: &str) -> String;
+    fn agent_notice_mcp_needs_login_fmt(&self, source: &str) -> String;
+    fn agent_notice_mcp_login_started_fmt(&self, source: &str, url: &str) -> String;
+    fn agent_notice_mcp_gone_fmt(&self, source: &str) -> String;
+    fn agent_notice_mcp_updated_fmt(&self, source: &str, count: usize) -> String;
+    fn agent_notice_mcp_logout_fmt(&self, source: &str) -> String;
+    fn agent_notice_mcp_no_login_fmt(&self, source: &str) -> String;
     /// Agent connection picker: its title.
     fn agent_pick_connection(&self) -> &str;
     /// Agent notice: switching to or from a CLI agent is refused mid-session.

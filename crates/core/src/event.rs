@@ -418,6 +418,38 @@ pub struct ChecklistItem {
     pub note: String,
 }
 
+/// A group heading of [`PanelEvent::ShowChecklist`] with more to it than its
+/// name: a remark, and buttons. A group no item names is still listed, as a
+/// heading alone, after the groups the items make.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChecklistGroup {
+    /// The `group` of the items it heads.
+    pub name: String,
+    /// A dim remark after the heading (a state, a reason), or empty.
+    pub note: String,
+    pub buttons: Vec<ChecklistButton>,
+}
+
+/// A button on a checklist heading. Pressing it — a click, or its key while
+/// the cursor is on the heading — applies the list as `Enter` does and names
+/// the button in [`crate::PanelCommand::ChecklistDone`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChecklistButton {
+    /// What the panel knows the button by.
+    pub id: String,
+    /// One narrow symbol, drawn in brackets.
+    pub icon: String,
+    pub key: char,
+}
+
+/// What a checklist came back with: the keys left checked, and the button
+/// that closed it, if one did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChecklistOutcome {
+    pub checked: Vec<String>,
+    pub pressed: Option<String>,
+}
+
 /// Events emitted by panels to communicate with the application.
 #[derive(Debug, Clone)]
 pub enum PanelEvent {
@@ -582,6 +614,8 @@ pub enum PanelEvent {
         /// A hint line under the title (the keys, what a greyed item means).
         prompt: String,
         items: Vec<ChecklistItem>,
+        /// Headings with a remark or buttons, and headings with no items.
+        groups: Vec<ChecklistGroup>,
         /// Echoed back with the result, so the panel knows which list it was.
         action: String,
     },

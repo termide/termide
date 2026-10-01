@@ -207,8 +207,16 @@ first message.
 
 The **Tools** chip (and the banner's `tools` line) opens a checklist of what
 the session may use: the built-in tools, the skills, and each MCP server's
-tools once it has connected. The checkbox on a group's heading switches the
-whole group on or off at once, and shows `[-]` while it is partly on.
+tools once it has connected. Every group opens collapsed to its heading, which
+shows how many of its items are on (`▶ [-] MCP github  3/12`): `→` or a click
+on the arrow opens it, `←` closes it (or goes from an item up to its heading).
+The checkbox on a group's heading switches the whole group on or off at once,
+open or not, and shows `[-]` while it is partly on. Every configured MCP server
+has a heading, one that has not connected too — with its state beside the
+name (`needs sign-in`, `failed: …`) — and buttons at its right end: `[↻]`
+connects it again (`r` on the heading), and on a server that signs in with
+OAuth `[⇥]` signs in or `[⇤]` signs out (`l`). A button applies the ticks as
+`Enter` does, closes the list and does what it says.
 Unchecking an item before the first request keeps
 it out of the model's context altogether — its description and schema are
 never sent, which saves tokens and takes the capability away. Later in the
@@ -259,7 +267,7 @@ you have named or sent even one message to is always kept.
 | `F6` | Switch session — open the picker of this directory's sessions |
 | `F7` | Start a new session (the used one is kept in the list) |
 | `F8` | Delete this session (after a confirmation) and start a fresh one; in the banner's list of sessions, delete the one under the cursor |
-| `/name args` + `Enter` | Send the prompt template `name` with `args` filled in, run the command script `name` or send the skill `name` (`/skill:name` when the name is taken); `/compact [focus]` summarises the session, `/undo` takes the last request back, `/new` starts a fresh session, `/clear` starts one after discarding the current session, and `/rename [name]` (or `/name`) renames it; `/pause` stops the run after the current step and `/continue` resumes it (or, before the step ends, cancels the pause); `/loop [interval] <prompt>` re-runs a prompt on an interval (or back-to-back), `/loop stop` (or `Esc`) ends it; `/goal <what to achieve>` works autonomously toward a goal until a judge says it is reached, `/goal stop` (or `Esc`) ends it; `/handoff` briefs the unfinished work, then offers to save it to `HANDOFF.md` or start a new session from it; `/usage` opens the session-info modal and `/prompt` opens the assembled system prompt |
+| `/name args` + `Enter` | Send the prompt template `name` with `args` filled in, run the command script `name` or send the skill `name` (`/skill:name` when the name is taken); `/compact [focus]` summarises the session, `/undo` takes the last request back, `/new` starts a fresh session, `/clear` starts one after discarding the current session, and `/rename [name]` (or `/name`) renames it; `/pause` stops the run after the current step and `/continue` resumes it (or, before the step ends, cancels the pause); `/loop [interval] <prompt>` re-runs a prompt on an interval (or back-to-back), `/loop stop` (or `Esc`) ends it; `/goal <what to achieve>` works autonomously toward a goal until a judge says it is reached, `/goal stop` (or `Esc`) ends it; `/handoff` briefs the unfinished work, then offers to save it to `HANDOFF.md` or start a new session from it; `/usage` opens the session-info modal and `/prompt` opens the assembled system prompt; `/mcp` lists the MCP servers, `/mcp reload [server]` reads their configuration again (for one server, or all), and `/mcp login <server>` and `/mcp logout <server>` sign in to one and out of it (see [MCP servers](#mcp-servers)) |
 | `↑` / `↓` | On the first or last line of the input: take back the messages still queued (`↑`, while any wait), else recall an earlier request of this session, or come back to what you were typing |
 | `Tab` | Complete the highlighted `/command` or `@file` while the list is open |
 | `Ctrl+↑` / `Ctrl+↓`, `PageUp` / `PageDown` | Scroll the session |
@@ -873,6 +881,7 @@ ai/
   commands/<name>          command scripts, typed as /name, see below
   shims/<command>          command shims (config level only), see below
   mcp.toml                 MCP servers, see below
+  mcp-auth.json            MCP sign-ins (config level only), see MCP servers
   hooks.toml               command hooks, see below
   system/compact.md        how the agent summarises a long session
   system/compacted.md      how the summary is worded in the context
@@ -1217,14 +1226,70 @@ tools = ["search_issues", "get_issue", "create_issue"]      # optional: a subset
 timeout_secs = 60                                            # startup and one call
 ```
 
-Servers speak over stdio: TermIDE starts the process when the panel opens,
-in the background, and reports in the session when it is connected or why it
+A server is either a program TermIDE starts or a URL it reaches. A program
+speaks over stdio; a URL speaks Streamable HTTP, one request per POST, with
+its keys in `headers` (`$NAME` in a header value comes from your environment,
+as in `env`). Non-`https` URLs are refused except on the loopback, since
+these servers carry tokens. Either way the panel connects in the background
+when it opens, and reports in the session when it is connected or why it
 is not. Its tools appear as `<server>__<tool>` (for example
 `github__search_issues`), the shape OpenAI-compatible endpoints accept; they
 are not listed in the system prompt, the model sees their schemas directly.
 Every schema travels with every request, so a server with dozens of tools is
 worth narrowing with `tools`; the log says so when a server has more than
 twenty and no such list.
+
+A server may change its tools while it runs. A program says so on its pipe; a
+URL server on a stream TermIDE holds open to it after the handshake, opened
+again when it drops. Either way the tools are listed again and the session
+takes the new set, with a line saying so. Like any change of tools, it costs
+the next request its prompt cache.
+
+The configuration is read when the panel opens. `/mcp reload` reads it again,
+at every level and from every `.mcp.json`: a server no longer configured
+leaves with its tools, a new or changed one connects, one that failed tries
+again, and one that is connected and unchanged is left as it is.
+`/mcp reload <server>` does it for one server, and connects it again even when
+nothing changed — as the `[↻]` on its heading in the toolset list does. `/mcp`
+alone lists the servers and where each stands.
+
+A URL server with no `Authorization` among its `headers` that answers `401`
+wants an OAuth sign-in, and the session says so. `/mcp login <server>` opens
+the browser on the server's authorization page; once you approve, the browser
+returns to a one-off listener on `127.0.0.1` and the server connects. The
+endpoints come from the server's own metadata, TermIDE registers itself as a
+client where the server allows it, and the exchange uses PKCE. The sign-in is
+kept in `mcp-auth.json` in the configuration's `ai/` directory, readable by
+you only, filed by the server's URL — so every panel and every project that
+configures the same URL shares it — and renewed when it lapses. `/mcp logout
+<server>` forgets it. When the browser does not open (over SSH, say), the
+session shows the address to open by hand; the browser must then reach the
+listener, so forward its port and fix it with `callback_port`. A server that
+does not register clients needs one registered by hand:
+
+```toml
+[jira]
+url = "https://mcp.example.com/mcp"
+oauth = { client_id = "termide", client_secret = "$JIRA_SECRET", scopes = ["read"], callback_port = 8765 }
+```
+
+A `.mcp.json` at the directory the panel works in, at any directory above
+it, or at the project root is read beside it, so a repository committed for Claude Code, Cursor or VS Code
+brings its servers here unchanged — the same courtesy as reading `CLAUDE.md`
+and `.agents/skills/`. There is no standard for this file: the MCP
+specification leaves configuration to each client. So it is honoured only as
+far as it agrees with termide — `command`, `args`, `env`, `cwd` and `tools`,
+or `url` with `headers` and `oauth` (`clientId`, `clientSecret`, `scopes`,
+`callbackPort`); under either root key (`mcpServers`, or VS Code's
+`servers`); with `disabled` read as `enabled = false` and `${workspaceFolder}`,
+`${userHome}` and `${env:NAME}` resolved. An `sse` server is skipped — the
+older transport, where requests go to an address a stream names first, is not
+the one TermIDE speaks — and so is one
+holding a `${input:…}` reference: that asks you for a secret in the other
+tool, and termide would start it on an empty one. Every skip is in the log. Within one directory `mcp.toml` wins the
+same name; the directory nearer the panel wins both. One `.mcp.json` above a
+group of repositories therefore serves every panel opened inside them, the
+same way Claude Code reads it.
 
 An MCP tool asks for permission like a command: it runs in `all`, is refused
 in `plan`, goes to the reviewer in `auto`, and asks elsewhere unless a rule

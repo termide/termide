@@ -531,6 +531,14 @@ impl Translation for RuntimeTranslation {
         agent_cmd_desc_goal,
         agent_cmd_desc_handoff,
         agent_cmd_desc_usage,
+        agent_cmd_desc_mcp,
+        agent_toolset_buttons_hint,
+        agent_hint_mcp,
+        agent_notice_mcp_none,
+        agent_notice_mcp_usage,
+        agent_mcp_status_connecting,
+        agent_mcp_status_needs_login,
+        agent_mcp_status_signing_in,
         agent_cmd_desc_prompt,
         agent_notice_busy,
         agent_notice_no_log_to_name,
@@ -1015,6 +1023,61 @@ impl Translation for RuntimeTranslation {
             "agent_notice_mcp_connected_fmt",
             &[("source", source), ("count", &count.to_string())],
         )
+    }
+
+    fn agent_mcp_status_ready_fmt(&self, count: usize) -> String {
+        self.format(
+            "agent_mcp_status_ready_fmt",
+            &[("count", &count.to_string())],
+        )
+    }
+
+    fn agent_mcp_status_failed_fmt(&self, error: &str) -> String {
+        self.format("agent_mcp_status_failed_fmt", &[("error", error)])
+    }
+
+    fn agent_notice_mcp_status_fmt(&self, source: &str, status: &str) -> String {
+        self.format(
+            "agent_notice_mcp_status_fmt",
+            &[("source", source), ("status", status)],
+        )
+    }
+
+    fn agent_notice_mcp_reload_fmt(&self, started: &str, removed: &str, kept: &str) -> String {
+        self.format(
+            "agent_notice_mcp_reload_fmt",
+            &[("started", started), ("removed", removed), ("kept", kept)],
+        )
+    }
+
+    fn agent_notice_mcp_needs_login_fmt(&self, source: &str) -> String {
+        self.format("agent_notice_mcp_needs_login_fmt", &[("source", source)])
+    }
+
+    fn agent_notice_mcp_login_started_fmt(&self, source: &str, url: &str) -> String {
+        self.format(
+            "agent_notice_mcp_login_started_fmt",
+            &[("source", source), ("url", url)],
+        )
+    }
+
+    fn agent_notice_mcp_gone_fmt(&self, source: &str) -> String {
+        self.format("agent_notice_mcp_gone_fmt", &[("source", source)])
+    }
+
+    fn agent_notice_mcp_updated_fmt(&self, source: &str, count: usize) -> String {
+        self.format(
+            "agent_notice_mcp_updated_fmt",
+            &[("source", source), ("count", &count.to_string())],
+        )
+    }
+
+    fn agent_notice_mcp_logout_fmt(&self, source: &str) -> String {
+        self.format("agent_notice_mcp_logout_fmt", &[("source", source)])
+    }
+
+    fn agent_notice_mcp_no_login_fmt(&self, source: &str) -> String {
+        self.format("agent_notice_mcp_no_login_fmt", &[("source", source)])
     }
 
     fn agent_notice_no_agent_fmt(&self, name: &str) -> String {

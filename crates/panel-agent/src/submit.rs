@@ -15,8 +15,9 @@ use crate::session_ops::discard;
 use crate::{
     millis, slash, AgentPanel, GoalTask, Item, LoopTask, NoticeKind, BUILTIN_COMMANDS,
     CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND, GOAL_COMMAND, GOAL_MAX_ITERATIONS,
-    HANDOFF_COMMAND, LOOP_COMMAND, LOOP_MAX_ITERATIONS, NAME_COMMAND, NEW_COMMAND, PAUSE_COMMAND,
-    PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND, SHOW_PROMPT_ACTION, UNDO_COMMAND, USAGE_COMMAND,
+    HANDOFF_COMMAND, LOOP_COMMAND, LOOP_MAX_ITERATIONS, MCP_COMMAND, NAME_COMMAND, NEW_COMMAND,
+    PAUSE_COMMAND, PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND, SHOW_PROMPT_ACTION, UNDO_COMMAND,
+    USAGE_COMMAND,
 };
 
 /// The work turn a `/goal` sends when the judge says the goal is not yet
@@ -266,6 +267,11 @@ impl AgentPanel {
                 self.clear_input();
                 return self.handle_status_action(SHOW_PROMPT_ACTION);
             }
+            Some((MCP_COMMAND, args)) => {
+                self.clear_input();
+                self.mcp_command(args);
+                return vec![PanelEvent::NeedsRedraw];
+            }
             Some((name, args)) => match slash::resolve(
                 name,
                 self.catalog.prompts(),
@@ -312,6 +318,7 @@ impl AgentPanel {
                     names.push(HANDOFF_COMMAND.to_string());
                     names.push(USAGE_COMMAND.to_string());
                     names.push(PROMPT_COMMAND.to_string());
+                    names.push(MCP_COMMAND.to_string());
                     self.notice(
                         termide_i18n::t().agent_notice_no_command_fmt(name, &names.join(", ")),
                         NoticeKind::Warn,

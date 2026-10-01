@@ -16,7 +16,7 @@ use termide_agent_core::{
     DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
 };
 use termide_agent_hooks::CommandHooks;
-use termide_agent_mcp::Connections;
+use termide_agent_mcp::{Connections, TokenStore};
 use termide_agent_providers::{AnthropicProvider, Compat, OpenAiCompatProvider, ReasoningParam};
 use termide_agent_tools::{builtin_tools, QuestionTool, SkillTool, SubagentRun, TaskTool};
 use termide_agent_web::{web_tools, Web, WebConfig};
@@ -102,6 +102,10 @@ pub(crate) fn restore_agent_panel(
     )))
 }
 
+/// The OAuth sign-ins of MCP servers, under the configuration's agent
+/// directory: live tokens, so the file is created readable by the user only.
+const MCP_AUTH_FILE: &str = "mcp-auth.json";
+
 /// The agent definitions of one panel: `agents/<name>/` across the agent
 /// directories of the panel's working directory, the project and the
 /// configuration, turned into prompts and tool sets.
@@ -133,10 +137,19 @@ impl FsCatalog {
 
     fn with_global(cwd: &Path, project_root: &Path, global_agent_dir: Option<PathBuf>) -> Self {
         let dirs = AgentDirs::new(cwd, Some(project_root), global_agent_dir.as_deref());
+        // OAuth sign-ins are the user's, kept beside the user's own agent
+        // files rather than in any project.
+        let mcp = match &global_agent_dir {
+            Some(global) => Connections::with_tokens(
+                dirs.mcp_servers(),
+                TokenStore::new(global.join(MCP_AUTH_FILE)),
+            ),
+            None => Connections::new(dirs.mcp_servers()),
+        };
         Self {
             cwd: cwd.to_path_buf(),
             project_root: project_root.to_path_buf(),
-            mcp: Connections::new(dirs.mcp_servers()),
+            mcp,
             dirs,
             subagents: None,
             web: None,
@@ -149,6 +162,28 @@ impl AgentCatalog for FsCatalog {
         if let Some(subagents) = &self.subagents {
             subagents.mode.set(mode);
         }
+    }
+
+    fn mcp_status(&self) -> Vec<termide_agent_core::McpServerState> {
+        self.mcp.status()
+    }
+
+    fn mcp_reconnect(&self, server: &str) -> Result<termide_agent_core::McpReload, String> {
+        self.mcp.reconnect(server, &self.dirs.mcp_servers())
+    }
+
+    /// The configuration is read from the files again, at every level, so
+    /// an edit to any of them is what the reload applies.
+    fn mcp_reload(&self) -> Option<termide_agent_core::McpReload> {
+        Some(self.mcp.reload(self.dirs.mcp_servers()))
+    }
+
+    fn mcp_login(&self, server: &str) -> Result<(), String> {
+        self.mcp.login(server)
+    }
+
+    fn mcp_logout(&self, server: &str) -> Result<bool, String> {
+        self.mcp.logout(server)
     }
 
     fn prompts(&self) -> Vec<termide_agent_core::PromptTemplate> {
@@ -259,7 +294,8 @@ impl AgentCatalog for FsCatalog {
             tools,
             model: definition.spec.model,
             mode: definition.spec.mode,
-            late_tools: (!self.mcp.is_empty() && backend.is_none()).then(|| self.mcp.subscribe()),
+            // Subscribed with no servers too: a reload may bring some.
+            late_tools: backend.is_none().then(|| self.mcp.subscribe()),
             backend,
             offered,
             skills: skill_names,

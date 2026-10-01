@@ -4156,6 +4156,233 @@ fn late_tools_join_the_registry_and_failures_are_reported() {
     let agent = runtime.into_agent().expect("agent");
     assert!(agent.tools().get("github__search").is_some());
 }
+fn notices(panel: &AgentPanel) -> Vec<String> {
+    panel
+        .transcript()
+        .items()
+        .iter()
+        .filter_map(|item| match item {
+            Item::Notice { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_server_s_new_set_replaces_its_old_one_and_a_removed_server_takes_its_tools() {
+    let (tx, rx) = mpsc::channel();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        late_tools: Some(rx),
+        ..setup(vec![])
+    });
+    let ready = |names: &[&'static str]| LateTools::Ready {
+        source: "github".into(),
+        tools: names
+            .iter()
+            .map(|name| Arc::new(Late(name)) as Arc<dyn termide_agent_core::Tool>)
+            .collect(),
+    };
+    tx.send(ready(&["github__a", "github__b"])).unwrap();
+    panel.tick();
+    // The server changed its list: `a` leaves, `c` arrives, `b` stays.
+    tx.send(ready(&["github__b", "github__c"])).unwrap();
+    panel.tick();
+    assert!(panel.tools.get("github__a").is_none());
+    assert!(panel.tools.get("github__b").is_some());
+    assert!(panel.tools.get("github__c").is_some());
+    assert_eq!(panel.mcp_arrived.len(), 2);
+    assert_eq!(
+        notices(&panel).last().unwrap(),
+        "mcp github: the tools changed, 2 now"
+    );
+
+    // Dropped from the configuration: every tool of it goes, the worker's too.
+    tx.send(LateTools::Gone {
+        source: "github".into(),
+    })
+    .unwrap();
+    panel.tick();
+    assert!(panel.tools.get("github__b").is_none() && panel.mcp_arrived.is_empty());
+    assert_eq!(
+        notices(&panel).last().unwrap(),
+        "mcp github: removed from the configuration"
+    );
+    let runtime = std::mem::replace(&mut panel.runtime, Box::new(Idle));
+    let agent = runtime.into_agent().expect("agent");
+    assert!(agent.tools().get("github__b").is_none());
+    assert!(agent.tools().get("github__c").is_none());
+}
+
+#[test]
+fn a_sign_in_is_asked_for_and_its_address_shown() {
+    let (tx, rx) = mpsc::channel();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        late_tools: Some(rx),
+        ..setup(vec![])
+    });
+    tx.send(LateTools::NeedsLogin {
+        source: "plane".into(),
+    })
+    .unwrap();
+    tx.send(LateTools::LoginStarted {
+        source: "plane".into(),
+        url: "https://as.example/authorize?x=1".into(),
+    })
+    .unwrap();
+    panel.tick();
+    let seen = notices(&panel);
+    assert_eq!(seen[0], "mcp plane: needs sign-in — /mcp login plane");
+    assert!(
+        seen[1].contains("https://as.example/authorize?x=1"),
+        "{seen:?}"
+    );
+}
+
+/// A catalog with MCP servers that records what `/mcp` asked of it.
+struct Servers(Arc<Mutex<Vec<String>>>);
+
+impl AgentCatalog for Servers {
+    fn list(&self) -> Vec<AgentEntry> {
+        Agents.list()
+    }
+    fn resolve(&self, name: &str) -> Option<AgentProfile> {
+        Agents.resolve(name)
+    }
+    fn mcp_status(&self) -> Vec<termide_agent_core::McpServerState> {
+        use termide_agent_core::{McpServerState, McpSignIn, McpStatus};
+        vec![
+            McpServerState {
+                name: "db".into(),
+                status: McpStatus::Ready { tools: 4 },
+                sign_in: McpSignIn::None,
+            },
+            McpServerState {
+                name: "plane".into(),
+                status: McpStatus::NeedsLogin,
+                sign_in: McpSignIn::SignedOut,
+            },
+        ]
+    }
+    fn mcp_reconnect(&self, server: &str) -> Result<termide_agent_core::McpReload, String> {
+        self.0.lock().unwrap().push(format!("reconnect {server}"));
+        Ok(termide_agent_core::McpReload {
+            started: vec![server.to_string()],
+            ..Default::default()
+        })
+    }
+    fn mcp_reload(&self) -> Option<termide_agent_core::McpReload> {
+        self.0.lock().unwrap().push("reload".into());
+        Some(termide_agent_core::McpReload {
+            started: vec!["new".into()],
+            removed: Vec::new(),
+            kept: vec!["db".into()],
+        })
+    }
+    fn mcp_login(&self, server: &str) -> Result<(), String> {
+        self.0.lock().unwrap().push(format!("login {server}"));
+        Ok(())
+    }
+    fn mcp_logout(&self, server: &str) -> Result<bool, String> {
+        self.0.lock().unwrap().push(format!("logout {server}"));
+        Ok(true)
+    }
+}
+
+#[test]
+fn mcp_lists_reloads_and_signs_in_and_out() {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        catalog: Arc::new(Servers(Arc::clone(&asked))),
+        ..setup(vec![])
+    });
+    for command in [
+        "/mcp",
+        "/mcp reload",
+        "/mcp login plane",
+        "/mcp logout plane",
+        "/mcp what",
+    ] {
+        type_text(&mut panel, command);
+        panel.submit();
+    }
+    assert_eq!(
+        *asked.lock().unwrap(),
+        ["reload", "login plane", "logout plane"]
+    );
+    assert_eq!(
+        notices(&panel),
+        [
+            "mcp db: 4 tools",
+            "mcp plane: needs sign-in",
+            "MCP configuration reloaded — connecting: new; removed: —; unchanged: db",
+            "mcp plane: signed out",
+            "Usage: /mcp [reload [<server>] | login <server> | logout <server>]",
+        ]
+    );
+    // Nothing of it went to the model.
+    assert!(!panel.is_busy());
+}
+
+#[test]
+fn the_toolset_list_heads_every_server_with_its_buttons() {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        catalog: Arc::new(Servers(Arc::clone(&asked))),
+        ..setup(vec![])
+    });
+    let events = panel.handle_status_action(crate::toolset::TOOLSET_ACTION);
+    let Some(PanelEvent::ShowChecklist { groups, prompt, .. }) = events.first() else {
+        panic!("the toolset list opens");
+    };
+    assert!(prompt.contains("r reconnects"), "{prompt}");
+    let summary: Vec<(String, String, Vec<String>)> = groups
+        .iter()
+        .map(|g| {
+            (
+                g.name.clone(),
+                g.note.clone(),
+                g.buttons
+                    .iter()
+                    .map(|b| format!("{}{}", b.key, b.id))
+                    .collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            (
+                "MCP: db".into(),
+                String::new(),
+                vec!["rmcp-reload:db".into()]
+            ),
+            (
+                "MCP: plane".into(),
+                "needs sign-in".into(),
+                vec!["rmcp-reload:plane".into(), "lmcp-login:plane".into()]
+            ),
+        ]
+    );
+    // A button applies the ticks and does what it says.
+    panel.handle_command(PanelCommand::ChecklistDone {
+        action: crate::toolset::TOOLSET_ACTION.into(),
+        checked: Vec::new(),
+        pressed: Some("mcp-login:plane".into()),
+    });
+    panel.handle_command(PanelCommand::ChecklistDone {
+        action: crate::toolset::TOOLSET_ACTION.into(),
+        checked: Vec::new(),
+        pressed: Some("mcp-reload:db".into()),
+    });
+    // The same one server from the input.
+    type_text(&mut panel, "/mcp reload db");
+    panel.submit();
+    assert_eq!(
+        *asked.lock().unwrap(),
+        ["login plane", "reconnect db", "reconnect db"]
+    );
+}
+
 /// A backend with nothing behind it, to swap out of a panel in a test.
 struct Idle;
 

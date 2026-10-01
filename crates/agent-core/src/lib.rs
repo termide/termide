@@ -72,7 +72,10 @@ pub use layers::{
     SHARED_SKILLS_DIR, SHIMS_DIR, SKILLS_DIR, SKILL_FILE, SOUL_FILE, SPEC_FILE, SYSTEM_DIR,
     WEB_ENGINES_DIR,
 };
-pub use mcp::{expand_env, McpServerConfig, MCP_FILE};
+pub use mcp::{
+    expand_env, mcp_servers_from_json, McpOAuth, McpReload, McpServerConfig, McpServerState,
+    McpSignIn, McpStatus, McpTarget, MCP_FILE, MCP_JSON_FILE,
+};
 pub use message::{
     now_millis, AssistantContent, AssistantMessage, Message, StopReason, ToolCall,
     ToolResultContent, ToolResultMessage, Usage, UserContent, UserMessage,

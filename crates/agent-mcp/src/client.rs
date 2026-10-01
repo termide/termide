@@ -2,6 +2,17 @@
 //! transport specifies. Blocking I/O on two threads (stdout, stderr) with
 //! replies handed over channels, so a request can wait with a timeout and
 //! notice a cancelled run.
+//!
+//! [`McpTransport`] is the pair of verbs every transport answers — one
+//! request, one notification — with the handshake, `tools/list` and
+//! `tools/call` written once against them, so [`HttpClient`] speaks the same
+//! protocol over Streamable HTTP.
+//!
+//! What a server sends unasked reaches [`McpTransport::listen`]'s handler: a
+//! notification such as `notifications/tools/list_changed`. A server's own
+//! request is answered by the transport — `ping` with an empty result, as the
+//! specification requires, anything else (roots, sampling, elicitation) with
+//! "method not found", since termide offers none of them.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -12,10 +23,30 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
-use termide_agent_core::{expand_env, CancelToken, McpServerConfig};
+use termide_agent_core::{expand_env, CancelToken, McpServerConfig, McpTarget};
 
 /// The protocol revision requested; servers answer with the one they speak.
 pub const PROTOCOL_VERSION: &str = "2024-11-05";
+
+/// Receives a server's notifications: the method and its params. Called on
+/// the transport's reader thread, so it must hand anything slow to a thread
+/// of its own — a request made from inside it would wait for a reply that
+/// thread is the one to deliver.
+pub type OnMessage = Arc<dyn Fn(&str, &Value) + Send + Sync>;
+
+/// The answer to a request a server sends us: `ping` is owed an empty
+/// result, and nothing else is offered.
+pub(crate) fn answer_server_request(id: &Value, method: &str) -> Value {
+    if method == "ping" {
+        json!({ "jsonrpc": "2.0", "id": id, "result": {} })
+    } else {
+        log::debug!("mcp: declining server request {method}");
+        json!({
+            "jsonrpc": "2.0", "id": id,
+            "error": { "code": -32601, "message": "method not supported by termide" }
+        })
+    }
+}
 
 /// A tool as `tools/list` describes it.
 #[derive(Debug, Clone, PartialEq)]
@@ -25,75 +56,40 @@ pub struct McpToolInfo {
     pub input_schema: Value,
 }
 
-type Pending = Arc<Mutex<HashMap<u64, Sender<Result<Value, String>>>>>;
-type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
+/// What it takes to be a server termide can talk to: send a request and get
+/// its answer, send a notification and expect nothing back. Everything above
+/// that — the handshake, the tool list, a tool call — is the same on either
+/// transport and lives here.
+pub trait McpTransport: Send + Sync {
+    /// Send a request and wait for its reply, up to the transport's timeout,
+    /// giving up early when `cancel` is set.
+    ///
+    /// # Errors
+    ///
+    /// The reason there is no answer: the transport failed, the server
+    /// answered with a JSON-RPC error, the wait ran out, or the run was
+    /// cancelled.
+    fn request(
+        &self,
+        method: &str,
+        params: Value,
+        cancel: Option<&CancelToken>,
+    ) -> Result<Value, String>;
 
-pub struct McpClient {
-    writer: SharedWriter,
-    pending: Pending,
-    next_id: AtomicU64,
-    timeout: Duration,
-    server_name: Mutex<String>,
-    child: Mutex<Option<Child>>,
-}
+    /// Send a notification; nothing comes back.
+    ///
+    /// # Errors
+    ///
+    /// When the message cannot be sent.
+    fn notify(&self, method: &str, params: Value) -> Result<(), String>;
 
-impl McpClient {
-    /// Start the server process and speak to it over its stdin/stdout;
-    /// stderr lines go to the log.
-    pub fn spawn(name: &str, config: &McpServerConfig) -> Result<Self, String> {
-        let mut command = Command::new(&config.command);
-        command
-            .args(&config.args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        for (key, value) in &config.env {
-            command.env(key, expand_env(value, |var| std::env::var(var).ok()));
-        }
-        if let Some(cwd) = &config.cwd {
-            command.current_dir(cwd);
-        }
-        let mut child = command
-            .spawn()
-            .map_err(|error| format!("cannot start {}: {error}", config.command))?;
-        let stdin = child.stdin.take().ok_or("no stdin")?;
-        let stdout = child.stdout.take().ok_or("no stdout")?;
-        if let Some(stderr) = child.stderr.take() {
-            let server = name.to_string();
-            std::thread::spawn(move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                    log::debug!("mcp {server}: {line}");
-                }
-            });
-        }
-        let client = Self::from_streams(stdout, stdin, Duration::from_secs(config.timeout_secs));
-        *client.child.lock().unwrap_or_else(PoisonError::into_inner) = Some(child);
-        Ok(client)
-    }
-
-    /// Speak over any pair of streams (tests, other transports).
-    pub fn from_streams(
-        reader: impl Read + Send + 'static,
-        writer: impl Write + Send + 'static,
-        timeout: Duration,
-    ) -> Self {
-        let writer: SharedWriter = Arc::new(Mutex::new(Box::new(writer)));
-        let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
-        let reader_pending = Arc::clone(&pending);
-        let reply_writer = Arc::clone(&writer);
-        std::thread::spawn(move || read_loop(reader, reader_pending, reply_writer));
-        Self {
-            writer,
-            pending,
-            next_id: AtomicU64::new(1),
-            timeout,
-            server_name: Mutex::new(String::new()),
-            child: Mutex::new(None),
-        }
-    }
+    /// Hand the server's notifications to `on_message` from now on. Over
+    /// stdio they arrive on the pipe already being read; over HTTP this opens
+    /// the stream a server pushes them on. Called once, after the handshake.
+    fn listen(&self, on_message: OnMessage);
 
     /// The `initialize` handshake; returns the server's declared name.
-    pub fn initialize(&self) -> Result<String, String> {
+    fn initialize(&self) -> Result<String, String> {
         let result = self.request(
             "initialize",
             json!({
@@ -104,19 +100,14 @@ impl McpClient {
             None,
         )?;
         self.notify("notifications/initialized", json!({}))?;
-        let name = result["serverInfo"]["name"]
+        Ok(result["serverInfo"]["name"]
             .as_str()
             .unwrap_or("")
-            .to_string();
-        *self
-            .server_name
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = name.clone();
-        Ok(name)
+            .to_string())
     }
 
     /// Every tool the server offers, following `nextCursor` pages.
-    pub fn list_tools(&self) -> Result<Vec<McpToolInfo>, String> {
+    fn list_tools(&self) -> Result<Vec<McpToolInfo>, String> {
         let mut tools = Vec::new();
         let mut cursor: Option<String> = None;
         loop {
@@ -147,7 +138,7 @@ impl McpClient {
 
     /// Call a tool; the text of the result's content blocks and whether the
     /// server flagged it as an error.
-    pub fn call_tool(
+    fn call_tool(
         &self,
         name: &str,
         arguments: &Value,
@@ -189,10 +180,100 @@ impl McpClient {
         }
         Ok((text, result["isError"].as_bool().unwrap_or(false)))
     }
+}
 
-    /// Send a request and wait for its reply, up to the timeout, giving up
-    /// early when `cancel` is set.
-    pub fn request(
+type Pending = Arc<Mutex<HashMap<u64, Sender<Result<Value, String>>>>>;
+type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
+type SharedHandler = Arc<Mutex<Option<OnMessage>>>;
+
+pub struct McpClient {
+    writer: SharedWriter,
+    pending: Pending,
+    on_message: SharedHandler,
+    next_id: AtomicU64,
+    timeout: Duration,
+    child: Mutex<Option<Child>>,
+}
+
+impl McpClient {
+    /// Start the server process and speak to it over its stdin/stdout;
+    /// stderr lines go to the log.
+    pub fn spawn(name: &str, config: &McpServerConfig) -> Result<Self, String> {
+        let (program, args) = match config.target()? {
+            McpTarget::Stdio { command, args } => (command, args),
+            McpTarget::Http { url } => return Err(format!("{name}: {url} is no process")),
+        };
+        let mut command = Command::new(program);
+        command
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        for (key, value) in &config.env {
+            command.env(key, expand_env(value, |var| std::env::var(var).ok()));
+        }
+        if let Some(cwd) = &config.cwd {
+            command.current_dir(cwd);
+        }
+        let mut child = command
+            .spawn()
+            .map_err(|error| format!("cannot start {program}: {error}"))?;
+        let stdin = child.stdin.take().ok_or("no stdin")?;
+        let stdout = child.stdout.take().ok_or("no stdout")?;
+        if let Some(stderr) = child.stderr.take() {
+            let server = name.to_string();
+            std::thread::spawn(move || {
+                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                    log::debug!("mcp {server}: {line}");
+                }
+            });
+        }
+        let client = Self::from_streams(stdout, stdin, Duration::from_secs(config.timeout_secs));
+        *client.child.lock().unwrap_or_else(PoisonError::into_inner) = Some(child);
+        Ok(client)
+    }
+
+    /// Speak over any pair of streams (tests, other transports).
+    pub fn from_streams(
+        reader: impl Read + Send + 'static,
+        writer: impl Write + Send + 'static,
+        timeout: Duration,
+    ) -> Self {
+        let writer: SharedWriter = Arc::new(Mutex::new(Box::new(writer)));
+        let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
+        let on_message: SharedHandler = Arc::new(Mutex::new(None));
+        let reader_pending = Arc::clone(&pending);
+        let reply_writer = Arc::clone(&writer);
+        let reader_handler = Arc::clone(&on_message);
+        std::thread::spawn(move || read_loop(reader, reader_pending, reply_writer, reader_handler));
+        Self {
+            writer,
+            pending,
+            on_message,
+            next_id: AtomicU64::new(1),
+            timeout,
+            child: Mutex::new(None),
+        }
+    }
+
+    /// The `initialize` handshake is on [`McpTransport`]; the name it returns
+    /// is what the panel shows. `request` and `notify` are the two verbs the
+    /// pipes answer.
+    fn write(&self, message: &Value) -> Result<(), String> {
+        let mut line = message.to_string();
+        line.push('\n');
+        let mut writer = self.writer.lock().unwrap_or_else(PoisonError::into_inner);
+        writer
+            .write_all(line.as_bytes())
+            .and_then(|()| writer.flush())
+            .map_err(|error| format!("cannot write to the server: {error}"))
+    }
+}
+
+impl McpTransport for McpClient {
+    /// Write one line and wait for the reply carrying this id, up to the
+    /// timeout, giving up early when `cancel` is set.
+    fn request(
         &self,
         method: &str,
         params: Value,
@@ -222,18 +303,15 @@ impl McpClient {
         outcome.map_err(|error| format!("{method}: {error}"))
     }
 
-    pub fn notify(&self, method: &str, params: Value) -> Result<(), String> {
+    fn notify(&self, method: &str, params: Value) -> Result<(), String> {
         self.write(&json!({ "jsonrpc": "2.0", "method": method, "params": params }))
     }
 
-    fn write(&self, message: &Value) -> Result<(), String> {
-        let mut line = message.to_string();
-        line.push('\n');
-        let mut writer = self.writer.lock().unwrap_or_else(PoisonError::into_inner);
-        writer
-            .write_all(line.as_bytes())
-            .and_then(|()| writer.flush())
-            .map_err(|error| format!("cannot write to the server: {error}"))
+    fn listen(&self, on_message: OnMessage) {
+        *self
+            .on_message
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(on_message);
     }
 }
 
@@ -275,9 +353,9 @@ fn wait(
     }
 }
 
-/// Deliver replies to their requests; answer a server's own requests with
-/// "method not found" (termide offers no roots or sampling); log the rest.
-fn read_loop(reader: impl Read, pending: Pending, writer: SharedWriter) {
+/// Deliver replies to their requests, answer a server's own requests (see
+/// [`answer_server_request`]) and hand its notifications to the handler.
+fn read_loop(reader: impl Read, pending: Pending, writer: SharedWriter, handler: SharedHandler) {
     for line in BufReader::new(reader).lines() {
         let Ok(line) = line else { break };
         if line.trim().is_empty() {
@@ -290,9 +368,15 @@ fn read_loop(reader: impl Read, pending: Pending, writer: SharedWriter) {
                 continue;
             }
         };
-        let id = message["id"].as_u64();
-        match (id, message.get("method")) {
-            (Some(id), None) => {
+        // A server's request may carry a string id; only our own replies are
+        // known to be numbers.
+        let has_id = message.get("id").is_some_and(|id| !id.is_null());
+        match (
+            has_id.then(|| message["id"].as_u64()),
+            message.get("method"),
+        ) {
+            (Some(None), None) => {}
+            (Some(Some(id)), None) => {
                 let reply = if let Some(error) = message.get("error") {
                     Err(format!(
                         "{} (code {})",
@@ -310,12 +394,8 @@ fn read_loop(reader: impl Read, pending: Pending, writer: SharedWriter) {
                     let _ = tx.send(reply);
                 }
             }
-            (Some(id), Some(method)) => {
-                log::debug!("mcp: declining server request {method}");
-                let reply = json!({
-                    "jsonrpc": "2.0", "id": id,
-                    "error": { "code": -32601, "message": "method not supported by termide" }
-                });
+            (Some(_), Some(method)) => {
+                let reply = answer_server_request(&message["id"], method.as_str().unwrap_or(""));
                 let mut line = reply.to_string();
                 line.push('\n');
                 let mut writer = writer.lock().unwrap_or_else(PoisonError::into_inner);
@@ -323,7 +403,17 @@ fn read_loop(reader: impl Read, pending: Pending, writer: SharedWriter) {
                     .write_all(line.as_bytes())
                     .and_then(|()| writer.flush());
             }
-            (None, Some(method)) => log::debug!("mcp: notification {method}"),
+            (None, Some(method)) => {
+                let method = method.as_str().unwrap_or("");
+                log::debug!("mcp: notification {method}");
+                let handler = handler
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone();
+                if let Some(handler) = handler {
+                    handler(method, &message["params"]);
+                }
+            }
             (None, None) => {}
         }
     }
@@ -460,6 +550,39 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_pushed_notification_reaches_the_handler_and_a_ping_is_answered() {
+        let (to_server_rx, to_server_tx) = pipe().unwrap();
+        let (from_server_rx, mut from_server_tx) = pipe().unwrap();
+        let client = McpClient::from_streams(from_server_rx, to_server_tx, Duration::from_secs(5));
+        let (seen_tx, seen_rx) = mpsc::channel();
+        client.listen(Arc::new(move |method, _| {
+            let _ = seen_tx.send(method.to_string());
+        }));
+        writeln!(
+            from_server_tx,
+            "{}",
+            json!({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
+        )
+        .unwrap();
+        // A server's request may carry a string id; the answer echoes it.
+        writeln!(
+            from_server_tx,
+            "{}",
+            json!({"jsonrpc": "2.0", "id": "p-1", "method": "ping"})
+        )
+        .unwrap();
+        assert_eq!(
+            seen_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            "notifications/tools/list_changed"
+        );
+        let mut answer = String::new();
+        BufReader::new(to_server_rx).read_line(&mut answer).unwrap();
+        let answer: Value = serde_json::from_str(&answer).unwrap();
+        assert_eq!(answer["id"], "p-1");
+        assert_eq!(answer["result"], json!({}));
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_real_process_over_stdio_answers() {
@@ -472,13 +595,11 @@ mod tests {
   esac
 done"#;
         let config = McpServerConfig {
-            command: "sh".into(),
+            command: Some("sh".into()),
             args: vec!["-c".into(), script.into()],
             env: [("GREETING".to_string(), "hi-$USER_FOR_TEST".to_string())].into(),
-            cwd: None,
-            tools: None,
             timeout_secs: 5,
-            enabled: true,
+            ..Default::default()
         };
         std::env::set_var("USER_FOR_TEST", "tester");
         let client = McpClient::spawn("sh", &config).unwrap();

@@ -5,18 +5,19 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 use termide_agent_core::{CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate};
 
-use crate::client::{McpClient, McpToolInfo};
+use crate::client::{McpToolInfo, McpTransport};
 
 pub struct McpTool {
     name: String,
     description: String,
     info: McpToolInfo,
-    client: Arc<McpClient>,
+    /// Over stdio or over Streamable HTTP: a tool does not care which.
+    client: Arc<dyn McpTransport>,
 }
 
 impl McpTool {
     #[must_use]
-    pub fn new(server: &str, info: McpToolInfo, client: Arc<McpClient>) -> Self {
+    pub fn new(server: &str, info: McpToolInfo, client: Arc<dyn McpTransport>) -> Self {
         let description = if info.description.is_empty() {
             format!("Tool `{}` of the MCP server `{server}`.", info.name)
         } else {

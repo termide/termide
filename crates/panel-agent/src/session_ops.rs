@@ -72,6 +72,7 @@ impl AgentPanel {
             self.late_tools = profile.late_tools;
             self.backend = self.provider_backend.clone().or(profile.backend);
             self.waiting_tools.clear();
+            self.leaving_tools.clear();
             self.mcp_arrived.clear();
             self.offered_tools = profile.offered;
             self.offered_skills = profile.skills;

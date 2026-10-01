@@ -179,6 +179,8 @@ pub enum PanelCommand<'a> {
         action: String,
         /// Keys of the items left checked, in list order.
         checked: Vec<String>,
+        /// The `id` of the heading button that closed the list, if one did.
+        pressed: Option<String>,
     },
 
     /// The user submitted an input modal the panel raised with

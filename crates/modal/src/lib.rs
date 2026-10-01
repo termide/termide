@@ -324,7 +324,7 @@ mod outside_click_tests {
             ),
             (
                 "checklist",
-                clicks(ChecklistModal::new("Tools", "", vec![item])),
+                clicks(ChecklistModal::new("Tools", "", vec![item], vec![])),
             ),
             ("input", clicks(InputModal::new("Name", "Enter a name"))),
             ("confirm", clicks(ConfirmModal::new("Delete", "Sure?"))),

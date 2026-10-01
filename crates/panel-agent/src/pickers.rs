@@ -307,6 +307,7 @@ impl AgentPanel {
         self.tools = profile.tools;
         self.late_tools = profile.late_tools;
         self.waiting_tools.clear();
+        self.leaving_tools.clear();
         // The new agent's prompt is built without what the session switched
         // off (the cache is lost anyway), and it offers its own lists.
         self.mcp_arrived.clear();

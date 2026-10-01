@@ -249,11 +249,12 @@ impl App {
                 PendingAction::PanelChecklist { action } => {
                     // Like a selection, to the focused panel that raised it;
                     // cancelling changes nothing.
-                    if let Some(checked) = value.downcast_ref::<Vec<String>>() {
+                    if let Some(outcome) = value.downcast_ref::<termide_core::ChecklistOutcome>() {
                         if let Some(panel) = self.layout_manager.active_panel_mut() {
                             panel.handle_command(termide_core::PanelCommand::ChecklistDone {
                                 action,
-                                checked: checked.clone(),
+                                checked: outcome.checked.clone(),
+                                pressed: outcome.pressed.clone(),
                             });
                         }
                         self.state.needs_redraw = true;

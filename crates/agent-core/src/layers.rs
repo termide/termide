@@ -20,7 +20,7 @@ use crate::context::SEED_TEMPLATE;
 use crate::goal::{GoalPrompt, SEED_GOAL};
 use crate::handoff::{HandoffPrompt, SEED_HANDOFF};
 use crate::hooks::{HookConfig, HOOKS_FILE};
-use crate::mcp::{McpServerConfig, MCP_FILE};
+use crate::mcp::{mcp_servers_from_json, McpServerConfig, MCP_FILE, MCP_JSON_FILE};
 use crate::permissions::Mode;
 use crate::plan::{PlanPrompt, SEED_PLAN};
 use crate::refusals::{Refusals, SEED_PERMISSIONS};
@@ -416,6 +416,10 @@ pub struct AgentDirs {
     /// Skill directories in priority order: each level's `ai/skills`
     /// followed by its `.agents/skills`.
     skill_roots: Vec<PathBuf>,
+    /// MCP files in priority order: each level's `mcp.toml` followed by the
+    /// `.mcp.json` of its directory, then the `.mcp.json` of every ancestor
+    /// of the panel's directory, nearest first.
+    mcp_files: Vec<PathBuf>,
     /// The configuration level, the user's own files, when there is one.
     global: Option<PathBuf>,
 }
@@ -432,21 +436,43 @@ impl AgentDirs {
             cwd.join(PROJECT_AGENT_DIR).join(SKILLS_DIR),
             cwd.join(SHARED_SKILLS_DIR),
         ];
-        if let Some(root) = project_root {
-            let dir = root.join(PROJECT_AGENT_DIR);
-            if !roots.contains(&dir) {
-                roots.push(dir.clone());
-                skill_roots.push(dir.join(SKILLS_DIR));
-                skill_roots.push(root.join(SHARED_SKILLS_DIR));
+        // A `.mcp.json` sits beside an `ai` directory, not inside one, so it
+        // joins the search at the level of the directory it is in: termide's
+        // own `mcp.toml` there wins it, a nearer directory wins both. Every
+        // ancestor of the panel's directory is a level, as for `AGENTS.md`:
+        // one file above a group of repositories serves all of them.
+        let mut mcp_files = vec![roots[0].join(MCP_FILE)];
+        let project_dir = project_root
+            .map(|root| root.join(PROJECT_AGENT_DIR))
+            .filter(|dir| !roots.contains(dir));
+        let mut project_dir_placed = false;
+        for dir in cwd.ancestors() {
+            if let Some(project_dir) = &project_dir {
+                if project_root == Some(dir) {
+                    mcp_files.push(project_dir.join(MCP_FILE));
+                    project_dir_placed = true;
+                }
             }
+            mcp_files.push(dir.join(MCP_JSON_FILE));
+        }
+        if let (Some(root), Some(dir)) = (project_root, project_dir) {
+            if !project_dir_placed {
+                mcp_files.push(dir.join(MCP_FILE));
+                mcp_files.push(root.join(MCP_JSON_FILE));
+            }
+            skill_roots.push(dir.join(SKILLS_DIR));
+            skill_roots.push(root.join(SHARED_SKILLS_DIR));
+            roots.push(dir);
         }
         if let Some(global) = global {
             roots.push(global.to_path_buf());
             skill_roots.push(global.join(SKILLS_DIR));
+            mcp_files.push(global.join(MCP_FILE));
         }
         Self {
             roots,
             skill_roots,
+            mcp_files,
             global: global.map(Path::to_path_buf),
         }
     }
@@ -590,25 +616,38 @@ impl AgentDirs {
         hooks
     }
 
-    /// MCP servers from every root's `mcp.toml`, by name; a higher root's
-    /// table for a name wins, and `enabled = false` there drops the server.
-    /// A file that does not parse is reported and skipped.
+    /// MCP servers, by name, from every `mcp.toml` of the roots and from a
+    /// `.mcp.json` at the panel's directory, any of its ancestors, or the
+    /// project root. A nearer level's name wins, and `enabled = false` there drops the server; a
+    /// file that does not parse is reported and skipped.
+    ///
+    /// The `.mcp.json` of the same directory ranks below its `mcp.toml` —
+    /// termide's own file is the one edited here — and above the level
+    /// above it, so a repository committed for Claude Code, Cursor or VS Code
+    /// brings its servers to the panel unchanged.
     #[must_use]
     pub fn mcp_servers(&self) -> BTreeMap<String, McpServerConfig> {
         let mut servers: BTreeMap<String, McpServerConfig> = BTreeMap::new();
-        for root in &self.roots {
-            let path = root.join(MCP_FILE);
-            let Ok(text) = std::fs::read_to_string(&path) else {
-                continue;
-            };
-            let parsed: BTreeMap<String, McpServerConfig> = match toml::from_str(&text) {
-                Ok(parsed) => parsed,
-                Err(error) => {
-                    log::warn!("ignoring {}: {error}", path.display());
+        for path in &self.mcp_files {
+            let entries = if path.extension().is_some_and(|ext| ext == "json") {
+                let (taken, skipped) = mcp_servers_from_json(path);
+                for reason in skipped {
+                    log::warn!("{}: {reason}", path.display());
+                }
+                taken
+            } else {
+                let Ok(text) = std::fs::read_to_string(path) else {
                     continue;
+                };
+                match toml::from_str(&text) {
+                    Ok(parsed) => parsed,
+                    Err(error) => {
+                        log::warn!("ignoring {}: {error}", path.display());
+                        continue;
+                    }
                 }
             };
-            for (name, config) in parsed {
+            for (name, config) in entries {
                 servers.entry(name).or_insert(config);
             }
         }
@@ -1202,6 +1241,67 @@ mod tests {
             ["db"]
         );
     }
+    #[test]
+    fn a_mcp_json_joins_the_servers_at_its_own_level() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("proj");
+        let global = tmp.path().join("ai");
+        std::fs::create_dir_all(project.join(".termide/ai")).unwrap();
+        std::fs::create_dir_all(&global).unwrap();
+        // The repository carries the portable file. Within one directory
+        // termide's own file wins it; a higher directory wins both, so the
+        // project's portable file outranks the configuration level.
+        std::fs::write(
+            project.join(MCP_JSON_FILE),
+            r#"{"mcpServers":{"github":{"command":"npx","args":["-y","server-github"]},
+               "fs":{"command":"fs-server"},"off":{"command":"x","disabled":true}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            project.join(".termide/ai").join(MCP_FILE),
+            "[github]\ncommand = \"own\"\n",
+        )
+        .unwrap();
+        std::fs::write(global.join(MCP_FILE), "[fs]\ncommand = \"global-fs\"\n").unwrap();
+        let servers = AgentDirs::new(&project, None, Some(&global)).mcp_servers();
+        assert_eq!(servers.keys().collect::<Vec<_>>(), ["fs", "github"]);
+        assert_eq!(servers["github"].command.as_deref(), Some("own"));
+        assert_eq!(servers["fs"].command.as_deref(), Some("fs-server"));
+
+        // The project's own file gone, the portable one stands; its disabled
+        // server stays off even where the configuration level defines the name.
+        std::fs::remove_file(project.join(".termide/ai").join(MCP_FILE)).unwrap();
+        std::fs::write(global.join(MCP_FILE), "[off]\ncommand = \"global-x\"\n").unwrap();
+        let servers = AgentDirs::new(&project, None, Some(&global)).mcp_servers();
+        assert_eq!(servers.keys().collect::<Vec<_>>(), ["fs", "github"]);
+        assert_eq!(servers["github"].command.as_deref(), Some("npx"));
+
+        // The panel's directory outranks the project root's portable file.
+        let sub = project.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(
+            sub.join(MCP_JSON_FILE),
+            r#"{"mcpServers":{"github":{"command":"npx","args":["-y","sub"]}}}"#,
+        )
+        .unwrap();
+        let servers = AgentDirs::new(&sub, Some(&project), Some(&global)).mcp_servers();
+        assert_eq!(servers["github"].args, ["-y", "sub"]);
+
+        // A file above the repository serves every panel below it, from
+        // any depth, and ranks under every level nearer the panel.
+        std::fs::write(
+            tmp.path().join(MCP_JSON_FILE),
+            r#"{"mcpServers":{"tree":{"command":"tree-server"},
+               "github":{"command":"far"}}}"#,
+        )
+        .unwrap();
+        let deep = sub.join("deeper");
+        std::fs::create_dir_all(&deep).unwrap();
+        let servers = AgentDirs::new(&deep, Some(&project), Some(&global)).mcp_servers();
+        assert_eq!(servers["tree"].command.as_deref(), Some("tree-server"));
+        assert_eq!(servers["github"].args, ["-y", "sub"]);
+    }
+
     #[test]
     fn hooks_merge_by_name_like_servers() {
         let tmp = tempfile::tempdir().unwrap();

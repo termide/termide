@@ -128,6 +128,7 @@ impl AgentPanel {
                 self.system_prompt = profile.system_prompt;
                 self.tools = tools;
                 self.waiting_tools.clear();
+                self.leaving_tools.clear();
                 self.context_off = self.toolset_off.clone();
                 self.context_stale = false;
                 self.sync_blocked();
@@ -263,13 +264,20 @@ impl AgentPanel {
             self.late_tools = None;
         }
         let changed = !arrivals.is_empty();
+        let t = termide_i18n::t();
         for event in arrivals {
+            // Every event but a sign-in under way speaks for all the server's
+            // tools: what it had before goes, and a `Ready` brings the new set.
+            let replaced = !matches!(event, LateTools::LoginStarted { .. })
+                && self.withdraw_mcp_source(event.source());
             match event {
                 LateTools::Ready { source, tools } => {
-                    self.notice(
-                        termide_i18n::t().agent_notice_mcp_connected_fmt(&source, tools.len()),
-                        NoticeKind::Info,
-                    );
+                    let text = if replaced {
+                        t.agent_notice_mcp_updated_fmt(&source, tools.len())
+                    } else {
+                        t.agent_notice_mcp_connected_fmt(&source, tools.len())
+                    };
+                    self.notice(text, NoticeKind::Info);
                     // Every one is listed in the checklist; one switched off
                     // stays out of the registry, and so out of the context.
                     for tool in tools {
@@ -285,28 +293,77 @@ impl AgentPanel {
                 }
                 LateTools::Failed { source, error } => {
                     self.notice(
-                        termide_i18n::t().agent_notice_mcp_error_fmt(&source, &error.to_string()),
+                        t.agent_notice_mcp_error_fmt(&source, &error),
                         NoticeKind::Warn,
+                    );
+                }
+                LateTools::Gone { source } => {
+                    self.notice(t.agent_notice_mcp_gone_fmt(&source), NoticeKind::Info);
+                }
+                LateTools::NeedsLogin { source } => {
+                    self.notice(
+                        t.agent_notice_mcp_needs_login_fmt(&source),
+                        NoticeKind::Warn,
+                    );
+                }
+                LateTools::LoginStarted { source, url } => {
+                    self.notice(
+                        t.agent_notice_mcp_login_started_fmt(&source, &url),
+                        NoticeKind::Info,
                     );
                 }
             }
         }
-        if !self.waiting_tools.is_empty() && !self.is_busy() {
+        let pending = !self.waiting_tools.is_empty() || !self.leaving_tools.is_empty();
+        if pending && !self.is_busy() {
             let batch = std::mem::take(&mut self.waiting_tools);
-            let for_worker = batch.clone();
+            let leaving = std::mem::take(&mut self.leaving_tools);
+            let (for_worker, leaving_worker) = (batch.clone(), leaving.clone());
             match self.runtime.update(Box::new(move |agent| {
+                for name in &leaving_worker {
+                    agent.tools_mut().remove(name);
+                }
                 for tool in for_worker {
                     agent.tools_mut().insert(tool);
                 }
             })) {
                 Ok(()) => {
+                    for name in &leaving {
+                        self.tools.remove(name);
+                    }
                     for tool in batch {
                         self.tools.insert(tool);
                     }
                 }
-                Err(_) => self.waiting_tools = batch,
+                Err(_) => {
+                    self.waiting_tools = batch;
+                    self.leaving_tools = leaving;
+                }
             }
         }
         changed
+    }
+
+    /// Take `source`'s MCP tools out of the checklist and the queue, and mark
+    /// those the agent already has to leave its registry. `true` when the
+    /// server had any.
+    fn withdraw_mcp_source(&mut self, source: &str) -> bool {
+        let mut names = Vec::new();
+        self.mcp_arrived.retain(|(server, tool)| {
+            if server == source {
+                names.push(tool.name().to_string());
+                return false;
+            }
+            true
+        });
+        self.waiting_tools
+            .retain(|tool| !names.iter().any(|name| name == tool.name()));
+        for name in &names {
+            self.context_off.remove(name);
+            if self.tools.get(name).is_some() && !self.leaving_tools.contains(name) {
+                self.leaving_tools.push(name.clone());
+            }
+        }
+        !names.is_empty()
     }
 }

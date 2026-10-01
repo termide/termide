@@ -8,6 +8,7 @@
 
 mod events;
 mod input;
+mod mcp;
 mod pending;
 mod pickers;
 mod render;
@@ -32,9 +33,10 @@ use ratatui::layout::Rect;
 use termide_agent_core::{
     civil_date, Backend, BackendModel, BackendSetup, CheckpointStore, CommandScript,
     CompactionPolicy, CompactionPrompts, Decision, GoalPrompt, HandoffPrompt, Hooks, LateTools,
-    Mode, ModeHandle, ModelInfo, ModelSpec, PermissionEnvelope, PermissionRules, PersistScope,
-    PlanPrompt, PromptError, PromptTemplate, Provider, QuestionEnvelope, Refusals, ReviewerSetup,
-    Session, SessionSummary, SkillInfo, Tool, ToolRegistry, DEFAULT_AGENT,
+    McpReload, McpServerState, Mode, ModeHandle, ModelInfo, ModelSpec, PermissionEnvelope,
+    PermissionRules, PersistScope, PlanPrompt, PromptError, PromptTemplate, Provider,
+    QuestionEnvelope, Refusals, ReviewerSetup, Session, SessionSummary, SkillInfo, Tool,
+    ToolRegistry, DEFAULT_AGENT,
 };
 use termide_config::Config;
 use termide_core::{
@@ -133,9 +135,12 @@ const HANDOFF_COMMAND: &str = "handoff";
 const USAGE_COMMAND: &str = "usage";
 /// The built-in `/prompt` command: open the assembled system prompt in a viewer.
 const PROMPT_COMMAND: &str = "prompt";
+/// The built-in `/mcp` command: the MCP servers' status, a reload of their
+/// configuration, a sign-in or a sign-out.
+const MCP_COMMAND: &str = "mcp";
 /// Every built-in `/name`, whatever the state; a template, script or skill
 /// of the same name never runs under it (see `slash`).
-const BUILTIN_COMMANDS: [&str; 13] = [
+const BUILTIN_COMMANDS: [&str; 14] = [
     UNDO_COMMAND,
     COMPACT_COMMAND,
     NEW_COMMAND,
@@ -149,6 +154,7 @@ const BUILTIN_COMMANDS: [&str; 13] = [
     HANDOFF_COMMAND,
     USAGE_COMMAND,
     PROMPT_COMMAND,
+    MCP_COMMAND,
 ];
 /// Welcome-banner action that explains the `/name`s defined more than once.
 const SLASH_CONFLICTS_ACTION: &str = "agent_slash_conflicts";
@@ -325,6 +331,43 @@ pub trait AgentCatalog: Send + Sync {
     /// on the session's behalf (a delegated task) follows. The default runs
     /// nothing.
     fn set_mode(&self, _mode: Mode) {}
+    /// Where each configured MCP server stands, for `/mcp` and the toolset
+    /// list.
+    fn mcp_status(&self) -> Vec<McpServerState> {
+        Vec::new()
+    }
+    /// Connect the MCP server `server` again from the configuration as it
+    /// is now, or let it go when it is no longer there.
+    ///
+    /// # Errors
+    ///
+    /// When there is no such server.
+    fn mcp_reconnect(&self, server: &str) -> Result<McpReload, String> {
+        Err(format!("no MCP server named {server}"))
+    }
+    /// Read the MCP configuration again. What changes reaches the panel as
+    /// late tools; `None` when the catalog connects no servers.
+    fn mcp_reload(&self) -> Option<McpReload> {
+        None
+    }
+    /// Start a sign-in to the MCP server `server` in the browser; its outcome
+    /// arrives as late tools.
+    ///
+    /// # Errors
+    ///
+    /// Why the sign-in cannot start.
+    fn mcp_login(&self, server: &str) -> Result<(), String> {
+        Err(format!("no MCP server named {server}"))
+    }
+    /// Forget the sign-in kept for `server` and reconnect it without one;
+    /// `false` when none was kept.
+    ///
+    /// # Errors
+    ///
+    /// Why it cannot be forgotten.
+    fn mcp_logout(&self, server: &str) -> Result<bool, String> {
+        Err(format!("no MCP server named {server}"))
+    }
 }
 
 /// What the agent is doing right now, for the live activity indicators.
@@ -500,6 +543,9 @@ pub struct AgentPanel {
     /// flight and wait for the worker to be free.
     late_tools: Option<Receiver<LateTools>>,
     waiting_tools: Vec<Arc<dyn Tool>>,
+    /// MCP tools whose server replaced or withdrew them, by name, still to
+    /// leave the worker's registry once it is between runs.
+    leaving_tools: Vec<String>,
     /// What the session switched off: tool names and `skill:<name>`.
     toolset_off: BTreeSet<String>,
     /// What the running profile (its prompt and registry) was built without.
@@ -838,6 +884,7 @@ impl AgentPanel {
             prompt_choices: Vec::new(),
             late_tools,
             waiting_tools: Vec::new(),
+            leaving_tools: Vec::new(),
             toolset_off,
             context_off,
             blocked,
@@ -1198,12 +1245,21 @@ impl Panel for AgentPanel {
             }
             // An external agent brings its own tools; nothing of ours to list.
             TOOLSET_ACTION if self.external => Vec::new(),
-            TOOLSET_ACTION => vec![PanelEvent::ShowChecklist {
-                title: t.agent_toolset_title().to_string(),
-                prompt: t.agent_toolset_prompt().to_string(),
-                items: self.toolset_items(),
-                action: TOOLSET_ACTION.to_string(),
-            }],
+            TOOLSET_ACTION => {
+                let groups = self.toolset_groups();
+                let mut prompt = t.agent_toolset_prompt().to_string();
+                if !groups.is_empty() {
+                    prompt.push(' ');
+                    prompt.push_str(t.agent_toolset_buttons_hint());
+                }
+                vec![PanelEvent::ShowChecklist {
+                    title: t.agent_toolset_title().to_string(),
+                    prompt,
+                    items: self.toolset_items(),
+                    groups,
+                    action: TOOLSET_ACTION.to_string(),
+                }]
+            }
             NEW_SESSION_ACTION => {
                 self.switch_session(None);
                 vec![PanelEvent::NeedsRedraw]
@@ -1346,8 +1402,17 @@ impl Panel for AgentPanel {
             PanelCommand::Cut if !self.chat_focus => {
                 CommandResult::Handled(self.cut_input_selection())
             }
-            PanelCommand::ChecklistDone { action, checked } if action == TOOLSET_ACTION => {
+            PanelCommand::ChecklistDone {
+                action,
+                checked,
+                pressed,
+            } if action == TOOLSET_ACTION => {
+                // The ticks first, as `Enter` would have applied them; then
+                // what the button asks for.
                 self.apply_toolset(&checked);
+                if let Some(id) = pressed {
+                    self.press_toolset_button(&id);
+                }
                 self.pending_events.push(PanelEvent::NeedsRedraw);
                 CommandResult::Handled(true)
             }

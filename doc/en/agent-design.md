@@ -558,15 +558,35 @@ MCP:
 
 | | Claude Code | Codex | OpenCode | termide |
 |---|---|---|---|---|
-| Transport | stdio, SSE, HTTP | stdio, HTTP | stdio, HTTP | stdio |
+| Transport | stdio, SSE, HTTP | stdio, HTTP | stdio, HTTP | stdio, Streamable HTTP |
 | Taken from a server | tools, prompts, resources | tools | tools | tools |
-| Configuration | `.mcp.json`, `~/.claude.json` | `[mcp_servers.<name>]` in `config.toml` | `opencode.json` | `ai/mcp.toml` at the three levels |
+| Configuration | `.mcp.json`, `~/.claude.json` | `[mcp_servers.<name>]` in `config.toml` | `opencode.json` | `ai/mcp.toml` at the three levels, the `.mcp.json` of the directory and its ancestors read beside them |
 | Tool names | `mcp__server__tool` | `server/tool` | `server_tool` | `server__tool` |
+| OAuth | browser, from `/mcp` | `codex mcp login` | `opencode mcp auth` | `/mcp login`: browser, loopback callback |
 | Permissions | allow-list of `mcp__*` | per-server approval | per-tool | the per-tool rules, `ask` by default |
 
-Decisions (`crates/agent-mcp`): stdio only, because the servers that matter
-for a local coding agent run locally and it spares the crate OAuth and HTTP
-plumbing; tools only, since prompts are ours and resources are files the
+Decisions (`crates/agent-mcp`): stdio and Streamable HTTP — one POST per
+request, the session in `Mcp-Session-Id`, the keys in `headers` — because the
+remote servers people actually configure (Plane, Redash, Kibana, hosted docs)
+are HTTP and refusing them left those unreachable; the older HTTP+SSE
+transport is still out, since every server we meet speaks the newer one. After
+the handshake a GET holds the stream a server pushes on, on a thread of its
+own, reopened with `Last-Event-ID` and backoff, because without it a server
+that changes its tools mid-session goes unnoticed; `tools/list_changed` on
+either transport lists the tools again and the new set replaces the old one
+whole (`LateTools` speaks for all of a source's tools), and `ping` is
+answered. OAuth follows the specification's discovery chain — RFC 9728
+resource metadata, RFC 8414 or OpenID server metadata, RFC 7591 registration,
+PKCE `S256`, `resource` per RFC 8707 — started explicitly by `/mcp login`
+rather than on the first `401`: several panels open at once would otherwise
+open several browser tabs, and a sign-in is a thing the user decides to do.
+The grants live in one `0600` file under the configuration, filed by URL, not
+in a keychain: the same on every system, no service to depend on, beside the
+configuration that already holds static keys. A reload is explicit too,
+`/mcp reload`, rather than a watcher on every MCP file: a half-saved file
+must not tear servers down, and it is a moment the user chooses; connections
+carry a generation, so whatever an older attempt brings back is dropped. Tools
+only, since prompts are ours and resources are files the
 model reads anyway. Names use `__` because OpenAI-compatible endpoints accept
 only `[A-Za-z0-9_-]` in a function name, which rules out `/` and `.`.
 Connecting happens on a thread per server and the tools arrive as
@@ -577,7 +597,14 @@ their schemas already reach the model, and a `tools` filter plus a warning
 past twenty tools keep the per-request cost visible — the same reasoning as
 for skills. The client is blocking JSON-RPC over pipes with a reader thread,
 no tokio, like the rest of the agent; a server's own requests (roots,
-sampling) are declined with -32601.
+sampling, elicitation) are declined with -32601. A `.mcp.json` is read at the panel's
+directory, every directory above it and the project root, nearest first and
+below the `mcp.toml` of the same directory — the walk Claude Code makes and
+`AGENTS.md` already gets, so one file above a group of repositories serves
+them all — because that portable shape is what a cloned repository carries and
+reading it is the same decision as reading `CLAUDE.md` and `.agents/skills`:
+the fields that agree are taken and the rest are refused with a reason rather
+than run half-configured, so the permission model stays as it was.
 
 Command scripts (`ai/commands/<name>`, executables): the user's answer to
 Claude Code's and OpenCode's `!`cmd`` splicing and Gemini CLI's `!{cmd}`,

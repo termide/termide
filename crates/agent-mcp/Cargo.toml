@@ -5,10 +5,20 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "MCP client for the termide coding agent: tools from servers over stdio"
+description = "MCP client for the termide coding agent: tools from servers over stdio or Streamable HTTP"
 
 [dependencies]
+base64.workspace = true
+getrandom = "0.2"
 log.workspace = true
+open = "5"
+serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.10"
+ureq.workspace = true
+url.workspace = true
 
 termide-agent-core = { path = "../agent-core" }
+
+[dev-dependencies]
+tempfile.workspace = true

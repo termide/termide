@@ -266,9 +266,10 @@ impl App {
                 title,
                 prompt,
                 items,
+                groups,
                 action,
             } => {
-                let modal = termide_modal::ChecklistModal::new(title, prompt, items);
+                let modal = termide_modal::ChecklistModal::new(title, prompt, items, groups);
                 self.state.set_pending_action(
                     termide_state::PendingAction::PanelChecklist { action },
                     crate::state::ActiveModal::Checklist(Box::new(modal)),

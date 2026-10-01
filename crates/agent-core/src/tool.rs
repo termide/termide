@@ -90,6 +90,11 @@ pub trait Tool: Send + Sync {
 
 /// Tools that arrive after the agent started — an MCP server that finished
 /// connecting — or word that they will not.
+///
+/// Every event names its `source` and speaks for all of that source's tools:
+/// `Ready` is the whole set, the first one or one that replaces the set
+/// before it (the server changed its list, or it was reconnected), and every
+/// other event but `LoginStarted` leaves the source with none.
 #[derive(Clone)]
 pub enum LateTools {
     Ready {
@@ -100,6 +105,33 @@ pub enum LateTools {
         source: String,
         error: String,
     },
+    /// The source is no longer configured.
+    Gone {
+        source: String,
+    },
+    /// The source answers only a signed-in client, and no sign-in is kept
+    /// for it (or the one kept has lapsed).
+    NeedsLogin {
+        source: String,
+    },
+    /// A sign-in for the source waits in the browser at `url`.
+    LoginStarted {
+        source: String,
+        url: String,
+    },
+}
+
+impl LateTools {
+    #[must_use]
+    pub fn source(&self) -> &str {
+        match self {
+            Self::Ready { source, .. }
+            | Self::Failed { source, .. }
+            | Self::Gone { source }
+            | Self::NeedsLogin { source }
+            | Self::LoginStarted { source, .. } => source,
+        }
+    }
 }
 
 /// Ordered set of tools; insertion order is the order the model sees.

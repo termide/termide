@@ -10,8 +10,8 @@ use termide_ui::{ChoiceAction, CompletionAction, CompletionItem, CompletionList,
 use crate::{
     select, transcript, AgentPanel, BannerHit, FoldMode, Item, NoticeKind, Paste, RunButton,
     CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND, GOAL_COMMAND, HANDOFF_COMMAND, LOOP_COMMAND,
-    NAME_COMMAND, NEW_COMMAND, NEW_SESSION_ACTION, PAUSE_COMMAND, PROMPT_COMMAND, RENAME_ACTION,
-    RENAME_COMMAND, RESUME_ACTION, UNDO_COMMAND, USAGE_COMMAND,
+    MCP_COMMAND, NAME_COMMAND, NEW_COMMAND, NEW_SESSION_ACTION, PAUSE_COMMAND, PROMPT_COMMAND,
+    RENAME_ACTION, RENAME_COMMAND, RESUME_ACTION, UNDO_COMMAND, USAGE_COMMAND,
 };
 
 /// A paste past either bound is held as a short placeholder rather than
@@ -577,6 +577,14 @@ impl AgentPanel {
                 CompletionItem::new(PROMPT_COMMAND)
                     .with_label(format!("/{PROMPT_COMMAND}"))
                     .with_description(termide_i18n::t().agent_cmd_desc_prompt()),
+            );
+        }
+        if MCP_COMMAND.starts_with(prefix) && !self.external {
+            items.push(
+                CompletionItem::new(MCP_COMMAND)
+                    .with_label(format!("/{MCP_COMMAND}"))
+                    .with_hint(termide_i18n::t().agent_hint_mcp())
+                    .with_description(termide_i18n::t().agent_cmd_desc_mcp()),
             );
         }
         if items.is_empty() {

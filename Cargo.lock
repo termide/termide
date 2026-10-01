@@ -4951,9 +4951,17 @@ dependencies = [
 name = "termide-agent-mcp"
 version = "0.37.0"
 dependencies = [
+ "base64",
+ "getrandom 0.2.17",
  "log",
+ "open",
+ "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
  "termide-agent-core",
+ "ureq",
+ "url",
 ]
 
 [[package]]
