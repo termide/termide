@@ -5,7 +5,7 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use serde_json::Value;
-use termide_agent_core::{ToolCall, ToolResultMessage};
+use termide_agent_core::{DecidedBy, Lasting, PermissionNote, ToolCall, ToolResultMessage};
 use termide_core::ThemeColors;
 use termide_panel_markdown::render_markdown;
 use termide_richtext::Builder;
@@ -1240,6 +1240,37 @@ fn prose_output_lines(line: &str, width: u16, colors: &ThemeColors) -> Vec<Line<
     out
 }
 
+/// The line that says who decided a call, or `None` when the rules allowed
+/// it without asking anyone — the common case, left unsaid.
+fn permission_text(note: &PermissionNote) -> Option<String> {
+    let t = termide_i18n::t();
+    let text = match (note.by, note.allowed) {
+        (DecidedBy::Rules, true) => return None,
+        (DecidedBy::Rules, false) => t.agent_perm_note_rules_denied().to_string(),
+        (DecidedBy::Plan, _) => t.agent_perm_note_plan().to_string(),
+        (DecidedBy::Hook, true) => t.agent_perm_note_hook_allowed().to_string(),
+        (DecidedBy::Hook, false) => t.agent_perm_note_hook_denied().to_string(),
+        (DecidedBy::Reviewer, true) => t.agent_perm_note_reviewer_allowed_fmt(&note.reason),
+        (DecidedBy::Reviewer, false) => t.agent_perm_note_reviewer_blocked_fmt(&note.reason),
+        (DecidedBy::Unattended, _) => t.agent_perm_note_unattended().to_string(),
+        (DecidedBy::User, true) => match note.lasting {
+            Some(Lasting::Session) => t.agent_perm_note_user_session().to_string(),
+            Some(Lasting::Project) => t.agent_perm_note_user_project().to_string(),
+            Some(Lasting::Global) => t.agent_perm_note_user_global().to_string(),
+            _ => t.agent_perm_note_user_once().to_string(),
+        },
+        (DecidedBy::User, false) if !note.reason.is_empty() => {
+            t.agent_perm_note_user_denied_reason_fmt(&note.reason)
+        }
+        (DecidedBy::User, false) => match note.lasting {
+            Some(Lasting::Session) => t.agent_perm_note_user_denied_session().to_string(),
+            _ => t.agent_perm_note_user_denied().to_string(),
+        },
+    };
+    let glyph = if note.allowed { "✓" } else { "✗" };
+    Some(format!("{glyph} {text}"))
+}
+
 /// The first line of a non-shell tool call (a shell's is [`command_lines`]):
 /// a type glyph, a localized action and its subject for the file, web, skill,
 /// task and MCP tools, else the tool name and a summary. The fold `marker`, if
@@ -1803,6 +1834,14 @@ fn render_body(
                     dim,
                 ));
             }
+            // Who let the call run or refused it, unless the rules simply did.
+            if let Some(text) = result
+                .as_ref()
+                .and_then(|r| r.permission.as_deref())
+                .and_then(permission_text)
+            {
+                lines.extend(prose_output_lines(&text, width, colors));
+            }
             if !finished && !clock.is_empty() {
                 // Still running, the wait is all there is to show.
                 if lines.len() == 1 {
@@ -2258,6 +2297,50 @@ mod tests {
             .all(|l| l.chars().count() <= 14));
         assert!(narrow.iter().any(|l| l.contains("Looking at")));
         assert_eq!(transcript.items().len(), 4);
+    }
+
+    #[test]
+    fn an_unfolded_call_says_who_decided_it_unless_the_rules_did() {
+        let colors = ThemeColors::default();
+        let mut transcript = Transcript::default();
+        transcript.set_fold(FoldMode::Never);
+        let finished = |note: Option<PermissionNote>| {
+            let mut result = ToolResultMessage::text(&call("bash", json!({})), "ok");
+            result.permission = note.map(Box::new);
+            Item::Tool {
+                call: call("bash", json!({ "command": "make" })),
+                result: Some(result),
+                live: None,
+                at: "12:00".into(),
+                duration_ms: Some(10),
+                waited_ms: None,
+                waiting: false,
+            }
+        };
+        transcript.push(finished(Some(PermissionNote {
+            lasting: Some(Lasting::Session),
+            ..PermissionNote::new(DecidedBy::User, true)
+        })));
+        transcript.push(finished(Some(PermissionNote {
+            reason: "not asked for".into(),
+            ..PermissionNote::new(DecidedBy::Reviewer, false)
+        })));
+        transcript.push(finished(Some(PermissionNote::new(DecidedBy::Rules, true))));
+        let lines = text_of(transcript.lines(80, &colors, false));
+        let t = termide_i18n::t();
+        assert!(lines
+            .iter()
+            .any(|l| l.contains(&format!("✓ {}", t.agent_perm_note_user_session()))));
+        assert!(lines.iter().any(|l| l.contains(&format!(
+            "✗ {}",
+            t.agent_perm_note_reviewer_blocked_fmt("not asked for")
+        ))));
+        // What the rules allowed without asking is the common case, unsaid.
+        let decisions = lines
+            .iter()
+            .filter(|l| l.starts_with("  ✓ ") || l.starts_with("  ✗ "))
+            .count();
+        assert_eq!(decisions, 2);
     }
 
     #[test]

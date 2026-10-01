@@ -108,10 +108,10 @@ pub fn run_agent_headless(
         rules.mode = mode;
     }
     // Plan mode is a UI affordance (it waits for a card); headless has no
-    // one to accept a plan, so the configured rules decide instead.
+    // one to accept a plan, so the default mode decides instead.
     if rules.mode == Mode::Plan {
-        eprintln!("termide: plan mode has no meaning without the panel; using configured");
-        rules.mode = Mode::Configured;
+        eprintln!("termide: plan mode has no meaning without the panel; using auto");
+        rules.mode = Mode::Auto;
     }
 
     let mut agent = Agent::new(Arc::clone(&provider), tools, model, cwd.to_path_buf())
@@ -119,15 +119,15 @@ pub fn run_agent_headless(
         .with_compaction(settings.compaction)
         .with_compaction_prompts(dirs.compaction_prompts());
     let cancel = CancelToken::new();
+    let refusals = dirs.refusals();
     let mut hooks = PermissionHooks::new(
         rules,
-        Box::new(AutoDenyPrompter::new(
-            "running headless with no one to ask; allowed only what the rules and mode permit",
-        )),
+        Box::new(AutoDenyPrompter::new(refusals.unattended_headless.clone())),
     )
     .with_classifier(Box::new(
         reviewer_setup(settings, &dirs).classifier(cancel.clone()),
-    ));
+    ))
+    .with_refusals(refusals);
     let stdout = std::io::stdout();
     let mut wrote_text = false;
     // Tool calls in call order: (id, name, subject, is_error), for the JSON

@@ -10,7 +10,7 @@ use termide_agent_core::{
     ChainedHooks, CheckpointHooks, CheckpointStore, CompactionPolicy, CompactionPrompts,
     GoalPrompt, HandoffPrompt, Hooks, HostTools, LoggedMessage, Message, Mode, ModeHandle,
     ModelInfo, ModelSpec, PermissionEnvelope, PermissionHooks, PermissionRules, PersistRule,
-    PlanGuard, PlanPrompt, Provider, QuestionEnvelope, ReviewerSetup, Session, Timing,
+    PlanGuard, PlanPrompt, Provider, QuestionEnvelope, Refusals, ReviewerSetup, Session, Timing,
     ToolRegistry,
 };
 
@@ -159,6 +159,7 @@ pub(crate) fn spawn_runtime(
     goal_prompt: &GoalPrompt,
     handoff_prompt: &HandoffPrompt,
     reviewer: &ReviewerSetup,
+    refusals: &Refusals,
     persist_rule: Option<PersistFn>,
     extra_hooks: Option<&HooksFactory>,
     backend: Option<&BackendFactory>,
@@ -183,7 +184,8 @@ pub(crate) fn spawn_runtime(
     // commands and matching rules pass without a prompt).
     let backend_rules = rules.clone();
     let mut hooks = PermissionHooks::new(rules, Box::new(prompter))
-        .with_classifier(Box::new(reviewer.classifier(cancel.clone())));
+        .with_classifier(Box::new(reviewer.classifier(cancel.clone())))
+        .with_refusals(refusals.clone());
     let mode = hooks.mode_handle();
     if let Some(persist) = persist_rule {
         hooks = hooks.with_persist(Box::new(persist) as PersistRule);
@@ -200,7 +202,7 @@ pub(crate) fn spawn_runtime(
             Box::new(ToolsetGuard {
                 blocked: Arc::clone(blocked),
             }),
-            Box::new(PlanGuard::new(mode.clone())),
+            Box::new(PlanGuard::new(mode.clone()).with_refusals(refusals)),
         ];
         if let Some(store) = checkpoints {
             chain.push(Box::new(CheckpointHooks::new(store)));
@@ -231,7 +233,8 @@ pub(crate) fn spawn_runtime(
         // same channel under the same live mode.
         let mut host_permissions =
             PermissionHooks::new(backend_rules.clone(), Box::new(external_prompter.clone()))
-                .with_mode_handle(mode.clone());
+                .with_mode_handle(mode.clone())
+                .with_refusals(refusals.clone());
         if let Some(persist) = persist_rule {
             host_permissions = host_permissions.with_persist(Box::new(persist) as PersistRule);
         }

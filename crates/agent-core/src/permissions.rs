@@ -28,6 +28,7 @@ use crate::agent::{Hooks, ToolDecision};
 use crate::cancel::CancelToken;
 use crate::classifier::{Classifier, Verdict};
 use crate::message::ToolCall;
+use crate::refusals::Refusals;
 use crate::tool::ToolContext;
 
 /// Which rules count and what happens to calls none covers.
@@ -46,11 +47,11 @@ pub enum Mode {
     Edit,
     /// The configured rules decide, and "allow always" adds to them; what
     /// none covers asks.
-    #[default]
     Configured,
     /// The configured rules decide, less the broad `allow` ones that would
     /// let any program run; edits inside the project pass, and what none
-    /// covers goes to a reviewer model instead of a prompt.
+    /// covers goes to a reviewer model instead of a prompt. The default.
+    #[default]
     Auto,
     /// Allow everything the rules do not refuse or send to a prompt.
     All,
@@ -88,9 +89,63 @@ impl Mode {
     }
 }
 
-/// Why a call was refused in plan mode; the model reads it as the result.
-pub const PLAN_MODE_REASON: &str =
-    "plan mode: only reading is allowed; describe the change in the plan and wait for the user to leave plan mode";
+/// How a tool call came to run or not, kept with its result for the record:
+/// the session log holds it and the transcript shows it, the model never
+/// sees it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PermissionNote {
+    pub by: DecidedBy,
+    pub allowed: bool,
+    /// For an answer of the user's, how long it holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lasting: Option<Lasting>,
+    /// The reviewer's reason, or the words the user denied with.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reason: String,
+}
+
+impl PermissionNote {
+    #[must_use]
+    pub fn new(by: DecidedBy, allowed: bool) -> Self {
+        Self {
+            by,
+            allowed,
+            lasting: None,
+            reason: String::new(),
+        }
+    }
+}
+
+/// Who decided a call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DecidedBy {
+    /// The rules, the mode or a safe default, without asking anyone.
+    Rules,
+    /// Plan mode, which refuses what could change something.
+    Plan,
+    /// A command hook, which approved or blocked the call.
+    Hook,
+    /// The `auto` mode reviewer.
+    Reviewer,
+    /// The user, answering a permission card.
+    User,
+    /// No one: the run had no one to ask (a subagent, a headless run), so
+    /// what would have asked was refused.
+    Unattended,
+}
+
+/// How long a user's answer holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Lasting {
+    Once,
+    Session,
+    /// A rule written to the project's configuration.
+    Project,
+    /// A rule written to the global configuration.
+    Global,
+}
 
 /// Whether a call can change nothing: a read, a skill, or a shell command
 /// made only of read-only parts without substitution.
@@ -116,24 +171,46 @@ pub fn is_read_only_call(call: &ToolCall) -> bool {
 /// mode; in every other mode it does nothing.
 pub struct PlanGuard {
     mode: ModeHandle,
+    /// What the model reads for a refusal.
+    reason: String,
+    /// Whether it refused the call judged last.
+    refused: bool,
 }
 
 impl PlanGuard {
     #[must_use]
     pub fn new(mode: ModeHandle) -> Self {
-        Self { mode }
+        Self {
+            mode,
+            reason: Refusals::default().plan_mode,
+            refused: false,
+        }
+    }
+
+    /// Refuse with the texts of `system/permissions.md`.
+    #[must_use]
+    pub fn with_refusals(mut self, refusals: &Refusals) -> Self {
+        self.reason = refusals.plan_mode.clone();
+        self
     }
 }
 
 impl Hooks for PlanGuard {
     fn before_tool_call(&mut self, call: &ToolCall, _ctx: &ToolContext) -> ToolDecision {
         if self.mode.get() == Mode::Plan && !is_read_only_call(call) {
+            self.refused = true;
             ToolDecision::Block {
-                reason: PLAN_MODE_REASON.into(),
+                reason: self.reason.clone(),
             }
         } else {
             ToolDecision::Allow
         }
+    }
+
+    fn take_permission(&mut self) -> Option<PermissionNote> {
+        // Only a refusal is the guard's to record; a call it lets through is
+        // the rest of the chain's to decide.
+        std::mem::take(&mut self.refused).then(|| PermissionNote::new(DecidedBy::Plan, false))
     }
 }
 
@@ -218,12 +295,11 @@ impl PermissionRules {
         evaluate_rules(&self.session, tool, subject)
     }
 
-    /// [`PermissionRules::evaluate`] (or, with `session`, the session's
-    /// answers) without the broad `allow` rules `auto` mode sets aside.
+    /// [`PermissionRules::evaluate`] without the broad `allow` rules `auto`
+    /// mode sets aside.
     #[must_use]
-    pub fn evaluate_narrow(&self, tool: &str, subject: &str, session: bool) -> Option<Decision> {
-        let tables = if session { &self.session } else { &self.tools };
-        tables
+    pub fn evaluate_narrow(&self, tool: &str, subject: &str) -> Option<Decision> {
+        self.tools
             .get(tool)?
             .iter()
             .filter(|(pattern, decision)| {
@@ -317,8 +393,8 @@ pub struct PermissionRequest {
     pub call: ToolCall,
     /// Rule pattern offered for the answers that last beyond this call.
     pub suggested_pattern: String,
-    /// Whether "allow always" is on offer: in `configured` mode, which is the
-    /// one the configured rules count in, with somewhere to write the rule,
+    /// Whether "allow always" is on offer: in `configured` and `auto`, the
+    /// modes the configured rules count in, with somewhere to write the rule,
     /// and only for the one command whose scope its pattern states — a bundle
     /// of parts and a command that destroys or runs some other program leave
     /// no rule behind.
@@ -394,6 +470,12 @@ pub enum PersistScope {
 /// Blocks on the agent thread until the user answers.
 pub trait PermissionPrompter: Send {
     fn ask(&mut self, request: &PermissionRequest) -> PermissionAnswer;
+
+    /// Whether a person answers; a prompter that answers alone is recorded
+    /// as such, not as the user.
+    fn attended(&self) -> bool {
+        true
+    }
 }
 
 /// A prompter that answers every question with the same denial. A subagent
@@ -416,6 +498,10 @@ impl AutoDenyPrompter {
 impl PermissionPrompter for AutoDenyPrompter {
     fn ask(&mut self, _request: &PermissionRequest) -> PermissionAnswer {
         PermissionAnswer::DenyWithReason(self.reason.clone())
+    }
+
+    fn attended(&self) -> bool {
+        false
     }
 }
 
@@ -495,6 +581,10 @@ pub struct PermissionHooks {
     /// asks what it would review.
     classifier: Option<Box<dyn Classifier>>,
     breaker: Breaker,
+    /// Who decided the call judged last, until the loop takes it.
+    note: Option<PermissionNote>,
+    /// What the model reads when a call is refused.
+    refusals: Refusals,
 }
 
 /// How many blocks in a row, and in all, pause the reviewer and put the
@@ -529,10 +619,6 @@ struct CommandVerdict {
     forced: bool,
 }
 
-/// What the model reads when the reviewer blocks a call.
-pub const AUTO_BLOCK_REASON: &str = "blocked by the auto-mode reviewer";
-const AUTO_BLOCK_ADVICE: &str = "Do not reach the same outcome another way; continue with a safer alternative, or tell the user what you need them to run or allow.";
-
 impl PermissionHooks {
     #[must_use]
     pub fn new(rules: PermissionRules, prompter: Box<dyn PermissionPrompter>) -> Self {
@@ -543,7 +629,16 @@ impl PermissionHooks {
             persist: None,
             classifier: None,
             breaker: Breaker::default(),
+            note: None,
+            refusals: Refusals::default(),
         }
+    }
+
+    /// Refuse with the texts of `system/permissions.md`.
+    #[must_use]
+    pub fn with_refusals(mut self, refusals: Refusals) -> Self {
+        self.refusals = refusals;
+        self
     }
 
     /// Let `classifier` decide in `auto` mode what would otherwise be asked.
@@ -634,10 +729,10 @@ impl PermissionHooks {
         // The configured rules count in full only in `configured`, and less
         // their broad allows in `auto`; elsewhere they can only tighten. This
         // session's answers count everywhere but in `all`, which allows what
-        // they would.
+        // they would — in `auto` too: the user gave them for this session.
         if mode == Mode::Auto {
-            let configured = self.rules.evaluate_narrow(tool, text, false);
-            let session = self.rules.evaluate_narrow(tool, text, true);
+            let configured = self.rules.evaluate_narrow(tool, text);
+            let session = self.rules.evaluate_session(tool, text);
             return configured.into_iter().chain(session).max();
         }
         let configured = self
@@ -713,7 +808,7 @@ impl PermissionHooks {
         ctx: &ToolContext,
         forced: bool,
         parts: &[AskedPart],
-    ) -> Option<ToolDecision> {
+    ) -> Option<(ToolDecision, PermissionNote)> {
         if self.mode.get() != Mode::Auto || forced || self.breaker.paused {
             return None;
         }
@@ -724,20 +819,27 @@ impl PermissionHooks {
         // The mode may have changed while the reviewer thought; its verdict
         // then answers a question the new mode does not ask.
         if self.mode.get() != Mode::Auto {
-            return Some(self.before_tool_call(call, ctx));
+            return Some(self.judge(call, ctx));
         }
+        let reviewed = |allowed: bool, reason: &str| PermissionNote {
+            reason: reason.to_string(),
+            ..PermissionNote::new(DecidedBy::Reviewer, allowed)
+        };
         match verdict {
             Verdict::Allow { reason } => {
                 log::info!("auto mode allowed {}: {reason}", call.name);
                 self.breaker.consecutive = 0;
-                Some(ToolDecision::Allow)
+                Some((ToolDecision::Allow, reviewed(true, &reason)))
             }
             Verdict::Block { reason } => {
                 log::info!("auto mode blocked {}: {reason}", call.name);
                 self.breaker.block();
-                Some(ToolDecision::Block {
-                    reason: format!("{AUTO_BLOCK_REASON}: {reason}\n{AUTO_BLOCK_ADVICE}"),
-                })
+                Some((
+                    ToolDecision::Block {
+                        reason: Refusals::with_reason(&self.refusals.reviewer_blocked, &reason),
+                    },
+                    reviewed(false, &reason),
+                ))
             }
             Verdict::Unavailable { reason } => {
                 log::warn!("auto mode could not review {}: {reason}", call.name);
@@ -771,14 +873,36 @@ impl PermissionHooks {
 
 impl Hooks for PermissionHooks {
     fn before_tool_call(&mut self, call: &ToolCall, ctx: &ToolContext) -> ToolDecision {
+        let (decision, note) = self.judge(call, ctx);
+        self.note = Some(note);
+        decision
+    }
+
+    fn take_permission(&mut self) -> Option<PermissionNote> {
+        self.note.take()
+    }
+}
+
+impl PermissionHooks {
+    /// The decision on `call`, and who made it.
+    fn judge(&mut self, call: &ToolCall, ctx: &ToolContext) -> (ToolDecision, PermissionNote) {
         match self.decide(call, ctx) {
-            Decision::Allow => ToolDecision::Allow,
-            Decision::Deny if self.mode.get() == Mode::Plan => ToolDecision::Block {
-                reason: PLAN_MODE_REASON.into(),
-            },
-            Decision::Deny => ToolDecision::Block {
-                reason: "denied by the permission rules".into(),
-            },
+            Decision::Allow => (
+                ToolDecision::Allow,
+                PermissionNote::new(DecidedBy::Rules, true),
+            ),
+            Decision::Deny if self.mode.get() == Mode::Plan => (
+                ToolDecision::Block {
+                    reason: self.refusals.plan_mode.clone(),
+                },
+                PermissionNote::new(DecidedBy::Plan, false),
+            ),
+            Decision::Deny => (
+                ToolDecision::Block {
+                    reason: self.refusals.rule_denied.clone(),
+                },
+                PermissionNote::new(DecidedBy::Rules, false),
+            ),
             Decision::Ask => {
                 let subject = subject_of(call, ctx);
                 let (parts, forced) = if call.name == "bash" {
@@ -790,8 +914,8 @@ impl Hooks for PermissionHooks {
                         self.rule(&call.name, &subject) == Some(Decision::Ask),
                     )
                 };
-                if let Some(decision) = self.review(call, ctx, forced, &parts) {
-                    return decision;
+                if let Some(judged) = self.review(call, ctx, forced, &parts) {
+                    return judged;
                 }
                 // A rule outliving this call is an answer given without seeing
                 // the calls it will cover, so it is on offer only where it
@@ -802,7 +926,7 @@ impl Hooks for PermissionHooks {
                 let bundle = parts.len() > 1;
                 let destructive = parts.iter().any(|p| destructive_command(&p.text));
                 let delegating = parts.iter().any(|p| delegating_command(&p.text));
-                let can_persist = self.mode.get() == Mode::Configured
+                let can_persist = matches!(self.mode.get(), Mode::Configured | Mode::Auto)
                     && self.persist.is_some()
                     && !bundle
                     && !destructive
@@ -842,35 +966,77 @@ impl Hooks for PermissionHooks {
                 ) {
                     self.breaker = Breaker::default();
                 }
+                let attended = self.prompter.attended();
+                let user = |allowed: bool, lasting: Lasting| {
+                    if attended {
+                        PermissionNote {
+                            lasting: Some(lasting),
+                            ..PermissionNote::new(DecidedBy::User, allowed)
+                        }
+                    } else {
+                        PermissionNote::new(DecidedBy::Unattended, allowed)
+                    }
+                };
                 match answer {
-                    PermissionAnswer::AllowOnce => ToolDecision::Allow,
+                    PermissionAnswer::AllowOnce => (ToolDecision::Allow, user(true, Lasting::Once)),
                     // An answer outlasting the call when none was on offer
                     // stands for this call only.
-                    PermissionAnswer::AllowSession if !can_allow_session => ToolDecision::Allow,
+                    PermissionAnswer::AllowSession if !can_allow_session => {
+                        (ToolDecision::Allow, user(true, Lasting::Once))
+                    }
                     PermissionAnswer::AllowSession => {
                         self.remember(&request, Decision::Allow, None);
-                        ToolDecision::Allow
+                        (ToolDecision::Allow, user(true, Lasting::Session))
                     }
                     PermissionAnswer::AllowAlways => {
                         self.remember(&request, Decision::Allow, Some(PersistScope::Project));
-                        ToolDecision::Allow
+                        let lasting = if request.can_persist {
+                            Lasting::Project
+                        } else {
+                            Lasting::Session
+                        };
+                        (ToolDecision::Allow, user(true, lasting))
                     }
                     PermissionAnswer::AllowAlwaysGlobal => {
                         self.remember(&request, Decision::Allow, Some(PersistScope::Global));
-                        ToolDecision::Allow
+                        let lasting = if request.can_persist {
+                            Lasting::Global
+                        } else {
+                            Lasting::Session
+                        };
+                        (ToolDecision::Allow, user(true, lasting))
                     }
-                    PermissionAnswer::Deny => ToolDecision::Block {
-                        reason: "denied by the user".into(),
-                    },
+                    PermissionAnswer::Deny => (
+                        ToolDecision::Block {
+                            reason: self.refusals.user_denied.clone(),
+                        },
+                        user(false, Lasting::Once),
+                    ),
                     PermissionAnswer::DenySession => {
                         self.remember(&request, Decision::Deny, None);
-                        ToolDecision::Block {
-                            reason: "denied by the user for this session".into(),
-                        }
+                        (
+                            ToolDecision::Block {
+                                reason: self.refusals.user_denied_session.clone(),
+                            },
+                            user(false, Lasting::Session),
+                        )
                     }
-                    PermissionAnswer::DenyWithReason(reason) => ToolDecision::Block {
-                        reason: format!("denied by the user: {reason}"),
-                    },
+                    PermissionAnswer::DenyWithReason(reason) => (
+                        ToolDecision::Block {
+                            reason: Refusals::with_reason(
+                                &self.refusals.user_denied_reason,
+                                &reason,
+                            ),
+                        },
+                        if attended {
+                            PermissionNote {
+                                reason,
+                                ..user(false, Lasting::Once)
+                            }
+                        } else {
+                            user(false, Lasting::Once)
+                        },
+                    ),
                 }
             }
         }
@@ -1749,7 +1915,7 @@ mod tests {
         assert_eq!(rules.evaluate("edit", "README.md"), None);
         let text = toml::to_string(&rules).unwrap();
         assert_eq!(toml::from_str::<PermissionRules>(&text).unwrap(), rules);
-        assert_eq!(PermissionRules::default().mode, Mode::Configured);
+        assert_eq!(PermissionRules::default().mode, Mode::Auto);
         // The earlier names still read.
         assert_eq!(rules_of_mode("accept-edits"), Mode::Edit);
         // `auto` is its own mode now, not a spelling of `all`.
@@ -1857,7 +2023,9 @@ mod tests {
         rules.add_session("bash", "rm *", Decision::Deny);
         let (hooks, _) = hooks(rules, vec![]);
         let handle = hooks.mode_handle();
-        for mode in [Mode::Ask, Mode::Edit, Mode::Configured] {
+        // `make *` is a broad pattern, yet in `auto` too an answer the user
+        // gave for the session holds.
+        for mode in [Mode::Ask, Mode::Edit, Mode::Configured, Mode::Auto] {
             handle.set(mode);
             assert_eq!(hooks.decide(&bash("make all"), &ctx()), Decision::Allow);
             assert_eq!(hooks.decide(&bash("rm x"), &ctx()), Decision::Deny);
@@ -2371,7 +2539,10 @@ mod tests {
         let persisted = Arc::new(Mutex::new(Vec::new()));
         let sink = persisted.clone();
         let (hooks, asked) = hooks(
-            PermissionRules::default(),
+            PermissionRules {
+                mode: Mode::Configured,
+                ..PermissionRules::default()
+            },
             vec![
                 PermissionAnswer::AllowOnce,
                 PermissionAnswer::AllowSession,
@@ -2548,7 +2719,10 @@ mod tests {
     fn mode_handle_switches_the_live_mode() {
         let asked = Arc::new(Mutex::new(Vec::new()));
         let mut hooks = PermissionHooks::new(
-            PermissionRules::default(),
+            PermissionRules {
+                mode: Mode::Configured,
+                ..PermissionRules::default()
+            },
             Box::new(Scripted {
                 answers: vec![],
                 asked: asked.clone(),
@@ -2625,7 +2799,7 @@ mod tests {
         let blocked = |guard: &mut PlanGuard, call: &ToolCall| {
             matches!(
                 guard.before_tool_call(call, &ctx()),
-                ToolDecision::Block { reason } if reason == PLAN_MODE_REASON
+                ToolDecision::Block { reason } if reason == Refusals::default().plan_mode
             )
         };
         assert!(!blocked(
@@ -2729,6 +2903,76 @@ mod tests {
     }
 
     #[test]
+    fn every_decision_leaves_a_note_of_who_made_it() {
+        let configured = PermissionRules {
+            mode: Mode::Configured,
+            ..rules(
+                r#"
+                [bash]
+                "sudo*" = "deny"
+                "#,
+            )
+        };
+        let (mut hooks, _) = hooks(
+            configured,
+            vec![
+                PermissionAnswer::AllowSession,
+                PermissionAnswer::DenyWithReason("use the fixture".into()),
+            ],
+        );
+        let ctx = ctx();
+        let mut note = |call: ToolCall| {
+            hooks.before_tool_call(&call, &ctx);
+            hooks.take_permission().expect("a note")
+        };
+        assert_eq!(
+            note(bash("ls")),
+            PermissionNote::new(DecidedBy::Rules, true)
+        );
+        assert_eq!(
+            note(bash("sudo rm x")),
+            PermissionNote::new(DecidedBy::Rules, false)
+        );
+        assert_eq!(
+            note(bash("make")),
+            PermissionNote {
+                lasting: Some(Lasting::Session),
+                ..PermissionNote::new(DecidedBy::User, true)
+            }
+        );
+        assert_eq!(
+            note(bash("curl x")),
+            PermissionNote {
+                lasting: Some(Lasting::Once),
+                reason: "use the fixture".into(),
+                ..PermissionNote::new(DecidedBy::User, false)
+            }
+        );
+
+        let (mut reviewed, _, _) = auto_hooks("", vec![allow("part of the task")], vec![]);
+        reviewed.before_tool_call(&bash("make"), &ctx);
+        assert_eq!(
+            reviewed.take_permission(),
+            Some(PermissionNote {
+                reason: "part of the task".into(),
+                ..PermissionNote::new(DecidedBy::Reviewer, true)
+            })
+        );
+        // Taking it clears it.
+        assert_eq!(reviewed.take_permission(), None);
+
+        let mode = ModeHandle::new(Mode::Plan);
+        let mut guard = PlanGuard::new(mode);
+        guard.before_tool_call(&bash("ls"), &ctx);
+        assert_eq!(guard.take_permission(), None);
+        guard.before_tool_call(&bash("make"), &ctx);
+        assert_eq!(
+            guard.take_permission(),
+            Some(PermissionNote::new(DecidedBy::Plan, false))
+        );
+    }
+
+    #[test]
     fn auto_mode_reviews_what_the_rules_leave_open() {
         let (mut hooks, judged, asked) = auto_hooks(
             r#"
@@ -2770,7 +3014,7 @@ mod tests {
         else {
             panic!("the reviewer's block stands");
         };
-        assert!(reason.starts_with(AUTO_BLOCK_REASON));
+        assert!(reason.starts_with("blocked by the auto-mode reviewer"));
         assert!(reason.contains("pipes a download into a shell"));
         assert_eq!(
             *judged.lock().unwrap(),

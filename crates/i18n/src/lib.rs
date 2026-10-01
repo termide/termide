@@ -477,6 +477,34 @@ pub trait Translation: Send + Sync {
     fn agent_mode_auto(&self) -> &str;
     /// Permission-mode picker: all
     fn agent_mode_all(&self) -> &str;
+    /// Transcript: who decided a tool call (rules denied)
+    fn agent_perm_note_rules_denied(&self) -> &str;
+    /// Transcript: who decided a tool call (plan)
+    fn agent_perm_note_plan(&self) -> &str;
+    /// Transcript: who decided a tool call (hook allowed)
+    fn agent_perm_note_hook_allowed(&self) -> &str;
+    /// Transcript: who decided a tool call (hook denied)
+    fn agent_perm_note_hook_denied(&self) -> &str;
+    /// Transcript: who decided a tool call (reviewer allowed)
+    fn agent_perm_note_reviewer_allowed_fmt(&self, reason: &str) -> String;
+    /// Transcript: who decided a tool call (reviewer blocked)
+    fn agent_perm_note_reviewer_blocked_fmt(&self, reason: &str) -> String;
+    /// Transcript: who decided a tool call (unattended)
+    fn agent_perm_note_unattended(&self) -> &str;
+    /// Transcript: who decided a tool call (user once)
+    fn agent_perm_note_user_once(&self) -> &str;
+    /// Transcript: who decided a tool call (user session)
+    fn agent_perm_note_user_session(&self) -> &str;
+    /// Transcript: who decided a tool call (user project)
+    fn agent_perm_note_user_project(&self) -> &str;
+    /// Transcript: who decided a tool call (user global)
+    fn agent_perm_note_user_global(&self) -> &str;
+    /// Transcript: who decided a tool call (user denied)
+    fn agent_perm_note_user_denied(&self) -> &str;
+    /// Transcript: who decided a tool call (user denied session)
+    fn agent_perm_note_user_denied_session(&self) -> &str;
+    /// Transcript: who decided a tool call (user denied reason)
+    fn agent_perm_note_user_denied_reason_fmt(&self, reason: &str) -> String;
     /// Agent panel context menu: open the assembled system prompt
     fn agent_show_prompt(&self) -> &str;
     /// Agent panel context menu and `/usage`: the session-info modal title

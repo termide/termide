@@ -18,6 +18,7 @@ use crate::handoff::HandoffPrompt;
 use crate::message::{
     AssistantMessage, Message, StopReason, ToolCall, ToolResultMessage, UserMessage,
 };
+use crate::permissions::{DecidedBy, PermissionNote};
 use crate::provider::{ModelSpec, Provider, Request, StreamEvent, ThinkingLevel};
 use crate::tool::{ToolContext, ToolRegistry, ToolUpdate};
 
@@ -185,7 +186,9 @@ pub fn execute_tool(
             ),
         );
     };
-    let effective = match hooks.before_tool_call(call, ctx) {
+    let decision = hooks.before_tool_call(call, ctx);
+    let permission = hooks.take_permission().map(Box::new);
+    let effective = match decision {
         ToolDecision::Allow | ToolDecision::Approve { arguments: None } => call.clone(),
         ToolDecision::Replace { arguments }
         | ToolDecision::Approve {
@@ -195,10 +198,14 @@ pub fn execute_tool(
             ..call.clone()
         },
         ToolDecision::Block { reason } => {
-            return ToolResultMessage::error(call, format!("Tool call blocked: {reason}"));
+            let mut result = ToolResultMessage::error(call, format!("Tool call blocked: {reason}"));
+            result.permission = permission;
+            return result;
         }
     };
-    tool.execute(&effective, ctx, on_update, cancel)
+    let mut result = tool.execute(&effective, ctx, on_update, cancel);
+    result.permission = permission;
+    result
 }
 
 /// Extension points of the loop. All methods have permissive defaults.
@@ -208,6 +215,13 @@ pub fn execute_tool(
 pub trait Hooks: Send {
     fn before_tool_call(&mut self, _call: &ToolCall, _ctx: &ToolContext) -> ToolDecision {
         ToolDecision::Allow
+    }
+
+    /// Who decided the call `before_tool_call` judged last, for the record
+    /// kept with its result; taking it clears it. A hook that does not judge
+    /// permissions has nothing to say.
+    fn take_permission(&mut self) -> Option<PermissionNote> {
+        None
     }
 
     /// Inspect or rewrite a result before it enters the transcript. Runs for
@@ -239,12 +253,13 @@ impl Hooks for NoHooks {}
 /// any says so.
 pub struct ChainedHooks {
     hooks: Vec<Box<dyn Hooks>>,
+    note: Option<PermissionNote>,
 }
 
 impl ChainedHooks {
     #[must_use]
     pub fn new(hooks: Vec<Box<dyn Hooks>>) -> Self {
-        Self { hooks }
+        Self { hooks, note: None }
     }
 }
 
@@ -252,19 +267,35 @@ impl Hooks for ChainedHooks {
     fn before_tool_call(&mut self, call: &ToolCall, ctx: &ToolContext) -> ToolDecision {
         let mut current = call.clone();
         let mut replaced = false;
+        self.note = None;
         for hook in &mut self.hooks {
-            match hook.before_tool_call(&current, ctx) {
-                ToolDecision::Allow => {}
+            let decision = hook.before_tool_call(&current, ctx);
+            // The hook that settles the call says who decided; one that does
+            // not judge permissions (a command hook) is recorded as a hook.
+            let settled = |hook: &mut Box<dyn Hooks>, allowed: bool| {
+                hook.take_permission()
+                    .or_else(|| Some(PermissionNote::new(DecidedBy::Hook, allowed)))
+            };
+            match decision {
+                ToolDecision::Allow => {
+                    if let Some(note) = hook.take_permission() {
+                        self.note = Some(note);
+                    }
+                }
                 ToolDecision::Replace { arguments } => {
                     current.arguments = arguments;
                     replaced = true;
                 }
                 ToolDecision::Approve { arguments } => {
+                    self.note = settled(hook, true);
                     return ToolDecision::Approve {
                         arguments: arguments.or_else(|| replaced.then_some(current.arguments)),
                     };
                 }
-                block @ ToolDecision::Block { .. } => return block,
+                block @ ToolDecision::Block { .. } => {
+                    self.note = settled(hook, false);
+                    return block;
+                }
             }
         }
         if replaced {
@@ -274,6 +305,10 @@ impl Hooks for ChainedHooks {
         } else {
             ToolDecision::Allow
         }
+    }
+
+    fn take_permission(&mut self) -> Option<PermissionNote> {
+        self.note.take()
     }
 
     fn after_tool_call(&mut self, call: &ToolCall, result: ToolResultMessage) -> ToolResultMessage {
@@ -1397,6 +1432,67 @@ mod tests {
             })
             .unwrap();
         assert!(blocked.contains("not part of the request"), "{blocked}");
+    }
+
+    /// Approves `echo` with the text "approved" and has no say otherwise.
+    struct Approver;
+
+    impl Hooks for Approver {
+        fn before_tool_call(&mut self, call: &ToolCall, _ctx: &ToolContext) -> ToolDecision {
+            if call.arguments["text"] == "approved" {
+                ToolDecision::Approve { arguments: None }
+            } else {
+                ToolDecision::Allow
+            }
+        }
+    }
+
+    #[test]
+    fn a_result_records_who_let_the_call_run() {
+        use crate::permissions::{
+            AutoDenyPrompter, DecidedBy, Mode, PermissionHooks, PermissionNote, PermissionRules,
+        };
+
+        let echo = Arc::new(EchoTool::default());
+        let (mut agent, _) = agent(
+            ScriptedProvider::new(vec![
+                tool_reply(
+                    vec![
+                        ("1", "echo", json!({"text": "approved"})),
+                        ("2", "echo", json!({"text": "other"})),
+                    ],
+                    StopReason::ToolUse,
+                ),
+                text_reply("done"),
+            ]),
+            registry_with(echo),
+        );
+        let rules = PermissionRules {
+            mode: Mode::Configured,
+            ..PermissionRules::default()
+        };
+        let permissions = PermissionHooks::new(rules, Box::new(AutoDenyPrompter::new("no one")));
+        let mut hooks = ChainedHooks::new(vec![Box::new(Approver), Box::new(permissions)]);
+        collect(&mut agent, "go", &mut hooks);
+        let notes: Vec<_> = agent
+            .messages()
+            .iter()
+            .filter_map(|m| match m {
+                Message::ToolResult(r) => {
+                    Some((r.tool_call_id.as_str(), r.permission.as_deref().cloned()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            notes[0],
+            ("1", Some(PermissionNote::new(DecidedBy::Hook, true)))
+        );
+        // No one was there to ask: recorded as such, not as the user.
+        assert_eq!(
+            notes[1],
+            ("2", Some(PermissionNote::new(DecidedBy::Unattended, false)))
+        );
     }
 
     #[test]

@@ -12,8 +12,8 @@ use termide_agent_core::{
     build_system_prompt, discover_context_files, ensure_global_layout, AcpConfig, AcpFlavor, Agent,
     AgentDirs, AgentEvent, AutoDenyPrompter, CancelToken, CompactionPolicy, Decision, IntentLog,
     Message, ModelSpec, PermissionHooks, PermissionRules, PersistScope, PromptOptions, Provider,
-    ReviewerSetup, Session, ThinkingLevel, ToolContext, ToolRegistry, UserMessage, DEFAULT_AGENT,
-    GLOBAL_AGENT_DIR, SESSIONS_DIR,
+    Refusals, ReviewerSetup, Session, ThinkingLevel, ToolContext, ToolRegistry, UserMessage,
+    DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
 };
 use termide_agent_hooks::CommandHooks;
 use termide_agent_mcp::Connections;
@@ -576,6 +576,8 @@ struct Subagents {
     compaction: CompactionPolicy,
     /// Reviews the subagent's calls in `auto` mode.
     reviewer: ReviewerSetup,
+    /// What the subagent's model reads when a call is refused.
+    refusals: Refusals,
 }
 
 /// A runaway subagent is cut off after this many model calls.
@@ -648,10 +650,11 @@ impl Subagents {
         let mut hooks = PermissionHooks::new(
             rules,
             Box::new(AutoDenyPrompter::new(
-                "a subagent cannot prompt; it may only do what the permission rules and mode already allow",
+                self.refusals.unattended_subagent.clone(),
             )),
         )
-        .with_classifier(Box::new(self.reviewer.classifier(budget.clone())));
+        .with_classifier(Box::new(self.reviewer.classifier(budget.clone())))
+        .with_refusals(self.refusals.clone());
         let mut turns = 0usize;
         let mut progress = String::new();
         {
@@ -750,12 +753,14 @@ fn agent_setup(
         reasoning: settings.reasoning,
         compaction: settings.compaction,
         reviewer: reviewer_setup(settings, &catalog.dirs),
+        refusals: catalog.dirs.refusals(),
     }));
     let compaction_prompts = catalog.dirs.compaction_prompts();
     let plan_prompt = catalog.dirs.plan_prompt();
     let goal_prompt = catalog.dirs.goal_prompt();
     let handoff_prompt = catalog.dirs.handoff_prompt();
     let reviewer = reviewer_setup(settings, &catalog.dirs);
+    let refusals = catalog.dirs.refusals();
     let hooks: Option<HooksFactory> = {
         let configs = catalog.dirs.hooks();
         let hook_cwd = cwd.clone();
@@ -827,6 +832,7 @@ fn agent_setup(
         goal_prompt,
         handoff_prompt,
         reviewer,
+        refusals,
         fold: match settings.fold_blocks {
             termide_config::FoldBlocks::Immediately => FoldMode::Immediately,
             termide_config::FoldBlocks::OnFinish => FoldMode::OnFinish,
@@ -1416,6 +1422,7 @@ mod tests {
             reasoning: ThinkingLevel::Off,
             compaction: settings.compaction,
             reviewer: ReviewerSetup::default(),
+            refusals: Refusals::default(),
         }));
 
         assert_eq!(catalog.resolve("search").unwrap().tools.names(), ["read"]);

@@ -10,6 +10,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::permissions::PermissionNote;
+
 /// Milliseconds since the Unix epoch, used to timestamp transcript entries.
 #[must_use]
 pub fn now_millis() -> u64 {
@@ -268,6 +270,10 @@ pub struct ToolResultMessage {
     /// to the model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub details: Option<Value>,
+    /// Who let the call run, or refused it, and how: a rule, the reviewer,
+    /// the user's answer. Set by the loop, never sent to the model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission: Option<Box<PermissionNote>>,
     pub timestamp: u64,
 }
 
@@ -280,6 +286,7 @@ impl ToolResultMessage {
             content: vec![ToolResultContent::Text { text: text.into() }],
             is_error: false,
             details: None,
+            permission: None,
             timestamp: now_millis(),
         }
     }
@@ -364,6 +371,7 @@ mod tests {
                 content: vec![ToolResultContent::Text { text: "ok".into() }],
                 is_error: false,
                 details: None,
+                permission: None,
                 timestamp: 2,
             }),
         ];

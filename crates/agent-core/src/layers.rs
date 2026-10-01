@@ -23,6 +23,7 @@ use crate::hooks::{HookConfig, HOOKS_FILE};
 use crate::mcp::{McpServerConfig, MCP_FILE};
 use crate::permissions::Mode;
 use crate::plan::{PlanPrompt, SEED_PLAN};
+use crate::refusals::{Refusals, SEED_PERMISSIONS};
 
 /// The `ai` directory inside the configuration directory.
 pub const GLOBAL_AGENT_DIR: &str = "ai";
@@ -253,6 +254,7 @@ fn shipped_assets() -> Vec<(String, &'static str)> {
         (format!("{SYSTEM_DIR}/goal.md"), SEED_GOAL),
         (format!("{SYSTEM_DIR}/handoff.md"), SEED_HANDOFF),
         (format!("{SYSTEM_DIR}/classify.md"), SEED_CLASSIFY),
+        (format!("{SYSTEM_DIR}/permissions.md"), SEED_PERMISSIONS),
     ];
     assets.extend(
         SEED_ENGINES
@@ -501,6 +503,13 @@ impl AgentDirs {
     #[must_use]
     pub fn classify_prompt(&self) -> ClassifyPrompt {
         ClassifyPrompt::from_file(&self.system_file("classify.md", SEED_CLASSIFY))
+    }
+
+    /// What the model reads when a call is refused: `system/permissions.md`,
+    /// the seed otherwise.
+    #[must_use]
+    pub fn refusals(&self) -> Refusals {
+        Refusals::from_file(&self.system_file("permissions.md", SEED_PERMISSIONS))
     }
 
     /// The command-shim directory (`shims/`), from the configuration level
@@ -989,6 +998,21 @@ mod tests {
         .unwrap();
         assert_eq!(dirs.plan_prompt().request, "Go.");
         assert_eq!(dirs.plan_prompt().instructions, "Plan first.");
+        // The refusal texts the same way, the configuration level only.
+        assert_eq!(dirs.refusals(), Refusals::default());
+        std::fs::write(
+            project.join("permissions.md"),
+            "---\nrule_denied: go ahead\n---\n",
+        )
+        .unwrap();
+        assert_eq!(dirs.refusals(), Refusals::default());
+        std::fs::write(
+            global.join("system/permissions.md"),
+            "---\nrule_denied: the rules say no\n---\n",
+        )
+        .unwrap();
+        assert_eq!(dirs.refusals().rule_denied, "the rules say no");
+        assert_eq!(dirs.refusals().plan_mode, Refusals::default().plan_mode);
 
         std::fs::write(&soul, "mine").unwrap();
         ensure_global_layout(&global).unwrap();

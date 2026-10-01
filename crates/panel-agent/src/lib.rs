@@ -33,8 +33,8 @@ use termide_agent_core::{
     civil_date, Backend, BackendModel, BackendSetup, CheckpointStore, CommandScript,
     CompactionPolicy, CompactionPrompts, Decision, GoalPrompt, HandoffPrompt, Hooks, LateTools,
     Mode, ModeHandle, ModelInfo, ModelSpec, PermissionEnvelope, PermissionRules, PersistScope,
-    PlanPrompt, PromptError, PromptTemplate, Provider, QuestionEnvelope, ReviewerSetup, Session,
-    SessionSummary, SkillInfo, Tool, ToolRegistry, DEFAULT_AGENT,
+    PlanPrompt, PromptError, PromptTemplate, Provider, QuestionEnvelope, Refusals, ReviewerSetup,
+    Session, SessionSummary, SkillInfo, Tool, ToolRegistry, DEFAULT_AGENT,
 };
 use termide_config::Config;
 use termide_core::{
@@ -199,6 +199,9 @@ pub struct AgentPanelSetup {
     /// The `auto` mode reviewer: its texts from `system/classify.md`, and a
     /// model of its own when one is configured.
     pub reviewer: ReviewerSetup,
+    /// What the model reads when a call is refused, from
+    /// `system/permissions.md`.
+    pub refusals: Refusals,
     /// Where "allow always" rules go; a plain function so it survives a
     /// session switch. `None` keeps such rules in memory only.
     pub persist_rule: Option<PersistFn>,
@@ -569,6 +572,8 @@ pub struct AgentPanel {
     handoff_prompt: HandoffPrompt,
     /// Builds the `auto` mode reviewer of each agent the panel spawns.
     reviewer: ReviewerSetup,
+    /// The refusal texts every agent the panel spawns uses.
+    refusals: Refusals,
     /// When blocks fold now; passed to each transcript. `Ctrl+O` switches
     /// it between `Never` and the configured mode, so fresh blocks follow
     /// what it last did to the finished ones.
@@ -786,6 +791,7 @@ impl AgentPanel {
             &setup.goal_prompt,
             &setup.handoff_prompt,
             &setup.reviewer,
+            &setup.refusals,
             setup.persist_rule,
             setup.hooks.as_ref(),
             backend.as_ref(),
@@ -865,6 +871,7 @@ impl AgentPanel {
             goal_prompt: setup.goal_prompt,
             handoff_prompt: setup.handoff_prompt,
             reviewer: setup.reviewer,
+            refusals: setup.refusals,
             fold: setup.fold,
             fold_setting: setup.fold,
             prompt_stale: false,

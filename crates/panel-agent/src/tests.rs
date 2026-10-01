@@ -221,7 +221,12 @@ fn setup_with(provider: Arc<Scripted>) -> AgentPanelSetup {
             thinking: ThinkingLevel::Off,
         },
         tools: ToolRegistry::new(),
-        rules: PermissionRules::default(),
+        // `configured`, not the default `auto`: a reviewer would spend the
+        // scripted replies on its own calls.
+        rules: PermissionRules {
+            mode: Mode::Configured,
+            ..PermissionRules::default()
+        },
         system_prompt: String::new(),
         compaction: CompactionPolicy::default(),
         compaction_prompts: CompactionPrompts::default(),
@@ -229,6 +234,7 @@ fn setup_with(provider: Arc<Scripted>) -> AgentPanelSetup {
         goal_prompt: GoalPrompt::default(),
         handoff_prompt: HandoffPrompt::default(),
         reviewer: ReviewerSetup::default(),
+        refusals: Refusals::default(),
         persist_rule: None,
         session_dir: None,
         session: None,

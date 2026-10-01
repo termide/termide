@@ -479,6 +479,17 @@ impl Translation for RuntimeTranslation {
         agent_mode_configured,
         agent_mode_auto,
         agent_mode_all,
+        agent_perm_note_rules_denied,
+        agent_perm_note_plan,
+        agent_perm_note_hook_allowed,
+        agent_perm_note_hook_denied,
+        agent_perm_note_unattended,
+        agent_perm_note_user_once,
+        agent_perm_note_user_session,
+        agent_perm_note_user_project,
+        agent_perm_note_user_global,
+        agent_perm_note_user_denied,
+        agent_perm_note_user_denied_session,
         agent_show_prompt,
         agent_session_info,
         agent_perm_allow_once,
@@ -1451,6 +1462,27 @@ impl Translation for RuntimeTranslation {
 
     fn agent_notice_external_failed_fmt(&self, error: &str) -> String {
         self.format("agent_notice_external_failed_fmt", &[("error", error)])
+    }
+
+    fn agent_perm_note_reviewer_allowed_fmt(&self, reason: &str) -> String {
+        self.format(
+            "agent_perm_note_reviewer_allowed_fmt",
+            &[("reason", reason)],
+        )
+    }
+
+    fn agent_perm_note_reviewer_blocked_fmt(&self, reason: &str) -> String {
+        self.format(
+            "agent_perm_note_reviewer_blocked_fmt",
+            &[("reason", reason)],
+        )
+    }
+
+    fn agent_perm_note_user_denied_reason_fmt(&self, reason: &str) -> String {
+        self.format(
+            "agent_perm_note_user_denied_reason_fmt",
+            &[("reason", reason)],
+        )
     }
 
     fn agent_queued_fmt(&self, count: usize) -> String {

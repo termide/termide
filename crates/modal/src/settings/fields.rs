@@ -927,17 +927,17 @@ mod enum_option_tests {
     fn the_permission_mode_for_new_sessions_is_chosen_from_the_six() {
         let mut config = Config::default();
         let field = AI_PERMISSION_MODE_FIELD;
-        // Configured by default, shown by its localized name.
-        assert_eq!(config.ai.permission_mode(), "configured");
+        // Auto by default, shown by its localized name.
+        assert_eq!(config.ai.permission_mode(), "auto");
         let options = enum_options(&config, SettingsTab::Ai, field).unwrap();
         assert_eq!(
             options.values,
             ["ask", "plan", "edit", "configured", "auto", "all"]
         );
-        assert_eq!(options.current, Some(3));
+        assert_eq!(options.current, Some(4));
         assert_eq!(
             get_field_value(&config, SettingsTab::Ai, field),
-            i18n::t().agent_mode_configured()
+            i18n::t().agent_mode_auto()
         );
         apply_enum_value(&mut config, SettingsTab::Ai, field, "edit");
         assert_eq!(config.ai.permission_mode(), "edit");

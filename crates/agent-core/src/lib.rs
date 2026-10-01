@@ -36,6 +36,7 @@ pub mod message;
 pub mod permissions;
 pub mod plan;
 pub mod provider;
+pub mod refusals;
 pub mod runtime;
 pub mod session;
 pub mod tool;
@@ -78,12 +79,13 @@ pub use message::{
 };
 pub use permissions::{
     is_read_only_call, permission_channel, shell_parts, subject_of, AskedPart, AutoDenyPrompter,
-    ChannelPrompter, Decision, Mode, ModeHandle, PermissionAnswer, PermissionEnvelope,
-    PermissionHooks, PermissionPrompter, PermissionRequest, PermissionRules, PersistRule,
-    PersistScope, PlanGuard, RuleTables, ShellPart, PLAN_MODE_REASON,
+    ChannelPrompter, DecidedBy, Decision, Lasting, Mode, ModeHandle, PermissionAnswer,
+    PermissionEnvelope, PermissionHooks, PermissionNote, PermissionPrompter, PermissionRequest,
+    PermissionRules, PersistRule, PersistScope, PlanGuard, RuleTables, ShellPart,
 };
 pub use plan::{PlanPrompt, SEED_PLAN};
 pub use provider::{ModelInfo, ModelSpec, Provider, Request, StreamEvent, ThinkingLevel, ToolSpec};
+pub use refusals::{Refusals, SEED_PERMISSIONS};
 pub use runtime::{AgentRuntime, Backend, BackendModel, BackendSetup, HostTools, PromptError};
 pub use session::{
     Entry, EntryKind, LoggedMessage, Session, SessionHeader, SessionModel, SessionSummary, Timing,

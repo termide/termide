@@ -103,6 +103,7 @@ impl AgentPanel {
             &self.goal_prompt,
             &self.handoff_prompt,
             &self.reviewer,
+            &self.refusals,
             self.persist_rule,
             self.hooks.as_ref(),
             self.backend.as_ref(),

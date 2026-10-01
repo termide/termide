@@ -228,36 +228,53 @@ fn clip(text: &str, max: usize) -> String {
     }
 }
 
-/// Read a verdict from the reviewer's reply: the first word decides, and
-/// only an explicit `ALLOW` or `BLOCK` counts. The reason is the rest of the
-/// first line or the next line.
+/// Read a verdict from the reviewer's reply: the last line that opens with
+/// an explicit `ALLOW` or `BLOCK` decides — the reason comes first, so the
+/// verdict is the conclusion and not a guess made before it. The reason is
+/// the rest of that line, or else the first other line.
 #[must_use]
 pub fn parse_classification(reply: &str) -> Verdict {
-    let mut lines = reply.lines().map(str::trim).filter(|l| !l.is_empty());
-    let first = lines.next().unwrap_or_default();
-    let first = first.trim_start_matches(['*', '`', '#', ' ']);
-    let token: String = first
-        .chars()
-        .take_while(char::is_ascii_alphabetic)
-        .collect::<String>()
-        .to_ascii_uppercase();
-    let tail = first[token.len()..]
-        .trim_start_matches(['*', '`', ':', '.', '-', '—', ' '])
-        .trim();
-    let reason = if tail.is_empty() {
-        lines.next().unwrap_or_default().to_string()
-    } else {
-        tail.to_string()
-    };
-    match token.as_str() {
-        "ALLOW" => Verdict::Allow { reason },
-        "BLOCK" => Verdict::Block { reason },
-        _ => Verdict::Unavailable {
+    let lines: Vec<&str> = reply
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let verdict = lines.iter().enumerate().rev().find_map(|(at, line)| {
+        let line = line.trim_start_matches(['*', '`', '#', ' ']);
+        let token: String = line
+            .chars()
+            .take_while(char::is_ascii_alphabetic)
+            .collect::<String>()
+            .to_ascii_uppercase();
+        matches!(token.as_str(), "ALLOW" | "BLOCK").then(|| {
+            let tail = line[token.len()..]
+                .trim_start_matches(['*', '`', ':', '.', '-', '—', ' '])
+                .trim();
+            (at, token, tail.to_string())
+        })
+    });
+    let Some((at, token, tail)) = verdict else {
+        return Verdict::Unavailable {
             reason: format!(
                 "the reviewer's reply had no verdict: {:?}",
                 clip(reply, 200)
             ),
-        },
+        };
+    };
+    let reason = if tail.is_empty() {
+        lines
+            .iter()
+            .enumerate()
+            .find(|(other, _)| *other != at)
+            .map(|(_, line)| line.trim_start_matches(['*', '`', '-', ' ']).to_string())
+            .unwrap_or_default()
+    } else {
+        tail
+    };
+    if token == "ALLOW" {
+        Verdict::Allow { reason }
+    } else {
+        Verdict::Block { reason }
     }
 }
 
@@ -409,6 +426,17 @@ mod tests {
         assert!(matches!(
             parse_classification("I think it is fine"),
             Verdict::Unavailable { .. }
+        ));
+        // The reason first, then the verdict: the conclusion decides.
+        assert_eq!(
+            parse_classification("Sends .env to a paste site.\nBLOCK"),
+            Verdict::Block {
+                reason: "Sends .env to a paste site.".into()
+            }
+        );
+        assert!(matches!(
+            parse_classification("ALLOW would be wrong: it deletes the cache.\nBLOCK"),
+            Verdict::Block { .. }
         ));
         assert!(matches!(
             parse_classification(""),

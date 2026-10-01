@@ -277,12 +277,15 @@ tool and an argument pattern (`bash: "git push *"`, `edit: "src/**"`), evaluated
 deny → ask → allow. The mode decides which rules count and what unresolved
 calls do: `ask` (everything asks, configured `allow` rules set aside), `plan`
 (reads and the web pass, changes are refused), `edit` (edits inside the
-project and the web pass, commands ask), `configured` (default: the rules
-decide, the rest asks), `auto` (the rules decide, the rest goes to a reviewer
+project and the web pass, commands ask), `configured` (the rules decide, the
+rest asks), `auto` (default: the rules decide, the rest goes to a reviewer
 model, §4b) and `all` (everything passes). A rule's `deny` and
 `ask` hold in every mode, so a stricter mode never protects less; answers
 given for the session count everywhere but in `all`, and "allow always" is
-offered only in `configured`, the one mode the configured rules count in.
+offered only in `configured` and `auto`, the modes the configured rules count
+in. `auto` is the default, as it is Claude Code's starting mode: a
+session starts without card after card, and the reviewer, not a prompt,
+stands between the agent and what the rules leave open.
 Prompt answers: allow once, allow for the session, allow always in the project
 or everywhere (a rule in the project `.termide` or the global config), deny,
 deny for the session. This is the Claude Code / OpenCode shape with ACP's
@@ -301,7 +304,7 @@ Chosen TOML shape (OpenCode-style tables, so "allow always" appends one key):
 
 ```toml
 [ai.permissions]
-mode = "configured" # ask | plan | edit | configured | auto | all
+mode = "auto" # ask | plan | edit | configured | auto | all
 
 [ai.permissions.bash]
 "git status*" = "allow"
@@ -406,8 +409,27 @@ about. The reviewer's text is `ai/system/classify.md`, one editable file at
 the configuration level only, like every service prompt — a checked-out
 repository must not be able to tell the reviewer to allow everything; it
 reviews with the session's model unless `auto_reviewer` names a connection.
-Not covered yet: the allowed verdicts are logged, not shown in the
-transcript.
+The reviewer answers with its reason first and the verdict last: a small
+model that names the verdict first decides before it thinks, and on a local
+Qwen it once called an upload of `.env` to a paste site `ALLOW` while
+describing it as a leak; with the reason first the same scenarios came out
+right on every run. Its prompt says outright that looking — reading,
+listing, sizes, settings, dry runs, anywhere on the machine — changes
+nothing, while printing a credential, or cleaning up when asked only to
+analyse, is blocked; the first version blocked `du ~/Library/Caches` in a
+security review.
+
+Every decision is kept with the call's result as a `PermissionNote` (who:
+rules, plan, hook, reviewer, user, unattended; allowed or not; for the user
+how long the answer holds, for the reviewer its reason), set by the loop
+through `Hooks::take_permission` — `ChainedHooks` takes it from the hook
+that settled the call and records a command hook as a hook. It travels in
+the session log, never to the model, and the transcript shows all but the
+rules' silent allows. A rule's refusal tells the model the rules are the
+user's: in a live session the agent probed `~/.ssh` four ways after the
+first denial. The refusal texts themselves — rule, plan mode, reviewer, the
+user's denials, an unattended run — are `ai/system/permissions.md`, one
+front-matter key each (`Refusals`), so no text the model reads is code.
 
 ## 5. Hooks and extension mechanism
 

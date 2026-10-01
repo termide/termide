@@ -595,7 +595,7 @@ wants to do something that is not already allowed, a card appears in the
 panel above the input. Its title is the intent — "Agent wants to run bash:" —
 and under it, dim, exactly what that is (the command or path); a long one
 folds to five lines that a click unfolds. The rows follow: allow once, allow
-for this session, in `configured` mode also allow always in this project and
+for this session, in `configured` and `auto` also allow always in this project and
 allow always everywhere, then deny, deny for this session, **deny and tell the
 agent why** (a sentence you type, returned to the model as the reason, so it
 can take another way), and **stop the run**. The rows that outlast the call
@@ -612,12 +612,24 @@ one you stopped); it rings once until you look at the panel, and
 `.termide/config.toml` in the project, "everywhere" to the global
 configuration; answers for the session live until the panel closes.
 
+Every call keeps who decided it, in the session log and so across a resume:
+the rules, plan mode, a hook, the auto mode reviewer with its reason, no one
+(a subagent or a headless run that had no one to ask), or you — with the
+answer you gave and how long it holds. An unfolded call shows it on a line
+of its own (`✓ you allowed it for this session`, `✗ the auto mode reviewer
+blocked it: …`); a call the rules allowed without asking, the common case,
+says nothing. A refusal by a rule tells the model the rules are yours, so it
+does not go looking for another way to the same thing. What the model reads
+for each kind of refusal — a rule, plan mode, the reviewer, your denial, a
+run with no one to ask — is `system/permissions.md` in the configuration's
+agent directory, one line per case; edit it to word them your way.
+
 Rules live per tool. Among the rules that match, the strictest wins, so a
 `deny` always beats an `allow`:
 
 ```toml
 [ai.permissions]
-mode = "configured" # ask | plan | edit | configured (default) | auto | all — what new sessions start in
+mode = "auto"       # ask | plan | edit | configured | auto (default) | all — what new sessions start in
 
 [ai.permissions.bash]
 "cargo *"     = "allow"
@@ -675,7 +687,7 @@ answer you give is the answer that is recorded.
 The mode decides which rules count and what happens to anything none covers.
 
 `mode` in the configuration is the starting point every new session takes
-(`configured` unless you change it), also set from the settings modal's **AI**
+(`auto` unless you change it), also set from the settings modal's **AI**
 section under Permissions; the panel's **Permissions** chip and `Shift+Tab` change it
 for the current panel only.
 
@@ -686,12 +698,12 @@ for the current panel only.
 - **edit** also edits and creates files inside the project without asking;
   commands, MCP tools and files outside the project ask. The configured
   `allow` rules do not count.
-- **configured** (the default) follows the configured rules and your answers
-  in this session, asks about the rest, and is the one mode that offers
-  "allow always".
-- **auto** follows the configured rules less the broad `allow` ones, edits
-  inside the project without asking, and hands what would otherwise ask to a
-  reviewer model that allows or blocks it in your place. See below.
+- **configured** follows the configured rules and your answers in this
+  session, asks about the rest, and offers "allow always".
+- **auto** (the default) follows the configured rules less the broad `allow`
+  ones, edits inside the project without asking, and hands what would
+  otherwise ask to a reviewer model that allows or blocks it in your place.
+  See below.
 - **all** allows everything.
 
 | | ask | plan | edit | configured | auto | all |
@@ -868,6 +880,7 @@ ai/
   system/goal.md           how the judge decides whether a /goal is reached
   system/handoff.md        how /handoff briefs the unfinished work
   system/classify.md       what the auto mode reviewer allows and blocks
+  system/permissions.md    what the model reads when a call is refused
   web/engines/<name>.toml  search engines for web_search, see Web
   web/browser/             the web tools' browser profile (config level only)
 ```
@@ -1336,8 +1349,9 @@ termide --prompt "count the TODOs in src" --output json
 
 No one is watching to answer a permission card, so a headless run does only
 what the rules and the mode already allow: anything that would ask is refused
-with a reason the model reads. In the default `configured` mode, add `allow`
-rules for the exact commands and paths the task needs, set `mode = "auto"` to
-have the reviewer decide the rest, or set `mode = "all"` for unattended work. Plan mode has no meaning without the panel and is
-treated as `configured`, and an external (`[acp]`) agent cannot be run this
+with a reason the model reads. In the default `auto` mode the reviewer decides
+what the rules leave open, and a call it cannot decide is refused; in
+`configured`, add `allow` rules for the exact commands and paths the task
+needs, or set `mode = "all"` for unattended work. Plan mode has no meaning
+without the panel and is treated as `auto`, and an external (`[acp]`) agent cannot be run this
 way.
