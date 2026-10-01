@@ -33,8 +33,8 @@ use termide_agent_core::{
     civil_date, Backend, BackendModel, BackendSetup, CheckpointStore, CommandScript,
     CompactionPolicy, CompactionPrompts, Decision, GoalPrompt, HandoffPrompt, Hooks, LateTools,
     Mode, ModeHandle, ModelInfo, ModelSpec, PermissionEnvelope, PermissionRules, PersistScope,
-    PlanPrompt, PromptError, PromptTemplate, Provider, QuestionEnvelope, Session, SessionSummary,
-    SkillInfo, Tool, ToolRegistry, DEFAULT_AGENT,
+    PlanPrompt, PromptError, PromptTemplate, Provider, QuestionEnvelope, ReviewerSetup, Session,
+    SessionSummary, SkillInfo, Tool, ToolRegistry, DEFAULT_AGENT,
 };
 use termide_config::Config;
 use termide_core::{
@@ -196,6 +196,9 @@ pub struct AgentPanelSetup {
     pub goal_prompt: GoalPrompt,
     /// The handoff-brief texts, from the agent directory's `system/handoff.md`.
     pub handoff_prompt: HandoffPrompt,
+    /// The `auto` mode reviewer: its texts from `system/classify.md`, and a
+    /// model of its own when one is configured.
+    pub reviewer: ReviewerSetup,
     /// Where "allow always" rules go; a plain function so it survives a
     /// session switch. `None` keeps such rules in memory only.
     pub persist_rule: Option<PersistFn>,
@@ -564,6 +567,8 @@ pub struct AgentPanel {
     goal_prompt: GoalPrompt,
     /// The handoff-brief texts, passed to the agent for `/handoff`.
     handoff_prompt: HandoffPrompt,
+    /// Builds the `auto` mode reviewer of each agent the panel spawns.
+    reviewer: ReviewerSetup,
     /// When blocks fold now; passed to each transcript. `Ctrl+O` switches
     /// it between `Never` and the configured mode, so fresh blocks follow
     /// what it last did to the finished ones.
@@ -780,6 +785,7 @@ impl AgentPanel {
             &setup.plan_prompt,
             &setup.goal_prompt,
             &setup.handoff_prompt,
+            &setup.reviewer,
             setup.persist_rule,
             setup.hooks.as_ref(),
             backend.as_ref(),
@@ -858,6 +864,7 @@ impl AgentPanel {
             plan_prompt: setup.plan_prompt,
             goal_prompt: setup.goal_prompt,
             handoff_prompt: setup.handoff_prompt,
+            reviewer: setup.reviewer,
             fold: setup.fold,
             fold_setting: setup.fold,
             prompt_stale: false,

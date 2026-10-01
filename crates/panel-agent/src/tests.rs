@@ -228,6 +228,7 @@ fn setup_with(provider: Arc<Scripted>) -> AgentPanelSetup {
         plan_prompt: PlanPrompt::default(),
         goal_prompt: GoalPrompt::default(),
         handoff_prompt: HandoffPrompt::default(),
+        reviewer: ReviewerSetup::default(),
         persist_rule: None,
         session_dir: None,
         session: None,
@@ -3322,7 +3323,7 @@ fn delegated_tasks_follow_the_session_mode() {
     assert!(panel.switch_agent("review"));
     assert_eq!(
         *seen.lock().unwrap(),
-        vec![Mode::Configured, Mode::All, Mode::Edit]
+        vec![Mode::Configured, Mode::Auto, Mode::Edit]
     );
 }
 
@@ -3336,10 +3337,10 @@ fn mode_switches_from_the_chip_and_with_shift_tab() {
     let events = panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));
     assert!(events.iter().any(|e| matches!(
         e,
-        PanelEvent::SetStatusMessage { message, .. } if message.ends_with("all")
+        PanelEvent::SetStatusMessage { message, .. } if message.ends_with("auto")
     )));
-    assert_eq!(chip(&panel, MODE_ACTION), "all");
-    assert_eq!(hooks_mode.get(), Mode::All);
+    assert_eq!(chip(&panel, MODE_ACTION), "auto");
+    assert_eq!(hooks_mode.get(), Mode::Auto);
 
     // The chip opens a picker with the current mode marked.
     let events = panel.handle_status_action(MODE_ACTION);
@@ -3347,8 +3348,8 @@ fn mode_switches_from_the_chip_and_with_shift_tab() {
     let PanelEvent::ShowSelect { options, .. } = picker else {
         panic!("expected a picker, got {picker:?}");
     };
-    assert_eq!(options.len(), 5);
-    assert!(options[4].starts_with("● all"), "{:?}", options[4]);
+    assert_eq!(options.len(), 6);
+    assert!(options[4].starts_with("● auto"), "{:?}", options[4]);
     assert!(options[1].starts_with("  plan"), "{:?}", options[1]);
     assert!(matches!(
         select(&mut panel, picker, 2),
@@ -3364,8 +3365,9 @@ fn mode_switches_from_the_chip_and_with_shift_tab() {
 
     // Cycling wraps from all to ask, and a rebuilt agent starts in the
     // chosen mode.
-    panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));
-    panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));
+    for _ in 0..3 {
+        panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));
+    }
     assert_eq!(chip(&panel, MODE_ACTION), "all");
     panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));
     assert_eq!(chip(&panel, MODE_ACTION), "ask");
@@ -4451,7 +4453,7 @@ fn an_external_agent_that_follows_the_mode_gets_termides_prompt_tools_and_mode()
     // The Mode chip is there, and a switch reaches the agent.
     assert_eq!(chip(&panel, MODE_ACTION), "configured");
     panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));
-    assert_eq!(*modes.lock().unwrap(), vec![Mode::All]);
+    assert_eq!(*modes.lock().unwrap(), vec![Mode::Auto]);
 }
 
 #[test]
@@ -4831,8 +4833,8 @@ fn plan_mode_adds_its_instructions_and_offers_to_carry_the_plan_out() {
         plan_prompt: PlanPrompt::from_file("---\nrequest: Do it.\n---\nPlan first."),
         ..setup(vec![reply("1. change a\n2. change b"), reply("done")])
     });
-    // ask → accept-edits → auto → plan
-    for _ in 0..3 {
+    // configured → auto → all → ask → plan
+    for _ in 0..4 {
         panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));
     }
     assert_eq!(panel.mode.get(), Mode::Plan);

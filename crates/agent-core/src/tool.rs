@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::ask::UserAsker;
 use crate::cancel::CancelToken;
+use crate::classifier::SessionView;
 use crate::message::{ToolCall, ToolResultMessage};
 use crate::provider::ToolSpec;
 
@@ -18,6 +19,9 @@ pub struct ToolContext {
     /// Someone to put a question to; `None` when no one is watching the run
     /// (a subagent, headless mode).
     pub asker: Option<UserAsker>,
+    /// The session the call comes from, for the `auto` mode reviewer; `None`
+    /// for a call from outside termide's own loop.
+    pub session: Option<SessionView>,
 }
 
 impl ToolContext {
@@ -27,6 +31,7 @@ impl ToolContext {
         Self {
             cwd: cwd.into(),
             asker: None,
+            session: None,
         }
     }
 }

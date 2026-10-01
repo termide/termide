@@ -224,6 +224,10 @@ pub(super) fn fields_for_tab(tab: SettingsTab) -> Vec<FieldDescriptor> {
                 label: t.settings_agent_permission_mode(),
                 field_type: FieldType::Enum,
             },
+            FieldDescriptor {
+                label: t.settings_agent_auto_reviewer(),
+                field_type: FieldType::Enum,
+            },
         ],
         SettingsTab::Connection => super::connection::connection_fields(),
         SettingsTab::Keybindings => vec![],
@@ -314,6 +318,7 @@ pub(super) fn get_field_value(config: &Config, tab: SettingsTab, index: usize) -
                 }
             }
             AI_PERMISSION_MODE_FIELD => permission_mode_label(config.ai.permission_mode()),
+            AI_AUTO_REVIEWER_FIELD => auto_reviewer_label(&config.ai.auto_reviewer),
             _ => String::new(),
         },
         // Read from the open connection by the modal, not the config alone.
@@ -491,6 +496,11 @@ pub(super) fn enum_options(config: &Config, tab: SettingsTab, index: usize) -> O
             let labels = values.iter().map(|v| permission_mode_label(v)).collect();
             (values, labels, config.ai.permission_mode().to_string())
         }
+        (SettingsTab::Ai, AI_AUTO_REVIEWER_FIELD) => {
+            let values = auto_reviewer_choices(config);
+            let labels = values.iter().map(|v| auto_reviewer_label(v)).collect();
+            (values, labels, config.ai.auto_reviewer.clone())
+        }
         _ => return None,
     };
 
@@ -532,6 +542,7 @@ pub(super) fn apply_enum_value(config: &mut Config, tab: SettingsTab, index: usi
         (SettingsTab::Ai, 4) => config.ai.web.engine = value.to_string(),
         (SettingsTab::Ai, 5) => config.ai.web.display = value.to_string(),
         (SettingsTab::Ai, AI_PERMISSION_MODE_FIELD) => config.ai.set_permission_mode(value),
+        (SettingsTab::Ai, AI_AUTO_REVIEWER_FIELD) => config.ai.auto_reviewer = value.to_string(),
         _ => {}
     }
 }
@@ -573,10 +584,42 @@ fn permission_mode_label(mode: &str) -> String {
         "ask" => t.agent_mode_ask(),
         "plan" => t.agent_mode_plan(),
         "edit" => t.agent_mode_edit(),
+        "auto" => t.agent_mode_auto(),
         "all" => t.agent_mode_all(),
         _ => t.agent_mode_configured(),
     }
     .to_string()
+}
+
+/// The AI tab's field for the connection whose model reviews in `auto` mode.
+pub(super) const AI_AUTO_REVIEWER_FIELD: usize = 8;
+
+/// What the `auto` mode reviewer can be: the session's model (empty), or a
+/// connection to a model — a CLI agent reviews nothing.
+fn auto_reviewer_choices(config: &Config) -> Vec<String> {
+    std::iter::once(String::new())
+        .chain(
+            config
+                .ai
+                .connections
+                .iter()
+                .filter(|(_, c)| !termide_config::is_cli_provider(&c.provider))
+                .map(|(name, _)| name.clone()),
+        )
+        .collect()
+}
+
+fn auto_reviewer_label(value: &str) -> String {
+    if value.is_empty() {
+        i18n::t().settings_agent_auto_reviewer_session().to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+fn cycle_auto_reviewer(config: &mut Config, forward: bool) {
+    let choices = auto_reviewer_choices(config);
+    step_value(&mut config.ai.auto_reviewer, &choices, forward);
 }
 
 /// Step the permission mode to the next (or previous) one, wrapping.
@@ -683,6 +726,7 @@ pub(super) fn cycle_enum_forward(config: &mut Config, tab: SettingsTab, index: u
             2 => cycle_fold_blocks(config, true),
             3..=5 => cycle_web_field(config, index, true),
             AI_PERMISSION_MODE_FIELD => cycle_permission_mode(config, true),
+            AI_AUTO_REVIEWER_FIELD => cycle_auto_reviewer(config, true),
             _ => {}
         },
         _ => {}
@@ -734,6 +778,7 @@ pub(super) fn cycle_enum_backward(config: &mut Config, tab: SettingsTab, index: 
             2 => cycle_fold_blocks(config, false),
             3..=5 => cycle_web_field(config, index, false),
             AI_PERMISSION_MODE_FIELD => cycle_permission_mode(config, false),
+            AI_AUTO_REVIEWER_FIELD => cycle_auto_reviewer(config, false),
             _ => {}
         },
         _ => {}
@@ -790,8 +835,8 @@ mod field_index_tests {
         let fields = fields_for_tab(SettingsTab::Ai);
         assert_eq!(
             fields.len(),
-            8,
-            "the permission mode follows the web fields"
+            9,
+            "the permission mode and its reviewer follow the web fields"
         );
         assert!(matches!(fields[6].field_type, FieldType::OptionalText));
         assert!(matches!(fields[7].field_type, FieldType::Enum));
@@ -879,13 +924,16 @@ mod enum_option_tests {
     }
 
     #[test]
-    fn the_permission_mode_for_new_sessions_is_chosen_from_the_five() {
+    fn the_permission_mode_for_new_sessions_is_chosen_from_the_six() {
         let mut config = Config::default();
         let field = AI_PERMISSION_MODE_FIELD;
         // Configured by default, shown by its localized name.
         assert_eq!(config.ai.permission_mode(), "configured");
         let options = enum_options(&config, SettingsTab::Ai, field).unwrap();
-        assert_eq!(options.values, ["ask", "plan", "edit", "configured", "all"]);
+        assert_eq!(
+            options.values,
+            ["ask", "plan", "edit", "configured", "auto", "all"]
+        );
         assert_eq!(options.current, Some(3));
         assert_eq!(
             get_field_value(&config, SettingsTab::Ai, field),
@@ -896,11 +944,44 @@ mod enum_option_tests {
         cycle_enum_forward(&mut config, SettingsTab::Ai, field);
         assert_eq!(config.ai.permission_mode(), "configured");
         cycle_enum_forward(&mut config, SettingsTab::Ai, field);
+        assert_eq!(config.ai.permission_mode(), "auto");
+        cycle_enum_forward(&mut config, SettingsTab::Ai, field);
         assert_eq!(config.ai.permission_mode(), "all");
         cycle_enum_forward(&mut config, SettingsTab::Ai, field);
         assert_eq!(config.ai.permission_mode(), "ask");
         cycle_enum_backward(&mut config, SettingsTab::Ai, field);
         assert_eq!(config.ai.permission_mode(), "all");
+    }
+
+    #[test]
+    fn the_auto_reviewer_is_the_session_model_or_a_model_connection() {
+        let mut config = Config::default();
+        for (name, provider) in [("cloud", "anthropic_compatible"), ("cli", "claude_code")] {
+            config.ai.connections.insert(
+                name.to_string(),
+                termide_config::Connection {
+                    provider: provider.to_string(),
+                    ..termide_config::Connection::default()
+                },
+            );
+        }
+        let field = AI_AUTO_REVIEWER_FIELD;
+        assert_eq!(fields_for_tab(SettingsTab::Ai).len(), field + 1);
+        let options = enum_options(&config, SettingsTab::Ai, field).unwrap();
+        // A CLI agent cannot review.
+        assert_eq!(options.values, ["", "cloud"]);
+        assert_eq!(options.current, Some(0));
+        assert_eq!(
+            get_field_value(&config, SettingsTab::Ai, field),
+            i18n::t().settings_agent_auto_reviewer_session()
+        );
+        cycle_enum_forward(&mut config, SettingsTab::Ai, field);
+        assert_eq!(config.ai.auto_reviewer, "cloud");
+        assert_eq!(get_field_value(&config, SettingsTab::Ai, field), "cloud");
+        cycle_enum_backward(&mut config, SettingsTab::Ai, field);
+        assert_eq!(config.ai.auto_reviewer, "");
+        apply_enum_value(&mut config, SettingsTab::Ai, field, "cloud");
+        assert_eq!(config.ai.auto_reviewer, "cloud");
     }
 
     /// Choosing from the dropdown and cycling with Left/Right must write the

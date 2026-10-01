@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::acp::AcpConfig;
+use crate::classifier::{ClassifyPrompt, SEED_CLASSIFY};
 use crate::commands::{CommandScript, COMMANDS_DIR};
 use crate::compaction::{CompactionPrompts, SEED_COMPACT, SEED_COMPACTED};
 use crate::context::SEED_TEMPLATE;
@@ -251,6 +252,7 @@ fn shipped_assets() -> Vec<(String, &'static str)> {
         (format!("{SYSTEM_DIR}/plan.md"), SEED_PLAN),
         (format!("{SYSTEM_DIR}/goal.md"), SEED_GOAL),
         (format!("{SYSTEM_DIR}/handoff.md"), SEED_HANDOFF),
+        (format!("{SYSTEM_DIR}/classify.md"), SEED_CLASSIFY),
     ];
     assets.extend(
         SEED_ENGINES
@@ -492,6 +494,13 @@ impl AgentDirs {
     #[must_use]
     pub fn handoff_prompt(&self) -> HandoffPrompt {
         HandoffPrompt::from_file(&self.system_file("handoff.md", SEED_HANDOFF))
+    }
+
+    /// The `auto` mode reviewer's texts: `system/classify.md`, the seed
+    /// otherwise.
+    #[must_use]
+    pub fn classify_prompt(&self) -> ClassifyPrompt {
+        ClassifyPrompt::from_file(&self.system_file("classify.md", SEED_CLASSIFY))
     }
 
     /// The command-shim directory (`shims/`), from the configuration level

@@ -128,6 +128,7 @@ impl AgentPanel {
                     Mode::Plan => t.agent_mode_plan(),
                     Mode::Edit => t.agent_mode_edit(),
                     Mode::Configured => t.agent_mode_configured(),
+                    Mode::Auto => t.agent_mode_auto(),
                     Mode::All => t.agent_mode_all(),
                 };
                 format!("{}{text}", current_mark(*mode == current))

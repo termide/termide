@@ -14,8 +14,8 @@ use termide_agent_tools::SkillTool;
 use termide_config::AiSettings;
 
 use super::{
-    api_key_of, base_tools, build_provider, resolve_model, restrict_tools, shared_web,
-    usable_connection,
+    api_key_of, base_tools, build_provider, resolve_model, restrict_tools, reviewer_setup,
+    shared_web, usable_connection,
 };
 
 /// How a headless run reports its result.
@@ -34,8 +34,9 @@ pub enum HeadlessOutput {
 /// scripting and CI: `termide --prompt "..."`. Text goes to stdout, tool
 /// activity and errors to stderr. There is no one to answer a permission
 /// prompt, so it runs under the configured rules and mode with everything
-/// else refused (as a subagent does); set `mode = "all"` or add allow rules
-/// for unattended use. Returns the process exit code.
+/// else refused (as a subagent does); set `mode = "auto"` to have the
+/// reviewer decide, `mode = "all"` or allow rules for unattended use.
+/// Returns the process exit code.
 pub fn run_agent_headless(
     settings: &AiSettings,
     cwd: &Path,
@@ -117,14 +118,16 @@ pub fn run_agent_headless(
         .with_system_prompt(system_prompt)
         .with_compaction(settings.compaction)
         .with_compaction_prompts(dirs.compaction_prompts());
+    let cancel = CancelToken::new();
     let mut hooks = PermissionHooks::new(
         rules,
         Box::new(AutoDenyPrompter::new(
             "running headless with no one to ask; allowed only what the rules and mode permit",
         )),
-    );
-
-    let cancel = CancelToken::new();
+    )
+    .with_classifier(Box::new(
+        reviewer_setup(settings, &dirs).classifier(cancel.clone()),
+    ));
     let stdout = std::io::stdout();
     let mut wrote_text = false;
     // Tool calls in call order: (id, name, subject, is_error), for the JSON

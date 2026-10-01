@@ -19,9 +19,17 @@ use termide_agent_core::{CancelToken, Tool, ToolCall, ToolContext, ToolResultMes
 use crate::args::required_str;
 
 /// Runs the named agent on `prompt` to completion and returns its final
-/// answer, or an error message. Progress is forwarded through `on_update`.
+/// answer, or an error message. Progress is forwarded through `on_update`;
+/// the context is the delegating call's, whose session the subagent's
+/// reviewer judges against.
 pub type SubagentRun = Arc<
-    dyn Fn(&str, &str, &CancelToken, &mut dyn FnMut(ToolUpdate)) -> Result<String, String>
+    dyn Fn(
+            &str,
+            &str,
+            &ToolContext,
+            &CancelToken,
+            &mut dyn FnMut(ToolUpdate),
+        ) -> Result<String, String>
         + Send
         + Sync,
 >;
@@ -92,7 +100,7 @@ impl Tool for TaskTool {
     fn execute(
         &self,
         call: &ToolCall,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
         on_update: &mut dyn FnMut(ToolUpdate),
         cancel: &CancelToken,
     ) -> ToolResultMessage {
@@ -111,7 +119,7 @@ impl Tool for TaskTool {
                 format!("no agent named {agent}; available: {}", names.join(", ")),
             );
         }
-        match (self.run)(agent, prompt, cancel, on_update) {
+        match (self.run)(agent, prompt, ctx, cancel, on_update) {
             Ok(report) => ToolResultMessage::text(call, report),
             Err(message) => ToolResultMessage::error(call, message),
         }
@@ -145,7 +153,7 @@ mod tests {
     fn it_lists_agents_delegates_and_reports_errors() {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         let seen_run = Arc::clone(&seen);
-        let run: SubagentRun = Arc::new(move |agent: &str, prompt: &str, _c, _u| {
+        let run: SubagentRun = Arc::new(move |agent: &str, prompt: &str, _ctx, _c, _u| {
             seen_run
                 .lock()
                 .unwrap()

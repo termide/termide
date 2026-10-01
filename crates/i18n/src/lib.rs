@@ -473,6 +473,8 @@ pub trait Translation: Send + Sync {
     fn agent_mode_edit(&self) -> &str;
     /// Permission-mode picker: configured
     fn agent_mode_configured(&self) -> &str;
+    /// Permission-mode picker: auto (a reviewer model decides)
+    fn agent_mode_auto(&self) -> &str;
     /// Permission-mode picker: all
     fn agent_mode_all(&self) -> &str;
     /// Agent panel context menu: open the assembled system prompt
@@ -855,6 +857,10 @@ pub trait Translation: Send + Sync {
     fn settings_ai_connection_name_taken(&self) -> &str;
     /// Settings modal: the permission mode new agent sessions start in.
     fn settings_agent_permission_mode(&self) -> &str;
+    /// AI settings: the connection whose model reviews calls in `auto` mode
+    fn settings_agent_auto_reviewer(&self) -> &str;
+    /// AI settings: the `auto` mode reviewer left to the session's model
+    fn settings_agent_auto_reviewer_session(&self) -> &str;
     /// Settings modal: AI tab, web tools field labels.
     fn settings_web_backend(&self) -> &str;
     /// AI menu: the row that shows or hides the agents' web browser window.

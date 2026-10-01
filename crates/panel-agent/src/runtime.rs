@@ -10,7 +10,8 @@ use termide_agent_core::{
     ChainedHooks, CheckpointHooks, CheckpointStore, CompactionPolicy, CompactionPrompts,
     GoalPrompt, HandoffPrompt, Hooks, HostTools, LoggedMessage, Message, Mode, ModeHandle,
     ModelInfo, ModelSpec, PermissionEnvelope, PermissionHooks, PermissionRules, PersistRule,
-    PlanGuard, PlanPrompt, Provider, QuestionEnvelope, Session, Timing, ToolRegistry,
+    PlanGuard, PlanPrompt, Provider, QuestionEnvelope, ReviewerSetup, Session, Timing,
+    ToolRegistry,
 };
 
 use crate::toolset::{Blocked, ToolsetGuard};
@@ -157,6 +158,7 @@ pub(crate) fn spawn_runtime(
     plan_prompt: &PlanPrompt,
     goal_prompt: &GoalPrompt,
     handoff_prompt: &HandoffPrompt,
+    reviewer: &ReviewerSetup,
     persist_rule: Option<PersistFn>,
     extra_hooks: Option<&HooksFactory>,
     backend: Option<&BackendFactory>,
@@ -180,7 +182,8 @@ pub(crate) fn spawn_runtime(
     // permission requests get the built-in agent's treatment (read-only
     // commands and matching rules pass without a prompt).
     let backend_rules = rules.clone();
-    let mut hooks = PermissionHooks::new(rules, Box::new(prompter));
+    let mut hooks = PermissionHooks::new(rules, Box::new(prompter))
+        .with_classifier(Box::new(reviewer.classifier(cancel.clone())));
     let mode = hooks.mode_handle();
     if let Some(persist) = persist_rule {
         hooks = hooks.with_persist(Box::new(persist) as PersistRule);

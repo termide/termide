@@ -278,7 +278,8 @@ deny → ask → allow. The mode decides which rules count and what unresolved
 calls do: `ask` (everything asks, configured `allow` rules set aside), `plan`
 (reads and the web pass, changes are refused), `edit` (edits inside the
 project and the web pass, commands ask), `configured` (default: the rules
-decide, the rest asks) and `all` (everything passes). A rule's `deny` and
+decide, the rest asks), `auto` (the rules decide, the rest goes to a reviewer
+model, §4b) and `all` (everything passes). A rule's `deny` and
 `ask` hold in every mode, so a stricter mode never protects less; answers
 given for the session count everywhere but in `all`, and "allow always" is
 offered only in `configured`, the one mode the configured rules count in.
@@ -300,7 +301,7 @@ Chosen TOML shape (OpenCode-style tables, so "allow always" appends one key):
 
 ```toml
 [ai.permissions]
-mode = "configured" # ask | plan | edit | configured | all
+mode = "configured" # ask | plan | edit | configured | auto | all
 
 [ai.permissions.bash]
 "git status*" = "allow"
@@ -354,6 +355,59 @@ same file, so the plan stays in context. The plan is the answer in the
 session, not a file: the session log is the record, and the panel's `/undo`
 checkpoints cover the changes the accepted plan then makes. Not covered: MCP tools with
 a read-only annotation are blocked too, since annotations are not plumbed.
+
+## 4b. Auto mode
+
+| Agent | Who decides | What the judge sees | No verdict | Repeated denials |
+|---|---|---|---|---|
+| Claude Code (`auto`) | a separate model call (Sonnet 5), a fast single-token filter that leans to block, then reasoning on what it flags | user messages, tool calls, `CLAUDE.md`; assistant text and tool results stripped | deny | 3 in a row or 20 in all → prompts again |
+| Codex (auto-review / guardian) | a reviewer subagent | a compact transcript with tool outputs, no hidden reasoning | deny | 3 in a row or 10 of the last 50 → the turn aborts |
+| OpenHands (LLM analyzer) | the agent itself, through a `security_risk` field added to every tool schema | — | ask | — |
+| Gemini CLI | a rule policy engine, no model | — | — | — |
+| pi | nobody; permission prompts are left out by design | — | — | — |
+
+Decision: **a sixth mode, `auto`, where a reviewer model stands in for the
+prompt**. Self-assessment (OpenHands) is ruled out: an injected agent rates
+its own call low. The reviewer sees what Claude Code's does — the user's
+messages and the calls, never the results (where hostile content enters,
+and our agent reads the web) nor the agent's text (which would let it argue
+its case); Codex's reviewer, which reads outputs, trades that defence for
+context. On repeated blocks the questions go back to the user, as in Claude
+Code, rather than the turn aborting as in Codex: termide is interactive and
+the user is there. One call with a two-line verdict (`ALLOW`/`BLOCK`, a
+reason) and reasoning off, rather than Claude Code's two stages, until the
+latency asks for a filter in front.
+
+The reviewer is `Classifier` in `crates/agent-core/src/classifier.rs`,
+plugged into `PermissionHooks` where a call would otherwise reach the
+prompter, so every rule, guard and hook keeps its place before it: a rule's
+`deny` refuses, its `ask` asks, `PlanGuard` and command hooks run first.
+`auto` counts the configured rules like `configured` less the broad `allow`
+ones (`broad_allow`: a whole tool, a wildcard after a delegating command, an
+`allow` for `task`), lets edits inside the project and web searches through,
+and never hands the reviewer a removal of the root, the home or the working
+directory or above (`critical_removal`). A verdict that does not parse, a
+failed call or a session with nothing to judge against falls back to the
+prompter; three blocks in a row or twenty in all pause the reviewer until the
+user allows a call. A verdict that arrives after the mode changed is dropped
+and the call judged again.
+
+What the reviewer judges against is an `IntentLog` the loop keeps beside the
+transcript and passes to tools in `ToolContext::session`, with the provider
+and model the session runs on: user messages and calls, filled from the
+transcript when a run first needs it (a compaction summary is skipped: the
+model wrote it) and then as messages arrive. Kept apart, it outlives a
+compaction, so a boundary the user set is not lost with the message that set
+it — a gap Claude Code documents. A subagent gets a log seeded with the
+parent's user messages, its task marked as delegated, so the delegating
+model's words are never taken for the user's. Calls from outside the loop
+(tools served to an external agent over MCP) carry no session and are asked
+about. The reviewer's text is `ai/system/classify.md`, one editable file at
+the configuration level only, like every service prompt — a checked-out
+repository must not be able to tell the reviewer to allow everything; it
+reviews with the session's model unless `auto_reviewer` names a connection.
+Not covered yet: the allowed verdicts are logged, not shown in the
+transcript.
 
 ## 5. Hooks and extension mechanism
 

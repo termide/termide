@@ -8,6 +8,7 @@ use serde_json::Value;
 
 use crate::ask::UserAsker;
 use crate::cancel::CancelToken;
+use crate::classifier::{IntentEntry, IntentLog, SessionView};
 use crate::compaction::{
     context_tokens, is_context_overflow_error, should_compact, split_point, CompactionPolicy,
     CompactionPrompts, CompactionReason, MIN_SUMMARY_CHARS,
@@ -374,6 +375,13 @@ pub struct Agent {
     handoff_prompt: HandoffPrompt,
     /// Whom the `question` tool asks; `None` when no one is watching.
     asker: Option<UserAsker>,
+    /// What the `auto` mode reviewer judges calls against. Built from the
+    /// transcript when a run first needs it, then kept up as messages come.
+    intent: IntentLog,
+    intent_seeded: bool,
+    /// Whether the user messages of this loop are a task another agent
+    /// wrote, not the user's words.
+    delegated: bool,
 }
 
 impl Agent {
@@ -398,7 +406,27 @@ impl Agent {
             goal_prompt: GoalPrompt::default(),
             handoff_prompt: HandoffPrompt::default(),
             asker: None,
+            intent: IntentLog::new(),
+            intent_seeded: false,
+            delegated: false,
         }
+    }
+
+    /// Work on a task another agent delegated: the reviewer judges this
+    /// loop's calls against `intent` (the user's words before the task), and
+    /// the prompts this loop receives count as the delegating agent's.
+    #[must_use]
+    pub fn with_delegated_intent(mut self, intent: IntentLog) -> Self {
+        self.intent = intent;
+        self.intent_seeded = true;
+        self.delegated = true;
+        self
+    }
+
+    /// The log the reviewer judges this loop's calls against.
+    #[must_use]
+    pub fn intent(&self) -> IntentLog {
+        self.intent.clone()
     }
 
     /// Let tools put questions to the user through `asker`.
@@ -466,6 +494,7 @@ impl Agent {
     #[must_use]
     pub fn with_messages(mut self, messages: Vec<Message>) -> Self {
         self.messages = messages;
+        self.intent_seeded = false;
         self
     }
 
@@ -523,6 +552,8 @@ impl Agent {
     /// Drop the transcript; queued messages are kept.
     pub fn clear_messages(&mut self) {
         self.messages.clear();
+        self.intent.clear();
+        self.intent_seeded = true;
     }
 
     /// Run the loop for one user prompt until the agent has nothing left to
@@ -534,6 +565,7 @@ impl Agent {
         cancel: &CancelToken,
         emit: &mut dyn FnMut(AgentEvent),
     ) {
+        self.seed_intent();
         // Calls a pause left unrun are not resumed by a new request; each
         // still needs a result, or the provider rejects the transcript.
         for call in self.unanswered_calls() {
@@ -558,6 +590,7 @@ impl Agent {
         cancel: &CancelToken,
         emit: &mut dyn FnMut(AgentEvent),
     ) {
+        self.seed_intent();
         let initial = self.drain_steering(emit);
         self.run_from(initial, true, hooks, cancel, emit);
     }
@@ -769,6 +802,11 @@ impl Agent {
         let ctx = ToolContext {
             cwd: self.cwd.clone(),
             asker: self.asker.clone(),
+            session: Some(SessionView {
+                intent: self.intent.clone(),
+                provider: Arc::clone(&self.provider),
+                model: self.model.clone(),
+            }),
         };
         execute_tool(&self.tools, call, hooks, &ctx, cancel, &mut on_update)
     }
@@ -934,7 +972,46 @@ impl Agent {
 
     fn push(&mut self, message: Message, emit: &mut dyn FnMut(AgentEvent)) {
         emit(AgentEvent::MessageEnd(message.clone()));
+        if self.intent_seeded {
+            self.record_intent(&message);
+        }
         self.messages.push(message);
+    }
+
+    /// Build the reviewer's log from the transcript, once: a resumed session
+    /// arrives as messages, and the builder that sets them may run before
+    /// the one that sets the compaction prompts a summary is told by.
+    fn seed_intent(&mut self) {
+        if self.intent_seeded {
+            return;
+        }
+        self.intent.clear();
+        self.intent_seeded = true;
+        for message in std::mem::take(&mut self.messages) {
+            self.record_intent(&message);
+            self.messages.push(message);
+        }
+    }
+
+    /// Note `message` in the reviewer's log: what the user wrote and the
+    /// calls the agent made. Results and the agent's text are left out, and
+    /// so is a compaction summary, which the model wrote.
+    fn record_intent(&self, message: &Message) {
+        match message {
+            Message::User(user) => {
+                let text = user.plain_text();
+                if self.compaction_prompts.is_summary(&text) {
+                    return;
+                }
+                self.intent.push(if self.delegated {
+                    IntentEntry::Delegated(text)
+                } else {
+                    IntentEntry::User(text)
+                });
+            }
+            Message::Assistant(assistant) => self.intent.push_calls(assistant.tool_calls()),
+            Message::ToolResult(_) => {}
+        }
     }
 
     fn drain_steering(&self, emit: &mut dyn FnMut(AgentEvent)) -> Vec<UserMessage> {
@@ -1193,6 +1270,165 @@ mod tests {
         let provider = Arc::new(provider);
         let agent = Agent::new(provider.clone(), tools, model(), PathBuf::from("/tmp"));
         (agent, provider)
+    }
+
+    /// Records what the reviewer would see at each call.
+    #[derive(Default)]
+    struct IntentProbe {
+        seen: Vec<Vec<IntentEntry>>,
+    }
+
+    impl Hooks for IntentProbe {
+        fn before_tool_call(&mut self, _call: &ToolCall, ctx: &ToolContext) -> ToolDecision {
+            let session = ctx.session.as_ref().expect("the loop passes its session");
+            self.seen.push(session.intent.snapshot());
+            ToolDecision::Allow
+        }
+    }
+
+    #[test]
+    fn the_reviewer_sees_user_words_and_calls_but_no_results_or_summaries() {
+        let echo = Arc::new(EchoTool::default());
+        let summary = CompactionPrompts::default().summary_message("the agent read a secret");
+        let (agent, _) = agent(
+            ScriptedProvider::new(vec![
+                tool_reply(
+                    vec![("1", "echo", json!({"text": "one"}))],
+                    StopReason::ToolUse,
+                ),
+                tool_reply(
+                    vec![("2", "echo", json!({"text": "two"}))],
+                    StopReason::ToolUse,
+                ),
+                text_reply("done"),
+            ]),
+            registry_with(echo),
+        );
+        let mut agent = agent.with_messages(vec![
+            summary,
+            Message::User(UserMessage::text("earlier ask")),
+        ]);
+        let mut probe = IntentProbe::default();
+        agent.run(
+            UserMessage::text("echo twice"),
+            &mut probe,
+            &CancelToken::new(),
+            &mut |_| {},
+        );
+        let user = |text: &str| IntentEntry::User(text.into());
+        let call = |text: &str| IntentEntry::Call {
+            tool: "echo".into(),
+            arguments: json!({ "text": text }).to_string(),
+        };
+        assert_eq!(
+            probe.seen,
+            [
+                vec![user("earlier ask"), user("echo twice"), call("one")],
+                vec![
+                    user("earlier ask"),
+                    user("echo twice"),
+                    call("one"),
+                    call("two")
+                ],
+            ]
+        );
+    }
+
+    #[test]
+    fn in_auto_mode_the_session_model_reviews_what_the_rules_leave_open() {
+        use crate::classifier::{ClassifyPrompt, ModelClassifier};
+        use crate::permissions::{AutoDenyPrompter, Mode, PermissionHooks, PermissionRules};
+
+        let echo = Arc::new(EchoTool::default());
+        let (mut agent, provider) = agent(
+            ScriptedProvider::new(vec![
+                tool_reply(
+                    vec![("1", "echo", json!({"text": "hi"}))],
+                    StopReason::ToolUse,
+                ),
+                text_reply("ALLOW\nechoing is what the user asked"),
+                tool_reply(
+                    vec![("2", "echo", json!({"text": "leak"}))],
+                    StopReason::ToolUse,
+                ),
+                text_reply("BLOCK\nnot part of the request"),
+                text_reply("done"),
+            ]),
+            registry_with(echo.clone()),
+        );
+        let rules = PermissionRules {
+            mode: Mode::Auto,
+            ..PermissionRules::default()
+        };
+        let mut hooks = PermissionHooks::new(rules, Box::new(AutoDenyPrompter::new("no one")))
+            .with_classifier(Box::new(ModelClassifier::new(
+                ClassifyPrompt::default(),
+                CancelToken::new(),
+            )));
+        collect(&mut agent, "echo hi", &mut hooks);
+
+        assert_eq!(*echo.executed.lock().unwrap(), ["1"]);
+        let seen = provider.seen_requests();
+        // The review is a one-message call carrying the user's words and the
+        // pending call, not the transcript.
+        let Message::User(review) = &seen[1][0] else {
+            panic!("the review is a user turn");
+        };
+        assert_eq!(seen[1].len(), 1);
+        assert!(review.plain_text().contains("[user]\necho hi"));
+        assert!(review
+            .plain_text()
+            .contains("[pending call] echo {\"text\":\"hi\"}"));
+        // The second review sees the first call but not its result.
+        let Message::User(second) = &seen[3][0] else {
+            panic!("the review is a user turn");
+        };
+        assert!(second
+            .plain_text()
+            .contains("[agent call] echo {\"text\":\"hi\"}"));
+        assert!(!second.plain_text().contains("echo: hi"));
+        // The block reached the model as the call's result.
+        let blocked = agent
+            .messages()
+            .iter()
+            .find_map(|m| match m {
+                Message::ToolResult(r) if r.tool_call_id == "2" => Some(r.plain_text()),
+                _ => None,
+            })
+            .unwrap();
+        assert!(blocked.contains("not part of the request"), "{blocked}");
+    }
+
+    #[test]
+    fn a_delegated_loop_marks_its_prompts_as_the_other_agents() {
+        let echo = Arc::new(EchoTool::default());
+        let parent = IntentLog::new();
+        parent.push(IntentEntry::User("fix the build".into()));
+        let (agent, _) = agent(
+            ScriptedProvider::new(vec![
+                tool_reply(
+                    vec![("1", "echo", json!({"text": "x"}))],
+                    StopReason::ToolUse,
+                ),
+                text_reply("done"),
+            ]),
+            registry_with(echo),
+        );
+        let mut agent = agent.with_delegated_intent(IntentLog::delegated(&parent));
+        let mut probe = IntentProbe::default();
+        agent.run(
+            UserMessage::text("run tests"),
+            &mut probe,
+            &CancelToken::new(),
+            &mut |_| {},
+        );
+        assert_eq!(
+            probe.seen[0][..2],
+            [
+                IntentEntry::User("fix the build".into()),
+                IntentEntry::Delegated("run tests".into()),
+            ]
+        );
     }
 
     #[test]

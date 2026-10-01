@@ -312,6 +312,7 @@ mod tests {
         let ctx = ToolContext {
             cwd: "/".into(),
             asker: Some(asker),
+            session: None,
         };
         let answerer = std::thread::spawn(move || {
             let envelope = rx.recv().unwrap();
@@ -354,6 +355,7 @@ mod tests {
         let ctx = ToolContext {
             cwd: "/".into(),
             asker: Some(asker),
+            session: None,
         };
         let answerer = std::thread::spawn(move || {
             let envelope = rx.recv().unwrap();

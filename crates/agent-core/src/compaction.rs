@@ -110,6 +110,20 @@ impl CompactionPrompts {
             self.wrapper.replace("{{summary}}", summary.trim()),
         ))
     }
+
+    /// Whether `text` is a summary this wrapper produced: it opens with the
+    /// wrapper's words before `{{summary}}`. A wrapper that opens with the
+    /// summary itself cannot be told, and no text counts.
+    #[must_use]
+    pub fn is_summary(&self, text: &str) -> bool {
+        let lead = self
+            .wrapper
+            .split("{{summary}}")
+            .next()
+            .unwrap_or("")
+            .trim();
+        !lead.is_empty() && text.trim_start().starts_with(lead)
+    }
 }
 
 /// Rough token count of messages with no usage data: characters over four.

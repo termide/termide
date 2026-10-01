@@ -161,11 +161,11 @@ whichever connection it is on:
   checks as the built-in loop's: the permission mode, the rules, the session
   answers, plan mode and the `/undo` checkpoints.
 - **Codex** keeps its own system prompt and tools; termide puts it in the
-  modes that match the panel's (`ask` and `configured`: ask for approval,
+  modes that match the panel's (`ask`, `configured` and `auto`: ask for approval,
   `plan`: that plus its plan collaboration mode, `edit`: approve for me,
   `all`: full access) and decides what it asks.
 - **Gemini CLI** keeps its own system prompt and tools too; termide sets its
-  approval mode to match the panel's (`ask` and `configured`: `default`, which
+  approval mode to match the panel's (`ask`, `configured` and `auto`: `default`, which
   asks before edits and commands, `plan`: `plan`, or `default` where Gemini's
   plan mode is off, `edit`: `autoEdit`, `all`: `yolo`) and decides what it
   asks.
@@ -252,7 +252,7 @@ you have named or sent even one message to is always kept.
 | `Shift+arrows`, `Shift+Home`/`End`, `Ctrl+Shift+arrows` | Extend the prompt selection by character, to the line edges, by word |
 | `Ctrl+Left` / `Ctrl+Right` | Word-by-word navigation in the prompt |
 | `Ctrl+Z` / `Ctrl+Y`, `Ctrl+Shift+Z` | Undo / redo a prompt edit |
-| `Shift+Tab` | Cycle the permission mode: ask → plan → edit → configured → all |
+| `Shift+Tab` | Cycle the permission mode: ask → plan → edit → configured → auto → all |
 | `F2` | Rename this session (the same prompt as the `[≡]` menu) |
 | `F3` | Open the session-info modal (model, agent, mode, directory, created/last-active times, messages, compactions, tokens, context, how much shell output was cleaned); also `/usage` and the `[≡]` menu |
 | `F4` | Roll the session back to before a chosen checkpoint |
@@ -467,7 +467,7 @@ configured `context_window_fallback` is only a **fallback**, used when the endpo
 reports no window; left unset it shows `(auto)` in the settings modal and the
 built-in default stands in until (or unless) the provider is known.
 
-The **Permissions** chip offers the five modes described below. `Shift+Tab` cycles
+The **Permissions** chip offers the six modes described below. `Shift+Tab` cycles
 through them without the picker. A change applies at the agent's next tool
 call, so you can loosen the mode while a long task is running instead of
 answering the same prompt again and again. Neither switch touches the
@@ -579,7 +579,8 @@ file of your own with a new name adds an engine. The keys are described in
 the shipped files.
 
 In `plan` and `edit` both tools run without asking; in `ask` and, without a
-rule, in `configured` they ask. "Allow" beyond once for `fetch` covers the
+rule, in `configured` they ask; in `auto` a search runs and a fetch, whose
+URL can carry data out, goes to the reviewer. "Allow" beyond once for `fetch` covers the
 whole site (`https://docs.rs/*`), for `web_search` every query.
 
 A file the agent edits while it is open in an editor is reloaded there at
@@ -616,7 +617,7 @@ Rules live per tool. Among the rules that match, the strictest wins, so a
 
 ```toml
 [ai.permissions]
-mode = "configured" # ask | plan | edit | configured (default) | all — what new sessions start in
+mode = "configured" # ask | plan | edit | configured (default) | auto | all — what new sessions start in
 
 [ai.permissions.bash]
 "cargo *"     = "allow"
@@ -688,20 +689,24 @@ for the current panel only.
 - **configured** (the default) follows the configured rules and your answers
   in this session, asks about the rest, and is the one mode that offers
   "allow always".
+- **auto** follows the configured rules less the broad `allow` ones, edits
+  inside the project without asking, and hands what would otherwise ask to a
+  reviewer model that allows or blocks it in your place. See below.
 - **all** allows everything.
 
-| | ask | plan | edit | configured | all |
-|---|---|---|---|---|---|
-| read inside the project | ✓ | ✓ | ✓ | ✓ | ✓ |
-| read outside it | ? | ? | ? | rules / ? | ✓ |
-| web | ? | ✓ | ✓ | rules / ? | ✓ |
-| edit inside the project | ? | ✗ | ✓ | rules / ? | ✓ |
-| edit outside it | ? | ✗ | ? | rules / ? | ✓ |
-| look-only command | ✓ | ✓ | ✓ | ✓ | ✓ |
-| other command, MCP tool | ? | ✗ | ? | rules / ? | ✓ |
+| | ask | plan | edit | configured | auto | all |
+|---|---|---|---|---|---|---|
+| read inside the project | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| read outside it | ? | ? | ? | rules / ? | rules / R | ✓ |
+| web search | ? | ✓ | ✓ | rules / ? | ✓ | ✓ |
+| fetch a page | ? | ✓ | ✓ | rules / ? | rules / R | ✓ |
+| edit inside the project | ? | ✗ | ✓ | rules / ? | ✓ | ✓ |
+| edit outside it | ? | ✗ | ? | rules / ? | rules / R | ✓ |
+| look-only command | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| other command, MCP tool | ? | ✗ | ? | rules / ? | rules / R | ✓ |
 
-✓ runs, ? asks, ✗ is refused, "rules / ?" follows a matching rule and asks
-without one. Whatever the mode, a rule's `deny` refuses and its `ask` asks:
+✓ runs, ? asks, ✗ is refused, R goes to the reviewer, "rules / ?" follows a
+matching rule and asks without one. Whatever the mode, a rule's `deny` refuses and its `ask` asks:
 the modes set the configured `allow` rules aside, never the refusals. Your
 answers for the session count in every mode but `all`.
 
@@ -742,6 +747,62 @@ session goes on to carry the plan out with it in context; the third (or
 `Esc`) keeps plan mode, and whatever you type next refines the plan. The
 plan is the agent's answer in the session, nothing is written to a file; the
 `/undo` checkpoints cover the changes that follow.
+
+### Auto mode
+
+**auto** is for a run you trust in its direction but do not want to answer
+card after card. What a rule or a safe default settles is settled as in
+`configured`; everything that would put a card up goes to a reviewer, a
+separate call to a model that decides whether the action is a reasonable
+step toward what you asked for or goes beyond it. An allowed call runs; a
+blocked one does not, and the model reads why, with the advice to take a
+safer way or tell you what it needs. Claude Code's auto mode and Codex's
+auto-review work the same way.
+
+The reviewer sees what you wrote in the session and the calls the agent made,
+and never the results of those calls nor the agent's own text. The results
+are where hostile content from a file or a web page enters, and the agent
+must not argue its case, so neither reaches the reviewer. A boundary you set
+("don't push", "wait for my review") counts until you lift it, and it
+outlives a compaction: the reviewer's record of your words is kept apart
+from the context the model sees.
+
+Some things are never left to the reviewer, and ask as in `configured`:
+
+- a call an `ask` rule covers;
+- removing the filesystem root, the home directory, or the working directory
+  or one above it (`rm -rf ~`, `rm -rf .`, `rm -rf *`);
+- everything, once the reviewer has blocked three calls in a row or twenty in
+  the session: the questions come back to you, and allowing one hands the
+  decisions back to the reviewer;
+- a call the reviewer could not decide: the call failed, timed out or
+  answered something other than a verdict.
+
+A rule's `deny` refuses as in every mode. The broad `allow` rules — a
+whole tool (`"*" = "allow"`), a wildcard after an interpreter, a script
+runner or a wrapper (`python3*`, `npm run *`, `make*`, `env *`), an `allow`
+for `task` — are set aside, since they would let any program run past the
+reviewer; narrow ones such as `"cargo test*"` still pass without it.
+
+What the reviewer is told is `system/classify.md` in the configuration's
+agent directory: what to allow, what to block, and the shape of the verdict.
+Edit it to tell the reviewer about your infrastructure or your habits. By
+default the session's own model reviews; `auto_reviewer` under `[ai]` (in
+the settings modal, **Auto mode reviewer** under Permissions) names another
+connection to review with, a small fast one being the usual choice. A review
+is one more model call before each action it decides; reads, edits inside
+the project and look-only commands never reach it and cost nothing.
+
+```toml
+[ai]
+auto_reviewer = "haiku"   # a connection's name; empty reviews with the session's model
+```
+
+The reviewer judges delegated work too: a subagent's calls are reviewed
+against your words and the task it was given, marked as another agent's.
+Headless runs use it the same way, falling back to a refusal where the panel
+would ask. An external (`[acp]`) agent keeps its conversation to itself, so
+in `auto` its requests are asked about as in `configured`.
 
 ## The AI menu
 
@@ -806,6 +867,7 @@ ai/
   system/plan.md           what plan mode tells the agent, and what accepting a plan sends
   system/goal.md           how the judge decides whether a /goal is reached
   system/handoff.md        how /handoff briefs the unfinished work
+  system/classify.md       what the auto mode reviewer allows and blocks
   web/engines/<name>.toml  search engines for web_search, see Web
   web/browser/             the web tools' browser profile (config level only)
 ```
@@ -832,7 +894,7 @@ model still gets the tools, but no instructions. Beside it an `agent.toml` may s
 ```toml
 description = "Reviews diffs and points at risks"
 model = "Qwen3.8-27B-MTPLX-Optimized-Quality"   # at the configured endpoint
-mode = "edit"                                    # ask | plan | edit | configured | all
+mode = "edit"                                    # ask | plan | edit | configured | auto | all
 tools = ["read", "bash"]                         # a subset of the built-in tools
 ```
 
@@ -860,7 +922,8 @@ The delegate does not see the conversation, so the calling agent must put
 everything into the prompt. It runs in the session's current mode, unless its
 `agent.toml` names one, with no one to prompt, so it can only do what the
 rules and that mode already allow: anything that would otherwise ask is
-refused with a reason it reads. External (`[acp]`)
+refused with a reason it reads. In `auto` the reviewer decides those calls
+instead. External (`[acp]`)
 agents cannot be delegates, and a subagent gets no `task` tool of its own, so
 delegation does not nest. An agent whose `tools` list leaves out `task`
 cannot delegate. A run that will not stop is cut off after fifty
@@ -1151,7 +1214,8 @@ worth narrowing with `tools`; the log says so when a server has more than
 twenty and no such list.
 
 An MCP tool asks for permission like a command: it runs in `all`, is refused
-in `plan`, and asks elsewhere unless a rule covers it in `configured`. "Allow
+in `plan`, goes to the reviewer in `auto`, and asks elsewhere unless a rule
+covers it in `configured`. "Allow
 always" writes a rule for the tool name:
 
 ```toml
@@ -1273,7 +1337,7 @@ termide --prompt "count the TODOs in src" --output json
 No one is watching to answer a permission card, so a headless run does only
 what the rules and the mode already allow: anything that would ask is refused
 with a reason the model reads. In the default `configured` mode, add `allow`
-rules for the exact commands and paths the task needs, or set `mode = "all"`
-for unattended work. Plan mode has no meaning without the panel and is
+rules for the exact commands and paths the task needs, set `mode = "auto"` to
+have the reviewer decide the rest, or set `mode = "all"` for unattended work. Plan mode has no meaning without the panel and is
 treated as `configured`, and an external (`[acp]`) agent cannot be run this
 way.

@@ -10,9 +10,10 @@ use termide_agent_acp::AcpRuntime;
 use termide_agent_core::Mode;
 use termide_agent_core::{
     build_system_prompt, discover_context_files, ensure_global_layout, AcpConfig, AcpFlavor, Agent,
-    AgentDirs, AgentEvent, AutoDenyPrompter, CancelToken, CompactionPolicy, Decision, Message,
-    ModelSpec, PermissionHooks, PermissionRules, PersistScope, PromptOptions, Provider, Session,
-    ThinkingLevel, ToolRegistry, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
+    AgentDirs, AgentEvent, AutoDenyPrompter, CancelToken, CompactionPolicy, Decision, IntentLog,
+    Message, ModelSpec, PermissionHooks, PermissionRules, PersistScope, PromptOptions, Provider,
+    ReviewerSetup, Session, ThinkingLevel, ToolContext, ToolRegistry, UserMessage, DEFAULT_AGENT,
+    GLOBAL_AGENT_DIR, SESSIONS_DIR,
 };
 use termide_agent_hooks::CommandHooks;
 use termide_agent_mcp::Connections;
@@ -218,9 +219,10 @@ impl AgentCatalog for FsCatalog {
                 let delegates = self.delegatable(name);
                 if !delegates.is_empty() {
                     let runner = Arc::clone(subagents);
-                    let run: SubagentRun = Arc::new(move |agent, prompt, cancel, on_update| {
-                        runner.run(agent, prompt, cancel, on_update)
-                    });
+                    let run: SubagentRun =
+                        Arc::new(move |agent, prompt, ctx, cancel, on_update| {
+                            runner.run(agent, prompt, ctx, cancel, on_update)
+                        });
                     tools.insert(Arc::new(TaskTool::new(delegates, run)));
                 }
             }
@@ -528,6 +530,37 @@ fn api_key_of(connection: &Connection) -> Option<String> {
         .flatten()
 }
 
+/// The `auto` mode reviewer: the texts of `system/classify.md`, and the
+/// model of the `auto_reviewer` connection when one is named. A name that
+/// matches no connection, or one that drives a CLI agent, reviews with the
+/// session's model.
+fn reviewer_setup(settings: &AiSettings, dirs: &AgentDirs) -> ReviewerSetup {
+    let name = settings.auto_reviewer.trim();
+    let model = match settings.connections.get(name) {
+        _ if name.is_empty() => None,
+        Some(connection) if !termide_config::is_cli_provider(&connection.provider) => {
+            let spec = ModelSpec {
+                provider: "agent".to_string(),
+                id: connection.model.clone(),
+                context_window: connection.effective_context_window(),
+                max_tokens: None,
+                thinking: ThinkingLevel::Off,
+            };
+            Some((build_provider(connection, api_key_of(connection)), spec))
+        }
+        _ => {
+            log::warn!(
+                "auto_reviewer names no model connection {name:?}; the session's model reviews"
+            );
+            None
+        }
+    };
+    ReviewerSetup {
+        prompt: dirs.classify_prompt(),
+        model,
+    }
+}
+
 struct Subagents {
     active: ActiveSlot,
     dirs: AgentDirs,
@@ -541,6 +574,8 @@ struct Subagents {
     max_tokens: Option<u64>,
     reasoning: ThinkingLevel,
     compaction: CompactionPolicy,
+    /// Reviews the subagent's calls in `auto` mode.
+    reviewer: ReviewerSetup,
 }
 
 /// A runaway subagent is cut off after this many model calls.
@@ -551,6 +586,7 @@ impl Subagents {
         &self,
         name: &str,
         prompt: &str,
+        ctx: &ToolContext,
         cancel: &CancelToken,
         on_update: &mut dyn FnMut(termide_agent_core::ToolUpdate),
     ) -> Result<String, String> {
@@ -594,19 +630,28 @@ impl Subagents {
         };
         let mut rules = self.rules.clone();
         rules.mode = definition.spec.mode.unwrap_or_else(|| self.mode.get());
+        // The reviewer judges the subagent's calls against what the user asked
+        // the delegating agent; the task itself counts as that agent's words.
+        let parent = ctx
+            .session
+            .as_ref()
+            .map(|session| IntentLog::delegated(&session.intent))
+            .unwrap_or_default();
         let mut agent = Agent::new(Arc::clone(&active.provider), tools, model, self.cwd.clone())
             .with_system_prompt(system_prompt)
-            .with_compaction(self.compaction);
+            .with_compaction(self.compaction)
+            .with_delegated_intent(parent);
+
+        // Mirror the sub-run's own progress up as it goes, and stop a run
+        // that will not stop itself. The parent's cancel aborts it too.
+        let budget = CancelToken::new();
         let mut hooks = PermissionHooks::new(
             rules,
             Box::new(AutoDenyPrompter::new(
                 "a subagent cannot prompt; it may only do what the permission rules and mode already allow",
             )),
-        );
-
-        // Mirror the sub-run's own progress up as it goes, and stop a run
-        // that will not stop itself. The parent's cancel aborts it too.
-        let budget = CancelToken::new();
+        )
+        .with_classifier(Box::new(self.reviewer.classifier(budget.clone())));
         let mut turns = 0usize;
         let mut progress = String::new();
         {
@@ -704,11 +749,13 @@ fn agent_setup(
         max_tokens: settings.output_limit(),
         reasoning: settings.reasoning,
         compaction: settings.compaction,
+        reviewer: reviewer_setup(settings, &catalog.dirs),
     }));
     let compaction_prompts = catalog.dirs.compaction_prompts();
     let plan_prompt = catalog.dirs.plan_prompt();
     let goal_prompt = catalog.dirs.goal_prompt();
     let handoff_prompt = catalog.dirs.handoff_prompt();
+    let reviewer = reviewer_setup(settings, &catalog.dirs);
     let hooks: Option<HooksFactory> = {
         let configs = catalog.dirs.hooks();
         let hook_cwd = cwd.clone();
@@ -779,6 +826,7 @@ fn agent_setup(
         plan_prompt,
         goal_prompt,
         handoff_prompt,
+        reviewer,
         fold: match settings.fold_blocks {
             termide_config::FoldBlocks::Immediately => FoldMode::Immediately,
             termide_config::FoldBlocks::OnFinish => FoldMode::OnFinish,
@@ -1367,6 +1415,7 @@ mod tests {
             max_tokens: settings.output_limit(),
             reasoning: ThinkingLevel::Off,
             compaction: settings.compaction,
+            reviewer: ReviewerSetup::default(),
         }));
 
         assert_eq!(catalog.resolve("search").unwrap().tools.names(), ["read"]);
@@ -1405,7 +1454,7 @@ mod tests {
         assert!(review.system_prompt.starts_with("You review.\n\n- read:"));
         assert_eq!(review.tools.names(), ["read", "bash"]);
         assert_eq!(review.model.as_deref(), Some("big"));
-        assert_eq!(review.mode, Some(termide_agent_core::Mode::All));
+        assert_eq!(review.mode, Some(termide_agent_core::Mode::Auto));
 
         let default = catalog.resolve(DEFAULT_AGENT).unwrap();
         // The built-in four and `question`, which the panel's agent asks with.

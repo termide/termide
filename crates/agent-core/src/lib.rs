@@ -23,6 +23,7 @@ pub mod agent;
 pub mod ask;
 pub mod cancel;
 pub mod checkpoints;
+pub mod classifier;
 pub mod commands;
 pub mod compaction;
 pub mod context;
@@ -50,6 +51,10 @@ pub use ask::{
 };
 pub use cancel::CancelToken;
 pub use checkpoints::{CheckpointHooks, CheckpointStore, SavedFile, Undone};
+pub use classifier::{
+    parse_classification, Classifier, ClassifyPrompt, IntentEntry, IntentLog, ModelClassifier,
+    ReviewerSetup, SessionView, Verdict, SEED_CLASSIFY,
+};
 pub use commands::{CommandScript, COMMANDS_DIR};
 pub use compaction::{CompactionPolicy, CompactionPrompts, CompactionReason};
 pub use context::{

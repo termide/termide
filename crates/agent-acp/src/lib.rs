@@ -1149,9 +1149,12 @@ fn is_finished(update: &Value) -> bool {
 }
 
 /// Codex's approval preset and collaboration mode for the panel's `mode`.
+/// `auto` asks like `configured`: termide's reviewer judges a call against
+/// the session, which an external agent keeps to itself, so its requests go
+/// to termide's rules and the user.
 fn codex_modes(mode: Mode) -> (&'static str, &'static str) {
     match mode {
-        Mode::Ask | Mode::Configured => ("read-only", "default"),
+        Mode::Ask | Mode::Configured | Mode::Auto => ("read-only", "default"),
         Mode::Plan => ("read-only", "plan"),
         Mode::Edit => ("agent", "default"),
         Mode::All => ("agent-full-access", "default"),
@@ -1161,7 +1164,7 @@ fn codex_modes(mode: Mode) -> (&'static str, &'static str) {
 /// Gemini CLI's approval mode for the panel's `mode`.
 fn gemini_mode(mode: Mode) -> &'static str {
     match mode {
-        Mode::Ask | Mode::Configured => "default",
+        Mode::Ask | Mode::Configured | Mode::Auto => "default",
         Mode::Plan => "plan",
         Mode::Edit => "autoEdit",
         Mode::All => "yolo",

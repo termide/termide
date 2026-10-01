@@ -121,6 +121,11 @@ pub struct AiSettings {
     #[serde(default)]
     pub permissions: termide_agent_core::PermissionRules,
 
+    /// The connection whose model reviews calls in `auto` mode. Empty
+    /// reviews with the model the session runs on.
+    #[serde(default)]
+    pub auto_reviewer: String,
+
     /// Context compaction policy.
     #[serde(default)]
     pub compaction: termide_agent_core::CompactionPolicy,
@@ -429,6 +434,7 @@ impl Default for AiSettings {
             max_tokens_per_turn: agent_defaults::max_tokens(),
             reasoning: agent_defaults::reasoning(),
             permissions: termide_agent_core::PermissionRules::default(),
+            auto_reviewer: String::new(),
             compaction: termide_agent_core::CompactionPolicy::default(),
             fold_blocks: FoldBlocks::default(),
             web: WebSettings::default(),
@@ -1248,7 +1254,8 @@ mod ai_settings_tests {
         );
         let parsed: AiSettings =
             toml::from_str("prefer_reasoning = false\n[permissions]\nmode = \"auto\"\n").unwrap();
-        assert_eq!(parsed.permissions.mode, termide_agent_core::Mode::All);
+        assert_eq!(parsed.permissions.mode, termide_agent_core::Mode::Auto);
+        assert!(parsed.auto_reviewer.is_empty());
         assert_eq!(parsed.reasoning, termide_agent_core::ThinkingLevel::Off);
         let parsed: AiSettings = toml::from_str("prefer_reasoning = true\n").unwrap();
         assert_eq!(parsed.reasoning, termide_agent_core::ThinkingLevel::High);
