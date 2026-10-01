@@ -202,8 +202,11 @@ once that panel lets it go. A click opens one in place of the empty session;
 from the keyboard, `Tab` moves into the list, the arrows, `PgUp`/`PgDn` and
 `Home`/`End` walk it, `Enter` opens the session under the cursor, `F8` or
 `Delete` deletes it after a confirmation, and `Tab` or `Esc` goes back to the
-prompt. The banner gives way to the conversation as soon as you send your
-first message.
+prompt. What the panel reports before then — an MCP server connected, a
+`/name` defined twice — goes under the banner, past a dashed rule, the latest
+in view; the list of sessions gives up its rows to it first. The banner gives
+way to the conversation as soon as you send your first message, and those
+lines stay at the top of it.
 
 The **Tools** chip (and the banner's `tools` line) opens a checklist of what
 the session may use: the built-in tools, the skills, and each MCP server's

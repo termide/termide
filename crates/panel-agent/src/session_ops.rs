@@ -166,9 +166,7 @@ impl AgentPanel {
     /// back; the cursor stays on the session it was on while that is listed.
     /// A cheap check while nothing changed, for the tick.
     pub(crate) fn follow_open_sessions(&mut self) -> bool {
-        if !self.transcript.items().is_empty()
-            || Session::open_generation() == self.recent_generation
-        {
+        if !self.banner_shown() || Session::open_generation() == self.recent_generation {
             return false;
         }
         let selected = self
@@ -206,7 +204,7 @@ impl AgentPanel {
     /// Whether the welcome banner is up and lists recent sessions, so `Tab`
     /// can take the keyboard into that list and the wheel scrolls it.
     pub(crate) fn recent_list_shown(&self) -> bool {
-        self.transcript.items().is_empty() && !self.recent_sessions.is_empty()
+        self.banner_shown() && !self.recent_sessions.is_empty()
     }
 
     /// Scroll the banner's list by `delta` rows. With the keyboard in the

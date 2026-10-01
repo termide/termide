@@ -156,8 +156,6 @@ const BUILTIN_COMMANDS: [&str; 14] = [
     PROMPT_COMMAND,
     MCP_COMMAND,
 ];
-/// Welcome-banner action that explains the `/name`s defined more than once.
-const SLASH_CONFLICTS_ACTION: &str = "agent_slash_conflicts";
 /// Context-menu action that undoes the last request.
 const UNDO_ACTION: &str = "agent_undo";
 
@@ -754,9 +752,6 @@ pub struct AgentPanel {
     /// Rebuilt every render; empty once the session has content and the
     /// banner is gone.
     banner_hits: Vec<(Rect, BannerHit)>,
-    /// The `/name`s more than one kind defined when the panel opened, for
-    /// the welcome banner; a click there explains them.
-    shadowed: Vec<String>,
 }
 
 impl AgentPanel {
@@ -977,20 +972,10 @@ impl AgentPanel {
             input_area: Rect::default(),
             scrollbars: ScrollBars::default(),
             banner_hits: Vec::new(),
-            shadowed: Vec::new(),
         };
-        // Names defined twice are reported once, when the panel opens: on the
-        // welcome banner of a fresh session (a notice would replace it), as
-        // notices under a resumed one.
-        if panel.transcript.items().is_empty() {
-            panel.shadowed = panel
-                .slash_conflicts()
-                .into_iter()
-                .map(|conflict| conflict.name)
-                .collect();
-        } else {
-            panel.notice_slash_conflicts();
-        }
+        // Names defined twice are reported once, when the panel opens; under
+        // a fresh session's banner the notices sit below it.
+        panel.notice_slash_conflicts();
         panel.refresh_recent_sessions();
         panel
     }
@@ -1026,6 +1011,15 @@ impl AgentPanel {
     /// welcome banner is still showing. A model/agent switch then updates the
     /// banner's values in place instead of pushing a notice that would replace
     /// the banner with a near-empty transcript.
+    /// Whether the welcome banner is up: nothing in the transcript but what
+    /// the panel reported, which the banner shows below itself.
+    fn banner_shown(&self) -> bool {
+        self.transcript
+            .items()
+            .iter()
+            .all(|item| matches!(item, Item::Notice { .. }))
+    }
+
     fn is_fresh(&self) -> bool {
         !self
             .transcript
@@ -1211,10 +1205,6 @@ impl Panel for AgentPanel {
                 on_submit: InputAction::Custom(RENAME_ACTION.to_string()),
             }],
             DELETE_SESSION_ACTION => self.ask_delete_session(),
-            SLASH_CONFLICTS_ACTION => {
-                self.notice_slash_conflicts();
-                vec![PanelEvent::NeedsRedraw]
-            }
             CONNECTION_ACTION => {
                 let Some(connections) = &self.connections else {
                     return Vec::new();

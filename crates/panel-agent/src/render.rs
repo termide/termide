@@ -13,8 +13,10 @@ use crate::toolset::TOOLSET_ACTION;
 use crate::{
     format_tokens, provider_label, shorten_path, transcript, truncate_title, AgentPanel, BannerHit,
     Phase, RunButton, AGENT_ACTION, CONNECTION_ACTION, MODEL_ACTION, MODE_ACTION, REASONING_ACTION,
-    SLASH_CONFLICTS_ACTION,
 };
+
+/// Rows of the welcome banner's logo.
+const WELCOME_LOGO_ROWS: usize = 5;
 
 /// Queued messages the state strip shows before folding the rest into a count.
 pub(crate) const STATE_QUEUED_ROWS: usize = 3;
@@ -239,13 +241,20 @@ impl AgentPanel {
             .min(available.saturating_sub(2).max(1))
     }
 
+    /// Rows the banner's fields take, before its list of sessions: the name,
+    /// the subtitle, a blank, connection, model, agent, tools (for our own
+    /// agent) and cwd.
+    pub(crate) fn banner_field_rows(&self) -> usize {
+        7 + usize::from(!self.external)
+    }
+
     /// The welcome banner shown while the session is empty: a logo on the left
     /// and what the agent is set up with (provider, model, agent, directory) on
     /// the right, at the top of the transcript area, with the recent sessions
     /// filling the rows below. On a narrow panel the logo is dropped and only
     /// the details show.
     pub(crate) fn render_welcome(&mut self, area: Rect, buf: &mut Buffer, colors: &ThemeColors) {
-        const LOGO: [&str; 5] = [
+        const LOGO: [&str; WELCOME_LOGO_ROWS] = [
             "╭───────╮",
             "│       │",
             "│  ›_   │",
@@ -323,20 +332,7 @@ impl AgentPanel {
             ));
         }
         info.push((field("cwd", cwd, false), None));
-        if !self.shadowed.is_empty() {
-            let names: Vec<String> = self
-                .shadowed
-                .iter()
-                .map(|name| format!("/{name}"))
-                .collect();
-            info.push((
-                Line::from(vec![
-                    Span::styled(format!("{:<12}", "shadowed"), dim),
-                    Span::styled(names.join(", "), Style::default().fg(colors.warning)),
-                ]),
-                Some(BannerHit::Action(SLASH_CONFLICTS_ACTION)),
-            ));
-        }
+        debug_assert_eq!(info.len(), self.banner_field_rows());
         // This directory's other sessions, newest first, one click (or
         // Tab, the arrows and Enter) away: as many rows as the panel's height
         // leaves, scrolling through the rest.
@@ -577,8 +573,14 @@ impl AgentPanel {
         // Keep the chat selection valid, on screen, and note the flat-line
         // range to tint — computed now, before `lines` borrows the transcript.
         let item_count = self.transcript.items().len();
+        let banner = self.banner_shown();
+        // The banner's top margin and its fields, which the notices under it
+        // leave room for.
+        let needed = 1 + self.banner_field_rows().max(WELCOME_LOGO_ROWS);
         let mut selected_range: Option<(usize, usize)> = None;
-        if self.chat_focus && item_count > 0 {
+        // Under the banner the keyboard is in its list of sessions, not on
+        // the notices.
+        if self.chat_focus && item_count > 0 && !banner {
             self.selected = self
                 .transcript
                 .selectable_near(self.selected)
@@ -594,14 +596,29 @@ impl AgentPanel {
         // The block under the chat cursor is shown inverted (text and
         // background swapped), so the selection reads as one solid block.
         let selected_style = Style::default().fg(colors.bg).bg(colors.fg);
-        if lines.is_empty() {
-            // A fresh session shows a welcome banner in place of the (empty)
-            // transcript: the logo and what the agent is set up with.
+        if banner {
+            // A fresh session shows a welcome banner in place of the
+            // transcript: the logo and what the agent is set up with. What
+            // the panel reports before the first request goes under it, past
+            // a dashed rule, the latest kept in view; the banner's list of
+            // sessions gives up its rows first, its fields never.
+            let room = (transcript_height as usize).saturating_sub(needed + 1);
+            let shown = lines.len().min(room);
+            let notices: Vec<Line<'static>> = lines[lines.len() - shown..].to_vec();
+            let rule_rows = u16::from(shown > 0);
             let welcome = Rect {
-                height: transcript_height,
+                height: transcript_height - shown as u16 - rule_rows,
                 ..area
             };
             self.render_welcome(welcome, buf, &colors);
+            if shown > 0 {
+                let rule_y = area.y + welcome.height;
+                let rule = transcript::separator(text_width + 1, &colors);
+                buf.set_line(area.x, rule_y, &rule, text_width);
+                for (row, line) in notices.iter().enumerate() {
+                    buf.set_line(area.x, rule_y + 1 + row as u16, line, text_width);
+                }
+            }
         } else {
             // No banner while the session has content, so its click targets go.
             self.banner_hits.clear();
@@ -639,17 +656,23 @@ impl AgentPanel {
                 }
             }
         }
-        self.scrollbars.vertical = ScrollBar::render_tracked(
-            buf,
-            ctx.border_right_x.unwrap_or(area.x + area.width - 1),
-            area.y,
-            transcript_height,
-            self.top,
-            transcript_height as usize,
-            total,
-            &self.colors,
-            ctx.is_focused,
-        );
+        // The banner's list draws its own bar; the notices under it keep to
+        // their latest rows and scroll nowhere.
+        self.scrollbars.vertical = if banner {
+            None
+        } else {
+            ScrollBar::render_tracked(
+                buf,
+                ctx.border_right_x.unwrap_or(area.x + area.width - 1),
+                area.y,
+                transcript_height,
+                self.top,
+                transcript_height as usize,
+                total,
+                &self.colors,
+                ctx.is_focused,
+            )
+        };
 
         let state_y = area.y + transcript_height;
         for (row, line) in state.iter().enumerate() {

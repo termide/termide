@@ -2112,6 +2112,52 @@ fn an_empty_session_shows_a_welcome_banner() {
 }
 
 #[test]
+fn notices_before_the_first_request_go_under_the_banner() {
+    let (tx, rx) = mpsc::channel();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        late_tools: Some(rx),
+        ..setup(vec![])
+    });
+    tx.send(LateTools::Ready {
+        source: "github".into(),
+        tools: vec![Arc::new(Late("github__search"))],
+    })
+    .unwrap();
+    panel.tick();
+    let rows = render_text(&mut panel, 60, 20);
+    let all = rows.join("\n");
+    // The banner stays up, the notice sits under it past a dashed rule.
+    assert!(all.contains("coding agent"), "banner stays: {all}");
+    let rule = rows.iter().position(|r| r.contains("╌╌╌")).expect("a rule");
+    let notice = rows
+        .iter()
+        .position(|r| r.contains("mcp github: 1 tools connected"))
+        .expect("the notice");
+    let cwd = rows.iter().position(|r| r.contains("cwd")).unwrap();
+    assert!(cwd < rule && rule < notice, "{rows:#?}");
+    assert!(!panel.banner_hits.is_empty());
+
+    // On a short panel the fields keep their rows and the newest notice
+    // is the one shown.
+    for i in 0..10 {
+        panel.notice(format!("note {i}"), NoticeKind::Info);
+    }
+    let rows = render_text(&mut panel, 60, 16);
+    let all = rows.join("\n");
+    assert!(all.contains("cwd") && all.contains("note 9"), "{rows:#?}");
+    assert!(!all.contains("note 0"), "{rows:#?}");
+
+    // The first request takes the banner away; the notices stay above it.
+    type_text(&mut panel, "hello");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+    let all = render_text(&mut panel, 60, 40).join("\n");
+    assert!(!all.contains("coding agent"), "banner gone: {all}");
+    assert!(all.contains("note 9"), "{all}");
+    assert!(panel.banner_hits.is_empty());
+}
+
+#[test]
 fn the_summary_reports_output_cleaning_savings() {
     use termide_agent_core::ToolCall;
     let mut panel = panel(vec![]);
@@ -4066,25 +4112,22 @@ fn slash_completion_offers_a_hidden_skill_by_its_prefix() {
 
 #[test]
 fn shadowed_names_are_reported_when_the_panel_opens() {
-    // A fresh session keeps its banner: the names wait there, a click
-    // explains them.
-    let mut fresh = skilled_panel(None);
-    assert_eq!(fresh.shadowed, ["review"]);
-    assert!(fresh.transcript().items().is_empty());
-    fresh.handle_status_action(SLASH_CONFLICTS_ACTION);
+    // A fresh session says so under its banner, which stays up.
+    let fresh = skilled_panel(None);
+    assert!(fresh.banner_shown());
     assert!(fresh.transcript().items().iter().any(|item| matches!(
         item,
         Item::Notice { text, kind: NoticeKind::Warn } if text.contains("/skill:review")
     )));
 
-    // A resumed session has no banner, so the warning comes as a notice.
+    // A resumed session has no banner; the warning is a notice all the same.
     let dir = tempfile::tempdir().unwrap();
     let mut session = Session::create(dir.path(), dir.path()).unwrap();
     session
         .append_timed_message(&Message::User(UserMessage::text("hi")), None)
         .unwrap();
     let resumed = skilled_panel(Some(Session::open(session.path()).unwrap()));
-    assert!(resumed.shadowed.is_empty());
+    assert!(!resumed.banner_shown());
     assert!(resumed.transcript().items().iter().any(|item| matches!(
         item,
         Item::Notice { text, .. } if text.starts_with("/review")

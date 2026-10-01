@@ -938,6 +938,8 @@ impl AgentPanel {
             .len()
             .checked_sub(1)
             .and_then(|last| self.transcript.selectable_near(last));
+        // Under the banner the notices are not blocks to walk.
+        let last_block = last_block.filter(|_| !self.banner_shown());
         if let (KeyCode::Tab, Some(last_block)) = (key.code, last_block) {
             self.chat_focus = true;
             self.follow = false;
@@ -1188,6 +1190,11 @@ impl AgentPanel {
                 if self.pause_requested && self.pause_row == Some(event.row) {
                     self.cancel_pause();
                     return vec![PanelEvent::NeedsRedraw];
+                }
+                // Under the banner the notices take no clicks: the banner's
+                // own rows did above.
+                if inside && self.banner_shown() {
+                    return vec![];
                 }
                 if !inside {
                     // A click below the transcript lands on the input: hand focus
