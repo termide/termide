@@ -7,6 +7,7 @@
 //! transcript change also goes to the JSONL [`Session`] when one is attached.
 
 mod events;
+mod export;
 mod input;
 mod mcp;
 mod pending;
@@ -156,6 +157,8 @@ const BUILTIN_COMMANDS: [&str; 14] = [
     PROMPT_COMMAND,
     MCP_COMMAND,
 ];
+/// Context-menu action (also `Ctrl+S`) that saves the chat as Markdown.
+const SAVE_CHAT_ACTION: &str = "agent_save_chat";
 /// Context-menu action that undoes the last request.
 const UNDO_ACTION: &str = "agent_undo";
 
@@ -1066,7 +1069,7 @@ fn now_hms() -> String {
 
 /// Upper-case the first character of `name`, leaving the rest as written
 /// (so `reviewer` → `Reviewer`, `web-dev` → `Web-dev`).
-fn capitalize(name: &str) -> String {
+pub(crate) fn capitalize(name: &str) -> String {
     let mut chars = name.chars();
     match chars.next() {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
@@ -1194,6 +1197,7 @@ impl Panel for AgentPanel {
         vec![
             (t.agent_session_info().to_string(), SESSION_INFO_ACTION),
             (t.agent_rename().to_string(), RENAME_ACTION),
+            (t.agent_save_chat().to_string(), SAVE_CHAT_ACTION),
             (t.agent_delete_session().to_string(), DELETE_SESSION_ACTION),
         ]
     }
@@ -1212,6 +1216,7 @@ impl Panel for AgentPanel {
                 on_submit: InputAction::Custom(RENAME_ACTION.to_string()),
             }],
             DELETE_SESSION_ACTION => self.ask_delete_session(),
+            SAVE_CHAT_ACTION => self.save_chat(),
             CONNECTION_ACTION => {
                 let Some(connections) = &self.connections else {
                     return Vec::new();

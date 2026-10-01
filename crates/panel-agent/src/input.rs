@@ -775,6 +775,11 @@ impl AgentPanel {
             }
         }
 
+        // Ctrl+S saves the chat as Markdown, wherever the focus sits in the
+        // panel — the same as the `[≡]` menu's entry.
+        if ctrl && !alt && !shift && key.code == KeyCode::Char('s') {
+            return self.save_chat();
+        }
         // F2 renames the session, wherever the focus sits in the panel — the
         // same prompt as the `[≡]` menu's Rename.
         if key.code == KeyCode::F(2) && !ctrl && !alt && !shift {

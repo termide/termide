@@ -237,8 +237,15 @@ kept in the session log, so a reopened session comes back with it. An external
 agent over ACP brings its own tools, so it has no checklist.
 
 The panel's `[≡]` menu is kept to the actions with no home elsewhere —
-**Session info** (also `F3` and `/usage`), **Rename session** and **Delete
-session**. The assembled system prompt opens with `/prompt`. Managing sessions
+**Session info** (also `F3` and `/usage`), **Rename session**, **Save chat as
+Markdown…** (also `Ctrl+S`) and **Delete session**. The assembled system prompt
+opens with `/prompt`. Saving the chat writes the conversation through a Save As
+dialog, named after the session: each day under its own heading, and under it
+each of your messages and each of the agent's answers under a heading of 🧑 or
+🤖, the speaker's name (a custom agent gives its own) and the time.
+Reasoning, tool calls and their output, and the panel's notices are left out;
+a message sent as `/name args` is saved as you typed it. The whole branch is
+saved, a compacted part included. Managing sessions
 is on the F-keys and in the AI menu instead: `F7` starts a new session, `F6` opens
 the picker of this directory's sessions (newest first, the current one marked
 `●`), `F8` deletes the current one after a confirmation, and `F2` renames it.
@@ -271,6 +278,7 @@ you have named or sent even one message to is always kept.
 | `Ctrl+Z` / `Ctrl+Y`, `Ctrl+Shift+Z` | Undo / redo a prompt edit |
 | `Shift+Tab` | Cycle the permission mode: ask → plan → edit → configured → auto → all |
 | `F2` | Rename this session (the same prompt as the `[≡]` menu) |
+| `Ctrl+S` | Save the chat as a Markdown file (your messages and the agent's answers under who and when, each day under its own heading); also the `[≡]` menu |
 | `F3` | Open the session-info modal (model, agent, mode, directory, created/last-active times, messages, compactions, tokens, context, how much shell output was cleaned); also `/usage` and the `[≡]` menu |
 | `F4` | Roll the session back to before a chosen checkpoint |
 | `F6` | Switch session — open the picker of this directory's sessions |

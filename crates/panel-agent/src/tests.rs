@@ -1631,7 +1631,12 @@ fn sessions_can_be_listed_switched_and_resumed() {
     let labels: Vec<&str> = items.iter().map(|(label, _)| label.as_str()).collect();
     assert_eq!(
         labels,
-        vec!["Session info", "Rename session", "Delete session"]
+        vec![
+            "Session info",
+            "Rename session",
+            "Save chat as Markdown…",
+            "Delete session"
+        ]
     );
     panel.handle_status_action(NEW_SESSION_ACTION);
     assert!(panel.transcript().items().is_empty());
@@ -2155,6 +2160,39 @@ fn notices_before_the_first_request_go_under_the_banner() {
     assert!(!all.contains("coding agent"), "banner gone: {all}");
     assert!(all.contains("note 9"), "{all}");
     assert!(panel.banner_hits.is_empty());
+}
+
+#[test]
+fn ctrl_s_saves_the_chat_and_the_menu_offers_it() {
+    let mut panel = panel(vec![reply_thinking("Hi there.", "they greet")]);
+    assert!(panel
+        .context_menu_items()
+        .iter()
+        .any(|(_, action)| *action == SAVE_CHAT_ACTION));
+    // Nothing said yet: nothing to save, and the panel says so.
+    let events = panel.handle_key(chord(KeyCode::Char('s'), KeyModifiers::CONTROL));
+    assert!(!events
+        .iter()
+        .any(|e| matches!(e, PanelEvent::SaveContentAs { .. })));
+    assert!(notices(&panel).last().unwrap().contains("Nothing to save"));
+
+    type_text(&mut panel, "hello");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+    let events = panel.handle_key(chord(KeyCode::Char('s'), KeyModifiers::CONTROL));
+    let Some(PanelEvent::SaveContentAs {
+        content,
+        default_name,
+    }) = events.into_iter().next()
+    else {
+        panic!("Ctrl+S asks where to save");
+    };
+    assert!(default_name.ends_with(".md"), "{default_name}");
+    assert!(content.starts_with("# "), "{content}");
+    assert!(content.contains("### 🧑 You · ") && content.contains("\nhello\n"));
+    assert!(content.contains("### 🤖 Agent · ") && content.contains("Hi there."));
+    // The reasoning and the panel's notices stay out.
+    assert!(!content.contains("they greet") && !content.contains("Nothing to save"));
 }
 
 #[test]

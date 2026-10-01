@@ -608,6 +608,10 @@ pub trait Translation: Send + Sync {
     fn agent_cmd_desc_handoff(&self) -> &str;
     fn agent_cmd_desc_usage(&self) -> &str;
     fn agent_cmd_desc_mcp(&self) -> &str;
+    fn agent_save_chat(&self) -> &str;
+    fn agent_export_you(&self) -> &str;
+    fn agent_export_title(&self) -> &str;
+    fn agent_notice_chat_empty(&self) -> &str;
     fn agent_toolset_buttons_hint(&self) -> &str;
     fn agent_hint_mcp(&self) -> &str;
     fn agent_notice_mcp_none(&self) -> &str;
