@@ -204,9 +204,14 @@ from the keyboard, `Tab` moves into the list, the arrows, `PgUp`/`PgDn` and
 `Delete` deletes it after a confirmation, and `Tab` or `Esc` goes back to the
 prompt. What the panel reports before then — an MCP server connected, a
 `/name` defined twice — goes under the banner, past a dashed rule, the latest
-in view; the list of sessions gives up its rows to it first. The banner gives
-way to the conversation as soon as you send your first message, and those
-lines stay at the top of it.
+in view; the list of sessions gives up its rows to it first. Each MCP server
+keeps one line there, rewritten as it changes: its tools and how many of them
+are on, connecting, needs sign-in. The banner gives way to the conversation as
+soon as you send your first message, and those lines stay at the top of it;
+from then on every change is a line of its own — a server reconnected or
+changing its tools, a toolset applied (`mcp github: 3 of 12 tools on`,
+`Tools switched off: bash; on: —`) — since from there the model has a
+different set.
 
 The **Tools** chip (and the banner's `tools` line) opens a checklist of what
 the session may use: the built-in tools, the skills, and each MCP server's

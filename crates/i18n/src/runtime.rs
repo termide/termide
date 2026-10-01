@@ -1018,6 +1018,31 @@ impl Translation for RuntimeTranslation {
         self.format("agent_toolset_mcp_fmt", &[("server", server)])
     }
 
+    fn agent_notice_mcp_reconnected_fmt(&self, source: &str, count: usize) -> String {
+        self.format(
+            "agent_notice_mcp_reconnected_fmt",
+            &[("source", source), ("count", &count.to_string())],
+        )
+    }
+
+    fn agent_notice_mcp_tools_on_fmt(&self, source: &str, on: usize, count: usize) -> String {
+        self.format(
+            "agent_notice_mcp_tools_on_fmt",
+            &[
+                ("source", source),
+                ("on", &on.to_string()),
+                ("count", &count.to_string()),
+            ],
+        )
+    }
+
+    fn agent_notice_toolset_changed_fmt(&self, off: &str, on: &str) -> String {
+        self.format(
+            "agent_notice_toolset_changed_fmt",
+            &[("off", off), ("on", on)],
+        )
+    }
+
     fn agent_notice_mcp_connected_fmt(&self, source: &str, count: usize) -> String {
         self.format(
             "agent_notice_mcp_connected_fmt",

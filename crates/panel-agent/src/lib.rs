@@ -544,6 +544,11 @@ pub struct AgentPanel {
     /// MCP tools whose server replaced or withdrew them, by name, still to
     /// leave the worker's registry once it is between runs.
     leaving_tools: Vec<String>,
+    /// Under the banner, the transcript item that is each MCP server's line.
+    mcp_lines: std::collections::HashMap<String, usize>,
+    /// Servers asked to connect again, so their next set reads "reconnected"
+    /// rather than "changed".
+    mcp_reconnecting: BTreeSet<String>,
     /// What the session switched off: tool names and `skill:<name>`.
     toolset_off: BTreeSet<String>,
     /// What the running profile (its prompt and registry) was built without.
@@ -880,6 +885,8 @@ impl AgentPanel {
             late_tools,
             waiting_tools: Vec::new(),
             leaving_tools: Vec::new(),
+            mcp_lines: std::collections::HashMap::new(),
+            mcp_reconnecting: BTreeSet::new(),
             toolset_off,
             context_off,
             blocked,

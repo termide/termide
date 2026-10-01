@@ -120,6 +120,8 @@ impl AgentPanel {
         self.question_rx = question_rx;
         self.pending = None;
         self.transcript = transcript;
+        // The lines the servers had point into the transcript just replaced.
+        self.mcp_lines.clear();
         // Leaving the current session: if it was never used, delete it so an
         // empty session does not clutter the list or the disk. On a
         // same-session rebuild (switch agent, undo) the caller has already

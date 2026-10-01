@@ -202,6 +202,7 @@ impl AgentPanel {
     /// is refused until a compaction takes it out.
     pub(crate) fn apply_toolset(&mut self, checked: &[String]) {
         let fresh = self.is_fresh();
+        let before = self.toolset_off.clone();
         let mut off = self.toolset_off.clone();
         for item in self.toolset_items() {
             if !item.enabled {
@@ -228,6 +229,96 @@ impl AgentPanel {
         } else {
             self.sync_blocked();
         }
+        self.announce_toolset(&before);
+    }
+
+    /// Say what a change of the toolset did. A server whose tools changed
+    /// gets its line — rewritten in place under the banner, a new one in a
+    /// conversation, since from here on the model has a different set; the
+    /// built-in tools and skills get one line between them in a
+    /// conversation, and the banner's `tools` count before it.
+    fn announce_toolset(&mut self, before: &BTreeSet<String>) {
+        let changed: BTreeSet<&String> = before.symmetric_difference(&self.toolset_off).collect();
+        let mut servers: Vec<String> = Vec::new();
+        for (server, tool) in &self.mcp_arrived {
+            if changed.contains(&tool.name().to_string()) && !servers.contains(server) {
+                servers.push(server.clone());
+            }
+        }
+        for server in servers {
+            let line = self.mcp_tools_line(&server);
+            self.mcp_notice(&server, line, NoticeKind::Info);
+        }
+        if self.banner_shown() {
+            return;
+        }
+        let is_mcp = |key: &str| self.mcp_arrived.iter().any(|(_, tool)| tool.name() == key);
+        let shown = |keys: Vec<&String>| -> String {
+            let names: Vec<&str> = keys
+                .into_iter()
+                .map(|key| key.strip_prefix("skill:").unwrap_or(key))
+                .collect();
+            if names.is_empty() {
+                "—".to_string()
+            } else {
+                names.join(", ")
+            }
+        };
+        let off: Vec<&String> = self
+            .toolset_off
+            .difference(before)
+            .filter(|key| !is_mcp(key))
+            .collect();
+        let on: Vec<&String> = before
+            .difference(&self.toolset_off)
+            .filter(|key| !is_mcp(key))
+            .collect();
+        if off.is_empty() && on.is_empty() {
+            return;
+        }
+        let text = termide_i18n::t().agent_notice_toolset_changed_fmt(&shown(off), &shown(on));
+        self.notice(text, NoticeKind::Info);
+    }
+
+    /// `(on, all)` of the tools `server` brought.
+    pub(crate) fn mcp_tool_count(&self, server: &str) -> (usize, usize) {
+        let tools: Vec<&str> = self
+            .mcp_arrived
+            .iter()
+            .filter(|(s, _)| s == server)
+            .map(|(_, tool)| tool.name())
+            .collect();
+        let off = tools
+            .iter()
+            .filter(|name| self.toolset_off.contains(**name))
+            .count();
+        (tools.len() - off, tools.len())
+    }
+
+    /// A connected server's line: its tools, and how many are on when not all.
+    pub(crate) fn mcp_tools_line(&self, server: &str) -> String {
+        let t = termide_i18n::t();
+        match self.mcp_tool_count(server) {
+            (on, all) if on == all => t.agent_notice_mcp_connected_fmt(server, all),
+            (on, all) => t.agent_notice_mcp_tools_on_fmt(server, on, all),
+        }
+    }
+
+    /// A line about the MCP server `server`. Under the banner a server has
+    /// one, rewritten in place as it changes, since there it is the state of
+    /// things and not a history; in a conversation every change is a line of
+    /// its own.
+    pub(crate) fn mcp_notice(&mut self, server: &str, text: String, kind: NoticeKind) {
+        if self.banner_shown() {
+            if let Some(&index) = self.mcp_lines.get(server) {
+                if self.transcript.replace_notice(index, text.clone(), kind) {
+                    return;
+                }
+            }
+            self.mcp_lines
+                .insert(server.to_string(), self.transcript.items().len());
+        }
+        self.notice(text, kind);
     }
 
     /// `on/all` of what the session offers, for the banner and the chip.
@@ -272,12 +363,14 @@ impl AgentPanel {
                 && self.withdraw_mcp_source(event.source());
             match event {
                 LateTools::Ready { source, tools } => {
-                    let text = if replaced {
+                    let asked = self.mcp_reconnecting.remove(&source);
+                    let text = if asked {
+                        t.agent_notice_mcp_reconnected_fmt(&source, tools.len())
+                    } else if replaced {
                         t.agent_notice_mcp_updated_fmt(&source, tools.len())
                     } else {
                         t.agent_notice_mcp_connected_fmt(&source, tools.len())
                     };
-                    self.notice(text, NoticeKind::Info);
                     // Every one is listed in the checklist; one switched off
                     // stays out of the registry, and so out of the context.
                     for tool in tools {
@@ -290,27 +383,34 @@ impl AgentPanel {
                         }
                     }
                     self.sync_blocked();
+                    // Under the banner the line says where the server stands
+                    // now, switched-off tools counted; later it says what
+                    // happened.
+                    let text = if self.banner_shown() {
+                        self.mcp_tools_line(&source)
+                    } else {
+                        text
+                    };
+                    self.mcp_notice(&source, text, NoticeKind::Info);
                 }
                 LateTools::Failed { source, error } => {
-                    self.notice(
-                        t.agent_notice_mcp_error_fmt(&source, &error),
-                        NoticeKind::Warn,
-                    );
+                    self.mcp_reconnecting.remove(&source);
+                    let text = t.agent_notice_mcp_error_fmt(&source, &error);
+                    self.mcp_notice(&source, text, NoticeKind::Warn);
                 }
                 LateTools::Gone { source } => {
-                    self.notice(t.agent_notice_mcp_gone_fmt(&source), NoticeKind::Info);
+                    self.mcp_reconnecting.remove(&source);
+                    let text = t.agent_notice_mcp_gone_fmt(&source);
+                    self.mcp_notice(&source, text, NoticeKind::Info);
                 }
                 LateTools::NeedsLogin { source } => {
-                    self.notice(
-                        t.agent_notice_mcp_needs_login_fmt(&source),
-                        NoticeKind::Warn,
-                    );
+                    self.mcp_reconnecting.remove(&source);
+                    let text = t.agent_notice_mcp_needs_login_fmt(&source);
+                    self.mcp_notice(&source, text, NoticeKind::Warn);
                 }
                 LateTools::LoginStarted { source, url } => {
-                    self.notice(
-                        t.agent_notice_mcp_login_started_fmt(&source, &url),
-                        NoticeKind::Info,
-                    );
+                    let text = t.agent_notice_mcp_login_started_fmt(&source, &url);
+                    self.mcp_notice(&source, text, NoticeKind::Info);
                 }
             }
         }

@@ -4234,10 +4234,8 @@ fn a_server_s_new_set_replaces_its_old_one_and_a_removed_server_takes_its_tools(
     assert!(panel.tools.get("github__b").is_some());
     assert!(panel.tools.get("github__c").is_some());
     assert_eq!(panel.mcp_arrived.len(), 2);
-    assert_eq!(
-        notices(&panel).last().unwrap(),
-        "mcp github: the tools changed, 2 now"
-    );
+    // Under the banner the server's one line says where it stands now.
+    assert_eq!(notices(&panel), ["mcp github: 2 tools connected"]);
 
     // Dropped from the configuration: every tool of it goes, the worker's too.
     tx.send(LateTools::Gone {
@@ -4257,6 +4255,82 @@ fn a_server_s_new_set_replaces_its_old_one_and_a_removed_server_takes_its_tools(
 }
 
 #[test]
+fn a_server_s_line_tracks_the_toolset_under_the_banner_and_logs_it_after() {
+    let (tx, rx) = mpsc::channel();
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        late_tools: Some(rx),
+        catalog: Arc::new(Servers(Arc::clone(&asked))),
+        ..setup(vec![])
+    });
+    let ready = || LateTools::Ready {
+        source: "github".into(),
+        tools: vec![
+            Arc::new(Late("github__a")) as Arc<dyn termide_agent_core::Tool>,
+            Arc::new(Late("github__b")),
+        ],
+    };
+    // A built-in tool beside the server's, as an agent offers one.
+    panel.offered_tools = vec!["bash".into()];
+    tx.send(ready()).unwrap();
+    panel.tick();
+    let keys = |panel: &AgentPanel| -> Vec<String> {
+        panel
+            .toolset_items()
+            .into_iter()
+            .map(|item| item.key)
+            .collect()
+    };
+    let all = keys(&panel);
+    let without = |gone: &[&str]| -> Vec<String> {
+        all.iter()
+            .filter(|key| !gone.contains(&key.as_str()))
+            .cloned()
+            .collect()
+    };
+    let before = notices(&panel).len();
+
+    // Under the banner the server keeps one line, rewritten in place.
+    panel.apply_toolset(&without(&["github__a", "github__b"]));
+    assert_eq!(notices(&panel).len(), before);
+    assert!(notices(&panel).contains(&"mcp github: 0 of 2 tools on".to_string()));
+    panel.apply_toolset(&all);
+    assert!(notices(&panel).contains(&"mcp github: 2 tools connected".to_string()));
+    panel.press_toolset_button("mcp-reload:github");
+    assert!(notices(&panel).contains(&"mcp github: connecting".to_string()));
+    tx.send(ready()).unwrap();
+    panel.tick();
+    assert_eq!(notices(&panel).len(), before);
+    assert!(notices(&panel).contains(&"mcp github: 2 tools connected".to_string()));
+
+    // In a conversation every change is a line of its own.
+    type_text(&mut panel, "hello");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+    let builtin = all
+        .iter()
+        .find(|key| !key.starts_with("github__"))
+        .cloned()
+        .expect("a built-in tool");
+    panel.apply_toolset(&without(&["github__a", builtin.as_str()]));
+    let seen = notices(&panel);
+    let tail = &seen[seen.len() - 2..];
+    assert_eq!(tail[0], "mcp github: 1 of 2 tools on");
+    assert_eq!(tail[1], format!("Tools switched off: {builtin}; on: —"));
+    panel.press_toolset_button("mcp-reload:github");
+    tx.send(ready()).unwrap();
+    panel.tick();
+    assert_eq!(
+        notices(&panel).last().unwrap(),
+        "mcp github: reconnected, 2 tools"
+    );
+    assert_eq!(
+        *asked.lock().unwrap(),
+        ["reconnect github", "reconnect github"]
+    );
+}
+
+#[test]
 fn a_sign_in_is_asked_for_and_its_address_shown() {
     let (tx, rx) = mpsc::channel();
     let mut panel = AgentPanel::new(AgentPanelSetup {
@@ -4267,6 +4341,12 @@ fn a_sign_in_is_asked_for_and_its_address_shown() {
         source: "plane".into(),
     })
     .unwrap();
+    panel.tick();
+    assert_eq!(
+        notices(&panel),
+        ["mcp plane: needs sign-in — /mcp login plane"]
+    );
+    // The sign-in under way takes the server's line, with the address.
     tx.send(LateTools::LoginStarted {
         source: "plane".into(),
         url: "https://as.example/authorize?x=1".into(),
@@ -4274,9 +4354,9 @@ fn a_sign_in_is_asked_for_and_its_address_shown() {
     .unwrap();
     panel.tick();
     let seen = notices(&panel);
-    assert_eq!(seen[0], "mcp plane: needs sign-in — /mcp login plane");
+    assert_eq!(seen.len(), 1);
     assert!(
-        seen[1].contains("https://as.example/authorize?x=1"),
+        seen[0].contains("https://as.example/authorize?x=1"),
         "{seen:?}"
     );
 }

@@ -428,6 +428,17 @@ impl Transcript {
         });
     }
 
+    /// Rewrite the notice at `index` in place; `false` when there is none
+    /// there (the transcript was cleared since).
+    pub fn replace_notice(&mut self, index: usize, text: String, kind: NoticeKind) -> bool {
+        let Some(item @ Item::Notice { .. }) = self.items.get_mut(index) else {
+            return false;
+        };
+        *item = Item::Notice { text, kind };
+        self.invalidate(index);
+        true
+    }
+
     pub fn with_tool(&mut self, call_id: &str, f: impl FnOnce(&mut Item)) -> bool {
         let found = self
             .items

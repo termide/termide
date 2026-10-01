@@ -68,11 +68,26 @@ impl AgentPanel {
         let t = termide_i18n::t();
         let report = match server {
             None => match self.catalog.mcp_reload() {
-                Some(report) => report,
+                Some(report) => {
+                    self.mcp_reconnecting.extend(report.started.iter().cloned());
+                    report
+                }
                 None => return self.notice(t.agent_notice_mcp_none(), NoticeKind::Info),
             },
             Some(server) => match self.catalog.mcp_reconnect(server) {
-                Ok(report) => report,
+                Ok(report) => {
+                    if report.started.iter().any(|name| name == server) {
+                        self.mcp_reconnecting.insert(server.to_string());
+                        let (status, kind) = status_text(&McpStatus::Connecting);
+                        let line = t.agent_notice_mcp_status_fmt(server, &status);
+                        self.mcp_notice(server, line, kind);
+                        // Under the banner the connecting line is the answer.
+                        if self.banner_shown() {
+                            return;
+                        }
+                    }
+                    report
+                }
                 Err(error) => {
                     return self.notice(
                         t.agent_notice_mcp_error_fmt(server, &error),

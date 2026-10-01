@@ -733,6 +733,9 @@ pub trait Translation: Send + Sync {
     fn agent_notice_model_list_unavailable_fmt(&self, error: &str) -> String;
     fn agent_notice_mcp_error_fmt(&self, source: &str, error: &str) -> String;
     fn agent_notice_mcp_connected_fmt(&self, source: &str, count: usize) -> String;
+    fn agent_notice_mcp_reconnected_fmt(&self, source: &str, count: usize) -> String;
+    fn agent_notice_mcp_tools_on_fmt(&self, source: &str, on: usize, count: usize) -> String;
+    fn agent_notice_toolset_changed_fmt(&self, off: &str, on: &str) -> String;
     fn agent_mcp_status_ready_fmt(&self, count: usize) -> String;
     fn agent_mcp_status_failed_fmt(&self, error: &str) -> String;
     fn agent_notice_mcp_status_fmt(&self, source: &str, status: &str) -> String;
