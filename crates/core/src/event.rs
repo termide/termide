@@ -607,8 +607,9 @@ pub enum PanelEvent {
         on_select: SelectAction,
     },
 
-    /// Show a list of checkboxes; on `Enter` the keys left checked go back
-    /// to the focused panel as [`crate::PanelCommand::ChecklistDone`].
+    /// Show a list of checkboxes; however it is closed — `Enter`, `Esc`, a
+    /// click beside it, a heading button — the keys left checked go back to
+    /// the focused panel as [`crate::PanelCommand::ChecklistDone`].
     ShowChecklist {
         title: String,
         /// A hint line under the title (the keys, what a greyed item means).

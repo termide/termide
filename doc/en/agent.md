@@ -211,7 +211,8 @@ tools once it has connected. Every group opens collapsed to its heading, which
 shows how many of its items are on (`▶ [-] MCP github  3/12`): `→` or a click
 on the arrow opens it, `←` closes it (or goes from an item up to its heading).
 The checkbox on a group's heading switches the whole group on or off at once,
-open or not, and shows `[-]` while it is partly on. Every configured MCP server
+open or not, and shows `[-]` while it is partly on. The list applies however
+it is closed — `Enter`, `Esc` or a click beside it. Every configured MCP server
 has a heading, one that has not connected too — with its state beside the
 name (`needs sign-in`, `failed: …`) — and buttons at its right end: `[↻]`
 connects it again (`r` on the heading), and on a server that signs in with

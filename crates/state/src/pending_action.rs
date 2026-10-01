@@ -65,7 +65,7 @@ pub enum PendingAction {
     /// with this action string.
     PanelSelection { action: String },
     /// A checklist a panel raised with `PanelEvent::ShowChecklist`; the keys
-    /// left checked go back as `PanelCommand::ChecklistDone`.
+    /// left checked go back as `PanelCommand::ChecklistDone` however it closes.
     PanelChecklist { action: String },
     /// Text a panel asked for with `InputAction::Custom`; delivered back as
     /// `PanelCommand::InputSubmitted`.

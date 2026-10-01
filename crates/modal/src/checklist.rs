@@ -52,7 +52,8 @@ enum Row {
 /// `→` (or a click on the arrow) opens a group and `←` closes it, or goes
 /// from an item to its heading. `Space` (or a click) toggles the item under
 /// the cursor, or every item of the group when the cursor is on its heading;
-/// `Enter` applies them all, `Esc` leaves everything as it was. A locked item
+/// closing the list in any way — `Enter`, `Esc`, a click beside it — applies
+/// them all, so a choice made is never lost to the key that ends it. A locked item
 /// is shown greyed and keeps its state. A heading's buttons sit at its right
 /// end; a click on one, or its key on the heading, applies the list as
 /// `Enter` does and names the button.
@@ -458,8 +459,9 @@ impl Modal for ChecklistModal {
         chord: termide_core::KeyChord,
     ) -> Result<Option<ModalResult<Self::Result>>> {
         match chord.canonical.code {
-            KeyCode::Esc => return Ok(Some(ModalResult::Cancelled)),
-            KeyCode::Enter => return Ok(Some(ModalResult::Confirmed(self.outcome(None)))),
+            KeyCode::Esc | KeyCode::Enter => {
+                return Ok(Some(ModalResult::Confirmed(self.outcome(None))))
+            }
             KeyCode::Char(' ') => self.toggle_row(self.cursor),
             KeyCode::Char(c) => {
                 if let Some(Row::Heading(group)) = self.rows.get(self.cursor).copied() {
@@ -491,9 +493,9 @@ impl Modal for ChecklistModal {
         mouse: MouseEvent,
         _modal_area: Rect,
     ) -> Result<Option<ModalResult<Self::Result>>> {
-        // A click beside the modal leaves everything as it was, as Esc does.
+        // A click beside the modal closes it, and applies it as Esc does.
         if is_click_outside(&mouse, self.modal_area) {
-            return Ok(Some(ModalResult::Cancelled));
+            return Ok(Some(ModalResult::Confirmed(self.outcome(None))));
         }
         match mouse.kind {
             MouseEventKind::ScrollUp => self.move_by(-3),
@@ -794,7 +796,7 @@ mod tests {
     }
 
     #[test]
-    fn a_click_toggles_the_item_under_it_and_esc_changes_nothing() {
+    fn a_click_toggles_the_item_under_it_and_every_way_out_applies() {
         let mut modal = ChecklistModal::new(
             "Tools",
             "",
@@ -815,9 +817,22 @@ mod tests {
         };
         modal.handle_mouse(click, Rect::default()).unwrap();
         assert!(modal.checked().is_empty());
-        assert!(matches!(
-            modal.handle_key(key(KeyCode::Esc)).unwrap(),
-            Some(ModalResult::Cancelled)
-        ));
+        // Esc, and a click beside the list, apply what was chosen as Enter does.
+        let Some(ModalResult::Confirmed(outcome)) = modal.handle_key(key(KeyCode::Esc)).unwrap()
+        else {
+            panic!("Esc applies");
+        };
+        assert!(outcome.checked.is_empty() && outcome.pressed.is_none());
+        let beside = MouseEvent {
+            column: 0,
+            row: 0,
+            ..click
+        };
+        let Some(ModalResult::Confirmed(outcome)) =
+            modal.handle_mouse(beside, Rect::default()).unwrap()
+        else {
+            panic!("a click beside the list applies");
+        };
+        assert!(outcome.checked.is_empty());
     }
 }

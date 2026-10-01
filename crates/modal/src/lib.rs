@@ -284,18 +284,18 @@ mod outside_click_tests {
         }
     }
 
-    /// Render `modal` centred on a large screen, then report what a click in
-    /// the corner (beside it) and one at the centre (on it) do.
+    /// Render `modal` centred on a large screen, then report whether a click
+    /// in the corner (beside it) closes it — by cancelling, or, for a
+    /// checklist, by applying what was chosen — and whether one at the centre
+    /// (on it) cancels it.
     fn clicks<M: Modal>(mut modal: M) -> (bool, bool) {
         let screen = Rect::new(0, 0, 120, 40);
         let before = modal.handle_mouse(press(0, 0), screen).unwrap();
         assert!(before.is_none(), "no frame yet, nothing to be beside");
         let mut buf = Buffer::empty(screen);
         modal.render(screen, &mut buf, &Theme::default());
-        let beside = matches!(
-            modal.handle_mouse(press(0, 0), screen).unwrap(),
-            Some(ModalResult::Cancelled)
-        );
+        let beside = modal.handle_mouse(press(0, 0), screen).unwrap().is_some();
+        // On it, a click may pick (a select's option), but never dismisses.
         let on = matches!(
             modal.handle_mouse(press(60, 20), screen).unwrap(),
             Some(ModalResult::Cancelled)
