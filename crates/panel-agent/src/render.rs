@@ -18,6 +18,11 @@ use crate::{
 /// Rows of the welcome banner's logo.
 const WELCOME_LOGO_ROWS: usize = 5;
 
+/// The column the banner's values begin at, counted from where its labels
+/// begin. Labels are padded to it, never below one space, so a longer label —
+/// `Herramientas`, `エージェント` — pushes only its own value right.
+const LABEL_COL: usize = 12;
+
 /// Queued messages the state strip shows before folding the rest into a count.
 pub(crate) const STATE_QUEUED_ROWS: usize = 3;
 
@@ -287,24 +292,28 @@ impl AgentPanel {
             .fg(colors.info)
             .add_modifier(Modifier::BOLD);
         let field = |name: &str, value: String, clickable: bool| -> Line<'static> {
+            // Padded to the column the values share, in cells rather than by
+            // `{:width$}` so a label of another script and length is measured
+            // honestly; at least one space always divides it from its value.
+            let pad = LABEL_COL
+                .saturating_sub(termide_ui::str_display_width(name))
+                .max(1);
             Line::from(vec![
-                Span::styled(format!("{name:<12}"), dim),
+                Span::styled(format!("{name}{}", " ".repeat(pad)), dim),
                 Span::styled(value, if clickable { link } else { fg }),
             ])
         };
-        let cwd = shorten_path(&self.cwd, (info_w as usize).saturating_sub(12));
+        let cwd = shorten_path(&self.cwd, (info_w as usize).saturating_sub(LABEL_COL));
         // Each entry is a line and, when clicking it does something (re-pick a
         // choice, open a session), what that click does.
+        let t = termide_i18n::t();
         let info: Vec<(Line<'static>, Option<BannerHit>)> = vec![
             (Line::styled("termide", accent), None),
-            (
-                Line::styled(termide_i18n::t().agent_banner_subtitle(), dim),
-                None,
-            ),
+            (Line::styled(t.agent_banner_subtitle(), dim), None),
             (Line::from(""), None),
             (
                 field(
-                    "connection",
+                    t.agent_banner_connection(),
                     self.connection_display(),
                     self.connections.is_some(),
                 ),
@@ -313,11 +322,11 @@ impl AgentPanel {
                     .then_some(BannerHit::Action(CONNECTION_ACTION)),
             ),
             (
-                field("model", self.model_display(), true),
+                field(t.agent_banner_model(), self.model_display(), true),
                 Some(BannerHit::Action(MODEL_ACTION)),
             ),
             (
-                field("agent", self.agent.clone(), true),
+                field(t.agent_banner_agent(), self.agent.clone(), true),
                 Some(BannerHit::Action(AGENT_ACTION)),
             ),
         ];
@@ -327,11 +336,11 @@ impl AgentPanel {
         if !self.external {
             let (on, all) = self.toolset_counts();
             info.push((
-                field("tools", format!("{on}/{all}"), true),
+                field(t.agent_banner_tools(), format!("{on}/{all}"), true),
                 Some(BannerHit::Action(TOOLSET_ACTION)),
             ));
         }
-        info.push((field("cwd", cwd, false), None));
+        info.push((field(t.agent_banner_cwd(), cwd, false), None));
         debug_assert_eq!(info.len(), self.banner_field_rows());
         // This directory's other sessions, newest first, one click (or
         // Tab, the arrows and Enter) away: as many rows as the panel's height
@@ -357,7 +366,11 @@ impl AgentPanel {
                 .enumerate()
                 .map(|(row, summary)| (first + row, summary))
             {
-                let label = if index == first { "sessions" } else { "" };
+                let label = if index == first {
+                    t.agent_banner_sessions()
+                } else {
+                    ""
+                };
                 let value = format!(
                     "{} · {}",
                     civil_date(summary.modified),
@@ -411,7 +424,7 @@ impl AgentPanel {
             // The session under the keyboard cursor is shown inverted, like
             // a selected chat block; its label column stays plain.
             if self.chat_focus && *hit == Some(BannerHit::Session(self.recent_selected)) {
-                for x in info_x + 12.min(info_w)..info_x + info_w {
+                for x in info_x + (LABEL_COL as u16).min(info_w)..info_x + info_w {
                     buf[(x, y)].set_style(Style::default().fg(colors.bg).bg(colors.fg));
                 }
             }

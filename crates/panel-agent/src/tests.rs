@@ -2100,7 +2100,13 @@ fn an_empty_session_shows_a_welcome_banner() {
     // under it to the list of recent sessions.
     assert!(rows[1].contains("termide"), "{rows:#?}");
     let all = rows.join("\n");
-    for label in ["connection", "model", "agent", "cwd"] {
+    let t = termide_i18n::t();
+    for label in [
+        t.agent_banner_connection(),
+        t.agent_banner_model(),
+        t.agent_banner_agent(),
+        t.agent_banner_cwd(),
+    ] {
         assert!(all.contains(label), "missing {label}: {all}");
     }
     // The banner is the empty-state: once a turn runs, real content shows.
@@ -2138,7 +2144,10 @@ fn notices_before_the_first_request_go_under_the_banner() {
         .iter()
         .position(|r| r.contains("mcp github: 1 tools connected"))
         .expect("the notice");
-    let cwd = rows.iter().position(|r| r.contains("cwd")).unwrap();
+    let cwd = rows
+        .iter()
+        .position(|r| r.contains(termide_i18n::t().agent_banner_cwd()))
+        .unwrap();
     assert!(cwd < rule && rule < notice, "{rows:#?}");
     assert!(!panel.banner_hits.is_empty());
 
@@ -2149,7 +2158,8 @@ fn notices_before_the_first_request_go_under_the_banner() {
     }
     let rows = render_text(&mut panel, 60, 16);
     let all = rows.join("\n");
-    assert!(all.contains("cwd") && all.contains("note 9"), "{rows:#?}");
+    let cwd = termide_i18n::t().agent_banner_cwd();
+    assert!(all.contains(cwd) && all.contains("note 9"), "{rows:#?}");
     assert!(!all.contains("note 0"), "{rows:#?}");
 
     // The first request takes the banner away; the notices stay above it.
@@ -2362,7 +2372,8 @@ fn a_fresh_banner_offers_recent_sessions_to_open() {
     });
     // The very first session has nothing else to offer.
     let all = render_text(&mut panel, 80, 24).join("\n");
-    assert!(!all.contains("sessions"), "{all}");
+    let sessions = termide_i18n::t().agent_banner_sessions();
+    assert!(!all.contains(sessions), "{all}");
     let first_path = panel.session_path().unwrap().to_path_buf();
     type_text(&mut panel, "first task");
     panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
@@ -2374,7 +2385,7 @@ fn a_fresh_banner_offers_recent_sessions_to_open() {
     // A new session lists the used one, but not itself (it is empty).
     panel.handle_status_action(NEW_SESSION_ACTION);
     let all = render_text(&mut panel, 80, 24).join("\n");
-    assert!(all.contains("sessions"), "{all}");
+    assert!(all.contains(sessions), "{all}");
     assert!(all.contains("first task"), "{all}");
     let (rect, _) = panel
         .banner_hits

@@ -159,6 +159,12 @@ impl Translation for RuntimeTranslation {
         agent_chip_on,
         agent_chip_off,
         agent_banner_subtitle,
+        agent_banner_connection,
+        agent_banner_model,
+        agent_banner_agent,
+        agent_banner_tools,
+        agent_banner_cwd,
+        agent_banner_sessions,
         agent_rollback_last_request,
         agent_project_command,
         agent_hint_loop,
@@ -2186,6 +2192,36 @@ mod tests {
                     (en_h.as_str(), en_m.as_str(), en_s.as_str()),
                     "{code}: duration units left as the English fallback"
                 );
+            }
+        }
+    }
+
+    /// The banner's field labels were literals, so every language showed the
+    /// English keys. A dictionary that copies them over instead of translating
+    /// them looks right to the key test above, so check the words themselves.
+    #[test]
+    fn banner_labels_are_translated_everywhere() {
+        for (code, _) in crate::SUPPORTED_LANGUAGES {
+            let t = RuntimeTranslation::new(code).unwrap();
+            for label in [
+                t.agent_banner_connection(),
+                t.agent_banner_model(),
+                t.agent_banner_agent(),
+                t.agent_banner_tools(),
+                t.agent_banner_cwd(),
+                t.agent_banner_sessions(),
+            ] {
+                assert!(!label.is_empty(), "{code}: a banner label is empty");
+            }
+            // Latin-script languages legitimately share a word with English;
+            // the ones with their own script must not. `cwd` is a path, so it
+            // stays as is wherever the script allows.
+            if ["ru", "zh", "ja", "ko", "th", "hi", "bn"].contains(code) {
+                assert_ne!(t.agent_banner_connection(), "connection", "{code}");
+                assert_ne!(t.agent_banner_model(), "model", "{code}");
+                assert_ne!(t.agent_banner_agent(), "agent", "{code}");
+                assert_ne!(t.agent_banner_tools(), "tools", "{code}");
+                assert_ne!(t.agent_banner_sessions(), "sessions", "{code}");
             }
         }
     }

@@ -112,7 +112,7 @@ A configuration written before connections, with `provider`, `base_url`,
 read as one connection named `default` that new sessions start on; the next
 save from the settings modal writes it in the new shape.
 
-The banner's `connection` line and the status bar's **Connection** chip switch
+The banner's connection line and the status bar's **Connection** chip switch
 the session to another connection: its endpoint and its model replace the ones
 in use, the agent restarts on the same log and carries the conversation over,
 and delegated tasks follow. A CLI agent (`claude_code`, `codex`, `gemini_cli`) does
@@ -192,10 +192,11 @@ more of it. Give a session a name of your own through the panel's `[≡]` menu �
 
 A fresh session greets you with a banner: a small logo on the left and, on the
 right, what the agent is set up with — its connection, model, agent name, the
-tools it may use and the directory it works in. The connection, the model, the
-agent and the tools are shown bold in the accent colour: a click on any opens the same
+tools it may use and the directory it works in, each under a label in the
+language you set. The connection, the model, the agent and the tools are shown
+bold in the accent colour: a click on any opens the same
 picker its status-bar chip does, so you can set the session up before you
-start. Below them, the `sessions` rows list this directory's other sessions,
+start. Below them, the sessions rows list this directory's other sessions,
 newest first, filling the space the panel has and scrolling through the rest
 with the wheel. A session open in another panel is left out, and comes back
 once that panel lets it go. A click opens one in place of the empty session;
@@ -213,7 +214,7 @@ changing its tools, a toolset applied (`mcp github: 3 of 12 tools on`,
 `Tools switched off: bash; on: —`) — since from there the model has a
 different set.
 
-The **Tools** chip (and the banner's `tools` line) opens a checklist of what
+The **Tools** chip (and the banner's tools line) opens a checklist of what
 the session may use: the built-in tools, the skills, and each MCP server's
 tools once it has connected. Every group opens collapsed to its heading, which
 shows how many of its items are on (`▶ [-] MCP github  3/12`): `→` or a click
