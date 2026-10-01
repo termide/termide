@@ -466,6 +466,22 @@ LSP работает с любым языковым сервером, реали
 - **Go** — gopls
 - **C/C++** — clangd
 
+Встроенные определения серверов (используются автоматически, если бинарник есть в `PATH`):
+
+| Язык | Сервер | Файлы |
+|---|---|---|
+| Rust | `rust-analyzer` | `.rs` |
+| Python | `pylsp` | `.py` |
+| TypeScript/JavaScript | `typescript-language-server --stdio` | `.ts`, `.tsx`, `.js`, … |
+| Go | `gopls` | `.go` |
+| PHP | `phpantom_lsp` | `.php` |
+| Terraform | `terraform-ls serve` | `.tf`, `.tfvars` |
+| Docker | `docker-language-server start --stdio` | `Dockerfile` и `compose.yaml` по имени |
+
+У docker-файлов нет характерного расширения, поэтому они определяются по имени файла без учёта регистра: `Dockerfile`, `Dockerfile.*`, `*.Dockerfile`, а также `compose.yaml`/`docker-compose.yaml` с любой вставкой — например, `compose.override.yaml` или `docker-compose.prod.yml`.
+
+TermIDE при запуске просит `docker-language-server` не отправлять телеметрию; без этой просьбы сервер собирает её по умолчанию.
+
 **Примечание:** Языковой сервер необходимо установить отдельно. TermIDE предоставляет только клиентскую интеграцию LSP.
 
 ## Режим Vim

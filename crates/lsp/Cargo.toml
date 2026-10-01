@@ -9,6 +9,7 @@ description = "Language Server Protocol integration for termide"
 
 [dependencies]
 anyhow.workspace = true
+glob.workspace = true
 log.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

@@ -5,10 +5,12 @@
 //! `send_notification`.
 
 use std::collections::HashSet;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
+use std::process::ChildStdin;
 use std::sync::atomic::Ordering;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use lsp_types::{InitializeResult, PublishDiagnosticsParams, ServerCapabilities, WorkspaceEdit};
@@ -22,7 +24,98 @@ use crate::protocol::{
 
 use super::{LspServer, PendingRequests, ServerStatus};
 
+const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// `initializationOptions` a server needs at `initialize` to opt out of
+/// behaviour we do not want on its default. Keyed by the server's command:
+/// this document has no meaning outside the server it was written for, so
+/// each entry states the option its server actually reads.
+pub(super) fn initialization_options(command: &str) -> Option<Value> {
+    match command {
+        // docker-language-server reports to BugSnag with telemetry set to
+        // `all` unless the `initialize` request says otherwise, and
+        // `initialize` is the only place it will hear us: it reads telemetry
+        // from these options and, failing that, from a
+        // `workspace/configuration` round-trip we never start — answering
+        // that falls back to `all` again.
+        "docker-language-server" => Some(serde_json::json!({ "telemetry": "off" })),
+        _ => None,
+    }
+}
+
 impl LspServer {
+    pub(super) fn writer_loop(
+        mut stdin: ChildStdin,
+        writer_rx: mpsc::Receiver<String>,
+        initialize_rx: mpsc::Receiver<Option<InitializeResult>>,
+        status: Arc<Mutex<ServerStatus>>,
+    ) {
+        let mut initialize_rx = Some(initialize_rx);
+        while let Ok(msg) = writer_rx.recv() {
+            if Self::is_shutting_down(&status) || !Self::write_message(&mut stdin, &msg) {
+                break;
+            }
+            if let Some(initialize_rx) = initialize_rx.take() {
+                if !Self::await_initialize(&initialize_rx, &status, INITIALIZE_TIMEOUT) {
+                    break;
+                }
+                let initialized =
+                    JsonRpcNotification::new("initialized", Some(serde_json::json!({})));
+                let Ok(initialized) = encode_message(&initialized) else {
+                    break;
+                };
+                if !Self::write_message(&mut stdin, &initialized) {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Wait for the `initialize` response before letting `initialized` go out.
+    /// `true` means "send `initialized`": the response arrived, the channel
+    /// died, or the wait ran out — the last being the old degraded behaviour,
+    /// preferred to a writer held forever. `false` means shut down instead.
+    ///
+    /// `timeout` is a parameter rather than the constant so the timeout path
+    /// can be tested without costing 30 seconds.
+    fn await_initialize(
+        initialize_rx: &mpsc::Receiver<Option<InitializeResult>>,
+        status: &Arc<Mutex<ServerStatus>>,
+        timeout: Duration,
+    ) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            match initialize_rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(_) | Err(mpsc::RecvTimeoutError::Disconnected) => return true,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if Self::is_shutting_down(status) {
+                        return false;
+                    }
+                    if Instant::now() >= deadline {
+                        log::warn!("LSP: no response to initialize, sending initialized anyway");
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    fn is_shutting_down(status: &Arc<Mutex<ServerStatus>>) -> bool {
+        *status.lock().unwrap_or_else(|e| e.into_inner()) == ServerStatus::ShuttingDown
+    }
+
+    fn write_message(stdin: &mut ChildStdin, msg: &str) -> bool {
+        if let Err(e) = stdin.write_all(msg.as_bytes()) {
+            log::error!("Failed to write to LSP server: {}", e);
+            return false;
+        }
+        if let Err(e) = stdin.flush() {
+            log::error!("Failed to flush LSP server stdin: {}", e);
+            return false;
+        }
+        true
+    }
+
     /// Reader thread main loop
     #[allow(clippy::too_many_arguments)]
     pub(super) fn reader_loop(
@@ -315,6 +408,103 @@ impl LspServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn docker_server_is_told_to_send_no_telemetry() {
+        // docker-language-server defaults to `all`; without this it posts
+        // crash stacks and path hashes to BugSnag on the user's dime.
+        let options = initialization_options("docker-language-server").expect("options");
+        assert_eq!(options["telemetry"], "off");
+    }
+
+    #[test]
+    fn other_servers_get_no_initialization_options() {
+        // None of these read a `telemetry` option; sending them a document
+        // written for another server is at best noise we did not justify.
+        for command in [
+            "rust-analyzer",
+            "pylsp",
+            "typescript-language-server",
+            "gopls",
+            "terraform-ls",
+            "phpantom_lsp",
+        ] {
+            assert_eq!(
+                initialization_options(command),
+                None,
+                "{command} must initialize with no options"
+            );
+        }
+    }
+
+    /// A server that answers `initialize` releases the writer at once, so the
+    /// queued `initialized` and everything behind it flow.
+    #[test]
+    fn await_initialize_returns_as_soon_as_the_response_arrives() {
+        let (tx, rx) = mpsc::channel();
+        let status = Arc::new(Mutex::new(ServerStatus::Indexing));
+        tx.send(None).unwrap();
+
+        let start = Instant::now();
+        assert!(LspServer::await_initialize(
+            &rx,
+            &status,
+            INITIALIZE_TIMEOUT
+        ));
+        assert!(
+            start.elapsed() < INITIALIZE_TIMEOUT / 2,
+            "should not have waited for the deadline"
+        );
+    }
+
+    /// Dropping the sender means the response was consumed or lost; the writer
+    /// must not hang on it.
+    #[test]
+    fn await_initialize_passes_on_a_disconnected_channel() {
+        let (tx, rx) = mpsc::channel::<Option<InitializeResult>>();
+        let status = Arc::new(Mutex::new(ServerStatus::Indexing));
+        drop(tx);
+
+        assert!(LspServer::await_initialize(
+            &rx,
+            &status,
+            INITIALIZE_TIMEOUT
+        ));
+    }
+
+    /// Shutdown during the wait stops it: closing a panel must not have to sit
+    /// through the timeout.
+    #[test]
+    fn await_initialize_stops_on_shutdown() {
+        let (_tx, rx) = mpsc::channel::<Option<InitializeResult>>();
+        let status = Arc::new(Mutex::new(ServerStatus::Indexing));
+        *status.lock().unwrap() = ServerStatus::ShuttingDown;
+
+        let start = Instant::now();
+        assert!(
+            !LspServer::await_initialize(&rx, &status, INITIALIZE_TIMEOUT),
+            "a server going away mid-initialize is not a pass"
+        );
+        assert!(
+            start.elapsed() < INITIALIZE_TIMEOUT / 2,
+            "shutdown was noticed, not the deadline"
+        );
+    }
+
+    /// A server that never answers gives up and sends `initialized` anyway —
+    /// the old degraded behaviour, preferred to a writer held forever. Costs
+    /// the poll interval, not the 30s the writer waits for.
+    #[test]
+    fn await_initialize_passes_when_no_response_arrives() {
+        let (_tx, rx) = mpsc::channel::<Option<InitializeResult>>();
+        let status = Arc::new(Mutex::new(ServerStatus::Indexing));
+
+        assert!(LspServer::await_initialize(
+            &rx,
+            &status,
+            Duration::from_millis(150)
+        ));
+    }
 
     #[test]
     fn apply_edit_request_forwards_edit_and_acks_applied() {

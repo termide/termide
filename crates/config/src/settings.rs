@@ -951,6 +951,45 @@ fn default_lsp_servers() -> std::collections::HashMap<String, LspServerSettings>
         },
     );
 
+    // PHP - PHPantom
+    servers.insert(
+        "php".to_string(),
+        LspServerSettings {
+            command: "phpantom_lsp".to_string(),
+            args: vec![],
+            root_markers: vec!["composer.json".to_string()],
+        },
+    );
+
+    // Terraform - terraform-ls
+    for lang in ["terraform", "terraform-vars"] {
+        servers.insert(
+            lang.to_string(),
+            LspServerSettings {
+                command: "terraform-ls".to_string(),
+                args: vec!["serve".to_string()],
+                root_markers: vec![".terraform.lock.hcl".to_string(), ".terraform".to_string()],
+            },
+        );
+    }
+
+    // Dockerfile/Compose - docker-language-server
+    for lang in ["dockerfile", "dockercompose"] {
+        servers.insert(
+            lang.to_string(),
+            LspServerSettings {
+                command: "docker-language-server".to_string(),
+                args: vec!["start".to_string(), "--stdio".to_string()],
+                root_markers: vec![
+                    "compose.yaml".to_string(),
+                    "compose.yml".to_string(),
+                    "docker-compose.yaml".to_string(),
+                    "docker-compose.yml".to_string(),
+                ],
+            },
+        );
+    }
+
     servers
 }
 
@@ -1352,5 +1391,60 @@ next_group = ["Alt+Right", "Alt+D"]
             config.general.keybindings.quit,
             Some(KeyBinding::Single("Alt+Q".to_string()))
         );
+    }
+}
+
+#[cfg(test)]
+mod lsp_default_tests {
+    use super::*;
+
+    #[test]
+    fn built_in_servers_cover_php_terraform_and_docker() {
+        let servers = default_lsp_servers();
+        let expected: [(&str, &str, &[&str], &[&str]); 5] = [
+            ("php", "phpantom_lsp", &[], &["composer.json"]),
+            (
+                "terraform",
+                "terraform-ls",
+                &["serve"],
+                &[".terraform.lock.hcl", ".terraform"],
+            ),
+            (
+                "terraform-vars",
+                "terraform-ls",
+                &["serve"],
+                &[".terraform.lock.hcl", ".terraform"],
+            ),
+            (
+                "dockerfile",
+                "docker-language-server",
+                &["start", "--stdio"],
+                &[
+                    "compose.yaml",
+                    "compose.yml",
+                    "docker-compose.yaml",
+                    "docker-compose.yml",
+                ],
+            ),
+            (
+                "dockercompose",
+                "docker-language-server",
+                &["start", "--stdio"],
+                &[
+                    "compose.yaml",
+                    "compose.yml",
+                    "docker-compose.yaml",
+                    "docker-compose.yml",
+                ],
+            ),
+        ];
+        for (lang, command, args, root_markers) in expected {
+            let server = servers.get(lang).unwrap_or_else(|| panic!("{lang}"));
+            assert_eq!(server.command, command, "{lang}");
+            assert_eq!(server.args, args, "{lang}");
+            // The root the server runs in decides what it can resolve, so the
+            // markers are as much of the definition as the command is.
+            assert_eq!(server.root_markers, root_markers, "{lang}");
+        }
     }
 }

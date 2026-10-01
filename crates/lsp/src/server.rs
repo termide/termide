@@ -4,7 +4,6 @@
 //! and routing requests/responses through channels.
 
 use std::collections::{HashMap, HashSet};
-use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::AtomicU64;
@@ -124,29 +123,7 @@ impl LspServer {
         let capabilities = Arc::new(Mutex::new(None));
         let active_progress = Arc::new(Mutex::new(HashSet::new()));
 
-        // Writer thread - sends messages to server
         let (writer_tx, writer_rx) = mpsc::channel::<String>();
-        let writer_handle = {
-            let status = status.clone();
-            thread::spawn(move || {
-                let mut stdin = stdin;
-                while let Ok(msg) = writer_rx.recv() {
-                    if *status.lock().unwrap_or_else(|e| e.into_inner())
-                        == ServerStatus::ShuttingDown
-                    {
-                        break;
-                    }
-                    if let Err(e) = stdin.write_all(msg.as_bytes()) {
-                        log::error!("Failed to write to LSP server: {}", e);
-                        break;
-                    }
-                    if let Err(e) = stdin.flush() {
-                        log::error!("Failed to flush LSP server stdin: {}", e);
-                        break;
-                    }
-                }
-            })
-        };
 
         // Reader thread - receives messages from server
         let reader_handle = {
@@ -173,7 +150,7 @@ impl LspServer {
             process,
             next_id: AtomicU64::new(1),
             pending,
-            writer_handle: Some(writer_handle),
+            writer_handle: None,
             reader_handle: Some(reader_handle),
             writer_tx,
             status,
@@ -182,14 +159,26 @@ impl LspServer {
         };
 
         // Send initialize request
-        server.initialize(workspace_root)?;
+        let initialize_rx = server.initialize(workspace_root, &config.command)?;
+
+        // Writer thread - sends messages to server
+        server.writer_handle = Some({
+            let status = server.status.clone();
+            thread::spawn(move || {
+                Self::writer_loop(stdin, writer_rx, initialize_rx, status);
+            })
+        });
 
         Ok(server)
     }
 
     /// Send initialize request
     #[allow(deprecated)] // root_uri is deprecated but still widely used
-    fn initialize(&mut self, workspace_root: PathBuf) -> Result<()> {
+    fn initialize(
+        &mut self,
+        workspace_root: PathBuf,
+        command: &str,
+    ) -> Result<mpsc::Receiver<Option<InitializeResult>>> {
         let root_uri = path_to_uri(&workspace_root)
             .ok_or_else(|| anyhow::anyhow!("Invalid workspace path"))?;
 
@@ -253,17 +242,15 @@ impl LspServer {
                 }),
                 ..Default::default()
             },
+            initialization_options: transport::initialization_options(command),
             ..Default::default()
         };
 
-        let _rx = self.send_request::<InitializeResult>("initialize", params)?;
-
-        // Send initialized notification
-        self.send_notification("initialized", serde_json::json!({}));
+        let rx = self.send_request::<InitializeResult>("initialize", params)?;
 
         // Set to Indexing - will become Running when all progress tokens complete
         *self.status.lock().unwrap_or_else(|e| e.into_inner()) = ServerStatus::Indexing;
-        Ok(())
+        Ok(rx)
     }
 
     /// Request completion at position
