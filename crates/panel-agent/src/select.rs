@@ -87,9 +87,44 @@ impl TextSelection {
     }
 }
 
+/// The `http(s)://` URL of `line` that covers display column `col`, if any:
+/// it runs from its scheme to the first space or closing delimiter, as the
+/// terminal panel reads one, less any sentence punctuation it ends with.
+#[must_use]
+pub fn url_at(line: &Line<'_>, col: usize) -> Option<String> {
+    let mut chars = Vec::new();
+    let mut at = 0;
+    for ch in line.spans.iter().flat_map(|span| span.content.chars()) {
+        chars.push((ch, at));
+        at += termide_ui::str_display_width(ch.encode_utf8(&mut [0; 4]));
+    }
+    let text: String = chars.iter().map(|(ch, _)| ch).collect();
+    let mut from = 0;
+    while let Some(found) = ["https://", "http://"]
+        .iter()
+        .filter_map(|scheme| text[from..].find(scheme))
+        .min()
+    {
+        let start = from + found;
+        let end = text[start..]
+            .find(|ch: char| ch.is_whitespace() || ")>]}\"'`<".contains(ch))
+            .map_or(text.len(), |len| start + len);
+        let url = text[start..end].trim_end_matches(['.', ',', ';', ':', '!', '?']);
+        let first = text[..start].chars().count();
+        let last = first + url.chars().count();
+        let cols = chars[first].1..chars.get(last).map_or(at, |(_, c)| *c);
+        if cols.contains(&col) {
+            return Some(url.to_string());
+        }
+        from = end.max(start + 1);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::text::Span;
 
     fn cell(line: usize, col: usize) -> Cell {
         Cell { line, col }
@@ -123,5 +158,21 @@ mod tests {
         };
         assert_eq!(selection.text(&lines, 20), "3s");
         assert!(!selection.is_empty());
+    }
+
+    #[test]
+    fn a_url_is_found_under_its_cells_only() {
+        let line = Line::from(vec![
+            Span::raw("↓ Fetching "),
+            Span::raw("https://docs.rs/x, and (http://a.b)."),
+        ]);
+        // `↓` is one cell wide, so the URL starts at column 11.
+        assert_eq!(url_at(&line, 10), None);
+        assert_eq!(url_at(&line, 11).as_deref(), Some("https://docs.rs/x"));
+        assert_eq!(url_at(&line, 27).as_deref(), Some("https://docs.rs/x"));
+        // The comma after it is sentence punctuation, not the URL.
+        assert_eq!(url_at(&line, 28), None);
+        assert_eq!(url_at(&line, 35).as_deref(), Some("http://a.b"));
+        assert_eq!(url_at(&line, 45), None);
     }
 }

@@ -628,6 +628,53 @@ fn a_drag_selects_transcript_text_for_copy() {
 }
 
 #[test]
+fn a_ctrl_click_on_a_url_opens_it_in_the_browser() {
+    let mut panel = panel(vec![reply("See https://docs.rs now")]);
+    type_text(&mut panel, "hi there");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+    let rows = render_text(&mut panel, 40, 12);
+    let area = panel.transcript_area;
+    let y = rows
+        .iter()
+        .position(|r| r.contains("https://docs.rs"))
+        .expect("the URL is on screen") as u16;
+    let row = &rows[y as usize];
+    let x = row[..row.find("docs.rs").unwrap()].chars().count() as u16;
+    let mouse = |kind, column, modifiers| MouseEvent {
+        kind,
+        column,
+        row: y,
+        modifiers,
+    };
+    let click = |panel: &mut AgentPanel, column, modifiers| {
+        panel.handle_mouse(
+            mouse(MouseEventKind::Down(MouseButton::Left), column, modifiers),
+            area,
+        );
+        panel.handle_mouse(
+            mouse(MouseEventKind::Up(MouseButton::Left), column, modifiers),
+            area,
+        )
+    };
+    let events = click(&mut panel, x, KeyModifiers::CONTROL);
+    assert!(
+        matches!(events.as_slice(), [PanelEvent::OpenExternal(url)] if url.to_str() == Some("https://docs.rs")),
+        "{events:?}"
+    );
+    // A plain click selects the block instead, and Ctrl+click beside the URL
+    // opens nothing.
+    let events = click(&mut panel, x, KeyModifiers::NONE);
+    assert!(!events
+        .iter()
+        .any(|e| matches!(e, PanelEvent::OpenExternal(_))));
+    let events = click(&mut panel, x - 9, KeyModifiers::CONTROL);
+    assert!(!events
+        .iter()
+        .any(|e| matches!(e, PanelEvent::OpenExternal(_))));
+}
+
+#[test]
 fn the_input_grows_to_half_the_panel() {
     let mut panel = panel(vec![]);
     let text = (1..=12)

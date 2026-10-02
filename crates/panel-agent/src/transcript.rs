@@ -1352,15 +1352,16 @@ fn tool_headline(
     // for a question to the user — then its localized action in the same
     // accent and its subject.
     let accent = Style::default().fg(colors.info);
-    let action = |glyph: &str, verb: &str, subject: String| {
+    let styled_action = |glyph: &str, verb: &str, subject: String, style: Style| {
         let mut spans = vec![
             Span::styled(format!("{glyph} "), accent),
             Span::styled(format!("{verb} "), accent),
         ];
         spans.extend(marker.clone());
-        spans.push(Span::styled(subject, fg));
+        spans.push(Span::styled(subject, style));
         spans
     };
+    let action = |glyph: &str, verb: &str, subject: String| styled_action(glyph, verb, subject, fg);
     let with_args = |head: String, args: &str| {
         if args.is_empty() {
             head
@@ -1372,7 +1373,14 @@ fn tool_headline(
         "read" => action("<", t.agent_tool_read(), arg("path")),
         "write" => action(">", t.agent_tool_write(), arg("path")),
         "edit" => action("±", t.agent_tool_edit(), arg("path")),
-        "fetch" => action("↓", t.agent_tool_fetch(), arg("url")),
+        // A fetched URL is dim, as a link reads beside its text; Ctrl+click
+        // opens it in the browser.
+        "fetch" => styled_action(
+            "↓",
+            t.agent_tool_fetch(),
+            arg("url"),
+            Style::default().fg(colors.disabled),
+        ),
         "web_search" => action("?", t.agent_tool_web_search(), arg("query")),
         "skill" => action(
             "/",
@@ -3210,6 +3218,16 @@ mod tests {
             text(&call("fetch", json!({ "url": "https://docs.rs" }))),
             format!("↓ {} https://docs.rs", t.agent_tool_fetch())
         );
+        // The fetched URL is dim, as a link.
+        let spans = tool_headline(
+            &call("fetch", json!({ "url": "https://docs.rs" })),
+            None,
+            80,
+            &colors,
+        );
+        let url = spans.last().unwrap();
+        assert_eq!(url.content, "https://docs.rs");
+        assert_eq!(url.style.fg, Some(colors.disabled));
         assert_eq!(
             text(&call(
                 "web_search",

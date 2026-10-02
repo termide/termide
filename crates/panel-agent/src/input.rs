@@ -1176,6 +1176,18 @@ impl AgentPanel {
                     return vec![PanelEvent::NeedsRedraw];
                 }
                 self.text_selection = None;
+                // Ctrl+click on a URL opens it in the browser, as it does in
+                // the terminal panel.
+                if event.modifiers.contains(KeyModifiers::CONTROL) {
+                    let url = self
+                        .transcript
+                        .rendered()
+                        .get(press.line)
+                        .and_then(|line| select::url_at(line, press.col));
+                    if let Some(url) = url {
+                        return vec![PanelEvent::OpenExternal(url.into())];
+                    }
+                }
                 return self.click_line(press.line);
             }
             MouseEventKind::Down(MouseButton::Left) => {
