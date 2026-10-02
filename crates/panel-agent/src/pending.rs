@@ -5,8 +5,8 @@
 use std::time::Instant;
 
 use termide_agent_core::{
-    CommandScript, Decision, Mode, PermissionAnswer, PermissionEnvelope, PersistScope,
-    QuestionAnswer, QuestionEnvelope, QuestionReply,
+    shell_parts, CommandScript, Decision, Mode, PermissionAnswer, PermissionEnvelope, PersistScope,
+    QuestionAnswer, QuestionEnvelope, QuestionReply, SuggestionEnvelope, SuggestionReply,
 };
 use termide_core::PanelEvent;
 use termide_ui::{ChoiceAction, ChoiceForm};
@@ -48,6 +48,16 @@ pub(crate) enum Pending {
         form: ChoiceForm,
         brief: String,
     },
+    /// A command the `suggest_command` tool offered. It runs only on `[Run]`,
+    /// through the panel's own runner — never as a tool call the agent makes —
+    /// and `[Run]` is withheld where plan mode or a `deny` rule covers the
+    /// command, so the card cannot walk through the user's own rules.
+    Suggestion {
+        envelope: SuggestionEnvelope,
+        form: ChoiceForm,
+        /// What each row of the form answers, in their order.
+        answers: Vec<SuggestionReply>,
+    },
 }
 
 impl Pending {
@@ -58,7 +68,8 @@ impl Pending {
             | Pending::Command { form, .. }
             | Pending::Undo { form }
             | Pending::Plan { form }
-            | Pending::Handoff { form, .. } => form,
+            | Pending::Handoff { form, .. }
+            | Pending::Suggestion { form, .. } => form,
         }
     }
 
@@ -69,7 +80,8 @@ impl Pending {
             | Pending::Command { form, .. }
             | Pending::Undo { form }
             | Pending::Plan { form }
-            | Pending::Handoff { form, .. } => form,
+            | Pending::Handoff { form, .. }
+            | Pending::Suggestion { form, .. } => form,
         }
     }
 }
@@ -123,6 +135,35 @@ pub(crate) fn permission_detail(request: &termide_agent_core::PermissionRequest)
         })
         .collect();
     format!("{}\n\n{}", request.subject, parts.join("\n"))
+}
+
+/// The card for a command the `suggest_command` tool offered: the command in
+/// full and unmodified, why it is offered and where it would run, marked as
+/// the agent's suggestion so it cannot read as one the user wrote. `[Run]` is
+/// the only row that runs it; where plan mode or a `deny` rule covers the
+/// command, `[Run]` is left off and only `[Copy]` remains.
+pub(crate) fn suggestion_form(envelope: &SuggestionEnvelope, cwd: &std::path::Path) -> ChoiceForm {
+    let t = termide_i18n::t();
+    let mut detail = envelope.suggestion.command.clone();
+    if !envelope.suggestion.why.is_empty() {
+        detail.push('\n');
+        detail.push_str(&t.agent_suggest_why_fmt(&envelope.suggestion.why));
+    }
+    detail.push('\n');
+    detail.push_str(&t.agent_suggest_cwd_fmt(&cwd.display().to_string()));
+    detail.push('\n');
+    detail.push_str(t.agent_suggest_by_agent());
+    if let Some(reason) = envelope.denied.as_ref() {
+        detail.push('\n');
+        detail.push_str(reason);
+    }
+    let mut options: Vec<String> = Vec::new();
+    if envelope.denied.is_none() {
+        options.push(t.agent_suggest_run().to_string());
+        options.push(t.agent_suggest_edit().to_string());
+    }
+    options.push(t.agent_suggest_copy().to_string());
+    ChoiceForm::new(t.agent_suggest_title(), options).with_detail(detail)
 }
 
 impl AgentPanel {
@@ -292,6 +333,94 @@ impl AgentPanel {
         if let Some((start, before)) = self.permission_wait.take() {
             self.transcript
                 .set_tool_wait(before.saturating_add(millis(start.elapsed())), false);
+        }
+    }
+
+    /// Why the card must withhold `[Run]`: plan mode runs nothing that could
+    /// change something, and a `deny` rule is the user's own boundary. Parts
+    /// are checked one by one, as the permission layer judges a command, so a
+    /// `deny` on any part of a pipeline holds the whole card.
+    fn suggestion_denied(&self, command: &str) -> Option<String> {
+        let t = termide_i18n::t();
+        if self.mode.get() == Mode::Plan {
+            return Some(t.agent_suggest_denied_plan().to_string());
+        }
+        let denied = shell_parts(command, &self.cwd).iter().any(|part| {
+            self.rules.evaluate("bash", &part.text) == Some(Decision::Deny)
+                || self.rules.evaluate("bash", &part.resolved) == Some(Decision::Deny)
+        });
+        denied.then(|| t.agent_suggest_denied_rule().to_string())
+    }
+
+    /// Show a command the `suggest_command` tool offered, one card at a time;
+    /// like a permission prompt it pauses the running call until answered. A
+    /// card that cannot arrive while another is up is declined defensively, so
+    /// the tool learns at once that nothing ran.
+    pub(crate) fn poll_suggestions(&mut self) -> Vec<PanelEvent> {
+        let mut events = Vec::new();
+        while let Ok(mut envelope) = self.suggestion_rx.try_recv() {
+            if self.pending.is_some() {
+                let _ = envelope.reply.send(SuggestionReply::Declined);
+                continue;
+            }
+            envelope.denied = self.suggestion_denied(&envelope.suggestion.command);
+            let form = suggestion_form(&envelope, &self.cwd);
+            let mut answers: Vec<SuggestionReply> = Vec::new();
+            if envelope.denied.is_none() {
+                answers.push(SuggestionReply::Run);
+                answers.push(SuggestionReply::Edit);
+            }
+            answers.push(SuggestionReply::Copied);
+            events.push(PanelEvent::SetStatusMessage {
+                message: termide_i18n::t().agent_suggest_title().to_string(),
+                is_error: false,
+            });
+            self.pending = Some(Pending::Suggestion {
+                envelope,
+                form,
+                answers,
+            });
+            self.raise_attention(true);
+            // The call blocks on the card, so its wait shows as a pause, as a
+            // permission question's does.
+            let before = self.running_tool_wait();
+            self.permission_wait = Some((Instant::now(), before));
+            self.transcript.set_tool_wait(before, true);
+        }
+        events
+    }
+
+    /// Answer the offered command. `[Run]` only says so here: the tool runs it
+    /// on the agent thread through the runner in its context — the same one
+    /// `$` uses — so what reaches the shell is what was on the card, and its
+    /// output comes back as the call's result. `[Edit first]` puts it in the
+    /// input to change before the user runs it themselves.
+    pub(crate) fn answer_suggestion(
+        &mut self,
+        reply: SuggestionReply,
+        envelope: SuggestionEnvelope,
+    ) {
+        let command = envelope.suggestion.command.clone();
+        // The card is answered, so the call's wait rests; what follows — the
+        // command running, or nothing at all — is not a wait on the user.
+        self.end_permission_wait();
+        match reply {
+            SuggestionReply::Run => {
+                // The tool runs it; the panel does not run it a second time.
+                let _ = envelope.reply.send(SuggestionReply::Run);
+            }
+            SuggestionReply::Edit => {
+                let _ = envelope.reply.send(SuggestionReply::Edit);
+                self.shell_mode = true;
+                self.set_input(&command);
+            }
+            SuggestionReply::Copied => {
+                self.copy_text(&command);
+                let _ = envelope.reply.send(SuggestionReply::Copied);
+            }
+            SuggestionReply::Declined => {
+                let _ = envelope.reply.send(SuggestionReply::Declined);
+            }
         }
     }
 
@@ -500,6 +629,30 @@ impl AgentPanel {
             }
             (Some(Pending::Handoff { .. }), ChoiceAction::Cancelled | ChoiceAction::Custom(_)) => {
                 self.pending = None;
+            }
+            (Some(Pending::Suggestion { .. }), ChoiceAction::Chosen(index)) => {
+                let Some(Pending::Suggestion {
+                    envelope, answers, ..
+                }) = self.pending.take()
+                else {
+                    return true;
+                };
+                let reply = answers
+                    .into_iter()
+                    .nth(index)
+                    .unwrap_or(SuggestionReply::Declined);
+                self.answer_suggestion(reply, envelope);
+            }
+            // Esc declines: the command does not run, and the tool is told.
+            (
+                Some(Pending::Suggestion { .. }),
+                ChoiceAction::Cancelled | ChoiceAction::Custom(_),
+            ) => {
+                // Esc declines: the command does not run, and the tool is told.
+                if let Some(Pending::Suggestion { envelope, .. }) = self.pending.take() {
+                    self.end_permission_wait();
+                    let _ = envelope.reply.send(SuggestionReply::Declined);
+                }
             }
             (None, _) => {}
         }

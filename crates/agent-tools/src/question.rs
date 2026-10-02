@@ -310,9 +310,8 @@ mod tests {
     fn the_answers_come_back_as_text_and_details() {
         let (asker, rx) = question_channel(CancelToken::new());
         let ctx = ToolContext {
-            cwd: "/".into(),
             asker: Some(asker),
-            session: None,
+            ..ToolContext::new("/")
         };
         let answerer = std::thread::spawn(move || {
             let envelope = rx.recv().unwrap();
@@ -353,9 +352,8 @@ mod tests {
     fn a_declined_question_tells_the_model_to_wait() {
         let (asker, rx) = question_channel(CancelToken::new());
         let ctx = ToolContext {
-            cwd: "/".into(),
             asker: Some(asker),
-            session: None,
+            ..ToolContext::new("/")
         };
         let answerer = std::thread::spawn(move || {
             let envelope = rx.recv().unwrap();

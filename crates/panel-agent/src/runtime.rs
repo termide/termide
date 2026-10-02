@@ -6,12 +6,12 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 
 use termide_agent_core::{
-    permission_channel, question_channel, Agent, AgentRuntime, Backend, BackendSetup, CancelToken,
-    ChainedHooks, CheckpointHooks, CheckpointStore, CompactionPolicy, CompactionPrompts,
-    GoalPrompt, HandoffPrompt, Hooks, HostTools, LoggedMessage, Message, Mode, ModeHandle,
-    ModelInfo, ModelSpec, PermissionEnvelope, PermissionHooks, PermissionRules, PersistRule,
-    PlanGuard, PlanPrompt, Provider, QuestionEnvelope, Refusals, ReviewerSetup, Session, Timing,
-    ToolRegistry,
+    permission_channel, question_channel, suggestion_channel, Agent, AgentRuntime, Backend,
+    BackendSetup, CancelToken, ChainedHooks, CheckpointHooks, CheckpointStore, CompactionPolicy,
+    CompactionPrompts, GoalPrompt, HandoffPrompt, Hooks, HostTools, LoggedMessage, Message, Mode,
+    ModeHandle, ModelInfo, ModelSpec, PermissionEnvelope, PermissionHooks, PermissionRules,
+    PersistRule, PlanGuard, PlanPrompt, Provider, QuestionEnvelope, Refusals, ReviewerSetup,
+    Session, ShellRunner, SuggestionEnvelope, Timing, ToolRegistry,
 };
 
 use crate::toolset::{Blocked, ToolsetGuard};
@@ -135,6 +135,8 @@ pub(crate) struct Spawned {
     pub(crate) runtime: Box<dyn Backend>,
     pub(crate) permission_rx: Receiver<PermissionEnvelope>,
     pub(crate) question_rx: Receiver<QuestionEnvelope>,
+    /// Commands the `suggest_command` tool offers, awaiting the user's card.
+    pub(crate) suggestion_rx: Receiver<SuggestionEnvelope>,
     pub(crate) transcript: Transcript,
     pub(crate) mode: ModeHandle,
     pub(crate) external: bool,
@@ -167,12 +169,16 @@ pub(crate) fn spawn_runtime(
     fold: FoldMode,
     session: Option<&Session>,
     blocked: &Blocked,
+    shell_run: Option<ShellRunner>,
 ) -> Spawned {
     let cancel = CancelToken::new();
     let (prompter, permission_rx) = permission_channel(cancel.clone());
     // The `question` tool asks through this; an external agent asks its own
     // way, so its asker is dropped and nothing ever arrives.
     let (asker, question_rx) = question_channel(cancel.clone());
+    // The `suggest_command` tool offers commands through this, and waits for
+    // the card; like the asker, an external agent has no use for it.
+    let (suggester, suggestion_rx) = suggestion_channel(cancel.clone());
     let system_prompt = if rules.mode == Mode::Plan {
         plan_prompt.apply(system_prompt)
     } else {
@@ -264,6 +270,7 @@ pub(crate) fn spawn_runtime(
                     runtime,
                     permission_rx: external_rx,
                     question_rx,
+                    suggestion_rx,
                     transcript,
                     mode,
                     external: true,
@@ -276,7 +283,7 @@ pub(crate) fn spawn_runtime(
         }
     }
 
-    let agent = Agent::new(
+    let mut agent = Agent::new(
         Arc::clone(provider),
         tools.clone(),
         model.clone(),
@@ -288,7 +295,13 @@ pub(crate) fn spawn_runtime(
     .with_goal_prompt(goal_prompt.clone())
     .with_handoff_prompt(handoff_prompt.clone())
     .with_messages(messages)
-    .with_asker(asker);
+    .with_asker(asker)
+    .with_suggester(suggester);
+    if let Some(run) = shell_run {
+        // A command the user confirms on the card runs through this, in the
+        // middle of the call that asked.
+        agent = agent.with_shell_run(run);
+    }
     let mut chain = guards(checkpoints);
     chain.push(Box::new(hooks));
     let hooks: Box<dyn Hooks> = Box::new(ChainedHooks::new(chain));
@@ -297,6 +310,7 @@ pub(crate) fn spawn_runtime(
         runtime: Box::new(runtime),
         permission_rx,
         question_rx,
+        suggestion_rx,
         transcript,
         mode,
         external: false,
@@ -310,11 +324,23 @@ pub(crate) fn spawn_runtime(
 pub(crate) fn push_history(transcript: &mut Transcript, logged: &LoggedMessage) {
     let at = hms_from_millis(logged.timestamp);
     match &logged.message {
-        Message::User(user) => transcript.push(Item::User {
-            text: user.plain_text(),
-            at,
-            command: user.command.clone(),
-        }),
+        // A command the user ran is the shell call block it was; a template
+        // or skill expansion heads with its `/name`.
+        Message::User(user) => {
+            let duration_ms = match logged.timing {
+                Some(Timing::Tool { duration_ms, .. }) => Some(duration_ms),
+                _ => None,
+            };
+            let item =
+                transcript::user_command_item(user, at.clone(), duration_ms).unwrap_or_else(|| {
+                    Item::User {
+                        text: user.plain_text(),
+                        at,
+                        command: user.command.clone(),
+                    }
+                });
+            transcript.push(item);
+        }
         Message::Assistant(assistant) => {
             let cost = match logged.timing {
                 Some(Timing::Turn { prefill_ms, gen_ms }) => Some(transcript::Cost {

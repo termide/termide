@@ -39,6 +39,9 @@ pub enum IntentEntry {
     User(String),
     /// A task another agent delegated to this one: its words, not the user's.
     Delegated(String),
+    /// A shell command the user ran by hand (`$` in the input). The command
+    /// is the user's intent; what it printed is not, and never enters here.
+    Ran(String),
     /// A call the agent made, with its arguments.
     Call { tool: String, arguments: String },
 }
@@ -65,7 +68,10 @@ impl IntentLog {
     pub fn delegated(parent: &IntentLog) -> Self {
         let log = Self::new();
         for entry in parent.snapshot() {
-            if matches!(entry, IntentEntry::User(_) | IntentEntry::Delegated(_)) {
+            if matches!(
+                entry,
+                IntentEntry::User(_) | IntentEntry::Delegated(_) | IntentEntry::Ran(_)
+            ) {
                 log.push(entry);
             }
         }
@@ -196,6 +202,9 @@ impl ClassifyPrompt {
                 IntentEntry::Delegated(task) => text.push_str(&format!(
                     "[task delegated by another agent, not written by the user]\n{}\n\n",
                     clip(task, MAX_USER_CHARS)
+                )),
+                IntentEntry::Ran(command) => text.push_str(&format!(
+                    "[command the user ran by hand; its output is not shown here]\n! {command}\n\n"
                 )),
                 IntentEntry::Call { tool, arguments } => {
                     if skip > 0 {
@@ -340,10 +349,12 @@ impl Classifier for ModelClassifier {
             };
         };
         let intent = session.intent.snapshot();
-        if !intent
-            .iter()
-            .any(|e| matches!(e, IntentEntry::User(_) | IntentEntry::Delegated(_)))
-        {
+        if !intent.iter().any(|e| {
+            matches!(
+                e,
+                IntentEntry::User(_) | IntentEntry::Delegated(_) | IntentEntry::Ran(_)
+            )
+        }) {
             return Verdict::Unavailable {
                 reason: "there is no request to judge the call against".into(),
             };

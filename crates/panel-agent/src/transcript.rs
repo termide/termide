@@ -5,7 +5,9 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use serde_json::Value;
-use termide_agent_core::{DecidedBy, Lasting, PermissionNote, ToolCall, ToolResultMessage};
+use termide_agent_core::{
+    DecidedBy, Lasting, PermissionNote, ToolCall, ToolResultMessage, UserMessage,
+};
 use termide_core::ThemeColors;
 use termide_panel_markdown::render_markdown;
 use termide_richtext::Builder;
@@ -129,6 +131,48 @@ pub struct Cost {
     pub input: u64,
     /// Output tokens the model generated.
     pub output: u64,
+}
+
+/// The call id of a command the user ran by hand. Such a command shows as a
+/// `bash` call block, though the agent never made the call; the id is what
+/// tells the two apart, and no model-issued id takes this form.
+pub(crate) const USER_COMMAND_ID: &str = "user-command";
+
+/// Whether `call` is a command the user ran by hand rather than the agent's.
+pub(crate) fn is_user_command(call: &ToolCall) -> bool {
+    call.id == USER_COMMAND_ID
+}
+
+/// The block of a command the user ran by hand: a `bash` call with what it
+/// printed, as the agent's own shell calls show. `None` for any message that
+/// is not one.
+pub(crate) fn user_command_item(
+    user: &UserMessage,
+    at: String,
+    duration_ms: Option<u32>,
+) -> Option<Item> {
+    let command = user.ran.as_ref()?;
+    let call = ToolCall {
+        id: USER_COMMAND_ID.into(),
+        name: "bash".into(),
+        arguments: serde_json::json!({ "command": command }),
+        extra_content: None,
+    };
+    let output = user.plain_text();
+    let result = if user.ran_failed {
+        ToolResultMessage::error(&call, output)
+    } else {
+        ToolResultMessage::text(&call, output)
+    };
+    Some(Item::Tool {
+        call,
+        result: Some(result),
+        live: None,
+        at,
+        duration_ms,
+        waited_ms: None,
+        waiting: false,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1845,12 +1889,18 @@ fn render_body(
                     dim,
                 ));
             }
-            // Who let the call run or refused it, unless the rules simply did.
-            if let Some(text) = result
-                .as_ref()
-                .and_then(|r| r.permission.as_deref())
-                .and_then(permission_text)
-            {
+            // Who let the call run or refused it, unless the rules simply did;
+            // a command the user ran says so, the one thing that sets its
+            // block apart from the agent's.
+            let note = if is_user_command(call) {
+                Some(format!("✓ {}", t.agent_perm_note_user_ran()))
+            } else {
+                result
+                    .as_ref()
+                    .and_then(|r| r.permission.as_deref())
+                    .and_then(permission_text)
+            };
+            if let Some(text) = note {
                 lines.extend(prose_output_lines(&text, width, colors));
             }
             if !finished && !clock.is_empty() {

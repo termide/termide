@@ -17,6 +17,7 @@ mod edit;
 mod question;
 mod read;
 mod skill;
+mod suggest;
 mod task;
 mod truncate;
 mod write;
@@ -32,6 +33,7 @@ pub use edit::EditTool;
 pub use question::QuestionTool;
 pub use read::ReadTool;
 pub use skill::SkillTool;
+pub use suggest::SuggestCommandTool;
 pub use task::{SubagentRun, TaskTool};
 pub use write::WriteTool;
 

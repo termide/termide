@@ -84,7 +84,7 @@ impl AgentPanel {
             .expect("agent input is a multiline field")
     }
 
-    /// Clear the prompt box.
+    /// Clear the prompt box; shell mode, if on, stays.
     pub(crate) fn clear_input(&mut self) {
         self.input.set_field_text(0, "");
         self.pastes.clear();
@@ -237,15 +237,27 @@ impl AgentPanel {
         out
     }
 
-    /// Earlier requests of this session, oldest first, repeats collapsed.
+    /// Earlier requests of this session, oldest first, repeats collapsed. In
+    /// shell mode these are the commands the user ran by hand, and otherwise
+    /// the messages they sent: each mode walks its own history, so recalling
+    /// never switches the mode under the arrows.
     pub(crate) fn history(&self) -> Vec<String> {
         let mut history: Vec<String> = Vec::new();
         for item in self.transcript.items() {
-            if let Item::User { text, command, .. } = item {
-                let typed = command.as_ref().unwrap_or(text);
-                if history.last() != Some(typed) {
-                    history.push(typed.clone());
+            let typed = match item {
+                Item::User { text, command, .. } if !self.shell_mode => {
+                    command.as_ref().unwrap_or(text).clone()
                 }
+                Item::Tool { call, .. } if self.shell_mode && transcript::is_user_command(call) => {
+                    match call.arguments.get("command").and_then(|v| v.as_str()) {
+                        Some(command) => command.to_string(),
+                        None => continue,
+                    }
+                }
+                _ => continue,
+            };
+            if history.last() != Some(&typed) {
+                history.push(typed);
             }
         }
         history
@@ -267,7 +279,7 @@ impl AgentPanel {
         let Some(queued) = UserMessage::merge(taken) else {
             return false;
         };
-        let typed = self.input_area().text();
+        let typed = self.input_text();
         let text = if typed.trim().is_empty() {
             queued.typed()
         } else {
@@ -281,7 +293,7 @@ impl AgentPanel {
         let history = self.history();
         let next = match (self.history_pos, older) {
             (None, true) if !history.is_empty() => {
-                self.draft = self.input_area().text();
+                self.draft = self.input_text();
                 Some(history.len() - 1)
             }
             (None, _) => return false,
@@ -427,6 +439,12 @@ impl AgentPanel {
 
     pub(crate) fn refresh_completion(&mut self) {
         self.completion_span = None;
+        // A shell command is not a slash command or a mention: `/usr/bin` and
+        // `@` there are the command's own.
+        if self.shell_mode {
+            self.completion = None;
+            return;
+        }
         let text = self.input_area().text();
         let word = text.strip_prefix('/').filter(|rest| {
             self.input_area().line_count() <= 1 && !rest.contains(char::is_whitespace)
@@ -973,7 +991,18 @@ impl AgentPanel {
 
         match key.code {
             KeyCode::Esc => {
-                if self.is_busy() {
+                // A command the user ran by hand stops first: it is theirs and
+                // in the way, and stopping it should not also abort a run.
+                if self.cancel_user_command() {
+                    return vec![PanelEvent::NeedsRedraw];
+                }
+                // Then shell mode ends, with whatever command was being typed;
+                // a run the agent is on goes on.
+                if self.shell_mode {
+                    self.shell_mode = false;
+                    self.clear_input();
+                    self.after_edit();
+                } else if self.is_busy() {
                     self.abort();
                 } else if self.goal_task.take().is_some() {
                     self.notice(
@@ -1046,6 +1075,19 @@ impl AgentPanel {
                 if !self.paste_clipboard() {
                     return vec![];
                 }
+                self.after_edit();
+            }
+            // `$` into an empty input switches it to shell commands, and the
+            // `$` itself becomes the prompt marker, as it heads a shell call's
+            // block; Backspace in the empty input switches back, as Esc does.
+            KeyCode::Char('$')
+                if !ctrl && !alt && !self.shell_mode && self.input_area().is_empty() =>
+            {
+                self.shell_mode = true;
+                self.after_edit();
+            }
+            KeyCode::Backspace if !alt && self.shell_mode && self.input_area().is_empty() => {
+                self.shell_mode = false;
                 self.after_edit();
             }
             // Everything the prompt edits with: typing, deletion, character and

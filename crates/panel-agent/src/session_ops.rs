@@ -88,6 +88,7 @@ impl AgentPanel {
             runtime,
             permission_rx,
             question_rx,
+            suggestion_rx,
             transcript,
             mode,
             external,
@@ -112,12 +113,14 @@ impl AgentPanel {
             self.fold,
             session.as_ref(),
             &blocked,
+            self.shell_run.clone(),
         );
         // Dropping the old runtime cancels it and asks its worker to stop.
         self.runtime = runtime;
         self.external = external;
         self.permission_rx = permission_rx;
         self.question_rx = question_rx;
+        self.suggestion_rx = suggestion_rx;
         self.pending = None;
         self.transcript = transcript;
         // The lines the servers had point into the transcript just replaced.

@@ -39,6 +39,8 @@ pub mod provider;
 pub mod refusals;
 pub mod runtime;
 pub mod session;
+pub mod shell;
+pub mod suggest;
 pub mod tool;
 
 pub use acp::{AcpConfig, AcpFlavor};
@@ -92,5 +94,9 @@ pub use refusals::{Refusals, SEED_PERMISSIONS};
 pub use runtime::{AgentRuntime, Backend, BackendModel, BackendSetup, HostTools, PromptError};
 pub use session::{
     Entry, EntryKind, LoggedMessage, Session, SessionHeader, SessionModel, SessionSummary, Timing,
+};
+pub use shell::{ShellOutput, ShellRunner};
+pub use suggest::{
+    suggestion_channel, CommandSuggester, Suggestion, SuggestionEnvelope, SuggestionReply,
 };
 pub use tool::{LateTools, Tool, ToolContext, ToolRegistry, ToolUpdate};

@@ -10,6 +10,8 @@ use crate::cancel::CancelToken;
 use crate::classifier::SessionView;
 use crate::message::{ToolCall, ToolResultMessage};
 use crate::provider::ToolSpec;
+use crate::shell::ShellRunner;
+use crate::suggest::CommandSuggester;
 
 /// Environment a tool runs in.
 #[derive(Debug, Clone)]
@@ -19,6 +21,12 @@ pub struct ToolContext {
     /// Someone to put a question to; `None` when no one is watching the run
     /// (a subagent, headless mode).
     pub asker: Option<UserAsker>,
+    /// Someone to offer a command to; `None` when no one is watching to
+    /// confirm one (a subagent, headless mode).
+    pub suggester: Option<CommandSuggester>,
+    /// How to run a command the user confirmed; `None` when there is no way
+    /// to. A tool must not run something through this unless the user asked.
+    pub shell_run: Option<ShellRunner>,
     /// The session the call comes from, for the `auto` mode reviewer; `None`
     /// for a call from outside termide's own loop.
     pub session: Option<SessionView>,
@@ -31,6 +39,8 @@ impl ToolContext {
         Self {
             cwd: cwd.into(),
             asker: None,
+            suggester: None,
+            shell_run: None,
             session: None,
         }
     }

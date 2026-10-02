@@ -240,8 +240,8 @@ impl AgentPanel {
         // half the panel, leaving the other half to the conversation, and
         // scrolls beyond that.
         let text_width = width.saturating_sub(2).max(1) as usize;
-        let rows =
-            termide_ui::input_bar::wrapped_row_count(&self.input_text(), text_width).max(1) as u16;
+        let rows = termide_ui::input_bar::wrapped_row_count(&self.input_area().text(), text_width)
+            .max(1) as u16;
         rows.min((available / 2).max(1))
             .min(available.saturating_sub(2).max(1))
     }
@@ -500,6 +500,25 @@ impl AgentPanel {
             })
             .collect();
         self.input.set_border_buttons(buttons);
+        // Shell mode shows in the prompt marker and the placeholder, so what
+        // Enter will do is visible before anything is typed.
+        let t = termide_i18n::t();
+        let (label, prompt_style, placeholder) = if self.shell_mode {
+            (
+                "$ ",
+                Some(
+                    Style::default()
+                        .fg(colors.info)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                t.agent_input_placeholder_shell(),
+            )
+        } else {
+            ("", None, t.agent_input_placeholder())
+        };
+        self.input.set_label(0, label);
+        self.input.set_prompt_style(prompt_style);
+        self.input.set_placeholder(Some(placeholder.to_string()));
         // The bar's top border is the divider from the content above and
         // brightens while the input is focused; the agent's name lives in the
         // panel title, not here.

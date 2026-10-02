@@ -20,6 +20,8 @@ use crate::message::{
 };
 use crate::permissions::{DecidedBy, PermissionNote};
 use crate::provider::{ModelSpec, Provider, Request, StreamEvent, ThinkingLevel};
+use crate::shell::ShellRunner;
+use crate::suggest::CommandSuggester;
 use crate::tool::{ToolContext, ToolRegistry, ToolUpdate};
 
 /// How many queued messages one drain point delivers.
@@ -410,6 +412,12 @@ pub struct Agent {
     handoff_prompt: HandoffPrompt,
     /// Whom the `question` tool asks; `None` when no one is watching.
     asker: Option<UserAsker>,
+    /// Whom the `suggest_command` tool offers commands to; `None` when no one
+    /// is watching to confirm one.
+    suggester: Option<CommandSuggester>,
+    /// How a confirmed command reaches the shell; `None` when there is no way
+    /// to run one.
+    shell_run: Option<ShellRunner>,
     /// What the `auto` mode reviewer judges calls against. Built from the
     /// transcript when a run first needs it, then kept up as messages come.
     intent: IntentLog,
@@ -441,6 +449,8 @@ impl Agent {
             goal_prompt: GoalPrompt::default(),
             handoff_prompt: HandoffPrompt::default(),
             asker: None,
+            suggester: None,
+            shell_run: None,
             intent: IntentLog::new(),
             intent_seeded: false,
             delegated: false,
@@ -469,6 +479,32 @@ impl Agent {
     pub fn with_asker(mut self, asker: UserAsker) -> Self {
         self.asker = Some(asker);
         self
+    }
+
+    /// Let tools offer commands to the user through `suggester`.
+    #[must_use]
+    pub fn with_suggester(mut self, suggester: CommandSuggester) -> Self {
+        self.suggester = Some(suggester);
+        self
+    }
+
+    /// Let a command the user confirmed reach the shell through `shell_run`.
+    #[must_use]
+    pub fn with_shell_run(mut self, shell_run: ShellRunner) -> Self {
+        self.shell_run = Some(shell_run);
+        self
+    }
+
+    /// Add `message` to the context without starting a run: what a command
+    /// the user ran by hand (`$` in the input) leaves behind, so the next
+    /// request reads with the command and its output already in view. The
+    /// message joins the reviewer's log as the user's own, which is what it
+    /// is — they typed the command.
+    pub fn append_context(&mut self, message: Message) {
+        if self.intent_seeded {
+            self.record_intent(&message);
+        }
+        self.messages.push(message);
     }
 
     #[must_use]
@@ -837,6 +873,8 @@ impl Agent {
         let ctx = ToolContext {
             cwd: self.cwd.clone(),
             asker: self.asker.clone(),
+            suggester: self.suggester.clone(),
+            shell_run: self.shell_run.clone(),
             session: Some(SessionView {
                 intent: self.intent.clone(),
                 provider: Arc::clone(&self.provider),
@@ -1028,12 +1066,18 @@ impl Agent {
         }
     }
 
-    /// Note `message` in the reviewer's log: what the user wrote and the
-    /// calls the agent made. Results and the agent's text are left out, and
-    /// so is a compaction summary, which the model wrote.
+    /// Note `message` in the reviewer's log: what the user wrote, the commands
+    /// they ran by hand, and the calls the agent made. Results and the agent's
+    /// text are left out, and so is a compaction summary, which the model
+    /// wrote. A hand-run command is logged as the command alone — its output
+    /// is content that came from outside and must not read as intent.
     fn record_intent(&self, message: &Message) {
         match message {
             Message::User(user) => {
+                if let Some(command) = &user.ran {
+                    self.intent.push(IntentEntry::Ran(command.clone()));
+                    return;
+                }
                 let text = user.plain_text();
                 if self.compaction_prompts.is_summary(&text) {
                     return;
@@ -1523,6 +1567,114 @@ mod tests {
             [
                 IntentEntry::User("fix the build".into()),
                 IntentEntry::Delegated("run tests".into()),
+            ]
+        );
+    }
+
+    /// A command the user ran by hand joins the context without starting a
+    /// run, and the reviewer's log keeps the command alone — what it printed
+    /// came from outside and must not read as the user's intent.
+    #[test]
+    fn a_hand_run_command_enters_the_context_and_the_intent_as_the_command() {
+        let echo = Arc::new(EchoTool::default());
+        let (mut agent, provider) = agent(
+            ScriptedProvider::new(vec![
+                tool_reply(
+                    vec![("1", "echo", json!({"text": "x"}))],
+                    StopReason::ToolUse,
+                ),
+                text_reply("ok"),
+            ]),
+            registry_with(echo),
+        );
+        // One run first, so the reviewer's log is live and a later hand-run
+        // command is recorded as it happens.
+        let mut probe = IntentProbe::default();
+        agent.run(
+            UserMessage::text("publish it"),
+            &mut probe,
+            &CancelToken::new(),
+            &mut |_| {},
+        );
+
+        let output = "posted\nhttps://github.com/x/issues/1".to_string();
+        agent.append_context(Message::User(
+            UserMessage::text(output.clone()).with_ran("gh issue comment 59"),
+        ));
+
+        let intent = agent.intent().snapshot();
+        assert!(
+            intent.contains(&IntentEntry::Ran("gh issue comment 59".into())),
+            "{intent:?}"
+        );
+        assert!(
+            !intent
+                .iter()
+                .any(|e| matches!(e, IntentEntry::User(t) if t.contains("posted"))),
+            "the command's output must not enter the reviewer's log"
+        );
+
+        // The next request reads with the command and its output in view.
+        agent.run(
+            UserMessage::text("now close it"),
+            &mut NoHooks,
+            &CancelToken::new(),
+            &mut |_| {},
+        );
+        let requests = provider.seen_requests();
+        let last = requests.last().unwrap();
+        assert!(
+            last.iter().any(|m| matches!(
+                m,
+                Message::User(u) if u.plain_text() == output
+                    && u.ran.as_deref() == Some("gh issue comment 59")
+            )),
+            "the hand-run command and its output are not in the next request: {:?}",
+            roles(last)
+        );
+    }
+
+    /// A hand-run command added before any run reaches the reviewer's log
+    /// when the first run seeds it from the transcript.
+    #[test]
+    fn a_hand_run_command_before_the_first_run_is_seeded_into_the_intent() {
+        let (mut agent, _) = agent(
+            ScriptedProvider::new(vec![text_reply("ok")]),
+            registry_with(Arc::new(EchoTool::default())),
+        );
+        agent.append_context(Message::User(
+            UserMessage::text("nothing to see").with_ran("git status"),
+        ));
+        assert!(agent.intent().snapshot().is_empty(), "not seeded yet");
+        agent.run(
+            UserMessage::text("what changed?"),
+            &mut NoHooks,
+            &CancelToken::new(),
+            &mut |_| {},
+        );
+        assert_eq!(
+            agent.intent().snapshot()[0],
+            IntentEntry::Ran("git status".into())
+        );
+    }
+
+    /// `ran` is the user's own word, so it survives into a delegated loop's
+    /// log too — a subagent should see what the user ran.
+    #[test]
+    fn a_hand_run_command_carries_into_a_delegated_intent() {
+        let parent = IntentLog::new();
+        parent.push(IntentEntry::User("publish it".into()));
+        parent.push(IntentEntry::Ran("git push".into()));
+        parent.push(IntentEntry::Call {
+            tool: "bash".into(),
+            arguments: "{\"command\":\"ls\"}".into(),
+        });
+        let log = IntentLog::delegated(&parent);
+        assert_eq!(
+            log.snapshot(),
+            vec![
+                IntentEntry::User("publish it".into()),
+                IntentEntry::Ran("git push".into()),
             ]
         );
     }

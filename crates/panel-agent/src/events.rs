@@ -13,7 +13,7 @@ use termide_core::PanelEvent;
 use termide_ui::ChoiceForm;
 
 use crate::pending::Pending;
-use crate::{millis, now_hms, Activity, AgentPanel, Item, NoticeKind, Phase};
+use crate::{millis, now_hms, transcript, Activity, AgentPanel, Item, NoticeKind, Phase};
 
 /// A finished run shorter than this rings no bell: the user is most likely
 /// still there, and a bell on every quick answer would be noise.
@@ -181,11 +181,16 @@ impl AgentPanel {
                 // session shows the same figures.
                 let timing = match &message {
                     Message::User(user) => {
-                        self.transcript.push(Item::User {
-                            text: user.plain_text(),
-                            at: now_hms(),
-                            command: user.command.clone(),
-                        });
+                        // A command the user ran while the agent worked was
+                        // steered in, and shows as the shell call block it
+                        // would have shown had the agent been idle.
+                        let item = transcript::user_command_item(user, now_hms(), None)
+                            .unwrap_or_else(|| Item::User {
+                                text: user.plain_text(),
+                                at: now_hms(),
+                                command: user.command.clone(),
+                            });
+                        self.transcript.push(item);
                         None
                     }
                     Message::Assistant(assistant) => {
@@ -303,7 +308,10 @@ impl AgentPanel {
                 self.end_permission_wait();
                 // A question's call ends only once it is answered or its run
                 // stopped; a card still up then has no one waiting for it.
-                if matches!(self.pending, Some(Pending::Question { .. })) {
+                if matches!(
+                    self.pending,
+                    Some(Pending::Question { .. } | Pending::Suggestion { .. })
+                ) {
                     self.pending = None;
                 }
                 let waited = self.transcript.tool_wait(&id).unwrap_or(0);
@@ -412,7 +420,11 @@ impl AgentPanel {
         if let Some((start, before)) = self.permission_wait {
             if matches!(
                 self.pending,
-                Some(Pending::Permission { .. } | Pending::Question { .. })
+                Some(
+                    Pending::Permission { .. }
+                        | Pending::Question { .. }
+                        | Pending::Suggestion { .. }
+                )
             ) {
                 changed |= self
                     .transcript
@@ -428,6 +440,7 @@ impl AgentPanel {
         }
         let mut events = self.poll_permissions();
         events.append(&mut self.poll_questions());
+        events.append(&mut self.poll_suggestions());
         events.append(&mut self.pending_events);
         let tools_changed = self.poll_late_tools();
         changed |= tools_changed;
@@ -438,6 +451,7 @@ impl AgentPanel {
             events.push(self.toolset_refresh());
         }
         changed |= self.poll_command();
+        changed |= self.poll_shell_job();
         let fetched = self.model_fetch.as_ref().map(Receiver::try_recv);
         match fetched {
             Some(Ok(result)) => {

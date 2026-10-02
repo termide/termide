@@ -706,7 +706,11 @@ impl PermissionHooks {
             (_, "read") if inside => Decision::Allow,
             // Loads a skill's own text, which may live outside the project;
             // a question is already put to the user, so is never asked about.
-            (_, "skill" | "question") => Decision::Allow,
+            // `suggest_command` changes nothing itself — it shows a card and
+            // the user runs what is on it or does not — so it asks no one
+            // twice; the panel withholds `[Run]` where the mode or a rule
+            // forbids the command.
+            (_, "skill" | "question" | "suggest_command") => Decision::Allow,
             (Mode::Plan | Mode::Edit, "fetch" | "web_search") => Decision::Allow,
             (Mode::Edit | Mode::Auto, "edit" | "write") if inside => Decision::Allow,
             // A query reads the web; a fetched URL can carry data out, so the

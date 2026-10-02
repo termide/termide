@@ -32,12 +32,12 @@ use crossterm::event::MouseEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use termide_agent_core::{
-    civil_date, Backend, BackendModel, BackendSetup, CheckpointStore, CommandScript,
+    civil_date, Backend, BackendModel, BackendSetup, CancelToken, CheckpointStore, CommandScript,
     CompactionPolicy, CompactionPrompts, Decision, GoalPrompt, HandoffPrompt, Hooks, LateTools,
     McpReload, McpServerState, Mode, ModeHandle, ModelInfo, ModelSpec, PermissionEnvelope,
     PermissionRules, PersistScope, PlanPrompt, PromptError, PromptTemplate, Provider,
-    QuestionEnvelope, Refusals, ReviewerSetup, Session, SessionSummary, SkillInfo, Tool,
-    ToolRegistry, DEFAULT_AGENT,
+    QuestionEnvelope, Refusals, ReviewerSetup, Session, SessionSummary, ShellOutput, ShellRunner,
+    SkillInfo, SuggestionEnvelope, Tool, ToolRegistry, DEFAULT_AGENT,
 };
 use termide_config::Config;
 use termide_core::{
@@ -226,6 +226,11 @@ pub struct AgentPanelSetup {
     /// When reasoning and tool calls fold to their headline (the answer
     /// always shows).
     pub fold: FoldMode,
+    /// How a command the user ran by hand (`$` in the input) or confirmed on
+    /// a card reaches the shell; `None` when there is no way to run one, and
+    /// then both are refused with a notice. Built by the app over the same
+    /// `bash` tool the agent uses.
+    pub shell_run: Option<ShellRunner>,
 }
 
 /// Records an "allow always" rule outside the panel, in the project's or the
@@ -507,6 +512,22 @@ pub struct AgentPanel {
     permission_rx: Receiver<PermissionEnvelope>,
     /// The model's questions to the user, from the `question` tool.
     question_rx: Receiver<QuestionEnvelope>,
+    /// Commands the `suggest_command` tool offers, awaiting a card.
+    suggestion_rx: Receiver<SuggestionEnvelope>,
+    /// How a hand-run command and a confirmed card reach the shell; `None`
+    /// refuses both.
+    shell_run: Option<ShellRunner>,
+    /// A command the user ran by hand, on a thread: the command with what it
+    /// printed, or why it could not run, and how long it took in ms.
+    shell_job: Option<Receiver<ShellJobDone>>,
+    /// Stops the hand-run command in flight; `None` when none is running.
+    shell_cancel: Option<CancelToken>,
+    /// The input takes a shell command rather than a message: `$` typed into
+    /// an empty input turns it on and is not kept in the text, the prompt
+    /// marker becomes `$ `, and running the command, Esc, or Backspace in the
+    /// empty input turns it off; in it the arrows walk the commands run
+    /// before rather than the messages.
+    shell_mode: bool,
     /// The question a card in the panel is asking, if any.
     pending: Option<Pending>,
     /// Command scripts the user let run for this session, by name.
@@ -837,6 +858,7 @@ impl AgentPanel {
             runtime,
             permission_rx,
             question_rx,
+            suggestion_rx,
             transcript,
             mode,
             external,
@@ -861,6 +883,7 @@ impl AgentPanel {
             setup.fold,
             session.as_ref(),
             &blocked,
+            setup.shell_run.clone(),
         );
         // Learn the context window from the provider in the background and
         // adopt the active model's real `max_model_len`; the configured window
@@ -878,6 +901,11 @@ impl AgentPanel {
             external,
             permission_rx,
             question_rx,
+            suggestion_rx,
+            shell_run: setup.shell_run,
+            shell_job: None,
+            shell_cancel: None,
+            shell_mode: false,
             pending: None,
             allowed_commands: HashSet::new(),
             command_run: None,
@@ -1076,8 +1104,12 @@ impl Drop for AgentPanel {
 /// Longest text shown in a picker entry (the rollback steps) before it is cut.
 const MAX_TITLE_CHARS: usize = 60;
 
+/// A finished hand-run command: the command, what it printed or why it could
+/// not run, and how long it took in ms.
+pub(crate) type ShellJobDone = (String, Result<ShellOutput, String>, u32);
+
 /// Local wall-clock time as `HH:MM:SS`, for a transcript block's byline.
-fn now_hms() -> String {
+pub(crate) fn now_hms() -> String {
     chrono::Local::now().format("%H:%M:%S").to_string()
 }
 
@@ -1358,9 +1390,13 @@ impl Panel for AgentPanel {
     }
 
     fn captures_escape(&self) -> bool {
+        // A hand-run command in flight counts: Esc stops it, and the key
+        // must not reach the app to do something else while it runs.
         self.pending.is_some()
             || self.completion.is_some()
             || self.is_busy()
+            || self.shell_job.is_some()
+            || self.shell_mode
             || self.loop_task.is_some()
             || self.goal_task.is_some()
             || !self.input_area().is_empty()

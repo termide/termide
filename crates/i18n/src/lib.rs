@@ -493,6 +493,7 @@ pub trait Translation: Send + Sync {
     fn agent_perm_note_unattended(&self) -> &str;
     /// Transcript: who decided a tool call (user once)
     fn agent_perm_note_user_once(&self) -> &str;
+    fn agent_perm_note_user_ran(&self) -> &str;
     /// Transcript: who decided a tool call (user session)
     fn agent_perm_note_user_session(&self) -> &str;
     /// Transcript: who decided a tool call (user project)
@@ -650,6 +651,7 @@ pub trait Translation: Send + Sync {
     /// Agent panel state strip: queued messages beyond the ones shown.
     fn agent_state_queued_more(&self, count: usize) -> String;
     fn agent_input_placeholder(&self) -> &str;
+    fn agent_input_placeholder_shell(&self) -> &str;
     fn agent_info_session(&self) -> &str;
     fn agent_info_log(&self) -> &str;
     fn agent_info_agent(&self) -> &str;
@@ -740,11 +742,30 @@ pub trait Translation: Send + Sync {
     fn agent_notice_nothing_to_rollback(&self) -> &str;
     fn agent_notice_command_running(&self) -> &str;
     fn agent_notice_command_dropped(&self) -> &str;
+    fn agent_notice_bang_unavailable(&self) -> &str;
+    fn agent_notice_bang_running(&self) -> &str;
+    fn agent_notice_bang_dropped(&self) -> &str;
+    fn agent_notice_bang_failed(&self) -> &str;
+    fn agent_notice_bang_done(&self) -> &str;
+    fn agent_notice_bang_stopped(&self) -> &str;
+    /// The card a `suggest_command` offer shows, and its rows.
+    fn agent_suggest_title(&self) -> &str;
+    fn agent_suggest_by_agent(&self) -> &str;
+    fn agent_suggest_run(&self) -> &str;
+    fn agent_suggest_edit(&self) -> &str;
+    fn agent_suggest_copy(&self) -> &str;
+    fn agent_suggest_dismiss(&self) -> &str;
     fn agent_notice_clipboard_failed(&self) -> &str;
     fn agent_notice_goal_reached(&self) -> &str;
     fn agent_notice_looping(&self) -> &str;
 
     // Agent panel — transient notices (with values)
+    fn agent_notice_bang_running_cmd_fmt(&self, command: &str) -> String;
+    fn agent_suggest_why_fmt(&self, why: &str) -> String;
+    fn agent_suggest_cwd_fmt(&self, cwd: &str) -> String;
+    /// Why the card withholds `[Run]`: plan mode, or one of the user's rules.
+    fn agent_suggest_denied_plan(&self) -> &str;
+    fn agent_suggest_denied_rule(&self) -> &str;
     fn agent_notice_cannot_continue_fmt(&self, error: &str) -> String;
     fn agent_notice_cannot_start_fmt(&self, error: &str) -> String;
     fn agent_notice_cannot_check_goal_fmt(&self, error: &str) -> String;

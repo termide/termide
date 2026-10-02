@@ -181,7 +181,7 @@ impl OpenAiCompatProvider {
 
     fn convert(&self, message: &Message) -> Value {
         match message {
-            Message::User(user) => json!({ "role": "user", "content": user.plain_text() }),
+            Message::User(user) => json!({ "role": "user", "content": user.model_text() }),
             Message::ToolResult(result) => json!({
                 "role": "tool",
                 "tool_call_id": result.tool_call_id,

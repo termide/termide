@@ -136,6 +136,7 @@ impl Translation for RuntimeTranslation {
     // Generate 395 trivial `fn name(&self) -> &str` wrappers over get_string("name").
     i18n_get_string_methods! {
         agent_input_placeholder,
+        agent_input_placeholder_shell,
         agent_info_session,
         agent_info_log,
         agent_info_agent,
@@ -492,6 +493,7 @@ impl Translation for RuntimeTranslation {
         agent_perm_note_hook_denied,
         agent_perm_note_unattended,
         agent_perm_note_user_once,
+        agent_perm_note_user_ran,
         agent_perm_note_user_session,
         agent_perm_note_user_project,
         agent_perm_note_user_global,
@@ -576,6 +578,20 @@ impl Translation for RuntimeTranslation {
         agent_notice_nothing_to_rollback,
         agent_notice_command_running,
         agent_notice_command_dropped,
+        agent_notice_bang_unavailable,
+        agent_notice_bang_running,
+        agent_notice_bang_dropped,
+        agent_notice_bang_failed,
+        agent_notice_bang_done,
+        agent_notice_bang_stopped,
+        agent_suggest_title,
+        agent_suggest_by_agent,
+        agent_suggest_run,
+        agent_suggest_edit,
+        agent_suggest_copy,
+        agent_suggest_dismiss,
+        agent_suggest_denied_plan,
+        agent_suggest_denied_rule,
         agent_notice_clipboard_failed,
         agent_notice_goal_reached,
         agent_notice_looping,
@@ -1568,6 +1584,18 @@ impl Translation for RuntimeTranslation {
 
     fn agent_running_command_fmt(&self, name: &str) -> String {
         self.format("agent_running_command_fmt", &[("name", name)])
+    }
+
+    fn agent_notice_bang_running_cmd_fmt(&self, command: &str) -> String {
+        self.format("agent_notice_bang_running_cmd_fmt", &[("command", command)])
+    }
+
+    fn agent_suggest_why_fmt(&self, why: &str) -> String {
+        self.format("agent_suggest_why_fmt", &[("why", why)])
+    }
+
+    fn agent_suggest_cwd_fmt(&self, cwd: &str) -> String {
+        self.format("agent_suggest_cwd_fmt", &[("cwd", cwd)])
     }
 
     fn agent_notice_external_failed_fmt(&self, error: &str) -> String {

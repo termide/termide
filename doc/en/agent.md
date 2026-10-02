@@ -517,6 +517,30 @@ call, so you can loosen the mode while a long task is running instead of
 answering the same prompt again and again. Neither switch touches the
 configuration file; the panel starts from `[ai]` again the next time.
 
+### Running a command yourself
+
+`$` typed into an empty prompt switches it to a shell command: the `$` takes
+the place of the `›` marker, and `Enter` runs what you type there and then,
+without asking the model anything. Each command switches the mode on anew:
+running it, `Esc`, or `Backspace` in the empty prompt returns to messages. In
+shell mode `↑` and `↓` walk the commands you ran before rather than the
+messages. Text that merely opens with a `$` — pasted, or after a space — is
+still a message.
+
+The command runs in the session's directory through the same `bash` the agent
+uses, so a long output keeps its beginning and end and writes the complete log
+to a file. It shows in the transcript as a shell call block, like the agent's
+own — `$ git status --short`, folded, with its time and a `✗` if it failed;
+unfolded, it says you ran it — and the agent reads the command with its output
+when you next ask something, so you can follow a command you ran with "what
+does that mean for the fix". `Esc` stops a command still running; running one
+never spends a model call, and works while the agent is busy too.
+
+What you type is what runs — no permission card, because you wrote it. That is
+the whole of the difference: the agent's own commands are still judged by the
+mode and the rules below, and a command the agent offers you (see
+**suggest_command**) runs only if you confirm it.
+
 ### Undoing a request
 
 `/undo` takes back the last
@@ -574,6 +598,25 @@ permission question does. Asking never needs a permission, in plan mode too.
 Only the panel's own agent has this tool: a subagent and a `termide --prompt`
 run have no one to ask and decide on their own. An agent whose `tools` list leaves out
 `question` does not ask either.
+
+**suggest_command** hands you a command instead of running it. The agent puts
+one on a card — the command in full and exactly as it would run, why it is
+offered, and the directory — marked as the agent's suggestion. **Run** runs it
+through the same shell path as a [`$` command](#running-a-command-yourself) you typed,
+and its output comes back to the agent; **Edit first** puts it in the prompt as
+a shell-mode command for you to change and run; **Copy** takes the text alone. `Esc` declines,
+and the agent is told it did not run and must not offer it again. This is what
+a blocked call ends up doing: the refusal tells the agent to say what it needs
+run, and this turns that into a card rather than a line of text you retype. It
+is also how the agent hands over something it should not do itself — publishing,
+anything needing your credentials or your judgement.
+
+The card never runs anything on its own, and it cannot talk you past your own
+rules: where plan mode is on or a `deny` rule covers the command, **Run** and
+**Edit first** are left off and only **Copy** remains. Offering a command costs
+no permission — it changes nothing by itself — so the agent can always reach you
+this way; only your confirmation reaches the shell. Like `question`, the tool
+belongs to the panel's agent alone.
 
 ### Web
 

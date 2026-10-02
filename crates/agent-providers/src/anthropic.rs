@@ -336,7 +336,7 @@ fn convert_messages(messages: &[Message], replay_model: Option<&str>) -> Vec<Val
                 flush(&mut out, &mut pending_results);
                 out.push(json!({
                     "role": "user",
-                    "content": [{ "type": "text", "text": user.plain_text() }],
+                    "content": [{ "type": "text", "text": user.model_text() }],
                 }));
             }
             Message::Assistant(assistant) => {

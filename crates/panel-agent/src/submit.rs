@@ -6,15 +6,18 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::PoisonError;
 use std::time::Duration;
 
-use termide_agent_core::{CommandScript, Decision, PromptError, Session, SkillInfo, UserMessage};
+use termide_agent_core::{
+    CancelToken, CommandScript, Decision, Message, PromptError, Session, SkillInfo, Timing,
+    UserMessage,
+};
 use termide_core::{Panel, PanelEvent};
 use termide_ui::ChoiceForm;
 
 use crate::pending::Pending;
 use crate::session_ops::discard;
 use crate::{
-    millis, slash, AgentPanel, GoalTask, Item, LoopTask, NoticeKind, BUILTIN_COMMANDS,
-    CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND, FORK_COMMAND, GOAL_COMMAND,
+    millis, now_hms, slash, transcript, AgentPanel, GoalTask, Item, LoopTask, NoticeKind,
+    BUILTIN_COMMANDS, CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND, FORK_COMMAND, GOAL_COMMAND,
     GOAL_MAX_ITERATIONS, HANDOFF_COMMAND, LOOP_COMMAND, LOOP_MAX_ITERATIONS, MCP_COMMAND,
     NAME_COMMAND, NEW_COMMAND, PAUSE_COMMAND, PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND,
     SHOW_PROMPT_ACTION, UNDO_COMMAND, USAGE_COMMAND,
@@ -104,6 +107,18 @@ impl AgentPanel {
         self.completion = None;
         self.history_pos = None;
         self.draft.clear();
+        // In shell mode the input is a command, run in the shell here and now
+        // and never sent to the model as a request: the user typed it, so it
+        // needs no permission card, and what it printed joins the context as
+        // theirs. Only the mode makes a command — text that merely opens with
+        // `$` is a message — and it is checked before the slash arms, so a
+        // path like `/usr/bin/env` is never read as a command name.
+        // The mode is for this one command: the next is switched on again.
+        if self.shell_mode {
+            self.shell_mode = false;
+            self.clear_input();
+            return self.run_confirmed_command(text);
+        }
         // What reaches `send` through a slash arm was expanded from this.
         let command = slash_command(&text).map(|_| text.clone());
         let text = match slash_command(&text) {
@@ -396,6 +411,137 @@ impl AgentPanel {
             }
         }
         vec![PanelEvent::NeedsRedraw]
+    }
+
+    /// Run a command the user typed in shell mode, on a thread, so the UI stays
+    /// alive while it runs. A command confirmed on a `suggest_command` card
+    /// goes through the same runner, but on the agent thread inside the call
+    /// that asked, so its output comes back as that call's result rather than
+    /// through here. `Err`s from the runner (no shell, a spawn failure) and a
+    /// non-zero exit both land in `poll_shell_job`; only the first is red.
+    pub(crate) fn run_confirmed_command(&mut self, command: String) -> Vec<PanelEvent> {
+        let t = termide_i18n::t();
+        let Some(runner) = self.shell_run.clone() else {
+            self.notice(t.agent_notice_bang_unavailable(), NoticeKind::Warn);
+            return vec![PanelEvent::NeedsRedraw];
+        };
+        if self.shell_job.is_some() {
+            self.notice(t.agent_notice_bang_running(), NoticeKind::Warn);
+            return vec![PanelEvent::NeedsRedraw];
+        }
+        let (tx, rx) = mpsc::channel();
+        let cancel = CancelToken::new();
+        self.shell_cancel = Some(cancel.clone());
+        let status = t.agent_notice_bang_running_cmd_fmt(&command);
+        std::thread::spawn(move || {
+            let start = std::time::Instant::now();
+            let outcome = runner.run(&command, &cancel);
+            let _ = tx.send((command, outcome, millis(start.elapsed())));
+        });
+        self.shell_job = Some(rx);
+        vec![
+            PanelEvent::SetStatusMessage {
+                message: status,
+                is_error: false,
+            },
+            PanelEvent::NeedsRedraw,
+        ]
+    }
+
+    /// Take in a finished hand-run command: its output goes under the command
+    /// in the transcript and into the model's context as the user's own.
+    pub(crate) fn poll_shell_job(&mut self) -> bool {
+        let taken = self.shell_job.as_ref().map(Receiver::try_recv);
+        let (command, outcome, duration_ms) = match taken {
+            Some(Ok(done)) => done,
+            Some(Err(mpsc::TryRecvError::Empty)) | None => return false,
+            Some(Err(mpsc::TryRecvError::Disconnected)) => {
+                self.shell_job = None;
+                self.shell_cancel = None;
+                self.notice(
+                    termide_i18n::t().agent_notice_bang_dropped(),
+                    NoticeKind::Error,
+                );
+                return true;
+            }
+        };
+        self.shell_job = None;
+        self.shell_cancel = None;
+        let (output, failed) = match outcome {
+            Ok(out) => (out.text, out.failed),
+            Err(error) => (error, true),
+        };
+        let output = if output.trim().is_empty() {
+            termide_i18n::t().command_report_no_output().to_string()
+        } else {
+            output
+        };
+        // The model reads it as a message the user ran: the command is their
+        // intent, and the output travels with it as content, not as a request.
+        let message = UserMessage::text(output)
+            .with_ran(command)
+            .with_ran_failed(failed);
+        // Between runs the message joins the transcript through `update`;
+        // during one it steers, arriving at the next boundary — dropping it
+        // would leave the agent working without what the user just ran. A
+        // steered message comes back as `MessageEnd` and is logged then, so
+        // only this path writes it here; the log is what a session reopened
+        // later reads, and without it the command and its output would be
+        // gone from the next start.
+        let logged = Message::User(message.clone());
+        let delivered = if self.is_busy() {
+            // It waits in the state strip, as a steered message does, and
+            // shows as its block once the agent takes it.
+            self.queued_texts.push_back(message.typed());
+            self.runtime.steer(message);
+            self.set_queued(self.runtime.queue_lens());
+            Ok(())
+        } else {
+            if let Some(item) =
+                transcript::user_command_item(&message, now_hms(), Some(duration_ms))
+            {
+                self.transcript.push(item);
+            }
+            if let Some(session) = &mut self.session {
+                let timing = Timing::Tool {
+                    duration_ms,
+                    waited_ms: None,
+                };
+                if let Err(error) = session.append_timed_message(&logged, Some(timing)) {
+                    log::warn!("agent session write failed: {error}");
+                }
+            }
+            self.runtime.update(Box::new(move |agent| {
+                agent.append_context(logged);
+            }))
+        };
+        if let Err(error) = delivered {
+            log::debug!("cannot add a hand-run command to the context: {error}");
+        }
+        self.pending_events.push(PanelEvent::SetStatusMessage {
+            message: if failed {
+                termide_i18n::t().agent_notice_bang_failed()
+            } else {
+                termide_i18n::t().agent_notice_bang_done()
+            }
+            .to_string(),
+            is_error: failed,
+        });
+        true
+    }
+
+    /// Stop the hand-run command in flight, if there is one. Returns whether
+    /// there was one, so Esc does not also abort a run.
+    pub(crate) fn cancel_user_command(&mut self) -> bool {
+        let Some(cancel) = self.shell_cancel.take() else {
+            return false;
+        };
+        cancel.cancel();
+        self.notice(
+            termide_i18n::t().agent_notice_bang_stopped(),
+            NoticeKind::Info,
+        );
+        true
     }
 
     /// Run the next `/loop` iteration: send the loop's prompt as a fresh run,

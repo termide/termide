@@ -121,6 +121,9 @@ pub struct InputBar {
     border_button_areas: Vec<Rect>,
     /// Placeholder shown in an empty multi-line field while the bar is idle.
     placeholder: Option<String>,
+    /// Style of a multi-line field's prompt marker, so an input mode can show
+    /// in it; `None` draws it in the text's colour.
+    prompt_style: Option<Style>,
     /// Rendered field areas, parallel to `fields`, for mouse hit-testing; a
     /// multi-line field's area spans all of its rows.
     field_areas: Vec<Rect>,
@@ -153,6 +156,7 @@ impl InputBar {
             border_buttons: Vec::new(),
             border_button_areas: Vec::new(),
             placeholder: None,
+            prompt_style: None,
             field_areas: Vec::new(),
             control_areas: Vec::new(),
             drag_field: None,
@@ -195,6 +199,11 @@ impl InputBar {
 
     pub fn set_placeholder(&mut self, placeholder: Option<String>) {
         self.placeholder = placeholder;
+    }
+
+    /// Style the multi-line field's prompt marker; `None` restores the default.
+    pub fn set_prompt_style(&mut self, style: Option<Style>) {
+        self.prompt_style = style;
     }
 
     // === Structure ===
@@ -653,6 +662,7 @@ impl InputBar {
             .saturating_sub(reserved);
 
         let placeholder = self.placeholder.clone();
+        let prompt_style = self.prompt_style;
         for i in 0..self.fields.len() {
             if budget == 0 {
                 break;
@@ -702,6 +712,7 @@ impl InputBar {
                         field_area,
                         &label,
                         placeholder.as_deref(),
+                        prompt_style,
                         ta,
                         focused,
                         colors,
@@ -939,6 +950,7 @@ fn render_multiline(
     area: Rect,
     label: &str,
     placeholder: Option<&str>,
+    prompt_style: Option<Style>,
     ta: &mut TextArea,
     focused: bool,
     colors: &ThemeColors,
@@ -958,7 +970,7 @@ fn render_multiline(
     // Keeps the logical scroll offset (used by click-to-position) roughly in
     // step; the visual scroll below is what the wrapped render actually uses.
     ta.ensure_cursor_visible(area.height as usize);
-    let prompt_style = Style::default().fg(colors.fg);
+    let prompt_style = prompt_style.unwrap_or_else(|| Style::default().fg(colors.fg));
     let text_style = Style::default().fg(colors.fg);
     let tw = text_width as usize;
 

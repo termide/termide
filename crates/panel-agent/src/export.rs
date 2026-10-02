@@ -3,9 +3,7 @@
 //! own. Reasoning, tool calls, their results and the panel's own notices are
 //! left out — the file is the conversation, not the session's working.
 
-use termide_agent_core::{
-    AssistantContent, EntryKind, Message, Session, UserContent, DEFAULT_AGENT,
-};
+use termide_agent_core::{AssistantContent, EntryKind, Message, Session, DEFAULT_AGENT};
 use termide_core::PanelEvent;
 
 use crate::transcript::Item;
@@ -69,18 +67,10 @@ pub(crate) fn chat_from_session(session: &Session) -> Vec<ChatMessage> {
                 _ => return None,
             };
             let (user, text) = match message {
-                // What the user typed: the `/name args` a template or skill
-                // was expanded from, not the expansion.
-                Message::User(user) => (
-                    true,
-                    user.command.clone().unwrap_or_else(|| {
-                        user.content
-                            .iter()
-                            .map(|UserContent::Text { text }| text.as_str())
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    }),
-                ),
+                // What the user typed: the `/name args` a template or skill was
+                // expanded from, or the `$ cmd` they ran — not what either
+                // produced, which is what `typed` falls back to otherwise.
+                Message::User(user) => (true, user.typed()),
                 Message::Assistant(assistant) => (
                     false,
                     assistant

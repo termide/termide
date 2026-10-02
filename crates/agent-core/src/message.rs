@@ -139,6 +139,18 @@ pub struct UserMessage {
     /// Never sent to the model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
+    /// The shell command the user ran by hand (`$` in the input) whose output
+    /// `content` holds. Set only for a message this produces, and only when
+    /// they typed it themselves — a pasted line is not one. The reviewer's log
+    /// keeps this command and leaves `content` out, so what the command
+    /// printed — which may carry text from outside — never reads as the
+    /// user's intent. The model reads it through [`Self::model_text`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ran: Option<String>,
+    /// The hand-run command in [`Self::ran`] failed: it exited non-zero or
+    /// could not run at all.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ran_failed: bool,
 }
 
 impl UserMessage {
@@ -148,6 +160,8 @@ impl UserMessage {
             content: vec![UserContent::Text { text: text.into() }],
             timestamp: now_millis(),
             command: None,
+            ran: None,
+            ran_failed: false,
         }
     }
 
@@ -158,10 +172,47 @@ impl UserMessage {
         self
     }
 
-    /// What the user typed: the command when there is one, else the text.
+    /// The message holding the output of `command`, which the user ran by
+    /// hand. See [`Self::ran`].
+    #[must_use]
+    pub fn with_ran(mut self, command: impl Into<String>) -> Self {
+        self.ran = Some(command.into());
+        self
+    }
+
+    /// Mark the hand-run command as failed. See [`Self::ran_failed`].
+    #[must_use]
+    pub fn with_ran_failed(mut self, failed: bool) -> Self {
+        self.ran_failed = failed;
+        self
+    }
+
+    /// What the user typed: the `/name args` or the `$ cmd` behind the
+    /// message, else its text. A hand-run command reports itself rather than
+    /// what it printed, so the queue and an export show the line
+    /// they typed instead of its output.
     #[must_use]
     pub fn typed(&self) -> String {
-        self.command.clone().unwrap_or_else(|| self.plain_text())
+        self.command
+            .clone()
+            .or_else(|| self.ran.as_ref().map(|ran| format!("$ {ran}")))
+            .unwrap_or_else(|| self.plain_text())
+    }
+
+    /// The text a provider sends the model. A hand-run command's output is
+    /// framed with the command, so the model knows what printed it and that
+    /// it is output rather than something the user wrote; any other message
+    /// is its text as it stands.
+    #[must_use]
+    pub fn model_text(&self) -> String {
+        let text = self.plain_text();
+        match &self.ran {
+            Some(command) => format!(
+                "<bash-input>{command}</bash-input>\n<bash-output>\n{}\n</bash-output>",
+                text.trim_end()
+            ),
+            None => text,
+        }
     }
 
     /// `messages` as one, their texts joined by a blank line, or `None` for
@@ -363,6 +414,8 @@ mod tests {
                 content: vec![UserContent::Text { text: "hi".into() }],
                 timestamp: 0,
                 command: None,
+                ran: None,
+                ran_failed: false,
             }),
             Message::Assistant(assistant.clone()),
             Message::ToolResult(ToolResultMessage {
@@ -404,6 +457,24 @@ mod tests {
             serde_json::from_str(r#"{"content":[{"type":"text","text":"x"}],"timestamp":1}"#)
                 .unwrap();
         assert_eq!(old.command, None);
+    }
+
+    #[test]
+    fn a_hand_run_command_reaches_the_model_with_its_command() {
+        let ran = UserMessage::text("On branch main\n").with_ran("git status");
+        assert_eq!(
+            ran.model_text(),
+            "<bash-input>git status</bash-input>\n<bash-output>\nOn branch main\n</bash-output>"
+        );
+        // Anything else goes as it stands.
+        assert_eq!(UserMessage::text("hi").model_text(), "hi");
+        // The failure flag stays off disk unless set.
+        let json = serde_json::to_string(&ran).unwrap();
+        assert!(!json.contains("ran_failed"), "{json}");
+        let failed: UserMessage =
+            serde_json::from_str(&serde_json::to_string(&ran.with_ran_failed(true)).unwrap())
+                .unwrap();
+        assert!(failed.ran_failed);
     }
 
     #[test]

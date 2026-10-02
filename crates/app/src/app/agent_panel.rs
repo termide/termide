@@ -12,13 +12,16 @@ use termide_agent_core::{
     build_system_prompt, discover_context_files, ensure_global_layout, AcpConfig, AcpFlavor, Agent,
     AgentDirs, AgentEvent, AutoDenyPrompter, CancelToken, CompactionPolicy, Decision, IntentLog,
     Message, ModelSpec, PermissionHooks, PermissionRules, PersistScope, PromptOptions, Provider,
-    Refusals, ReviewerSetup, Session, SessionSummary, ThinkingLevel, ToolContext, ToolRegistry,
-    UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
+    Refusals, ReviewerSetup, Session, SessionSummary, ShellOutput, ShellRunner, ThinkingLevel,
+    Tool, ToolCall, ToolContext, ToolRegistry, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR,
+    SESSIONS_DIR,
 };
 use termide_agent_hooks::CommandHooks;
 use termide_agent_mcp::{Connections, TokenStore};
 use termide_agent_providers::{AnthropicProvider, Compat, OpenAiCompatProvider, ReasoningParam};
-use termide_agent_tools::{builtin_tools, QuestionTool, SkillTool, SubagentRun, TaskTool};
+use termide_agent_tools::{
+    builtin_tools, BashTool, QuestionTool, SkillTool, SubagentRun, SuggestCommandTool, TaskTool,
+};
 use termide_agent_web::{web_tools, Web, WebConfig};
 use termide_config::{AiSettings, Connection, WebSettings};
 use termide_panel_agent::{
@@ -345,10 +348,12 @@ impl AgentCatalog for FsCatalog {
         } else {
             base_tools(&self.dirs, self.web.as_ref())
         };
-        // Someone watches the panel's agent to answer its questions; a
-        // subagent and headless mode build their tools without it.
+        // Someone watches the panel's agent to answer its questions and to
+        // confirm a command it is offered; a subagent and headless mode build
+        // their tools without either.
         if backend.is_none() {
             tools.insert(Arc::new(QuestionTool));
+            tools.insert(Arc::new(SuggestCommandTool));
         }
         // The `task` tool lets this agent hand work to the others, and its
         // `tools` list can leave it out like any other capability; only when
@@ -949,6 +954,10 @@ fn agent_setup(
             .join(termide_project::project_key(&cwd))
     });
 
+    // Built before `cwd` moves into the setup: a hand-run command runs where
+    // the panel works.
+    let shell_run = user_shell_runner(&catalog.dirs, &cwd);
+
     AgentPanelSetup {
         cwd,
         agent,
@@ -983,7 +992,38 @@ fn agent_setup(
         persist_rule: Some(persist_rule),
         session_dir,
         session,
+        shell_run: Some(shell_run),
     }
+}
+
+/// The runner behind `!` in the agent panel's input and `[Run]` on a
+/// `suggest_command` card: the same `bash` tool the agent calls, so timeouts,
+/// output cleaning and the full-log file behave identically either way. It is
+/// built here rather than taken from the agent's registry because a command
+/// the user ran is not governed by the tools an agent profile was given —
+/// `restrict_tools` may well have left `bash` out of those.
+fn user_shell_runner(dirs: &AgentDirs, cwd: &Path) -> ShellRunner {
+    let tool = BashTool {
+        shim_path: dirs.shims_dir(),
+        ..BashTool::default()
+    };
+    let cwd = cwd.to_path_buf();
+    ShellRunner::new(move |command, cancel| {
+        let call = ToolCall {
+            id: "user-command".into(),
+            name: "bash".into(),
+            arguments: serde_json::json!({ "command": command }),
+            extra_content: None,
+        };
+        // The user wrote the command, so there is no one to ask about it and
+        // nothing for the reviewer to weigh; it runs in the panel's directory.
+        let ctx = ToolContext::new(cwd.clone());
+        let result = tool.execute(&call, &ctx, &mut |_| {}, cancel);
+        Ok(ShellOutput {
+            text: result.plain_text(),
+            failed: result.is_error,
+        })
+    })
 }
 
 /// The ACP backend for a CLI-adapter provider (`claude_code`, `codex`,
@@ -1671,10 +1711,18 @@ mod tests {
         assert_eq!(review.mode, Some(termide_agent_core::Mode::Auto));
 
         let default = catalog.resolve(DEFAULT_AGENT).unwrap();
-        // The built-in four and `question`, which the panel's agent asks with.
+        // The built-in four, plus the two that speak to the user watching the
+        // panel: `question` and `suggest_command`.
         assert_eq!(
             default.tools.names(),
-            ["read", "edit", "write", "bash", "question"]
+            [
+                "read",
+                "edit",
+                "write",
+                "bash",
+                "question",
+                "suggest_command"
+            ]
         );
         assert!(default
             .system_prompt
