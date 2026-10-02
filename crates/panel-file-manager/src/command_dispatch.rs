@@ -285,11 +285,9 @@ impl FileManager {
                         (path, parent)
                     };
                     let t = termide_i18n::t();
-                    let modal = InputModal::with_default(
-                        t.op_type_rename(),
-                        t.fm_move_prompt(&filename),
-                        &filename,
-                    );
+                    // The title already says "Rename"; a prompt here would
+                    // only repeat the name that is in the field.
+                    let modal = InputModal::with_default(t.op_type_rename(), "", &filename);
                     let action = PendingAction::MovePath {
                         sources: vec![source],
                         target_directory: target_dir,
