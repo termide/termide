@@ -284,7 +284,7 @@ impl InfoModal {
             .unwrap_or(0);
 
         // Calculate required width:
-        // padding (4) + borders (2) + key + ": " (2) + value
+        // padding (4) + borders (2) + key + separator (2) + value
         let content_width = 6 + max_key_len + 2 + max_value_len;
 
         // Apply constraints
@@ -315,11 +315,11 @@ impl Modal for InfoModal {
             .unwrap_or(0);
 
         // Calculate available width for values
-        // modal_width - borders (2) - padding (4) - key_width - ": " (2)
+        // modal_width - borders (2) - padding (4) - key_width - separator (2)
         let available_value_width = modal_width
             .saturating_sub(6) // borders + padding
             .saturating_sub(max_key_len as u16)
-            .saturating_sub(2) // ": "
+            .saturating_sub(2) // separator
             .max(MODAL_MIN_VALUE_WIDTH as u16) as usize;
 
         let t = i18n::t();
@@ -343,10 +343,9 @@ impl Modal for InfoModal {
                     if wrapped_values.is_empty() {
                         continue;
                     }
-                    let separator = if key.is_empty() { "  " } else { ": " };
                     all_lines.push(Line::from(vec![
                         Span::styled(format!("  {}{}", key, padding), key_style),
-                        Span::raw(separator),
+                        Span::raw("  "),
                         Span::styled(wrapped_values[0].clone(), Style::default().fg(theme.fg)),
                     ]));
                     let indent = " ".repeat(max_key_len + 4);
@@ -634,6 +633,28 @@ mod tests {
             state: KeyEventState::NONE,
         };
         termide_core::KeyChord::identity(ev)
+    }
+
+    #[test]
+    fn keys_are_divided_from_values_by_spaces() {
+        setup_i18n();
+        let mut modal = InfoModal::new("Info", vec![("Model".into(), "gpt".into())]);
+        let theme = Theme::default();
+        let area = Rect::new(0, 0, 80, 24);
+        let mut buf = Buffer::empty(area);
+        modal.render(area, &mut buf, &theme);
+        let text = (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains("Model  gpt") && !text.contains("Model:"),
+            "{text}"
+        );
     }
 
     #[test]
