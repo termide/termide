@@ -102,6 +102,8 @@ const SHOW_PROMPT_ACTION: &str = "agent_show_prompt";
 const SESSION_INFO_ACTION: &str = "agent_session_info";
 /// Status chip and context-menu action that opens the agent picker.
 const AGENT_ACTION: &str = "agent_agent";
+/// Banner action that picks another working directory for a fresh session.
+const CWD_ACTION: &str = "agent_cwd";
 /// Context-menu action that opens the prompt-template picker.
 const PROMPTS_ACTION: &str = "agent_prompts";
 /// The built-in `/compact [focus]` command.
@@ -1350,6 +1352,7 @@ impl Panel for AgentPanel {
             PROMPTS_ACTION => self.prompt_picker(),
             UNDO_ACTION => self.ask_undo(),
             AGENT_ACTION => vec![self.agent_picker()],
+            CWD_ACTION => self.ask_change_cwd(),
             MODEL_ACTION if self.external => self.acp_model_picker(),
             MODE_ACTION if self.external && !self.runtime.follows_mode() => {
                 self.notice(PromptError::Unsupported.to_string(), NoticeKind::Warn);

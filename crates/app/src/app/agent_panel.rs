@@ -118,6 +118,84 @@ impl App {
     }
 }
 
+impl App {
+    /// The banner of a fresh agent panel asked to work elsewhere: let the
+    /// user pick the directory, starting from the one it works in.
+    pub(in crate::app) fn ask_agent_cwd(&mut self, session: Option<PathBuf>, cwd: PathBuf) {
+        let t = termide_i18n::t();
+        let modal = termide_modal::DirectoryPickerModal::new(
+            cwd.clone(),
+            t.agent_cwd_title().to_string(),
+            t.directory_picker_select().to_string(),
+        );
+        self.state.set_pending_action(
+            termide_state::PendingAction::ChangeAgentCwd { session, cwd },
+            termide_modal::ActiveModal::DirectoryPicker(Box::new(modal)),
+        );
+    }
+
+    /// The picked directory for the agent panel that asked: its session log
+    /// moves to that directory's sessions, keeping the connection, model and
+    /// agent it was set up with, and the panel is rebuilt there in place —
+    /// its tools, agents, hooks and shell all come from where it works.
+    pub(in crate::app) fn handle_change_agent_cwd(
+        &mut self,
+        value: Box<dyn std::any::Any>,
+        session: Option<&Path>,
+        cwd: &Path,
+    ) -> Result<()> {
+        let Some(new_cwd) = value.downcast_ref::<PathBuf>() else {
+            return Ok(());
+        };
+        if new_cwd == cwd {
+            return Ok(());
+        }
+        // A modal moves no focus, so the panel that asked is the focused one;
+        // checked all the same, as nothing else may be replaced.
+        let agent = match self
+            .layout_manager
+            .active_panel_mut()
+            .and_then(|panel| panel.to_state(Path::new("")))
+        {
+            Some(termide_core::PanelState::Agent {
+                cwd: active_cwd,
+                session: active_session,
+                agent,
+            }) if active_cwd == cwd && active_session.as_deref() == session => agent,
+            _ => return Ok(()),
+        };
+        let settings = self.state.config.ai.clone();
+        if usable_connection(&settings).is_none() {
+            let t = termide_i18n::t();
+            self.show_error_modal(t.agent_not_configured().to_string());
+            return Ok(());
+        }
+        // A log that cannot move is left where it is, and the panel starts
+        // over on a fresh one in the new directory.
+        let moved = session
+            .zip(session_dir_of(new_cwd))
+            .and_then(|(path, dir)| {
+                Session::open(path)
+                    .and_then(|log| log.move_into(&dir, new_cwd))
+                    .map_err(|error| {
+                        log::warn!("cannot move the agent session {}: {error}", path.display());
+                    })
+                    .ok()
+            });
+        let Some(panel) = restore_agent_panel(&settings, new_cwd.clone(), moved, agent) else {
+            return Ok(());
+        };
+        // The old panel lets its log go; it finds the file moved, and an
+        // empty one it would have discarded is already gone.
+        if let Some(mut old) = self.layout_manager.replace_active_panel(Box::new(panel)) {
+            old.kill_processes();
+        }
+        self.state.needs_redraw = true;
+        self.auto_save_layout();
+        Ok(())
+    }
+}
+
 /// The name a fork of `source` takes, so the two are told apart in the
 /// session picker and in the panel's title: `Refactor` becomes `Refactor (2)`,
 /// then `Refactor (3)`. A source the user never named is labelled by its first
@@ -951,13 +1029,7 @@ fn agent_setup(
     let provider_backend = cli_provider_backend(&provider_kind, &agent);
     let backend = provider_backend.clone().or(profile.backend);
 
-    // Session logs are filed by the directory the panel works in, under the
-    // same `ai/` directory as the agents: `<config>/ai/sessions/<path>/`.
-    let session_dir = termide_config::get_config_dir().ok().map(|dir| {
-        dir.join(GLOBAL_AGENT_DIR)
-            .join(SESSIONS_DIR)
-            .join(termide_project::project_key(&cwd))
-    });
+    let session_dir = session_dir_of(&cwd);
 
     // Built before `cwd` moves into the setup: a hand-run command runs where
     // the panel works.
@@ -1007,6 +1079,17 @@ fn agent_setup(
 /// built here rather than taken from the agent's registry because a command
 /// the user ran is not governed by the tools an agent profile was given —
 /// `restrict_tools` may well have left `bash` out of those.
+/// Where the session logs of a panel working in `cwd` live: filed by that
+/// directory, under the same `ai/` directory as the agents,
+/// `<config>/ai/sessions/<path>/`.
+fn session_dir_of(cwd: &Path) -> Option<PathBuf> {
+    termide_config::get_config_dir().ok().map(|dir| {
+        dir.join(GLOBAL_AGENT_DIR)
+            .join(SESSIONS_DIR)
+            .join(termide_project::project_key(cwd))
+    })
+}
+
 fn user_shell_runner(dirs: &AgentDirs, cwd: &Path) -> ShellRunner {
     let tool = BashTool {
         shim_path: dirs.shims_dir(),

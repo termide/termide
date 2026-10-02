@@ -774,6 +774,16 @@ pub enum PanelEvent {
     /// copying, since it owns panel creation and the configuration a new panel
     /// runs on.
     ForkAgentSession { session: PathBuf, cwd: PathBuf },
+
+    /// Let the user pick another working directory for a fresh agent panel
+    /// working in `cwd`, on the session log at `session`. On a pick the app
+    /// moves the log to the new directory's sessions and reopens the panel
+    /// there in place, since the panel's tools, agents and hooks are all
+    /// resolved from its directory.
+    ChangeAgentCwd {
+        session: Option<PathBuf>,
+        cwd: PathBuf,
+    },
 }
 
 /// A single file location from LSP find-references.

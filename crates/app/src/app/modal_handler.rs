@@ -613,6 +613,9 @@ impl App {
                 PendingAction::SwitchDirectory => {
                     self.handle_switch_directory(value)?;
                 }
+                PendingAction::ChangeAgentCwd { session, cwd } => {
+                    self.handle_change_agent_cwd(value, session.as_deref(), &cwd)?;
+                }
                 // Add bookmark
                 PendingAction::AddBookmark { selected, .. } => {
                     use termide_modal::BookmarkAddResult;

@@ -567,6 +567,19 @@ impl AgentPanel {
         }
     }
 
+    /// The banner's directory: ask the app to let the user pick another one
+    /// to work in. Only a session nothing was sent to moves, so no message
+    /// or tool call is left pointing at the directory it was made in.
+    pub(crate) fn ask_change_cwd(&mut self) -> Vec<PanelEvent> {
+        if !self.is_fresh() || self.is_busy() {
+            return Vec::new();
+        }
+        vec![PanelEvent::ChangeAgentCwd {
+            session: self.session_path().map(std::path::Path::to_path_buf),
+            cwd: self.cwd.clone(),
+        }]
+    }
+
     /// A read-only summary of the current session, shown in an info modal
     /// (F3, the `[≡]` menu's "Session info", or `/usage`).
     pub(crate) fn session_summary(&self) -> Vec<PanelEvent> {

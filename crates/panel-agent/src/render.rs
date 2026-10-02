@@ -12,7 +12,8 @@ use termide_ui::ScrollBar;
 use crate::toolset::TOOLSET_ACTION;
 use crate::{
     format_tokens, provider_label, shorten_path, transcript, truncate_title, AgentPanel, BannerHit,
-    Phase, RunButton, AGENT_ACTION, CONNECTION_ACTION, MODEL_ACTION, MODE_ACTION, REASONING_ACTION,
+    Phase, RunButton, AGENT_ACTION, CONNECTION_ACTION, CWD_ACTION, MODEL_ACTION, MODE_ACTION,
+    REASONING_ACTION,
 };
 
 /// Rows of the welcome banner's logo.
@@ -308,9 +309,9 @@ impl AgentPanel {
             .add_modifier(Modifier::BOLD);
         let dim = Style::default().fg(colors.disabled);
         let fg = Style::default().fg(colors.fg);
-        // A re-pickable value (connection, model, tools) is drawn bold in the
-        // accent colour, so it reads as clickable; a fixed one (cwd)
-        // is plain. The click itself is wired through `banner_hits` below.
+        // A re-pickable value (cwd, connection, model, tools) is drawn bold in
+        // the accent colour, so it reads as clickable; a fixed one is plain.
+        // The click itself is wired through `banner_hits` below.
         let link = Style::default()
             .fg(colors.info)
             .add_modifier(Modifier::BOLD);
@@ -342,7 +343,11 @@ impl AgentPanel {
         }
         info.extend([
             (Line::from(""), None),
-            (field(t.agent_banner_cwd(), cwd, false), None),
+            // The directory moves only while the panel is idle.
+            (
+                field(t.agent_banner_cwd(), cwd, !self.is_busy()),
+                (!self.is_busy()).then_some(BannerHit::Action(CWD_ACTION)),
+            ),
             (
                 field(
                     t.agent_banner_connection(),

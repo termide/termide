@@ -171,6 +171,12 @@ pub enum PendingAction {
     },
     /// Switch active panel's working directory
     SwitchDirectory,
+    /// Move the focused fresh agent panel, working in `cwd` on the session
+    /// log at `session`, to the picked directory
+    ChangeAgentCwd {
+        session: Option<PathBuf>,
+        cwd: PathBuf,
+    },
     /// Add a bookmark
     AddBookmark {
         /// Group name to restore nested menu on return

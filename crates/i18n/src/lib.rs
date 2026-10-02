@@ -678,6 +678,7 @@ pub trait Translation: Send + Sync {
     fn agent_banner_model(&self) -> &str;
     fn agent_banner_tools(&self) -> &str;
     fn agent_banner_cwd(&self) -> &str;
+    fn agent_cwd_title(&self) -> &str;
     fn agent_banner_sessions(&self) -> &str;
     fn agent_rollback_last_request(&self) -> &str;
     fn agent_project_command(&self) -> &str;
@@ -1118,6 +1119,7 @@ pub trait Translation: Send + Sync {
     // Directory picker
     fn directory_picker_create(&self) -> &str;
     fn directory_picker_move(&self) -> &str;
+    fn directory_picker_select(&self) -> &str;
     fn directory_picker_cancel(&self) -> &str;
 
     // Directory switcher

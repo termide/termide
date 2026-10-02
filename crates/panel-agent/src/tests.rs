@@ -2261,6 +2261,37 @@ fn an_empty_session_shows_a_welcome_banner() {
 }
 
 #[test]
+fn clicking_the_banner_directory_asks_to_move_the_fresh_session() {
+    let mut panel = panel(vec![]);
+    render_text(&mut panel, 60, 16);
+    let rect = panel
+        .banner_hits
+        .iter()
+        .find_map(|(rect, hit)| (*hit == BannerHit::Action(CWD_ACTION)).then_some(*rect))
+        .expect("the directory is clickable in a fresh session");
+    let events = panel.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: rect.x,
+            row: rect.y,
+            modifiers: KeyModifiers::NONE,
+        },
+        Rect::new(0, 0, 60, 16),
+    );
+    let Some(PanelEvent::ChangeAgentCwd { session, cwd }) = events.into_iter().next() else {
+        panic!("no directory request");
+    };
+    assert_eq!(cwd, panel.cwd);
+    assert_eq!(session.as_deref(), panel.session_path());
+
+    // Once something was sent the session stays where it was made.
+    type_text(&mut panel, "hello");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+    assert!(panel.handle_status_action(CWD_ACTION).is_empty());
+}
+
+#[test]
 fn notices_before_the_first_request_go_under_the_banner() {
     let (tx, rx) = mpsc::channel();
     let mut panel = AgentPanel::new(AgentPanelSetup {
@@ -2485,8 +2516,8 @@ fn clicking_a_banner_field_reopens_its_picker() {
     let _ = render_text(&mut panel, 60, 16);
     assert_eq!(
         panel.banner_hits.len(),
-        3,
-        "the model, the agent and the tools are re-pickable"
+        4,
+        "the directory, the model, the agent and the tools are re-pickable"
     );
     let (rect, _) = panel
         .banner_hits

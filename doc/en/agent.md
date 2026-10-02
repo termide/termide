@@ -199,7 +199,11 @@ directory it works in, its connection, model and the tools it may use, each
 under a label in the language you set. The agent's name, the connection, the
 model and the tools are shown bold in the accent colour: a click on any opens
 the same picker its status-bar chip does, so you can set the session up before
-you start. Further down, under the sessions heading, the list of this
+you start. The directory is shown that way too while the panel is idle: a
+click opens the directory picker (`.` there shows hidden directories), and the
+panel moves to the picked one in place — the session log moves with it, so the
+connection, model and agent picked stay, while the project agents, skills,
+hooks and the list of sessions below are now that directory's. Further down, under the sessions heading, the list of this
 directory's other sessions, newest first, each with the local date and time
 of its last change, starting from the logo's column so the titles get the
 panel's width, filling the space the panel has and scrolling through the rest

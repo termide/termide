@@ -387,6 +387,50 @@ impl Session {
         Ok(path)
     }
 
+    /// Move this session's log to `dir` (created when missing) as a session
+    /// working in `cwd`, and return its new path: the session directory of
+    /// another working directory, for a session that goes on there. The log
+    /// keeps its id, its file name and every entry; only the header's `cwd`
+    /// changes; a failed move leaves the session where it was. The moved log
+    /// is not claimed, so the caller opens it as it would any other session.
+    pub fn move_into(&self, dir: &Path, cwd: &Path) -> std::io::Result<PathBuf> {
+        let file_name = self.path.file_name().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("{} has no file name", self.path.display()),
+            )
+        })?;
+        std::fs::create_dir_all(dir)?;
+        let path = dir.join(file_name);
+        let mut header = self.header.clone();
+        header.cwd = cwd.to_path_buf();
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .append(true)
+            .open(&path)?;
+        let written = (|| -> std::io::Result<()> {
+            write_line(
+                &mut file,
+                &Line::Header(HeaderLine {
+                    kind: HeaderTag::Session,
+                    header,
+                }),
+            )?;
+            for entry in &self.entries {
+                write_line(&mut file, &Line::Entry(entry.clone()))?;
+            }
+            Ok(())
+        })();
+        // The old file goes once the new one is whole; when it cannot go (a
+        // file held open on Windows) the copy does instead, so the session is
+        // never in two places.
+        if let Err(error) = written.and_then(|()| std::fs::remove_file(&self.path)) {
+            let _ = std::fs::remove_file(&path);
+            return Err(error);
+        }
+        Ok(path)
+    }
+
     /// Like [`Session::open`], but fails if the session is already open in
     /// another panel, so its log is never written from two places at once.
     pub fn open_exclusive(path: &Path) -> std::io::Result<Self> {
@@ -1199,6 +1243,26 @@ mod tests {
             .collect();
         assert_eq!(texts, ["keep"]);
     }
+
+    #[test]
+    fn a_move_refiles_the_whole_log_under_the_new_cwd_and_removes_the_old_one() {
+        let root = tempfile::tempdir().unwrap();
+        let mut session = Session::create(&root.path().join("a"), Path::new("/a")).unwrap();
+        session.append_connection_change("cloud").unwrap();
+        session.set_name("named").unwrap();
+        let source = session.path().to_path_buf();
+        let other = root.path().join("b");
+
+        let moved = session.move_into(&other, Path::new("/b")).unwrap();
+        assert_eq!(moved, other.join(source.file_name().unwrap()));
+        assert!(!source.exists());
+        let reopened = Session::open(&moved).unwrap();
+        assert_eq!(reopened.id(), session.id());
+        assert_eq!(reopened.header().cwd, PathBuf::from("/b"));
+        assert_eq!(reopened.current_connection().as_deref(), Some("cloud"));
+        assert_eq!(reopened.name(), Some("named"));
+    }
+
     #[test]
     fn a_rewind_drops_the_undone_messages_from_the_branch_and_survives_reopen() {
         let dir = tempfile::tempdir().unwrap();

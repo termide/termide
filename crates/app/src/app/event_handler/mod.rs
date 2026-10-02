@@ -418,6 +418,10 @@ impl App {
             PanelEvent::ForkAgentSession { session, cwd } => {
                 self.fork_agent_session(&session, &cwd)?;
             }
+
+            PanelEvent::ChangeAgentCwd { session, cwd } => {
+                self.ask_agent_cwd(session, cwd);
+            }
         }
         Ok(())
     }
