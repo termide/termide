@@ -311,9 +311,14 @@ impl AgentCatalog for FsCatalog {
         self.dirs
             .agents()
             .into_iter()
-            .map(|name| AgentEntry {
-                description: self.dirs.spec(&name).description,
-                name,
+            .map(|name| {
+                // The default agent needs no definition, so unless one gives
+                // it a description it is described by the panel's own label.
+                let mut description = self.dirs.spec(&name).description;
+                if description.is_empty() && name == DEFAULT_AGENT {
+                    description = termide_i18n::t().panel_agent().to_string();
+                }
+                AgentEntry { name, description }
             })
             .collect()
     }
@@ -1702,8 +1707,12 @@ mod tests {
         .unwrap();
         let catalog = FsCatalog::with_global(tmp.path(), tmp.path(), Some(global.clone()));
 
-        let names: Vec<String> = catalog.list().into_iter().map(|e| e.name).collect();
+        let entries = catalog.list();
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, ["default", "review"]);
+        // The default agent, defined nowhere, is described by the panel's label.
+        assert_eq!(entries[0].description, termide_i18n::t().panel_agent());
+        assert_eq!(entries[1].description, "Reviews diffs");
         let review = catalog.resolve("review").unwrap();
         assert!(review.system_prompt.starts_with("You review.\n\n- read:"));
         assert_eq!(review.tools.names(), ["read", "bash"]);

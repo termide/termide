@@ -32,7 +32,7 @@ use crossterm::event::MouseEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use termide_agent_core::{
-    civil_date, Backend, BackendModel, BackendSetup, CancelToken, CheckpointStore, CommandScript,
+    Backend, BackendModel, BackendSetup, CancelToken, CheckpointStore, CommandScript,
     CompactionPolicy, CompactionPrompts, Decision, GoalPrompt, HandoffPrompt, Hooks, LateTools,
     McpReload, McpServerState, Mode, ModeHandle, ModelInfo, ModelSpec, PermissionEnvelope,
     PermissionRules, PersistScope, PlanPrompt, PromptError, PromptTemplate, Provider,
@@ -562,6 +562,10 @@ pub struct AgentPanel {
     recent_to_delete: Option<PathBuf>,
     cwd: PathBuf,
     agent: String,
+    /// The agent's description and the agent it was looked up for: the catalog
+    /// reads the definitions from disk, so it is asked once per agent, not
+    /// every frame.
+    agent_description: Option<(String, String)>,
     catalog: Arc<dyn AgentCatalog>,
     /// Agents offered by the last picker, in the order they were shown.
     agent_choices: Vec<String>,
@@ -923,6 +927,7 @@ impl AgentPanel {
             model,
             configured_model: setup.model,
             agent,
+            agent_description: None,
             catalog: setup.catalog,
             agent_choices: Vec::new(),
             prompt_choices: Vec::new(),
@@ -1331,7 +1336,7 @@ impl Panel for AgentPanel {
                         };
                         format!(
                             "{mark}{} · {}",
-                            civil_date(summary.modified),
+                            crate::runtime::local_minute(summary.modified),
                             truncate_title(&summary.label())
                         )
                     })

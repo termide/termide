@@ -1,11 +1,11 @@
 //! Rendering: the transcript and the prompt box, the welcome banner, the
 //! run controls and state strip, and the status-bar segments.
 
+use crate::runtime::local_minute;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use termide_agent_core::civil_date;
 use termide_core::{RenderContext, SegmentKind, StatusSegment, ThemeColors};
 use termide_ui::ScrollBar;
 
@@ -246,16 +246,35 @@ impl AgentPanel {
             .min(available.saturating_sub(2).max(1))
     }
 
-    /// Rows the banner's fields take, before its list of sessions: the name,
-    /// the subtitle, a blank, connection, model, agent, tools (for our own
-    /// agent) and cwd.
-    pub(crate) fn banner_field_rows(&self) -> usize {
-        7 + usize::from(!self.external)
+    /// The agent's description from its definition, empty when it has
+    /// none; the banner shows it under the agent's name.
+    pub(crate) fn agent_description(&mut self) -> String {
+        match &self.agent_description {
+            Some((agent, description)) if *agent == self.agent => description.clone(),
+            _ => {
+                let description = self
+                    .catalog
+                    .list()
+                    .into_iter()
+                    .find(|entry| entry.name == self.agent)
+                    .map(|entry| entry.description)
+                    .unwrap_or_default();
+                self.agent_description = Some((self.agent.clone(), description.clone()));
+                description
+            }
+        }
+    }
+
+    /// Rows the banner's fields take, before its list of sessions: the
+    /// agent's name as the title, its description (when it has one), a
+    /// blank, cwd, connection, model and tools (for our own agent).
+    pub(crate) fn banner_field_rows(&mut self) -> usize {
+        5 + usize::from(!self.agent_description().is_empty()) + usize::from(!self.external)
     }
 
     /// The welcome banner shown while the session is empty: a logo on the left
-    /// and what the agent is set up with (provider, model, agent, directory) on
-    /// the right, at the top of the transcript area, with the recent sessions
+    /// and what the agent is set up with (agent, directory, connection, model)
+    /// on the right, at the top of the transcript area, with the recent sessions
     /// filling the rows below. On a narrow panel the logo is dropped and only
     /// the details show.
     pub(crate) fn render_welcome(&mut self, area: Rect, buf: &mut Buffer, colors: &ThemeColors) {
@@ -285,7 +304,7 @@ impl AgentPanel {
             .add_modifier(Modifier::BOLD);
         let dim = Style::default().fg(colors.disabled);
         let fg = Style::default().fg(colors.fg);
-        // A re-pickable value (model, agent, tools) is drawn bold in the
+        // A re-pickable value (connection, model, tools) is drawn bold in the
         // accent colour, so it reads as clickable; a fixed one (cwd)
         // is plain. The click itself is wired through `banner_hits` below.
         let link = Style::default()
@@ -307,10 +326,19 @@ impl AgentPanel {
         // Each entry is a line and, when clicking it does something (re-pick a
         // choice, open a session), what that click does.
         let t = termide_i18n::t();
-        let info: Vec<(Line<'static>, Option<BannerHit>)> = vec![
-            (Line::styled("termide", accent), None),
-            (Line::styled(t.agent_banner_subtitle(), dim), None),
+        // The title is the agent's name, re-pickable with a click, and its
+        // description, when it has one, goes under it.
+        let mut info: Vec<(Line<'static>, Option<BannerHit>)> = vec![(
+            Line::styled(self.agent.clone(), accent),
+            Some(BannerHit::Action(AGENT_ACTION)),
+        )];
+        let description = self.agent_description();
+        if !description.is_empty() {
+            info.push((Line::styled(description, fg), None));
+        }
+        info.extend([
             (Line::from(""), None),
+            (field(t.agent_banner_cwd(), cwd, false), None),
             (
                 field(
                     t.agent_banner_connection(),
@@ -325,14 +353,9 @@ impl AgentPanel {
                 field(t.agent_banner_model(), self.model_display(), true),
                 Some(BannerHit::Action(MODEL_ACTION)),
             ),
-            (
-                field(t.agent_banner_agent(), self.agent.clone(), true),
-                Some(BannerHit::Action(AGENT_ACTION)),
-            ),
-        ];
+        ]);
         // What the session may use, re-pickable before the first request,
         // when switching it off keeps it out of the context altogether.
-        let mut info = info;
         if !self.external {
             let (on, all) = self.toolset_counts();
             info.push((
@@ -340,54 +363,53 @@ impl AgentPanel {
                 Some(BannerHit::Action(TOOLSET_ACTION)),
             ));
         }
-        info.push((field(t.agent_banner_cwd(), cwd, false), None));
         debug_assert_eq!(info.len(), self.banner_field_rows());
         // This directory's other sessions, newest first, one click (or
         // Tab, the arrows and Enter) away: as many rows as the panel's height
         // leaves, scrolling through the rest.
         // The banner sits at the top, so the list gets every row under the
-        // fields; a blank row above it only when the whole list fits anyway.
+        // fields, a blank and its heading; a blank row above the banner only
+        // when the whole list fits anyway. The sessions go under the heading
+        // rather than beside it, so their titles get the full width.
         let header_len = info.len();
         let total = self.recent_sessions.len();
-        let list_need = if total > 0 { total + 1 } else { 0 };
+        let list_need = if total > 0 { total + 2 } else { 0 };
         let margin = usize::from(area.height as usize > header_len + list_need);
-        let rows = total.min((area.height as usize).saturating_sub(margin + header_len + 1));
+        let rows = total.min((area.height as usize).saturating_sub(margin + header_len + 2));
         self.recent_rows = rows;
-        let list_start = header_len + 1;
+        let list_start = header_len + 2;
         if rows > 0 {
             self.recent_top = self.recent_top.min(total - rows);
             if self.chat_focus {
                 self.scroll_recent_selection_into_view();
             }
             info.push((Line::from(""), None));
+            info.push((
+                Line::styled(t.agent_banner_sessions().to_string(), dim),
+                None,
+            ));
             let first = self.recent_top;
             for (index, summary) in self.recent_sessions[first..first + rows]
                 .iter()
                 .enumerate()
                 .map(|(row, summary)| (first + row, summary))
             {
-                let label = if index == first {
-                    t.agent_banner_sessions()
-                } else {
-                    ""
-                };
-                let value = format!(
-                    "{} · {}",
-                    civil_date(summary.modified),
-                    truncate_title(&summary.label())
-                );
-                info.push((field(label, value, true), Some(BannerHit::Session(index))));
+                // Only the title is in the accent colour; the date before it
+                // is dim.
+                let line = Line::from(vec![
+                    Span::styled(format!("{}  ", local_minute(summary.modified)), dim),
+                    Span::styled(truncate_title(&summary.label()), link),
+                ]);
+                info.push((line, Some(BannerHit::Session(index))));
             }
         }
 
-        // The logo is centred against the fields, not the list below them.
-        let header_h = header_len.max(LOGO.len()) as u16;
+        // The logo starts on the title's row.
         let bottom = area.y + area.height;
         let top = area.y + margin as u16;
         if show_logo {
-            let logo_top = top + (header_h - LOGO.len() as u16) / 2;
             for (i, line) in LOGO.iter().enumerate() {
-                let y = logo_top + i as u16;
+                let y = top + i as u16;
                 if y >= bottom {
                     break;
                 }
@@ -400,7 +422,7 @@ impl AgentPanel {
                 );
             }
         }
-        let info_top = top + (header_h - header_len as u16) / 2;
+        let info_top = top;
         for (i, (line, hit)) in info.iter().enumerate() {
             let y = info_top + i as u16;
             if y >= bottom {
@@ -422,9 +444,9 @@ impl AgentPanel {
                 ));
             }
             // The session under the keyboard cursor is shown inverted, like
-            // a selected chat block; its label column stays plain.
+            // a selected chat block.
             if self.chat_focus && *hit == Some(BannerHit::Session(self.recent_selected)) {
-                for x in info_x + (LABEL_COL as u16).min(info_w)..info_x + info_w {
+                for x in info_x..info_x + info_w {
                     buf[(x, y)].set_style(Style::default().fg(colors.bg).bg(colors.fg));
                 }
             }

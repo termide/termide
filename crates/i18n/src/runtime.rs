@@ -159,10 +159,8 @@ impl Translation for RuntimeTranslation {
         agent_chip_model,
         agent_chip_on,
         agent_chip_off,
-        agent_banner_subtitle,
         agent_banner_connection,
         agent_banner_model,
-        agent_banner_agent,
         agent_banner_tools,
         agent_banner_cwd,
         agent_banner_sessions,
@@ -2246,7 +2244,6 @@ mod tests {
             for label in [
                 t.agent_banner_connection(),
                 t.agent_banner_model(),
-                t.agent_banner_agent(),
                 t.agent_banner_tools(),
                 t.agent_banner_cwd(),
                 t.agent_banner_sessions(),
@@ -2259,7 +2256,6 @@ mod tests {
             if ["ru", "zh", "ja", "ko", "th", "hi", "bn"].contains(code) {
                 assert_ne!(t.agent_banner_connection(), "connection", "{code}");
                 assert_ne!(t.agent_banner_model(), "model", "{code}");
-                assert_ne!(t.agent_banner_agent(), "agent", "{code}");
                 assert_ne!(t.agent_banner_tools(), "tools", "{code}");
                 assert_ne!(t.agent_banner_sessions(), "sessions", "{code}");
             }

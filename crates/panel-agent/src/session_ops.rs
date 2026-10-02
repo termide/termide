@@ -4,7 +4,8 @@
 use std::path::Path;
 use std::sync::{Arc, PoisonError};
 
-use termide_agent_core::{civil_date, EntryKind, PromptError, Session, SessionSummary};
+use crate::runtime::local_minute;
+use termide_agent_core::{EntryKind, PromptError, Session, SessionSummary};
 use termide_core::{ConfirmAction, PanelEvent, SelectAction};
 use termide_ui::ChoiceForm;
 
@@ -463,7 +464,7 @@ impl AgentPanel {
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or_default();
-        let message = format!("{confirm}\n{} · {id}", civil_date(summary.modified));
+        let message = format!("{confirm}\n{} · {id}", local_minute(summary.modified));
         self.recent_to_delete = Some(summary.path.clone());
         vec![PanelEvent::ShowConfirm {
             message,
@@ -607,10 +608,10 @@ impl AgentPanel {
         if let Some(session) = self.session.as_ref() {
             rows.push((
                 t.agent_info_created().into(),
-                civil_date(session.header().created),
+                local_minute(session.header().created),
             ));
             if let Some(last) = session.entries().last().map(|e| e.timestamp) {
-                rows.push((t.agent_info_last_active().into(), civil_date(last)));
+                rows.push((t.agent_info_last_active().into(), local_minute(last)));
             }
             let compactions = session
                 .entries()

@@ -2221,25 +2221,39 @@ fn an_empty_session_shows_a_welcome_banner() {
     let mut panel = panel(vec![]);
     let rows = render_text(&mut panel, 60, 16);
     // The banner sits at the top, below one blank row, leaving the space
-    // under it to the list of recent sessions.
-    assert!(rows[1].contains("termide"), "{rows:#?}");
-    let all = rows.join("\n");
+    // under it to the list of recent sessions. Its title is the agent, and
+    // the directory comes first among the fields.
+    assert!(rows[1].contains("default"), "{rows:#?}");
+    // The logo starts on the title's row.
+    assert!(rows[1].contains('╭') && !rows[0].contains('╭'), "{rows:#?}");
     let t = termide_i18n::t();
-    for label in [
-        t.agent_banner_connection(),
-        t.agent_banner_model(),
-        t.agent_banner_agent(),
-        t.agent_banner_cwd(),
-    ] {
-        assert!(all.contains(label), "missing {label}: {all}");
-    }
+    let row_of = |label: &str| {
+        rows.iter()
+            .position(|r| r.contains(label))
+            .unwrap_or_else(|| panic!("missing {label}: {rows:#?}"))
+    };
+    let cwd = row_of(t.agent_banner_cwd());
+    assert!(cwd < row_of(t.agent_banner_connection()), "{rows:#?}");
+    assert!(cwd < row_of(t.agent_banner_model()), "{rows:#?}");
+    assert!(
+        panel
+            .banner_hits
+            .iter()
+            .any(|(rect, hit)| rect.y == 1 && *hit == BannerHit::Action(AGENT_ACTION)),
+        "the title picks the agent"
+    );
+    // An agent's description goes under its name.
+    assert!(panel.switch_agent("review"));
+    let rows = render_text(&mut panel, 60, 16);
+    assert!(rows[1].contains("review"), "{rows:#?}");
+    assert!(rows[2].contains("Reviews diffs"), "{rows:#?}");
     // The banner is the empty-state: once a turn runs, real content shows.
     type_text(&mut panel, "hello");
     panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
     settle(&mut panel);
     let all = render_text(&mut panel, 60, 16).join("\n");
     assert!(
-        !all.contains("coding agent"),
+        !all.contains(termide_i18n::t().agent_banner_cwd()),
         "banner gone once used: {all}"
     );
     // Once the banner is gone it leaves no clickable fields behind.
@@ -2262,7 +2276,10 @@ fn notices_before_the_first_request_go_under_the_banner() {
     let rows = render_text(&mut panel, 60, 20);
     let all = rows.join("\n");
     // The banner stays up, the notice sits under it past a dashed rule.
-    assert!(all.contains("coding agent"), "banner stays: {all}");
+    assert!(
+        all.contains(termide_i18n::t().agent_banner_cwd()),
+        "banner stays: {all}"
+    );
     let rule = rows.iter().position(|r| r.contains("╌╌╌")).expect("a rule");
     let notice = rows
         .iter()
@@ -2291,7 +2308,10 @@ fn notices_before_the_first_request_go_under_the_banner() {
     panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
     settle(&mut panel);
     let all = render_text(&mut panel, 60, 40).join("\n");
-    assert!(!all.contains("coding agent"), "banner gone: {all}");
+    assert!(
+        !all.contains(termide_i18n::t().agent_banner_cwd()),
+        "banner gone: {all}"
+    );
     assert!(all.contains("note 9"), "{all}");
     assert!(panel.banner_hits.is_empty());
 }
@@ -2411,7 +2431,7 @@ fn a_model_switch_in_a_fresh_session_updates_the_banner_not_the_transcript() {
     let mut panel = panel(vec![]);
     assert!(render_text(&mut panel, 60, 16)
         .join("\n")
-        .contains("coding agent"));
+        .contains(termide_i18n::t().agent_banner_cwd()));
 
     // No prompt yet: switching the model updates the banner in place and
     // pushes no notice, so the banner stays.
@@ -2423,7 +2443,10 @@ fn a_model_switch_in_a_fresh_session_updates_the_banner_not_the_transcript() {
         .iter()
         .any(|i| matches!(i, Item::Notice { .. })));
     let all = render_text(&mut panel, 60, 16).join("\n");
-    assert!(all.contains("coding agent"), "banner stays: {all}");
+    assert!(
+        all.contains(termide_i18n::t().agent_banner_cwd()),
+        "banner stays: {all}"
+    );
     assert!(all.contains("gpt-5-brand-new"), "banner shows it: {all}");
 
     // Once the conversation has begun, a switch is announced as before.
@@ -2510,7 +2533,11 @@ fn a_fresh_banner_offers_recent_sessions_to_open() {
     panel.handle_status_action(NEW_SESSION_ACTION);
     let all = render_text(&mut panel, 80, 24).join("\n");
     assert!(all.contains(sessions), "{all}");
-    assert!(all.contains("first task"), "{all}");
+    // Each session is dated to the minute of its last change, local time.
+    let stamp = crate::runtime::local_minute(panel.recent_sessions[0].modified);
+    assert_eq!(stamp.len(), "YYYY-MM-DD HH:MM".len(), "{stamp}");
+    assert_eq!(&stamp[13..14], ":", "{stamp}");
+    assert!(all.contains(&format!("{stamp}  first task")), "{all}");
     let (rect, _) = panel
         .banner_hits
         .iter()
@@ -2700,15 +2727,15 @@ fn the_wheel_scrolls_the_banner_sessions() {
         settle(&mut panel);
         panel.handle_status_action(NEW_SESSION_ACTION);
     }
-    let _ = render_text(&mut panel, 80, 12);
-    panel.handle_scroll(1, Rect::new(0, 0, 80, 12));
-    let all = render_text(&mut panel, 80, 12).join("\n");
+    let _ = render_text(&mut panel, 80, 11);
+    panel.handle_scroll(1, Rect::new(0, 0, 80, 11));
+    let all = render_text(&mut panel, 80, 11).join("\n");
     assert!(
         all.contains("first task") && !all.contains("second task"),
         "{all}"
     );
     // Past the end it stops.
-    panel.handle_scroll(5, Rect::new(0, 0, 80, 12));
+    panel.handle_scroll(5, Rect::new(0, 0, 80, 11));
     assert_eq!(panel.recent_top, 1);
 }
 

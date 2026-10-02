@@ -191,13 +191,17 @@ more of it. Give a session a name of your own through the panel's `[≡]` menu �
 **Rename session**, and the title shows that name from then on.
 
 A fresh session greets you with a banner: a small logo on the left and, on the
-right, what the agent is set up with — its connection, model, agent name, the
-tools it may use and the directory it works in, each under a label in the
-language you set. The connection, the model, the agent and the tools are shown
-bold in the accent colour: a click on any opens the same
-picker its status-bar chip does, so you can set the session up before you
-start. Below them, the sessions rows list this directory's other sessions,
-newest first, filling the space the panel has and scrolling through the rest
+right, what the agent is set up with. Its title is the agent's name, with the
+agent's description under it when the definition has one (the default agent,
+unless a definition says otherwise, is described as "Agent", the label of the
+panel's title); below them come the
+directory it works in, its connection, model and the tools it may use, each
+under a label in the language you set. The agent's name, the connection, the
+model and the tools are shown bold in the accent colour: a click on any opens
+the same picker its status-bar chip does, so you can set the session up before
+you start. Further down, under the sessions heading, the list of this
+directory's other sessions, newest first, each with the local date and time
+of its last change, filling the space the panel has and scrolling through the rest
 with the wheel. A session open in another panel is left out, and comes back
 once that panel lets it go. A click opens one in place of the empty session;
 from the keyboard, `Tab` moves into the list, the arrows, `PgUp`/`PgDn` and

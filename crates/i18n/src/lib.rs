@@ -674,10 +674,8 @@ pub trait Translation: Send + Sync {
     fn agent_chip_model(&self) -> &str;
     fn agent_chip_on(&self) -> &str;
     fn agent_chip_off(&self) -> &str;
-    fn agent_banner_subtitle(&self) -> &str;
     fn agent_banner_connection(&self) -> &str;
     fn agent_banner_model(&self) -> &str;
-    fn agent_banner_agent(&self) -> &str;
     fn agent_banner_tools(&self) -> &str;
     fn agent_banner_cwd(&self) -> &str;
     fn agent_banner_sessions(&self) -> &str;

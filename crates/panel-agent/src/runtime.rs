@@ -419,6 +419,16 @@ pub(crate) fn push_history(transcript: &mut Transcript, logged: &LoggedMessage) 
     }
 }
 
+/// Format an epoch-millis timestamp as the local `YYYY-MM-DD HH:MM`, how a
+/// list of sessions dates each one by its last change.
+pub(crate) fn local_minute(ms: u64) -> String {
+    use chrono::TimeZone;
+    match chrono::Local.timestamp_millis_opt(ms as i64) {
+        chrono::offset::LocalResult::Single(dt) => dt.format("%Y-%m-%d %H:%M").to_string(),
+        _ => termide_agent_core::civil_date(ms),
+    }
+}
+
 /// Format an epoch-millis timestamp as the local `HH:MM:SS`, matching
 /// [`now_hms`] so restored blocks read the same as live ones.
 pub(crate) fn hms_from_millis(ms: u64) -> String {
