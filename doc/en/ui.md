@@ -205,7 +205,7 @@ toggle_hex = "Ctrl+L"
 - Column width adjustable with `Alt+=` / `Alt+-`
 - Per-panel height adjustable inside a stacked column with `Alt+Shift+=` / `Alt+Shift+-` (1-row step), by dragging the panel's bottom border with the mouse, or by dragging the panel header up/down within the column
 - `Alt+F11` toggles the "fullscreen current panel" preset (one panel fills the column, others collapse to one row); pressing it again restores the previous heights
-- Some panels size themselves to their content instead of taking a share of the column — the Operations panel is one — and keep that height through the fullscreen preset; resizing such a panel by hand gives it an ordinary fixed height until it is closed
+- Some panels size themselves to their content instead of taking a share of the column — the Operations panel is one — and keep that height through the fullscreen preset (focusing such a panel leaves the enlarged panel as it is); resizing such a panel by hand gives it an ordinary fixed height until it is closed
 - Can be dragged by the top border to another position (see Mouse Interaction below)
 
 **Panel action context menu:**

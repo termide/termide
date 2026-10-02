@@ -624,15 +624,37 @@ impl PanelGroup {
         if n == 0 {
             return;
         }
-        let focused = self.expanded_index.min(n - 1);
+        let boosted = self.fullscreen_boost_index();
         let collapsed = MIN_PANEL_HEIGHT;
         let collapsed_total = collapsed as u32 * (n as u32 - 1);
-        let focused_height = (area_height as u32)
+        let boosted_height = (area_height as u32)
             .saturating_sub(collapsed_total)
             .max(collapsed as u32) as u16;
         let mut heights = vec![collapsed; n];
-        heights[focused] = focused_height;
+        heights[boosted] = boosted_height;
         self.split_heights = Some(heights);
+    }
+
+    /// The panel the fullscreen preset enlarges: the focused one, unless it
+    /// is a fit panel. A fit panel keeps its own rows under the preset, so
+    /// boosting it would collapse nothing and leave the free panels to share
+    /// the column evenly; the free panel the preset enlarged before keeps
+    /// the column instead.
+    fn fullscreen_boost_index(&self) -> usize {
+        let n = self.panels.len();
+        let focused = self.expanded_index.min(n - 1);
+        let is_fit = |i: usize| {
+            matches!(self.panels[i].height_mode(), HeightMode::FitContent(_))
+                && !self.is_height_pinned(i)
+        };
+        if n < 2 || !is_fit(focused) {
+            return focused;
+        }
+        let current = self.split_heights.as_deref().filter(|h| h.len() == n);
+        (0..n)
+            .filter(|&i| !is_fit(i))
+            .max_by_key(|&i| (current.map_or(0, |h| h[i]), std::cmp::Reverse(i)))
+            .unwrap_or(focused)
     }
 
     fn on_panels_changed_insert(&mut self, inserted_at: usize) {
@@ -946,12 +968,32 @@ mod tests {
         g.toggle_fullscreen(40);
         let h = g.effective_split_heights(40);
         assert_eq!(h, vec![31, 8, 1], "{h:?}");
-        // Focus on the fit panel: it stays at its rows and the free panels
-        // split the rest between them.
+        // Focus on the fit panel: it stays at its rows and the free panel
+        // the preset enlarged keeps the column.
         g.set_expanded(1);
         let h = g.effective_split_heights(40);
-        assert_eq!(h[1], 8);
-        assert_eq!(h.iter().sum::<u16>(), 40);
+        assert_eq!(h, vec![31, 8, 1], "{h:?}");
+        // Focus moving on to a free panel boosts that one as before.
+        g.set_expanded(2);
+        let h = g.effective_split_heights(40);
+        assert_eq!(h, vec![1, 8, 31], "{h:?}");
+    }
+
+    #[test]
+    fn opening_a_fit_panel_under_fullscreen_keeps_the_column_collapsed() {
+        // The operations panel opens right after the focused panel of a
+        // fullscreen column and takes the column's focus.
+        let mut g = PanelGroup::new(make_panel("a"));
+        g.add_panel(make_panel("b"));
+        g.toggle_fullscreen(40);
+        g.insert_panel(1, make_fit_panel(5));
+        g.set_expanded(1);
+        let h = g.effective_split_heights(40);
+        assert_eq!(h, vec![34, 5, 1], "{h:?}");
+        // Closing it hands the preset back to the panel it opened after.
+        g.remove_panel(1);
+        let h = g.effective_split_heights(40);
+        assert_eq!(h, vec![39, 1], "{h:?}");
     }
 
     #[test]
