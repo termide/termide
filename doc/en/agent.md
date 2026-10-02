@@ -293,7 +293,7 @@ you have named or sent even one message to is always kept.
 |---|---|
 | `Enter` | Send. While the agent works, the text is queued for the next turn instead and waits in the state strip above the input |
 | `Shift+Enter`, `Alt+Enter`, `Ctrl+J` | New line in the input |
-| `Esc` | Stop the running task; with nothing running, clear the input |
+| `Esc` | Stop the running task; with nothing running, clear the input; with the input empty too, pick a message to rewind to (see [Rewinding to a message](#rewinding-to-a-message)). `Esc` never closes the agent panel |
 | `Ctrl+O` | Expand or collapse every block, and new blocks after them |
 | `Tab` | Move focus between the input and the chat; in the chat, `↑`/`↓` pick a block, `Space`/`Enter` fold or unfold it, `→`/`←` unfold or fold it as in the file manager's tree, `o` opens it in its own panel; on a fresh session's banner, `↑`/`↓` pick a recent session and `Enter` opens it |
 | Click a block | Focus the chat and select that block (the selected block is shown inverted, success and error colours keeping their hue); click it again to fold or unfold it |
@@ -308,7 +308,7 @@ you have named or sent even one message to is always kept.
 | `F2` | Rename this session (the same prompt as the `[≡]` menu) |
 | `Ctrl+S` | Save the chat as a Markdown file (your messages and the agent's answers under who and when, each day under its own heading); also the `[≡]` menu |
 | `F3` | Open the session-info modal (model, agent, mode, directory, created/last-active times, messages, compactions, tokens, context, how much shell output was cleaned); also `/usage` and the `[≡]` menu |
-| `F4` | Roll the session back to before a chosen checkpoint |
+| `F4` | Pick a message to rewind the session to, as `Esc` does in the idle empty prompt |
 | `F5` | Fork this session (after a confirmation): its log is copied and the copy opens in a new agent panel, while this one goes on working at its own |
 | `F6` | Switch session — open the picker of this directory's sessions |
 | `F7` | Start a new session (the used one is kept in the list) |
@@ -567,6 +567,21 @@ Before `edit` or `write` runs, the panel keeps a copy of the target under the
 session's directory (`ai/sessions/<path>/checkpoints/<session id>/`), one
 folder per request, deleted again when the request is undone. Shell commands
 are not covered: what `bash` changes, git or your own backups have to hold.
+
+### Rewinding to a message
+
+`Esc` in the empty prompt, with nothing running, lists the messages you sent
+in this session, newest first (`F4` opens the same list at any time); a
+message after which the agent changed files says how many. Picking one
+rewinds the conversation to just before it and puts the message back into
+the prompt, to be edited and sent again — unless you have started typing
+something else. When files changed since that message, a card names them
+and asks what to put back: the files and the conversation, the conversation
+only (the files keep their current content), or the files only (the
+conversation goes on where it stands). The files come back from the same
+checkpoints `/undo` uses, and either way the checkpoints of the requests
+rewound past are used up. As with `/undo`, the rewound messages stay in the
+session log on a dead branch.
 
 ## Tools
 
@@ -1459,9 +1474,9 @@ the model and as the agent it last used. When a session approaches the
 model's context window, the agent replaces the older part with a summary it
 writes itself and keeps the recent messages verbatim; the panel says when this
 happens, and `/compact` does it on request (see
-[Service prompts](#service-prompts)). `/undo` writes a `rewind` entry: the
-log keeps every message, but the branch continues from before the undone
-request, on reopening too.
+[Service prompts](#service-prompts)). `/undo` and a rewind write a `rewind`
+entry: the log keeps every message, but the branch continues from before the
+undone request, on reopening too.
 
 When TermIDE reopens a saved layout, the agent panel comes back with it and
 continues the session it was in, on that session's model and as its agent. If

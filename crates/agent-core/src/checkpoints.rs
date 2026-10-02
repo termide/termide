@@ -37,6 +37,15 @@ struct Run {
     files: Vec<SavedFile>,
 }
 
+/// An undoable request as [`CheckpointStore::checkpoints`] lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Checkpoint {
+    /// The files it changed.
+    pub files: Vec<PathBuf>,
+    /// The session's leaf before the request's first message.
+    pub leaf_before: Option<String>,
+}
+
 /// What an undo did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Undone {
@@ -172,20 +181,39 @@ impl CheckpointStore {
             .unwrap_or_default()
     }
 
-    /// The undoable checkpoints, newest first, each as the files it changed —
-    /// for offering a rollback target. The order matches repeated
-    /// [`CheckpointStore::undo_last`] calls: the in-progress run (when it has
-    /// changed files) first, then the finished runs from newest to oldest.
+    /// The undoable checkpoints, newest first — for offering a rollback
+    /// target. The order matches repeated [`CheckpointStore::undo_last`]
+    /// calls: the in-progress run (when it has changed files) first, then the
+    /// finished runs from newest to oldest.
     #[must_use]
-    pub fn checkpoints(&self) -> Vec<Vec<PathBuf>> {
-        let mut out: Vec<Vec<PathBuf>> = Vec::new();
-        if let Some((_, run)) = self.current.as_ref().filter(|(_, r)| !r.files.is_empty()) {
-            out.push(run.files.iter().map(|f| f.path.clone()).collect());
-        }
-        for (_, run) in self.runs.iter().rev() {
-            out.push(run.files.iter().map(|f| f.path.clone()).collect());
-        }
-        out
+    pub fn checkpoints(&self) -> Vec<Checkpoint> {
+        let current = self.current.as_ref().filter(|(_, r)| !r.files.is_empty());
+        current
+            .into_iter()
+            .chain(self.runs.iter().rev())
+            .map(|(_, run)| Checkpoint {
+                files: run.files.iter().map(|f| f.path.clone()).collect(),
+                leaf_before: run.leaf_before.clone(),
+            })
+            .collect()
+    }
+
+    /// Drop the last request's checkpoint and leave its files as they are,
+    /// for a conversation rewound past it: what it kept no longer belongs to
+    /// the branch. `false` when there was nothing to drop.
+    pub fn forget_last(&mut self) -> bool {
+        let (index, _) = match self.current.take() {
+            Some((index, run)) if !run.files.is_empty() => (index, run),
+            other => {
+                self.current = other;
+                match self.runs.pop() {
+                    Some(last) => last,
+                    None => return false,
+                }
+            }
+        };
+        let _ = std::fs::remove_dir_all(self.dir.join(index.to_string()));
+        true
     }
 
     /// Put the last request's files back and forget its checkpoint.
@@ -329,8 +357,15 @@ mod tests {
         store.save(&b).unwrap();
         store.end_run();
 
+        let files = |store: &CheckpointStore| -> Vec<Vec<PathBuf>> {
+            store.checkpoints().into_iter().map(|c| c.files).collect()
+        };
         // Newest run (b) first, then the older (a).
-        assert_eq!(store.checkpoints(), vec![vec![b.clone()], vec![a.clone()]]);
+        assert_eq!(files(&store), vec![vec![b.clone()], vec![a.clone()]]);
+        assert_eq!(
+            store.checkpoints()[0].leaf_before.as_deref(),
+            Some("leaf-1")
+        );
         assert_eq!(store.checkpoints().len(), store.undoable());
 
         // The in-progress run appears first once it has changed a file.
@@ -338,8 +373,26 @@ mod tests {
         assert_eq!(store.checkpoints().len(), 2);
         store.save(&a).unwrap();
         assert_eq!(
-            store.checkpoints(),
+            files(&store),
             vec![vec![a.clone()], vec![b.clone()], vec![a.clone()]]
         );
+    }
+
+    #[test]
+    fn a_forgotten_checkpoint_leaves_its_files_as_they_are() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a.txt");
+        std::fs::write(&a, "before").unwrap();
+        let mut store = CheckpointStore::for_session(tmp.path(), "s1");
+        store.begin_run(None);
+        store.save(&a).unwrap();
+        std::fs::write(&a, "after").unwrap();
+        store.end_run();
+
+        assert!(store.forget_last());
+        assert_eq!(std::fs::read_to_string(&a).unwrap(), "after");
+        assert_eq!(store.undoable(), 0);
+        assert!(!tmp.path().join("checkpoints/s1/0").exists());
+        assert!(!store.forget_last());
     }
 }

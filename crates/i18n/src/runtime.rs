@@ -165,7 +165,6 @@ impl Translation for RuntimeTranslation {
         agent_banner_cwd,
         agent_cwd_title,
         agent_banner_sessions,
-        agent_rollback_last_request,
         agent_project_command,
         agent_hint_loop,
         agent_hint_goal,
@@ -515,6 +514,8 @@ impl Translation for RuntimeTranslation {
         agent_question_submit,
         agent_undo_restore,
         agent_undo_keep,
+        agent_rewind_conversation_only,
+        agent_rewind_files_only,
         agent_rollback_title,
         agent_plan_carry_title,
         agent_plan_accept_edits,
@@ -575,6 +576,7 @@ impl Translation for RuntimeTranslation {
         agent_notice_nothing_to_undo,
         agent_notice_fork_no_session,
         agent_notice_nothing_to_rollback,
+        agent_notice_rewound,
         agent_notice_command_running,
         agent_notice_command_dropped,
         agent_notice_bang_unavailable,
@@ -1277,6 +1279,31 @@ impl Translation for RuntimeTranslation {
         )
     }
 
+    fn agent_notice_files_restored_fmt(&self, count: usize, plural: &str) -> String {
+        self.format(
+            "agent_notice_files_restored_fmt",
+            &[("count", &count.to_string()), ("plural", plural)],
+        )
+    }
+
+    fn agent_rewind_option_files_fmt(&self, text: &str, count: usize, plural: &str) -> String {
+        self.format(
+            "agent_rewind_option_files_fmt",
+            &[
+                ("text", text),
+                ("count", &count.to_string()),
+                ("plural", plural),
+            ],
+        )
+    }
+
+    fn agent_rewind_confirm_fmt(&self, message: &str, changed: &str) -> String {
+        self.format(
+            "agent_rewind_confirm_fmt",
+            &[("message", message), ("changed", changed)],
+        )
+    }
+
     fn agent_notice_undid_fmt(&self, count: usize, plural: &str) -> String {
         self.format(
             "agent_notice_undid_fmt",
@@ -1569,17 +1596,6 @@ impl Translation for RuntimeTranslation {
 
     fn agent_project_command_fmt(&self, description: &str) -> String {
         self.format("agent_project_command_fmt", &[("description", description)])
-    }
-
-    fn agent_rollback_steps_fmt(&self, count: usize) -> String {
-        self.format("agent_rollback_steps_fmt", &[("count", &count.to_string())])
-    }
-
-    fn agent_rollback_files_fmt(&self, count: usize, names: &str) -> String {
-        self.format(
-            "agent_rollback_files_fmt",
-            &[("count", &count.to_string()), ("names", names)],
-        )
     }
 
     fn agent_running_command_fmt(&self, name: &str) -> String {

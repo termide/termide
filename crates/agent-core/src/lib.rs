@@ -53,7 +53,7 @@ pub use ask::{
     UserAsker,
 };
 pub use cancel::CancelToken;
-pub use checkpoints::{CheckpointHooks, CheckpointStore, SavedFile, Undone};
+pub use checkpoints::{Checkpoint, CheckpointHooks, CheckpointStore, SavedFile, Undone};
 pub use classifier::{
     parse_classification, Classifier, ClassifyPrompt, IntentEntry, IntentLog, ModelClassifier,
     ReviewerSetup, SessionView, Verdict, SEED_CLASSIFY,

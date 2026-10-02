@@ -571,6 +571,8 @@ pub trait Translation: Send + Sync {
     fn agent_undo_restore(&self) -> &str;
     /// Undo card: cancel, keeping everything
     fn agent_undo_keep(&self) -> &str;
+    fn agent_rewind_conversation_only(&self) -> &str;
+    fn agent_rewind_files_only(&self) -> &str;
 
     // Agent panel — rollback picker
     /// The F4 checkpoint-rollback picker title
@@ -680,7 +682,6 @@ pub trait Translation: Send + Sync {
     fn agent_banner_cwd(&self) -> &str;
     fn agent_cwd_title(&self) -> &str;
     fn agent_banner_sessions(&self) -> &str;
-    fn agent_rollback_last_request(&self) -> &str;
     fn agent_project_command(&self) -> &str;
     fn agent_hint_loop(&self) -> &str;
     fn agent_hint_goal(&self) -> &str;
@@ -719,8 +720,6 @@ pub trait Translation: Send + Sync {
     fn agent_paste_lines_fmt(&self, count: usize) -> String;
     fn agent_paste_chars_fmt(&self, count: usize) -> String;
     fn agent_project_command_fmt(&self, description: &str) -> String;
-    fn agent_rollback_steps_fmt(&self, count: usize) -> String;
-    fn agent_rollback_files_fmt(&self, count: usize, names: &str) -> String;
     fn agent_running_command_fmt(&self, name: &str) -> String;
     fn agent_notice_external_failed_fmt(&self, error: &str) -> String;
     fn agent_queued_fmt(&self, count: usize) -> String;
@@ -739,6 +738,7 @@ pub trait Translation: Send + Sync {
     fn agent_notice_nothing_to_open(&self) -> &str;
     fn agent_notice_nothing_to_undo(&self) -> &str;
     fn agent_notice_nothing_to_rollback(&self) -> &str;
+    fn agent_notice_rewound(&self) -> &str;
     fn agent_notice_command_running(&self) -> &str;
     fn agent_notice_command_dropped(&self) -> &str;
     fn agent_notice_bang_unavailable(&self) -> &str;
@@ -848,6 +848,9 @@ pub trait Translation: Send + Sync {
     fn agent_notice_goal_reached_reason_fmt(&self, reason: &str) -> String;
     fn agent_notice_command_denied_fmt(&self, name: &str) -> String;
     fn agent_notice_rolled_back_fmt(&self, count: usize, plural: &str) -> String;
+    fn agent_notice_files_restored_fmt(&self, count: usize, plural: &str) -> String;
+    fn agent_rewind_option_files_fmt(&self, text: &str, count: usize, plural: &str) -> String;
+    fn agent_rewind_confirm_fmt(&self, message: &str, changed: &str) -> String;
     fn agent_notice_undid_fmt(&self, count: usize, plural: &str) -> String;
 
     /// Agent panel: open the agent picker

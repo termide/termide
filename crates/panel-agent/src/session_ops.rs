@@ -1,12 +1,12 @@
 //! Session operations: switching, renaming and resuming sessions, deleting
-//! one, its summary, undo and rollback, and the `/handoff` brief.
+//! one, its summary, undo, and the `/handoff` brief.
 
 use std::path::Path;
 use std::sync::{Arc, PoisonError};
 
 use crate::runtime::local_minute;
 use termide_agent_core::{EntryKind, PromptError, Session, SessionSummary};
-use termide_core::{ConfirmAction, PanelEvent, SelectAction};
+use termide_core::{ConfirmAction, PanelEvent};
 use termide_ui::ChoiceForm;
 
 use crate::pending::Pending;
@@ -15,7 +15,7 @@ use crate::runtime::{
 };
 use crate::{
     format_tokens, shorten_path, truncate_title, AgentPanel, Item, NoticeKind,
-    DELETE_RECENT_ACTION, DELETE_SESSION_ACTION, FORK_SESSION_ACTION, ROLLBACK_ACTION,
+    DELETE_RECENT_ACTION, DELETE_SESSION_ACTION, FORK_SESSION_ACTION,
 };
 
 /// Delete a session the panel is leaving when it holds no conversation, so
@@ -661,105 +661,6 @@ impl AgentPanel {
             title: t.agent_session_info().to_string(),
             rows,
         }]
-    }
-
-    /// Offer the undoable checkpoints (F4), newest first, to roll the session
-    /// back to before a chosen change.
-    pub(crate) fn ask_rollback(&mut self) -> Vec<PanelEvent> {
-        if self.is_busy() {
-            self.notice(termide_i18n::t().agent_notice_busy(), NoticeKind::Warn);
-            return vec![PanelEvent::NeedsRedraw];
-        }
-        let Some(store) = self.checkpoints.clone() else {
-            self.notice(
-                termide_i18n::t().agent_notice_nothing_to_rollback(),
-                NoticeKind::Info,
-            );
-            return vec![PanelEvent::NeedsRedraw];
-        };
-        let checkpoints = store
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .checkpoints();
-        if checkpoints.is_empty() {
-            self.notice(
-                termide_i18n::t().agent_notice_nothing_to_rollback(),
-                NoticeKind::Info,
-            );
-            return vec![PanelEvent::NeedsRedraw];
-        }
-        let options = checkpoints
-            .iter()
-            .enumerate()
-            .map(|(i, files)| {
-                let names: Vec<String> = files
-                    .iter()
-                    .map(|p| p.strip_prefix(&self.cwd).unwrap_or(p).display().to_string())
-                    .collect();
-                let t = termide_i18n::t();
-                let changed = if names.len() == 1 {
-                    names[0].clone()
-                } else {
-                    t.agent_rollback_files_fmt(names.len(), &names.join(", "))
-                };
-                let step = if i == 0 {
-                    t.agent_rollback_last_request().to_string()
-                } else {
-                    t.agent_rollback_steps_fmt(i + 1)
-                };
-                truncate_title(&format!("{step} — {changed}"))
-            })
-            .collect();
-        vec![PanelEvent::ShowSelect {
-            title: termide_i18n::t().agent_rollback_title().to_string(),
-            options,
-            on_select: SelectAction::Custom(ROLLBACK_ACTION.to_string()),
-        }]
-    }
-
-    /// Undo every request from the newest down to the one the user picked
-    /// (`steps_from_newest` = 0 is the last request), putting the files back and
-    /// rewinding the conversation to before the oldest of them.
-    pub(crate) fn perform_rollback(&mut self, steps_from_newest: usize) -> Vec<PanelEvent> {
-        if self.is_busy() {
-            self.notice(termide_i18n::t().agent_notice_busy(), NoticeKind::Warn);
-            return vec![PanelEvent::NeedsRedraw];
-        }
-        let Some(store) = self.checkpoints.clone() else {
-            return vec![PanelEvent::NeedsRedraw];
-        };
-        let mut events = Vec::new();
-        let mut restored = 0usize;
-        let mut leaf = None;
-        {
-            let mut store = store.lock().unwrap_or_else(PoisonError::into_inner);
-            for _ in 0..=steps_from_newest {
-                match store.undo_last() {
-                    Ok(undone) => {
-                        for path in &undone.files {
-                            events.push(PanelEvent::FileChangedOnDisk(path.clone()));
-                        }
-                        restored += undone.files.len();
-                        leaf = undone.leaf_before;
-                    }
-                    Err(_) => break,
-                }
-            }
-        }
-        if let Some(session) = &mut self.session {
-            if let Err(error) = session.rewind_to(leaf.as_deref()) {
-                log::warn!("agent session rewind failed: {error}");
-            }
-        }
-        let session = self.session.take();
-        self.switch_session(session);
-        let t = termide_i18n::t();
-        self.notice(
-            t.agent_notice_rolled_back_fmt(restored, t.pluralize(restored, "file")),
-            NoticeKind::Info,
-        );
-        events.push(PanelEvent::NeedsRedraw);
-        events
     }
 
     /// Put the last request's files back, rewind the session to before it

@@ -810,13 +810,12 @@ impl AgentPanel {
         if key.code == KeyCode::F(2) && !ctrl && !alt && !shift {
             return self.handle_status_action(RENAME_ACTION);
         }
-        // F3 shows a summary of the session, F4 offers a checkpoint to roll back
-        // to.
+        // F3 shows a summary of the session, F4 offers a message to rewind to.
         if key.code == KeyCode::F(3) && !ctrl && !alt && !shift {
             return self.session_summary();
         }
         if key.code == KeyCode::F(4) && !ctrl && !alt && !shift {
-            return self.ask_rollback();
+            return self.ask_rewind();
         }
         // F5 forks the session: the log is copied and the copy opens in a new
         // panel, while this one goes on with its own.
@@ -1017,6 +1016,10 @@ impl AgentPanel {
                 } else if !self.input_area().is_empty() {
                     self.clear_input();
                     self.after_edit();
+                } else if !self.rewind_points().is_empty() {
+                    // With nothing left to stop or clear, Esc goes back in
+                    // the conversation, as in Claude Code.
+                    return self.ask_rewind();
                 } else {
                     return vec![];
                 }

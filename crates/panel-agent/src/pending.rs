@@ -1,6 +1,6 @@
 //! The card the panel shows while it waits for an answer: a permission
-//! request, the model's questions, a project command, an undo, a plan or a
-//! handoff brief.
+//! request, the model's questions, a project command, an undo, a rewind, a
+//! plan or a handoff brief.
 
 use std::time::Instant;
 
@@ -11,6 +11,7 @@ use termide_agent_core::{
 use termide_core::PanelEvent;
 use termide_ui::{ChoiceAction, ChoiceForm};
 
+use crate::rewind::{RewindPoint, RewindScope};
 use crate::{millis, AgentPanel, Item, NoticeKind};
 
 /// What a card in the panel is asking: the agent's permission request, the
@@ -37,6 +38,11 @@ pub(crate) enum Pending {
     },
     Undo {
         form: ChoiceForm,
+    },
+    /// A rewind to before `point`'s message: what to put back.
+    Rewind {
+        form: ChoiceForm,
+        point: RewindPoint,
     },
     /// Plan mode: the agent answered, carry the plan out or keep planning?
     Plan {
@@ -67,6 +73,7 @@ impl Pending {
             | Pending::Question { form, .. }
             | Pending::Command { form, .. }
             | Pending::Undo { form }
+            | Pending::Rewind { form, .. }
             | Pending::Plan { form }
             | Pending::Handoff { form, .. }
             | Pending::Suggestion { form, .. } => form,
@@ -79,6 +86,7 @@ impl Pending {
             | Pending::Question { form, .. }
             | Pending::Command { form, .. }
             | Pending::Undo { form }
+            | Pending::Rewind { form, .. }
             | Pending::Plan { form }
             | Pending::Handoff { form, .. }
             | Pending::Suggestion { form, .. } => form,
@@ -600,6 +608,16 @@ impl AgentPanel {
                 self.pending_events.extend(events);
             }
             (Some(Pending::Undo { .. }), ChoiceAction::Cancelled | ChoiceAction::Custom(_)) => {
+                self.pending = None;
+            }
+            (Some(Pending::Rewind { .. }), ChoiceAction::Chosen(index)) => {
+                let Some(Pending::Rewind { point, .. }) = self.pending.take() else {
+                    return true;
+                };
+                let events = self.rewind(&point, RewindScope::of_choice(index));
+                self.pending_events.extend(events);
+            }
+            (Some(Pending::Rewind { .. }), ChoiceAction::Cancelled | ChoiceAction::Custom(_)) => {
                 self.pending = None;
             }
             (Some(Pending::Plan { .. }), ChoiceAction::Chosen(index)) => {

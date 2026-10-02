@@ -13,6 +13,7 @@ mod mcp;
 mod pending;
 mod pickers;
 mod render;
+mod rewind;
 mod runtime;
 mod select;
 mod session_ops;
@@ -72,8 +73,9 @@ const DELETE_SESSION_ACTION: &str = "agent_delete_session";
 const FORK_SESSION_ACTION: &str = "agent_fork_session";
 /// Confirmation action that deletes the recent session picked in the banner.
 const DELETE_RECENT_ACTION: &str = "agent_delete_recent_session";
-/// Selection action for the F4 checkpoint-rollback picker.
-const ROLLBACK_ACTION: &str = "agent_rollback";
+/// Selection action for the rewind picker (`Esc` in the idle empty prompt,
+/// or `F4`).
+const REWIND_ACTION: &str = "agent_rewind";
 /// Context-menu action that starts a fresh session.
 const NEW_SESSION_ACTION: &str = "agent_new_session";
 /// Context-menu action that opens the session picker.
@@ -573,6 +575,8 @@ pub struct AgentPanel {
     agent_choices: Vec<String>,
     /// Prompt templates offered by the last picker, in the order shown.
     prompt_choices: Vec<PromptTemplate>,
+    /// Messages offered by the last rewind picker, in the order shown.
+    rewind_points: Vec<rewind::RewindPoint>,
     /// Tools still connecting, and those that arrived while a run was in
     /// flight and wait for the worker to be free.
     late_tools: Option<Receiver<LateTools>>,
@@ -933,6 +937,7 @@ impl AgentPanel {
             catalog: setup.catalog,
             agent_choices: Vec::new(),
             prompt_choices: Vec::new(),
+            rewind_points: Vec::new(),
             late_tools,
             waiting_tools: Vec::new(),
             leaving_tools: Vec::new(),
@@ -1398,16 +1403,9 @@ impl Panel for AgentPanel {
     }
 
     fn captures_escape(&self) -> bool {
-        // A hand-run command in flight counts: Esc stops it, and the key
-        // must not reach the app to do something else while it runs.
-        self.pending.is_some()
-            || self.completion.is_some()
-            || self.is_busy()
-            || self.shell_job.is_some()
-            || self.shell_mode
-            || self.loop_task.is_some()
-            || self.goal_task.is_some()
-            || !self.input_area().is_empty()
+        // Esc never closes the panel: it stops what runs, clears the input,
+        // and with nothing left to do offers a message to rewind to.
+        true
     }
 
     fn handle_scroll(&mut self, delta: i32, _panel_area: Rect) -> Vec<PanelEvent> {
@@ -1479,8 +1477,8 @@ impl Panel for AgentPanel {
             PanelCommand::SelectionMade { action, index } if action == RESUME_ACTION => {
                 CommandResult::Handled(self.resume_choice(index))
             }
-            PanelCommand::SelectionMade { action, index } if action == ROLLBACK_ACTION => {
-                let events = self.perform_rollback(index);
+            PanelCommand::SelectionMade { action, index } if action == REWIND_ACTION => {
+                let events = self.choose_rewind(index);
                 self.pending_events.extend(events);
                 CommandResult::Handled(true)
             }

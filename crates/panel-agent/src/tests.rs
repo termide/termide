@@ -1957,7 +1957,9 @@ fn shift_enter_adds_a_line_and_esc_clears() {
 
     panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
     assert!(panel.input_text().is_empty());
-    assert!(!panel.captures_escape());
+    // With nothing to rewind to either, Esc does nothing, and the panel
+    // keeps it rather than being closed by it.
+    assert!(panel.captures_escape());
     assert!(panel
         .handle_key(chord(KeyCode::Esc, KeyModifiers::NONE))
         .is_empty());
@@ -2233,34 +2235,218 @@ fn f3_shows_a_session_summary() {
 }
 
 #[test]
-fn f4_offers_a_rollback_picker_when_there_is_a_checkpoint() {
+fn f4_offers_the_messages_to_rewind_to() {
     let dir = tempfile::tempdir().unwrap();
     let mut panel = AgentPanel::new(AgentPanelSetup {
         session_dir: Some(dir.path().to_path_buf()),
         ..setup(vec![reply("ok")])
     });
-    // Nothing changed yet: F4 says there is nothing to roll back.
+    // Nothing asked yet: F4 says there is nothing to rewind to.
     panel.handle_key(chord(KeyCode::F(4), KeyModifiers::NONE));
     assert!(panel
         .transcript()
         .items()
         .iter()
-        .any(|i| matches!(i, Item::Notice { text, .. } if text.contains("roll back"))));
+        .any(|i| matches!(i, Item::Notice { text, .. } if text.contains("rewind"))));
 
-    // Record a checkpoint, then F4 offers it in a picker.
-    let file = dir.path().join("x.txt");
-    std::fs::write(&file, "v1").unwrap();
-    {
-        let store = panel.checkpoints.clone().expect("a checkpoint store");
-        let mut store = store.lock().unwrap();
-        store.begin_run(None);
-        store.save(&file).unwrap();
-        store.end_run();
-    }
+    type_text(&mut panel, "task one");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
     let events = panel.handle_key(chord(KeyCode::F(4), KeyModifiers::NONE));
     assert!(events
         .iter()
-        .any(|e| matches!(e, PanelEvent::ShowSelect { .. })));
+        .any(|e| matches!(e, PanelEvent::ShowSelect { options, .. } if options == &["task one"])));
+}
+
+/// A panel with a session that has been asked `prompts` in turn, the files
+/// in `edits` changed by the request of the same index.
+fn asked(dir: &Path, prompts: &[&str], edits: &[(usize, &Path)]) -> AgentPanel {
+    std::fs::create_dir_all(dir).unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        cwd: dir.to_path_buf(),
+        session_dir: Some(dir.join("sessions")),
+        ..setup(prompts.iter().map(|p| reply(&format!("re: {p}"))).collect())
+    });
+    for (at, prompt) in prompts.iter().enumerate() {
+        type_text(&mut panel, prompt);
+        panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+        // The request "edits" its file the way the hook records the edit
+        // tool, while it runs.
+        for (_, file) in edits.iter().filter(|(of, _)| *of == at) {
+            let store = panel.checkpoints.clone().unwrap();
+            store.lock().unwrap().save(file).unwrap();
+            std::fs::write(file, format!("after {prompt}")).unwrap();
+        }
+        settle(&mut panel);
+    }
+    panel
+}
+
+fn users(panel: &AgentPanel) -> Vec<String> {
+    panel
+        .transcript()
+        .items()
+        .iter()
+        .filter_map(|i| match i {
+            Item::User { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn esc_in_the_idle_empty_prompt_rewinds_to_a_chosen_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = asked(dir.path(), &["task one", "task two", "task three"], &[]);
+    assert!(panel.captures_escape(), "Esc does not close the panel");
+    let events = panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    let picker = events
+        .iter()
+        .find(|e| matches!(e, PanelEvent::ShowSelect { .. }))
+        .expect("the rewind picker");
+    let PanelEvent::ShowSelect { options, .. } = picker else {
+        unreachable!()
+    };
+    // Newest first, so the one just asked is a single Enter away.
+    assert_eq!(options, &["task three", "task two", "task one"]);
+
+    // No files to put back: the conversation rewinds at once, and the
+    // message comes back to be edited.
+    select(&mut panel, picker, 1);
+    assert!(panel.pending.is_none());
+    assert_eq!(panel.input_text(), "task two");
+    assert_eq!(users(&panel), ["task one"]);
+    assert_eq!(panel.session.as_ref().unwrap().context_messages().len(), 2);
+    assert!(panel
+        .transcript()
+        .items()
+        .iter()
+        .any(|i| matches!(i, Item::Notice { text, .. } if text == "conversation rewound")));
+    let reopened = Session::open(panel.session_path().unwrap()).unwrap();
+    assert_eq!(reopened.context_messages().len(), 2);
+}
+
+#[test]
+fn rewinding_past_changed_files_asks_what_to_put_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("notes.txt");
+    std::fs::write(&file, "before").unwrap();
+    let mut panel = asked(
+        dir.path(),
+        &["task one", "task two", "task three"],
+        &[(1, file.as_path())],
+    );
+    let events = panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    let picker = events
+        .iter()
+        .find(|e| matches!(e, PanelEvent::ShowSelect { .. }))
+        .unwrap();
+    let PanelEvent::ShowSelect { options, .. } = picker else {
+        unreachable!()
+    };
+    // Only rewinding to before task two or earlier takes the file back.
+    assert_eq!(
+        options,
+        &["task three", "task two · 1 file", "task one · 1 file"]
+    );
+
+    // Rewinding to before task three changes no file: no card.
+    select(&mut panel, picker, 0);
+    assert!(panel.pending.is_none());
+    assert_eq!(users(&panel), ["task one", "task two"]);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "after task two");
+
+    // Before task two, the card names the file; the first row puts back
+    // both the file and the conversation.
+    panel.clear_input();
+    let events = panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    let picker = events
+        .iter()
+        .find(|e| matches!(e, PanelEvent::ShowSelect { .. }))
+        .unwrap();
+    select(&mut panel, picker, 0);
+    let form = panel.pending.as_ref().expect("rewind card").form();
+    assert!(form.title().contains("notes.txt"), "{}", form.title());
+    panel.handle_key(chord(KeyCode::Char('1'), KeyModifiers::NONE));
+    let events = panel.tick();
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, PanelEvent::FileChangedOnDisk(p) if p == &file)));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "before");
+    assert_eq!(users(&panel), ["task one"]);
+    assert_eq!(panel.input_text(), "task two");
+    assert_eq!(
+        panel
+            .checkpoints
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .undoable(),
+        0
+    );
+}
+
+#[test]
+fn a_rewind_can_leave_the_files_or_the_conversation_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("notes.txt");
+    std::fs::write(&file, "before").unwrap();
+    let mut panel = asked(
+        dir.path(),
+        &["task one", "task two"],
+        &[(1, file.as_path())],
+    );
+    let rewind_to = |panel: &mut AgentPanel, index: usize, row: char| {
+        let events = panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+        let picker = events
+            .iter()
+            .find(|e| matches!(e, PanelEvent::ShowSelect { .. }))
+            .unwrap();
+        select(panel, picker, index);
+        panel.handle_key(chord(KeyCode::Char(row), KeyModifiers::NONE));
+        panel.tick()
+    };
+
+    // The files alone: the conversation goes on where it stands, and the
+    // checkpoint is used up.
+    rewind_to(&mut panel, 0, '3');
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "before");
+    assert_eq!(users(&panel), ["task one", "task two"]);
+    assert!(panel.input_text().is_empty());
+    assert_eq!(
+        panel
+            .checkpoints
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .undoable(),
+        0
+    );
+
+    // The conversation alone: the file keeps what the request wrote, and
+    // the checkpoint goes with the branch it belonged to.
+    std::fs::write(&file, "before").unwrap();
+    let mut panel = asked(
+        &dir.path().join("again"),
+        &["task one", "task two"],
+        &[(1, file.as_path())],
+    );
+    rewind_to(&mut panel, 0, '2');
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "after task two");
+    assert_eq!(users(&panel), ["task one"]);
+    assert_eq!(panel.input_text(), "task two");
+    assert_eq!(
+        panel
+            .checkpoints
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .undoable(),
+        0
+    );
 }
 
 #[test]
