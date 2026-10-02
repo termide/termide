@@ -2552,6 +2552,19 @@ fn a_fresh_banner_offers_recent_sessions_to_open() {
             .count(),
         1
     );
+    // The list starts in the logo's column, left of the fields beside it,
+    // so the titles get that width too.
+    let (title, _) = panel
+        .banner_hits
+        .iter()
+        .find(|(_, hit)| *hit == BannerHit::Action(AGENT_ACTION))
+        .copied()
+        .expect("the agent's name is clickable");
+    assert!(rect.x < title.x, "{rect:?} {title:?}");
+    assert!(rect.width > title.width, "{rect:?} {title:?}");
+    let row = &render_text(&mut panel, 80, 24)[rect.y as usize];
+    let logo_row = &render_text(&mut panel, 80, 24)[title.y as usize];
+    assert_eq!(row.find(&stamp), logo_row.find('╭'), "{row:?} {logo_row:?}");
 
     // A click on it opens it in place of the fresh one.
     let click = MouseEvent {
