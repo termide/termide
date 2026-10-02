@@ -280,9 +280,9 @@ impl AgentPanel {
     pub(crate) fn render_welcome(&mut self, area: Rect, buf: &mut Buffer, colors: &ThemeColors) {
         const LOGO: [&str; WELCOME_LOGO_ROWS] = [
             "╭───────╮",
-            "│       │",
-            "│  ›_   │",
-            "│       │",
+            "│ ▀█ █▀ │",
+            "│ ▄▀▀▀▄ │",
+            "│  ▀▀▀  │",
             "╰───────╯",
         ];
         self.banner_hits.clear();
