@@ -239,7 +239,8 @@ agent over ACP brings its own tools, so it has no checklist.
 
 The panel's `[≡]` menu is kept to the actions with no home elsewhere —
 **Session info** (also `F3` and `/usage`), **Rename session**, **Save chat as
-Markdown…** (also `Ctrl+S`) and **Delete session**. The assembled system prompt
+Markdown…** (also `Ctrl+S`), **Fork session** (also `F5` and `/fork`) and
+**Delete session**. The assembled system prompt
 opens with `/prompt`. Saving the chat writes the conversation through a Save As
 dialog, named after the session: each day under its own heading, and under it
 each of your messages and each of the agent's answers under a heading of 🧑 or
@@ -249,14 +250,26 @@ a message sent as `/name args` is saved as you typed it. The whole branch is
 saved, a compacted part included. Managing sessions
 is on the F-keys and in the AI menu instead: `F7` starts a new session, `F6` opens
 the picker of this directory's sessions (newest first, the current one marked
-`●`), `F8` deletes the current one after a confirmation, and `F2` renames it.
-Switching waits for the current task: stop it with `Esc` first if the agent is
-still working.
+`●`), `F5` forks the current one, `F8` deletes it after a confirmation, and
+`F2` renames it. Switching waits for the current task: stop it with `Esc`
+first if the agent is still working. A fork asks nothing of the run, so it
+works while the agent is busy.
 
-From the input, `/new` starts a fresh session (keeping the current one), and
-`/clear` starts one too but deletes the current one first; `/rename` (or
-`/name`) renames it. The model, agent and permission-mode pickers are the
-status-bar chips.
+Forking copies the session log and opens the copy in a new agent panel, which
+takes up the conversation where it stood — the same messages, the same agent and
+model — while the panel you forked from keeps working at its own log. The two
+part at that moment: each goes on writing its own file, so one conversation now
+runs in two places, and you can have the agent try two approaches side by side.
+The copy takes a name of its own — the source's with a counter on it,
+`Refactor` becoming `Refactor (2)`, then `Refactor (3)` — so the two are told
+apart in the picker and in the panel's title; rename either whenever you like.
+The copy is a session like any other: it shows in the session picker and in a
+fresh panel's banner once its panel lets it go, and you can switch back to it.
+
+From the input, `/new` starts a fresh session (keeping the current one),
+`/fork` copies this one into a new panel, and `/clear` starts one too but
+deletes the current one first; `/rename` (or `/name`) renames it. The model,
+agent and permission-mode pickers are the status-bar chips.
 
 A session you never send anything to is discarded when you switch away from it
 or close the panel, so opening a panel and closing it — or trying a couple of
@@ -282,10 +295,11 @@ you have named or sent even one message to is always kept.
 | `Ctrl+S` | Save the chat as a Markdown file (your messages and the agent's answers under who and when, each day under its own heading); also the `[≡]` menu |
 | `F3` | Open the session-info modal (model, agent, mode, directory, created/last-active times, messages, compactions, tokens, context, how much shell output was cleaned); also `/usage` and the `[≡]` menu |
 | `F4` | Roll the session back to before a chosen checkpoint |
+| `F5` | Fork this session (after a confirmation): its log is copied and the copy opens in a new agent panel, while this one goes on working at its own |
 | `F6` | Switch session — open the picker of this directory's sessions |
 | `F7` | Start a new session (the used one is kept in the list) |
 | `F8` | Delete this session (after a confirmation) and start a fresh one; in the banner's list of sessions, delete the one under the cursor |
-| `/name args` + `Enter` | Send the prompt template `name` with `args` filled in, run the command script `name` or send the skill `name` (`/skill:name` when the name is taken); `/compact [focus]` summarises the session, `/undo` takes the last request back, `/new` starts a fresh session, `/clear` starts one after discarding the current session, and `/rename [name]` (or `/name`) renames it; `/pause` stops the run after the current step and `/continue` resumes it (or, before the step ends, cancels the pause); `/loop [interval] <prompt>` re-runs a prompt on an interval (or back-to-back), `/loop stop` (or `Esc`) ends it; `/goal <what to achieve>` works autonomously toward a goal until a judge says it is reached, `/goal stop` (or `Esc`) ends it; `/handoff` briefs the unfinished work, then offers to save it to `HANDOFF.md` or start a new session from it; `/usage` opens the session-info modal and `/prompt` opens the assembled system prompt; `/mcp` lists the MCP servers, `/mcp reload [server]` reads their configuration again (for one server, or all), and `/mcp login <server>` and `/mcp logout <server>` sign in to one and out of it (see [MCP servers](#mcp-servers)) |
+| `/name args` + `Enter` | Send the prompt template `name` with `args` filled in, run the command script `name` or send the skill `name` (`/skill:name` when the name is taken); `/compact [focus]` summarises the session, `/undo` takes the last request back, `/new` starts a fresh session, `/fork` copies this one into a new panel, `/clear` starts one after discarding the current session, and `/rename [name]` (or `/name`) renames it; `/pause` stops the run after the current step and `/continue` resumes it (or, before the step ends, cancels the pause); `/loop [interval] <prompt>` re-runs a prompt on an interval (or back-to-back), `/loop stop` (or `Esc`) ends it; `/goal <what to achieve>` works autonomously toward a goal until a judge says it is reached, `/goal stop` (or `Esc`) ends it; `/handoff` briefs the unfinished work, then offers to save it to `HANDOFF.md` or start a new session from it; `/usage` opens the session-info modal and `/prompt` opens the assembled system prompt; `/mcp` lists the MCP servers, `/mcp reload [server]` reads their configuration again (for one server, or all), and `/mcp login <server>` and `/mcp logout <server>` sign in to one and out of it (see [MCP servers](#mcp-servers)) |
 | `↑` / `↓` | On the first or last line of the input: take back the messages still queued (`↑`, while any wait), else recall an earlier request of this session, or come back to what you were typing |
 | `Tab` | Complete the highlighted `/command` or `@file` while the list is open |
 | `Ctrl+↑` / `Ctrl+↓`, `PageUp` / `PageDown` | Scroll the session |

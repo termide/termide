@@ -549,6 +549,18 @@ pub trait Translation: Send + Sync {
     /// Agent delete confirmation: how an unnamed session is named in it.
     fn agent_delete_this_session(&self) -> &str;
 
+    // Agent panel — fork-session confirmation
+    /// The `[≡]` menu's Fork session entry (also `F5` and `/fork`).
+    fn agent_fork_session(&self) -> &str;
+    /// The fork-session card's question (`{label}` is the session)
+    fn agent_fork_confirm_fmt(&self, label: &str) -> String;
+    /// Fork confirmation: how an unnamed session is named in it.
+    fn agent_fork_this_session(&self) -> &str;
+    /// Why `/fork` did nothing: the panel has no session log.
+    fn agent_notice_fork_no_session(&self) -> &str;
+    /// The fork could not be made (`{error}` says why).
+    fn agent_notice_cannot_fork_fmt(&self, error: &str) -> String;
+
     // Agent panel — undo confirmation
     /// The undo card's question (`{changed}` names the changed files)
     fn agent_undo_confirm_fmt(&self, changed: &str) -> String;
@@ -599,6 +611,7 @@ pub trait Translation: Send + Sync {
     fn agent_cmd_desc_compact(&self) -> &str;
     fn agent_cmd_desc_undo(&self) -> &str;
     fn agent_cmd_desc_new(&self) -> &str;
+    fn agent_cmd_desc_fork(&self) -> &str;
     fn agent_cmd_desc_clear(&self) -> &str;
     fn agent_cmd_desc_rename(&self) -> &str;
     fn agent_cmd_desc_pause(&self) -> &str;

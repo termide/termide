@@ -68,6 +68,8 @@ fn millis(duration: Duration) -> u32 {
 const RENAME_ACTION: &str = "agent_rename";
 /// Context-menu action that deletes the session (behind a confirmation).
 const DELETE_SESSION_ACTION: &str = "agent_delete_session";
+/// Confirmation action that forks the session into a new panel (also `F5`).
+const FORK_SESSION_ACTION: &str = "agent_fork_session";
 /// Confirmation action that deletes the recent session picked in the banner.
 const DELETE_RECENT_ACTION: &str = "agent_delete_recent_session";
 /// Selection action for the F4 checkpoint-rollback picker.
@@ -109,6 +111,9 @@ const UNDO_COMMAND: &str = "undo";
 /// The built-in `/new` command: start a fresh session, keeping the current one
 /// in the list.
 const NEW_COMMAND: &str = "new";
+/// The built-in `/fork` command: copy the session log and carry on in a new
+/// panel, leaving this one at its work.
+const FORK_COMMAND: &str = "fork";
 /// The built-in `/clear` command: discard the current session and start a fresh
 /// one in its place.
 const CLEAR_COMMAND: &str = "clear";
@@ -141,10 +146,11 @@ const PROMPT_COMMAND: &str = "prompt";
 const MCP_COMMAND: &str = "mcp";
 /// Every built-in `/name`, whatever the state; a template, script or skill
 /// of the same name never runs under it (see `slash`).
-const BUILTIN_COMMANDS: [&str; 14] = [
+const BUILTIN_COMMANDS: [&str; 15] = [
     UNDO_COMMAND,
     COMPACT_COMMAND,
     NEW_COMMAND,
+    FORK_COMMAND,
     CLEAR_COMMAND,
     RENAME_COMMAND,
     NAME_COMMAND,
@@ -1198,6 +1204,7 @@ impl Panel for AgentPanel {
             (t.agent_session_info().to_string(), SESSION_INFO_ACTION),
             (t.agent_rename().to_string(), RENAME_ACTION),
             (t.agent_save_chat().to_string(), SAVE_CHAT_ACTION),
+            (t.agent_fork_session().to_string(), FORK_SESSION_ACTION),
             (t.agent_delete_session().to_string(), DELETE_SESSION_ACTION),
         ]
     }
@@ -1216,6 +1223,7 @@ impl Panel for AgentPanel {
                 on_submit: InputAction::Custom(RENAME_ACTION.to_string()),
             }],
             DELETE_SESSION_ACTION => self.ask_delete_session(),
+            FORK_SESSION_ACTION => self.ask_fork_session(),
             SAVE_CHAT_ACTION => self.save_chat(),
             CONNECTION_ACTION => {
                 let Some(connections) = &self.connections else {
@@ -1507,6 +1515,11 @@ impl Panel for AgentPanel {
             }
             PanelCommand::Confirmed { action } if action == DELETE_SESSION_ACTION => {
                 self.perform_delete_session();
+                CommandResult::Handled(true)
+            }
+            PanelCommand::Confirmed { action } if action == FORK_SESSION_ACTION => {
+                let events = self.perform_fork_session();
+                self.pending_events.extend(events);
                 CommandResult::Handled(true)
             }
             PanelCommand::Confirmed { action } if action == DELETE_RECENT_ACTION => {

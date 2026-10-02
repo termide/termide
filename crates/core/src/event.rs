@@ -745,6 +745,13 @@ pub enum PanelEvent {
 
     /// Open the directory switcher modal (emitted by file manager / terminal panels).
     OpenDirectorySwitcher,
+
+    /// Fork an agent session: copy the session log at `session` and open the
+    /// copy in a new agent panel working in `cwd`, leaving the panel that
+    /// asked at its own session. Emitted by the agent panel; the app does the
+    /// copying, since it owns panel creation and the configuration a new panel
+    /// runs on.
+    ForkAgentSession { session: PathBuf, cwd: PathBuf },
 }
 
 /// A single file location from LSP find-references.

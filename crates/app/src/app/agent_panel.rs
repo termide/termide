@@ -12,8 +12,8 @@ use termide_agent_core::{
     build_system_prompt, discover_context_files, ensure_global_layout, AcpConfig, AcpFlavor, Agent,
     AgentDirs, AgentEvent, AutoDenyPrompter, CancelToken, CompactionPolicy, Decision, IntentLog,
     Message, ModelSpec, PermissionHooks, PermissionRules, PersistScope, PromptOptions, Provider,
-    Refusals, ReviewerSetup, Session, ThinkingLevel, ToolContext, ToolRegistry, UserMessage,
-    DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
+    Refusals, ReviewerSetup, Session, SessionSummary, ThinkingLevel, ToolContext, ToolRegistry,
+    UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
 };
 use termide_agent_hooks::CommandHooks;
 use termide_agent_mcp::{Connections, TokenStore};
@@ -64,6 +64,112 @@ impl App {
         self.add_panel(Box::new(panel));
         self.auto_save_layout();
         Ok(())
+    }
+
+    /// Fork an agent session: copy the log at `source` and open the copy in a
+    /// new panel working in `cwd`. The panel that asked keeps its own session
+    /// and is not touched, so both go on working the conversation apart, each
+    /// writing its own log. The copy carries the agent and model its log
+    /// recorded, as any reopened session does, and a name of its own so the
+    /// two are told apart in the picker.
+    pub(in crate::app) fn fork_agent_session(&mut self, source: &Path, cwd: &Path) -> Result<()> {
+        let t = termide_i18n::t();
+        let source_session = match Session::open(source) {
+            Ok(session) => session,
+            Err(error) => {
+                log::warn!("cannot open {}: {error}", source.display());
+                self.show_error_modal(t.agent_notice_cannot_fork_fmt(&error.to_string()));
+                return Ok(());
+            }
+        };
+        let name = fork_name(&source_session);
+        let copy = match source_session.fork(cwd, name.as_deref()) {
+            Ok(path) => path,
+            Err(error) => {
+                log::warn!(
+                    "cannot fork the agent session {}: {error}",
+                    source.display()
+                );
+                self.show_error_modal(t.agent_notice_cannot_fork_fmt(&error.to_string()));
+                return Ok(());
+            }
+        };
+        let settings = self.state.config.ai.clone();
+        if let Some(panel) =
+            restore_agent_panel(&settings, cwd.to_path_buf(), Some(copy.clone()), None)
+        {
+            self.add_panel(Box::new(panel));
+            self.auto_save_layout();
+            return Ok(());
+        }
+        // No connection to run on: the copy is a session no one has open, so
+        // it goes back the way it came.
+        if let Err(error) = std::fs::remove_file(&copy) {
+            log::warn!(
+                "cannot remove the unused session copy {}: {error}",
+                copy.display()
+            );
+        }
+        self.show_error_modal(t.agent_not_configured().to_string());
+        Ok(())
+    }
+}
+
+/// The name a fork of `source` takes, so the two are told apart in the
+/// session picker and in the panel's title: `Refactor` becomes `Refactor (2)`,
+/// then `Refactor (3)`. A source the user never named is labelled by its first
+/// prompt, so the copy takes that with the counter on it — otherwise the
+/// picker would show two identical rows, which is what the suffix is for.
+///
+/// `None` when there is nothing to tell apart: a session nothing was ever sent
+/// to. Naming its copy would mark that copy worth keeping — a named session
+/// survives even when empty — and so leave an empty log on the disk that
+/// would otherwise be discarded once its panel closes.
+///
+/// The counter counts up from the names already in the directory, so forking
+/// one session twice gives two different names without either panel having to
+/// remember the other. Two forks cannot race for one number: this runs on the
+/// app's main thread, which is the only place a fork is made.
+fn fork_name(source: &Session) -> Option<String> {
+    if source.is_empty() {
+        return None;
+    }
+    // A name forked before keeps its counter, so the next one counts on from
+    // it rather than starting again at two.
+    let base = match source.name() {
+        Some(name) => strip_fork_suffix(name).to_string(),
+        None => SessionSummary::from(source).label(),
+    };
+    let taken: Vec<String> = source
+        .path()
+        .parent()
+        .and_then(|dir| Session::list(dir).ok())
+        .map(|list| {
+            list.into_iter()
+                .filter_map(|summary| summary.name)
+                .collect()
+        })
+        .unwrap_or_default();
+    (2..)
+        .find(|n| !taken.iter().any(|name| name == &format!("{base} ({n})")))
+        .map(|n| format!("{base} ({n})"))
+}
+
+/// A name's fork counter taken off: `Refactor (2)` → `Refactor`, so the next
+/// fork of it is `Refactor (3)`. Only the suffix this code writes counts as a
+/// counter — digits in brackets after a space, two or more — so a name the
+/// user gave, `work (draft)` or `fix (1)`, keeps its brackets.
+fn strip_fork_suffix(name: &str) -> &str {
+    let trimmed = name.trim_end();
+    let Some(head) = trimmed.strip_suffix(')') else {
+        return name;
+    };
+    let Some((before, counter)) = head.rsplit_once('(') else {
+        return name;
+    };
+    match counter.parse::<usize>() {
+        Ok(n) if n >= 2 && before.ends_with(' ') => before.trim_end(),
+        _ => name,
     }
 }
 
@@ -1322,6 +1428,71 @@ mod tests {
         settings.connections.remove("claude");
         let reopened = session_connection(&settings, Some(&session)).map(|(name, _)| name);
         assert_eq!(reopened.as_deref(), Some("local"));
+    }
+
+    #[test]
+    fn a_fork_is_named_after_its_source_with_a_counter_that_stays_unique() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), dir.path()).unwrap();
+        // Nothing sent yet: naming the copy would keep an empty log alive, so
+        // the copy stays unnamed and is discarded with its panel.
+        assert_eq!(fork_name(&session), None);
+
+        session.set_name("Refactor").unwrap();
+        assert_eq!(fork_name(&session).as_deref(), Some("Refactor (2)"));
+
+        // Forking counts on from the names already in the directory: with the
+        // first copy listed under `(2)`, the next fork takes `(3)`.
+        let first_copy = session
+            .fork(dir.path(), fork_name(&session).as_deref())
+            .unwrap();
+        let forked = Session::open_exclusive(&first_copy).unwrap();
+        assert_eq!(forked.name(), Some("Refactor (2)"));
+        assert_eq!(fork_name(&session).as_deref(), Some("Refactor (3)"));
+        // Forking the copy counts on too, from the name it carries.
+        assert_eq!(fork_name(&forked).as_deref(), Some("Refactor (3)"));
+
+        // A source the user never named is labelled by its first prompt, so
+        // the copy's suffix is what tells the two rows apart.
+        let mut plain = Session::create(dir.path(), dir.path()).unwrap();
+        plain
+            .append_message(&Message::User(UserMessage::text("fix the bug")))
+            .unwrap();
+        assert_eq!(fork_name(&plain).as_deref(), Some("fix the bug (2)"));
+    }
+
+    #[test]
+    fn a_fork_name_is_the_lowest_free_counter_in_the_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), dir.path()).unwrap();
+        session.set_name("Refactor").unwrap();
+        let copy = session.fork(dir.path(), Some("Refactor (2)")).unwrap();
+        assert_eq!(fork_name(&session).as_deref(), Some("Refactor (3)"));
+
+        // The counter counts the names in use, not the forks made: rename the
+        // copy away and `(2)` is free again, so no number runs up for nothing.
+        let mut forked = Session::open(&copy).unwrap();
+        forked.set_name("Refactor (7)").unwrap();
+        assert_eq!(fork_name(&session).as_deref(), Some("Refactor (2)"));
+        // A fork of the renamed copy takes the same free number: whichever
+        // forks first writes it, and the other then counts on from there.
+        assert_eq!(fork_name(&forked).as_deref(), Some("Refactor (2)"));
+        drop(forked);
+        std::fs::remove_file(&copy).unwrap();
+        assert_eq!(fork_name(&session).as_deref(), Some("Refactor (2)"));
+    }
+
+    #[test]
+    fn a_fork_suffix_counts_on_from_the_name_it_carries() {
+        assert_eq!(strip_fork_suffix("Refactor (2)"), "Refactor");
+        assert_eq!(strip_fork_suffix("Refactor (12)"), "Refactor");
+        // The counter starts at two: one fork makes the second of a kind.
+        assert_eq!(strip_fork_suffix("Refactor (1)"), "Refactor (1)");
+        // Not a counter: other brackets, other contents, no brackets.
+        assert_eq!(strip_fork_suffix("work (draft)"), "work (draft)");
+        assert_eq!(strip_fork_suffix("2 of 3"), "2 of 3");
+        assert_eq!(strip_fork_suffix("()"), "()");
+        assert_eq!(strip_fork_suffix("Refactor"), "Refactor");
     }
 
     #[test]

@@ -315,6 +315,78 @@ impl Session {
         OPEN_GENERATION.load(Ordering::Relaxed)
     }
 
+    /// Copy this session's log to a new file in the same directory and return
+    /// its path: a fork. The copy carries the conversation — the entries on
+    /// the current branch, in their original ids, so a compaction still
+    /// summarises what it summarised — under a new header id and the `cwd` of
+    /// the panel asking for it, which is where its work goes on. The original
+    /// keeps its name and stays open: two panels then work the same
+    /// conversation apart, each writing its own log.
+    ///
+    /// `name` is the display name the copy carries, which the caller gives it
+    /// suffixed so the two are told apart in a picker; `None` leaves the copy
+    /// unnamed like its source. A name is another entry on the branch, so it
+    /// wins over the ones carried across — and an unnamed copy gets no entry
+    /// at all, which keeps a fork of an untouched session empty and therefore
+    /// discardable. The copy is not claimed, so the caller opens it as it
+    /// would any other session.
+    pub fn fork(&self, cwd: &Path, name: Option<&str>) -> std::io::Result<PathBuf> {
+        let dir = self.path.parent().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("{} has no parent directory", self.path.display()),
+            )
+        })?;
+        let created = now_millis();
+        let id = new_id();
+        let path = dir.join(format!("{}_{id}.jsonl", file_timestamp(created)));
+        let mut header = self.header.clone();
+        header.id = id;
+        header.created = created;
+        header.cwd = cwd.to_path_buf();
+        header.name = name.map(str::to_string);
+        // `create_new` first: the file is removed on a failed copy only once
+        // this call has made it, so a name already taken is never touched.
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .append(true)
+            .open(&path)?;
+        let written = (|| -> std::io::Result<()> {
+            write_line(
+                &mut file,
+                &Line::Header(HeaderLine {
+                    kind: HeaderTag::Session,
+                    header: header.clone(),
+                }),
+            )?;
+            for entry in self.branch() {
+                write_line(&mut file, &Line::Entry(entry.clone()))?;
+            }
+            if let Some(name) = name {
+                // The copy's own name, hanging off the branch's end: the last
+                // one on the branch is what reads back.
+                write_line(
+                    &mut file,
+                    &Line::Entry(Entry {
+                        id: new_id(),
+                        parent_id: self.leaf.clone(),
+                        timestamp: created,
+                        kind: EntryKind::SessionName {
+                            name: name.to_string(),
+                        },
+                    }),
+                )?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = written {
+            // A half-written copy is no session anyone could open.
+            let _ = std::fs::remove_file(&path);
+            return Err(error);
+        }
+        Ok(path)
+    }
+
     /// Like [`Session::open`], but fails if the session is already open in
     /// another panel, so its log is never written from two places at once.
     pub fn open_exclusive(path: &Path) -> std::io::Result<Self> {
@@ -1041,6 +1113,91 @@ mod tests {
         let ids: std::collections::HashSet<String> = (0..1000).map(|_| new_id()).collect();
         assert_eq!(ids.len(), 1000);
         assert!(ids.iter().all(|id| id.len() == 8));
+    }
+
+    #[test]
+    fn a_fork_copies_the_branch_under_a_new_id_and_leaves_the_source_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create_exclusive(dir.path(), Path::new("/work")).unwrap();
+        session.append_connection_change("cloud").unwrap();
+        session
+            .append_message(&Message::User(UserMessage::text("one")))
+            .unwrap();
+        session
+            .append_message(&Message::Assistant(text_reply("a")))
+            .unwrap();
+        session.set_name("keep me").unwrap();
+        let source = session.path().to_path_buf();
+
+        let copy = session
+            .fork(Path::new("/other"), Some("keep me (2)"))
+            .unwrap();
+        assert_ne!(copy, source);
+        let forked = Session::open_exclusive(&copy).unwrap();
+        // A new log of its own: new id, the asking panel's cwd, and the name
+        // it was given — not the source's, which would leave two alike rows.
+        assert_ne!(forked.id(), session.id());
+        assert_eq!(forked.header().cwd, PathBuf::from("/other"));
+        assert_eq!(forked.name(), Some("keep me (2)"));
+        // The conversation came across whole, entries and ids included.
+        assert_eq!(forked.current_connection().as_deref(), Some("cloud"));
+        // The copy's leaf is the name entry it was given, hanging off the
+        // source's leaf: what came across keeps its ids and its shape.
+        assert_eq!(forked.entries().len(), session.entries().len() + 1);
+        let names: Vec<&str> = forked
+            .entries()
+            .iter()
+            .rev()
+            .filter_map(|e| match &e.kind {
+                EntryKind::SessionName { name } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(names, ["keep me (2)", "keep me"]);
+        let texts: Vec<String> = forked
+            .context_messages()
+            .iter()
+            .map(|m| match m {
+                Message::User(u) => u.plain_text(),
+                Message::Assistant(a) => a.plain_text(),
+                Message::ToolResult(_) => String::new(),
+            })
+            .collect();
+        assert_eq!(texts, ["one", "a"]);
+
+        // Writing to one log leaves the other where it was: the source is
+        // still claimed by this panel and still holds two messages.
+        assert!(Session::is_open(&source));
+        session
+            .append_message(&Message::User(UserMessage::text("later")))
+            .unwrap();
+        assert_eq!(Session::open(&copy).unwrap().context_messages().len(), 2);
+        assert_eq!(Session::open(&source).unwrap().context_messages().len(), 3);
+    }
+
+    #[test]
+    fn a_fork_takes_the_current_branch_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/w")).unwrap();
+        let keep = session
+            .append_message(&Message::User(UserMessage::text("keep")))
+            .unwrap();
+        session
+            .append_message(&Message::Assistant(text_reply("a")))
+            .unwrap();
+        session.rewind_to(Some(&keep)).unwrap();
+
+        let forked = Session::open(&session.fork(Path::new("/w"), None).unwrap()).unwrap();
+        let texts: Vec<String> = forked
+            .context_messages()
+            .iter()
+            .map(|m| match m {
+                Message::User(u) => u.plain_text(),
+                Message::Assistant(a) => a.plain_text(),
+                Message::ToolResult(_) => String::new(),
+            })
+            .collect();
+        assert_eq!(texts, ["keep"]);
     }
     #[test]
     fn a_rewind_drops_the_undone_messages_from_the_branch_and_survives_reopen() {

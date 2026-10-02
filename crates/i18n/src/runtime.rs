@@ -468,6 +468,7 @@ impl Translation for RuntimeTranslation {
         panel_agent,
         agent_rename,
         agent_delete_session,
+        agent_fork_session,
         agent_rename_prompt,
         agent_new_session,
         agent_resume,
@@ -529,6 +530,7 @@ impl Translation for RuntimeTranslation {
         agent_cmd_desc_compact,
         agent_cmd_desc_undo,
         agent_cmd_desc_new,
+        agent_cmd_desc_fork,
         agent_cmd_desc_clear,
         agent_cmd_desc_rename,
         agent_cmd_desc_pause,
@@ -570,6 +572,7 @@ impl Translation for RuntimeTranslation {
         agent_notice_plan_no_request,
         agent_notice_nothing_to_open,
         agent_notice_nothing_to_undo,
+        agent_notice_fork_no_session,
         agent_notice_nothing_to_rollback,
         agent_notice_command_running,
         agent_notice_command_dropped,
@@ -589,6 +592,7 @@ impl Translation for RuntimeTranslation {
         agent_tool_bash,
         agent_pick_connection,
         agent_delete_this_session,
+        agent_fork_this_session,
         agent_notice_connection_before_first,
         agent_notice_model_pending,
         agent_toolset_title,
@@ -950,6 +954,14 @@ impl Translation for RuntimeTranslation {
 
     fn agent_delete_confirm_fmt(&self, label: &str) -> String {
         self.format("agent_delete_confirm_fmt", &[("label", label)])
+    }
+
+    fn agent_fork_confirm_fmt(&self, label: &str) -> String {
+        self.format("agent_fork_confirm_fmt", &[("label", label)])
+    }
+
+    fn agent_notice_cannot_fork_fmt(&self, error: &str) -> String {
+        self.format("agent_notice_cannot_fork_fmt", &[("error", error)])
     }
 
     fn agent_undo_confirm_fmt(&self, changed: &str) -> String {

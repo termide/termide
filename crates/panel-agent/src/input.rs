@@ -9,9 +9,9 @@ use termide_ui::{ChoiceAction, CompletionAction, CompletionItem, CompletionList,
 
 use crate::{
     select, transcript, AgentPanel, BannerHit, FoldMode, Item, NoticeKind, Paste, RunButton,
-    CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND, GOAL_COMMAND, HANDOFF_COMMAND, LOOP_COMMAND,
-    MCP_COMMAND, NAME_COMMAND, NEW_COMMAND, NEW_SESSION_ACTION, PAUSE_COMMAND, PROMPT_COMMAND,
-    RENAME_ACTION, RENAME_COMMAND, RESUME_ACTION, UNDO_COMMAND, USAGE_COMMAND,
+    CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND, FORK_COMMAND, GOAL_COMMAND, HANDOFF_COMMAND,
+    LOOP_COMMAND, MCP_COMMAND, NAME_COMMAND, NEW_COMMAND, NEW_SESSION_ACTION, PAUSE_COMMAND,
+    PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND, RESUME_ACTION, UNDO_COMMAND, USAGE_COMMAND,
 };
 
 /// A paste past either bound is held as a short placeholder rather than
@@ -503,6 +503,13 @@ impl AgentPanel {
                         .with_description(termide_i18n::t().agent_cmd_desc_new()),
                 );
             }
+            if FORK_COMMAND.starts_with(prefix) {
+                items.push(
+                    CompletionItem::new(FORK_COMMAND)
+                        .with_label(format!("/{FORK_COMMAND}"))
+                        .with_description(termide_i18n::t().agent_cmd_desc_fork()),
+                );
+            }
             if CLEAR_COMMAND.starts_with(prefix) {
                 items.push(
                     CompletionItem::new(CLEAR_COMMAND)
@@ -792,6 +799,11 @@ impl AgentPanel {
         }
         if key.code == KeyCode::F(4) && !ctrl && !alt && !shift {
             return self.ask_rollback();
+        }
+        // F5 forks the session: the log is copied and the copy opens in a new
+        // panel, while this one goes on with its own.
+        if key.code == KeyCode::F(5) && !ctrl && !alt && !shift {
+            return self.ask_fork_session();
         }
         // F6 switches session (the picker), F7 starts a new one, F8 deletes the
         // current one behind a confirmation card.

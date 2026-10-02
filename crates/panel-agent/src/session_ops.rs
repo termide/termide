@@ -14,7 +14,7 @@ use crate::runtime::{
 };
 use crate::{
     format_tokens, shorten_path, truncate_title, AgentPanel, Item, NoticeKind,
-    DELETE_RECENT_ACTION, DELETE_SESSION_ACTION, ROLLBACK_ACTION,
+    DELETE_RECENT_ACTION, DELETE_SESSION_ACTION, FORK_SESSION_ACTION, ROLLBACK_ACTION,
 };
 
 /// Delete a session the panel is leaving when it holds no conversation, so
@@ -505,6 +505,62 @@ impl AgentPanel {
         }
         self.switch_session(None);
         vec![PanelEvent::NeedsRedraw]
+    }
+
+    /// Offer to fork the current session (F5, `/fork`, or the `[≡]` menu's
+    /// Fork session): the log is copied and the copy taken up in a new panel,
+    /// so this one keeps working where it stands. The accepted answer comes
+    /// back as `PanelCommand::Confirmed(FORK_SESSION_ACTION)`. Unlike a
+    /// session switch this asks nothing of the run in flight: the copy is read
+    /// off the flushed log, so a busy panel forks too and only its unfinished
+    /// answer is missing from the copy.
+    pub(crate) fn ask_fork_session(&mut self) -> Vec<PanelEvent> {
+        let t = termide_i18n::t();
+        let Some(path) = self.session_path() else {
+            self.notice(t.agent_notice_fork_no_session(), NoticeKind::Info);
+            return vec![PanelEvent::NeedsRedraw];
+        };
+        let name = self
+            .session
+            .as_ref()
+            .and_then(Session::name)
+            .map(str::to_string);
+        let id = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        let label = name
+            .clone()
+            .unwrap_or_else(|| t.agent_fork_this_session().to_string());
+        let confirm = t.agent_fork_confirm_fmt(&label);
+        // The log's id under the question, after the name when it has one.
+        let message = match (name, id.is_empty()) {
+            (_, true) => confirm,
+            (Some(name), false) => format!("{confirm}\n{name} · {id}"),
+            (None, false) => format!("{confirm}\n{id}"),
+        };
+        vec![PanelEvent::ShowConfirm {
+            message,
+            on_confirm: ConfirmAction::Custom(FORK_SESSION_ACTION.to_string()),
+        }]
+    }
+
+    /// The confirmed F5: ask the app to copy this session's log and open the
+    /// copy in a panel of its own. The panel copies nothing itself — the app
+    /// owns panel creation and the configuration a new panel runs on — and this
+    /// one goes on writing its own log, so both keep working.
+    pub(crate) fn perform_fork_session(&mut self) -> Vec<PanelEvent> {
+        let t = termide_i18n::t();
+        match self.session_path() {
+            Some(path) => vec![PanelEvent::ForkAgentSession {
+                session: path.to_path_buf(),
+                cwd: self.cwd.clone(),
+            }],
+            None => {
+                self.notice(t.agent_notice_fork_no_session(), NoticeKind::Info);
+                vec![]
+            }
+        }
     }
 
     /// A read-only summary of the current session, shown in an info modal

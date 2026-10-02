@@ -1635,6 +1635,7 @@ fn sessions_can_be_listed_switched_and_resumed() {
             "Session info",
             "Rename session",
             "Save chat as Markdown…",
+            "Fork session",
             "Delete session"
         ]
     );
@@ -2039,6 +2040,125 @@ fn f7_starts_a_new_session_and_f6_opens_the_switcher() {
     assert!(events
         .iter()
         .any(|e| matches!(e, PanelEvent::ShowSelect { .. })));
+}
+
+/// The session logs in a test's session directory, sorted by name.
+fn session_files(dir: &tempfile::TempDir) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("jsonl"))
+        .collect();
+    files.sort();
+    files
+}
+
+#[test]
+fn f5_forks_the_session_behind_a_confirmation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![reply("ok")])
+    });
+    type_text(&mut panel, "first task");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+    let first = panel.session_path().unwrap().to_path_buf();
+
+    // F5 asks through an app confirmation modal — nothing is copied yet.
+    let events = panel.handle_key(chord(KeyCode::F(5), KeyModifiers::NONE));
+    let Some(PanelEvent::ShowConfirm {
+        on_confirm,
+        message,
+    }) = events.first()
+    else {
+        panic!("F5 should raise a confirmation modal, got {events:?}");
+    };
+    assert!(
+        matches!(on_confirm, ConfirmAction::Custom(a) if a == FORK_SESSION_ACTION),
+        "{on_confirm:?}"
+    );
+    let t = termide_i18n::t();
+    let id = first.file_stem().unwrap().to_str().unwrap();
+    assert_eq!(
+        *message,
+        format!(
+            "{}\n{id}",
+            t.agent_fork_confirm_fmt(t.agent_fork_this_session())
+        )
+    );
+    assert_eq!(session_files(&dir), vec![first.clone()]);
+
+    // The confirmed answer asks the app to open a copy; this panel keeps its
+    // own session, and the copy is the app's to make.
+    panel.handle_command(PanelCommand::Confirmed {
+        action: FORK_SESSION_ACTION.to_string(),
+    });
+    let event = wait_for(&mut panel, |e| {
+        matches!(e, PanelEvent::ForkAgentSession { .. })
+    });
+    let PanelEvent::ForkAgentSession { session, cwd } = event else {
+        unreachable!()
+    };
+    assert_eq!(session, first);
+    assert_eq!(cwd, panel.cwd);
+    assert_eq!(panel.session_path().unwrap(), first);
+    assert_eq!(session_files(&dir), vec![first.clone()]);
+
+    // Cancelling the modal asks and leaves the panel where it stood.
+    panel.handle_key(chord(KeyCode::F(5), KeyModifiers::NONE));
+    assert_eq!(panel.session_path().unwrap(), first);
+}
+
+#[test]
+fn fork_copies_the_conversation_into_a_log_of_its_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![reply("ok")])
+    });
+    type_text(&mut panel, "first task");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+    let first = panel.session_path().unwrap().to_path_buf();
+
+    // What the app does on the confirmed fork: copy, then open the copy. The
+    // name it gives the copy is the app's concern (`fork_name`); `None` here
+    // takes the mechanics alone.
+    let copy = Session::open(&first)
+        .unwrap()
+        .fork(&panel.cwd, None)
+        .unwrap();
+    let forked = Session::open_exclusive(&copy).unwrap();
+    assert_ne!(forked.id(), panel.session.as_ref().unwrap().id());
+    assert_eq!(forked.context_messages().len(), 2);
+    // No second panel takes the same copy, and the source stays open here.
+    assert!(Session::open_exclusive(&copy).is_err());
+    assert!(Session::is_open(&first));
+
+    // The two logs part at once: a later request of this panel is not in the
+    // copy, and the copy's own directory is where its work goes.
+    assert_eq!(forked.header().cwd, panel.cwd);
+    drop(forked);
+    assert!(Session::open_exclusive(&copy).is_ok());
+}
+
+#[test]
+fn fork_without_a_session_log_says_so() {
+    // No session directory: the panel runs without a log to copy.
+    let mut panel = panel(vec![reply("ok")]);
+    let events = panel.handle_key(chord(KeyCode::F(5), KeyModifiers::NONE));
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, PanelEvent::ShowConfirm { .. })),
+        "{events:?}"
+    );
+    assert!(panel.transcript().items().iter().any(|item| matches!(
+        item,
+        Item::Notice { text, .. } if text == termide_i18n::t().agent_notice_fork_no_session()
+    )));
 }
 
 #[test]

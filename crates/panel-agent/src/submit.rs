@@ -14,10 +14,10 @@ use crate::pending::Pending;
 use crate::session_ops::discard;
 use crate::{
     millis, slash, AgentPanel, GoalTask, Item, LoopTask, NoticeKind, BUILTIN_COMMANDS,
-    CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND, GOAL_COMMAND, GOAL_MAX_ITERATIONS,
-    HANDOFF_COMMAND, LOOP_COMMAND, LOOP_MAX_ITERATIONS, MCP_COMMAND, NAME_COMMAND, NEW_COMMAND,
-    PAUSE_COMMAND, PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND, SHOW_PROMPT_ACTION, UNDO_COMMAND,
-    USAGE_COMMAND,
+    CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND, FORK_COMMAND, GOAL_COMMAND,
+    GOAL_MAX_ITERATIONS, HANDOFF_COMMAND, LOOP_COMMAND, LOOP_MAX_ITERATIONS, MCP_COMMAND,
+    NAME_COMMAND, NEW_COMMAND, PAUSE_COMMAND, PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND,
+    SHOW_PROMPT_ACTION, UNDO_COMMAND, USAGE_COMMAND,
 };
 
 /// The work turn a `/goal` sends when the judge says the goal is not yet
@@ -129,6 +129,10 @@ impl AgentPanel {
                 self.clear_input();
                 self.switch_session(None);
                 return vec![PanelEvent::NeedsRedraw];
+            }
+            Some((FORK_COMMAND, _)) => {
+                self.clear_input();
+                return self.ask_fork_session();
             }
             Some((CLEAR_COMMAND, _)) => {
                 // Like `/new`, but the current session is deleted rather than
@@ -303,6 +307,7 @@ impl AgentPanel {
                     names.push(COMPACT_COMMAND.to_string());
                     if self.session_dir.is_some() {
                         names.push(NEW_COMMAND.to_string());
+                        names.push(FORK_COMMAND.to_string());
                         names.push(CLEAR_COMMAND.to_string());
                         names.push(RENAME_COMMAND.to_string());
                         names.push(NAME_COMMAND.to_string());
