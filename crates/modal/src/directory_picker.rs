@@ -1,7 +1,8 @@
 //! Directory picker modal dialog with tree-view navigation.
 //!
-//! Supports expand/collapse of subdirectories (Right/Left arrows),
-//! cursor rendering matching the file manager panel style.
+//! Supports expand/collapse of subdirectories (Right/Left arrows), toggling
+//! hidden directories (`.`, as in the file manager), cursor rendering
+//! matching the file manager panel style.
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -42,6 +43,8 @@ pub struct DirectoryPickerModal {
     /// Cursor position (index into visible_indices)
     cursor: usize,
     scroll_offset: usize,
+    /// Whether directories whose name starts with `.` are listed.
+    show_hidden: bool,
     button_focused: bool,
     selected_button: usize,
     last_list_area: Option<Rect>,
@@ -65,6 +68,7 @@ impl DirectoryPickerModal {
             tree_prefixes: Vec::new(),
             cursor: 0,
             scroll_offset: 0,
+            show_hidden: false,
             button_focused: false,
             selected_button: 0,
             last_list_area: None,
@@ -125,7 +129,7 @@ impl DirectoryPickerModal {
                     continue;
                 }
                 let name = entry.file_name().to_string_lossy().into_owned();
-                if name.starts_with('.') {
+                if !self.show_hidden && name.starts_with('.') {
                     continue;
                 }
                 dirs.push(DirEntry {
@@ -205,6 +209,50 @@ impl DirectoryPickerModal {
         }
     }
 
+    /// Show or hide the hidden directories, keeping the expanded branches
+    /// and the cursor where they still exist.
+    fn toggle_hidden(&mut self) {
+        self.show_hidden = !self.show_hidden;
+        let expanded: Vec<PathBuf> = self
+            .entries
+            .iter()
+            .filter(|e| e.expanded == Some(true))
+            .map(|e| e.full_path.clone())
+            .collect();
+        let under_cursor = self
+            .visible_indices
+            .get(self.cursor)
+            .map(|&i| self.entries[i].full_path.clone());
+
+        self.load_root();
+        // Parents precede their children, so one pass re-expands nested
+        // branches in order.
+        let mut i = 0;
+        while i < self.entries.len() {
+            if self.entries[i].expanded == Some(false)
+                && expanded.contains(&self.entries[i].full_path)
+            {
+                if let Some(vis) = self.visible_indices.iter().position(|&t| t == i) {
+                    self.expand_dir(vis);
+                }
+            }
+            i += 1;
+        }
+
+        // The cursor stays on its entry, or else on its closest ancestor
+        // still listed (a hidden directory it was inside of).
+        if let Some(path) = under_cursor {
+            let found = path.ancestors().find_map(|ancestor| {
+                self.visible_indices.iter().position(|&t| {
+                    let entry = &self.entries[t];
+                    entry.expanded.is_some() && entry.full_path == ancestor
+                })
+            });
+            self.cursor = found.unwrap_or(0);
+            self.adjust_scroll();
+        }
+    }
+
     /// Recompute visible indices and tree prefixes
     fn recompute_visible(&mut self) {
         self.visible_indices = compute_visible(&self.entries);
@@ -217,7 +265,7 @@ impl DirectoryPickerModal {
         let max_entry_display = self
             .entries
             .iter()
-            .map(|e| e.depth * 3 + e.name.len() + 4) // prefix + icon + name
+            .map(|e| e.depth * 3 + e.name.len() + 5) // gutter + prefix + icon + name
             .max()
             .unwrap_or(0);
         let path_width = self.current_dir.to_string_lossy().len() as u16 + 5;
@@ -365,10 +413,12 @@ impl Modal for DirectoryPickerModal {
             };
 
             let text = format!("{} {}", icon, entry.name);
-            let line_width = tree_prefix.width() + text.width();
+            let line_width = 1 + tree_prefix.width() + text.width();
             let padding = " ".repeat((inner.width as usize).saturating_sub(line_width));
 
             let line = Line::from(vec![
+                // A one-column gutter before the tree, as in the file manager.
+                Span::styled(" ", row_style),
                 Span::styled(tree_prefix, prefix_row_style),
                 Span::styled(text, row_style),
                 Span::styled(padding, row_style),
@@ -439,6 +489,10 @@ impl Modal for DirectoryPickerModal {
         let key = chord.canonical;
         match key.code {
             KeyCode::Esc => Ok(Some(ModalResult::Cancelled)),
+            KeyCode::Char('.') => {
+                self.toggle_hidden();
+                Ok(None)
+            }
             KeyCode::Tab | KeyCode::BackTab => {
                 self.button_focused = !self.button_focused;
                 Ok(None)
@@ -680,4 +734,74 @@ fn compute_prefixes(entries: &[DirEntry], visible: &[usize]) -> Vec<String> {
 
     prefixes.reverse();
     prefixes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::KeyEvent;
+
+    fn scratch(name: &str) -> PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("termide-dir-picker-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for dir in [".git/objects", "src/bin", "target"] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        root
+    }
+
+    fn names(modal: &DirectoryPickerModal) -> Vec<&str> {
+        modal
+            .visible_indices
+            .iter()
+            .map(|&i| modal.entries[i].name.as_str())
+            .collect()
+    }
+
+    fn press(modal: &mut DirectoryPickerModal, code: KeyCode) {
+        let key = KeyEvent::new(code, KeyModifiers::NONE);
+        modal
+            .handle_key(termide_core::KeyChord::identity(key))
+            .unwrap();
+    }
+
+    #[test]
+    fn dot_toggles_hidden_directories() {
+        let root = scratch("toggle");
+        let mut modal = DirectoryPickerModal::new(root.clone(), String::new(), String::new());
+        assert_eq!(names(&modal), ["..", "src", "target"]);
+
+        press(&mut modal, KeyCode::Char('.'));
+        assert_eq!(names(&modal), ["..", ".git", "src", "target"]);
+
+        press(&mut modal, KeyCode::Char('.'));
+        assert_eq!(names(&modal), ["..", "src", "target"]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn toggling_hidden_keeps_expanded_branches_and_the_cursor() {
+        let root = scratch("keep");
+        let mut modal = DirectoryPickerModal::new(root.clone(), String::new(), String::new());
+        // Expand `src` and step onto `bin` inside it.
+        press(&mut modal, KeyCode::Down);
+        press(&mut modal, KeyCode::Right);
+        press(&mut modal, KeyCode::Down);
+        assert_eq!(modal.selected_path(), root.join("src/bin"));
+
+        press(&mut modal, KeyCode::Char('.'));
+        assert_eq!(names(&modal), ["..", ".git", "src", "bin", "target"]);
+        assert_eq!(modal.selected_path(), root.join("src/bin"));
+
+        // Hiding `.git` with the cursor inside it falls back to the list top.
+        press(&mut modal, KeyCode::Up);
+        press(&mut modal, KeyCode::Up);
+        press(&mut modal, KeyCode::Right);
+        press(&mut modal, KeyCode::Down);
+        assert_eq!(modal.selected_path(), root.join(".git/objects"));
+        press(&mut modal, KeyCode::Char('.'));
+        assert_eq!(modal.cursor, 0);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

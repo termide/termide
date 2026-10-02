@@ -72,6 +72,8 @@ Menu activation/deactivation and each item can be accessed by mouse click or [ke
   - New project — start a project in another directory
   - Switch project — open the project switcher modal
   - Change root path — move the current project to another directory
+
+    Both pick the directory in a tree: `→`/`←` expand and collapse a branch, `Enter` enters a directory, `Backspace` goes to the parent, `.` shows or hides hidden directories, `Ctrl+Enter` confirms from anywhere
   - Below a separator, the known projects as a tree of directory submenus. Directories that only lead to one place are folded into one row (`github.com/termide`) and the prefix shared by all projects is left out. A directory that is itself a project and holds further projects lists itself first. The current project and the directories leading to it are shown in bold. `→`/`Enter` open a directory, `←`/`Esc` close it, `Enter` or a click on a project switches to it. `Delete`/`F8` deletes the saved layout of the selected project, or of every project in the selected directory, after a confirmation, and so drops it from the list; the project's files are not touched. The current project is never deleted, and the layouts of projects nested inside a deleted one are kept
 - `AI` — the coding agent's agents, sessions, skills and prompts, and a switch for the agents' browser window; see [The AI menu](agent.md#the-ai-menu)
 - `Windows` — panel creation submenu:
