@@ -228,6 +228,20 @@ impl ActiveModal {
         dispatch_modal!(self, render, area, buf, theme);
     }
 
+    /// Bring the open checklist up to date with what its panel knows now;
+    /// `false` when the modal is not a checklist, or nothing changed.
+    pub fn refresh_checklist(
+        &mut self,
+        items: Vec<termide_core::ChecklistItem>,
+        groups: Vec<termide_core::ChecklistGroup>,
+        prompt: Option<String>,
+    ) -> bool {
+        match self {
+            ActiveModal::Checklist(m) => m.refresh(items, groups, prompt),
+            _ => false,
+        }
+    }
+
     /// Handle paste event.
     pub fn handle_paste(&mut self, text: &str) -> bool {
         dispatch_modal!(self, handle_paste, text)

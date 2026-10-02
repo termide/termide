@@ -9,7 +9,7 @@ use std::sync::{mpsc, Arc, PoisonError, RwLock};
 use termide_agent_core::{
     Hooks, LateTools, Mode, PromptError, ToolCall, ToolContext, ToolDecision,
 };
-use termide_core::ChecklistItem;
+use termide_core::{ChecklistGroup, ChecklistItem, ChecklistRefresh, PanelEvent};
 
 use crate::{AgentPanel, NoticeKind};
 
@@ -195,6 +195,32 @@ impl AgentPanel {
             )
         }));
         items
+    }
+
+    /// The hint line under the list's title: how it works, and — where there
+    /// are MCP headings — what its buttons do.
+    pub(crate) fn toolset_prompt(&self, groups: &[ChecklistGroup]) -> String {
+        let t = termide_i18n::t();
+        let mut prompt = t.agent_toolset_prompt().to_string();
+        if !groups.is_empty() {
+            prompt.push(' ');
+            prompt.push_str(t.agent_toolset_buttons_hint());
+        }
+        prompt
+    }
+
+    /// Ask to bring the toolset checklist already open up to date. Cheap and
+    /// quiet: the app drops it when no such list is open, so the panel may
+    /// raise it on every tick that changed what the list shows.
+    pub(crate) fn toolset_refresh(&self) -> PanelEvent {
+        let groups = self.toolset_groups();
+        let prompt = Some(self.toolset_prompt(&groups));
+        PanelEvent::RefreshChecklist(ChecklistRefresh {
+            action: TOOLSET_ACTION.to_string(),
+            prompt,
+            items: self.toolset_items(),
+            groups,
+        })
     }
 
     /// Apply the checklist: what is left unchecked is switched off. Before

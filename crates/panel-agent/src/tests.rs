@@ -4651,7 +4651,7 @@ fn the_toolset_list_heads_every_server_with_its_buttons() {
             (
                 "MCP: plane".into(),
                 "needs sign-in".into(),
-                vec!["rmcp-reload:plane".into(), "lmcp-login:plane".into()]
+                vec!["lmcp-login:plane".into(), "rmcp-reload:plane".into()]
             ),
         ]
     );
@@ -4672,6 +4672,89 @@ fn the_toolset_list_heads_every_server_with_its_buttons() {
     assert_eq!(
         *asked.lock().unwrap(),
         ["login plane", "reconnect db", "reconnect db"]
+    );
+}
+
+#[test]
+fn tools_that_arrive_while_the_list_is_open_refresh_it() {
+    let (tx, rx) = mpsc::channel();
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        late_tools: Some(rx),
+        catalog: Arc::new(Servers(Arc::clone(&asked))),
+        ..setup(vec![])
+    });
+    // A tick with nothing to take asks for nothing, and a panel that raised
+    // no list asks for nothing either.
+    let events = panel.tick();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, PanelEvent::RefreshChecklist(_))),
+        "{events:?}"
+    );
+    tx.send(LateTools::Ready {
+        source: "db".into(),
+        tools: vec![Arc::new(Late("db__query")) as Arc<dyn termide_agent_core::Tool>],
+    })
+    .unwrap();
+    let events = panel.tick();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, PanelEvent::RefreshChecklist(_))),
+        "{events:?}"
+    );
+
+    // The list stands open: what arrives now is brought to it, with the
+    // headings as they now read — the connected one without its remark.
+    panel.handle_status_action(crate::toolset::TOOLSET_ACTION);
+    tx.send(LateTools::Ready {
+        source: "db".into(),
+        tools: vec![Arc::new(Late("db__other")) as Arc<dyn termide_agent_core::Tool>],
+    })
+    .unwrap();
+    let events = panel.tick();
+    let Some(PanelEvent::RefreshChecklist(refresh)) = events
+        .iter()
+        .find(|e| matches!(e, PanelEvent::RefreshChecklist(_)))
+    else {
+        panic!("the list is brought up to date: {events:?}");
+    };
+    assert_eq!(refresh.action, crate::toolset::TOOLSET_ACTION);
+    // The server's new set is its own: the tool it had before has left with
+    // the set that was replaced.
+    let keys: Vec<&str> = refresh.items.iter().map(|i| i.key.as_str()).collect();
+    assert_eq!(keys, ["db__other"], "{keys:?}");
+    let heads: Vec<(&str, &str)> = refresh
+        .groups
+        .iter()
+        .map(|g| (g.name.as_str(), g.note.as_str()))
+        .collect();
+    assert_eq!(
+        heads,
+        [("MCP: db", ""), ("MCP: plane", "needs sign-in")],
+        "{heads:?}"
+    );
+    assert!(refresh.prompt.is_some());
+
+    // Closed, the panel stops asking: there is no list left to keep up.
+    panel.handle_command(PanelCommand::ChecklistDone {
+        action: crate::toolset::TOOLSET_ACTION.into(),
+        checked: Vec::new(),
+        pressed: None,
+    });
+    tx.send(LateTools::Ready {
+        source: "db".into(),
+        tools: vec![Arc::new(Late("db__third")) as Arc<dyn termide_agent_core::Tool>],
+    })
+    .unwrap();
+    let events = panel.tick();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, PanelEvent::RefreshChecklist(_))),
+        "{events:?}"
     );
 }
 

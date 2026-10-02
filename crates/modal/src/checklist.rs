@@ -31,7 +31,7 @@ const LEAD: usize = 3;
 /// A run of consecutive items with the same group. One with no name has no
 /// heading, and its items are always shown; one with no items is a heading
 /// alone, with nothing to open.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct Group {
     name: String,
     items: std::ops::Range<usize>,
@@ -84,36 +84,7 @@ impl ChecklistModal {
         items: Vec<ChecklistItem>,
         headings: Vec<ChecklistGroup>,
     ) -> Self {
-        let mut groups: Vec<Group> = Vec::new();
-        for (index, item) in items.iter().enumerate() {
-            match groups.last_mut() {
-                Some(group) if group.name == item.group => group.items.end = index + 1,
-                _ => groups.push(Group {
-                    name: item.group.clone(),
-                    items: index..index + 1,
-                    expanded: false,
-                    note: String::new(),
-                    buttons: Vec::new(),
-                }),
-            }
-        }
-        for heading in headings {
-            let group = match groups.iter_mut().find(|g| g.name == heading.name) {
-                Some(group) => group,
-                None => {
-                    groups.push(Group {
-                        name: heading.name.clone(),
-                        items: items.len()..items.len(),
-                        expanded: false,
-                        note: String::new(),
-                        buttons: Vec::new(),
-                    });
-                    groups.last_mut().expect("just pushed")
-                }
-            };
-            group.note = heading.note;
-            group.buttons = heading.buttons;
-        }
+        let groups = Self::build_groups(&items, headings);
         let mut modal = Self {
             title: title.into(),
             prompt: prompt.into(),
@@ -146,6 +117,106 @@ impl ChecklistModal {
             .filter(|item| item.checked)
             .map(|item| item.key.clone())
             .collect()
+    }
+
+    /// Bring the list up to date with what the panel knows now, keeping the
+    /// list's own state: what the user ticked stays ticked, a group stays open
+    /// or closed as it is, and the cursor stays on its row. An item that was
+    /// locked, and one that is new, take the state the panel brings — the
+    /// first was never the user's to change, the second has no tick of its
+    /// own yet. `true` when anything changed, so a caller redraws only then.
+    pub fn refresh(
+        &mut self,
+        items: Vec<ChecklistItem>,
+        groups: Vec<ChecklistGroup>,
+        prompt: Option<String>,
+    ) -> bool {
+        let before = (self.items.clone(), self.groups.clone(), self.prompt.clone());
+        // The row the cursor was on, by what it stood for: a group keeps its
+        // place by name, an item by its key.
+        let cursor = self
+            .rows
+            .get(self.cursor)
+            .copied()
+            .and_then(|row| match row {
+                Row::Heading(group) => self.groups.get(group).map(|g| (true, g.name.clone())),
+                Row::Item(item) => self.items.get(item).map(|i| (false, i.key.clone())),
+            });
+        let open: Vec<(String, bool)> = self
+            .groups
+            .iter()
+            .map(|group| (group.name.clone(), group.expanded))
+            .collect();
+
+        if let Some(prompt) = prompt {
+            self.prompt = prompt;
+        }
+        self.items = items;
+        self.groups = Self::build_groups(&self.items, groups);
+        // A group the user had opened or closed stays as they left it.
+        for group in &mut self.groups {
+            if let Some((_, expanded)) = open.iter().find(|(name, _)| *name == group.name) {
+                group.expanded = *expanded;
+            }
+        }
+        // An item the user could tick keeps the tick they gave it; one that
+        // was locked, and one that is new, come by as the panel reports them.
+        for item in self.items.iter_mut().filter(|item| item.enabled) {
+            if let Some(kept) = before
+                .0
+                .iter()
+                .find(|old| old.key == item.key && old.enabled)
+            {
+                item.checked = kept.checked;
+            }
+        }
+
+        self.rebuild_rows();
+        if let Some((headed, name)) = cursor {
+            if let Some(row) = self.rows.iter().position(|row| match row {
+                Row::Heading(group) => headed && self.groups[*group].name == name,
+                Row::Item(item) => !headed && self.items[*item].key == name,
+            }) {
+                self.cursor = row;
+            }
+        }
+        before.0 != self.items || before.1 != self.groups || before.2 != self.prompt
+    }
+
+    /// The groups the list shows: a run of consecutive items with the same
+    /// group, then the headings that name no item, in the order given.
+    fn build_groups(items: &[ChecklistItem], headings: Vec<ChecklistGroup>) -> Vec<Group> {
+        let mut groups: Vec<Group> = Vec::new();
+        for (index, item) in items.iter().enumerate() {
+            match groups.last_mut() {
+                Some(group) if group.name == item.group => group.items.end = index + 1,
+                _ => groups.push(Group {
+                    name: item.group.clone(),
+                    items: index..index + 1,
+                    expanded: false,
+                    note: String::new(),
+                    buttons: Vec::new(),
+                }),
+            }
+        }
+        for heading in headings {
+            let group = match groups.iter_mut().find(|g| g.name == heading.name) {
+                Some(group) => group,
+                None => {
+                    groups.push(Group {
+                        name: heading.name.clone(),
+                        items: items.len()..items.len(),
+                        expanded: false,
+                        note: String::new(),
+                        buttons: Vec::new(),
+                    });
+                    groups.last_mut().expect("just pushed")
+                }
+            };
+            group.note = heading.note;
+            group.buttons = heading.buttons;
+        }
+        groups
     }
 
     /// The rows the groups show now; the cursor stays on the row it was on,
@@ -715,6 +786,12 @@ mod tests {
         }
     }
 
+    /// The column a row's `[↻]` sits at, in the rows as rendered.
+    fn reload_column(rows: &[String], heading: &str) -> usize {
+        let row = rows.iter().find(|r| r.contains(heading)).unwrap();
+        row[..row.find("[↻]").unwrap()].chars().count()
+    }
+
     #[test]
     fn heading_buttons_close_the_list_and_an_empty_group_is_a_heading_alone() {
         let mut modal = ChecklistModal::new(
@@ -726,7 +803,7 @@ mod tests {
                 heading(
                     "MCP plane",
                     "needs sign-in",
-                    &[("reload:plane", "↻", 'r'), ("login:plane", "⇥", 'l')],
+                    &[("login:plane", "⇥", 'l'), ("reload:plane", "↻", 'r')],
                 ),
             ],
         );
@@ -739,8 +816,15 @@ mod tests {
         // No items: no arrow, no mark, no count; the remark and both buttons.
         let plane = shown.iter().find(|r| r.contains("MCP plane")).unwrap();
         assert!(plane.contains("   MCP plane — needs sign-in"), "{shown:?}");
-        assert!(plane.contains("[↻][⇥]"), "{shown:?}");
+        assert!(plane.contains("[⇥][↻]"), "{shown:?}");
         assert!(!plane.contains(ARROW_COLLAPSED) && !plane.contains("0/0"));
+        // The reload every server has keeps one column; the sign-in only
+        // some have stands to its left.
+        assert_eq!(
+            reload_column(&shown, "MCP db"),
+            reload_column(&shown, "MCP plane"),
+            "{shown:?}"
+        );
 
         // A key works on its own heading only; elsewhere it is nothing.
         assert!(modal.handle_key(key(KeyCode::Char('l'))).unwrap().is_none());
@@ -776,6 +860,109 @@ mod tests {
             panic!("a click on the button closes the list");
         };
         assert_eq!(outcome.pressed.as_deref(), Some("reload:db"));
+    }
+
+    #[test]
+    fn a_refresh_keeps_the_ticks_and_shows_what_arrived_since() {
+        // A server still connecting: its heading has no tools under it yet.
+        let mut modal = ChecklistModal::new(
+            "Tools",
+            "Off before the first request.",
+            vec![
+                item("read", "Built-in", true, true),
+                item("bash", "Built-in", true, true),
+            ],
+            vec![heading(
+                "MCP plane",
+                "needs sign-in",
+                &[("login:plane", "⇥", 'l'), ("reload:plane", "↻", 'r')],
+            )],
+        );
+        // The user works in the list: one tool off, the built-ins open, the
+        // cursor on `bash`.
+        modal.handle_key(key(KeyCode::Right)).unwrap();
+        modal.handle_key(key(KeyCode::Down)).unwrap();
+        modal.handle_key(key(KeyCode::Down)).unwrap();
+        modal.handle_key(key(KeyCode::Char(' '))).unwrap();
+        assert_eq!(modal.checked(), ["read"]);
+
+        // The server connects while the list is open and brings two tools.
+        let connected = vec![
+            item("read", "Built-in", true, true),
+            item("bash", "Built-in", true, true),
+            item("plane__query", "MCP plane", true, true),
+            item("plane__send", "MCP plane", false, true),
+        ];
+        assert!(modal.refresh(
+            connected.clone(),
+            vec![heading("MCP plane", "", &[("reload:plane", "↻", 'r')])],
+            Some("Off before the first request.".into()),
+        ));
+        // What the user ticked stands; what arrived came by as reported.
+        assert_eq!(modal.checked(), ["read", "plane__query"]);
+        let shown = rows(&mut modal);
+        let plane = shown.iter().find(|r| r.contains("MCP plane")).unwrap();
+        // The heading now counts its tools and has lost its remark; the
+        // reload stays in the column it had.
+        assert!(
+            plane.contains("[-] MCP plane  1/2") && plane.contains("[↻]"),
+            "{plane}"
+        );
+        assert!(
+            !plane.contains("needs sign-in") && !plane.contains("[⇥]"),
+            "{plane}"
+        );
+        // The group the user had not opened stays closed; opening it shows
+        // what arrived.
+        assert!(plane.contains(ARROW_COLLAPSED), "{plane}");
+        // The cursor is still on the row it was put on.
+        assert_eq!(modal.rows[modal.cursor], Row::Item(1));
+        modal.handle_key(key(KeyCode::Down)).unwrap();
+        modal.handle_key(key(KeyCode::Right)).unwrap();
+        let shown = rows(&mut modal);
+        assert!(
+            shown.iter().any(|r| r.contains("[✓] plane__query")),
+            "{shown:?}"
+        );
+        assert!(
+            shown.iter().any(|r| r.contains("[ ] plane__send")),
+            "{shown:?}"
+        );
+
+        // Nothing moved: the list says so and takes no redraw.
+        let same = vec![heading("MCP plane", "", &[("reload:plane", "↻", 'r')])];
+        assert!(!modal.refresh(connected, same, None));
+    }
+
+    #[test]
+    fn a_refresh_unlocks_an_item_the_panel_could_not_offer_before() {
+        // Before the first request a server's tool is not in the list at all;
+        // one that was locked keeps its state until it can be toggled.
+        let mut modal = ChecklistModal::new(
+            "Tools",
+            "",
+            vec![item("plane__query", "MCP plane", false, false)],
+            vec![heading("MCP plane", "connecting", &[])],
+        );
+        assert!(modal.refresh(
+            vec![item("plane__query", "MCP plane", true, true)],
+            vec![heading("MCP plane", "", &[("reload:plane", "↻", 'r')])],
+            None,
+        ));
+        assert_eq!(modal.checked(), ["plane__query"]);
+        assert!(modal.items[0].enabled);
+        // The user's own tick survives the next refresh, even though the
+        // panel still reports the tool as it had it: on.
+        modal.handle_key(key(KeyCode::Right)).unwrap();
+        modal.handle_key(key(KeyCode::Down)).unwrap();
+        modal.handle_key(key(KeyCode::Char(' '))).unwrap();
+        assert!(modal.checked().is_empty());
+        assert!(!modal.refresh(
+            vec![item("plane__query", "MCP plane", true, true)],
+            vec![heading("MCP plane", "", &[("reload:plane", "↻", 'r')])],
+            None,
+        ));
+        assert!(modal.checked().is_empty());
     }
 
     #[test]

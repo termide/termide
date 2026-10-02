@@ -141,7 +141,9 @@ impl AgentPanel {
     /// A heading per configured server in the toolset list, under the name
     /// its tools are grouped by: what state it is in when not connected, a
     /// button to connect it again, and one to sign in or out where that
-    /// applies. A server with no tools is listed by its heading alone.
+    /// applies. A server with no tools is listed by its heading alone. The
+    /// buttons are right-aligned, so the reload comes last: every server has
+    /// it, and only some have the sign-in, so that one keeps its column.
     pub(crate) fn toolset_groups(&self) -> Vec<ChecklistGroup> {
         let t = termide_i18n::t();
         self.catalog
@@ -152,11 +154,7 @@ impl AgentPanel {
                     McpStatus::Ready { .. } => String::new(),
                     other => status_text(other).0,
                 };
-                let mut buttons = vec![ChecklistButton {
-                    id: format!("{RELOAD_BUTTON}{}", server.name),
-                    icon: "↻".into(),
-                    key: 'r',
-                }];
+                let mut buttons = Vec::new();
                 let sign = match server.sign_in {
                     McpSignIn::None => None,
                     McpSignIn::SignedOut => Some((LOGIN_BUTTON, "⇥")),
@@ -169,6 +167,11 @@ impl AgentPanel {
                         key: 'l',
                     });
                 }
+                buttons.push(ChecklistButton {
+                    id: format!("{RELOAD_BUTTON}{}", server.name),
+                    icon: "↻".into(),
+                    key: 'r',
+                });
                 ChecklistGroup {
                     name: t.agent_toolset_mcp_fmt(&server.name),
                     note,

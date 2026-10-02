@@ -429,7 +429,14 @@ impl AgentPanel {
         let mut events = self.poll_permissions();
         events.append(&mut self.poll_questions());
         events.append(&mut self.pending_events);
-        changed |= self.poll_late_tools();
+        let tools_changed = self.poll_late_tools();
+        changed |= tools_changed;
+        // A toolset checklist this panel raised and that still stands open
+        // keeps up: what arrived while the user was reading it shows there
+        // too, not only in the session.
+        if tools_changed && self.toolset_list_open {
+            events.push(self.toolset_refresh());
+        }
         changed |= self.poll_command();
         let fetched = self.model_fetch.as_ref().map(Receiver::try_recv);
         match fetched {

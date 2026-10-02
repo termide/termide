@@ -22,9 +22,9 @@ pub mod wide_cells;
 
 pub use command::{CommandResult, PanelCommand};
 pub use event::{
-    ChecklistButton, ChecklistGroup, ChecklistItem, ChecklistOutcome, ConfirmAction,
-    ConflictResolution, Event, EventHandler, GitOperationType, InputAction, PanelEvent,
-    ReferenceLocation, SelectAction, SplitDirection, VimPanelDirection,
+    ChecklistButton, ChecklistGroup, ChecklistItem, ChecklistOutcome, ChecklistRefresh,
+    ConfirmAction, ConflictResolution, Event, EventHandler, GitOperationType, InputAction,
+    PanelEvent, ReferenceLocation, SelectAction, SplitDirection, VimPanelDirection,
 };
 pub use graphics_cells::GraphicsCells;
 pub use hotkey_table::HotkeyTable;

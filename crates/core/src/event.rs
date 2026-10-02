@@ -442,6 +442,21 @@ pub struct ChecklistButton {
     pub key: char,
 }
 
+/// What a refresh of an open checklist carries: the same list a panel raised
+/// with [`PanelEvent::ShowChecklist`], rebuilt from what is true now. The
+/// modal keeps the ticks the user has made and moves only what changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChecklistRefresh {
+    /// The `action` the panel raised the open list with.
+    pub action: String,
+    /// The hint line as it reads now; the modal keeps its own when `None`.
+    pub prompt: Option<String>,
+    pub items: Vec<ChecklistItem>,
+    /// The headings as they stand now; a heading no item names is listed as
+    /// a heading alone, and one no longer listed takes its items away.
+    pub groups: Vec<ChecklistGroup>,
+}
+
 /// What a checklist came back with: the keys left checked, and the button
 /// that closed it, if one did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -620,6 +635,13 @@ pub enum PanelEvent {
         /// Echoed back with the result, so the panel knows which list it was.
         action: String,
     },
+
+    /// Bring a checklist the panel raised with [`PanelEvent::ShowChecklist`]
+    /// up to date while it is open, as its state moved under the user — an
+    /// MCP server that connected, a tool that arrived. What the user ticked
+    /// stays ticked; only what changed moves. Ignored when no list with that
+    /// `action` is open, so a panel may raise it whenever it notices.
+    RefreshChecklist(ChecklistRefresh),
 
     /// Show file conflict resolution modal
     ShowConflict {

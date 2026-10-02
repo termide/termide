@@ -223,10 +223,14 @@ The checkbox on a group's heading switches the whole group on or off at once,
 open or not, and shows `[-]` while it is partly on. The list applies however
 it is closed — `Enter`, `Esc` or a click beside it. Every configured MCP server
 has a heading, one that has not connected too — with its state beside the
-name (`needs sign-in`, `failed: …`) — and buttons at its right end: `[↻]`
-connects it again (`r` on the heading), and on a server that signs in with
-OAuth `[⇥]` signs in or `[⇤]` signs out (`l`). A button applies the ticks as
-`Enter` does, closes the list and does what it says.
+name (`needs sign-in`, `failed: …`) — and buttons at its right end, standing
+in one column: `[↻]` connects it again (`r` on the heading), and on a server
+that signs in with OAuth `[⇥]` signs in or `[⇤]` signs out (`l`) to its left.
+A button applies the ticks as `Enter` does, closes the list and does what it
+says. A server that connects while the list is open appears in it there and
+then — its heading loses its remark and its tools come under it — so you do
+not have to close the list and open it again to see where a server stands;
+what you had ticked stays ticked.
 Unchecking an item before the first request keeps
 it out of the model's context altogether — its description and schema are
 never sent, which saves tokens and takes the capability away. Later in the

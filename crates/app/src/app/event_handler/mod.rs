@@ -276,6 +276,10 @@ impl App {
                 );
             }
 
+            PanelEvent::RefreshChecklist(refresh) => {
+                self.event_refresh_checklist(refresh);
+            }
+
             PanelEvent::ShowConflict {
                 source,
                 destination,

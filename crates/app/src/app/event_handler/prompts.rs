@@ -209,4 +209,28 @@ impl App {
         self.state
             .set_pending_action(pending_action, ActiveModal::Confirm(Box::new(modal)));
     }
+
+    /// Handle RefreshChecklist event: bring the checklist a panel already
+    /// raised up to date, in place. A refresh for a list that is not open —
+    /// closed since, or never raised — is dropped: the panel asked the app to
+    /// keep a window up to date, and there is none.
+    pub(in crate::app) fn event_refresh_checklist(
+        &mut self,
+        refresh: termide_core::ChecklistRefresh,
+    ) {
+        use crate::state::{ActiveModal, PendingAction};
+
+        if !matches!(
+            self.state.pending_action,
+            Some(PendingAction::PanelChecklist { ref action }) if *action == refresh.action
+        ) {
+            return;
+        }
+        let Some(ActiveModal::Checklist(modal)) = self.state.active_modal.as_mut() else {
+            return;
+        };
+        if modal.refresh(refresh.items, refresh.groups, refresh.prompt) {
+            self.state.needs_redraw = true;
+        }
+    }
 }

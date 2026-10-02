@@ -558,6 +558,13 @@ pub struct AgentPanel {
     /// Servers asked to connect again, so their next set reads "reconnected"
     /// rather than "changed".
     mcp_reconnecting: BTreeSet<String>,
+    /// Whether this panel is the one whose toolset checklist stands open.
+    /// Only then does a tick ask the app to refresh it: with two agent panels
+    /// open, the other one has nothing to say about this one's list. It is
+    /// set when the panel raises the list and cleared when the list comes back
+    /// — every way of closing it, `Enter`, `Esc` and a heading button alike,
+    /// comes back as `PanelCommand::ChecklistDone`.
+    toolset_list_open: bool,
     /// What the session switched off: tool names and `skill:<name>`.
     toolset_off: BTreeSet<String>,
     /// What the running profile (its prompt and registry) was built without.
@@ -896,6 +903,7 @@ impl AgentPanel {
             leaving_tools: Vec::new(),
             mcp_lines: std::collections::HashMap::new(),
             mcp_reconnecting: BTreeSet::new(),
+            toolset_list_open: false,
             toolset_off,
             context_off,
             blocked,
@@ -1257,11 +1265,8 @@ impl Panel for AgentPanel {
             TOOLSET_ACTION if self.external => Vec::new(),
             TOOLSET_ACTION => {
                 let groups = self.toolset_groups();
-                let mut prompt = t.agent_toolset_prompt().to_string();
-                if !groups.is_empty() {
-                    prompt.push(' ');
-                    prompt.push_str(t.agent_toolset_buttons_hint());
-                }
+                let prompt = self.toolset_prompt(&groups);
+                self.toolset_list_open = true;
                 vec![PanelEvent::ShowChecklist {
                     title: t.agent_toolset_title().to_string(),
                     prompt,
@@ -1419,6 +1424,7 @@ impl Panel for AgentPanel {
             } if action == TOOLSET_ACTION => {
                 // The ticks first, as `Enter` would have applied them; then
                 // what the button asks for.
+                self.toolset_list_open = false;
                 self.apply_toolset(&checked);
                 if let Some(id) = pressed {
                     self.press_toolset_button(&id);
