@@ -201,7 +201,8 @@ model and the tools are shown bold in the accent colour: a click on any opens
 the same picker its status-bar chip does, so you can set the session up before
 you start. Further down, under the sessions heading, the list of this
 directory's other sessions, newest first, each with the local date and time
-of its last change, filling the space the panel has and scrolling through the rest
+of its last change, starting from the logo's column so the titles get the
+panel's width, filling the space the panel has and scrolling through the rest
 with the wheel. A session open in another panel is left out, and comes back
 once that panel lets it go. A click opens one in place of the empty session;
 from the keyboard, `Tab` moves into the list, the arrows, `PgUp`/`PgDn` and

@@ -283,7 +283,7 @@ impl AgentPanel {
             "│ ▀█ █▀ │",
             "│ ▄▀▀▀▄ │",
             "│  ▀▀▀  │",
-            "╰───────╯",
+            "╰TERMIDE╯",
         ];
         self.banner_hits.clear();
         if area.width < 14 || area.height == 0 {
@@ -298,6 +298,10 @@ impl AgentPanel {
         let show_logo = area.width >= logo_w + gap + 22;
         let info_x = area.x + 2 + if show_logo { logo_w + gap } else { 0 };
         let info_w = (area.x + area.width).saturating_sub(info_x + 1);
+        // The list of sessions starts below the logo, so it takes the logo's
+        // column and the width that comes with it.
+        let list_x = area.x + 2;
+        let list_w = (area.x + area.width).saturating_sub(list_x + 1);
 
         let accent = Style::default()
             .fg(colors.info)
@@ -428,16 +432,21 @@ impl AgentPanel {
             if y >= bottom {
                 break;
             }
-            buf.set_line(info_x, y, line, info_w);
+            let (x, w) = if i < header_len {
+                (info_x, info_w)
+            } else {
+                (list_x, list_w)
+            };
+            buf.set_line(x, y, line, w);
             // The whole field row is the click target, so the label is as good
             // as the value; an external agent still routes the click, and its
             // action answers with the "unsupported" notice.
             if let Some(hit) = hit {
                 self.banner_hits.push((
                     Rect {
-                        x: info_x,
+                        x,
                         y,
-                        width: info_w,
+                        width: w,
                         height: 1,
                     },
                     *hit,
@@ -446,7 +455,7 @@ impl AgentPanel {
             // The session under the keyboard cursor is shown inverted, like
             // a selected chat block.
             if self.chat_focus && *hit == Some(BannerHit::Session(self.recent_selected)) {
-                for x in info_x..info_x + info_w {
+                for x in x..x + w {
                     buf[(x, y)].set_style(Style::default().fg(colors.bg).bg(colors.fg));
                 }
             }
