@@ -5086,9 +5086,11 @@ version = "0.37.0"
 dependencies = [
  "arboard",
  "base64",
+ "dunce",
  "log",
  "objc2-app-kit",
  "objc2-foundation",
+ "tempfile",
 ]
 
 [[package]]

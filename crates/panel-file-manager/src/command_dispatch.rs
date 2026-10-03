@@ -481,15 +481,13 @@ impl FileManager {
         // copy: the file flavor asks the OS for the real path, so a move would
         // relocate the target rather than the link.
         if self.selection_has_symlink() {
-            let text = clipboard::paths_to_text(&paths);
-            let _ = clipboard::cut(&text);
+            let _ = clipboard::cut_paths_as_text(&paths);
             return;
         }
 
         if let Err(e) = clipboard::cut_files(&paths) {
             log::debug!("file clipboard unavailable ({}), cutting paths as text", e);
-            let text = clipboard::paths_to_text(&paths);
-            let _ = clipboard::cut(&text);
+            let _ = clipboard::cut_paths_as_text(&paths);
         }
     }
 
