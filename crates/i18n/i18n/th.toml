@@ -452,7 +452,6 @@ agent_undo_restore = "กู้คืนไฟล์และย้อนกา�
 agent_undo_keep = "เก็บไว้ทั้งหมด"
 agent_rewind_conversation_only = "ย้อนเฉพาะบทสนทนา"
 agent_rewind_files_only = "กู้คืนเฉพาะไฟล์"
-agent_rollback_title = "ย้อนกลับไปก่อน…"
 agent_plan_carry_title = "โหมดวางแผน: ดำเนินการตามแผนหรือไม่?"
 agent_plan_accept_edits = "ใช่ ยอมรับการแก้ไข"
 agent_plan_configured = "ใช่ ตามกฎที่ตั้งไว้"

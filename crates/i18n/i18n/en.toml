@@ -454,7 +454,6 @@ agent_undo_keep = "Keep everything"
 agent_rewind_conversation_only = "Rewind the conversation only"
 agent_rewind_files_only = "Restore the files only"
 # Agent panel — rollback picker
-agent_rollback_title = "Rewind to before…"
 # Agent panel — plan-mode card
 agent_plan_carry_title = "Plan mode: carry the plan out?"
 agent_plan_accept_edits = "Yes, accepting edits"

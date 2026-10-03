@@ -587,8 +587,9 @@ session log on a dead branch.
 
 ## Tools
 
-The agent has six built-in tools, plus those its MCP servers provide (see
-[MCP servers](#mcp-servers)).
+The agent's built-in tools are listed below, plus those its MCP servers
+provide (see [MCP servers](#mcp-servers)). The panel's own agent also has
+**question** and **suggest_command**, described after the list.
 
 - **read** returns a file with line numbers, paged with an offset when a file
   is long.
@@ -605,7 +606,7 @@ The agent has six built-in tools, plus those its MCP servers provide (see
 Searching the project is done through `bash` with the tools you already have
 (`rg`, `find`), rather than through a separate search tool.
 
-A seventh tool, **skill**, appears when skills are defined; see
+One more tool, **skill**, appears when skills are defined; see
 [Skills](#skills).
 
 **question** lets the agent ask you when a decision is yours to make: which
@@ -631,8 +632,8 @@ one on a card — the command in full and exactly as it would run, why it is
 offered, and the directory — marked as the agent's suggestion. **Run** runs it
 through the same shell path as a [`$` command](#running-a-command-yourself) you typed,
 and its output comes back to the agent; **Edit first** puts it in the prompt as
-a shell-mode command for you to change and run; **Copy** takes the text alone. `Esc` declines,
-and the agent is told it did not run and must not offer it again. This is what
+a shell-mode command for you to change and run; **Copy** takes the text alone;
+**Don't run**, or `Esc`, declines, and the agent is told it did not run and must not offer it again. This is what
 a blocked call ends up doing: the refusal tells the agent to say what it needs
 run, and this turns that into a card rather than a line of text you retype. It
 is also how the agent hands over something it should not do itself — publishing,
@@ -640,7 +641,7 @@ anything needing your credentials or your judgement.
 
 The card never runs anything on its own, and it cannot talk you past your own
 rules: where plan mode is on or a `deny` rule covers the command, **Run** and
-**Edit first** are left off and only **Copy** remains. Offering a command costs
+**Edit first** are left off and only **Copy** and **Don't run** remain. Offering a command costs
 no permission — it changes nothing by itself — so the agent can always reach you
 this way; only your confirmation reaches the shell. Like `question`, the tool
 belongs to the panel's agent alone.

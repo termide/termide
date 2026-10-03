@@ -972,6 +972,7 @@ fn agent_setup(
         model: connection.model.clone(),
         context_window: connection.effective_context_window(),
     }));
+    let reviewer = reviewer_setup(settings, &catalog.dirs);
     catalog.subagents = Some(Arc::new(Subagents {
         active: Arc::clone(&active),
         dirs: catalog.dirs.clone(),
@@ -983,14 +984,13 @@ fn agent_setup(
         max_tokens: settings.output_limit(),
         reasoning: settings.reasoning,
         compaction: settings.compaction,
-        reviewer: reviewer_setup(settings, &catalog.dirs),
+        reviewer: reviewer.clone(),
         refusals: catalog.dirs.refusals(),
     }));
     let compaction_prompts = catalog.dirs.compaction_prompts();
     let plan_prompt = catalog.dirs.plan_prompt();
     let goal_prompt = catalog.dirs.goal_prompt();
     let handoff_prompt = catalog.dirs.handoff_prompt();
-    let reviewer = reviewer_setup(settings, &catalog.dirs);
     let refusals = catalog.dirs.refusals();
     let hooks: Option<HooksFactory> = {
         let configs = catalog.dirs.hooks();

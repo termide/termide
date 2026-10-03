@@ -452,7 +452,6 @@ agent_undo_restore = "फ़ाइलें पुनर्स्थापित
 agent_undo_keep = "सब कुछ रखें"
 agent_rewind_conversation_only = "केवल बातचीत को पीछे ले जाएँ"
 agent_rewind_files_only = "केवल फ़ाइलें पुनर्स्थापित करें"
-agent_rollback_title = "इससे पहले पर वापस जाएँ…"
 agent_plan_carry_title = "योजना मोड: योजना लागू करें?"
 agent_plan_accept_edits = "हाँ, संपादन स्वीकार करते हुए"
 agent_plan_configured = "हाँ, कॉन्फ़िगर किए नियमों के तहत"

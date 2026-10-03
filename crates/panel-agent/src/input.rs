@@ -1024,12 +1024,14 @@ impl AgentPanel {
                 } else if !self.input_area().is_empty() {
                     self.clear_input();
                     self.after_edit();
-                } else if !self.rewind_points().is_empty() {
+                } else {
+                    let points = self.rewind_points();
+                    if points.is_empty() {
+                        return vec![];
+                    }
                     // With nothing left to stop or clear, Esc goes back in
                     // the conversation, as in Claude Code.
-                    return self.ask_rewind();
-                } else {
-                    return vec![];
+                    return self.offer_rewind(points);
                 }
             }
             KeyCode::Enter if shift || alt => {

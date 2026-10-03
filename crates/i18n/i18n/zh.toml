@@ -466,7 +466,6 @@ agent_undo_keep = "全部保留"
 agent_rewind_conversation_only = "仅回退对话"
 agent_rewind_files_only = "仅恢复文件"
 # Agent panel — rollback picker
-agent_rollback_title = "回退到之前…"
 # Agent panel — plan-mode card
 agent_plan_carry_title = "计划模式：执行该计划？"
 agent_plan_accept_edits = "是，接受修改"

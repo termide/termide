@@ -6110,6 +6110,28 @@ fn a_suggested_command_denied_by_a_rule_withholds_run() {
 }
 
 #[test]
+fn the_dismiss_row_declines_a_suggestion() {
+    let mut panel = panel(vec![]);
+    let worker = suggest_in_worker(&mut panel, "git push", "publish");
+    // Row 4, after `[Run]`, `[Edit first]` and `[Copy]`, is `[Don't run]`.
+    panel.handle_key(chord(KeyCode::Char('4'), KeyModifiers::NONE));
+    assert!(panel.pending.is_none());
+    assert_eq!(worker.join().unwrap(), SuggestionReply::Declined);
+    assert!(panel.input_text().is_empty(), "nothing goes to the input");
+}
+
+#[test]
+fn a_denied_suggestion_still_offers_dismiss() {
+    let mut panel = panel(vec![]);
+    panel.mode.set(Mode::Plan);
+    let worker = suggest_in_worker(&mut panel, "touch new.rs", "create it");
+    // Row 2, after `[Copy]`, is `[Don't run]`.
+    panel.handle_key(chord(KeyCode::Char('2'), KeyModifiers::NONE));
+    assert!(panel.pending.is_none());
+    assert_eq!(worker.join().unwrap(), SuggestionReply::Declined);
+}
+
+#[test]
 fn edit_first_puts_the_command_in_the_input_to_run_by_hand() {
     let mut panel = panel(vec![]);
     let worker = suggest_in_worker(&mut panel, "git push", "publish");
