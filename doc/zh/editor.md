@@ -34,6 +34,10 @@
 | `Ctrl+Shift+Up`   | 选择到上一个段落/符号边界               |
 | `Ctrl+Shift+Down` | 选择到下一个段落/符号边界               |
 
+`↑`/`↓` 和 `PageUp`/`PageDown` 会让光标保持在其屏幕列上，制表符和宽字符按实际
+绘制的宽度计算。途经较短的行不会丢失该列：在下一个足够长的行上，光标会回到这一列。
+以其他任何方式移动光标（左右方向键、点击、跳转、编辑）都会从光标的新列开始计算。
+
 ## 编辑
 
 | 快捷键 | 操作 |
@@ -125,7 +129,8 @@
 - **`View: Text`** — 切换到十六进制查看器（等同于 `Ctrl+L`）。编辑/查看模式会延续：从可编辑缓冲区离开会打开可编辑的十六进制编辑器，反之亦然。
 - **`Edit: Yes`/`Edit: No`** — 切换只读，也绑定到 `Ctrl+E`（`[viewer.keybindings] toggle_view`）。
 - **`Highlight: <lang>`** — 打开语言选择器（见下文）。
-- **`Tab: <n>`** — 设置制表符宽度。
+- **`Tab: <n>`** — 设置制表符宽度。制表符绘制为空白，延伸到下一个该宽度的
+  整数倍列；启用自动换行时，每个折行都会重新开始计算制表位。
 - **`EOL`** / **`Encoding`** — 仅供参考。
 - **`Pos: <line>:<col>`** — 打开“转到行”；接受行号（`12`）或行加列（`12:4`）。
 
@@ -436,6 +441,22 @@ LSP 可与任何实现了 LSP 协议的语言服务器配合使用。常见示�
 - **TypeScript/JavaScript** - typescript-language-server
 - **Go** - gopls
 - **C/C++** - clangd
+
+内置的服务器定义，只要可执行文件在 `PATH` 中即自动使用：
+
+| 语言 | 服务器 | 文件 |
+|---|---|---|
+| Rust | `rust-analyzer` | `.rs` |
+| Python | `pylsp` | `.py` |
+| TypeScript/JavaScript | `typescript-language-server --stdio` | `.ts`、`.tsx`、`.js`、… |
+| Go | `gopls` | `.go` |
+| PHP | `phpantom_lsp` | `.php` |
+| Terraform | `terraform-ls serve` | `.tf`、`.tfvars` |
+| Docker | `docker-language-server start --stdio` | 按文件名识别 `Dockerfile` 和 `compose.yaml` |
+
+Docker 文件没有特征扩展名，因此按文件名识别，且不区分大小写：`Dockerfile`、`Dockerfile.*`、`*.Dockerfile`，以及带任意中缀的 `compose.yaml`/`docker-compose.yaml`，例如 `compose.override.yaml` 或 `docker-compose.prod.yml`。
+
+TermIDE 在启动 `docker-language-server` 时会要求它不发送遥测数据；否则该服务器默认会收集遥测。
 
 **注意：** 您需要单独安装语言服务器。TermIDE 仅提供 LSP 客户端集成。
 
