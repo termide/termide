@@ -29,9 +29,12 @@ const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
 /// `initializationOptions` a server needs at `initialize` to opt out of
 /// behaviour we do not want on its default. Keyed by the server's command:
 /// this document has no meaning outside the server it was written for, so
-/// each entry states the option its server actually reads.
+/// each entry states the option its server actually reads. Only the file
+/// name is compared, so an absolute path or a Windows `.exe` still matches.
 pub(super) fn initialization_options(command: &str) -> Option<Value> {
-    match command {
+    let name = std::path::Path::new(command).file_name()?.to_str()?;
+    let name = name.strip_suffix(".exe").unwrap_or(name);
+    match name {
         // docker-language-server reports to BugSnag with telemetry set to
         // `all` unless the `initialize` request says otherwise, and
         // `initialize` is the only place it will hear us: it reads telemetry
@@ -415,6 +418,21 @@ mod tests {
         // crash stacks and path hashes to BugSnag on the user's dime.
         let options = initialization_options("docker-language-server").expect("options");
         assert_eq!(options["telemetry"], "off");
+    }
+
+    #[test]
+    fn docker_server_given_by_path_is_told_to_send_no_telemetry() {
+        // A user entry may name the binary by path; the opt-out must follow.
+        for command in [
+            "/usr/local/bin/docker-language-server",
+            "bin/docker-language-server",
+            "docker-language-server.exe",
+        ] {
+            let options = initialization_options(command).expect("options");
+            assert_eq!(options["telemetry"], "off", "{command}");
+        }
+        assert_eq!(initialization_options("/usr/bin/gopls"), None);
+        assert_eq!(initialization_options(""), None);
     }
 
     #[test]
