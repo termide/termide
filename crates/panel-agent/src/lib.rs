@@ -73,9 +73,6 @@ const DELETE_SESSION_ACTION: &str = "agent_delete_session";
 const FORK_SESSION_ACTION: &str = "agent_fork_session";
 /// Confirmation action that deletes the recent session picked in the banner.
 const DELETE_RECENT_ACTION: &str = "agent_delete_recent_session";
-/// Selection action for the rewind picker (`Esc` in the idle empty prompt,
-/// or `F4`).
-const REWIND_ACTION: &str = "agent_rewind";
 /// Context-menu action that starts a fresh session.
 const NEW_SESSION_ACTION: &str = "agent_new_session";
 /// Context-menu action that opens the session picker.
@@ -575,8 +572,8 @@ pub struct AgentPanel {
     agent_choices: Vec<String>,
     /// Prompt templates offered by the last picker, in the order shown.
     prompt_choices: Vec<PromptTemplate>,
-    /// Messages offered by the last rewind picker, in the order shown.
-    rewind_points: Vec<rewind::RewindPoint>,
+    /// The list of messages to rewind to, while it is open above the input.
+    rewind_picker: Option<rewind::RewindPicker>,
     /// Tools still connecting, and those that arrived while a run was in
     /// flight and wait for the worker to be free.
     late_tools: Option<Receiver<LateTools>>,
@@ -937,7 +934,7 @@ impl AgentPanel {
             catalog: setup.catalog,
             agent_choices: Vec::new(),
             prompt_choices: Vec::new(),
-            rewind_points: Vec::new(),
+            rewind_picker: None,
             late_tools,
             waiting_tools: Vec::new(),
             leaving_tools: Vec::new(),
@@ -1476,11 +1473,6 @@ impl Panel for AgentPanel {
             }
             PanelCommand::SelectionMade { action, index } if action == RESUME_ACTION => {
                 CommandResult::Handled(self.resume_choice(index))
-            }
-            PanelCommand::SelectionMade { action, index } if action == REWIND_ACTION => {
-                let events = self.choose_rewind(index);
-                self.pending_events.extend(events);
-                CommandResult::Handled(true)
             }
             PanelCommand::SelectionMade { action, index } if action == PROMPTS_ACTION => {
                 let choice = self.prompt_choices.get(index).cloned();

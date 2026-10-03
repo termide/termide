@@ -800,6 +800,12 @@ impl AgentPanel {
             }
         }
 
+        // The rewind list takes the keys next; one it has no use for closes
+        // it and goes on.
+        if let Some(events) = self.rewind_picker_key(key) {
+            return events;
+        }
+
         // Ctrl+S saves the chat as Markdown, wherever the focus sits in the
         // panel — the same as the `[≡]` menu's entry.
         if ctrl && !alt && !shift && key.code == KeyCode::Char('s') {
@@ -1233,6 +1239,11 @@ impl AgentPanel {
                         list.select(index);
                         self.accept_completion();
                         return vec![PanelEvent::NeedsRedraw];
+                    }
+                }
+                if let Some(picker) = &self.rewind_picker {
+                    if let Some(index) = picker.list.hit(event.column, event.row) {
+                        return self.choose_rewind(index);
                     }
                 }
                 // A click on a re-pickable field in the welcome banner opens its

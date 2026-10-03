@@ -1286,17 +1286,6 @@ impl Translation for RuntimeTranslation {
         )
     }
 
-    fn agent_rewind_option_files_fmt(&self, text: &str, count: usize, plural: &str) -> String {
-        self.format(
-            "agent_rewind_option_files_fmt",
-            &[
-                ("text", text),
-                ("count", &count.to_string()),
-                ("plural", plural),
-            ],
-        )
-    }
-
     fn agent_rewind_confirm_fmt(&self, message: &str, changed: &str) -> String {
         self.format(
             "agent_rewind_confirm_fmt",

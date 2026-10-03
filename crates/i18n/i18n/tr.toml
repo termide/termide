@@ -996,7 +996,6 @@ agent_notice_goal_reached_reason_fmt = "hedefe ulaşıldı: {reason}"
 agent_notice_command_denied_fmt = "/{name} izin kurallarınca reddedildi"
 agent_notice_rolled_back_fmt = "geri dönüldü: {count} dosya geri yüklendi, konuşma geri sarıldı"
 agent_notice_files_restored_fmt = "{count} dosya geri yüklendi, konuşma korundu"
-agent_rewind_option_files_fmt = "{text} · {count} dosya"
 agent_rewind_confirm_fmt = "“{message}” öncesine dönülsün mü? O zamandan beri değişen: {changed}"
 agent_notice_undid_fmt = "son istek geri alındı: {count} dosya geri yüklendi, konuşma geri sarıldı"
 

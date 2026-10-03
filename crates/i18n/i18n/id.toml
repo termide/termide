@@ -996,7 +996,6 @@ agent_notice_goal_reached_reason_fmt = "tujuan tercapai: {reason}"
 agent_notice_command_denied_fmt = "/{name} ditolak oleh aturan izin"
 agent_notice_rolled_back_fmt = "dikembalikan: {count} file dipulihkan, percakapan dimundurkan"
 agent_notice_files_restored_fmt = "{count} berkas dipulihkan, percakapan dipertahankan"
-agent_rewind_option_files_fmt = "{text} · {count} berkas"
 agent_rewind_confirm_fmt = "Kembali ke sebelum “{message}”? Berubah sejak itu: {changed}"
 agent_notice_undid_fmt = "permintaan terakhir diurungkan: {count} file dipulihkan, percakapan dimundurkan"
 

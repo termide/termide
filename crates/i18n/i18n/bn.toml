@@ -996,7 +996,6 @@ agent_notice_goal_reached_reason_fmt = "লক্ষ্য পূরণ হয�
 agent_notice_command_denied_fmt = "/{name} অনুমতির নিয়মে নিষিদ্ধ"
 agent_notice_rolled_back_fmt = "ফিরে যাওয়া হয়েছে: {count}টি ফাইল পুনরুদ্ধার, কথোপকথন পিছিয়ে নেওয়া হয়েছে"
 agent_notice_files_restored_fmt = "{count}টি ফাইল পুনরুদ্ধার, কথোপকথন রাখা হয়েছে"
-agent_rewind_option_files_fmt = "{text} · {count}টি ফাইল"
 agent_rewind_confirm_fmt = "“{message}”-এর আগে ফিরে যাবেন? তারপর থেকে পরিবর্তিত: {changed}"
 agent_notice_undid_fmt = "শেষ অনুরোধ ফেরানো হয়েছে: {count}টি ফাইল পুনরুদ্ধার, কথোপকথন পিছিয়ে নেওয়া হয়েছে"
 

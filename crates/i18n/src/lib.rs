@@ -849,7 +849,6 @@ pub trait Translation: Send + Sync {
     fn agent_notice_command_denied_fmt(&self, name: &str) -> String;
     fn agent_notice_rolled_back_fmt(&self, count: usize, plural: &str) -> String;
     fn agent_notice_files_restored_fmt(&self, count: usize, plural: &str) -> String;
-    fn agent_rewind_option_files_fmt(&self, text: &str, count: usize, plural: &str) -> String;
     fn agent_rewind_confirm_fmt(&self, message: &str, changed: &str) -> String;
     fn agent_notice_undid_fmt(&self, count: usize, plural: &str) -> String;
 

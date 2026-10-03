@@ -781,6 +781,9 @@ impl AgentPanel {
             if let Some(list) = &mut self.completion {
                 list.render(above, buf, &colors);
             }
+            if let Some(picker) = &mut self.rewind_picker {
+                picker.list.render(above, buf, &colors);
+            }
         }
     }
 
