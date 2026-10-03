@@ -834,6 +834,16 @@ impl Panel for FileManager {
                 self.clipboard_paste_files();
                 CommandResult::Handled(true)
             }
+            // `Cmd+V` on macOS: the terminal emulator answers the key and
+            // types the clipboard's text flavor in. Take it only when that
+            // text names real files, so a prose paste is not swallowed. With
+            // the search bar open the panel still declines — the bar reads
+            // typed keys and drops a bracketed paste either way, and spending
+            // the keystroke on a copy from under it would be worse.
+            PanelCommand::PasteText { text } => {
+                let paste_as_files = self.search_bar.is_none() && self.clipboard_paste_text(&text);
+                CommandResult::Handled(paste_as_files)
+            }
             PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
             PanelCommand::SetScrollOffset { offset, .. } => {
                 self.scroll_offset = offset;
@@ -863,8 +873,7 @@ impl Panel for FileManager {
             | PanelCommand::SelectionMade { .. }
             | PanelCommand::ChecklistDone { .. }
             | PanelCommand::InputSubmitted { .. }
-            | PanelCommand::Confirmed { .. }
-            | PanelCommand::PasteText { .. } => CommandResult::None,
+            | PanelCommand::Confirmed { .. } => CommandResult::None,
         }
     }
 
@@ -1136,6 +1145,171 @@ mod tests {
         (0..fm.visible_count())
             .filter_map(|i| fm.entry_at(i).map(|e| e.name.clone()))
             .collect()
+    }
+
+    /// A symlink in the selection keeps the copy on the text path: the file
+    /// flavor resolves to the real path, so publishing it would deliver the
+    /// target under the target's name. A plain selection takes the flavor.
+    #[cfg(unix)]
+    #[test]
+    fn a_selected_symlink_keeps_the_copy_as_text() {
+        let temp_dir = TempDir::new().unwrap();
+        std::fs::write(temp_dir.path().join("real.txt"), "x").unwrap();
+        std::fs::write(temp_dir.path().join("plain.txt"), "y").unwrap();
+        std::os::unix::fs::symlink(
+            temp_dir.path().join("real.txt"),
+            temp_dir.path().join("link.txt"),
+        )
+        .unwrap();
+
+        let mut fm = FileManager::new_with_path(temp_dir.path().to_path_buf());
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+
+        // Cursor on a plain file: no link in play, the flavor is taken.
+        fm.selected = fm.find_entry_index("plain.txt").unwrap();
+        assert!(!fm.selection_has_symlink());
+
+        // Cursor on the link: the panel sees it as a link, not its target.
+        fm.selected = fm.find_entry_index("link.txt").unwrap();
+        assert!(fm.selection_has_symlink(), "the cursor sits on a symlink");
+
+        // A multi-selection holding the link reports it too.
+        fm.clear_selection();
+        fm.selection
+            .select(fm.find_entry_index("plain.txt").unwrap());
+        fm.selection
+            .select(fm.find_entry_index("link.txt").unwrap());
+        assert!(fm.selection_has_symlink());
+
+        // Without the link, the multi-selection takes the flavor.
+        fm.clear_selection();
+        fm.selection
+            .select(fm.find_entry_index("plain.txt").unwrap());
+        fm.selection
+            .select(fm.find_entry_index("real.txt").unwrap());
+        assert!(!fm.selection_has_symlink());
+    }
+
+    /// `Cmd+V` reaches the panel as a bracketed paste, not as `Paste`: the
+    /// terminal emulator answers the key and types the clipboard's text. When
+    /// that text names real files the panel must offer the copy, and say
+    /// which files — the count alone left the confirmation nameless.
+    #[test]
+    fn a_pasted_path_copies_the_file_and_names_it() {
+        let temp_dir = TempDir::new().unwrap();
+        let dir = canonical_temp_path(&temp_dir);
+        std::fs::write(dir.join("report.pdf"), "x").unwrap();
+
+        let mut fm = FileManager::new_with_path(dir.clone());
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+
+        let pasted = dir.join("report.pdf").display().to_string();
+        let result = fm.handle_command(PanelCommand::PasteText {
+            text: pasted.clone(),
+        });
+        assert!(
+            matches!(result, CommandResult::Handled(true)),
+            "a pasted path must be taken as a file paste"
+        );
+
+        let (action, modal) = fm.modal_request.take().expect("a confirmation");
+        match action {
+            PendingAction::CopyPath {
+                sources,
+                target_directory,
+                ..
+            } => {
+                assert_eq!(sources, [dir.join("report.pdf")]);
+                assert_eq!(target_directory, Some(dir.clone()));
+            }
+            other => panic!("expected a copy, got {other:?}"),
+        }
+
+        let message = match modal {
+            ActiveModal::Confirm(m) => m.message().to_string(),
+            other => panic!("expected a confirmation, got {other:?}"),
+        };
+        assert!(
+            message.contains("report.pdf"),
+            "the confirmation must name the file, got {message:?}"
+        );
+    }
+
+    /// Prose pasted into the panel is not a file: the key falls through
+    /// untouched, so it stays available to whatever handles keys next.
+    #[test]
+    fn pasted_prose_is_not_taken_as_a_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let dir = canonical_temp_path(&temp_dir);
+        let mut fm = FileManager::new_with_path(dir.clone());
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+
+        let result = fm.handle_command(PanelCommand::PasteText {
+            text: "a sentence, not a path".to_string(),
+        });
+        assert!(
+            matches!(result, CommandResult::Handled(false)),
+            "prose must fall through"
+        );
+        assert!(fm.modal_request.is_none(), "no copy was offered");
+    }
+
+    /// A relative path resolves against the process working directory, not
+    /// the panel's, so `exists()` can match some unrelated file and paste it
+    /// under the wrong name. Only absolute paths are taken as files.
+    #[test]
+    fn a_pasted_relative_path_is_not_taken_as_a_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let dir = canonical_temp_path(&temp_dir);
+
+        let mut fm = FileManager::new_with_path(dir.clone());
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+
+        // The bug this guards is silent unless the relative name really does
+        // resolve somewhere: assert that it does, and that the panel still
+        // refuses it. `Cargo.toml` exists in the crate directory the test
+        // runs from, but not in the panel's directory.
+        let relative = "Cargo.toml";
+        assert!(
+            std::path::Path::new(relative).exists(),
+            "precondition: this name must resolve outside the panel"
+        );
+        assert!(!dir.join(relative).exists());
+
+        let result = fm.handle_command(PanelCommand::PasteText {
+            text: relative.to_string(),
+        });
+        assert!(
+            matches!(result, CommandResult::Handled(false)),
+            "a relative path must fall through rather than resolve elsewhere"
+        );
+        assert!(fm.modal_request.is_none(), "no copy was offered");
+    }
+
+    /// With the search bar open the same keystroke is query text, so the
+    /// panel must not spend it on a copy even when it names a real file.
+    #[test]
+    fn a_pasted_path_is_left_to_the_open_search_bar() {
+        let temp_dir = TempDir::new().unwrap();
+        let dir = canonical_temp_path(&temp_dir);
+        std::fs::write(dir.join("report.pdf"), "x").unwrap();
+
+        let mut fm = FileManager::new_with_path(dir.clone());
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+
+        fm.open_name_bar();
+        let pasted = dir.join("report.pdf").display().to_string();
+        let result = fm.handle_command(PanelCommand::PasteText { text: pasted });
+        assert!(
+            matches!(result, CommandResult::Handled(false)),
+            "the search bar owns the paste"
+        );
+        assert!(fm.modal_request.is_none(), "no copy was offered");
     }
 
     /// Enter on an archive browses it like a directory; `..` at its root

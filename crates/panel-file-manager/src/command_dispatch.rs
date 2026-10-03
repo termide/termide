@@ -407,66 +407,116 @@ impl FileManager {
         events
     }
 
-    /// Copy the selected item paths to the system clipboard as newline-joined
-    /// paths (global `PanelCommand::Copy`).
+    /// Copy the selected items to the system clipboard (global
+    /// `PanelCommand::Copy`).
+    ///
+    /// Local items go as a native file list so other applications paste them
+    /// as files. Two cases stay newline-joined text:
+    ///
+    /// - Remote and in-archive panels: a `file://` URL cannot name such an
+    ///   entry, and a remote panel's `full_path` can look like a local path
+    ///   that also exists locally (see the rename path above), so `exists()`
+    ///   alone is not a safe test — the panel's protocol is.
+    /// - A selection holding a symlink: the file flavor asks the OS for the
+    ///   real path, so the link would arrive at the destination as its
+    ///   target, under the target's name. Text is the honest fallback. The
+    ///   whole selection falls back, not just the link — dropping items from
+    ///   the clipboard would be worse than losing the flavor.
     pub(crate) fn clipboard_copy_selection(&self) {
         let paths = self.get_selected_paths();
-        if !paths.is_empty() {
-            let text = paths
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join("\n");
+        if paths.is_empty() {
+            return;
+        }
+
+        let text = clipboard::paths_to_text(&paths);
+
+        if self.vfs.current_path().is_remote() || self.selection_has_symlink() {
+            let _ = clipboard::copy(&text);
+            return;
+        }
+
+        if let Err(e) = clipboard::copy_files(&paths) {
+            log::debug!("file clipboard unavailable ({}), copying paths as text", e);
             let _ = clipboard::copy(&text);
         }
     }
 
     /// Mark the selected item paths for move on the system clipboard
     /// (global `PanelCommand::Cut`).
+    ///
+    /// Deliberately text-only. Neither `CF_HDROP` nor `NSPasteboardTypeFileURL`
+    /// carries a "cut" flag, so publishing a file list here would make Finder
+    /// and Explorer paste a *copy* and leave the original in place — the user
+    /// would believe they had moved the file.
     pub(crate) fn clipboard_cut_selection(&self) {
         let paths = self.get_selected_paths();
         if !paths.is_empty() {
-            let text = paths
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join("\n");
+            let text = clipboard::paths_to_text(&paths);
             let _ = clipboard::cut(&text);
         }
     }
 
     /// Paste files referenced by the system clipboard into the cursor's tree
     /// level (global `PanelCommand::Paste`).
+    ///
+    /// Reads the clipboard itself: both the native file list (a copy made by
+    /// this panel or by Finder/Explorer) and newline-separated paths.
     pub(crate) fn clipboard_paste_files(&mut self) {
-        if let Some(text) = clipboard::paste() {
-            let files: Vec<PathBuf> = text
-                .lines()
-                .filter(|line| !line.is_empty())
-                .map(PathBuf::from)
-                .filter(|path| path.exists())
-                .collect();
+        self.request_paste_of(clipboard::paste_paths());
+    }
 
-            if !files.is_empty() {
-                // Land the paste at the cursor's tree level —
-                // same rule as create_file / create_dir use via
-                // `create_target_dir`. Cursor on a root entry
-                // pastes into `current_path`; cursor inside an
-                // expanded subdir, or on the expanded subdir
-                // itself, pastes into that subdir.
-                let (local_target, _vfs_target) = self.create_target_dir();
-                let t = termide_i18n::t();
-                let names = utils::paste_names_summary(&files);
-                let message =
-                    t.fm_paste_confirm(files.len(), &names, &local_target.display().to_string());
-                let action = PendingAction::CopyPath {
-                    sources: files,
-                    target_directory: Some(local_target),
-                    create_symlink: false,
-                    create_relative_symlink: false,
-                };
-                let modal = ConfirmModal::new(termide_i18n::t().modal_confirm_title(), &message);
-                self.modal_request = Some((action, ActiveModal::Confirm(Box::new(modal))));
-            }
+    /// Paste paths handed over by a bracketed paste (global
+    /// `PanelCommand::PasteText`).
+    ///
+    /// On macOS `Cmd+V` never reaches [`PanelCommand::Paste`]: the terminal
+    /// emulator answers it and types the clipboard's text flavor into the
+    /// pane, which arrives here. Taking the key only when the text names real
+    /// files keeps a prose paste from being swallowed — it falls through to
+    /// the panel's normal key handling unchanged.
+    ///
+    /// Only absolute paths qualify: a relative one would resolve against the
+    /// process working directory, not the panel's, so `exists()` could match
+    /// an unrelated file and paste it under the wrong name. Termide's own
+    /// copy publishes absolute paths, so this only discards text that was
+    /// never a file list.
+    pub(crate) fn clipboard_paste_text(&mut self, text: &str) -> bool {
+        let files: Vec<PathBuf> = clipboard::text_to_paths(text)
+            .into_iter()
+            .filter(|path| path.is_absolute() && path.exists())
+            .collect();
+
+        if files.is_empty() {
+            return false;
         }
+
+        self.request_paste_of(files);
+        true
+    }
+
+    /// Confirm, then copy `files` into the cursor's tree level. The single
+    /// path both paste entries funnel through.
+    fn request_paste_of(&mut self, files: Vec<PathBuf>) {
+        if files.is_empty() {
+            return;
+        }
+
+        // Land the paste at the cursor's tree level —
+        // same rule as create_file / create_dir use via
+        // `create_target_dir`. Cursor on a root entry
+        // pastes into `current_path`; cursor inside an
+        // expanded subdir, or on the expanded subdir
+        // itself, pastes into that subdir.
+        let (local_target, _vfs_target) = self.create_target_dir();
+        let t = termide_i18n::t();
+        let names = utils::paste_names_summary(&files);
+        let message = t.fm_paste_confirm(files.len(), &names, &local_target.display().to_string());
+        let action = PendingAction::CopyPath {
+            sources: files,
+            target_directory: Some(local_target),
+            create_symlink: false,
+            create_relative_symlink: false,
+        };
+        let modal = ConfirmModal::new(termide_i18n::t().modal_confirm_title(), &message);
+        self.modal_request = Some((action, ActiveModal::Confirm(Box::new(modal))));
     }
 }

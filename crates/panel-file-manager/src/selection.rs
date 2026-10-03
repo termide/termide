@@ -319,6 +319,26 @@ impl FileManager {
         deduped
     }
 
+    /// Whether any selected entry is a symbolic link.
+    ///
+    /// The clipboard's file flavor asks the OS for the real path, so a
+    /// symlink published there arrives at the destination as its *target*.
+    /// When the selection holds a link, the copy stays on the text path
+    /// instead — the conservative fallback, matching what the panel did
+    /// before the file flavor existed.
+    pub fn selection_has_symlink(&self) -> bool {
+        if self.selection.items.is_empty() {
+            return self
+                .entry_under_cursor()
+                .is_some_and(|te| te.file_entry.is_symlink);
+        }
+
+        self.selection.items.iter().copied().any(|vis_idx| {
+            self.tree_entry_at(vis_idx)
+                .is_some_and(|te| te.file_entry.is_symlink)
+        })
+    }
+
     /// Get list of selected files/directories as VfsPath (for remote operations).
     /// If nothing is selected, return current item under cursor.
     ///

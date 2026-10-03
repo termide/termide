@@ -147,9 +147,54 @@ Press `/` to start incremental search within the current directory tree:
 
 | Shortcut           | Action                                     |
 |-------------------|--------------------------------------------|
-| `Ctrl+C`          | Copy paths of selected items               |
-| `Ctrl+X`          | Cut paths of selected items                |
-| `Ctrl+V`          | Paste files from clipboard                 |
+| `Ctrl+C`          | Copy selected items as files             |
+| `Ctrl+X`          | Cut paths of selected items              |
+| `Ctrl+V`          | Paste files from clipboard               |
+| `Cmd+V` (macOS)   | Paste files copied from termide        |
+
+On macOS the terminal emulator answers `Cmd+V` itself and types the
+clipboard's *text* into the pane, so termide never sees that key as a paste.
+The file manager takes such typed text as a file paste when it names files
+that exist — termide's own copy carries the paths alongside the files, so
+`Cmd+V` pastes them. What a copy from another app does depends on whether
+that app also puts text on the clipboard; `Ctrl+V` always reads the file
+list directly and is the reliable key. Prose pastes fall through untouched.
+
+### What lands on the clipboard
+
+`Ctrl+C` publishes a **native file list** (`NSPasteboardTypeFileURL` on
+macOS, `CF_HDROP` on Windows, `text/uri-list` on Linux), so pasting into
+Finder, Explorer or a mail composer inserts the files themselves rather
+than a path string.
+
+Three consequences are worth knowing:
+
+- **`Ctrl+X` stays text.** No system clipboard format carries a "cut" flag
+  for files, so publishing a file list on cut would make Finder paste a
+  *copy* and leave the original in place. Cut therefore publishes paths as
+  text, and a real move between panels happens inside termide only.
+- **Remote and in-archive items stay text.** A `file://` URL cannot name an
+  SFTP or archive entry, so those panels keep copying path strings.
+- **Symlinks stay text.** The file flavor asks the OS for the real path, so
+  publishing a link would deliver its *target*, under the target's name. A
+  selection holding a symlink therefore copies paths as text, and the link
+  itself is preserved. Use the "Create symlink" option in the copy dialog
+  (`C` / `F5`) to make a link at the destination.
+
+The copy carries a plain-text flavor alongside the files wherever the
+platform allows it, so a browser address bar, another terminal or the
+terminal emulator's own `Cmd+V` receives the paths rather than nothing. On
+Linux, where the file flavor owns the clipboard outright, text consumers get
+nothing from a file copy; inside termide every text surface reads the file
+list back as newline-joined paths, so pasting into the editor, terminal,
+agent prompt or an input dialog still yields a usable path.
+
+The paste confirmation lists the names it is about to write — up to three,
+then a folded `… N` — over the destination, so it says which files land and
+not only how many.
+
+Over SSH or on a headless host there is no display server, so the file
+flavor is unavailable and copying falls back to path text.
 
 ### Target directory rule
 

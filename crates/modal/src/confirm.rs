@@ -52,6 +52,11 @@ impl ConfirmModal {
         self
     }
 
+    /// The message the modal asks about.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
     /// Calculate dynamic modal width based on content
     fn calculate_modal_width(&self, screen_width: u16) -> u16 {
         let title_width = self.title.len() as u16 + 2;
