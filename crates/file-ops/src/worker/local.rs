@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use super::conflict::generate_unique_path;
 use super::{ConflictAction, ConflictContext, OperationWorker, CHUNK_SIZE};
 
 /// Number of files between progress updates during scanning phase.
@@ -47,6 +48,74 @@ impl Drop for PartialFile<'_> {
 use crate::types::{
     OperationControl, OperationError, OperationPhase, OperationProgress, OperationResult,
 };
+
+/// How the destination of a local copy or move relates to its source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DestinationOverlap {
+    /// The paths are unrelated.
+    None,
+    /// The destination is the source entry itself (or a hard link to it):
+    /// writing it would truncate the data being read.
+    SameAsSource,
+    /// The destination lies inside the source directory: a copy would
+    /// recurse into its own output.
+    InsideSource,
+}
+
+/// Classify `dest` against `source` before anything is written.
+///
+/// `dest` is the final entry path (not its parent directory) and may not
+/// exist yet. Symlinked ancestors are resolved on both sides.
+pub fn destination_overlap(source: &Path, dest: &Path) -> DestinationOverlap {
+    if is_same_entry(source, dest) {
+        return DestinationOverlap::SameAsSource;
+    }
+    let is_real_dir = fs::symlink_metadata(source)
+        .map(|m| m.is_dir())
+        .unwrap_or(false);
+    if !is_real_dir {
+        return DestinationOverlap::None;
+    }
+    match (dunce::canonicalize(source), canonicalize_lenient(dest)) {
+        (Ok(source), Some(dest)) if dest.starts_with(&source) => DestinationOverlap::InsideSource,
+        _ => DestinationOverlap::None,
+    }
+}
+
+/// Whether both paths name the same directory entry, without following a
+/// final symlink (a link copied next to itself is a distinct entry).
+fn is_same_entry(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match (fs::symlink_metadata(a), fs::symlink_metadata(b)) {
+            (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
+            _ => false,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        match (dunce::canonicalize(a), dunce::canonicalize(b)) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+/// Canonicalize the longest existing prefix of `path` and append the rest.
+fn canonicalize_lenient(path: &Path) -> Option<PathBuf> {
+    let mut missing = Vec::new();
+    let mut current = path;
+    loop {
+        if let Ok(mut resolved) = dunce::canonicalize(current) {
+            resolved.extend(missing.iter().rev());
+            return Some(resolved);
+        }
+        missing.push(current.file_name()?);
+        current = current.parent()?;
+    }
+}
+
 /// Worker for local file/directory copy operations.
 pub struct LocalCopyWorker {
     /// Source paths.
@@ -402,9 +471,25 @@ impl OperationWorker for LocalCopyWorker {
                 self.destination.clone()
             };
 
+            let overlap = destination_overlap(source, &dest);
+            if overlap == DestinationOverlap::InsideSource {
+                return OperationResult::Failed(
+                    OperationError::DestinationInsideSource(source.clone()).to_string(),
+                );
+            }
+            if overlap == DestinationOverlap::SameAsSource && self.is_move {
+                // Moving an entry onto itself leaves it where it is.
+                files_copied += 1;
+                continue;
+            }
+
             // Check for conflict at top level before copying
             // Determine final destination (may be renamed)
-            let final_dest = if let Some(ref mut ctx) = conflict_ctx {
+            let final_dest = if overlap == DestinationOverlap::SameAsSource {
+                // Overwriting the source with itself would truncate it, so a
+                // copy into its own directory gets a fresh name instead.
+                generate_unique_path(&dest)
+            } else if let Some(ref mut ctx) = conflict_ctx {
                 let remaining = total_files.saturating_sub(files_copied + skipped_files);
                 match ctx.check_conflict(source, &dest, remaining) {
                     Ok(ConflictAction::Proceed) => dest.clone(),
@@ -803,6 +888,159 @@ mod tests {
         let result = worker.execute(&control, &tx);
         drop(tx);
         (result, rx.iter().collect())
+    }
+
+    /// Run a copy/move the way the batch flow does after "Overwrite":
+    /// with a conflict context that never asks.
+    fn run_overwriting(mut worker: LocalCopyWorker) -> OperationResult {
+        use crate::types::{ConflictMode, OperationId};
+        let control = OperationControl::new();
+        let (tx, _rx) = mpsc::channel();
+        let (event_tx, _events) = mpsc::channel();
+        let (_resolution_tx, resolution_rx) = mpsc::channel();
+        let mut ctx = ConflictContext {
+            operation_id: OperationId::new(1),
+            conflict_mode: ConflictMode::OverwriteAll,
+            event_tx,
+            resolution_rx,
+        };
+        worker.execute_with_conflicts(&control, &tx, Some(&mut ctx))
+    }
+
+    fn assert_success(result: &OperationResult) {
+        assert!(result.is_success(), "{result:?}");
+    }
+
+    #[test]
+    fn copy_onto_itself_keeps_the_source_and_renames_the_copy() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("notes.txt");
+        fs::write(&file, b"precious").unwrap();
+
+        // Destination given as the file itself and as its directory.
+        assert_success(&run_overwriting(LocalCopyWorker::new(
+            vec![file.clone()],
+            file.clone(),
+            false,
+        )));
+        assert_success(&run_overwriting(LocalCopyWorker::new(
+            vec![file.clone()],
+            tmp.path().to_path_buf(),
+            false,
+        )));
+
+        assert_eq!(fs::read(&file).unwrap(), b"precious");
+        assert_eq!(
+            fs::read(tmp.path().join("notes (1).txt")).unwrap(),
+            b"precious"
+        );
+        assert_eq!(
+            fs::read(tmp.path().join("notes (2).txt")).unwrap(),
+            b"precious"
+        );
+    }
+
+    #[test]
+    fn directory_copied_into_its_parent_gets_a_fresh_name() {
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("proj");
+        tree(&source);
+
+        assert_success(&run_overwriting(LocalCopyWorker::new(
+            vec![source.clone()],
+            tmp.path().to_path_buf(),
+            false,
+        )));
+
+        assert_eq!(fs::read(source.join("sub/deeper/c.txt")).unwrap(), b"ccc");
+        assert_eq!(
+            fs::read(tmp.path().join("proj (1)/sub/deeper/c.txt")).unwrap(),
+            b"ccc"
+        );
+    }
+
+    #[test]
+    fn move_onto_itself_is_a_no_op() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("notes.txt");
+        fs::write(&file, b"precious").unwrap();
+        let dir = tmp.path().join("proj");
+        tree(&dir);
+
+        assert_success(&run_overwriting(LocalCopyWorker::new(
+            vec![file.clone(), dir.clone()],
+            tmp.path().to_path_buf(),
+            true,
+        )));
+
+        assert_eq!(fs::read(&file).unwrap(), b"precious");
+        assert_eq!(fs::read(dir.join("sub/deeper/c.txt")).unwrap(), b"ccc");
+        assert_eq!(fs::read_dir(tmp.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn directory_into_its_own_subtree_is_refused() {
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("proj");
+        tree(&source);
+
+        for is_move in [false, true] {
+            let result = run_overwriting(LocalCopyWorker::new(
+                vec![source.clone()],
+                source.join("sub"),
+                is_move,
+            ));
+            assert!(matches!(result, OperationResult::Failed(_)), "{result:?}");
+        }
+
+        assert!(!source.join("sub/proj").exists());
+        assert_eq!(fs::read(source.join("sub/deeper/c.txt")).unwrap(), b"ccc");
+    }
+
+    #[test]
+    fn overlap_classification() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("proj");
+        tree(&dir);
+        let file = dir.join("a.txt");
+
+        assert_eq!(
+            destination_overlap(&file, &file),
+            DestinationOverlap::SameAsSource
+        );
+        assert_eq!(
+            destination_overlap(&dir, &dir.join("new/proj")),
+            DestinationOverlap::InsideSource
+        );
+        assert_eq!(
+            destination_overlap(&dir, &tmp.path().join("proj2")),
+            DestinationOverlap::None
+        );
+        assert_eq!(
+            destination_overlap(&file, &dir.join("b.txt")),
+            DestinationOverlap::None
+        );
+    }
+
+    /// A destination reached through a symlink into the source is still
+    /// inside the source.
+    #[cfg(unix)]
+    #[test]
+    fn overlap_sees_through_symlinked_ancestors() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("proj");
+        tree(&dir);
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(dir.join("sub"), &link).unwrap();
+
+        assert_eq!(
+            destination_overlap(&dir, &link.join("proj")),
+            DestinationOverlap::InsideSource
+        );
+        assert_eq!(
+            destination_overlap(&dir.join("a.txt"), &tmp.path().join("proj/../proj/a.txt")),
+            DestinationOverlap::SameAsSource
+        );
     }
 
     /// Every early return in `copy_file` (cancel, pause-cancel, read/write

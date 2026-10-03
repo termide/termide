@@ -416,6 +416,10 @@ pub enum OperationError {
     /// Invalid operation.
     #[error("Invalid operation: {0}")]
     Invalid(String),
+
+    /// A directory cannot be copied or moved into its own subtree.
+    #[error("Cannot copy or move {} into itself", .0.display())]
+    DestinationInsideSource(PathBuf),
 }
 
 /// Events emitted by the operation system.

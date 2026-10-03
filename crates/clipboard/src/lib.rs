@@ -35,7 +35,7 @@ static CLIPBOARD: OnceLock<Option<Mutex<Clipboard>>> = OnceLock::new();
 /// the clipboard actually holds (and, on macOS, its `changeCount`) rather than
 /// trusting that nothing else has written to it since.
 struct CutMarker {
-    /// The paths published as the cut list.
+    /// The paths published as the cut list, normalized by [`normalize`].
     paths: Vec<PathBuf>,
     /// macOS pasteboard change counter at publish time, used to notice that
     /// another application has since replaced the contents. `None` elsewhere,
@@ -50,7 +50,7 @@ impl CutMarker {
     /// a mismatched list is not a cut, and on macOS a pasteboard that has
     /// moved on belongs to someone else, so the cut is gone.
     fn matches(&self, paths: &[PathBuf], now_change_count: Option<isize>) -> bool {
-        if self.paths != paths {
+        if self.paths != normalize(paths) {
             return false;
         }
         match (self.change_count, now_change_count) {
@@ -58,6 +58,18 @@ impl CutMarker {
             _ => true,
         }
     }
+}
+
+/// Resolve symlinked ancestors so both sides of the cut comparison agree.
+///
+/// The native file list comes back canonicalized (arboard on macOS and Linux
+/// resolves it), while the panel publishes the path it shows, which may run
+/// through a symlinked directory. A path that cannot be resolved stays as is.
+fn normalize(paths: &[PathBuf]) -> Vec<PathBuf> {
+    paths
+        .iter()
+        .map(|path| dunce::canonicalize(path).unwrap_or_else(|_| path.clone()))
+        .collect()
 }
 
 /// The pending cut, if the clipboard still carries one.
@@ -113,6 +125,27 @@ pub fn cut_files(paths: &[PathBuf]) -> Result<(), String> {
     Ok(())
 }
 
+/// Cut a list of files through the text flavor: publish the paths as text
+/// and remember them as the cut list.
+///
+/// For a selection the native file list cannot carry (a symlink, which the
+/// OS would resolve to its target) or a clipboard that refuses it. A paste in
+/// the file manager reads the paths back from the text, so it still moves.
+pub fn cut_paths_as_text(paths: &[PathBuf]) -> Result<(), String> {
+    cut_publishing(paths, copy)
+}
+
+/// Publish `paths` as text through `publish`, then mark them as cut. The
+/// marker is set only after the write, because [`copy`] clears it.
+fn cut_publishing(
+    paths: &[PathBuf],
+    publish: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    publish(&paths_to_text(paths))?;
+    mark_cut_with(paths, pasteboard_change_count());
+    Ok(())
+}
+
 /// Remember `paths` as the cut list without publishing anything.
 ///
 /// The marker carries no pasteboard counter, so it stays valid until something
@@ -126,7 +159,7 @@ pub fn mark_cut(paths: &[PathBuf]) {
 
 fn mark_cut_with(paths: &[PathBuf], change_count: Option<isize>) {
     let marker = CutMarker {
-        paths: paths.to_vec(),
+        paths: normalize(paths),
         change_count,
     };
     if let Ok(mut guard) = cut_state().lock() {
@@ -265,9 +298,7 @@ fn copy_arboard(text: &str) -> Result<(), String> {
             .clipboard(LinuxClipboardKind::Primary)
             .text(text.to_string())
         {
-            #[cfg(debug_assertions)]
-            log::warn!("Failed to set PRIMARY selection: {}", e);
-            let _ = e; // Suppress unused warning in release
+            log::debug!("Failed to set PRIMARY selection: {}", e);
         }
     }
 
@@ -294,9 +325,10 @@ fn copy_arboard(text: &str) -> Result<(), String> {
 /// Platform notes, all of which are why this cannot be a plain
 /// `set_text` followed by `file_list` on every OS:
 ///
-/// - macOS/Linux: `file_list` owns the clipboard and clears it, so no text
-///   flavor is left behind. Text consumers recover the paths via
-///   [`paste_files`].
+/// - macOS: `file_list` owns the clipboard and clears it, so the text
+///   flavor is added back afterwards.
+/// - Linux: `file_list` owns the clipboard and clears it, so no text flavor
+///   is left behind. Text consumers recover the paths via [`paste_files`].
 /// - Windows: `SetClipboardData` is only allowed for the current clipboard
 ///   owner, and `file_list` does not clear. Writing the text first calls
 ///   `EmptyClipboard`, which takes ownership and makes the file write legal;
@@ -337,13 +369,8 @@ fn copy_files_arboard(paths: &[PathBuf]) -> Result<(), String> {
     {
         // Take ownership first: `file_list` calls `SetClipboardData` without
         // clearing, which the OS rejects unless we already own the clipboard.
-        let text = paths
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
         clipboard
-            .set_text(&text)
+            .set_text(paths_to_text(paths))
             .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
         clipboard
             .set()
@@ -478,7 +505,7 @@ pub fn paste_paths() -> Vec<PathBuf> {
 /// Paste text for a text-consuming panel (editor, terminal, agent prompt).
 ///
 /// Identical to [`paste`] except that a clipboard holding only a native file
-/// list — which is what [`copy_files`] leaves on macOS and Linux — yields the
+/// list — which is what [`copy_files`] leaves on Linux — yields the
 /// newline-joined paths instead of nothing. Without this, `Ctrl+V` after a
 /// file copy would be a silent no-op outside the file manager.
 pub fn paste_text_or_paths() -> Option<String> {
@@ -609,6 +636,57 @@ mod tests {
         // A marker taken where no counter exists must not be invalidated by a
         // platform that later reports one, and vice versa.
         assert!(plain.matches(&a, Some(9)));
+    }
+
+    /// A cut that has to travel as text (a symlink in the selection, or no
+    /// file flavor) must still be a cut: the marker is set after the write,
+    /// which would otherwise have cleared it.
+    #[test]
+    fn a_cut_published_as_text_stays_a_cut() {
+        let paths = vec![PathBuf::from("/tmp/termide-cut-text/one.txt")];
+        let mut published = String::new();
+
+        cut_publishing(&paths, |text| {
+            clear_cut();
+            published = text.to_string();
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(published, paths_to_text(&paths));
+        let guard = cut_state().lock().unwrap();
+        let marker = guard.as_ref().expect("the cut is remembered");
+        assert_eq!(marker.paths, paths);
+    }
+
+    #[test]
+    fn a_failed_text_cut_marks_nothing() {
+        clear_cut();
+        let paths = vec![PathBuf::from("/tmp/termide-cut-text/two.txt")];
+        assert!(cut_publishing(&paths, |_| Err("no clipboard".to_string())).is_err());
+        assert!(cut_state().lock().unwrap().is_none());
+    }
+
+    /// The file list comes back canonicalized, so a cut made under a
+    /// symlinked directory must still match it.
+    #[cfg(unix)]
+    #[test]
+    fn the_cut_marker_sees_through_symlinked_directories() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let real = tmp.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        std::fs::write(real.join("a.txt"), b"a").unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let marker = CutMarker {
+            paths: normalize(&[link.join("a.txt")]),
+            change_count: None,
+        };
+        let resolved = dunce::canonicalize(real.join("a.txt")).unwrap();
+        assert!(marker.matches(&[resolved], None));
+        assert!(marker.matches(&[link.join("a.txt")], None));
+        assert!(!marker.matches(&[link.join("b.txt")], None));
     }
 
     #[test]

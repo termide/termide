@@ -61,8 +61,7 @@ pub trait Translation: Send + Sync {
     /// Hindi put it at the end, so a `{mode}` placeholder cannot be filled
     /// grammatically. `names` is a trailing block of the actual file names,
     /// so the confirmation says what lands and not only how many; it sits on
-    /// its own lines, which is why one key serves every word order. A move
-    /// variant gets its own key when cut lands.
+    /// its own lines, which is why one key serves every word order.
     fn fm_paste_confirm(&self, count: usize, names: &str, dest: &str) -> String;
     /// "Move N files to: <dest>" — the same shape as [`Self::fm_paste_confirm`]
     /// with the verb swapped, used when the clipboard carries a cut rather
@@ -73,8 +72,8 @@ pub trait Translation: Send + Sync {
     /// in-archive panel. A cut that cannot move anything must say so rather
     /// than paste a copy in silence.
     fn fm_cut_local_only(&self) -> &str;
-    fn fm_copy_prompt(&self, name: &str) -> String;
-    fn fm_move_prompt(&self, name: &str) -> String;
+    /// Why a directory cannot be copied or moved into its own subtree.
+    fn fm_copy_into_itself(&self, name: &str) -> String;
     fn git_operation_cancelled(&self) -> &str;
 
     // Modal buttons

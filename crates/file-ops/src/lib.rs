@@ -89,6 +89,6 @@ pub use types::{
     OperationPriority, OperationProgress, OperationRequest, OperationResult, OperationType,
 };
 pub use worker::{
-    ConflictContext, DownloadWorker, LocalCopyWorker, LocalDeleteWorker, OperationWorker,
-    SpeedTracker, UploadWorker,
+    destination_overlap, ConflictContext, DestinationOverlap, DownloadWorker, LocalCopyWorker,
+    LocalDeleteWorker, OperationWorker, SpeedTracker, UploadWorker,
 };

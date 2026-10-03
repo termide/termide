@@ -121,7 +121,7 @@ impl ConflictContext {
 
 /// Generate a unique path by appending a number suffix.
 /// Example: "file.txt" -> "file (1).txt", "file (1).txt" -> "file (2).txt"
-fn generate_unique_path(path: &Path) -> PathBuf {
+pub(crate) fn generate_unique_path(path: &Path) -> PathBuf {
     let parent = path.parent().unwrap_or(Path::new(""));
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let extension = path.extension().and_then(|e| e.to_str());

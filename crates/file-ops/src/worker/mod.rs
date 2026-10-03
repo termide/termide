@@ -15,7 +15,7 @@ use crate::types::{OperationControl, OperationProgress, OperationResult};
 pub use conflict::{ConflictAction, ConflictContext};
 pub use cross_protocol::{CrossProtocolDirection, CrossProtocolWorker};
 pub use download::DownloadWorker;
-pub use local::{LocalCopyWorker, LocalDeleteWorker};
+pub use local::{destination_overlap, DestinationOverlap, LocalCopyWorker, LocalDeleteWorker};
 pub use pack::PackWorker;
 pub use remote_delete::RemoteDeleteWorker;
 pub use upload::UploadWorker;
