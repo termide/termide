@@ -338,9 +338,9 @@ Linux-окружений, `Ctrl+Alt+<цифра>` доходит из legacy-т�
 
 ```toml
 [general.keybindings]
-prev_project = "Ctrl+Alt+Left"
-next_project = "Ctrl+Alt+Right"
-goto_project_1 = "Ctrl+Alt+1"
+prev_project = "Shift+F5"
+next_project = "Shift+F6"
+goto_project_1 = "Shift+F1"
 ```
 
 Назначенная клавиша показывается рядом с проектом в меню `Проекты`.

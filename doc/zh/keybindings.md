@@ -287,9 +287,9 @@ bash 中插入上一条命令的最后一个参数。请将它们绑定到您系
 
 ```toml
 [general.keybindings]
-prev_project = "Ctrl+Alt+Left"
-next_project = "Ctrl+Alt+Right"
-goto_project_1 = "Ctrl+Alt+1"
+prev_project = "Shift+F5"
+next_project = "Shift+F6"
+goto_project_1 = "Shift+F1"
 ```
 
 绑定后，按键会显示在 `项目` 菜单中对应项目的旁边。
