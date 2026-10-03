@@ -72,8 +72,6 @@ pub trait Translation: Send + Sync {
     /// in-archive panel. A cut that cannot move anything must say so rather
     /// than paste a copy in silence.
     fn fm_cut_local_only(&self) -> &str;
-    fn fm_copy_prompt(&self, name: &str) -> String;
-    fn fm_move_prompt(&self, name: &str) -> String;
     /// Why a directory cannot be copied or moved into its own subtree.
     fn fm_copy_into_itself(&self, name: &str) -> String;
     fn git_operation_cancelled(&self) -> &str;

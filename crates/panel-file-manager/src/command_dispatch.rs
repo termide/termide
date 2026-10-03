@@ -210,31 +210,19 @@ impl FileManager {
                     }
                 }
             }
+            // The app answers a copy/move request with its own destination
+            // picker (`handle_modal_request` sees no target directory), so
+            // the modal sent along is a placeholder that is never shown.
             FmCommand::CopyFiles => {
                 let paths = self.get_selected_paths();
                 if !paths.is_empty() {
-                    let t = termide_i18n::t();
-                    let (message, default_dest) = if paths.len() == 1 {
-                        let name = path_utils::get_file_name_str(&paths[0]);
-                        // Single file: show full path with filename (user can rename)
-                        (
-                            t.fm_copy_prompt(name),
-                            format!("{}/{}", self.current_path.display(), name),
-                        )
-                    } else {
-                        // Multiple files: directory only (trailing slash)
-                        (
-                            format!("Copy {} items to:", paths.len()),
-                            format!("{}/", self.current_path.display()),
-                        )
-                    };
-                    let modal = InputModal::with_default("Copy", &message, &default_dest);
                     let action = PendingAction::CopyPath {
                         sources: paths,
                         target_directory: None,
                         create_symlink: false,
                         create_relative_symlink: false,
                     };
+                    let modal = InputModal::new("", "");
                     self.modal_request = Some((action, ActiveModal::Input(Box::new(modal))));
                 }
             }
@@ -242,21 +230,11 @@ impl FileManager {
             FmCommand::MoveFiles => {
                 let paths = self.get_selected_paths();
                 if !paths.is_empty() {
-                    let t = termide_i18n::t();
-                    let (message, default_dest) = if paths.len() == 1 {
-                        let name = path_utils::get_file_name_str(&paths[0]);
-                        (t.fm_move_prompt(name), name.to_string())
-                    } else {
-                        (
-                            format!("Move {} items to:", paths.len()),
-                            format!("{}/", self.current_path.display()),
-                        )
-                    };
-                    let modal = InputModal::with_default("Move", &message, &default_dest);
                     let action = PendingAction::MovePath {
                         sources: paths,
                         target_directory: None,
                     };
+                    let modal = InputModal::new("", "");
                     self.modal_request = Some((action, ActiveModal::Input(Box::new(modal))));
                 }
             }

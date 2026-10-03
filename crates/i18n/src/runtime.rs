@@ -1375,14 +1375,6 @@ impl Translation for RuntimeTranslation {
         self.format_paste("fm_paste_move_confirm", count, names, dest)
     }
 
-    fn fm_copy_prompt(&self, name: &str) -> String {
-        self.format("fm_copy_prompt", &[("name", name)])
-    }
-
-    fn fm_move_prompt(&self, name: &str) -> String {
-        self.format("fm_move_prompt", &[("name", name)])
-    }
-
     fn fm_copy_into_itself(&self, name: &str) -> String {
         self.format("fm_copy_into_itself", &[("name", name)])
     }
@@ -2315,10 +2307,9 @@ mod tests {
     }
 
     /// A paste of a cut deletes the sources, so its confirmation cannot read
-    /// like a copy. The move string is derived from each locale's own
-    /// `fm_move_prompt`, which is exactly the risk this guards: a derivation
-    /// that silently produced the copy text again would render "Copy" over a
-    /// destructive Yes.
+    /// like a copy. Each move string swaps the verb in the locale's copy
+    /// string, which is exactly the risk this guards: a swap that silently
+    /// left the copy text in place would render "Copy" over a destructive Yes.
     #[test]
     fn the_move_confirmation_differs_from_the_copy_in_every_language() {
         for (code, _) in crate::SUPPORTED_LANGUAGES {
