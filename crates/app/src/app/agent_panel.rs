@@ -277,8 +277,9 @@ pub(crate) fn restore_agent_panel(
             None
         }
     });
-    // termide's project root is the directory it was started in; the layout
-    // restore runs off the App, so read it from the same source.
+    // termide's project root is its working directory, which follows the
+    // current project; the layout restore runs off the App, so read it from
+    // the same source.
     let project_root = std::env::current_dir().unwrap_or_else(|_| cwd.clone());
     Some(AgentPanel::new(agent_setup(
         settings,

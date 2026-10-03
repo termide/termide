@@ -20,15 +20,11 @@ impl App {
     pub(in crate::app) fn handle_open_projects_modal(&mut self) -> Result<()> {
         use crate::projects_menu::listed_projects;
         use termide_modal::{ProjectItem, ProjectsModal};
-        use termide_project::{format_local_minute, list_all_projects};
+        use termide_project::format_local_minute;
 
         let t = i18n::t();
 
-        let known: Vec<(PathBuf, std::time::SystemTime)> = list_all_projects()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|info| (info.project_path, info.modified))
-            .collect();
+        let known = crate::projects_menu::known_projects();
         let items: Vec<ProjectItem> = listed_projects(&self.state.open_projects, &known)
             .into_iter()
             .map(|project| ProjectItem {

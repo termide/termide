@@ -209,7 +209,7 @@ impl HelpGenerator {
         kb: &GlobalKeybindings,
         t: &dyn termide_i18n::Translation,
     ) -> HelpSection {
-        let entries = vec![
+        let mut entries = vec![
             HelpEntry {
                 keys: "Esc".to_string(),
                 description: t.help_desc_escape_close().to_string(),
@@ -283,6 +283,32 @@ impl HelpGenerator {
                 description: t.help_desc_goto_panel().to_string(),
             },
         ];
+        // Switching projects ships unbound: listed once the user binds it.
+        let cycle = [&kb.prev_project, &kb.next_project]
+            .into_iter()
+            .map(Self::format_keys)
+            .filter(|keys| !keys.is_empty())
+            .collect::<Vec<_>>()
+            .join(" / ");
+        if !cycle.is_empty() {
+            entries.push(HelpEntry {
+                keys: cycle,
+                description: t.help_desc_cycle_project().to_string(),
+            });
+        }
+        let goto = kb
+            .goto_project()
+            .into_iter()
+            .map(Self::format_keys)
+            .filter(|keys| !keys.is_empty())
+            .collect::<Vec<_>>()
+            .join(" / ");
+        if !goto.is_empty() {
+            entries.push(HelpEntry {
+                keys: goto,
+                description: t.help_desc_goto_project().to_string(),
+            });
+        }
 
         HelpSection {
             header: t.help_section_panels().to_string(),

@@ -378,6 +378,7 @@ impl App {
     /// Switch to a different project. The project left stays open in the
     /// background: its panels are parked, not dropped.
     pub(super) fn switch_to_project(&mut self, new_project_root: std::path::PathBuf) -> Result<()> {
+        let new_project_root = super::parked_projects::project_root_of(new_project_root);
         if new_project_root == self.project_root {
             return Ok(());
         }
@@ -423,12 +424,7 @@ impl App {
             return Ok(());
         }
         log::info!("Deleted project layout for {:?}", path);
-        match menu {
-            Some(selection) => self.reopen_projects_menu(selection),
-            // Reopen the projects modal with updated list
-            None => self.handle_open_projects_modal()?,
-        }
-        Ok(())
+        self.return_to_projects(menu)
     }
 
     /// Handle new project modal result - create/switch to a project in selected directory
@@ -450,6 +446,13 @@ impl App {
         use termide_panel_file_manager::FileManager;
         use termide_project::ProjectLayout;
 
+        let new_project_root = super::parked_projects::project_root_of(new_project_root);
+        if new_project_root == self.project_root {
+            // Resetting it would stop what runs in its panels.
+            self.state
+                .set_info(termide_i18n::t().projects_already_current().to_string());
+            return Ok(());
+        }
         if self.open_projects.is_open(&new_project_root) {
             return self.switch_to_project(new_project_root);
         }
@@ -517,6 +520,8 @@ impl App {
     /// Move the current project's stored state to a new directory
     fn move_project_to(&mut self, new_project_root: std::path::PathBuf) -> Result<()> {
         use termide_project::ProjectLayout;
+
+        let new_project_root = super::parked_projects::project_root_of(new_project_root);
 
         let old_project_root = self.project_root.clone();
 

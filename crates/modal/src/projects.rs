@@ -24,6 +24,13 @@ use termide_ui::str_display_width;
 
 use crate::{calculate_modal_width, centered_rect_with_size, Modal, ModalResult, ModalWidthConfig};
 
+/// Marks the current project.
+pub const CURRENT_MARK: &str = "●";
+/// Marks a project open in the background.
+pub const OPEN_MARK: &str = "○";
+/// Marks a project with a panel that waits for the user.
+pub const ATTENTION_MARK: &str = "🔔";
+
 /// Action returned by the projects modal
 #[derive(Debug, Clone)]
 pub enum ProjectAction {
@@ -61,23 +68,27 @@ impl ProjectItem {
     /// columns, so the project's own name and the bell stay in view.
     fn segments(&self, width: usize) -> (String, String, String) {
         let mark = if self.is_current {
-            "● "
+            format!("{CURRENT_MARK} ")
         } else if self.is_open {
-            "○ "
+            format!("{OPEN_MARK} ")
         } else {
-            "  "
+            "  ".to_string()
         };
         let time = if self.modified.is_empty() {
             String::new()
         } else {
             format!("{} ", self.modified)
         };
-        let tail = if self.attention { " 🔔" } else { "" };
+        let tail = if self.attention {
+            format!(" {ATTENTION_MARK}")
+        } else {
+            String::new()
+        };
         let room = width.saturating_sub(
-            str_display_width(mark) + str_display_width(&time) + str_display_width(tail),
+            str_display_width(&mark) + str_display_width(&time) + str_display_width(&tail),
         );
         let path = termide_ui::path_utils::truncate_left(&self.display_path, room);
-        (mark.to_string(), time, format!("{path}{tail}"))
+        (mark, time, format!("{path}{tail}"))
     }
 
     /// The row's text, without the padding around it.

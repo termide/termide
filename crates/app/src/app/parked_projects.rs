@@ -19,6 +19,7 @@ use super::App;
 use crate::open_projects::OpenProjectView;
 use crate::projects_menu::path_order;
 use crate::state::{ActiveModal, PendingAction};
+use crate::PanelExt;
 
 /// What a project open in the background keeps.
 pub(super) struct ParkedProject {
@@ -46,6 +47,27 @@ impl ParkedProject {
         self.panels()
             .any(|panel| panel.needs_close_confirmation().is_some())
     }
+}
+
+/// Queue `event`, raised by a panel of a parked project, for when the project
+/// is current again. A redraw request means nothing off screen — a busy
+/// agent raises one ten times a second — and one directory change per queue
+/// says all that the next does.
+fn queue_parked_event(events: &mut Vec<PanelEvent>, event: PanelEvent) {
+    match event {
+        PanelEvent::NeedsRedraw => {}
+        PanelEvent::WorkingDirectoryChanged
+            if events
+                .iter()
+                .any(|queued| matches!(queued, PanelEvent::WorkingDirectoryChanged)) => {}
+        event => events.push(event),
+    }
+}
+
+/// The root a project is known by: the directory with symlinks resolved, so
+/// one project reached by two paths is opened once.
+pub(super) fn project_root_of(path: PathBuf) -> PathBuf {
+    dunce::canonicalize(&path).unwrap_or(path)
 }
 
 /// `root` as the menus and messages name it.
@@ -96,6 +118,19 @@ impl App {
         self.layout_manager = parked.layout;
         self.layout_manager
             .redistribute_widths_proportionally(self.state.terminal.width);
+        // Diagnostics published while the project was parked reached only
+        // `all_diagnostics`.
+        for panel in self.layout_manager.iter_all_panels_mut() {
+            if let Some(editor) = panel.as_editor_mut() {
+                let fresh = editor
+                    .file_path()
+                    .and_then(|path| self.state.all_diagnostics.get(path))
+                    .cloned();
+                if let Some(diagnostics) = fresh {
+                    editor.update_diagnostics(diagnostics);
+                }
+            }
+        }
         self.state.needs_watcher_registration = true;
         self.state.needs_redraw = true;
         if !parked.events.is_empty() {
@@ -131,20 +166,31 @@ impl App {
             return;
         }
         let mut ring = false;
-        for (_, parked) in self.open_projects.parked_mut() {
+        let mut attention_changed = false;
+        for (root, parked) in self.open_projects.parked_mut() {
             for panel in parked.layout.iter_all_panels_mut() {
                 for event in panel.tick() {
                     match event {
                         PanelEvent::RequestAttention => ring = true,
-                        event => parked.events.push(event),
+                        event => queue_parked_event(&mut parked.events, event),
                     }
                 }
             }
+            // Rebuilt below only when a mark changes: this runs every tick.
+            let shown = self
+                .state
+                .open_projects
+                .iter()
+                .find(|view| view.root == root)
+                .is_some_and(|view| view.attention);
+            attention_changed |= shown != parked.needs_attention();
         }
         if ring {
             self.state.attention_bell();
         }
-        self.sync_open_projects();
+        if attention_changed {
+            self.sync_open_projects();
+        }
     }
 
     /// The open projects' roots in the order the menus list them.
@@ -214,6 +260,14 @@ impl App {
     /// panels, which stops the processes in its terminals.
     pub(super) fn close_project(&mut self, root: &Path, menu: Option<usize>) -> Result<()> {
         if let Some(mut parked) = self.open_projects.close(root) {
+            // As closing an editor panel does: the server forgets the file.
+            if let Some(lsp_manager) = self.state.lsp_manager.as_ref() {
+                for panel in parked.layout.iter_all_panels_mut() {
+                    if let Some(editor) = panel.as_editor_mut() {
+                        editor.cleanup_lsp(lsp_manager);
+                    }
+                }
+            }
             if self.persist_layout {
                 if let Err(e) = save_layout_of(root, &mut parked.layout) {
                     log::error!("Failed to save the layout of {:?}: {}", root, e);
@@ -222,6 +276,12 @@ impl App {
             log::info!("Closed project {:?}", root);
         }
         self.sync_open_projects();
+        self.return_to_projects(menu)
+    }
+
+    /// Go back to where closing or deleting a project was started: the
+    /// Projects menu at row `menu`, or the project switcher.
+    pub(super) fn return_to_projects(&mut self, menu: Option<usize>) -> Result<()> {
         match menu {
             Some(selection) => self.reopen_projects_menu(selection),
             None => self.handle_open_projects_modal()?,
@@ -261,5 +321,34 @@ impl App {
                 log::error!("Failed to save the layout of {:?}: {}", root, e);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_parked_queue_drops_redraws_and_keeps_one_directory_change() {
+        let mut events = Vec::new();
+        for _ in 0..100 {
+            queue_parked_event(&mut events, PanelEvent::NeedsRedraw);
+            queue_parked_event(&mut events, PanelEvent::WorkingDirectoryChanged);
+        }
+        queue_parked_event(&mut events, PanelEvent::ShowError("failed".into()));
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], PanelEvent::WorkingDirectoryChanged));
+        assert!(matches!(events[1], PanelEvent::ShowError(_)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_project_reached_through_a_symlink_has_the_same_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert_eq!(project_root_of(link), project_root_of(real));
     }
 }

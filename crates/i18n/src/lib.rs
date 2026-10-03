@@ -190,6 +190,8 @@ pub trait Translation: Send + Sync {
     fn help_desc_prev_panel(&self) -> &str;
     fn help_desc_next_panel(&self) -> &str;
     fn help_desc_goto_panel(&self) -> &str;
+    fn help_desc_cycle_project(&self) -> &str;
+    fn help_desc_goto_project(&self) -> &str;
     fn help_desc_save_as(&self) -> &str;
     fn help_desc_reload(&self) -> &str;
     fn help_desc_duplicate_line(&self) -> &str;
@@ -1127,6 +1129,7 @@ pub trait Translation: Send + Sync {
     fn projects_close_title(&self) -> &str;
     fn projects_close_warning(&self) -> &str;
     fn projects_already_open(&self) -> &str;
+    fn projects_already_current(&self) -> &str;
 
     // Detached sessions
     fn detach_instance(&self) -> &str;

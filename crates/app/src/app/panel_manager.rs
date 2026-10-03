@@ -86,7 +86,11 @@ impl App {
             // panel returns control to the launching tool (git, crontab, ...)
             // like nano/vim would, instead of leaving an empty shell behind.
             if !self.persist_layout {
-                self.state.quit();
+                // Through the quit request, which asks first when a project
+                // left open in the background still runs something.
+                if let Err(e) = self.handle_quit_request() {
+                    log::error!("Failed to quit: {}", e);
+                }
                 return;
             }
             let help = Help::new(&self.state.config);

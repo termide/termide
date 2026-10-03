@@ -312,7 +312,7 @@ The disk window lists one row per storage pool, with the filesystem type as a se
 | `Alt+Backspace` / `F11` | Toggle panel stacking (merge/unstack) |
 | `Alt+K`           | Open panel action menu (`[≡]` dropdown)    |
 | `Shift+F10`       | Open panel action menu (alternative)       |
-| `Alt+\`           | Open projects menu                         |
+| `Alt+\`           | Open the project switcher                  |
 | `Alt+N`           | Start a new project                        |
 | `Alt+B`           | Add bookmark                               |
 | `Ctrl+P`          | Open command palette                       |
