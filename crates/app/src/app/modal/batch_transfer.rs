@@ -164,6 +164,25 @@ impl App {
             .with_destination_directory(destination_is_directory)
             .with_source_location(source_location);
 
+        // Refuse up front rather than fail midway through a batch.
+        let single = batch_op.sources.len() == 1;
+        if let Some(source) = batch_op.sources.iter().find(|source| {
+            !batch_op.source_is_remote(source)
+                && termide_file_ops::destination_overlap(
+                    source,
+                    &path_utils::resolve_batch_destination_path(
+                        source,
+                        &batch_op.destination,
+                        single,
+                        batch_op.destination_is_directory,
+                    ),
+                ) == termide_file_ops::DestinationOverlap::InsideSource
+        }) {
+            let message = termide_i18n::t().fm_copy_into_itself(&source_name(source));
+            self.show_error_modal(message);
+            return Ok(());
+        }
+
         self.process_batch_operation(batch_op);
         Ok(())
     }

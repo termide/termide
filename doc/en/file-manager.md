@@ -66,6 +66,12 @@ the source directory is offered only when no panel sits anywhere else. When the
 panels span more than one directory, a dropdown under the field lists them all;
 the path stays editable.
 
+Copying or pasting an item into the directory it already lives in makes a
+copy next to it named `name (1).ext` (the next free number) instead of
+asking to overwrite the original; moving an item onto itself does nothing.
+A directory cannot be copied or moved into itself or any of its
+subdirectories — the operation is refused before anything is written.
+
 ## Search
 
 | Shortcut           | Action                                     |

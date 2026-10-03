@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Unified file operations system for termide with queue, progress, and pause/cancel support"
 
 [dependencies]
+dunce.workspace = true
 thiserror = "2.0"
 log = "0.4"
 termide-vfs = { path = "../vfs" }

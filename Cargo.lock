@@ -5161,6 +5161,7 @@ dependencies = [
 name = "termide-file-ops"
 version = "0.37.0"
 dependencies = [
+ "dunce",
  "log",
  "tempfile",
  "termide-vfs",

@@ -1383,6 +1383,10 @@ impl Translation for RuntimeTranslation {
         self.format("fm_move_prompt", &[("name", name)])
     }
 
+    fn fm_copy_into_itself(&self, name: &str) -> String {
+        self.format("fm_copy_into_itself", &[("name", name)])
+    }
+
     fn editor_file_opened(&self, filename: &str) -> String {
         self.format("editor_file_opened", &[("filename", filename)])
     }

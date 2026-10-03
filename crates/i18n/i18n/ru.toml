@@ -911,6 +911,7 @@ file_info_git_uncommitted = "{count} незакоммиченных измене
 file_info_items = "{count} элементов"
 fm_copy_prompt = "Копировать '{name}' в:"
 fm_move_prompt = "Переместить '{name}' в:"
+fm_copy_into_itself = "Нельзя скопировать или переместить '{name}' внутрь себя"
 fm_paste_confirm = "Копировать {count} файл{plural} в:\n{dest}\n{names}"
 fm_paste_move_confirm = "Переместить {count} файл{plural} в:\n{dest}\n{names}"
 modal_copy_multiple_title = "Копировать {count} {element} в:"

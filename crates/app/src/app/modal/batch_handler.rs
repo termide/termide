@@ -473,8 +473,15 @@ impl App {
             self.state.needs_redraw = true;
         }
 
+        // An entry pasted onto itself is no conflict: the worker gives a copy
+        // a fresh name and leaves a move where it is.
+        let onto_itself = !is_remote_dest
+            && !operation.source_is_remote(&source)
+            && termide_file_ops::destination_overlap(&source, &final_dest)
+                == termide_file_ops::DestinationOverlap::SameAsSource;
+
         // Check conflict
-        if final_dest.exists() {
+        if final_dest.exists() && !onto_itself {
             match operation.conflict_mode {
                 ConflictMode::Ask => {
                     // Show conflict resolution modal window
