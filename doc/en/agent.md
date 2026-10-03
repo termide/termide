@@ -587,8 +587,9 @@ session log on a dead branch.
 
 ## Tools
 
-The agent has six built-in tools, plus those its MCP servers provide (see
-[MCP servers](#mcp-servers)).
+The agent's built-in tools are listed below, plus those its MCP servers
+provide (see [MCP servers](#mcp-servers)). The panel's own agent also has
+**question** and **suggest_command**, described after the list.
 
 - **read** returns a file with line numbers, paged with an offset when a file
   is long.
@@ -605,7 +606,7 @@ The agent has six built-in tools, plus those its MCP servers provide (see
 Searching the project is done through `bash` with the tools you already have
 (`rg`, `find`), rather than through a separate search tool.
 
-A seventh tool, **skill**, appears when skills are defined; see
+One more tool, **skill**, appears when skills are defined; see
 [Skills](#skills).
 
 **question** lets the agent ask you when a decision is yours to make: which
