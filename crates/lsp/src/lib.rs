@@ -92,7 +92,6 @@ impl LspManager {
         // `COMPOSE.yaml` are ordinary names on a case-insensitive filesystem,
         // and lowercase `dockerfile` is common on Linux. Every pattern here is
         // lowercase, so comparing against the lowered name is enough.
-        // Extensions below keep matching exactly as they did before.
         let lower = name.to_lowercase();
         if lower == "dockerfile"
             || lower.starts_with("dockerfile.")

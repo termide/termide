@@ -423,6 +423,14 @@ args = ["--stdio"]
 root_markers = ["package.json", "tsconfig.json"]
 ```
 
+Entries under `[lsp.servers]` override or add to the built-in servers listed in
+[Supported Languages](#supported-languages); the built-ins you do not mention stay
+in use. An entry for a built-in language changes only the fields it sets, so
+`command = "/opt/rust-analyzer"` alone keeps the built-in `root_markers`. An entry
+for any other language adds a server for it. The key is the language id TermIDE
+detects for the file, such as `typescriptreact` for `.tsx`.
+
+
 ### Find References
 
 | Shortcut           | Action                                     |

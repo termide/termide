@@ -45,7 +45,7 @@ Terminal editors cover the code; everything around it — files on remote hosts,
 
 ## Features
 
-- **Terminal-based IDE** - Syntax highlighting for 22 languages, word navigation (Ctrl+Left/Right), paragraph/symbol navigation (Ctrl+Up/Down), toggle comment (Ctrl+/), auto-indentation, auto-close brackets
+- **Terminal-based IDE** - Syntax highlighting for 23 languages, word navigation (Ctrl+Left/Right), paragraph/symbol navigation (Ctrl+Up/Down), toggle comment (Ctrl+/), auto-indentation, auto-close brackets
 - **LSP Support** - Code completion, Find References (Shift+F12), Rename Symbol (F4), Go to Definition (Ctrl+Click), diagnostics
 - **Coding Agent** - A panel (`Alt+A`) where a language model reads, edits and runs commands in your project through any OpenAI- or Anthropic-compatible endpoint (local llama.cpp / Ollama / vLLM / omlx or hosted), asking permission per tool call, with `/undo` and checkpoints to take its edits back; skills, prompt templates, MCP servers, command hooks, and external agents over ACP (Claude Code, Codex, Gemini CLI) in the same panel
 - **Smart File Manager** - Tree view with expandable directories, nested git status, batch operations, file/content search (glob/regex), in-tree incremental search; zip, tar and ISO archives open like read-only directories (also on a server or inside another archive), and `P` packs the selection into zip or tar

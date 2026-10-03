@@ -45,7 +45,7 @@
 
 ## 功能特性
 
-- **基于终端的 IDE** - 支持 22 种语言的语法高亮、单词导航（Ctrl+Left/Right）、段落/符号导航（Ctrl+Up/Down）、自动缩进、自动关闭括号
+- **基于终端的 IDE** - 支持 23 种语言的语法高亮、单词导航（Ctrl+Left/Right）、段落/符号导航（Ctrl+Up/Down）、自动缩进、自动关闭括号
 - **LSP 支持** - 代码补全、查找引用、重命名符号、跳转到定义，通过 rust-analyzer、pylsp、typescript-language-server 及其他 LSP 服务器实现
 - **编码代理** - 一个面板（`Alt+A`），语言模型通过任意 OpenAI 或 Anthropic 兼容端点（本地 llama.cpp / Ollama / vLLM / omlx 或托管服务）在你的项目中读取、编辑和运行命令，每次工具调用都会征求许可，并可通过 `/undo` 和检查点撤回其修改；技能、提示模板、MCP 服务器、命令钩子，以及通过 ACP 接入的外部代理（Claude Code、Codex、Gemini CLI）都在同一面板中
 - **智能文件管理器** - 可展开目录的树形视图、嵌套 Git 状态、批量操作、文件/内容搜索（glob/正则表达式）、树内增量搜索；zip、tar 和 ISO 压缩包可像只读目录一样打开（包括服务器上的和嵌套在其他压缩包中的），按 `P` 可将所选内容打包为 zip 或 tar

@@ -767,8 +767,9 @@ pub struct LspSettings {
     #[serde(default = "default_lsp_hover_delay_ms")]
     pub hover_delay_ms: u64,
 
-    /// Per-language server configurations
-    #[serde(default = "default_lsp_servers")]
+    /// Per-language server configurations: the built-ins, with each user
+    /// entry laid over the built-in of the same language or added beside them.
+    #[serde(default = "default_lsp_servers", deserialize_with = "lsp_servers")]
     pub servers: std::collections::HashMap<String, LspServerSettings>,
 }
 
@@ -928,24 +929,29 @@ fn default_lsp_servers() -> std::collections::HashMap<String, LspServerSettings>
         },
     );
 
-    // TypeScript/JavaScript - typescript-language-server
-    servers.insert(
-        "typescript".to_string(),
-        LspServerSettings {
-            command: "typescript-language-server".to_string(),
-            args: vec!["--stdio".to_string()],
-            root_markers: vec!["tsconfig.json".to_string(), "package.json".to_string()],
-        },
-    );
+    // TypeScript/JavaScript - typescript-language-server. The JSX variants
+    // are languages of their own to the server, so they get their own keys.
+    for lang in ["typescript", "typescriptreact"] {
+        servers.insert(
+            lang.to_string(),
+            LspServerSettings {
+                command: "typescript-language-server".to_string(),
+                args: vec!["--stdio".to_string()],
+                root_markers: vec!["tsconfig.json".to_string(), "package.json".to_string()],
+            },
+        );
+    }
 
-    servers.insert(
-        "javascript".to_string(),
-        LspServerSettings {
-            command: "typescript-language-server".to_string(),
-            args: vec!["--stdio".to_string()],
-            root_markers: vec!["package.json".to_string()],
-        },
-    );
+    for lang in ["javascript", "javascriptreact"] {
+        servers.insert(
+            lang.to_string(),
+            LspServerSettings {
+                command: "typescript-language-server".to_string(),
+                args: vec!["--stdio".to_string()],
+                root_markers: vec!["package.json".to_string()],
+            },
+        );
+    }
 
     // Go - gopls
     servers.insert(
@@ -997,6 +1003,37 @@ fn default_lsp_servers() -> std::collections::HashMap<String, LspServerSettings>
     }
 
     servers
+}
+
+/// `[lsp.servers]` as written, laid over [`default_lsp_servers`] the way the
+/// layered loader overlays files: an entry for a built-in language changes
+/// only the fields it sets, any other entry is added. Without this a single
+/// entry would replace the whole built-in table whenever a config is parsed
+/// directly (`--config`, saving the config file from the editor).
+fn lsp_servers<'de, D>(
+    deserializer: D,
+) -> Result<std::collections::HashMap<String, LspServerSettings>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let entries = std::collections::HashMap::<String, toml::Value>::deserialize(deserializer)?;
+    let mut servers = default_lsp_servers();
+    for (lang, entry) in entries {
+        let merged = match servers.remove(&lang) {
+            Some(builtin) => {
+                let mut value = toml::Value::try_from(builtin).map_err(D::Error::custom)?;
+                crate::diff::merge_partial(&mut value, &entry);
+                value
+            }
+            None => entry,
+        };
+        let server = merged
+            .try_into()
+            .map_err(|e: toml::de::Error| D::Error::custom(format!("{lang}: {}", e.message())))?;
+        servers.insert(lang, server);
+    }
+    Ok(servers)
 }
 
 /// Legacy flat config format for migration.

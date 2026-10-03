@@ -509,7 +509,7 @@ crates/i18n/
 - Raw mode management
 
 **Tree-sitter** - Syntax highlighting
-- Parser generators for 22 languages
+- Parser generators for 23 languages
 - Incremental parsing for performance
 - Query system for syntax highlighting
 
