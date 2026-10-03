@@ -24,6 +24,10 @@ dirs = "6.0"
 dunce = "1.0"
 ropey = "1.6"
 arboard = "3.4"
+# macOS pasteboard access below arboard's builder, which can only write one
+# flavor at a time; see `termide-clipboard::copy_files`.
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSString", "NSURL"] }
 unicode-segmentation = "1.11"
 unicode-width = "0.2"
 # Infra dependencies

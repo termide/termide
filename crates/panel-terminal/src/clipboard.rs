@@ -78,9 +78,11 @@ pub fn copy_selection_to_clipboard(screen: &RwLock<TerminalScreen>) -> Result<()
 
 /// Paste text from system clipboard.
 ///
-/// Returns the text to paste, or None if clipboard is empty.
+/// Returns the text to paste, or None if clipboard is empty. A clipboard
+/// holding only a native file list yields its paths, so a file copied from
+/// the file manager still types a usable path into the shell.
 pub fn get_clipboard_text() -> Option<String> {
-    termide_ui::clipboard::paste()
+    termide_ui::clipboard::paste_text_or_paths()
 }
 
 /// Send paste data as a single atomic write with optional bracketed paste.

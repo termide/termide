@@ -84,8 +84,10 @@ pub fn paste_from_clipboard(
     buffer: &mut TextBuffer,
     cursor: &Cursor,
 ) -> Result<Option<(Cursor, usize, bool)>> {
-    // Read from system clipboard via arboard
-    if let Some(text) = termide_clipboard::paste() {
+    // Read from system clipboard via arboard. `paste_text_or_paths` also
+    // covers a clipboard holding only a native file list, which carries no
+    // text flavor on macOS/Linux — pasting it here yields the paths.
+    if let Some(text) = termide_clipboard::paste_text_or_paths() {
         if !text.is_empty() {
             // Normalize line endings (some terminals/clipboards use \r\n or \r)
             let text = text.replace("\r\n", "\n").replace('\r', "\n");

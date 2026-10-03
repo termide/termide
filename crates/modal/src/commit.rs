@@ -326,7 +326,7 @@ impl Modal for CommitModal {
                                 }
                                 'v' => {
                                     // Paste
-                                    if let Some(text) = clipboard::paste() {
+                                    if let Some(text) = clipboard::paste_text_or_paths() {
                                         self.textarea.insert_str(&text);
                                     }
                                 }

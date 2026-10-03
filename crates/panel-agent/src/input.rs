@@ -208,7 +208,9 @@ impl AgentPanel {
     /// Paste the clipboard into the prompt; a large paste is held as a
     /// placeholder rather than flooding the input.
     pub(crate) fn paste_clipboard(&mut self) -> bool {
-        match termide_ui::clipboard::paste() {
+        // `paste_text_or_paths` covers a clipboard holding only a native file
+        // list, which carries no text flavor on macOS/Linux.
+        match termide_ui::clipboard::paste_text_or_paths() {
             Some(text) => {
                 self.paste(&text);
                 true

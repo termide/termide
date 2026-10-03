@@ -68,7 +68,7 @@ pub fn edit_text_input(input: &mut TextInput, key: KeyEvent) -> FieldEdit {
                 FieldEdit::NotHandled
             }
         }
-        KeyCode::Char('v') if ctrl => match crate::clipboard::paste() {
+        KeyCode::Char('v') if ctrl => match crate::clipboard::paste_text_or_paths() {
             Some(text) => {
                 input.paste(&text);
                 FieldEdit::Edited
@@ -144,7 +144,7 @@ pub fn edit_text_area(area: &mut TextArea, key: KeyEvent) -> FieldEdit {
                 FieldEdit::NotHandled
             }
         }
-        KeyCode::Char('v') if ctrl => match crate::clipboard::paste() {
+        KeyCode::Char('v') if ctrl => match crate::clipboard::paste_text_or_paths() {
             Some(text) => {
                 area.insert_str(&text);
                 FieldEdit::Edited

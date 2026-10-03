@@ -5087,6 +5087,8 @@ dependencies = [
  "arboard",
  "base64",
  "log",
+ "objc2-app-kit",
+ "objc2-foundation",
 ]
 
 [[package]]

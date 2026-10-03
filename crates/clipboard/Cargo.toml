@@ -11,3 +11,10 @@ description = "Clipboard operations for termide"
 arboard.workspace = true
 base64.workspace = true
 log.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Below arboard's builder, which writes one flavor at a time: a file copy has
+# to carry the plain-text flavor too, or a browser address bar and the
+# terminal emulator's own Cmd+V paste come out empty.
+objc2-app-kit.workspace = true
+objc2-foundation.workspace = true
