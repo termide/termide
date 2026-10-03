@@ -5,7 +5,7 @@
 //! The project switcher (`Alt+\`) lists the same projects in the same
 //! order, see [`listed_projects`].
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
 use termide_ui_render::{
@@ -16,12 +16,7 @@ use termide_ui_render::{
 use crate::open_projects::OpenProjectView;
 use crate::AppState;
 
-/// Marks the current project.
-pub const CURRENT_MARK: &str = "●";
-/// Marks a project open in the background.
-pub const OPEN_MARK: &str = "○";
-/// Marks a project with a panel that waits for the user.
-pub const ATTENTION_MARK: &str = "🔔";
+pub use termide_modal::projects::{ATTENTION_MARK, CURRENT_MARK, OPEN_MARK};
 
 /// A project as the Projects menu and the project switcher list it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,7 +58,7 @@ pub fn listed_projects(
     listed.sort_by(|a, b| path_order(&a.root, &b.root));
     let mut others: Vec<ListedProject> = known
         .iter()
-        .filter(|(root, _)| !open.iter().any(|view| &view.root == root))
+        .filter(|(root, _)| !open.iter().any(|view| same_project(&view.root, root)))
         .map(|(root, modified)| ListedProject {
             root: root.clone(),
             open: false,
@@ -74,6 +69,27 @@ pub fn listed_projects(
     others.sort_by_key(|project| std::cmp::Reverse(project.modified));
     listed.extend(others);
     listed
+}
+
+/// Whether `a` and `b` name the same project. The list of projects worked
+/// on is rebuilt from where their layouts are stored, which keeps no drive
+/// prefix on Windows, so only what follows it is compared.
+fn same_project(a: &Path, b: &Path) -> bool {
+    fn tail(path: &Path) -> Vec<Component<'_>> {
+        path.components()
+            .filter(|c| !matches!(c, Component::Prefix(_) | Component::RootDir))
+            .collect()
+    }
+    tail(a) == tail(b)
+}
+
+/// The projects worked on and when, from their saved layouts.
+pub fn known_projects() -> Vec<(PathBuf, SystemTime)> {
+    termide_project::list_all_projects()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|info| (info.project_path, info.modified))
+        .collect()
 }
 
 /// The mark in front of a project: ● for the current one, ○ for another
@@ -237,11 +253,7 @@ impl AppState {
 
     /// Load the projects worked on.
     pub(crate) fn load_known_projects(&mut self) {
-        self.cache.projects = termide_project::list_all_projects()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|info| (info.project_path, info.modified))
-            .collect();
+        self.cache.projects = known_projects();
     }
 }
 
@@ -304,6 +316,17 @@ mod tests {
         assert!(listed[0].open && listed[0].attention);
         assert_eq!(listed[0].modified, None, "an open project has no time");
         assert!(!listed[2].open && listed[2].modified.is_some());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_known_project_without_its_drive_is_still_the_open_one() {
+        let listed = listed_projects(
+            &[open(r"C:\Users\u\a", false)],
+            &known(&[(r"\Users\u\a", 10), (r"\Users\u\b", 5)]),
+        );
+        assert_eq!(listed.len(), 2);
+        assert!(listed[0].open && !listed[1].open);
     }
 
     #[test]

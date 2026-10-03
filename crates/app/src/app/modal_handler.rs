@@ -143,16 +143,10 @@ impl App {
                                 self.reopen_bookmarks_menu(None, is_project, selected);
                                 return Ok(());
                             }
-                            PendingAction::DeleteProject {
-                                menu: Some(selection),
-                                ..
-                            }
-                            | PendingAction::CloseProject {
-                                menu: Some(selection),
-                                ..
-                            } => {
+                            PendingAction::DeleteProject { menu, .. }
+                            | PendingAction::CloseProject { menu, .. } => {
                                 self.state.close_modal();
-                                self.reopen_projects_menu(selection);
+                                self.return_to_projects(menu)?;
                                 return Ok(());
                             }
                             other => self.state.pending_action = Some(other),
@@ -510,6 +504,8 @@ impl App {
                 PendingAction::CloseProject { root, menu } => {
                     if value.downcast_ref::<bool>().copied().unwrap_or(false) {
                         self.close_project(&root, menu)?;
+                    } else {
+                        self.return_to_projects(menu)?;
                     }
                 }
                 PendingAction::NewProject => {
@@ -518,6 +514,8 @@ impl App {
                 PendingAction::DeleteProject { path, menu } => {
                     if value.downcast_ref::<bool>().copied().unwrap_or(false) {
                         self.handle_delete_project(&path, menu)?;
+                    } else {
+                        self.return_to_projects(menu)?;
                     }
                 }
                 PendingAction::DeleteBookmark {
