@@ -320,7 +320,7 @@ bash. Bind them to what is free on your system:
 
 | Action | Does |
 |--------|------|
-| `prev_project` / `next_project` | Switch to the previous / next open project, in the order they were opened |
+| `prev_project` / `next_project` | Switch to the previous / next open project, in the order the `Projects` menu lists them |
 | `goto_project_1` … `goto_project_9` | Switch to the open project with that number |
 
 ```toml

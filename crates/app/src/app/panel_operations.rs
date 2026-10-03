@@ -368,9 +368,8 @@ impl App {
                 ProjectAction::Switch(path) => {
                     self.switch_to_project(path.clone())?;
                 }
-                ProjectAction::Delete(path) => {
-                    self.confirm_delete_project(vec![path.clone()], None, None)
-                }
+                ProjectAction::Close(path) => self.confirm_close_project(path.clone(), None),
+                ProjectAction::Delete(path) => self.confirm_delete_project(path.clone(), None),
             }
         }
         Ok(())
@@ -398,51 +397,34 @@ impl App {
         Ok(())
     }
 
-    /// Ask before deleting the stored state of the projects at `paths`.
-    /// `dir` names the menu directory they were picked from, if any; `menu`
+    /// Ask before deleting the saved layout of the project at `path`. `menu`
     /// is where to return afterwards, see `PendingAction::DeleteProject`.
-    pub(super) fn confirm_delete_project(
-        &mut self,
-        paths: Vec<std::path::PathBuf>,
-        dir: Option<&str>,
-        menu: Option<Vec<usize>>,
-    ) {
+    pub(super) fn confirm_delete_project(&mut self, path: std::path::PathBuf, menu: Option<usize>) {
         let t = termide_i18n::t();
-        let (title, message) = match (paths.as_slice(), dir) {
-            ([_, _, ..], Some(dir)) => (
-                t.projects_delete_many_title(),
-                t.projects_delete_many_fmt(dir, paths.len()),
-            ),
-            _ => (
-                t.projects_delete_title(),
-                t.projects_delete_fmt(&termide_core::util::shorten_home_path(
-                    &paths[0].display().to_string(),
-                )),
-            ),
-        };
-        let modal = termide_modal::ConfirmModal::new(title, message);
+        let message = t.projects_delete_fmt(&termide_core::util::shorten_home_path(
+            &path.display().to_string(),
+        ));
+        let modal = termide_modal::ConfirmModal::new(t.projects_delete_title(), message);
         self.state.set_pending_action(
-            PendingAction::DeleteProject { paths, menu },
+            PendingAction::DeleteProject { path, menu },
             ActiveModal::Confirm(Box::new(modal)),
         );
     }
 
     pub(super) fn handle_delete_project(
         &mut self,
-        paths: &[std::path::PathBuf],
-        menu: Option<Vec<usize>>,
+        path: &std::path::Path,
+        menu: Option<usize>,
     ) -> Result<()> {
-        for path in paths {
-            if let Err(e) = termide_project::ProjectLayout::delete_layout(path) {
-                log::error!("Failed to delete project layout for {:?}: {}", path, e);
-                // Keep the error on screen instead of reopening over it.
-                self.show_error_modal(i18n::t().projects_delete_failed_fmt(&e.to_string()));
-                return Ok(());
-            }
-            log::info!("Deleted project layout for {:?}", path);
+        if let Err(e) = termide_project::ProjectLayout::delete_layout(path) {
+            log::error!("Failed to delete project layout for {:?}: {}", path, e);
+            // Keep the error on screen instead of reopening over it.
+            self.show_error_modal(i18n::t().projects_delete_failed_fmt(&e.to_string()));
+            return Ok(());
         }
+        log::info!("Deleted project layout for {:?}", path);
         match menu {
-            Some(selection) => self.reopen_projects_menu(&selection),
+            Some(selection) => self.reopen_projects_menu(selection),
             // Reopen the projects modal with updated list
             None => self.handle_open_projects_modal()?,
         }

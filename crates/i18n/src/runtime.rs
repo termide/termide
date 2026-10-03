@@ -722,12 +722,10 @@ impl Translation for RuntimeTranslation {
         settings_lsp_add_server,
         settings_logging_min_level,
         settings_vfs_connection_timeout,
-        projects_current,
         projects_new,
         projects_switch,
         projects_change_root,
         projects_delete_title,
-        projects_delete_many_title,
         project_created,
         project_moved,
         projects_close_title,
@@ -1997,13 +1995,6 @@ impl Translation for RuntimeTranslation {
 
     fn app_quit_background_fmt(&self, projects: &str) -> String {
         self.format("app_quit_background_fmt", &[("projects", projects)])
-    }
-
-    fn projects_delete_many_fmt(&self, dir: &str, count: usize) -> String {
-        self.format(
-            "projects_delete_many_fmt",
-            &[("dir", dir), ("count", &count.to_string())],
-        )
     }
 
     fn replace_done_fmt(&self, count: usize, files: usize) -> String {

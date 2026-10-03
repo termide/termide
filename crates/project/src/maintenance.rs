@@ -473,13 +473,12 @@ fn collect_projects(
     Ok(())
 }
 
-/// Format a SystemTime as a relative time string (e.g., "2 hours ago").
-pub fn format_relative_time(time: std::time::SystemTime) -> String {
-    let seconds = std::time::SystemTime::now()
-        .duration_since(time)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    termide_i18n::relative_age(seconds)
+/// Format a SystemTime as the local date and minute (`2026-10-03 14:22`), as
+/// the agent's session list shows times.
+pub fn format_local_minute(time: std::time::SystemTime) -> String {
+    chrono::DateTime::<Local>::from(time)
+        .format("%Y-%m-%d %H:%M")
+        .to_string()
 }
 
 #[cfg(test)]

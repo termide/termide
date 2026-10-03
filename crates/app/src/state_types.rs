@@ -232,8 +232,9 @@ pub struct CacheState {
     pub commands_registry: Option<termide_config::commands::CommandsRegistry>,
     /// Cached global hotkey table (invalidated when commands_registry is)
     pub hotkey_table: Option<termide_core::HotkeyTable>,
-    /// Known projects as the Projects menu tree (loaded on open, cleared on close).
-    pub projects: Vec<crate::projects_menu::ProjectNode>,
+    /// Projects worked on, the most recently used first, for the Projects
+    /// menu (loaded on open, cleared on close).
+    pub projects: Vec<std::path::PathBuf>,
 }
 
 /// Active scrollbar thumb drag.

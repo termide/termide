@@ -37,12 +37,8 @@ fn render_dropdowns_and_modals(
         && state.ui.selected_menu_item == Some(PROJECTS_MENU_INDEX)
         && state.ui.projects_submenu.open
     {
-        // The dropdown, then each open directory submenu to its right.
-        let screen = frame.area();
-        for level in state.projects_menu_levels(screen) {
-            Dropdown::new(&level.items, level.selected, level.x, level.y, theme)
-                .render(frame.buffer_mut());
-        }
+        let menu = state.projects_menu();
+        Dropdown::new(&menu.items, menu.selected, menu.x, menu.y, theme).render(frame.buffer_mut());
     }
 
     // Render Tools submenu if open

@@ -1,10 +1,10 @@
 //! Projects menu actions — project switching, directory switcher.
 
 use anyhow::Result;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use super::super::App;
-use crate::projects_menu::ProjectsTarget;
+use crate::projects_menu::{ProjectRow, ProjectsTarget};
 use crate::state::{ActiveModal, PendingAction};
 use crate::PanelExt;
 use termide_app_core::Panel;
@@ -14,57 +14,45 @@ use termide_ui_render::{
 };
 
 impl App {
-    /// Open the projects modal to switch between projects. The open projects
-    /// come first, the most recently used first, with the cursor on the one
-    /// left last: `Enter` goes back to it.
+    /// Open the projects modal to switch between projects. It lists the
+    /// projects as the Projects menu does, with the cursor on the one left
+    /// last: `Enter` goes back to it.
     pub(in crate::app) fn handle_open_projects_modal(&mut self) -> Result<()> {
+        use crate::projects_menu::listed_projects;
         use termide_modal::{ProjectItem, ProjectsModal};
-        use termide_project::{format_relative_time, list_all_projects};
+        use termide_project::{format_local_minute, list_all_projects};
 
         let t = i18n::t();
 
-        let item = |project_path: PathBuf, relative_time: String| {
-            let view = self
-                .state
-                .open_projects
-                .iter()
-                .find(|view| view.root == project_path);
-            ProjectItem {
-                display_path: termide_core::util::shorten_home_path(
-                    &project_path.display().to_string(),
-                ),
-                relative_time,
-                is_current: project_path == self.project_root,
-                is_open: self.open_projects.is_open(&project_path),
-                attention: view.is_some_and(|view| view.attention),
-                project_path,
-            }
-        };
-
-        let mut known: Vec<(PathBuf, String)> = list_all_projects()
-            .unwrap_or_default()
+        let known = list_all_projects().unwrap_or_default();
+        let roots: Vec<PathBuf> = known.iter().map(|info| info.project_path.clone()).collect();
+        let items: Vec<ProjectItem> = listed_projects(&self.state.open_projects, &roots)
             .into_iter()
-            .map(|info| (info.project_path, format_relative_time(info.modified)))
+            .map(|project| ProjectItem {
+                display_path: termide_core::util::shorten_home_path(
+                    &project.root.display().to_string(),
+                ),
+                // An open project's layout is saved all the time: its time
+                // would always read "now".
+                modified: known
+                    .iter()
+                    .find(|info| !project.open && info.project_path == project.root)
+                    .map(|info| format_local_minute(info.modified))
+                    .unwrap_or_default(),
+                is_current: project.root == self.project_root,
+                is_open: project.open,
+                attention: project.attention,
+                project_path: project.root,
+            })
             .collect();
-        let mut items: Vec<ProjectItem> = Vec::new();
-        for root in self.open_projects.by_recent_use() {
-            let relative_time = known
-                .iter()
-                .position(|(path, _)| path == root)
-                .map(|index| known.remove(index).1)
-                .unwrap_or_default();
-            items.push(item(root.to_path_buf(), relative_time));
-        }
-        items.extend(
-            known
-                .into_iter()
-                .map(|(path, relative_time)| item(path, relative_time)),
-        );
 
         // Only show modal if there are other projects
         if items.iter().any(|item| !item.is_current) {
-            // The current project is first; the one left last follows it.
-            let cursor = usize::from(self.open_projects.count() > 1);
+            let previous = self.open_projects.by_recent_use().get(1).copied();
+            let cursor = previous
+                .and_then(|root| items.iter().position(|item| item.project_path == root))
+                .or_else(|| items.iter().position(|item| !item.is_current))
+                .unwrap_or(0);
             let modal = ProjectsModal::new(t.projects_title(), items).with_cursor(cursor);
             self.state.set_pending_action(
                 PendingAction::SwitchProject,
@@ -193,8 +181,9 @@ impl App {
     // Projects submenu handling
     // =========================================================================
 
-    /// Handle keyboard event in the Projects menu. Keys act on the deepest
-    /// open level: Right/Enter open a directory, Left/Esc close it again.
+    /// Handle keyboard event in the Projects menu. Delete/F8 closes an open
+    /// project, or deletes the saved layout of one that is not open; the
+    /// current project stays.
     pub(in crate::app) fn handle_projects_submenu_key(
         &mut self,
         key: crossterm::event::KeyEvent,
@@ -202,104 +191,59 @@ impl App {
         use super::navigate_submenu;
         use super::SubmenuNavAction;
 
-        let levels = self.state.projects_menu_levels(self.screen_rect());
-        let depth = levels.len() - 1;
-        let level = &levels[depth];
-        let target = ProjectsTarget::of(level.selected_row());
-        // What Delete removes: the project, or every project in the directory.
-        // Open projects are kept, as in the project switcher: their layouts
-        // are saved again when they are left.
-        let deletable: Vec<PathBuf> = level
-            .selected_row()
-            .map(|row| row.projects())
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|path| !self.open_projects.is_open(path))
-            .map(Path::to_path_buf)
-            .collect();
-        // On an open project Delete closes it instead; the current one stays.
-        let closable = level
-            .selected_row()
-            .and_then(|row| row.open_project())
-            .filter(|path| *path != self.project_root)
-            .map(Path::to_path_buf);
-        let dir = level
-            .selected_row()
-            .and_then(|row| row.submenu())
-            .map(|node| node.label.clone());
+        let menu = self.state.projects_menu();
+        let target = ProjectsTarget::of(menu.selected_row());
+        let removable = match menu.selected_row() {
+            Some(ProjectRow::Project(project)) if project.root != self.project_root => {
+                Some(project.clone())
+            }
+            _ => None,
+        };
         let mut cursor = termide_state::SubmenuState {
             open: true,
-            selected: level.selected,
+            selected: menu.selected,
         };
-        let action = navigate_submenu(&key, &mut cursor, level.items.len(), &level.separators());
-        drop(levels);
-        self.select_projects_row(depth, cursor.selected);
+        let action = navigate_submenu(&key, &mut cursor, menu.items.len(), &menu.separators());
+        drop(menu);
+        self.state.ui.projects_submenu.selected = cursor.selected;
 
         match action {
-            SubmenuNavAction::Close if depth > 0 => {
-                self.state.ui.projects_nested.pop();
-            }
             SubmenuNavAction::Close => self.state.close_menu(),
-            SubmenuNavAction::Left if depth > 0 => {
-                self.state.ui.projects_nested.pop();
-            }
             SubmenuNavAction::Left => self.switch_to_prev_menu()?,
-            SubmenuNavAction::Right if matches!(target, ProjectsTarget::Submenu) => {
-                self.state.ui.projects_nested.push(0);
-            }
             SubmenuNavAction::Right => self.switch_to_next_menu()?,
-            SubmenuNavAction::Execute => self.activate_projects_target(target, false)?,
-            SubmenuNavAction::Delete if closable.is_some() => {
-                let mut selection = vec![self.state.ui.projects_submenu.selected];
-                selection.extend_from_slice(&self.state.ui.projects_nested);
-                self.state.close_menu();
-                if let Some(root) = closable {
-                    self.confirm_close_project(root, Some(selection));
+            SubmenuNavAction::Execute => self.activate_projects_target(target)?,
+            SubmenuNavAction::Delete => {
+                if let Some(project) = removable {
+                    let selection = self.state.ui.projects_submenu.selected;
+                    self.state.close_menu();
+                    if project.open {
+                        self.confirm_close_project(project.root, Some(selection));
+                    } else {
+                        self.confirm_delete_project(project.root, Some(selection));
+                    }
                 }
             }
-            SubmenuNavAction::Delete if !deletable.is_empty() => {
-                let mut selection = vec![self.state.ui.projects_submenu.selected];
-                selection.extend_from_slice(&self.state.ui.projects_nested);
-                self.state.close_menu();
-                self.confirm_delete_project(deletable, dir.as_deref(), Some(selection));
-            }
-            SubmenuNavAction::Delete => {}
             SubmenuNavAction::Rename | SubmenuNavAction::Edit | SubmenuNavAction::None => {}
         }
         Ok(())
     }
 
-    /// Open the Projects menu at `selection` (as saved from
-    /// `projects_submenu` and `projects_nested`), as close as the reloaded
-    /// tree still allows.
-    pub(in crate::app) fn reopen_projects_menu(&mut self, selection: &[usize]) {
-        let screen = self.screen_rect();
+    /// Open the Projects menu at row `selection`, as close as the reloaded
+    /// list still allows.
+    pub(in crate::app) fn reopen_projects_menu(&mut self, selection: usize) {
         self.state.ui.menu_open = true;
         self.state.ui.selected_menu_item = Some(termide_ui_render::PROJECTS_MENU_INDEX);
         self.state.open_projects_submenu();
-        self.state.restore_projects_selection(selection, screen);
+        self.state.restore_projects_selection(selection);
     }
 
-    /// Select `index` at menu level `depth` and close every level below it.
-    pub(in crate::app) fn select_projects_row(&mut self, depth: usize, index: usize) {
-        let ui = &mut self.state.ui;
-        ui.projects_nested.truncate(depth);
-        match depth.checked_sub(1) {
-            None => ui.projects_submenu.selected = index,
-            Some(parent) => ui.projects_nested[parent] = index,
-        }
-    }
-
-    /// Carry out the selected row. `was_open` is whether the row's submenu
-    /// was open before it was selected, so a second click folds it again.
+    /// Carry out the selected row.
     pub(in crate::app) fn activate_projects_target(
         &mut self,
         target: ProjectsTarget,
-        was_open: bool,
     ) -> Result<()> {
         match target {
-            ProjectsTarget::Submenu if !was_open => self.state.ui.projects_nested.push(0),
-            ProjectsTarget::Submenu | ProjectsTarget::None => {}
+            ProjectsTarget::None => {}
             ProjectsTarget::Project(path) => {
                 self.state.close_menu();
                 if path != self.project_root {

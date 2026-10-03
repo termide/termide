@@ -17,6 +17,7 @@ use termide_layout::LayoutManager;
 use super::project_layout::save_layout_of;
 use super::App;
 use crate::open_projects::OpenProjectView;
+use crate::projects_menu::path_order;
 use crate::state::{ActiveModal, PendingAction};
 
 /// What a project open in the background keeps.
@@ -146,25 +147,33 @@ impl App {
         self.sync_open_projects();
     }
 
-    /// Switch to the open project at `index` in the order they were opened.
+    /// The open projects' roots in the order the menus list them.
+    fn listed_open_roots(&self) -> Vec<PathBuf> {
+        let mut roots: Vec<PathBuf> = self.open_projects.roots().map(Path::to_path_buf).collect();
+        roots.sort_by(|a, b| path_order(a, b));
+        roots
+    }
+
+    /// Switch to the open project at `index` in the order the menus list
+    /// them.
     pub(super) fn switch_to_open_project(&mut self, index: usize) -> Result<()> {
-        let Some(root) = self.open_projects.roots().nth(index).map(Path::to_path_buf) else {
+        let Some(root) = self.listed_open_roots().into_iter().nth(index) else {
             return Ok(());
         };
         self.switch_to_project(root)
     }
 
     /// Switch to the open project after (or before) the current one, in the
-    /// order they were opened, wrapping around.
+    /// order the menus list them, wrapping around.
     pub(super) fn cycle_open_projects(&mut self, forward: bool) -> Result<()> {
         let count = self.open_projects.count();
         if count < 2 {
             return Ok(());
         }
         let current = self
-            .open_projects
-            .roots()
-            .position(|root| root == self.project_root)
+            .listed_open_roots()
+            .iter()
+            .position(|root| *root == self.project_root)
             .unwrap_or(0);
         let next = if forward {
             (current + 1) % count
@@ -176,7 +185,7 @@ impl App {
 
     /// Ask before closing the parked project at `root`. `menu` is where to
     /// return afterwards, see `PendingAction::CloseProject`.
-    pub(super) fn confirm_close_project(&mut self, root: PathBuf, menu: Option<Vec<usize>>) {
+    pub(super) fn confirm_close_project(&mut self, root: PathBuf, menu: Option<usize>) {
         let Some(live) = self
             .open_projects
             .parked()
@@ -203,7 +212,7 @@ impl App {
 
     /// Close the parked project at `root`: save its layout and drop its
     /// panels, which stops the processes in its terminals.
-    pub(super) fn close_project(&mut self, root: &Path, menu: Option<Vec<usize>>) -> Result<()> {
+    pub(super) fn close_project(&mut self, root: &Path, menu: Option<usize>) -> Result<()> {
         if let Some(mut parked) = self.open_projects.close(root) {
             if self.persist_layout {
                 if let Err(e) = save_layout_of(root, &mut parked.layout) {
@@ -214,7 +223,7 @@ impl App {
         }
         self.sync_open_projects();
         match menu {
-            Some(selection) => self.reopen_projects_menu(&selection),
+            Some(selection) => self.reopen_projects_menu(selection),
             None => self.handle_open_projects_modal()?,
         }
         Ok(())
