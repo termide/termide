@@ -835,3 +835,21 @@ mod layered_load_tests {
         assert!(!is_flat("not toml ["));
     }
 }
+
+#[cfg(test)]
+mod lsp_servers_tests {
+    use super::*;
+
+    #[test]
+    fn jsx_languages_have_a_builtin_server() {
+        let servers = Config::default().lsp.servers;
+        assert_eq!(
+            servers["typescriptreact"].command,
+            servers["typescript"].command
+        );
+        assert_eq!(
+            servers["javascriptreact"].command,
+            servers["javascript"].command
+        );
+    }
+}

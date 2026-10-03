@@ -928,24 +928,29 @@ fn default_lsp_servers() -> std::collections::HashMap<String, LspServerSettings>
         },
     );
 
-    // TypeScript/JavaScript - typescript-language-server
-    servers.insert(
-        "typescript".to_string(),
-        LspServerSettings {
-            command: "typescript-language-server".to_string(),
-            args: vec!["--stdio".to_string()],
-            root_markers: vec!["tsconfig.json".to_string(), "package.json".to_string()],
-        },
-    );
+    // TypeScript/JavaScript - typescript-language-server. The JSX variants
+    // are languages of their own to the server, so they get their own keys.
+    for lang in ["typescript", "typescriptreact"] {
+        servers.insert(
+            lang.to_string(),
+            LspServerSettings {
+                command: "typescript-language-server".to_string(),
+                args: vec!["--stdio".to_string()],
+                root_markers: vec!["tsconfig.json".to_string(), "package.json".to_string()],
+            },
+        );
+    }
 
-    servers.insert(
-        "javascript".to_string(),
-        LspServerSettings {
-            command: "typescript-language-server".to_string(),
-            args: vec!["--stdio".to_string()],
-            root_markers: vec!["package.json".to_string()],
-        },
-    );
+    for lang in ["javascript", "javascriptreact"] {
+        servers.insert(
+            lang.to_string(),
+            LspServerSettings {
+                command: "typescript-language-server".to_string(),
+                args: vec!["--stdio".to_string()],
+                root_markers: vec!["package.json".to_string()],
+            },
+        );
+    }
 
     // Go - gopls
     servers.insert(
