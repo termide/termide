@@ -63,7 +63,7 @@ Terminal editors cover the code; everything around it — files on remote hosts,
 - **38 Built-in Themes** - Dark, light, retro, and cinematic themes (Dracula, Nord, Monokai, Solarized, Matrix, Pip-Boy, Norton Commander, Windows 95, etc.)
 - **Custom Themes** - Create your own themes in TOML format
 - **15 UI Languages** - Bengali, Chinese, English, French, German, Hindi, Indonesian, Japanese, Korean, Portuguese, Russian, Spanish, Thai, Turkish, Vietnamese (missing keys transparently fall back to English)
-- **Project Management** - Auto-save and restore panel layouts per project
+- **Project Management** - Auto-save and restore panel layouts per project; projects you switch away from stay open in the background (terminals keep running, unsaved edits are kept), and the Projects menu and the `Alt+\` switcher list open and recent projects
 - **Detached Instances** - `termide --detached` keeps the whole instance — editors, shells, LSP servers, running jobs — alive after the terminal closes; `termide --attach` picks it up again from any terminal, at any size (Unix only)
 - **System Monitor** - Real-time CPU, RAM, network I/O in menu bar and disk usage in status bar; click any indicator to open a detail modal (top processes by CPU/RAM, top processes by network connections with listening ports); repeated click on the same indicator closes the modal (toggle)
 - **Search & Replace** - Live preview, match counter, regex support
