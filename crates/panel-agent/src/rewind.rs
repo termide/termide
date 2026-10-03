@@ -1,17 +1,27 @@
 //! Rewinding the session to before one of the user's messages (`Esc` in an
-//! idle, empty prompt, or `F4`): the conversation continues from there, the
-//! message comes back into the input, and the files the requests since then
-//! changed can be put back too, as Claude Code's rewind does.
+//! idle, empty prompt, or `F4`): the messages are listed right above the
+//! input, as the `/command` completions are; the conversation continues from
+//! the one picked, the message comes back into the input, and the files the
+//! requests since then changed can be put back too, as Claude Code's rewind
+//! does.
 
 use std::path::PathBuf;
 use std::sync::PoisonError;
 
+use crossterm::event::{KeyEvent, KeyModifiers};
+
 use termide_agent_core::{EntryKind, Message};
-use termide_core::{PanelEvent, SelectAction};
-use termide_ui::ChoiceForm;
+use termide_core::PanelEvent;
+use termide_ui::{ChoiceForm, CompletionAction, CompletionItem, CompletionList};
 
 use crate::pending::Pending;
-use crate::{truncate_title, AgentPanel, NoticeKind, REWIND_ACTION};
+use crate::{truncate_title, AgentPanel, NoticeKind};
+
+/// The open list of messages to rewind to, and what each row stands for.
+pub(crate) struct RewindPicker {
+    pub(crate) list: CompletionList,
+    points: Vec<RewindPoint>,
+}
 
 /// A user message on the current branch the session can be rewound to.
 #[derive(Debug, Clone)]
@@ -115,53 +125,43 @@ impl AgentPanel {
             .collect()
     }
 
-    /// Offer the user's messages, newest first, to rewind the session to
-    /// before one of them.
+    /// Offer the user's messages to rewind the session to before one of
+    /// them, in a list above the input: the newest at the bottom, next to the
+    /// input and selected, `↑` going back in time. A row names the files
+    /// rewinding there can put back.
     pub(crate) fn ask_rewind(&mut self) -> Vec<PanelEvent> {
         let t = termide_i18n::t();
         if self.is_busy() {
             self.notice(t.agent_notice_busy(), NoticeKind::Warn);
             return vec![PanelEvent::NeedsRedraw];
         }
-        let points = self.rewind_points();
+        let mut points = self.rewind_points();
+        points.reverse();
         if points.is_empty() {
             self.notice(t.agent_notice_nothing_to_rollback(), NoticeKind::Info);
             return vec![PanelEvent::NeedsRedraw];
         }
-        let options = points
+        let items = points
             .iter()
-            .map(|point| {
-                let text = truncate_title(&point.typed);
-                if point.files.is_empty() {
-                    text
-                } else {
-                    let count = point.files.len();
-                    t.agent_rewind_option_files_fmt(&text, count, t.pluralize(count, "file"))
-                }
+            .enumerate()
+            .map(|(index, point)| {
+                CompletionItem::new(index.to_string())
+                    .with_label(truncate_title(&point.typed))
+                    .with_description(self.changed_files(&point.files))
             })
             .collect();
-        self.rewind_points = points;
-        vec![PanelEvent::ShowSelect {
-            title: t.agent_rollback_title().to_string(),
-            options,
-            on_select: SelectAction::Custom(REWIND_ACTION.to_string()),
-        }]
+        self.completion = None;
+        self.chat_focus = false;
+        let mut list = CompletionList::new(items);
+        list.select(points.len() - 1);
+        self.rewind_picker = Some(RewindPicker { list, points });
+        vec![PanelEvent::NeedsRedraw]
     }
 
-    /// The message picked in the rewind list: with files to put back, a card
-    /// asks what to restore; without, the conversation rewinds at once.
-    pub(crate) fn choose_rewind(&mut self, index: usize) -> Vec<PanelEvent> {
-        let point = self.rewind_points.get(index).cloned();
-        self.rewind_points.clear();
-        let Some(point) = point else {
-            return Vec::new();
-        };
-        if point.files.is_empty() {
-            return self.rewind(&point, RewindScope::Conversation);
-        }
-        let t = termide_i18n::t();
-        let names: Vec<String> = point
-            .files
+    /// `files` as a row or a card names them: relative to the panel's
+    /// directory, counted when there are several; empty for none.
+    fn changed_files(&self, files: &[PathBuf]) -> String {
+        let names: Vec<String> = files
             .iter()
             .map(|path| {
                 path.strip_prefix(&self.cwd)
@@ -170,11 +170,58 @@ impl AgentPanel {
                     .to_string()
             })
             .collect();
-        let changed = if names.len() == 1 {
-            names[0].clone()
+        match names.as_slice() {
+            [] => String::new(),
+            [name] => name.clone(),
+            _ => termide_i18n::t().agent_undo_changed_files_fmt(names.len(), &names.join(", ")),
+        }
+    }
+
+    /// A key while the rewind list is open: the arrows move through it,
+    /// `Enter` or `Tab` picks the message, `Esc` closes it. Any other key
+    /// closes it too and goes on to the input (`None`), so typing starts a
+    /// new prompt.
+    pub(crate) fn rewind_picker_key(&mut self, key: KeyEvent) -> Option<Vec<PanelEvent>> {
+        let picker = self.rewind_picker.as_mut()?;
+        let plain = !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        let action = if plain {
+            picker.list.handle_key(key)
         } else {
-            t.agent_undo_changed_files_fmt(names.len(), &names.join(", "))
+            CompletionAction::NotHandled
         };
+        match action {
+            CompletionAction::Handled => Some(vec![PanelEvent::NeedsRedraw]),
+            CompletionAction::Accept => {
+                let index = picker.list.selected();
+                Some(self.choose_rewind(index))
+            }
+            CompletionAction::Dismiss => {
+                self.rewind_picker = None;
+                Some(vec![PanelEvent::NeedsRedraw])
+            }
+            CompletionAction::NotHandled => {
+                self.rewind_picker = None;
+                None
+            }
+        }
+    }
+
+    /// The message picked in the rewind list: with files to put back, a card
+    /// asks what to restore; without, the conversation rewinds at once.
+    pub(crate) fn choose_rewind(&mut self, index: usize) -> Vec<PanelEvent> {
+        let point = self.rewind_picker.take().and_then(|mut picker| {
+            (index < picker.points.len()).then(|| picker.points.swap_remove(index))
+        });
+        let Some(point) = point else {
+            return Vec::new();
+        };
+        if point.files.is_empty() {
+            return self.rewind(&point, RewindScope::Conversation);
+        }
+        let t = termide_i18n::t();
+        let changed = self.changed_files(&point.files);
         let form = ChoiceForm::new(
             t.agent_rewind_confirm_fmt(&truncate_title(&point.typed), &changed),
             vec![

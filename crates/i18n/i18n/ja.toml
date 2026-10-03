@@ -996,7 +996,6 @@ agent_notice_goal_reached_reason_fmt = "目標を達成しました: {reason}"
 agent_notice_command_denied_fmt = "/{name} は権限ルールで拒否されています"
 agent_notice_rolled_back_fmt = "巻き戻しました: {count} ファイルを復元、会話を巻き戻し"
 agent_notice_files_restored_fmt = "{count} ファイルを復元、会話はそのまま"
-agent_rewind_option_files_fmt = "{text} · {count} ファイル"
 agent_rewind_confirm_fmt = "「{message}」の前まで巻き戻しますか？ それ以降の変更: {changed}"
 agent_notice_undid_fmt = "直前のリクエストを取り消しました: {count} ファイルを復元、会話を巻き戻し"
 

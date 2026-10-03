@@ -996,7 +996,6 @@ agent_notice_goal_reached_reason_fmt = "목표 달성: {reason}"
 agent_notice_command_denied_fmt = "/{name}은(는) 권한 규칙에 의해 거부됨"
 agent_notice_rolled_back_fmt = "되돌림: 파일 {count}개 복원, 대화 되감음"
 agent_notice_files_restored_fmt = "파일 {count}개 복원, 대화 유지"
-agent_rewind_option_files_fmt = "{text} · 파일 {count}개"
 agent_rewind_confirm_fmt = "“{message}” 이전으로 되돌릴까요? 그 이후 변경: {changed}"
 agent_notice_undid_fmt = "마지막 요청 취소함: 파일 {count}개 복원, 대화 되감음"
 

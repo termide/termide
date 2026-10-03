@@ -571,9 +571,11 @@ are not covered: what `bash` changes, git or your own backups have to hold.
 ### Rewinding to a message
 
 `Esc` in the empty prompt, with nothing running, lists the messages you sent
-in this session, newest first (`F4` opens the same list at any time); a
-message after which the agent changed files says how many. Picking one
-rewinds the conversation to just before it and puts the message back into
+in this session right above the prompt, as the `/command` completions are
+(`F4` opens the same list at any time). The newest stands next to the
+prompt and is selected, `↑`/`↓` move through the others, `Enter` (or a
+click) picks one, and `Esc` or typing closes the list. A message after
+which the agent changed files names them beside it. Picking one rewinds the conversation to just before it and puts the message back into
 the prompt, to be edited and sent again — unless you have started typing
 something else. When files changed since that message, a card names them
 and asks what to put back: the files and the conversation, the conversation

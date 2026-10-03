@@ -2252,10 +2252,33 @@ fn f4_offers_the_messages_to_rewind_to() {
     type_text(&mut panel, "task one");
     panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
     settle(&mut panel);
-    let events = panel.handle_key(chord(KeyCode::F(4), KeyModifiers::NONE));
-    assert!(events
+    panel.handle_key(chord(KeyCode::F(4), KeyModifiers::NONE));
+    assert_eq!(rewind_rows(&panel), [("task one".into(), String::new())]);
+}
+
+/// The rows of the open rewind list: each message and the files rewinding
+/// to it puts back.
+fn rewind_rows(panel: &AgentPanel) -> Vec<(String, String)> {
+    panel
+        .rewind_picker
+        .as_ref()
+        .expect("the rewind list is open")
+        .list
+        .items()
         .iter()
-        .any(|e| matches!(e, PanelEvent::ShowSelect { options, .. } if options == &["task one"])));
+        .map(|item| (item.label.clone(), item.description.clone()))
+        .collect()
+}
+
+/// Open the rewind list with Esc and pick the message `back` steps before
+/// the newest.
+fn rewind_with_esc(panel: &mut AgentPanel, back: usize) {
+    panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(panel.rewind_picker.is_some(), "Esc opened the rewind list");
+    for _ in 0..back {
+        panel.handle_key(chord(KeyCode::Up, KeyModifiers::NONE));
+    }
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
 }
 
 /// A panel with a session that has been asked `prompts` in turn, the files
@@ -2299,20 +2322,21 @@ fn esc_in_the_idle_empty_prompt_rewinds_to_a_chosen_message() {
     let dir = tempfile::tempdir().unwrap();
     let mut panel = asked(dir.path(), &["task one", "task two", "task three"], &[]);
     assert!(panel.captures_escape(), "Esc does not close the panel");
-    let events = panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
-    let picker = events
-        .iter()
-        .find(|e| matches!(e, PanelEvent::ShowSelect { .. }))
-        .expect("the rewind picker");
-    let PanelEvent::ShowSelect { options, .. } = picker else {
-        unreachable!()
-    };
-    // Newest first, so the one just asked is a single Enter away.
-    assert_eq!(options, &["task three", "task two", "task one"]);
+    panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    // The list stands right above the input, as the `/command` completions
+    // do, the newest message next to it, so it is a single Enter away.
+    let labels: Vec<String> = rewind_rows(&panel).into_iter().map(|(l, _)| l).collect();
+    assert_eq!(labels, ["task one", "task two", "task three"]);
+    let rows = render_text(&mut panel, 40, 16);
+    let rule = rows.iter().rposition(|r| r.starts_with('─')).unwrap();
+    assert!(rows[rule - 1].contains("task three"), "{rows:#?}");
+    assert!(rows[rule - 3].contains("task one"), "{rows:#?}");
 
     // No files to put back: the conversation rewinds at once, and the
     // message comes back to be edited.
-    select(&mut panel, picker, 1);
+    panel.handle_key(chord(KeyCode::Up, KeyModifiers::NONE));
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(panel.rewind_picker.is_none());
     assert!(panel.pending.is_none());
     assert_eq!(panel.input_text(), "task two");
     assert_eq!(users(&panel), ["task one"]);
@@ -2327,6 +2351,24 @@ fn esc_in_the_idle_empty_prompt_rewinds_to_a_chosen_message() {
 }
 
 #[test]
+fn the_rewind_list_closes_on_esc_and_on_typing() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = asked(dir.path(), &["task one"], &[]);
+    panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(panel.rewind_picker.is_some());
+    panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(panel.rewind_picker.is_none(), "Esc closes the list");
+    assert_eq!(users(&panel), ["task one"], "and rewinds nothing");
+
+    // Typing closes it and goes into the input: a new prompt.
+    panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    type_text(&mut panel, "next");
+    assert!(panel.rewind_picker.is_none());
+    assert_eq!(panel.input_text(), "next");
+    assert_eq!(users(&panel), ["task one"]);
+}
+
+#[test]
 fn rewinding_past_changed_files_asks_what_to_put_back() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("notes.txt");
@@ -2336,35 +2378,27 @@ fn rewinding_past_changed_files_asks_what_to_put_back() {
         &["task one", "task two", "task three"],
         &[(1, file.as_path())],
     );
-    let events = panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
-    let picker = events
-        .iter()
-        .find(|e| matches!(e, PanelEvent::ShowSelect { .. }))
-        .unwrap();
-    let PanelEvent::ShowSelect { options, .. } = picker else {
-        unreachable!()
-    };
+    panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
     // Only rewinding to before task two or earlier takes the file back.
     assert_eq!(
-        options,
-        &["task three", "task two · 1 file", "task one · 1 file"]
+        rewind_rows(&panel),
+        [
+            ("task one".into(), "notes.txt".into()),
+            ("task two".into(), "notes.txt".into()),
+            ("task three".into(), String::new()),
+        ]
     );
 
     // Rewinding to before task three changes no file: no card.
-    select(&mut panel, picker, 0);
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
     assert!(panel.pending.is_none());
     assert_eq!(users(&panel), ["task one", "task two"]);
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "after task two");
 
-    // Before task two, the card names the file; the first row puts back
-    // both the file and the conversation.
+    // Before task two, now the newest, the card names the file; the first
+    // row puts back both the file and the conversation.
     panel.clear_input();
-    let events = panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
-    let picker = events
-        .iter()
-        .find(|e| matches!(e, PanelEvent::ShowSelect { .. }))
-        .unwrap();
-    select(&mut panel, picker, 0);
+    rewind_with_esc(&mut panel, 0);
     let form = panel.pending.as_ref().expect("rewind card").form();
     assert!(form.title().contains("notes.txt"), "{}", form.title());
     panel.handle_key(chord(KeyCode::Char('1'), KeyModifiers::NONE));
@@ -2398,12 +2432,7 @@ fn a_rewind_can_leave_the_files_or_the_conversation_alone() {
         &[(1, file.as_path())],
     );
     let rewind_to = |panel: &mut AgentPanel, index: usize, row: char| {
-        let events = panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
-        let picker = events
-            .iter()
-            .find(|e| matches!(e, PanelEvent::ShowSelect { .. }))
-            .unwrap();
-        select(panel, picker, index);
+        rewind_with_esc(panel, index);
         panel.handle_key(chord(KeyCode::Char(row), KeyModifiers::NONE));
         panel.tick()
     };

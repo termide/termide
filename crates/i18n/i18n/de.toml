@@ -997,7 +997,6 @@ agent_notice_goal_reached_reason_fmt = "Ziel erreicht: {reason}"
 agent_notice_command_denied_fmt = "/{name} ist durch die Berechtigungsregeln verweigert"
 agent_notice_rolled_back_fmt = "zurückgesetzt: {count} Datei{plural} wiederhergestellt, Gespräch zurückgespult"
 agent_notice_files_restored_fmt = "{count} Datei{plural} wiederhergestellt, Gespräch behalten"
-agent_rewind_option_files_fmt = "{text} · {count} Datei{plural}"
 agent_rewind_confirm_fmt = "Zurück zu vor „{message}“? Seitdem geändert: {changed}"
 agent_notice_undid_fmt = "letzte Anfrage rückgängig: {count} Datei{plural} wiederhergestellt, Gespräch zurückgespult"
 

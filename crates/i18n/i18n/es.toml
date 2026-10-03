@@ -996,7 +996,6 @@ agent_notice_goal_reached_reason_fmt = "objetivo alcanzado: {reason}"
 agent_notice_command_denied_fmt = "/{name} está denegado por las reglas de permisos"
 agent_notice_rolled_back_fmt = "revertido: {count} archivo{plural} restaurado{plural}, conversación rebobinada"
 agent_notice_files_restored_fmt = "{count} archivo{plural} restaurado{plural}, conversación conservada"
-agent_rewind_option_files_fmt = "{text} · {count} archivo{plural}"
 agent_rewind_confirm_fmt = "¿Volver a antes de «{message}»? Cambiado desde entonces: {changed}"
 agent_notice_undid_fmt = "última petición deshecha: {count} archivo{plural} restaurado{plural}, conversación rebobinada"
 

@@ -996,7 +996,6 @@ agent_notice_goal_reached_reason_fmt = "लक्ष्य पूरा हु�
 agent_notice_command_denied_fmt = "/{name} अनुमति नियमों द्वारा अस्वीकृत है"
 agent_notice_rolled_back_fmt = "वापस लाया गया: {count} फ़ाइल{plural} पुनर्स्थापित, बातचीत पीछे ले जाई गई"
 agent_notice_files_restored_fmt = "{count} फ़ाइलें पुनर्स्थापित, बातचीत रखी गई"
-agent_rewind_option_files_fmt = "{text} · {count} फ़ाइलें"
 agent_rewind_confirm_fmt = "“{message}” से पहले लौटें? तब से बदला: {changed}"
 agent_notice_undid_fmt = "पिछला अनुरोध पूर्ववत: {count} फ़ाइल{plural} पुनर्स्थापित, बातचीत पीछे ले जाई गई"
 

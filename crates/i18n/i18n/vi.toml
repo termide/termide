@@ -996,7 +996,6 @@ agent_notice_goal_reached_reason_fmt = "đã đạt mục tiêu: {reason}"
 agent_notice_command_denied_fmt = "/{name} bị quy tắc quyền từ chối"
 agent_notice_rolled_back_fmt = "đã quay về: khôi phục {count} tệp, tua lại hội thoại"
 agent_notice_files_restored_fmt = "đã khôi phục {count} tệp, giữ nguyên cuộc trò chuyện"
-agent_rewind_option_files_fmt = "{text} · {count} tệp"
 agent_rewind_confirm_fmt = "Quay về trước “{message}”? Đã thay đổi từ đó: {changed}"
 agent_notice_undid_fmt = "đã hoàn tác yêu cầu cuối: khôi phục {count} tệp, tua lại hội thoại"
 
