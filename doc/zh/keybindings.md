@@ -272,3 +272,24 @@ crossterm 解析为 `Ctrl+7` / `Ctrl+4`,规范化器将其重写回斜杠 / 反�
 
 任何动作都支持多个备选项:列在数组中。第一项是帮助面板中显示的
 规范字符串。
+
+### 未绑定的操作
+
+有些操作默认不带绑定，因为每个仍然空闲的组合键在某处都会与桌面或 shell
+的快捷键冲突：`Ctrl+Alt+Left` / `Ctrl+Alt+Right` 在多个 Linux 桌面中用于切换
+工作区，`Ctrl+Alt+<数字>` 在传统终端中会被当作 `Alt+<数字>`，而 `Alt+.` 在
+bash 中插入上一条命令的最后一个参数。请将它们绑定到您系统上空闲的组合键：
+
+| 操作 | 作用 |
+|------|------|
+| `prev_project` / `next_project` | 按打开顺序切换到上一个 / 下一个已打开的项目 |
+| `goto_project_1` … `goto_project_9` | 切换到对应编号的已打开项目 |
+
+```toml
+[general.keybindings]
+prev_project = "Ctrl+Alt+Left"
+next_project = "Ctrl+Alt+Right"
+goto_project_1 = "Ctrl+Alt+1"
+```
+
+绑定后，按键会显示在 `项目` 菜单中对应项目的旁边。

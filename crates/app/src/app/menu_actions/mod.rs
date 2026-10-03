@@ -335,10 +335,9 @@ impl App {
             }
             "quit" => {
                 self.state.close_menu();
-                if self.has_panels_requiring_confirmation() {
+                if let Some(message) = self.quit_confirmation() {
                     let t = i18n::t();
-                    let modal =
-                        termide_modal::ConfirmModal::new(t.app_quit_title(), t.app_quit_confirm());
+                    let modal = termide_modal::ConfirmModal::new(t.app_quit_title(), message);
                     self.state.set_pending_action(
                         PendingAction::QuitApplication,
                         ActiveModal::Confirm(Box::new(modal)),

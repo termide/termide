@@ -121,9 +121,13 @@ impl Perform for VtPerformer {
                 }
             }
             b'\x07' => {
-                // Bell character - just forward to parent terminal
+                // Bell character - forward to parent terminal, and note it
+                // so the panel asks for attention until it is shown focused.
                 print!("\x07");
                 let _ = std::io::stdout().flush();
+                if let Ok(mut screen) = self.screen.write() {
+                    screen.bell = true;
+                }
             }
             _ => {}
         }
@@ -777,6 +781,15 @@ mod tests {
         assert_eq!(row_text(&screen, 0), "");
         feed(&mut performer, "\x1b[1;1H中文x\x1b[4G\x1b[1X".as_bytes());
         assert_eq!(row_text(&screen, 0), "中  x");
+    }
+
+    #[test]
+    fn a_bell_is_noted_but_an_osc_ended_by_bel_is_not() {
+        let (mut performer, _capture, screen) = performer();
+        feed(&mut performer, b"\x1b]0;title\x07$ ");
+        assert!(!screen.read().unwrap().bell);
+        feed(&mut performer, b"\x07");
+        assert!(screen.read().unwrap().bell);
     }
 
     #[test]

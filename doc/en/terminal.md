@@ -9,6 +9,7 @@ The terminal panel provides a full-featured terminal emulator with pseudotermina
 - **Wide and combining characters**: CJK text, emoji and emoji sequences (skin tones, ZWJ) take the two columns the host terminal gives them, and combining accents attach to the character before them instead of taking a cell. Whether a variation selector widens a symbol (`⏱️`) is probed from the host terminal at startup, because terminals differ on it. Full-screen applications and coding agents such as `pi` keep their layout, erase the right rows, and place the cursor where they expect
 - **Modern TUI Compatibility**: Responds to common terminal capability queries and supports negotiated keyboard/focus reporting used by applications such as `vim`, `neovim`, `yazi`, `htop`, and `lazygit`
 - **Process Management**: When closing a terminal panel with running processes, the application will request confirmation before terminating them
+- **Bell**: A bell rung by the program reaches your terminal, and the header of a terminal panel that is not focused turns the warning colour until you focus it. In a project open in the background it marks the project with 🔔 in the `Projects` menu
 - **Panel Title**: Shows `user@host/<directory> (<foreground command>)`. The directory is read from the running shell, so it follows a `cd` inside the panel; a panel started with a fixed command (for example an SSH session) is titled with that command instead
 - **Live Working Directory**: The directory the panel reports to the rest of the application also follows a `cd` inside the shell — the directory switcher, opening a new panel "here", and the repository list of the git panels all use the directory you are actually working in. On Windows, see [Working directory on Windows](#working-directory-on-windows)
 - **Layout Restore**: A restored terminal opens in the directory the shell was last working in, not the one the panel was originally created in. If that directory no longer exists, the nearest existing parent is used
@@ -44,6 +45,18 @@ trigger `backward-word` / `forward-word` in bash/zsh readline, `Shift+Home` /
 Plain arrows keep their existing path, including application-cursor-mode
 substitution (`\x1bOA` vs `\x1b[A`). `Alt+Left` / `Alt+Right` remain bound
 globally to previous/next panel group and therefore aren't forwarded.
+
+A shell with no binding for such a sequence echoes its last letter: bash 5
+and zsh print `A` for `Shift+Up`, `D` for `Shift+Left`, and so on. Any
+xterm-compatible terminal behaves the same. Bind the keys in `~/.inputrc`
+for bash, for example:
+
+```
+"\e[1;2A": previous-history
+"\e[1;2B": next-history
+"\e[1;2C": forward-char
+"\e[1;2D": backward-char
+```
 
 ## Text Search
 

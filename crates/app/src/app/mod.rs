@@ -49,6 +49,7 @@ mod operation_manager_handler;
 mod panel_factory;
 mod panel_manager;
 mod panel_operations;
+mod parked_projects;
 mod project_layout;
 mod watcher;
 mod workspace_edit;
@@ -60,6 +61,9 @@ pub struct App {
     event_handler: EventHandler,
     /// Project root directory (used for per-project layout storage)
     project_root: std::path::PathBuf,
+    /// Projects open in this instance; the ones not current keep their
+    /// panels parked here.
+    open_projects: crate::open_projects::OpenProjects<parked_projects::ParkedProject>,
     /// Last seen editor edit_version (for debounced outline sync).
     outline_last_version: u64,
     /// Last seen editor cursor line (for outline cursor sync).
@@ -156,6 +160,7 @@ impl App {
             event_handler: EventHandler::new(Duration::from_millis(
                 termide_config::constants::EVENT_HANDLER_INTERVAL_MS,
             )),
+            open_projects: crate::open_projects::OpenProjects::new(project_root.clone()),
             project_root,
             outline_last_version: 0,
             outline_last_cursor: 0,
@@ -244,6 +249,7 @@ impl App {
             event_handler: EventHandler::new(Duration::from_millis(
                 termide_config::constants::EVENT_HANDLER_INTERVAL_MS,
             )),
+            open_projects: crate::open_projects::OpenProjects::new(project_root.clone()),
             project_root,
             outline_last_version: 0,
             outline_last_cursor: 0,
@@ -706,6 +712,7 @@ impl App {
         // Initialize terminal dimensions
         let size = terminal.size()?;
         self.state.update_terminal_size(size.width, size.height);
+        self.sync_open_projects();
 
         while !self.state.should_quit {
             // Process events
@@ -810,6 +817,7 @@ impl App {
             }
         }
 
+        self.save_parked_layouts();
         Ok(())
     }
 
@@ -916,6 +924,7 @@ impl App {
                     log::error!("Error processing panel events: {}", e);
                 }
             }
+            self.tick_parked_projects();
         } else {
             // During scrolling: only check terminal output (lightweight)
             for panel in self.layout_manager.iter_all_panels_mut() {

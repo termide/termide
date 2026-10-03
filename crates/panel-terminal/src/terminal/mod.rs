@@ -280,6 +280,9 @@ pub struct TerminalScreen {
     pub force_cache_invalidation: bool,
     /// Working directory the shell last reported in-band (OSC 7 / OSC 9;9).
     pub reported_cwd: Option<std::path::PathBuf>,
+    /// The program rang the bell (BEL) since the panel was last shown
+    /// focused: it waits for the user.
+    pub bell: bool,
 }
 
 impl TerminalScreen {
@@ -324,6 +327,7 @@ impl TerminalScreen {
             sync_output_ended: false,
             force_cache_invalidation: false,
             reported_cwd: None,
+            bell: false,
         }
     }
 

@@ -32,6 +32,9 @@ pub struct MenuRenderParams<'a> {
     pub net_up_rate: u64,
     /// Battery info, if available on this system
     pub battery: Option<BatteryInfo>,
+    /// A project open in the background waits for the user: the Projects
+    /// title is drawn on the warning colour.
+    pub projects_attention: bool,
 }
 
 /// Menu labels cached per UI language. Recomputed (and leaked) when the
@@ -286,6 +289,13 @@ pub fn render_menu(frame: &mut Frame, area: Rect, params: &MenuRenderParams) {
             Style::default()
                 .fg(params.theme.selected_fg)
                 .bg(params.theme.selected_bg)
+                .add_modifier(Modifier::BOLD)
+        } else if i == PROJECTS_MENU_INDEX && params.projects_attention {
+            // A badge, not a text colour: several themes (the default
+            // included) give menu titles the warning colour already.
+            Style::default()
+                .fg(params.theme.bg)
+                .bg(params.theme.warning)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(params.theme.accented_fg)

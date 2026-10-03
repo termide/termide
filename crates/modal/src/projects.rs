@@ -38,6 +38,11 @@ pub struct ProjectItem {
     pub relative_time: String,
     /// Whether this is the current project
     pub is_current: bool,
+    /// Whether the project is open in this instance (the current one is)
+    pub is_open: bool,
+    /// Whether a panel of this project, open in the background, waits for
+    /// the user
+    pub attention: bool,
 }
 
 /// Projects selection modal window
@@ -89,7 +94,7 @@ impl ProjectsModal {
         let max_path_width = self
             .items
             .iter()
-            .map(|item| item.display_path.len() as u16 + 4) // "▶ " + path + " (current)"
+            .map(|item| item.display_path.len() as u16 + 7) // "▶ " + path + " ○ 🔔"
             .max()
             .unwrap_or(40);
 
@@ -241,16 +246,27 @@ impl Modal for ProjectsModal {
             // Line 1: Path with selection indicator
             let prefix = if is_selected { "▶ " } else { "  " };
 
-            let path_suffix = if is_current {
+            // The current project is named so; another open one is marked
+            // ○, and 🔔 when it waits for the user — as in the Projects menu.
+            let mut path_suffix = if is_current {
                 format!(" {}", t.projects_current())
+            } else if item.is_open {
+                " ○".to_string()
             } else {
                 String::new()
             };
+            if item.attention {
+                path_suffix.push_str(" 🔔");
+            }
 
             let path_style = if is_selected {
                 Style::default()
                     .fg(theme.fg)
                     .bg(theme.bg)
+                    .add_modifier(Modifier::BOLD)
+            } else if item.attention {
+                Style::default()
+                    .fg(theme.warning)
                     .add_modifier(Modifier::BOLD)
             } else if is_current {
                 Style::default().fg(theme.accented_fg)
@@ -334,10 +350,11 @@ impl Modal for ProjectsModal {
                 }
             }
 
-            // Delete project layout (Delete or F8)
+            // Delete project layout (Delete or F8). An open project keeps
+            // its layout: it is saved again when the project is left.
             KeyCode::Delete | KeyCode::F(8) => {
                 if let Some(item) = self.get_selected() {
-                    if !item.is_current {
+                    if !item.is_open {
                         Ok(Some(ModalResult::Confirmed(ProjectAction::Delete(
                             item.project_path.clone(),
                         ))))
@@ -420,5 +437,52 @@ impl Modal for ProjectsModal {
                 Ok(None)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyEvent, KeyModifiers};
+    use std::path::Path;
+    use termide_core::KeyChord;
+
+    fn item(path: &str, is_current: bool, is_open: bool) -> ProjectItem {
+        ProjectItem {
+            project_path: PathBuf::from(path),
+            display_path: path.to_string(),
+            relative_time: String::new(),
+            is_current,
+            is_open,
+            attention: false,
+        }
+    }
+
+    fn press(modal: &mut ProjectsModal, code: KeyCode) -> Option<ModalResult<ProjectAction>> {
+        modal
+            .handle_key(KeyChord::identity(KeyEvent::new(code, KeyModifiers::NONE)))
+            .unwrap()
+    }
+
+    #[test]
+    fn only_a_project_not_open_has_its_layout_deleted() {
+        let items = vec![
+            item("/current", true, true),
+            item("/background", false, true),
+            item("/closed", false, false),
+        ];
+        let mut modal = ProjectsModal::new("Projects", items).with_cursor(1);
+        assert!(press(&mut modal, KeyCode::Delete).is_none());
+        assert!(matches!(
+            press(&mut modal, KeyCode::Enter),
+            Some(ModalResult::Confirmed(ProjectAction::Switch(path))) if path == Path::new("/background")
+        ));
+
+        let items = vec![item("/current", true, true), item("/closed", false, false)];
+        let mut modal = ProjectsModal::new("Projects", items).with_cursor(1);
+        assert!(matches!(
+            press(&mut modal, KeyCode::F(8)),
+            Some(ModalResult::Confirmed(ProjectAction::Delete(path))) if path == Path::new("/closed")
+        ));
     }
 }

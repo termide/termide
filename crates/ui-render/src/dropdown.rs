@@ -26,6 +26,9 @@ pub struct DropdownItem {
     pub is_project: bool,
     /// Keyboard shortcut for this action, shown dimmed on the right.
     pub shortcut: Option<String>,
+    /// What the row stands for waits for the user (drawn in the warning
+    /// colour, as the header of a panel that waits is).
+    pub attention: bool,
 }
 
 impl DropdownItem {
@@ -37,6 +40,7 @@ impl DropdownItem {
             is_separator: false,
             is_project: false,
             shortcut: None,
+            attention: false,
         }
     }
 
@@ -56,6 +60,7 @@ impl DropdownItem {
             is_separator: true,
             is_project: false,
             shortcut: None,
+            attention: false,
         }
     }
 
@@ -68,6 +73,12 @@ impl DropdownItem {
     /// Mark this item as project-local (rendered bold)
     pub fn with_project(mut self) -> Self {
         self.is_project = true;
+        self
+    }
+
+    /// Mark this item as waiting for the user
+    pub fn with_attention(mut self) -> Self {
+        self.attention = true;
         self
     }
 }
@@ -311,6 +322,11 @@ impl<'a> Dropdown<'a> {
                 Style::default()
                     .bg(self.theme.selected_bg)
                     .fg(self.theme.selected_fg)
+                    .add_modifier(Modifier::BOLD)
+            } else if item.attention {
+                Style::default()
+                    .fg(self.theme.warning)
+                    .bg(self.theme.bg)
                     .add_modifier(Modifier::BOLD)
             } else if item.is_project {
                 Style::default()

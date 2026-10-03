@@ -418,6 +418,7 @@ pub fn render_layout_with_accordion(
         net_down_rate: state.system_monitor.net_download_rate(),
         net_up_rate: state.system_monitor.net_upload_rate(),
         battery: state.system_monitor.battery_cached(),
+        projects_attention: state.open_projects.iter().any(|p| p.attention),
     };
     render_menu(frame, main_chunks[0], &menu_params);
 

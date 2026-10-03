@@ -679,6 +679,9 @@ projects_delete_many_title = "Удалить сохранённые раскла
 projects_title = "Переключить проект"
 project_created = "Новый проект создан"
 project_moved = "Проект перемещён"
+projects_close_title = "Закрыть проект?"
+projects_close_warning = "Запущенные процессы будут остановлены, несохранённые изменения потеряны."
+projects_already_open = "Эта директория уже занята другим открытым проектом"
 detach_instance = "Отсоединить экземпляр"
 detach_not_detached_instance = "Запущено не в отсоединённом экземпляре"
 detach_failed = "Не удалось связаться с демоном экземпляра"
@@ -886,6 +889,7 @@ command_report_no_output = "(нет вывода)"
 
 [formats]
 projects_delete_fmt = "Раскладка {path}"
+app_quit_background_fmt = "Открыты в фоне: {projects}"
 projects_delete_many_fmt = "Раскладок в {dir}: {count}"
 replace_done_fmt = "Заменено {count} вхождений в {files} файлах."
 replace_confirm_fmt = "Заменить {count} вхождений в {files} файлах?"

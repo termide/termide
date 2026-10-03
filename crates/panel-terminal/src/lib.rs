@@ -910,6 +910,11 @@ impl Panel for Terminal {
         // area is already the inner content area (accordion drew outer border)
         let theme = self.cached_theme;
 
+        // Shown focused, the bell rung meanwhile has been answered.
+        if ctx.is_focused && self.read_screen().bell {
+            self.write_screen().bell = false;
+        }
+
         // Dock the inline find bar at the BOTTOM (with a pseudographic separator
         // above it), shrinking the grid area so the PTY resize / scroll / mouse
         // math see the reduced height — consistent with the agent prompt input.
@@ -1433,6 +1438,10 @@ impl Panel for Terminal {
                 CommandResult::NeedsRedraw(true)
             }
         }
+    }
+
+    fn needs_attention(&self) -> bool {
+        self.read_screen().bell
     }
 
     fn needs_close_confirmation(&self) -> Option<String> {

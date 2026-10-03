@@ -99,6 +99,13 @@ pub enum PendingAction {
     QuitApplication,
     /// Switch to another project
     SwitchProject,
+    /// Close the project open in the background at `root` (with confirmation)
+    CloseProject {
+        root: PathBuf,
+        /// Projects menu selections to reopen afterwards (`None`: return to
+        /// the project switcher).
+        menu: Option<Vec<usize>>,
+    },
     /// Create a new project in specified directory
     NewProject,
     /// Delete the layouts of one or more projects (with confirmation)

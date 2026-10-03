@@ -1123,9 +1123,13 @@ pub trait Translation: Send + Sync {
     fn projects_delete_title(&self) -> &str;
     fn projects_delete_many_title(&self) -> &str;
     fn projects_delete_fmt(&self, path: &str) -> String;
+    fn app_quit_background_fmt(&self, projects: &str) -> String;
     fn projects_delete_many_fmt(&self, dir: &str, count: usize) -> String;
     fn project_created(&self) -> &str;
     fn project_moved(&self) -> &str;
+    fn projects_close_title(&self) -> &str;
+    fn projects_close_warning(&self) -> &str;
+    fn projects_already_open(&self) -> &str;
 
     // Detached sessions
     fn detach_instance(&self) -> &str;

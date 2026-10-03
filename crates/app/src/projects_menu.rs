@@ -1,5 +1,5 @@
-//! Projects menu: the fixed actions, then the known projects as a tree of
-//! directory submenus.
+//! Projects menu: the fixed actions, the projects open in this instance,
+//! then the known projects as a tree of directory submenus.
 //!
 //! The tree mirrors the directories that hold projects. Chains of directories
 //! with a single child and no project of their own are folded into one row
@@ -20,7 +20,15 @@ use termide_ui_render::{
     PROJECTS_MENU_INDEX, PROJECTS_SUBMENU_ITEM_COUNT,
 };
 
+use crate::open_projects::OpenProjectView;
 use crate::AppState;
+
+/// Marks the current project.
+const CURRENT_MARK: &str = "●";
+/// Marks a project open in the background.
+const OPEN_MARK: &str = "○";
+/// Marks a project with a panel that waits for the user.
+const ATTENTION_MARK: &str = "🔔";
 
 /// A directory on the way to one or more projects, or a project itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,6 +86,8 @@ pub enum ProjectRow<'a> {
     Node(&'a ProjectNode),
     /// The project of a directory whose submenu this row belongs to.
     Open(&'a ProjectNode),
+    /// A project open in this instance, in the section above the tree.
+    Opened(&'a OpenProjectView),
 }
 
 impl<'a> ProjectRow<'a> {
@@ -96,7 +106,8 @@ impl<'a> ProjectRow<'a> {
         match self {
             Self::Node(node) => node.collect_projects(&mut out),
             Self::Open(node) => out.extend(node.project.as_deref()),
-            Self::Action(_) | Self::Separator => {}
+            // Delete closes an open project instead, see `open_project`.
+            Self::Action(_) | Self::Separator | Self::Opened(_) => {}
         }
         out
     }
@@ -106,6 +117,15 @@ impl<'a> ProjectRow<'a> {
         match self {
             Self::Node(node) if node.children.is_empty() => node.project.as_deref(),
             Self::Open(node) => node.project.as_deref(),
+            Self::Opened(view) => Some(&view.root),
+            _ => None,
+        }
+    }
+
+    /// The open project this row stands for, in the section above the tree.
+    pub fn open_project(&self) -> Option<&'a Path> {
+        match self {
+            Self::Opened(view) => Some(&view.root),
             _ => None,
         }
     }
@@ -255,31 +275,161 @@ fn sort(nodes: &mut [ProjectNode]) {
     }
 }
 
+/// `label` with the marks of the project at `project`, if it is open: ● for
+/// the current one, ○ for one open in the background, 🔔 when it waits for
+/// the user. Whether it waits is returned too.
+fn marked_label(
+    label: &str,
+    project: Option<&Path>,
+    current: &Path,
+    open: &[OpenProjectView],
+) -> (String, bool) {
+    let Some(view) = project.and_then(|p| open.iter().find(|view| view.root == p)) else {
+        return (label.to_string(), false);
+    };
+    let mark = if view.root == current {
+        CURRENT_MARK
+    } else {
+        OPEN_MARK
+    };
+    let mut marked = format!("{label} {mark}");
+    if view.attention {
+        marked.push(' ');
+        marked.push_str(ATTENTION_MARK);
+    }
+    (marked, view.attention)
+}
+
 /// Dropdown rows for `rows`. The current project, and every directory on the
-/// way to it, is drawn bold so the path to it can be followed.
-fn level_items(rows: &[ProjectRow<'_>], current: &Path) -> Vec<DropdownItem> {
+/// way to it, is drawn bold so the path to it can be followed. Open projects
+/// carry their marks, see `marked_label`.
+fn level_items(
+    rows: &[ProjectRow<'_>],
+    current: &Path,
+    open: &[OpenProjectView],
+) -> Vec<DropdownItem> {
     rows.iter()
         .map(|row| match row {
             ProjectRow::Action(_) => unreachable!("actions are built by get_projects_items"),
+            ProjectRow::Opened(_) => unreachable!("open projects are built by open_items"),
             ProjectRow::Separator => DropdownItem::separator(),
             ProjectRow::Node(node) => {
-                let mut item = DropdownItem::new(node.label.clone(), String::new());
+                // A directory that opens a submenu lists its own project
+                // inside, where the marks go.
+                let project = if node.children.is_empty() {
+                    node.project.as_deref()
+                } else {
+                    None
+                };
+                let (label, attention) = marked_label(&node.label, project, current, open);
+                let mut item = DropdownItem::new(label, String::new());
                 if !node.children.is_empty() {
                     item = item.with_submenu();
                 }
                 if node.contains(current) {
                     item = item.with_project();
                 }
+                if attention {
+                    item = item.with_attention();
+                }
                 item
             }
             ProjectRow::Open(node) => {
-                let item = DropdownItem::new(node.label.clone(), String::new());
+                let (label, attention) =
+                    marked_label(&node.label, node.project.as_deref(), current, open);
+                let mut item = DropdownItem::new(label, String::new());
                 if node.project.as_deref() == Some(current) {
-                    item.with_project()
-                } else {
-                    item
+                    item = item.with_project();
                 }
+                if attention {
+                    item = item.with_attention();
+                }
+                item
             }
+        })
+        .collect()
+}
+
+/// Names for `roots` that tell them apart: as few trailing directory names
+/// as make each one unique, the whole path when nothing shorter does.
+pub fn short_names(roots: &[&Path]) -> Vec<String> {
+    let tails = |root: &Path, count: usize| -> Option<PathBuf> {
+        let names: Vec<_> = root
+            .components()
+            .filter_map(|c| match c {
+                Component::Normal(name) => Some(name),
+                _ => None,
+            })
+            .collect();
+        (count <= names.len()).then(|| names[names.len() - count..].iter().collect())
+    };
+    roots
+        .iter()
+        .map(|root| {
+            (1..)
+                .map_while(|count| tails(root, count))
+                .find(|tail| {
+                    roots
+                        .iter()
+                        .filter(|other| {
+                            tails(other, tail.components().count()).as_ref() == Some(tail)
+                        })
+                        .count()
+                        == 1
+                })
+                .map(|tail| tail.display().to_string())
+                .unwrap_or_else(|| {
+                    termide_core::util::shorten_home_path(&root.display().to_string())
+                })
+        })
+        .collect()
+}
+
+/// Dropdown rows for the open projects, `rows`, in the section above the
+/// tree: ● for the current one, ○ for the others, 🔔 for one that waits, and
+/// the key that switches to it, when one is bound.
+fn open_items(
+    rows: &[ProjectRow<'_>],
+    current: &Path,
+    keybindings: &termide_config::GlobalKeybindings,
+) -> Vec<DropdownItem> {
+    let views: Vec<&OpenProjectView> = rows
+        .iter()
+        .filter_map(|row| match row {
+            ProjectRow::Opened(view) => Some(*view),
+            _ => None,
+        })
+        .collect();
+    let roots: Vec<&Path> = views.iter().map(|view| view.root.as_path()).collect();
+    let names = short_names(&roots);
+    let goto = keybindings.goto_project();
+    views
+        .iter()
+        .zip(names)
+        .enumerate()
+        .map(|(index, (view, name))| {
+            let mark = if view.root == current {
+                CURRENT_MARK
+            } else {
+                OPEN_MARK
+            };
+            let mut label = format!("{mark} {name}");
+            if view.attention {
+                label.push(' ');
+                label.push_str(ATTENTION_MARK);
+            }
+            let shortcut = goto
+                .get(index)
+                .and_then(|binding| binding.as_ref())
+                .map(|binding| binding.display().to_string());
+            let mut item = DropdownItem::new(label, String::new()).with_shortcut(shortcut);
+            if view.root == current {
+                item = item.with_project();
+            }
+            if view.attention {
+                item = item.with_attention();
+            }
+            item
         })
         .collect()
 }
@@ -293,11 +443,27 @@ impl AppState {
             .map(ProjectRow::Action)
             .collect();
         let mut items = get_projects_items(Some(&self.config.general.keybindings));
+        // With one project open the section would only repeat the tree.
+        if self.open_projects.len() > 1 {
+            rows.push(ProjectRow::Separator);
+            items.push(DropdownItem::separator());
+            let open_rows: Vec<_> = self.open_projects.iter().map(ProjectRow::Opened).collect();
+            items.extend(open_items(
+                &open_rows,
+                &self.project_root,
+                &self.config.general.keybindings,
+            ));
+            rows.extend(open_rows);
+        }
         if !self.cache.projects.is_empty() {
             rows.push(ProjectRow::Separator);
             items.push(DropdownItem::separator());
             let tree_rows: Vec<_> = self.cache.projects.iter().map(ProjectRow::Node).collect();
-            items.extend(level_items(&tree_rows, &self.project_root));
+            items.extend(level_items(
+                &tree_rows,
+                &self.project_root,
+                &self.open_projects,
+            ));
             rows.extend(tree_rows);
         }
 
@@ -317,7 +483,7 @@ impl AppState {
                 dropdown_geometry(&parent.items, parent.selected, parent.x, parent.y, screen);
             let row_y = geometry.area.y + 1 + (parent.selected - geometry.scroll_offset) as u16;
             let rows = node.rows();
-            let items = level_items(&rows, &self.project_root);
+            let items = level_items(&rows, &self.project_root, &self.open_projects);
             levels.push(ProjectsMenuLevel {
                 rows,
                 items,
@@ -477,9 +643,97 @@ mod tests {
             Some(&home),
         );
         let rows: Vec<_> = tree.iter().map(ProjectRow::Node).collect();
-        let items = level_items(&rows, Path::new("/home/u/g/a/two"));
+        let items = level_items(&rows, Path::new("/home/u/g/a/two"), &[]);
         assert!(items[0].is_project && items[0].has_submenu);
         assert!(!items[1].is_project && !items[1].has_submenu);
+    }
+
+    fn open(root: &str, attention: bool) -> OpenProjectView {
+        OpenProjectView {
+            root: PathBuf::from(root),
+            attention,
+        }
+    }
+
+    #[test]
+    fn short_names_take_as_many_trailing_names_as_tell_projects_apart() {
+        let roots = [
+            Path::new("/home/u/src/termide"),
+            Path::new("/home/u/work/api"),
+            Path::new("/home/u/old/api"),
+        ];
+        assert_eq!(
+            short_names(&roots),
+            vec![
+                "termide".to_string(),
+                format!("work{}api", sep()),
+                format!("old{}api", sep())
+            ]
+        );
+        // One path is the tail of another: the whole path names it.
+        let nested = [Path::new("/api"), Path::new("/x/api")];
+        let names = short_names(&nested);
+        assert_eq!(names[1], format!("x{}api", sep()));
+        assert_ne!(names[0], "api");
+    }
+
+    #[test]
+    fn open_projects_get_a_section_above_the_tree_from_two_on() {
+        let mut state = test_state();
+        state.project_root = PathBuf::from("/p/one");
+        state.cache.projects = build_project_tree(&paths(&["/p/one", "/p/two", "/p/three"]), None);
+        let screen = Rect::new(0, 0, 120, 40);
+
+        state.open_projects = vec![open("/p/one", false)];
+        let levels = state.projects_menu_levels(screen);
+        assert!(levels[0]
+            .rows
+            .iter()
+            .all(|row| row.open_project().is_none()));
+
+        state.open_projects = vec![open("/p/one", false), open("/p/two", true)];
+        let levels = state.projects_menu_levels(screen);
+        let first = PROJECTS_SUBMENU_ITEM_COUNT + 1;
+        let (section, tree) = (
+            &levels[0].items[first..first + 2],
+            &levels[0].items[first + 3..],
+        );
+        assert!(levels[0].items[first - 1].is_separator && levels[0].items[first + 2].is_separator);
+        assert_eq!(section[0].label, "● one");
+        assert!(section[0].is_project && !section[0].attention);
+        assert_eq!(section[1].label, "○ two 🔔");
+        assert!(section[1].attention);
+        assert_eq!(
+            levels[0].rows[first + 1].open_project(),
+            Some(Path::new("/p/two"))
+        );
+        assert!(
+            levels[0].rows[first + 1].projects().is_empty(),
+            "Delete closes an open project, it does not delete its layout"
+        );
+
+        let labels: Vec<&str> = tree.iter().map(|item| item.label.as_str()).collect();
+        assert_eq!(labels, vec!["one ●", "three", "two ○ 🔔"]);
+        assert!(tree[2].attention);
+    }
+
+    #[test]
+    fn the_open_project_section_shows_bound_project_keys() {
+        let mut state = test_state();
+        state.project_root = PathBuf::from("/p/one");
+        state.open_projects = vec![open("/p/one", false), open("/p/two", false)];
+        let mut config = (*state.config).clone();
+        config.general.keybindings.goto_project_2 =
+            Some(termide_config::KeyBinding::Single("Alt+F2".into()));
+        state.config = std::sync::Arc::new(config);
+
+        let levels = state.projects_menu_levels(Rect::new(0, 0, 120, 40));
+        let first = PROJECTS_SUBMENU_ITEM_COUNT + 1;
+        assert_eq!(levels[0].items[first].shortcut, None);
+        assert_eq!(
+            levels[0].items[first + 1].shortcut.as_deref(),
+            Some("Alt+F2")
+        );
     }
 
     #[test]

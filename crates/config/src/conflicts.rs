@@ -142,6 +142,17 @@ pub fn enumerate_bindings(config: &Config) -> Vec<(BindingLocation, ParsedKeyBin
     push(&mut out, "general", "goto_panel_7", &g.goto_panel_7);
     push(&mut out, "general", "goto_panel_8", &g.goto_panel_8);
     push(&mut out, "general", "goto_panel_9", &g.goto_panel_9);
+    push(&mut out, "general", "prev_project", &g.prev_project);
+    push(&mut out, "general", "next_project", &g.next_project);
+    push(&mut out, "general", "goto_project_1", &g.goto_project_1);
+    push(&mut out, "general", "goto_project_2", &g.goto_project_2);
+    push(&mut out, "general", "goto_project_3", &g.goto_project_3);
+    push(&mut out, "general", "goto_project_4", &g.goto_project_4);
+    push(&mut out, "general", "goto_project_5", &g.goto_project_5);
+    push(&mut out, "general", "goto_project_6", &g.goto_project_6);
+    push(&mut out, "general", "goto_project_7", &g.goto_project_7);
+    push(&mut out, "general", "goto_project_8", &g.goto_project_8);
+    push(&mut out, "general", "goto_project_9", &g.goto_project_9);
     push(&mut out, "general", "quit", &g.quit);
     push(
         &mut out,

@@ -20,30 +20,7 @@ impl App {
         if !self.persist_layout {
             return Ok(());
         }
-
-        // Get the storage directory of this project
-        let project_dir = termide_project::ProjectLayout::get_project_dir(&self.project_root)?;
-
-        // Ensure all modified unnamed buffers have stable filenames
-        for group in &mut self.layout_manager.panel_groups {
-            for panel in group.panels_mut() {
-                if let Some(editor) = panel.as_editor_mut() {
-                    editor.ensure_unsaved_buffer_file();
-                }
-            }
-        }
-
-        // Serialize the layout (may save temporary buffers)
-        let layout = self.layout_manager.to_state(&project_dir);
-
-        // Save the layout to its file
-        layout.save(&self.project_root)?;
-
-        // Remove stale unsaved buffer files not referenced by the current layout
-        termide_project::cleanup_stale_buffers(&project_dir, &layout);
-
-        log::info!("Project layout saved");
-        Ok(())
+        save_layout_of(&self.project_root, &mut self.layout_manager)
     }
 
     /// Load the current project's layout from its file and restore it
@@ -136,4 +113,34 @@ impl App {
             log::error!("Failed to auto-save project layout: {}", e);
         }
     }
+}
+
+/// Save `layout` as the layout of the project at `project_root`.
+pub(super) fn save_layout_of(
+    project_root: &std::path::Path,
+    layout_manager: &mut LayoutManager,
+) -> Result<()> {
+    // Get the storage directory of this project
+    let project_dir = termide_project::ProjectLayout::get_project_dir(project_root)?;
+
+    // Ensure all modified unnamed buffers have stable filenames
+    for group in &mut layout_manager.panel_groups {
+        for panel in group.panels_mut() {
+            if let Some(editor) = panel.as_editor_mut() {
+                editor.ensure_unsaved_buffer_file();
+            }
+        }
+    }
+
+    // Serialize the layout (may save temporary buffers)
+    let layout = layout_manager.to_state(&project_dir);
+
+    // Save the layout to its file
+    layout.save(project_root)?;
+
+    // Remove stale unsaved buffer files not referenced by the current layout
+    termide_project::cleanup_stale_buffers(&project_dir, &layout);
+
+    log::info!("Project layout saved");
+    Ok(())
 }
