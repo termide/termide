@@ -298,9 +298,7 @@ fn copy_arboard(text: &str) -> Result<(), String> {
             .clipboard(LinuxClipboardKind::Primary)
             .text(text.to_string())
         {
-            #[cfg(debug_assertions)]
-            log::warn!("Failed to set PRIMARY selection: {}", e);
-            let _ = e; // Suppress unused warning in release
+            log::debug!("Failed to set PRIMARY selection: {}", e);
         }
     }
 
@@ -327,9 +325,10 @@ fn copy_arboard(text: &str) -> Result<(), String> {
 /// Platform notes, all of which are why this cannot be a plain
 /// `set_text` followed by `file_list` on every OS:
 ///
-/// - macOS/Linux: `file_list` owns the clipboard and clears it, so no text
-///   flavor is left behind. Text consumers recover the paths via
-///   [`paste_files`].
+/// - macOS: `file_list` owns the clipboard and clears it, so the text
+///   flavor is added back afterwards.
+/// - Linux: `file_list` owns the clipboard and clears it, so no text flavor
+///   is left behind. Text consumers recover the paths via [`paste_files`].
 /// - Windows: `SetClipboardData` is only allowed for the current clipboard
 ///   owner, and `file_list` does not clear. Writing the text first calls
 ///   `EmptyClipboard`, which takes ownership and makes the file write legal;
@@ -370,13 +369,8 @@ fn copy_files_arboard(paths: &[PathBuf]) -> Result<(), String> {
     {
         // Take ownership first: `file_list` calls `SetClipboardData` without
         // clearing, which the OS rejects unless we already own the clipboard.
-        let text = paths
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
         clipboard
-            .set_text(&text)
+            .set_text(paths_to_text(paths))
             .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
         clipboard
             .set()
@@ -511,7 +505,7 @@ pub fn paste_paths() -> Vec<PathBuf> {
 /// Paste text for a text-consuming panel (editor, terminal, agent prompt).
 ///
 /// Identical to [`paste`] except that a clipboard holding only a native file
-/// list — which is what [`copy_files`] leaves on macOS and Linux — yields the
+/// list — which is what [`copy_files`] leaves on Linux — yields the
 /// newline-joined paths instead of nothing. Without this, `Ctrl+V` after a
 /// file copy would be a silent no-op outside the file manager.
 pub fn paste_text_or_paths() -> Option<String> {

@@ -61,8 +61,7 @@ pub trait Translation: Send + Sync {
     /// Hindi put it at the end, so a `{mode}` placeholder cannot be filled
     /// grammatically. `names` is a trailing block of the actual file names,
     /// so the confirmation says what lands and not only how many; it sits on
-    /// its own lines, which is why one key serves every word order. A move
-    /// variant gets its own key when cut lands.
+    /// its own lines, which is why one key serves every word order.
     fn fm_paste_confirm(&self, count: usize, names: &str, dest: &str) -> String;
     /// "Move N files to: <dest>" — the same shape as [`Self::fm_paste_confirm`]
     /// with the verb swapped, used when the clipboard carries a cut rather
