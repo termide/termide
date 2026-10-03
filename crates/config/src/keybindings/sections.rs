@@ -64,8 +64,8 @@ pub struct GlobalKeybindings {
     pub goto_panel_7: Option<KeyBinding>,
     pub goto_panel_8: Option<KeyBinding>,
     pub goto_panel_9: Option<KeyBinding>,
-    /// Switch to the previous / next open project, in the order they were
-    /// opened. Unbound by default: every free chord collides with a desktop
+    /// Switch to the previous / next open project, in the order the
+    /// Projects menu lists them. Unbound by default: every free chord collides with a desktop
     /// shortcut or a shell binding somewhere.
     pub prev_project: Option<KeyBinding>,
     pub next_project: Option<KeyBinding>,

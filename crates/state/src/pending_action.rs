@@ -102,18 +102,18 @@ pub enum PendingAction {
     /// Close the project open in the background at `root` (with confirmation)
     CloseProject {
         root: PathBuf,
-        /// Projects menu selections to reopen afterwards (`None`: return to
-        /// the project switcher).
-        menu: Option<Vec<usize>>,
+        /// Projects menu row to reopen at afterwards (`None`: return to the
+        /// project switcher).
+        menu: Option<usize>,
     },
     /// Create a new project in specified directory
     NewProject,
-    /// Delete the layouts of one or more projects (with confirmation)
+    /// Delete the saved layout of a project (with confirmation)
     DeleteProject {
-        paths: Vec<PathBuf>,
-        /// Projects menu selections to reopen afterwards (`None`: return to
-        /// the project switcher).
-        menu: Option<Vec<usize>>,
+        path: PathBuf,
+        /// Projects menu row to reopen at afterwards (`None`: return to the
+        /// project switcher).
+        menu: Option<usize>,
     },
     /// Delete bookmark (with confirmation)
     DeleteBookmark {

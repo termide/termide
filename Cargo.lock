@@ -5673,7 +5673,6 @@ dependencies = [
  "log",
  "serde",
  "tempfile",
- "termide-i18n",
  "toml",
 ]
 

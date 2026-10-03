@@ -282,7 +282,7 @@ bash 中插入上一条命令的最后一个参数。请将它们绑定到您系
 
 | 操作 | 作用 |
 |------|------|
-| `prev_project` / `next_project` | 按打开顺序切换到上一个 / 下一个已打开的项目 |
+| `prev_project` / `next_project` | 按 `项目` 菜单中的排列顺序切换到上一个 / 下一个已打开的项目 |
 | `goto_project_1` … `goto_project_9` | 切换到对应编号的已打开项目 |
 
 ```toml

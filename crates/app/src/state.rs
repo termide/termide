@@ -353,7 +353,7 @@ impl AppState {
     pub fn open_projects_submenu(&mut self) {
         self.ui.close_all_submenus();
         self.ui.projects_submenu.open();
-        self.load_projects_tree();
+        self.load_known_projects();
     }
 
     /// Open Tools submenu

@@ -146,9 +146,13 @@ impl App {
                             PendingAction::DeleteProject {
                                 menu: Some(selection),
                                 ..
+                            }
+                            | PendingAction::CloseProject {
+                                menu: Some(selection),
+                                ..
                             } => {
                                 self.state.close_modal();
-                                self.reopen_projects_menu(&selection);
+                                self.reopen_projects_menu(selection);
                                 return Ok(());
                             }
                             other => self.state.pending_action = Some(other),
@@ -511,9 +515,9 @@ impl App {
                 PendingAction::NewProject => {
                     self.handle_new_project_result(value)?;
                 }
-                PendingAction::DeleteProject { paths, menu } => {
+                PendingAction::DeleteProject { path, menu } => {
                     if value.downcast_ref::<bool>().copied().unwrap_or(false) {
-                        self.handle_delete_project(&paths, menu)?;
+                        self.handle_delete_project(&path, menu)?;
                     }
                 }
                 PendingAction::DeleteBookmark {

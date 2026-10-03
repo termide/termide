@@ -1,4 +1,10 @@
 //! Projects selection modal dialog.
+//!
+//! Lists the projects as the Projects menu does: the open ones first, then
+//! the others below a separator. Each takes one row — the mark (● current,
+//! ○ open in the background), when it was last worked on, the path, and 🔔
+//! when a panel of it waits for the user — and the row under the cursor is
+//! inverted, as in the agent's session list.
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, MouseButton, MouseEvent, MouseEventKind};
@@ -7,14 +13,14 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{List, ListItem, Widget},
+    widgets::{Paragraph, Widget},
 };
 
 use crate::base::render_modal_block;
 use std::path::PathBuf;
-use unicode_width::UnicodeWidthStr;
 
 use termide_theme::Theme;
+use termide_ui::str_display_width;
 
 use crate::{calculate_modal_width, centered_rect_with_size, Modal, ModalResult, ModalWidthConfig};
 
@@ -23,6 +29,8 @@ use crate::{calculate_modal_width, centered_rect_with_size, Modal, ModalResult, 
 pub enum ProjectAction {
     /// Switch to the selected project
     Switch(PathBuf),
+    /// Close the selected project, open in the background
+    Close(PathBuf),
     /// Request deletion of the selected project's layout
     Delete(PathBuf),
 }
@@ -34,8 +42,9 @@ pub struct ProjectItem {
     pub project_path: PathBuf,
     /// Display path (potentially shortened)
     pub display_path: String,
-    /// Relative time since last modification (e.g., "2 hours ago")
-    pub relative_time: String,
+    /// When the project was last worked on (`2026-10-03 14:22`), empty when
+    /// unknown
+    pub modified: String,
     /// Whether this is the current project
     pub is_current: bool,
     /// Whether the project is open in this instance (the current one is)
@@ -45,20 +54,63 @@ pub struct ProjectItem {
     pub attention: bool,
 }
 
+impl ProjectItem {
+    /// The row in its three parts: the mark, when the project was last
+    /// worked on (drawn dimmed, empty when unknown) and the path with the
+    /// bell. The path is cut from its start to keep the row within `width`
+    /// columns, so the project's own name and the bell stay in view.
+    fn segments(&self, width: usize) -> (String, String, String) {
+        let mark = if self.is_current {
+            "● "
+        } else if self.is_open {
+            "○ "
+        } else {
+            "  "
+        };
+        let time = if self.modified.is_empty() {
+            String::new()
+        } else {
+            format!("{} ", self.modified)
+        };
+        let tail = if self.attention { " 🔔" } else { "" };
+        let room = width.saturating_sub(
+            str_display_width(mark) + str_display_width(&time) + str_display_width(tail),
+        );
+        let path = termide_ui::path_utils::truncate_left(&self.display_path, room);
+        (mark.to_string(), time, format!("{path}{tail}"))
+    }
+
+    /// The row's text, without the padding around it.
+    fn label(&self) -> String {
+        let (mark, time, rest) = self.segments(usize::MAX);
+        format!("{mark}{time}{rest}")
+    }
+}
+
+/// A row of the list: a project, by its position among the filtered ones,
+/// or the separator between the open projects and the others.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Row {
+    Item(usize),
+    Separator,
+}
+
 /// Projects selection modal window
 #[derive(Debug)]
 pub struct ProjectsModal {
     title: String,
     items: Vec<ProjectItem>,
+    /// Position of the selected project among `filtered_indices`.
     cursor: usize,
+    /// First row shown.
     scroll_offset: usize,
     last_list_area: Option<Rect>,
     filter: String,
     filtered_indices: Vec<usize>,
 }
 
-/// Maximum number of items visible at once (each item takes 2 lines)
-const MAX_VISIBLE_ITEMS: usize = 6;
+/// Maximum number of rows visible at once
+const MAX_VISIBLE_ROWS: usize = 15;
 
 /// Height of the empty line + filter row + separator above the list
 const FILTER_ROWS: u16 = 3;
@@ -78,7 +130,7 @@ impl ProjectsModal {
         }
     }
 
-    /// Set initial cursor position (for selecting the current project)
+    /// Set initial cursor position (an index into the items)
     pub fn with_cursor(mut self, index: usize) -> Self {
         // filtered_indices starts as 0..items.len(), so cursor == item index
         self.cursor = index.min(self.filtered_indices.len().saturating_sub(1));
@@ -86,15 +138,33 @@ impl ProjectsModal {
         self
     }
 
+    /// The rows as shown: the filtered projects, with a separator between
+    /// the open ones and the others while the list keeps its own order.
+    fn rows(&self) -> Vec<Row> {
+        let mut rows = Vec::with_capacity(self.filtered_indices.len() + 1);
+        for (pos, &index) in self.filtered_indices.iter().enumerate() {
+            if self.filter.is_empty()
+                && pos > 0
+                && self.items[self.filtered_indices[pos - 1]].is_open
+                && !self.items[index].is_open
+            {
+                rows.push(Row::Separator);
+            }
+            rows.push(Row::Item(pos));
+        }
+        rows
+    }
+
     /// Calculate dynamic modal width
     fn calculate_modal_width(&self, screen_width: u16) -> u16 {
-        let title_width = self.title.len() as u16 + 4;
+        let title_width = str_display_width(&self.title) as u16 + 4;
 
-        // Find max path width across all items (not just filtered, to keep stable width)
-        let max_path_width = self
+        // Widest row across all items (not just filtered, to keep stable
+        // width), with a column of padding on either side.
+        let max_row_width = self
             .items
             .iter()
-            .map(|item| item.display_path.len() as u16 + 7) // "▶ " + path + " ○ 🔔"
+            .map(|item| str_display_width(&item.label()) as u16 + 2)
             .max()
             .unwrap_or(40);
 
@@ -102,7 +172,7 @@ impl ProjectsModal {
         let filter_prefix_width = 12u16; // "  Filter: ".width()
 
         calculate_modal_width(
-            [title_width, max_path_width, filter_prefix_width].into_iter(),
+            [title_width, max_row_width, filter_prefix_width].into_iter(),
             screen_width,
             ModalWidthConfig::wide(),
         )
@@ -153,10 +223,15 @@ impl ProjectsModal {
         self.adjust_scroll();
     }
 
-    /// Adjust scroll to keep cursor visible
+    /// Adjust scroll to keep the cursor's row visible
     fn adjust_scroll(&mut self) {
+        let row = self
+            .rows()
+            .iter()
+            .position(|row| *row == Row::Item(self.cursor))
+            .unwrap_or(0);
         self.scroll_offset =
-            termide_ui::ensure_offset_visible(self.scroll_offset, self.cursor, MAX_VISIBLE_ITEMS);
+            termide_ui::ensure_offset_visible(self.scroll_offset, row, MAX_VISIBLE_ROWS);
     }
 
     /// Get the selected project from filtered list
@@ -172,10 +247,10 @@ impl Modal for ProjectsModal {
 
     fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         let modal_width = self.calculate_modal_width(area.width);
+        let rows = self.rows();
 
-        // Each item takes 2 lines; list is preceded by filter row + separator
-        let visible_items = self.filtered_indices.len().min(MAX_VISIBLE_ITEMS);
-        let list_height = (visible_items * 2) as u16;
+        // The list is preceded by filter row + separator
+        let list_height = rows.len().min(MAX_VISIBLE_ROWS) as u16;
 
         // Height: 1 (top border) + FILTER_ROWS + list_height + 1 (bottom border)
         let modal_height = 2 + FILTER_ROWS + list_height;
@@ -188,7 +263,8 @@ impl Modal for ProjectsModal {
         let filter_label = "  Filter: ";
         let filter_text = format!("{}{}", filter_label, self.filter);
         // Pad to full inner width, reserving 1 cell for the block cursor
-        let padding_len = (inner.width as usize).saturating_sub(filter_text.width() + 1);
+        let padding_len =
+            (inner.width as usize).saturating_sub(str_display_width(&filter_text) + 1);
         let padding = " ".repeat(padding_len);
 
         let filter_style = Style::default().fg(theme.fg);
@@ -210,14 +286,13 @@ impl Modal for ProjectsModal {
             width: inner.width,
             height: 1,
         };
-        ratatui::widgets::Paragraph::new(filter_line).render(filter_area, buf);
+        Paragraph::new(filter_line).render(filter_area, buf);
 
         // --- Separator row ---
         let sep_y = inner.y + 2;
-        let sep_char = "─";
         for x in inner.x..inner.x + inner.width {
             buf[(x, sep_y)]
-                .set_symbol(sep_char)
+                .set_symbol("─")
                 .set_style(Style::default().fg(theme.accented_bg));
         }
 
@@ -229,82 +304,59 @@ impl Modal for ProjectsModal {
             height: inner.height.saturating_sub(FILTER_ROWS),
         };
 
-        let mut list_items: Vec<ListItem> = Vec::new();
-        let t = termide_i18n::t();
-
-        for (pos, &item_idx) in self
-            .filtered_indices
+        let row_width = list_area.width as usize;
+        let lines: Vec<Line> = rows
             .iter()
-            .enumerate()
             .skip(self.scroll_offset)
-            .take(MAX_VISIBLE_ITEMS)
-        {
-            let item = &self.items[item_idx];
-            let is_selected = pos == self.cursor;
-            let is_current = item.is_current;
-
-            // Line 1: Path with selection indicator
-            let prefix = if is_selected { "▶ " } else { "  " };
-
-            // The current project is named so; another open one is marked
-            // ○, and 🔔 when it waits for the user — as in the Projects menu.
-            let mut path_suffix = if is_current {
-                format!(" {}", t.projects_current())
-            } else if item.is_open {
-                " ○".to_string()
-            } else {
-                String::new()
-            };
-            if item.attention {
-                path_suffix.push_str(" 🔔");
-            }
-
-            let path_style = if is_selected {
-                Style::default()
-                    .fg(theme.fg)
-                    .bg(theme.bg)
-                    .add_modifier(Modifier::BOLD)
-            } else if item.attention {
-                Style::default()
-                    .fg(theme.warning)
-                    .add_modifier(Modifier::BOLD)
-            } else if is_current {
-                Style::default().fg(theme.accented_fg)
-            } else {
-                Style::default().fg(theme.fg)
-            };
-
-            // Pad line1 to full width
-            let line1_width = prefix.width() + item.display_path.width() + path_suffix.width();
-            let padding1 = " ".repeat((list_area.width as usize).saturating_sub(line1_width));
-
-            let line1 = Line::from(vec![
-                Span::styled(prefix, path_style),
-                Span::styled(&item.display_path, path_style),
-                Span::styled(path_suffix, path_style),
-                Span::styled(padding1, path_style),
-            ]);
-
-            // Line 2: Relative time (indented, dimmed)
-            let time_style = Style::default()
-                .fg(theme.accented_bg)
-                .add_modifier(Modifier::DIM);
-
-            let line2_prefix = "  ";
-            let line2_width = line2_prefix.width() + item.relative_time.width();
-            let padding2 = " ".repeat((list_area.width as usize).saturating_sub(line2_width));
-
-            let line2 = Line::from(vec![
-                Span::styled(line2_prefix, time_style),
-                Span::styled(&item.relative_time, time_style),
-                Span::styled(padding2, time_style),
-            ]);
-
-            list_items.push(ListItem::new(vec![line1, line2]));
-        }
-
-        let list = List::new(list_items).style(Style::default().bg(theme.bg));
-        list.render(list_area, buf);
+            .take(MAX_VISIBLE_ROWS)
+            .map(|row| match *row {
+                Row::Separator => Line::from(Span::styled(
+                    "─".repeat(row_width),
+                    Style::default().fg(theme.accented_bg),
+                )),
+                Row::Item(pos) => {
+                    let item = &self.items[self.filtered_indices[pos]];
+                    // One column of padding on either side.
+                    let (mark, time, rest) = item.segments(row_width.saturating_sub(2));
+                    let pad = row_width.saturating_sub(
+                        1 + str_display_width(&mark)
+                            + str_display_width(&time)
+                            + str_display_width(&rest),
+                    );
+                    let selected = pos == self.cursor;
+                    let style = if selected {
+                        Style::default()
+                            .fg(theme.bg)
+                            .bg(theme.fg)
+                            .add_modifier(Modifier::BOLD)
+                    } else if item.attention {
+                        Style::default()
+                            .fg(theme.warning)
+                            .add_modifier(Modifier::BOLD)
+                    } else if item.is_current {
+                        Style::default().fg(theme.accented_fg)
+                    } else {
+                        Style::default().fg(theme.fg)
+                    };
+                    // The time is a reminder, not a thing to read first; on
+                    // the inverted row it keeps the row's colours.
+                    let time_style = if selected {
+                        style
+                    } else {
+                        Style::default().fg(theme.disabled)
+                    };
+                    Line::from(vec![
+                        Span::styled(format!(" {mark}"), style),
+                        Span::styled(time, time_style),
+                        Span::styled(rest, style),
+                        Span::styled(" ".repeat(pad), style),
+                    ])
+                }
+            })
+            .collect();
+        Paragraph::new(lines)
+            .style(Style::default().bg(theme.bg))
+            .render(list_area, buf);
 
         self.last_list_area = Some(list_area);
     }
@@ -350,21 +402,19 @@ impl Modal for ProjectsModal {
                 }
             }
 
-            // Delete project layout (Delete or F8). An open project keeps
-            // its layout: it is saved again when the project is left.
-            KeyCode::Delete | KeyCode::F(8) => {
-                if let Some(item) = self.get_selected() {
-                    if !item.is_open {
-                        Ok(Some(ModalResult::Confirmed(ProjectAction::Delete(
-                            item.project_path.clone(),
-                        ))))
-                    } else {
-                        Ok(None)
-                    }
+            // Delete or F8: close a project open in the background, delete
+            // the saved layout of one that is not open. The current project
+            // stays.
+            KeyCode::Delete | KeyCode::F(8) => Ok(self.get_selected().and_then(|item| {
+                let path = item.project_path.clone();
+                if item.is_current {
+                    None
+                } else if item.is_open {
+                    Some(ModalResult::Confirmed(ProjectAction::Close(path)))
                 } else {
-                    Ok(None)
+                    Some(ModalResult::Confirmed(ProjectAction::Delete(path)))
                 }
-            }
+            })),
 
             // Filter text input
             KeyCode::Backspace => {
@@ -387,8 +437,6 @@ impl Modal for ProjectsModal {
         mouse: MouseEvent,
         _modal_area: Rect,
     ) -> Result<Option<ModalResult<Self::Result>>> {
-        use crate::{check_mouse_click_with_item_height, MouseClickResult};
-
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 for _ in 0..3 {
@@ -408,34 +456,28 @@ impl Modal for ProjectsModal {
         if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
             return Ok(None);
         }
-
-        const LINES_PER_ITEM: usize = 2;
-
-        match check_mouse_click_with_item_height(
-            mouse.column,
-            mouse.row,
-            None,
-            self.last_list_area,
-            self.scroll_offset,
-            LINES_PER_ITEM,
-        ) {
-            MouseClickResult::OutsideModal | MouseClickResult::OutsideList => Ok(None),
-            MouseClickResult::OnListItem(clicked_index) => {
-                if clicked_index < self.filtered_indices.len() {
-                    let item_idx = self.filtered_indices[clicked_index];
-                    let item = &self.items[item_idx];
-                    self.cursor = clicked_index;
-
-                    if item.is_current {
-                        return Ok(Some(ModalResult::Cancelled));
-                    } else {
-                        return Ok(Some(ModalResult::Confirmed(ProjectAction::Switch(
-                            item.project_path.clone(),
-                        ))));
-                    }
-                }
-                Ok(None)
-            }
+        let Some(list_area) = self.last_list_area else {
+            return Ok(None);
+        };
+        if mouse.row < list_area.y
+            || mouse.row >= list_area.y + list_area.height
+            || mouse.column < list_area.x
+            || mouse.column >= list_area.x + list_area.width
+        {
+            return Ok(None);
+        }
+        let clicked = self.scroll_offset + (mouse.row - list_area.y) as usize;
+        let Some(Row::Item(pos)) = self.rows().get(clicked).copied() else {
+            return Ok(None);
+        };
+        self.cursor = pos;
+        let item = &self.items[self.filtered_indices[pos]];
+        if item.is_current {
+            Ok(Some(ModalResult::Cancelled))
+        } else {
+            Ok(Some(ModalResult::Confirmed(ProjectAction::Switch(
+                item.project_path.clone(),
+            ))))
         }
     }
 }
@@ -451,7 +493,7 @@ mod tests {
         ProjectItem {
             project_path: PathBuf::from(path),
             display_path: path.to_string(),
-            relative_time: String::new(),
+            modified: String::new(),
             is_current,
             is_open,
             attention: false,
@@ -465,24 +507,60 @@ mod tests {
     }
 
     #[test]
-    fn only_a_project_not_open_has_its_layout_deleted() {
+    fn delete_closes_an_open_project_and_deletes_the_layout_of_another() {
         let items = vec![
             item("/current", true, true),
             item("/background", false, true),
             item("/closed", false, false),
         ];
-        let mut modal = ProjectsModal::new("Projects", items).with_cursor(1);
+        let mut modal = ProjectsModal::new("Projects", items).with_cursor(0);
         assert!(press(&mut modal, KeyCode::Delete).is_none());
+        press(&mut modal, KeyCode::Down);
         assert!(matches!(
-            press(&mut modal, KeyCode::Enter),
-            Some(ModalResult::Confirmed(ProjectAction::Switch(path))) if path == Path::new("/background")
+            press(&mut modal, KeyCode::Delete),
+            Some(ModalResult::Confirmed(ProjectAction::Close(path))) if path == Path::new("/background")
         ));
-
-        let items = vec![item("/current", true, true), item("/closed", false, false)];
-        let mut modal = ProjectsModal::new("Projects", items).with_cursor(1);
+        press(&mut modal, KeyCode::Down);
         assert!(matches!(
             press(&mut modal, KeyCode::F(8)),
             Some(ModalResult::Confirmed(ProjectAction::Delete(path))) if path == Path::new("/closed")
         ));
+    }
+
+    #[test]
+    fn a_row_carries_the_mark_the_time_the_path_and_the_bell() {
+        let mut background = item("~/api", false, true);
+        background.modified = "2026-10-03 14:22".into();
+        background.attention = true;
+        assert_eq!(background.label(), "○ 2026-10-03 14:22 ~/api 🔔");
+        assert_eq!(item("~/x", true, true).label(), "● ~/x");
+        assert_eq!(item("~/y", false, false).label(), "  ~/y");
+    }
+
+    #[test]
+    fn a_long_path_loses_its_start_not_the_project_or_the_bell() {
+        let mut long = item("~/very/long/path/to/the/project", false, true);
+        long.attention = true;
+        let (mark, time, rest) = long.segments(20);
+        let fitted = format!("{mark}{time}{rest}");
+        assert!(fitted.ends_with("project 🔔"), "{fitted}");
+        assert!(fitted.starts_with("○ …"), "{fitted}");
+        assert_eq!(str_display_width(&fitted), 20);
+    }
+
+    #[test]
+    fn a_separator_parts_open_projects_from_the_rest_until_filtered() {
+        let items = vec![
+            item("/a", true, true),
+            item("/b", false, true),
+            item("/c", false, false),
+        ];
+        let mut modal = ProjectsModal::new("Projects", items);
+        assert_eq!(
+            modal.rows(),
+            vec![Row::Item(0), Row::Item(1), Row::Separator, Row::Item(2)]
+        );
+        press(&mut modal, KeyCode::Char('c'));
+        assert!(!modal.rows().contains(&Row::Separator));
     }
 }

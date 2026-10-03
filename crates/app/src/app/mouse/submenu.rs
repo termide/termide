@@ -173,31 +173,24 @@ impl App {
         Ok(true)
     }
 
-    /// Handle click on the Projects menu or one of its open directory
-    /// submenus. Deeper levels are drawn on top, so they are tested first.
+    /// Handle click on the Projects menu.
     /// Returns true if click was handled
     pub(in crate::app) fn handle_projects_submenu_click(&mut self, x: u16, y: u16) -> Result<bool> {
         let screen = self.screen_rect();
-        let levels = self.state.projects_menu_levels(screen);
-        let hit = levels.iter().enumerate().rev().find_map(|(depth, level)| {
-            let geometry =
-                dropdown_geometry(&level.items, level.selected, level.x, level.y, screen);
-            let index = geometry.item_at(x, y)?;
-            Some((depth, index, level.items.get(index)?.is_separator))
-        });
-        let Some((depth, index, is_separator)) = hit else {
-            drop(levels);
+        let menu = self.state.projects_menu();
+        let geometry = dropdown_geometry(&menu.items, menu.selected, menu.x, menu.y, screen);
+        let Some(index) = geometry.item_at(x, y) else {
+            drop(menu);
             self.state.close_menu();
             return Ok(true);
         };
-        if is_separator {
+        if menu.items.get(index).is_none_or(|item| item.is_separator) {
             return Ok(true);
         }
-        let was_open = levels.len() > depth + 1 && levels[depth].selected == index;
-        let target = ProjectsTarget::of(levels[depth].rows.get(index).copied());
-        drop(levels);
-        self.select_projects_row(depth, index);
-        self.activate_projects_target(target, was_open)?;
+        let target = ProjectsTarget::of(menu.rows.get(index));
+        drop(menu);
+        self.state.ui.projects_submenu.selected = index;
+        self.activate_projects_target(target)?;
         Ok(true)
     }
 
