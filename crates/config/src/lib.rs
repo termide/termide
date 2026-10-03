@@ -840,6 +840,78 @@ mod layered_load_tests {
 mod lsp_servers_tests {
     use super::*;
 
+    const USER_RUST: &str = r#"
+        [lsp.servers.rust]
+        command = "/opt/rust-analyzer"
+
+        [lsp.servers.zig]
+        command = "zls"
+    "#;
+
+    fn assert_user_entries_over_builtins(config: &Config) {
+        let servers = &config.lsp.servers;
+        assert_eq!(servers["rust"].command, "/opt/rust-analyzer");
+        // Fields the entry leaves out keep the built-in's values.
+        assert_eq!(servers["rust"].root_markers, vec!["Cargo.toml".to_string()]);
+        assert_eq!(servers["zig"].command, "zls");
+        for builtin in ["go", "php", "terraform", "dockerfile", "typescriptreact"] {
+            assert!(servers.contains_key(builtin), "{builtin} was dropped");
+        }
+    }
+
+    /// Saving a config file from the editor parses it directly.
+    #[test]
+    fn a_parsed_config_keeps_the_builtin_servers() {
+        let config = Config::validate_content(USER_RUST).unwrap();
+        assert_user_entries_over_builtins(&config);
+    }
+
+    /// `--config` loads a single file directly.
+    #[test]
+    fn a_config_file_loaded_alone_keeps_the_builtin_servers() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, USER_RUST).unwrap();
+        assert_user_entries_over_builtins(&Config::load_from(&path).unwrap());
+    }
+
+    #[test]
+    fn the_layered_path_keeps_the_builtin_servers() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("config.toml");
+        std::fs::write(&global, USER_RUST).unwrap();
+        let loaded = Config::load_layers(Some(&global), &dir.path().join("none.toml")).unwrap();
+        assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+        assert_user_entries_over_builtins(&loaded.effective);
+    }
+
+    /// The merged built-ins are defaults, not user settings: a save writes
+    /// back only what the user set.
+    #[test]
+    fn saving_writes_only_the_user_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let config = Config::validate_content(USER_RUST).unwrap();
+        let mut baseline = Config::default();
+        baseline.normalize();
+        config.save_to(&path, &baseline).unwrap();
+
+        let written: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let servers = written["lsp"]["servers"].as_table().unwrap();
+        let mut keys: Vec<_> = servers.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["rust", "zig"]);
+        assert_eq!(
+            servers["rust"]
+                .as_table()
+                .unwrap()
+                .keys()
+                .collect::<Vec<_>>(),
+            ["command"]
+        );
+    }
+
     #[test]
     fn jsx_languages_have_a_builtin_server() {
         let servers = Config::default().lsp.servers;

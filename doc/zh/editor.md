@@ -391,6 +391,12 @@ args = ["--stdio"]
 root_markers = ["package.json", "tsconfig.json"]
 ```
 
+`[lsp.servers]` 中的条目会覆盖或补充[支持的语言](#支持的语言)中列出的内置服务器；
+未提及的内置服务器仍然有效。针对内置语言的条目只修改其中设置的字段，因此仅写
+`command = "/opt/rust-analyzer"` 会保留内置的 `root_markers`。针对其他语言的条目会为
+该语言新增一个服务器。键名是 TermIDE 为文件识别出的语言标识，例如 `.tsx` 对应
+`typescriptreact`。
+
 ### 查找引用
 
 | 快捷键              | 操作                                       |
