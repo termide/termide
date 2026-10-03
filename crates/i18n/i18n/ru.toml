@@ -459,7 +459,6 @@ agent_undo_keep = "Оставить всё как есть"
 agent_rewind_conversation_only = "Отмотать только разговор"
 agent_rewind_files_only = "Восстановить только файлы"
 # Agent panel — rollback picker
-agent_rollback_title = "Откатиться к моменту перед…"
 # Agent panel — plan-mode card
 agent_plan_carry_title = "Режим плана: выполнить план?"
 agent_plan_accept_edits = "Да, принимая правки"

@@ -590,10 +590,6 @@ pub trait Translation: Send + Sync {
     fn agent_rewind_conversation_only(&self) -> &str;
     fn agent_rewind_files_only(&self) -> &str;
 
-    // Agent panel — rollback picker
-    /// The F4 checkpoint-rollback picker title
-    fn agent_rollback_title(&self) -> &str;
-
     // Agent panel — plan-mode carry-out card
     /// The plan card's question when the plan is ready
     fn agent_plan_carry_title(&self) -> &str;

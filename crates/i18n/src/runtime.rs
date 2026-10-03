@@ -531,7 +531,6 @@ impl Translation for RuntimeTranslation {
         agent_undo_keep,
         agent_rewind_conversation_only,
         agent_rewind_files_only,
-        agent_rollback_title,
         agent_plan_carry_title,
         agent_plan_accept_edits,
         agent_plan_configured,
