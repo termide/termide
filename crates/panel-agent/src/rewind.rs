@@ -130,12 +130,17 @@ impl AgentPanel {
     /// input and selected, `↑` going back in time. A row names the files
     /// rewinding there can put back.
     pub(crate) fn ask_rewind(&mut self) -> Vec<PanelEvent> {
+        let points = self.rewind_points();
+        self.offer_rewind(points)
+    }
+
+    /// [`Self::ask_rewind`] over `points` already collected, oldest first.
+    pub(crate) fn offer_rewind(&mut self, mut points: Vec<RewindPoint>) -> Vec<PanelEvent> {
         let t = termide_i18n::t();
         if self.is_busy() {
             self.notice(t.agent_notice_busy(), NoticeKind::Warn);
             return vec![PanelEvent::NeedsRedraw];
         }
-        let mut points = self.rewind_points();
         points.reverse();
         if points.is_empty() {
             self.notice(t.agent_notice_nothing_to_rollback(), NoticeKind::Info);

@@ -265,9 +265,7 @@ impl AgentPanel {
             });
             self.raise_attention(true);
             // The question pauses the running call until it is answered.
-            let before = self.running_tool_wait();
-            self.permission_wait = Some((Instant::now(), before));
-            self.transcript.set_tool_wait(before, true);
+            self.begin_permission_wait();
         }
         events
     }
@@ -311,9 +309,7 @@ impl AgentPanel {
                 form,
             });
             self.raise_attention(true);
-            let before = self.running_tool_wait();
-            self.permission_wait = Some((Instant::now(), before));
-            self.transcript.set_tool_wait(before, true);
+            self.begin_permission_wait();
         }
         events
     }
@@ -341,6 +337,13 @@ impl AgentPanel {
         }
         self.end_permission_wait();
         let _ = envelope.reply.send(QuestionReply::Answered(answers));
+    }
+
+    /// A permission question is up: the running call's wait starts counting.
+    fn begin_permission_wait(&mut self) {
+        let before = self.running_tool_wait();
+        self.permission_wait = Some((Instant::now(), before));
+        self.transcript.set_tool_wait(before, true);
     }
 
     /// The permission question is gone (answered, or dropped by a stop):
@@ -393,9 +396,7 @@ impl AgentPanel {
             self.raise_attention(true);
             // The call blocks on the card, so its wait shows as a pause, as a
             // permission question's does.
-            let before = self.running_tool_wait();
-            self.permission_wait = Some((Instant::now(), before));
-            self.transcript.set_tool_wait(before, true);
+            self.begin_permission_wait();
         }
         events
     }
