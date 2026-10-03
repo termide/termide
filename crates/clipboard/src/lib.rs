@@ -26,6 +26,133 @@ use arboard::SetExtWindows;
 /// `None` when clipboard is unavailable (e.g. headless servers).
 static CLIPBOARD: OnceLock<Option<Mutex<Clipboard>>> = OnceLock::new();
 
+/// What [`cut_files`] last published, so a later paste can tell a cut from a
+/// copy.
+///
+/// No system clipboard format carries a "cut" flag — neither
+/// `NSPasteboardTypeFileURL` nor `CF_HDROP` — so the intent has to live here.
+/// It is kept honest against the clipboard by [`is_cut`], which re-reads what
+/// the clipboard actually holds (and, on macOS, its `changeCount`) rather than
+/// trusting that nothing else has written to it since.
+struct CutMarker {
+    /// The paths published as the cut list.
+    paths: Vec<PathBuf>,
+    /// macOS pasteboard change counter at publish time, used to notice that
+    /// another application has since replaced the contents. `None` elsewhere,
+    /// where the path comparison is the only signal available.
+    change_count: Option<isize>,
+}
+
+impl CutMarker {
+    /// Whether this marker still describes `paths`.
+    ///
+    /// Split out from [`is_cut`] so the rule is testable without a clipboard:
+    /// a mismatched list is not a cut, and on macOS a pasteboard that has
+    /// moved on belongs to someone else, so the cut is gone.
+    fn matches(&self, paths: &[PathBuf], now_change_count: Option<isize>) -> bool {
+        if self.paths != paths {
+            return false;
+        }
+        match (self.change_count, now_change_count) {
+            (Some(was), Some(now)) => was == now,
+            _ => true,
+        }
+    }
+}
+
+/// The pending cut, if the clipboard still carries one.
+static CUT: OnceLock<Mutex<Option<CutMarker>>> = OnceLock::new();
+
+fn cut_state() -> &'static Mutex<Option<CutMarker>> {
+    CUT.get_or_init(|| Mutex::new(None))
+}
+
+/// Forget any pending cut, so the next paste copies.
+///
+/// Every write to the clipboard that is not a file cut calls this: once the
+/// contents are no longer what was cut, the marker must not survive, because
+/// pasting would then delete files the user only meant to copy. Losing the
+/// marker is always safe — it degrades a cut into a copy, which leaves the
+/// original in place.
+pub fn clear_cut() {
+    if let Ok(mut guard) = cut_state().lock() {
+        *guard = None;
+    }
+}
+
+/// The pasteboard's change counter, or `None` off macOS.
+///
+/// `changeCount` is a safe method in objc2; it bumps whenever any application
+/// writes the clipboard, which makes it a reliable "someone replaced it"
+/// signal without any unsafe.
+#[cfg(target_os = "macos")]
+fn pasteboard_change_count() -> Option<isize> {
+    use objc2_app_kit::NSPasteboard;
+
+    Some(NSPasteboard::generalPasteboard().changeCount())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn pasteboard_change_count() -> Option<isize> {
+    None
+}
+
+/// Cut a list of files: publish them exactly as [`copy_files`] does, and
+/// remember them so a later paste in the file manager moves instead of copies.
+///
+/// The clipboard payload is identical to a copy on purpose. A cut has no way
+/// to announce itself to other applications, so Finder and Explorer will paste
+/// a copy and leave the original — which is the safe direction to be wrong:
+/// a stray copy is one `rm` away from fixed, a deleted original is not. The
+/// move happens inside termide only, and [`is_cut`] guards it.
+pub fn cut_files(paths: &[PathBuf]) -> Result<(), String> {
+    copy_files(paths)?;
+    // The counter is read here, right after the publish, so it reflects the
+    // pasteboard this call just wrote.
+    mark_cut_with(paths, pasteboard_change_count());
+    Ok(())
+}
+
+/// Remember `paths` as the cut list without publishing anything.
+///
+/// The marker carries no pasteboard counter, so it stays valid until something
+/// else overwrites the clipboard through this crate. [`cut_files`] stamps the
+/// counter, which is the stronger guard; this entry point exists for a caller
+/// that publishes by other means and for tests, which must not depend on what
+/// the real pasteboard happens to hold.
+pub fn mark_cut(paths: &[PathBuf]) {
+    mark_cut_with(paths, None);
+}
+
+fn mark_cut_with(paths: &[PathBuf], change_count: Option<isize>) {
+    let marker = CutMarker {
+        paths: paths.to_vec(),
+        change_count,
+    };
+    if let Ok(mut guard) = cut_state().lock() {
+        *guard = Some(marker);
+    }
+}
+
+/// Whether `paths` are still the cut list rather than a copy.
+///
+/// True only when the marker matches `paths` item for item and, on macOS, the
+/// pasteboard has not changed since. A copy of the same selection clears the
+/// marker in [`copy_files`], so re-copying what was cut pastes a copy, which
+/// is what the last keystroke asked for.
+pub fn is_cut(paths: &[PathBuf]) -> bool {
+    let Ok(guard) = cut_state().lock() else {
+        return false;
+    };
+    let Some(marker) = guard.as_ref() else {
+        return false;
+    };
+
+    // If the pasteboard moved on, another application owns the clipboard now
+    // and our cut is gone; pasting must copy.
+    marker.matches(paths, pasteboard_change_count())
+}
+
 /// Get or initialize the global clipboard instance.
 ///
 /// Returns an error on systems without clipboard support (e.g. headless servers).
@@ -78,6 +205,10 @@ fn has_display_server() -> bool {
 /// On Linux with a display server, copies to BOTH CLIPBOARD and PRIMARY selections.
 ///
 /// Returns Ok(()) on success, or Err with detailed error message.
+///
+/// A successful write replaces whatever the clipboard held, so it also drops
+/// any pending file cut: pasting text that is not the cut list must not
+/// delete the files that were cut.
 pub fn copy(text: &str) -> Result<(), String> {
     if text.is_empty() {
         return Err("Cannot copy empty text".to_string());
@@ -86,13 +217,18 @@ pub fn copy(text: &str) -> Result<(), String> {
     // Without a display server arboard cannot reach the clipboard — go
     // straight to OSC 52 which the terminal emulator handles locally.
     if !has_display_server() {
-        return osc52_copy(text);
+        let result = osc52_copy(text);
+        if result.is_ok() {
+            clear_cut();
+        }
+        return result;
     }
 
     // Try arboard first (works with display server)
     let arboard_result = copy_arboard(text);
 
     if arboard_result.is_ok() {
+        clear_cut();
         return Ok(());
     }
 
@@ -101,7 +237,11 @@ pub fn copy(text: &str) -> Result<(), String> {
         "arboard failed ({}), falling back to OSC 52",
         arboard_result.unwrap_err()
     );
-    osc52_copy(text)
+    let result = osc52_copy(text);
+    if result.is_ok() {
+        clear_cut();
+    }
+    result
 }
 
 /// Copy text using arboard (requires display server).
@@ -178,7 +318,12 @@ pub fn copy_files(paths: &[PathBuf]) -> Result<(), String> {
     copy_files_arboard(paths).map_err(|e| {
         log::warn!("arboard file_list failed: {}", e);
         e
-    })
+    })?;
+
+    // The clipboard now holds this list, so any earlier cut is gone.
+    // `cut_files` sets its marker after this returns, so a cut survives.
+    clear_cut();
+    Ok(())
 }
 
 /// Write the native file list. Split out so [`copy_files`] keeps a single
@@ -389,7 +534,9 @@ pub fn paste() -> Option<String> {
 
 /// Cut text to clipboard.
 ///
-/// Same as copy - actual deletion is handled by the caller.
+/// Same as copy - actual deletion is handled by the caller. It also drops any
+/// pending file cut, since the clipboard no longer holds the cut list; that is
+/// what makes [`is_cut`] safe to trust.
 pub fn cut(text: &str) -> Result<(), String> {
     copy(text)
 }
@@ -424,6 +571,57 @@ mod tests {
     #[test]
     fn empty_file_list_is_refused_before_touching_the_clipboard() {
         assert!(copy_files(&[]).is_err());
+    }
+
+    /// The cut marker is the only thing that turns a paste into a move, so
+    /// every way it can go stale has to fall back to copying.
+    #[test]
+    fn the_cut_marker_survives_only_while_the_clipboard_still_holds_it() {
+        let a = vec![PathBuf::from("/tmp/one.txt")];
+        let other = vec![PathBuf::from("/tmp/two.txt")];
+
+        // macOS: the counter is the signal that someone else wrote.
+        let marker = CutMarker {
+            paths: a.clone(),
+            change_count: Some(7),
+        };
+        assert!(
+            marker.matches(&a, Some(7)),
+            "the same list on an untouched pasteboard is still a cut"
+        );
+        assert!(
+            !marker.matches(&other, Some(7)),
+            "a different list is not the cut"
+        );
+        assert!(
+            !marker.matches(&a, Some(8)),
+            "another application replaced the pasteboard, so pasting must copy"
+        );
+
+        // Linux/Windows: no counter, so the list comparison is all there is.
+        let plain = CutMarker {
+            paths: a.clone(),
+            change_count: None,
+        };
+        assert!(plain.matches(&a, None));
+        assert!(!plain.matches(&other, None));
+
+        // A marker taken where no counter exists must not be invalidated by a
+        // platform that later reports one, and vice versa.
+        assert!(plain.matches(&a, Some(9)));
+    }
+
+    #[test]
+    fn clearing_the_cut_makes_every_paste_a_copy() {
+        let paths = vec![PathBuf::from("/tmp/one.txt")];
+        *cut_state().lock().unwrap() = Some(CutMarker {
+            paths: paths.clone(),
+            change_count: None,
+        });
+
+        clear_cut();
+        assert!(cut_state().lock().unwrap().is_none());
+        assert!(!is_cut(&paths), "a cleared marker must never move");
     }
 
     // The round trip through the real pasteboard is gated because opening the
