@@ -149,8 +149,12 @@ pub(crate) fn permission_detail(request: &termide_agent_core::PermissionRequest)
 /// full and unmodified, why it is offered and where it would run, marked as
 /// the agent's suggestion so it cannot read as one the user wrote. `[Run]` is
 /// the only row that runs it; where plan mode or a `deny` rule covers the
-/// command, `[Run]` is left off and only `[Copy]` remains.
-pub(crate) fn suggestion_form(envelope: &SuggestionEnvelope, cwd: &std::path::Path) -> ChoiceForm {
+/// command, `[Run]` and `[Edit first]` are left off and only `[Copy]` and the
+/// dismiss row remain. Returns the form with the answer of each option row.
+pub(crate) fn suggestion_form(
+    envelope: &SuggestionEnvelope,
+    cwd: &std::path::Path,
+) -> (ChoiceForm, Vec<SuggestionReply>) {
     let t = termide_i18n::t();
     let mut detail = envelope.suggestion.command.clone();
     if !envelope.suggestion.why.is_empty() {
@@ -165,13 +169,17 @@ pub(crate) fn suggestion_form(envelope: &SuggestionEnvelope, cwd: &std::path::Pa
         detail.push('\n');
         detail.push_str(reason);
     }
-    let mut options: Vec<String> = Vec::new();
+    let mut rows: Vec<(SuggestionReply, String)> = Vec::new();
     if envelope.denied.is_none() {
-        options.push(t.agent_suggest_run().to_string());
-        options.push(t.agent_suggest_edit().to_string());
+        rows.push((SuggestionReply::Run, t.agent_suggest_run().to_string()));
+        rows.push((SuggestionReply::Edit, t.agent_suggest_edit().to_string()));
     }
-    options.push(t.agent_suggest_copy().to_string());
-    ChoiceForm::new(t.agent_suggest_title(), options).with_detail(detail)
+    rows.push((SuggestionReply::Copied, t.agent_suggest_copy().to_string()));
+    let (answers, options): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
+    let form = ChoiceForm::new(t.agent_suggest_title(), options)
+        .with_detail(detail)
+        .with_cancel(t.agent_suggest_dismiss());
+    (form, answers)
 }
 
 impl AgentPanel {
@@ -372,13 +380,7 @@ impl AgentPanel {
                 continue;
             }
             envelope.denied = self.suggestion_denied(&envelope.suggestion.command);
-            let form = suggestion_form(&envelope, &self.cwd);
-            let mut answers: Vec<SuggestionReply> = Vec::new();
-            if envelope.denied.is_none() {
-                answers.push(SuggestionReply::Run);
-                answers.push(SuggestionReply::Edit);
-            }
-            answers.push(SuggestionReply::Copied);
+            let (form, answers) = suggestion_form(&envelope, &self.cwd);
             events.push(PanelEvent::SetStatusMessage {
                 message: termide_i18n::t().agent_suggest_title().to_string(),
                 is_error: false,
@@ -661,12 +663,12 @@ impl AgentPanel {
                     .unwrap_or(SuggestionReply::Declined);
                 self.answer_suggestion(reply, envelope);
             }
-            // Esc declines: the command does not run, and the tool is told.
             (
                 Some(Pending::Suggestion { .. }),
                 ChoiceAction::Cancelled | ChoiceAction::Custom(_),
             ) => {
-                // Esc declines: the command does not run, and the tool is told.
+                // Esc or the dismiss row declines: the command does not run,
+                // and the tool is told.
                 if let Some(Pending::Suggestion { envelope, .. }) = self.pending.take() {
                     self.end_permission_wait();
                     let _ = envelope.reply.send(SuggestionReply::Declined);
