@@ -24,20 +24,20 @@ impl App {
 
         let t = i18n::t();
 
-        let known = list_all_projects().unwrap_or_default();
-        let roots: Vec<PathBuf> = known.iter().map(|info| info.project_path.clone()).collect();
-        let items: Vec<ProjectItem> = listed_projects(&self.state.open_projects, &roots)
+        let known: Vec<(PathBuf, std::time::SystemTime)> = list_all_projects()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|info| (info.project_path, info.modified))
+            .collect();
+        let items: Vec<ProjectItem> = listed_projects(&self.state.open_projects, &known)
             .into_iter()
             .map(|project| ProjectItem {
                 display_path: termide_core::util::shorten_home_path(
                     &project.root.display().to_string(),
                 ),
-                // An open project's layout is saved all the time: its time
-                // would always read "now".
-                modified: known
-                    .iter()
-                    .find(|info| !project.open && info.project_path == project.root)
-                    .map(|info| format_local_minute(info.modified))
+                modified: project
+                    .modified
+                    .map(format_local_minute)
                     .unwrap_or_default(),
                 is_current: project.root == self.project_root,
                 is_open: project.open,

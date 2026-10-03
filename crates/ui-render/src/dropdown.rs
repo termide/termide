@@ -29,6 +29,14 @@ pub struct DropdownItem {
     /// What the row stands for waits for the user (drawn in the warning
     /// colour, as the header of a panel that waits is).
     pub attention: bool,
+    /// Drawn before the label in the row's own colours (a mark).
+    pub lead: String,
+    /// Drawn dimmed between `lead` and the label (a time).
+    pub muted: String,
+    /// A label too long loses its start instead of its end: it is a path,
+    /// whose last names say most. A dropdown holding such rows may also grow
+    /// wider than the others, see [`dropdown_width`].
+    pub cut_start: bool,
 }
 
 impl DropdownItem {
@@ -41,6 +49,9 @@ impl DropdownItem {
             is_project: false,
             shortcut: None,
             attention: false,
+            lead: String::new(),
+            muted: String::new(),
+            cut_start: false,
         }
     }
 
@@ -61,6 +72,9 @@ impl DropdownItem {
             is_project: false,
             shortcut: None,
             attention: false,
+            lead: String::new(),
+            muted: String::new(),
+            cut_start: false,
         }
     }
 
@@ -81,10 +95,36 @@ impl DropdownItem {
         self.attention = true;
         self
     }
+
+    /// Draw `lead` before the label, then `muted` dimmed.
+    pub fn with_prefix(mut self, lead: impl Into<String>, muted: impl Into<String>) -> Self {
+        self.lead = lead.into();
+        self.muted = muted.into();
+        self
+    }
+
+    /// Cut a label too long from its start (a path).
+    pub fn cut_at_start(mut self) -> Self {
+        self.cut_start = true;
+        self
+    }
+
+    /// Display width of everything before the shortcut column.
+    fn text_width(&self) -> usize {
+        str_display_width(&self.lead)
+            + str_display_width(&self.muted)
+            + str_display_width(&self.label)
+    }
 }
 
 /// Maximum visible items in dropdown before scrolling
 const MAX_VISIBLE_ITEMS: usize = 20;
+
+/// Widest a dropdown grows, borders included.
+const MAX_WIDTH: usize = 48;
+/// Widest a dropdown listing paths grows: a path says little once cut down
+/// to 48 columns. The screen still bounds it.
+const MAX_PATH_WIDTH: usize = 96;
 
 /// Dropdown menu
 pub struct Dropdown<'a> {
@@ -104,7 +144,7 @@ pub struct Dropdown<'a> {
 pub fn dropdown_width(items: &[DropdownItem]) -> u16 {
     let max_label_len = items
         .iter()
-        .map(|item| str_display_width(&item.label))
+        .map(DropdownItem::text_width)
         .max()
         .unwrap_or(0);
     // Shortcuts share the row with the labels, so the widest of each has
@@ -120,8 +160,13 @@ pub fn dropdown_width(items: &[DropdownItem]) -> u16 {
     } else {
         max_shortcut_len + 2
     };
+    let max_width = if items.iter().any(|item| item.cut_start) {
+        MAX_PATH_WIDTH
+    } else {
+        MAX_WIDTH
+    };
     // 2 (borders) + 1 (space) + label + shortcut + 3 (" ▶ ")
-    (max_label_len + shortcut_column + 6).min(48) as u16
+    (max_label_len + shortcut_column + 6).min(max_width) as u16
 }
 
 /// Where a dropdown list is actually drawn once it is fitted to the screen.
@@ -342,15 +387,51 @@ impl<'a> Dropdown<'a> {
                 buf[(col, row_y)].set_style(base_style);
             }
 
-            // " " + label
+            // " " + lead + muted + label
             let mut cursor_x = inner.x;
             cursor_x += render_text_cells(buf, cursor_x, row_y, " ", inner.width, base_style);
+            for (text, style) in [
+                (&item.lead, base_style),
+                (
+                    &item.muted,
+                    // Dimmed like the shortcut, except on the highlighted row.
+                    if is_selected {
+                        base_style
+                    } else {
+                        Style::default().fg(self.theme.disabled).bg(self.theme.bg)
+                    },
+                ),
+            ] {
+                if !text.is_empty() {
+                    cursor_x += render_text_cells(
+                        buf,
+                        cursor_x,
+                        row_y,
+                        text,
+                        inner.width.saturating_sub(cursor_x - inner.x),
+                        style,
+                    );
+                }
+            }
             // A label wider than the capped box ends in an ellipsis instead
-            // of being cut off under the 3-column suffix.
-            let label = termide_ui::path_utils::truncate_right(
-                &item.label,
-                inner.width.saturating_sub(cursor_x - inner.x + 3) as usize,
-            );
+            // of being cut off under the 3-column suffix; a path loses its
+            // start instead. A path also keeps clear of its shortcut.
+            let shortcut_room = if item.cut_start {
+                item.shortcut
+                    .as_deref()
+                    .map_or(0, |s| str_display_width(s) as u16 + 1)
+            } else {
+                0
+            };
+            let room = inner
+                .width
+                .saturating_sub(cursor_x - inner.x + 3 + shortcut_room)
+                as usize;
+            let label = if item.cut_start {
+                termide_ui::path_utils::truncate_left(&item.label, room)
+            } else {
+                termide_ui::path_utils::truncate_right(&item.label, room)
+            };
             let label_width = str_display_width(&label) as u16;
             cursor_x += render_text_cells(
                 buf,
@@ -1074,6 +1155,30 @@ mod overflow_tests {
         let row: String = (0..width).map(|x| buf[(x, 1)].symbol()).collect();
         // border, space, label ... ellipsis, 3-column suffix, border
         assert!(row.ends_with("…   │"), "{row:?}");
+    }
+
+    // A path row grows past the usual cap, keeps its lead and dimmed time,
+    // and loses the start of the path rather than its end.
+    #[test]
+    fn a_path_row_is_wider_dims_its_time_and_loses_its_start() {
+        let theme = Theme::get_by_name("default");
+        let path = format!("~/{}/project", "deep/".repeat(30));
+        let items = vec![DropdownItem::new(path, "id")
+            .with_prefix("○ ", "2026-10-03 14:22 ")
+            .cut_at_start()];
+        let mut buf = Buffer::empty(Rect::new(0, 0, 200, 5));
+        let dropdown = Dropdown::new(&items, 0, 0, 0, theme);
+        let width = dropdown.width();
+        assert!(width > 48 && width <= 96, "{width}");
+        // Rendered unselected: the row under the cursor keeps its colours.
+        let other = DropdownItem::new("x", "id");
+        let both = [other, items[0].clone()];
+        Dropdown::new(&both, 0, 0, 0, theme).render(&mut buf);
+        let row: String = (0..width).map(|x| buf[(x, 2)].symbol()).collect();
+        assert!(row.starts_with("│ ○ 2026-10-03 14:22 …"), "{row:?}");
+        assert!(row.ends_with("/project   │"), "{row:?}");
+        assert_eq!(buf[(4, 2)].fg, theme.disabled, "the time is dimmed");
+        assert_ne!(buf[(22, 2)].fg, theme.disabled, "the path is not");
     }
 }
 
