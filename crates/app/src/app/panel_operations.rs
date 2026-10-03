@@ -376,34 +376,25 @@ impl App {
         Ok(())
     }
 
-    /// Switch to a different project
+    /// Switch to a different project. The project left stays open in the
+    /// background: its panels are parked, not dropped.
     pub(super) fn switch_to_project(&mut self, new_project_root: std::path::PathBuf) -> Result<()> {
-        // 1. Save the current layout
-        self.auto_save_layout();
-
-        // 2. Change working directory
-        std::env::set_current_dir(&new_project_root)?;
-        log::info!("Changed working directory to: {:?}", new_project_root);
-
-        // 3. Update project_root
-        self.project_root = new_project_root;
-        self.state.project_root = self.project_root.clone();
-        self.state.project_bookmarks =
-            termide_config::BookmarksConfig::load_from_project(&self.project_root);
-
-        // Invalidate caches that depend on the project root: project-local
-        // commands.toml lives under `<project_root>/.termide/`, so both the
-        // commands registry and the global hotkey table (which folds
-        // command hotkeys in) must rebuild for the new project.
-        self.state.cache.commands_registry = None;
-        self.state.cache.hotkey_table = None;
-
-        // 4. Load the new project's layout
-        self.load_layout()?;
-
-        // 5. Update terminal title to reflect new project root
+        if new_project_root == self.project_root {
+            return Ok(());
+        }
+        match self.enter_project(new_project_root)? {
+            Some(parked) => self.restore_parked_project(parked),
+            None => {
+                if let Err(e) = self.load_layout() {
+                    log::warn!(
+                        "Could not load the project layout ({e}); starting with the default layout."
+                    );
+                    self.setup_default_layout();
+                }
+            }
+        }
         self.update_terminal_title();
-
+        self.sync_open_projects();
         Ok(())
     }
 
@@ -470,15 +461,18 @@ impl App {
     }
 
     /// Create a new project in the specified directory
-    /// If it already has a saved layout, that is cleared (reset to default panels)
+    /// If it already has a saved layout, that is cleared (reset to default panels).
+    /// A directory that is already open as a project is switched to instead:
+    /// resetting it would stop what runs in its panels.
     fn create_new_project(&mut self, new_project_root: std::path::PathBuf) -> Result<()> {
         use termide_panel_file_manager::FileManager;
         use termide_project::ProjectLayout;
 
-        // 1. Save the current layout before switching
-        self.auto_save_layout();
+        if self.open_projects.is_open(&new_project_root) {
+            return self.switch_to_project(new_project_root);
+        }
 
-        // 2. Clear any existing layout of the target directory
+        // 1. Clear any existing layout of the target directory
         if let Ok(project_dir) = ProjectLayout::get_project_dir(&new_project_root) {
             // Remove the layout file if it exists (this clears the layout)
             let layout_file = project_dir.join("session.toml");
@@ -495,32 +489,21 @@ impl App {
             }
         }
 
-        // 3. Change working directory
-        std::env::set_current_dir(&new_project_root)?;
-        log::info!("Changed working directory to: {:?}", new_project_root);
+        // 2. Park the current project and enter the new one
+        self.enter_project(new_project_root.clone())?;
 
-        // 4. Update project_root
-        self.project_root = new_project_root.clone();
-        self.state.project_root = self.project_root.clone();
-        self.state.project_bookmarks =
-            termide_config::BookmarksConfig::load_from_project(&self.project_root);
-
-        // Invalidate project-root-dependent caches (see switch_to_project).
-        self.state.cache.commands_registry = None;
-        self.state.cache.hotkey_table = None;
-
-        // 5. Create fresh layout with default panels (2 FileManagers)
-        self.layout_manager = termide_layout::LayoutManager::new();
+        // 3. Create fresh layout with default panels (2 FileManagers)
         let fm1 = FileManager::new_with_path(new_project_root.clone());
         let fm2 = FileManager::new_with_path(new_project_root);
         self.add_panel(Box::new(fm1));
         self.add_panel(Box::new(fm2));
 
-        // 6. Save the new layout
+        // 4. Save the new layout
         self.auto_save_layout();
 
-        // 7. Update terminal title to reflect new project root
+        // 5. Update terminal title to reflect new project root
         self.update_terminal_title();
+        self.sync_open_projects();
 
         let t = termide_i18n::t();
         self.state.set_info(t.project_created().to_string());
@@ -557,6 +540,11 @@ impl App {
 
         // Don't do anything if same directory
         if old_project_root == new_project_root {
+            return Ok(());
+        }
+        // Another open project lives there: two would share one root.
+        if self.open_projects.is_open(&new_project_root) {
+            self.show_error_modal(i18n::t().projects_already_open().to_string());
             return Ok(());
         }
 
@@ -615,14 +603,9 @@ impl App {
         );
 
         // 4. Update project_root
-        self.project_root = new_project_root;
-        self.state.project_root = self.project_root.clone();
-        self.state.project_bookmarks =
-            termide_config::BookmarksConfig::load_from_project(&self.project_root);
-
-        // Invalidate project-root-dependent caches (see switch_to_project).
-        self.state.cache.commands_registry = None;
-        self.state.cache.hotkey_table = None;
+        self.open_projects.move_current(new_project_root.clone());
+        self.set_project_root(new_project_root);
+        self.sync_open_projects();
 
         // 5. Save the layout in the new location
         self.auto_save_layout();

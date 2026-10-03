@@ -493,6 +493,11 @@ impl App {
                 PendingAction::SwitchProject => {
                     self.handle_switch_project(value)?;
                 }
+                PendingAction::CloseProject { root, menu } => {
+                    if value.downcast_ref::<bool>().copied().unwrap_or(false) {
+                        self.close_project(&root, menu)?;
+                    }
+                }
                 PendingAction::NewProject => {
                     self.handle_new_project_result(value)?;
                 }

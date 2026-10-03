@@ -14,42 +14,58 @@ use termide_ui_render::{
 };
 
 impl App {
-    /// Open the projects modal to switch between projects
+    /// Open the projects modal to switch between projects. The open projects
+    /// come first, the most recently used first, with the cursor on the one
+    /// left last: `Enter` goes back to it.
     pub(in crate::app) fn handle_open_projects_modal(&mut self) -> Result<()> {
         use termide_modal::{ProjectItem, ProjectsModal};
         use termide_project::{format_relative_time, list_all_projects};
 
         let t = i18n::t();
 
-        // Get all projects
-        let projects = list_all_projects().unwrap_or_default();
+        let item = |project_path: PathBuf, relative_time: String| {
+            let view = self
+                .state
+                .open_projects
+                .iter()
+                .find(|view| view.root == project_path);
+            ProjectItem {
+                display_path: termide_core::util::shorten_home_path(
+                    &project_path.display().to_string(),
+                ),
+                relative_time,
+                is_current: project_path == self.project_root,
+                is_open: self.open_projects.is_open(&project_path),
+                attention: view.is_some_and(|view| view.attention),
+                project_path,
+            }
+        };
 
-        // Get current project path
-        let current_project = std::env::current_dir().unwrap_or_default();
-
-        // Convert to ProjectItems
-        let items: Vec<ProjectItem> = projects
+        let mut known: Vec<(PathBuf, String)> = list_all_projects()
+            .unwrap_or_default()
             .into_iter()
-            .map(|info| {
-                let is_current = info.project_path == current_project;
-                let display_path =
-                    termide_core::util::shorten_home_path(&info.project_path.display().to_string());
-                let relative_time = format_relative_time(info.modified);
-
-                ProjectItem {
-                    project_path: info.project_path,
-                    display_path,
-                    relative_time,
-                    is_current,
-                }
-            })
+            .map(|info| (info.project_path, format_relative_time(info.modified)))
             .collect();
+        let mut items: Vec<ProjectItem> = Vec::new();
+        for root in self.open_projects.by_recent_use() {
+            let relative_time = known
+                .iter()
+                .position(|(path, _)| path == root)
+                .map(|index| known.remove(index).1)
+                .unwrap_or_default();
+            items.push(item(root.to_path_buf(), relative_time));
+        }
+        items.extend(
+            known
+                .into_iter()
+                .map(|(path, relative_time)| item(path, relative_time)),
+        );
 
         // Only show modal if there are other projects
         if items.iter().any(|item| !item.is_current) {
-            // Find index of the current project to position cursor there
-            let current_idx = items.iter().position(|item| item.is_current).unwrap_or(0);
-            let modal = ProjectsModal::new(t.projects_title(), items).with_cursor(current_idx);
+            // The current project is first; the one left last follows it.
+            let cursor = usize::from(self.open_projects.count() > 1);
+            let modal = ProjectsModal::new(t.projects_title(), items).with_cursor(cursor);
             self.state.set_pending_action(
                 PendingAction::SwitchProject,
                 ActiveModal::Projects(Box::new(modal)),
@@ -191,15 +207,22 @@ impl App {
         let level = &levels[depth];
         let target = ProjectsTarget::of(level.selected_row());
         // What Delete removes: the project, or every project in the directory.
-        // The current project is kept, as in the project switcher.
+        // Open projects are kept, as in the project switcher: their layouts
+        // are saved again when they are left.
         let deletable: Vec<PathBuf> = level
             .selected_row()
             .map(|row| row.projects())
             .unwrap_or_default()
             .into_iter()
-            .filter(|path| *path != self.project_root)
+            .filter(|path| !self.open_projects.is_open(path))
             .map(Path::to_path_buf)
             .collect();
+        // On an open project Delete closes it instead; the current one stays.
+        let closable = level
+            .selected_row()
+            .and_then(|row| row.open_project())
+            .filter(|path| *path != self.project_root)
+            .map(Path::to_path_buf);
         let dir = level
             .selected_row()
             .and_then(|row| row.submenu())
@@ -226,6 +249,14 @@ impl App {
             }
             SubmenuNavAction::Right => self.switch_to_next_menu()?,
             SubmenuNavAction::Execute => self.activate_projects_target(target, false)?,
+            SubmenuNavAction::Delete if closable.is_some() => {
+                let mut selection = vec![self.state.ui.projects_submenu.selected];
+                selection.extend_from_slice(&self.state.ui.projects_nested);
+                self.state.close_menu();
+                if let Some(root) = closable {
+                    self.confirm_close_project(root, Some(selection));
+                }
+            }
             SubmenuNavAction::Delete if !deletable.is_empty() => {
                 let mut selection = vec![self.state.ui.projects_submenu.selected];
                 selection.extend_from_slice(&self.state.ui.projects_nested);

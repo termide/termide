@@ -11,6 +11,7 @@
 // Internal modules
 pub mod app;
 pub mod layout_store;
+pub mod open_projects;
 pub mod panel_ext;
 pub mod projects_menu;
 pub mod state;

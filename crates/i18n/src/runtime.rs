@@ -715,6 +715,9 @@ impl Translation for RuntimeTranslation {
         projects_delete_many_title,
         project_created,
         project_moved,
+        projects_close_title,
+        projects_close_warning,
+        projects_already_open,
         detach_instance,
         detach_not_detached_instance,
         detach_failed,
@@ -1979,6 +1982,10 @@ impl Translation for RuntimeTranslation {
 
     fn projects_delete_fmt(&self, path: &str) -> String {
         self.format("projects_delete_fmt", &[("path", path)])
+    }
+
+    fn app_quit_background_fmt(&self, projects: &str) -> String {
+        self.format("app_quit_background_fmt", &[("projects", projects)])
     }
 
     fn projects_delete_many_fmt(&self, dir: &str, count: usize) -> String {

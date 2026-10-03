@@ -72,6 +72,7 @@ impl App {
             net_down_rate: self.state.system_monitor.net_download_rate(),
             net_up_rate: self.state.system_monitor.net_upload_rate(),
             battery: self.state.system_monitor.battery_cached(),
+            projects_attention: self.state.open_projects.iter().any(|p| p.attention),
         };
         get_resource_indicator_ranges(self.state.terminal.width, &params)
     }

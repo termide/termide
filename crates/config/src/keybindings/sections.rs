@@ -64,6 +64,22 @@ pub struct GlobalKeybindings {
     pub goto_panel_7: Option<KeyBinding>,
     pub goto_panel_8: Option<KeyBinding>,
     pub goto_panel_9: Option<KeyBinding>,
+    /// Switch to the previous / next open project, in the order they were
+    /// opened. Unbound by default: every free chord collides with a desktop
+    /// shortcut or a shell binding somewhere.
+    pub prev_project: Option<KeyBinding>,
+    pub next_project: Option<KeyBinding>,
+    /// Switch to the open project with this number. Unbound by default, as
+    /// above.
+    pub goto_project_1: Option<KeyBinding>,
+    pub goto_project_2: Option<KeyBinding>,
+    pub goto_project_3: Option<KeyBinding>,
+    pub goto_project_4: Option<KeyBinding>,
+    pub goto_project_5: Option<KeyBinding>,
+    pub goto_project_6: Option<KeyBinding>,
+    pub goto_project_7: Option<KeyBinding>,
+    pub goto_project_8: Option<KeyBinding>,
+    pub goto_project_9: Option<KeyBinding>,
 
     // Application
     pub quit: Option<KeyBinding>,
@@ -355,6 +371,21 @@ pub struct TerminalKeybindings {
 // =============================================================================
 
 impl GlobalKeybindings {
+    /// The `goto_project_1..9` bindings, by number.
+    pub fn goto_project(&self) -> [&Option<KeyBinding>; 9] {
+        [
+            &self.goto_project_1,
+            &self.goto_project_2,
+            &self.goto_project_3,
+            &self.goto_project_4,
+            &self.goto_project_5,
+            &self.goto_project_6,
+            &self.goto_project_7,
+            &self.goto_project_8,
+            &self.goto_project_9,
+        ]
+    }
+
     /// Drop bindings that are verbatim copies of defaults this version no
     /// longer ships, so the new default can take their place.
     ///

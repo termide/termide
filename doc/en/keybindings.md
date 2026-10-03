@@ -309,3 +309,25 @@ normalizer rewrites back to the slash / backslash chord.
 Multiple alternatives are supported for any action: list them in an
 array. The first form is the canonical display string shown in help
 panels.
+
+### Unbound actions
+
+Some actions ship without a binding, because every chord still free collides
+with a desktop or shell shortcut somewhere: `Ctrl+Alt+Left` / `Ctrl+Alt+Right`
+switch workspaces in several Linux desktops, `Ctrl+Alt+<digit>` reaches a
+legacy terminal as `Alt+<digit>`, and `Alt+.` inserts the last argument in
+bash. Bind them to what is free on your system:
+
+| Action | Does |
+|--------|------|
+| `prev_project` / `next_project` | Switch to the previous / next open project, in the order they were opened |
+| `goto_project_1` … `goto_project_9` | Switch to the open project with that number |
+
+```toml
+[general.keybindings]
+prev_project = "Ctrl+Alt+Left"
+next_project = "Ctrl+Alt+Right"
+goto_project_1 = "Ctrl+Alt+1"
+```
+
+Once bound, the key is shown beside the project in the `Projects` menu.

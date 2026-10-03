@@ -51,6 +51,17 @@ pub(super) fn build_global_hotkey_table(kb: &GlobalKeybindings) -> HotkeyTable {
     t.insert("goto_panel_7", &kb.goto_panel_7);
     t.insert("goto_panel_8", &kb.goto_panel_8);
     t.insert("goto_panel_9", &kb.goto_panel_9);
+    t.insert("prev_project", &kb.prev_project);
+    t.insert("next_project", &kb.next_project);
+    t.insert("goto_project_1", &kb.goto_project_1);
+    t.insert("goto_project_2", &kb.goto_project_2);
+    t.insert("goto_project_3", &kb.goto_project_3);
+    t.insert("goto_project_4", &kb.goto_project_4);
+    t.insert("goto_project_5", &kb.goto_project_5);
+    t.insert("goto_project_6", &kb.goto_project_6);
+    t.insert("goto_project_7", &kb.goto_project_7);
+    t.insert("goto_project_8", &kb.goto_project_8);
+    t.insert("goto_project_9", &kb.goto_project_9);
 
     // Panel management
     t.insert("close_panel", &kb.close_panel);
@@ -198,6 +209,21 @@ impl App {
             let action = format!("goto_panel_{}", n);
             if table.matches(&action, key) {
                 self.navigate_to_group(n);
+                return Ok(true);
+            }
+        }
+        if table.matches("prev_project", key) {
+            self.cycle_open_projects(false)?;
+            return Ok(true);
+        }
+        if table.matches("next_project", key) {
+            self.cycle_open_projects(true)?;
+            return Ok(true);
+        }
+        for n in 1..=9usize {
+            let action = format!("goto_project_{}", n);
+            if table.matches(&action, key) {
+                self.switch_to_open_project(n - 1)?;
                 return Ok(true);
             }
         }
@@ -374,9 +400,9 @@ impl App {
         // Always save the layout before quit
         self.auto_save_layout();
 
-        if self.has_panels_requiring_confirmation() {
+        if let Some(message) = self.quit_confirmation() {
             let t = i18n::t();
-            let modal = termide_modal::ConfirmModal::new(t.app_quit_title(), t.app_quit_confirm());
+            let modal = termide_modal::ConfirmModal::new(t.app_quit_title(), message);
             self.state.set_pending_action(
                 PendingAction::QuitApplication,
                 ActiveModal::Confirm(Box::new(modal)),
