@@ -1,11 +1,12 @@
 //! Projects menu: the fixed actions, then every project worked on as one
-//! flat list — the projects open in this instance first, then the others,
-//! each group sorted by path.
+//! flat list — the projects open in this instance first, sorted by path,
+//! then the others, the most recently used first.
 //!
 //! The project switcher (`Alt+\`) lists the same projects in the same
 //! order, see [`listed_projects`].
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use termide_ui_render::{
     get_menu_item_x_position, get_projects_items, DropdownItem, PROJECTS_MENU_INDEX,
@@ -30,6 +31,9 @@ pub struct ListedProject {
     pub open: bool,
     /// A panel of this project, open in the background, waits for the user.
     pub attention: bool,
+    /// When a project not open was last worked on. An open project's layout
+    /// is saved all the time, so its time would always read "now": `None`.
+    pub modified: Option<SystemTime>,
 }
 
 /// How projects are ordered in a list: by path, ignoring case first.
@@ -40,28 +44,34 @@ pub fn path_order(a: &Path, b: &Path) -> std::cmp::Ordering {
         .then_with(|| a.cmp(&b))
 }
 
-/// The projects to list: the `open` ones, then the `known` ones not open,
-/// each group sorted by path.
-pub fn listed_projects(open: &[OpenProjectView], known: &[PathBuf]) -> Vec<ListedProject> {
+/// The projects to list: the `open` ones sorted by path — few, and their
+/// order numbers them for `goto_project_N` — then the `known` ones not open
+/// (root and last use), the most recently used first.
+pub fn listed_projects(
+    open: &[OpenProjectView],
+    known: &[(PathBuf, SystemTime)],
+) -> Vec<ListedProject> {
     let mut listed: Vec<ListedProject> = open
         .iter()
         .map(|view| ListedProject {
             root: view.root.clone(),
             open: true,
             attention: view.attention,
+            modified: None,
         })
         .collect();
     listed.sort_by(|a, b| path_order(&a.root, &b.root));
     let mut others: Vec<ListedProject> = known
         .iter()
-        .filter(|root| !open.iter().any(|view| &view.root == *root))
-        .map(|root| ListedProject {
+        .filter(|(root, _)| !open.iter().any(|view| &view.root == root))
+        .map(|(root, modified)| ListedProject {
             root: root.clone(),
             open: false,
             attention: false,
+            modified: Some(*modified),
         })
         .collect();
-    others.sort_by(|a, b| path_order(&a.root, &b.root));
+    others.sort_by_key(|project| std::cmp::Reverse(project.modified));
     listed.extend(others);
     listed
 }
@@ -133,61 +143,30 @@ impl ProjectsMenu {
     }
 }
 
-/// Names for `roots` that tell them apart: as few trailing directory names
-/// as make each one unique, the whole path when nothing shorter does.
-pub fn short_names(roots: &[&Path]) -> Vec<String> {
-    let tails = |root: &Path, count: usize| -> Option<PathBuf> {
-        let names: Vec<_> = root
-            .components()
-            .filter_map(|c| match c {
-                Component::Normal(name) => Some(name),
-                _ => None,
-            })
-            .collect();
-        (count <= names.len()).then(|| names[names.len() - count..].iter().collect())
-    };
-    roots
-        .iter()
-        .map(|root| {
-            (1..)
-                .map_while(|count| tails(root, count))
-                .find(|tail| {
-                    roots
-                        .iter()
-                        .filter(|other| {
-                            tails(other, tail.components().count()).as_ref() == Some(tail)
-                        })
-                        .count()
-                        == 1
-                })
-                .map(|tail| tail.display().to_string())
-                .unwrap_or_else(|| {
-                    termide_core::util::shorten_home_path(&root.display().to_string())
-                })
-        })
-        .collect()
-}
-
-/// Dropdown rows for `projects`: the mark, a short name and 🔔 for one that
-/// waits; an open project shows the key that switches to it, when one is
-/// bound.
+/// Dropdown rows for `projects`, as the project switcher shows them: the
+/// mark, the dimmed time a project not open was last worked on, the path —
+/// losing its start when too long — and 🔔 for one that waits. An open
+/// project shows the key that switches to it, when one is bound.
 fn project_items(
     projects: &[ListedProject],
     current: &Path,
     keybindings: &termide_config::GlobalKeybindings,
 ) -> Vec<DropdownItem> {
-    let roots: Vec<&Path> = projects.iter().map(|p| p.root.as_path()).collect();
     let goto = keybindings.goto_project();
     projects
         .iter()
-        .zip(short_names(&roots))
         .enumerate()
-        .map(|(index, (project, name))| {
-            let mut label = format!("{} {name}", project_mark(project, current));
+        .map(|(index, project)| {
+            let mut label =
+                termide_core::util::shorten_home_path(&project.root.display().to_string());
             if project.attention {
                 label.push(' ');
                 label.push_str(ATTENTION_MARK);
             }
+            let time = project
+                .modified
+                .map(|time| format!("{} ", termide_project::format_local_minute(time)))
+                .unwrap_or_default();
             // Open projects come first, so their index is their number.
             let shortcut = if project.open {
                 goto.get(index).and_then(|binding| binding.as_ref())
@@ -195,7 +174,10 @@ fn project_items(
                 None
             }
             .map(|binding| binding.display().to_string());
-            let mut item = DropdownItem::new(label, String::new()).with_shortcut(shortcut);
+            let mut item = DropdownItem::new(label, String::new())
+                .with_prefix(format!("{} ", project_mark(project, current)), time)
+                .cut_at_start()
+                .with_shortcut(shortcut);
             if project.root == current {
                 item = item.with_project();
             }
@@ -258,7 +240,7 @@ impl AppState {
         self.cache.projects = termide_project::list_all_projects()
             .unwrap_or_default()
             .into_iter()
-            .map(|info| info.project_path)
+            .map(|info| (info.project_path, info.modified))
             .collect();
     }
 }
@@ -266,6 +248,7 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     /// State on the built-in defaults: `AppState::new` would read the
     /// developer's own config file.
@@ -276,12 +259,17 @@ mod tests {
         AppState::with_config_and_theme(config.clone(), config, theme)
     }
 
-    fn paths(list: &[&str]) -> Vec<PathBuf> {
-        list.iter().map(PathBuf::from).collect()
-    }
-
-    fn sep() -> char {
-        std::path::MAIN_SEPARATOR
+    /// `(root, last use)` pairs, the first `seconds` after the epoch and
+    /// so on.
+    fn known(list: &[(&str, u64)]) -> Vec<(PathBuf, SystemTime)> {
+        list.iter()
+            .map(|(root, seconds)| {
+                (
+                    PathBuf::from(root),
+                    SystemTime::UNIX_EPOCH + Duration::from_secs(*seconds),
+                )
+            })
+            .collect()
     }
 
     fn open(root: &str, attention: bool) -> OpenProjectView {
@@ -291,68 +279,66 @@ mod tests {
         }
     }
 
-    fn labels(menu: &ProjectsMenu) -> Vec<&str> {
+    /// Each project row as "lead|muted|label", separators as "---".
+    fn rows(menu: &ProjectsMenu) -> Vec<String> {
         menu.items[PROJECTS_SUBMENU_ITEM_COUNT..]
             .iter()
             .map(|item| {
                 if item.is_separator {
-                    "---"
+                    "---".to_string()
                 } else {
-                    item.label.as_str()
+                    format!("{}|{}|{}", item.lead, item.muted, item.label)
                 }
             })
             .collect()
     }
 
     #[test]
-    fn short_names_take_as_many_trailing_names_as_tell_projects_apart() {
-        let roots = [
-            Path::new("/home/u/src/termide"),
-            Path::new("/home/u/work/api"),
-            Path::new("/home/u/old/api"),
-        ];
-        assert_eq!(
-            short_names(&roots),
-            vec![
-                "termide".to_string(),
-                format!("work{}api", sep()),
-                format!("old{}api", sep())
-            ]
-        );
-        // One path is the tail of another: the whole path names it.
-        let nested = [Path::new("/api"), Path::new("/x/api")];
-        let names = short_names(&nested);
-        assert_eq!(names[1], format!("x{}api", sep()));
-        assert_ne!(names[0], "api");
-    }
-
-    #[test]
-    fn open_projects_come_first_then_the_rest_each_sorted_by_path() {
+    fn open_projects_come_first_by_path_then_the_rest_most_recent_first() {
         let listed = listed_projects(
             &[open("/p/b", false), open("/p/a", true)],
-            &paths(&["/p/D", "/p/a", "/p/c"]),
+            &known(&[("/p/c", 10), ("/p/a", 50), ("/p/d", 30)]),
         );
         let roots: Vec<_> = listed.iter().map(|p| p.root.to_str().unwrap()).collect();
-        assert_eq!(roots, vec!["/p/a", "/p/b", "/p/c", "/p/D"]);
+        assert_eq!(roots, vec!["/p/a", "/p/b", "/p/d", "/p/c"]);
         assert!(listed[0].open && listed[0].attention);
-        assert!(!listed[2].open);
+        assert_eq!(listed[0].modified, None, "an open project has no time");
+        assert!(!listed[2].open && listed[2].modified.is_some());
     }
 
     #[test]
-    fn the_menu_lists_open_projects_then_the_others_below_a_separator() {
+    fn the_menu_shows_rows_as_the_switcher_does() {
         let mut state = test_state();
         state.project_root = PathBuf::from("/p/one");
-        state.open_projects = vec![open("/p/one", false), open("/p/two", true)];
-        state.cache.projects = paths(&["/p/three", "/p/one", "/p/two", "/p/four"]);
+        state.open_projects = vec![open("/p/two", true), open("/p/one", false)];
+        state.cache.projects = known(&[("/p/one", 40), ("/p/three", 10), ("/p/four", 20)]);
 
         let menu = state.projects_menu();
+        let time = |seconds| {
+            format!(
+                "{} ",
+                termide_project::format_local_minute(
+                    SystemTime::UNIX_EPOCH + Duration::from_secs(seconds)
+                )
+            )
+        };
         assert_eq!(
-            labels(&menu),
-            vec!["---", "● one", "○ two 🔔", "---", "  four", "  three"]
+            rows(&menu),
+            vec![
+                "---".to_string(),
+                "● ||/p/one".to_string(),
+                "○ ||/p/two 🔔".to_string(),
+                "---".to_string(),
+                format!("  |{}|/p/four", time(20)),
+                format!("  |{}|/p/three", time(10)),
+            ]
         );
         let first = PROJECTS_SUBMENU_ITEM_COUNT + 1;
         assert!(menu.items[first].is_project && !menu.items[first].attention);
         assert!(menu.items[first + 1].attention);
+        assert!(menu.items[first..]
+            .iter()
+            .all(|item| item.is_separator || item.cut_start));
         assert!(matches!(
             ProjectsTarget::of(menu.rows.get(first + 3)),
             ProjectsTarget::Project(root) if root == Path::new("/p/four")
@@ -360,8 +346,8 @@ mod tests {
 
         // With only the current project open there is no second group.
         state.open_projects = vec![open("/p/one", false)];
-        state.cache.projects = paths(&["/p/one"]);
-        assert_eq!(labels(&state.projects_menu()), vec!["---", "● one"]);
+        state.cache.projects = known(&[("/p/one", 40)]);
+        assert_eq!(rows(&state.projects_menu()), vec!["---", "● ||/p/one"]);
     }
 
     #[test]
@@ -369,7 +355,7 @@ mod tests {
         let mut state = test_state();
         state.project_root = PathBuf::from("/p/one");
         state.open_projects = vec![open("/p/one", false), open("/p/two", false)];
-        state.cache.projects = paths(&["/p/three"]);
+        state.cache.projects = known(&[("/p/three", 10)]);
         let mut config = (*state.config).clone();
         config.general.keybindings.goto_project_2 =
             Some(termide_config::KeyBinding::Single("Alt+F2".into()));
@@ -396,12 +382,12 @@ mod tests {
         let first = PROJECTS_SUBMENU_ITEM_COUNT + 1;
 
         // The last project went: the cursor moves to the one above.
-        state.cache.projects = paths(&["/p/one", "/p/two"]);
+        state.cache.projects = known(&[("/p/one", 20), ("/p/two", 10)]);
         state.restore_projects_selection(first + 3);
         assert_eq!(state.ui.projects_submenu.selected, first + 2);
 
         // Only the current project is left; past the end falls back to it.
-        state.cache.projects = paths(&["/p/one"]);
+        state.cache.projects = known(&[("/p/one", 20)]);
         state.restore_projects_selection(first + 2);
         assert_eq!(state.ui.projects_submenu.selected, first);
 
