@@ -410,6 +410,16 @@ impl App {
                     sources,
                     target_directory,
                 } => {
+                    // A move consumes the cut it came from — pasting the same
+                    // list again would try to move sources that are already
+                    // gone. Only on a confirmed Yes: cancelling keeps the cut
+                    // alive, and only for a matching list, so renaming an
+                    // unrelated file does not drop a live cut.
+                    if *value.downcast_ref::<bool>().unwrap_or(&false)
+                        && termide_clipboard::is_cut(&sources)
+                    {
+                        termide_clipboard::clear_cut();
+                    }
                     self.handle_move_path(sources, target_directory, value)?;
                 }
                 PendingAction::PackPaths { sources } => {

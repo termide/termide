@@ -441,16 +441,53 @@ impl FileManager {
         }
     }
 
-    /// Mark the selected item paths for move on the system clipboard
-    /// (global `PanelCommand::Cut`).
+    /// Publish the selected items as a cut (global `PanelCommand::Cut`).
     ///
-    /// Deliberately text-only. Neither `CF_HDROP` nor `NSPasteboardTypeFileURL`
-    /// carries a "cut" flag, so publishing a file list here would make Finder
-    /// and Explorer paste a *copy* and leave the original in place — the user
-    /// would believe they had moved the file.
-    pub(crate) fn clipboard_cut_selection(&self) {
+    /// Local items go as a native file list, exactly like [`Self::
+    /// clipboard_copy_selection`], plus the in-app marker that turns a later
+    /// paste into a move. Publishing the list is the safe half of the
+    /// trade-off: no clipboard format carries a cut flag, so Finder and
+    /// Explorer paste a copy and leave the original — a stray copy is one
+    /// `rm` away from fixed, a deleted original is not. The move itself
+    /// happens inside termide only, and [`clipboard::is_cut`] guards it.
+    ///
+    /// Remote and in-archive panels refuse instead of degrading to a copy.
+    /// `MovePath` takes local paths, so a cut there could not move anything;
+    /// letting it publish would leave the user holding a cut that pastes as a
+    /// copy with no word said, and a silent copy is the one outcome a cut must
+    /// never produce. The refusal names itself, so the keystroke is not lost.
+    pub(crate) fn clipboard_cut_selection(&mut self) {
         let paths = self.get_selected_paths();
-        if !paths.is_empty() {
+        if paths.is_empty() {
+            return;
+        }
+
+        // The archive refusal already exists and reads exactly right; remote
+        // needs its own words. The order matters: an in-archive path reports
+        // `is_remote()` too, so the archive test has to come first or a cut
+        // inside an archive would be refused as if it were remote.
+        if self.vfs.current_path().is_archive() {
+            let t = termide_i18n::t();
+            self.show_info_modal(t.modal_error_title(), t.fm_archive_read_only());
+            return;
+        }
+        if self.vfs.current_path().is_remote() {
+            let t = termide_i18n::t();
+            self.show_info_modal(t.modal_error_title(), t.fm_cut_local_only());
+            return;
+        }
+
+        // A selection holding a symlink stays on the text path, as it does for
+        // copy: the file flavor asks the OS for the real path, so a move would
+        // relocate the target rather than the link.
+        if self.selection_has_symlink() {
+            let text = clipboard::paths_to_text(&paths);
+            let _ = clipboard::cut(&text);
+            return;
+        }
+
+        if let Err(e) = clipboard::cut_files(&paths) {
+            log::debug!("file clipboard unavailable ({}), cutting paths as text", e);
             let text = clipboard::paths_to_text(&paths);
             let _ = clipboard::cut(&text);
         }
@@ -493,8 +530,9 @@ impl FileManager {
         true
     }
 
-    /// Confirm, then copy `files` into the cursor's tree level. The single
-    /// path both paste entries funnel through.
+    /// Confirm, then land `files` in the cursor's tree level — as a move when
+    /// the clipboard still carries them as a cut, otherwise as a copy. The
+    /// single path both paste entries funnel through.
     fn request_paste_of(&mut self, files: Vec<PathBuf>) {
         if files.is_empty() {
             return;
@@ -507,14 +545,35 @@ impl FileManager {
         // expanded subdir, or on the expanded subdir
         // itself, pastes into that subdir.
         let (local_target, _vfs_target) = self.create_target_dir();
+
+        // Move only where the destination is local. `MovePath` takes local
+        // paths, and a remote panel's target has no scheme here, so a move
+        // into one would be resolved against the local filesystem — which
+        // would then delete the source and write it somewhere else. Copy is
+        // the only honest option there, so the cut is not even consulted.
+        // `is_remote()` already covers an in-archive path, which reports it.
+        let as_move = !self.vfs.current_path().is_remote() && clipboard::is_cut(&files);
+
         let t = termide_i18n::t();
         let names = utils::paste_names_summary(&files);
-        let message = t.fm_paste_confirm(files.len(), &names, &local_target.display().to_string());
-        let action = PendingAction::CopyPath {
-            sources: files,
-            target_directory: Some(local_target),
-            create_symlink: false,
-            create_relative_symlink: false,
+        let dest = local_target.display().to_string();
+        let message = if as_move {
+            t.fm_paste_move_confirm(files.len(), &names, &dest)
+        } else {
+            t.fm_paste_confirm(files.len(), &names, &dest)
+        };
+        let action = if as_move {
+            PendingAction::MovePath {
+                sources: files,
+                target_directory: Some(local_target),
+            }
+        } else {
+            PendingAction::CopyPath {
+                sources: files,
+                target_directory: Some(local_target),
+                create_symlink: false,
+                create_relative_symlink: false,
+            }
         };
         let modal = ConfirmModal::new(termide_i18n::t().modal_confirm_title(), &message);
         self.modal_request = Some((action, ActiveModal::Confirm(Box::new(modal))));

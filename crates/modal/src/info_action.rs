@@ -172,6 +172,15 @@ impl InfoActionModal {
         }
     }
 
+    /// The text the modal shows, joined for assertions and logging.
+    pub fn message_text(&self) -> String {
+        self.lines
+            .iter()
+            .map(|(_, v)| v.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// Add permissions editor widget (Unix mode bits with access control)
     pub fn with_permissions(mut self, mode: u32, access: PermAccess) -> Self {
         self.permissions = Some(PermissionsState::from_mode(mode, access));

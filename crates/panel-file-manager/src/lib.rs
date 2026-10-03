@@ -1257,6 +1257,107 @@ mod tests {
         assert!(fm.modal_request.is_none(), "no copy was offered");
     }
 
+    /// A cut that is still on the clipboard pastes as a move, and the
+    /// confirmation has to say so — Yes deletes the sources here, so a dialog
+    /// reading "Copy" would be asking about the wrong operation.
+    #[test]
+    fn a_pasted_cut_moves_and_the_confirmation_says_move() {
+        let temp_dir = TempDir::new().unwrap();
+        let dir = canonical_temp_path(&temp_dir);
+        std::fs::write(dir.join("report.pdf"), "x").unwrap();
+
+        let mut fm = FileManager::new_with_path(dir.clone());
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+
+        let path = dir.join("report.pdf");
+        termide_ui::clipboard::mark_cut(std::slice::from_ref(&path));
+
+        let result = fm.handle_command(PanelCommand::PasteText {
+            text: path.display().to_string(),
+        });
+        assert!(
+            matches!(result, CommandResult::Handled(true)),
+            "the paste must be taken"
+        );
+
+        let (action, modal) = fm.modal_request.take().expect("a confirmation");
+        match action {
+            PendingAction::MovePath {
+                sources,
+                target_directory,
+            } => {
+                assert_eq!(sources, std::slice::from_ref(&path));
+                assert_eq!(target_directory, Some(dir.clone()));
+            }
+            other => panic!("expected a move, got {other:?}"),
+        }
+
+        let message = match modal {
+            ActiveModal::Confirm(m) => m.message().to_string(),
+            other => panic!("expected a confirmation, got {other:?}"),
+        };
+        assert!(
+            message.contains("report.pdf"),
+            "the confirmation must name the file, got {message:?}"
+        );
+        let t = termide_i18n::t();
+        assert_eq!(
+            message,
+            t.fm_paste_move_confirm(1, "report.pdf", &dir.display().to_string()),
+            "the confirmation must carry the move wording"
+        );
+    }
+
+    /// A cut inside an archive cannot move anything — `MovePath` takes local
+    /// paths — so it must refuse rather than hand back a cut that pastes as a
+    /// copy. Refusing also means no marker survives: a stale marker over paths
+    /// the panel cannot move would delete local files that merely share them.
+    #[test]
+    fn cutting_inside_an_archive_refuses_and_marks_nothing() {
+        use std::io::Write;
+        let temp_dir = TempDir::new().unwrap();
+        let archive = temp_dir.path().join("pack.zip");
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&archive).unwrap());
+        zip.start_file("inner.txt", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(b"x").unwrap();
+        zip.finish().unwrap();
+
+        let mut fm = FileManager::new_with_path(temp_dir.path().to_path_buf());
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+
+        fm.selected = fm.find_entry_index("pack.zip").unwrap();
+        assert!(fm.enter().is_none());
+        wait_for_vfs(&mut fm);
+        assert!(fm.vfs.at_archive_root(), "the panel is inside the archive");
+
+        fm.selected = fm.find_entry_index("inner.txt").unwrap();
+        // What the cut would have published — an in-archive path that also
+        // names a plausible local file, which is exactly the danger.
+        let would_cut = fm.get_selected_paths();
+        assert_eq!(would_cut, [PathBuf::from("/inner.txt")]);
+        fm.handle_command(PanelCommand::Cut);
+
+        // The refusal has to name the reason. An empty or generic modal would
+        // look like a refusal and still leave the user guessing.
+        let (action, modal) = fm.modal_request.take().expect("the refusal is said");
+        assert!(matches!(action, PendingAction::VfsMessage));
+        match modal {
+            ActiveModal::InfoAction(m) => assert_eq!(
+                m.message_text(),
+                termide_i18n::t().fm_archive_read_only(),
+                "the refusal must carry the archive read-only text"
+            ),
+            other => panic!("expected an info modal, got {other:?}"),
+        }
+        assert!(
+            !termide_ui::clipboard::is_cut(&would_cut),
+            "a refused cut must leave no marker over the paths it would publish"
+        );
+    }
+
     /// A relative path resolves against the process working directory, not
     /// the panel's, so `exists()` can match some unrelated file and paste it
     /// under the wrong name. Only absolute paths are taken as files.

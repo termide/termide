@@ -64,6 +64,15 @@ pub trait Translation: Send + Sync {
     /// its own lines, which is why one key serves every word order. A move
     /// variant gets its own key when cut lands.
     fn fm_paste_confirm(&self, count: usize, names: &str, dest: &str) -> String;
+    /// "Move N files to: <dest>" — the same shape as [`Self::fm_paste_confirm`]
+    /// with the verb swapped, used when the clipboard carries a cut rather
+    /// than a copy. A paste deletes the sources in that case, so the
+    /// confirmation has to say which operation Yes commits to.
+    fn fm_paste_move_confirm(&self, count: usize, names: &str, dest: &str) -> String;
+    /// "Cut works only for local files" — why `Ctrl+X` refuses a remote or
+    /// in-archive panel. A cut that cannot move anything must say so rather
+    /// than paste a copy in silence.
+    fn fm_cut_local_only(&self) -> &str;
     fn fm_copy_prompt(&self, name: &str) -> String;
     fn fm_move_prompt(&self, name: &str) -> String;
     fn git_operation_cancelled(&self) -> &str;

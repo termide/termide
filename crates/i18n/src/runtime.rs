@@ -103,6 +103,21 @@ impl RuntimeTranslation {
         }
         result
     }
+
+    /// Both paste confirmations take the same slots and pluralize the same
+    /// way; only the key differs, so they share one formatter.
+    fn format_paste(&self, key: &str, count: usize, names: &str, dest: &str) -> String {
+        let plural = self.pluralize(count, "file");
+        self.format(
+            key,
+            &[
+                ("count", &count.to_string()),
+                ("dest", dest),
+                ("names", names),
+                ("plural", plural),
+            ],
+        )
+    }
 }
 
 /// Generates trivial translation methods of the shape
@@ -808,6 +823,7 @@ impl Translation for RuntimeTranslation {
         modal_confirm_title,
         modal_error_title,
         fm_archive_read_only,
+        fm_cut_local_only,
         help_desc_pack,
         op_type_pack,
         modal_pack_title,
@@ -1351,16 +1367,11 @@ impl Translation for RuntimeTranslation {
     }
 
     fn fm_paste_confirm(&self, count: usize, names: &str, dest: &str) -> String {
-        let plural = self.pluralize(count, "file");
-        self.format(
-            "fm_paste_confirm",
-            &[
-                ("count", &count.to_string()),
-                ("dest", dest),
-                ("names", names),
-                ("plural", plural),
-            ],
-        )
+        self.format_paste("fm_paste_confirm", count, names, dest)
+    }
+
+    fn fm_paste_move_confirm(&self, count: usize, names: &str, dest: &str) -> String {
+        self.format_paste("fm_paste_move_confirm", count, names, dest)
     }
 
     fn fm_copy_prompt(&self, name: &str) -> String {
@@ -2296,6 +2307,42 @@ mod tests {
                 assert!(
                     !msg.contains("Copy"),
                     "{code}: untranslated verb in {msg:?}"
+                );
+            }
+        }
+    }
+
+    /// A paste of a cut deletes the sources, so its confirmation cannot read
+    /// like a copy. The move string is derived from each locale's own
+    /// `fm_move_prompt`, which is exactly the risk this guards: a derivation
+    /// that silently produced the copy text again would render "Copy" over a
+    /// destructive Yes.
+    #[test]
+    fn the_move_confirmation_differs_from_the_copy_in_every_language() {
+        for (code, _) in crate::SUPPORTED_LANGUAGES {
+            let t = RuntimeTranslation::new(code).unwrap();
+            let copy = t.fm_paste_confirm(3, "a.txt\nb.txt", "/tmp/target");
+            let move_ = t.fm_paste_move_confirm(3, "a.txt\nb.txt", "/tmp/target");
+
+            assert!(!move_.is_empty(), "{code}: empty move confirmation");
+            assert!(
+                !move_.contains('{') && !move_.contains('}'),
+                "{code}: unfilled placeholder in {move_:?}"
+            );
+            assert!(
+                move_.contains("/tmp/target"),
+                "{code}: lost the destination"
+            );
+            assert!(move_.contains("a.txt"), "{code}: lost the names");
+            assert_ne!(
+                copy, move_,
+                "{code}: a cut must not be confirmed with the copy wording"
+            );
+
+            if ["ru", "zh", "ja", "ko", "th", "hi", "bn"].contains(code) {
+                assert!(
+                    !move_.contains("Move") && !move_.contains("Copy"),
+                    "{code}: untranslated verb in {move_:?}"
                 );
             }
         }

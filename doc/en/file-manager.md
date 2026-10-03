@@ -148,8 +148,8 @@ Press `/` to start incremental search within the current directory tree:
 | Shortcut           | Action                                     |
 |-------------------|--------------------------------------------|
 | `Ctrl+C`          | Copy selected items as files             |
-| `Ctrl+X`          | Cut paths of selected items              |
-| `Ctrl+V`          | Paste files from clipboard               |
+| `Ctrl+X`          | Cut selected items                       |
+| `Ctrl+V`          | Paste — move if the clipboard holds a cut |
 | `Cmd+V` (macOS)   | Paste files copied from termide        |
 
 On macOS the terminal emulator answers `Cmd+V` itself and types the
@@ -169,10 +169,12 @@ than a path string.
 
 Three consequences are worth knowing:
 
-- **`Ctrl+X` stays text.** No system clipboard format carries a "cut" flag
-  for files, so publishing a file list on cut would make Finder paste a
-  *copy* and leave the original in place. Cut therefore publishes paths as
-  text, and a real move between panels happens inside termide only.
+- **`Ctrl+X` publishes the same list as `Ctrl+C`.** No system clipboard
+  format carries a "cut" flag for files, so termide cannot tell Finder or
+  Explorer that the items are meant to move. They paste a *copy* and leave
+  the original — the safe way to be wrong, since a stray copy is one `rm`
+  away from fixed and a deleted original is not. The move itself happens
+  inside termide, where the panel remembers what it cut.
 - **Remote and in-archive items stay text.** A `file://` URL cannot name an
   SFTP or archive entry, so those panels keep copying path strings.
 - **Symlinks stay text.** The file flavor asks the OS for the real path, so
@@ -195,6 +197,23 @@ not only how many.
 
 Over SSH or on a headless host there is no display server, so the file
 flavor is unavailable and copying falls back to path text.
+
+### Cut and paste
+
+A cut moves: `Ctrl+V` after `Ctrl+X` puts the files at the destination and
+removes them from where they were. The confirmation says so — "Move N files
+to", not "Copy" — because Yes is what deletes the sources.
+
+The cut is remembered only while the clipboard still holds it. Copying
+anything afterwards, in termide or in another application, turns the next
+paste back into a copy; on macOS the pasteboard's change counter settles it,
+elsewhere the paths themselves are compared. Cancelling the confirmation
+keeps the cut alive, so you can change your mind about the destination and
+paste again.
+
+`Ctrl+X` refuses in a remote panel and inside an archive, and says why:
+nothing there can be moved, so handing back a cut that pastes as a copy would
+be the one thing a cut must never do — delete silently, or pretend.
 
 ### Target directory rule
 
