@@ -56,7 +56,14 @@ pub trait Translation: Send + Sync {
     fn pluralize(&self, count: usize, key: &str) -> &str;
 
     // File Manager operations
-    fn fm_paste_confirm(&self, count: usize, mode: &str, dest: &str) -> String;
+    /// "Copy N files to: <dest>" — the verb is part of each locale's own
+    /// string, not a slot: German, Japanese, Korean, Turkish, Bengali and
+    /// Hindi put it at the end, so a `{mode}` placeholder cannot be filled
+    /// grammatically. `names` is a trailing block of the actual file names,
+    /// so the confirmation says what lands and not only how many; it sits on
+    /// its own lines, which is why one key serves every word order. A move
+    /// variant gets its own key when cut lands.
+    fn fm_paste_confirm(&self, count: usize, names: &str, dest: &str) -> String;
     fn fm_copy_prompt(&self, name: &str) -> String;
     fn fm_move_prompt(&self, name: &str) -> String;
     fn git_operation_cancelled(&self) -> &str;

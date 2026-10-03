@@ -10,7 +10,7 @@ use termide_modal::{ActiveModal, ConfirmModal, InputModal};
 use termide_state::PendingAction;
 use termide_ui::{clipboard, path_utils};
 
-use super::{keyboard, FileManager};
+use super::{keyboard, utils, FileManager};
 
 /// Build HotkeyTable for the file manager from config.
 pub(crate) fn build_fm_hotkey_table(config: &Config) -> HotkeyTable {
@@ -455,8 +455,9 @@ impl FileManager {
                 // itself, pastes into that subdir.
                 let (local_target, _vfs_target) = self.create_target_dir();
                 let t = termide_i18n::t();
+                let names = utils::paste_names_summary(&files);
                 let message =
-                    t.fm_paste_confirm(files.len(), "Copy", &local_target.display().to_string());
+                    t.fm_paste_confirm(files.len(), &names, &local_target.display().to_string());
                 let action = PendingAction::CopyPath {
                     sources: files,
                     target_directory: Some(local_target),

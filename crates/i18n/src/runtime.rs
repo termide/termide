@@ -1361,14 +1361,14 @@ impl Translation for RuntimeTranslation {
         self.format("db_row_title_fmt", &[("table", table)])
     }
 
-    fn fm_paste_confirm(&self, count: usize, mode: &str, dest: &str) -> String {
+    fn fm_paste_confirm(&self, count: usize, names: &str, dest: &str) -> String {
         let plural = self.pluralize(count, "file");
         self.format(
             "fm_paste_confirm",
             &[
                 ("count", &count.to_string()),
-                ("mode", mode),
                 ("dest", dest),
+                ("names", names),
                 ("plural", plural),
             ],
         )
@@ -2278,5 +2278,57 @@ mod tests {
                 assert_ne!(t.agent_banner_sessions(), "sessions", "{code}");
             }
         }
+    }
+
+    /// The paste confirmation carries its verb inside each locale's own
+    /// string. It used to take `{mode}` filled with a hardcoded `"Copy"`, so
+    /// every non-English dictionary rendered the English word — and a verb
+    /// slot cannot be filled grammatically where the verb goes last (de, ja,
+    /// ko, tr, bn, hi). This guards both halves, and that the names block
+    /// lands: the confirmation has to say *which* files, not only how many.
+    #[test]
+    fn paste_confirmation_carries_its_verb_in_every_language() {
+        for (code, _) in crate::SUPPORTED_LANGUAGES {
+            let t = RuntimeTranslation::new(code).unwrap();
+            let msg = t.fm_paste_confirm(3, "a.txt\nb.txt", "/tmp/target");
+
+            assert!(!msg.is_empty(), "{code}: empty paste confirmation");
+            assert!(
+                !msg.contains('{') && !msg.contains('}'),
+                "{code}: unfilled placeholder in {msg:?}"
+            );
+            assert!(msg.contains("/tmp/target"), "{code}: lost the destination");
+            assert!(msg.contains("a.txt"), "{code}: lost the names");
+
+            // The verb must be localized, not the literal "Copy" the old call
+            // site passed in. Latin-script languages legitimately share the
+            // English word; scripted ones must not.
+            if ["ru", "zh", "ja", "ko", "th", "hi", "bn"].contains(code) {
+                assert!(
+                    !msg.contains("Copy"),
+                    "{code}: untranslated verb in {msg:?}"
+                );
+            }
+        }
+    }
+
+    /// A counted paste confirmation pluralizes where the language inflects:
+    /// Russian asks for "файл / файла / файлов" by the last digits.
+    #[test]
+    fn paste_confirmation_pluralizes_per_language() {
+        let ru = RuntimeTranslation::new("ru").unwrap();
+        assert!(ru.fm_paste_confirm(1, "a", "/d").contains("файл"), "1");
+        assert!(ru.fm_paste_confirm(3, "a", "/d").contains("файла"), "3");
+        assert!(ru.fm_paste_confirm(7, "a", "/d").contains("файлов"), "7");
+
+        let en = RuntimeTranslation::new("en").unwrap();
+        assert!(
+            en.fm_paste_confirm(1, "a", "/d").contains("file to"),
+            "one: no plural"
+        );
+        assert!(
+            en.fm_paste_confirm(2, "a", "/d").contains("files to"),
+            "two: plural"
+        );
     }
 }

@@ -7,6 +7,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use termide_git::truncate_right;
 use termide_ui::constants::{GIGABYTE, KILOBYTE, MEGABYTE};
+use termide_ui::path_utils;
 
 use super::FileEntry;
 
@@ -411,10 +412,74 @@ pub fn format_modified_time(time: Option<SystemTime>) -> String {
         .unwrap_or_else(|| "                   ".to_string())
 }
 
+/// How many names the paste confirmation lists before folding the tail.
+///
+/// Three keeps the modal at ten rows — `ConfirmModal` sizes its height to
+/// its content and does not clamp to the screen, so a longer list pushes the
+/// Yes/No buttons off a short terminal.
+const PASTE_NAME_LIMIT: usize = 3;
+
+/// The names block for the paste confirmation: one name per line, the tail
+/// folded to `… N`.
+///
+/// The fold is an ellipsis and a number with no word in it, deliberately —
+/// a "and 3 more" would need a new key in every one of the fifteen
+/// dictionaries, and `stash_more` cannot carry it (several of them leave it
+/// as the English "more"). A bare count reads in any locale.
+pub fn paste_names_summary(paths: &[PathBuf]) -> String {
+    let shown: Vec<String> = paths
+        .iter()
+        .take(PASTE_NAME_LIMIT)
+        .map(|p| path_utils::get_file_name_str(p).to_string())
+        .collect();
+
+    let mut lines = shown;
+    let hidden = paths.len().saturating_sub(PASTE_NAME_LIMIT);
+    if hidden > 0 {
+        lines.push(format!("… {}", hidden));
+    }
+
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn paste_names_summary_lists_names_then_folds_the_tail() {
+        let paths: Vec<PathBuf> = (0..8)
+            .map(|i| PathBuf::from(format!("/tmp/dir/file{i}.txt")))
+            .collect();
+
+        let summary = paste_names_summary(&paths);
+        let lines: Vec<&str> = summary.lines().collect();
+
+        // The limit of names, then a folded count of the rest.
+        assert_eq!(lines, vec!["file0.txt", "file1.txt", "file2.txt", "… 5"]);
+    }
+
+    #[test]
+    fn paste_names_summary_shows_every_name_up_to_the_limit() {
+        let paths: Vec<PathBuf> = (0..3)
+            .map(|i| PathBuf::from(format!("/tmp/f{i}.txt")))
+            .collect();
+        assert_eq!(paste_names_summary(&paths), "f0.txt\nf1.txt\nf2.txt");
+    }
+
+    #[test]
+    fn paste_names_summary_of_one_file_is_just_its_name() {
+        assert_eq!(
+            paste_names_summary(&[PathBuf::from("/tmp/only.txt")]),
+            "only.txt"
+        );
+    }
+
+    #[test]
+    fn paste_names_summary_of_nothing_is_empty() {
+        assert_eq!(paste_names_summary(&[]), "");
+    }
 
     fn write_file(path: &Path, bytes: usize) {
         let mut f = fs::File::create(path).expect("create file");
