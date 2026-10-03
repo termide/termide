@@ -44,6 +44,17 @@ TermIDE 支持西里尔文键盘布局的常用快捷键。使用俄语/西里�
 （`\x1bOA` 与 `\x1b[A`）。`Alt+Left` / `Alt+Right` 仍然被全局面板组切换
 快捷键占用，不会转发给终端。
 
+如果 shell 没有为此类序列绑定功能，就会输出序列的最后一个字母：bash 5 和
+zsh 对 `Shift+Up` 输出 `A`，对 `Shift+Left` 输出 `D`，以此类推。任何兼容
+xterm 的终端都是如此。对于 bash，可在 `~/.inputrc` 中绑定这些按键，例如：
+
+```
+"\e[1;2A": previous-history
+"\e[1;2B": next-history
+"\e[1;2C": forward-char
+"\e[1;2D": backward-char
+```
+
 ## 文本搜索
 
 按 `Ctrl+F` 打开停靠在面板底部的内嵌搜索栏（与编辑器、文件管理器一致），其上带

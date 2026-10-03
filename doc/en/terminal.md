@@ -45,6 +45,18 @@ Plain arrows keep their existing path, including application-cursor-mode
 substitution (`\x1bOA` vs `\x1b[A`). `Alt+Left` / `Alt+Right` remain bound
 globally to previous/next panel group and therefore aren't forwarded.
 
+A shell with no binding for such a sequence echoes its last letter: bash 5
+and zsh print `A` for `Shift+Up`, `D` for `Shift+Left`, and so on. Any
+xterm-compatible terminal behaves the same. Bind the keys in `~/.inputrc`
+for bash, for example:
+
+```
+"\e[1;2A": previous-history
+"\e[1;2B": next-history
+"\e[1;2C": forward-char
+"\e[1;2D": backward-char
+```
+
 ## Text Search
 
 Press `Ctrl+F` to open an inline find bar docked at the bottom of the panel (the
