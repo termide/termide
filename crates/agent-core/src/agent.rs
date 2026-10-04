@@ -16,7 +16,7 @@ use crate::compaction::{
 use crate::goal::{parse_verdict, GoalPrompt, GoalVerdict};
 use crate::handoff::HandoffPrompt;
 use crate::message::{
-    AssistantMessage, Message, StopReason, ToolCall, ToolResultMessage, UserMessage,
+    AssistantMessage, Message, StopReason, ToolCall, ToolResultMessage, Usage, UserMessage,
 };
 use crate::permissions::{DecidedBy, PermissionNote};
 use crate::provider::{ModelSpec, Provider, Request, StreamEvent, ThinkingLevel};
@@ -359,16 +359,23 @@ pub enum AgentEvent {
         steering: usize,
         follow_up: usize,
     },
+    /// A compaction began; `prompt_tokens` estimates the part of the
+    /// transcript the summary call reads.
     CompactionStart {
         reason: CompactionReason,
+        prompt_tokens: u64,
     },
+    /// Stream progress of the summary call: prefill progress, retries and
+    /// the summary's deltas. Not part of the transcript.
+    CompactionUpdate(StreamEvent),
     /// The transcript now starts with a summary message followed by the
     /// `kept` most recent messages; consumers mirroring the transcript must
-    /// apply the same replacement.
+    /// apply the same replacement. `tokens_after` estimates the new context.
     Compacted {
         summary: String,
         kept: usize,
         tokens_before: u64,
+        tokens_after: u64,
     },
     CompactionFailed {
         error: String,
@@ -928,10 +935,13 @@ impl Agent {
             });
             return Err(error);
         }
-        emit(AgentEvent::CompactionStart { reason });
         let tokens_before = context_tokens(&self.messages);
-
         let mut to_summarize = self.messages[..split].to_vec();
+        emit(AgentEvent::CompactionStart {
+            reason,
+            prompt_tokens: context_tokens(&to_summarize),
+        });
+
         to_summarize.push(Message::User(UserMessage::text(
             self.compaction_prompts.request.clone(),
         )));
@@ -943,7 +953,11 @@ impl Agent {
             tools: &[],
             thinking: ThinkingLevel::Off,
         };
-        let reply = self.provider.stream(&request, &mut |_| {}, cancel);
+        let reply = self.provider.stream(
+            &request,
+            &mut |event| emit(AgentEvent::CompactionUpdate(event)),
+            cancel,
+        );
         let summary = reply.plain_text();
         if matches!(reply.stop_reason, StopReason::Error | StopReason::Aborted)
             || summary.trim().chars().count() < MIN_SUMMARY_CHARS
@@ -960,7 +974,15 @@ impl Agent {
             return Err(error);
         }
 
-        let tail = self.messages.split_off(split);
+        let mut tail = self.messages.split_off(split);
+        // A kept reply's usage measured the context before the summary
+        // replaced its head; left in place, `context_tokens` would keep
+        // reporting the old size until the next reply.
+        for message in &mut tail {
+            if let Message::Assistant(assistant) = message {
+                assistant.usage = Usage::default();
+            }
+        }
         let kept = tail.len();
         self.messages = vec![self.compaction_prompts.summary_message(&summary)];
         self.messages.extend(tail);
@@ -968,6 +990,7 @@ impl Agent {
             summary,
             kept,
             tokens_before,
+            tokens_after: context_tokens(&self.messages),
         });
         Ok(())
     }
@@ -1143,7 +1166,7 @@ pub(crate) mod test_support {
     use serde_json::{json, Value};
 
     use super::*;
-    use crate::message::{AssistantContent, Usage};
+    use crate::message::AssistantContent;
     use crate::tool::Tool;
 
     /// Replays scripted assistant messages and records every request's
@@ -2249,9 +2272,13 @@ mod tests {
         collect(&mut agent, &long_prompt, &mut NoHooks);
         let events = collect(&mut agent, "next", &mut NoHooks);
 
-        assert!(events.contains(&AgentEvent::CompactionStart {
-            reason: CompactionReason::Threshold
-        }));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::CompactionStart {
+                reason: CompactionReason::Threshold,
+                ..
+            }
+        )));
         assert!(events.iter().any(|e| matches!(
             e,
             AgentEvent::Compacted { summary, kept: 1, .. } if summary.starts_with("SUMMARY OF EARLIER WORK")
@@ -2296,9 +2323,13 @@ mod tests {
         ]);
         let events = collect(&mut agent, "new question", &mut NoHooks);
 
-        assert!(events.contains(&AgentEvent::CompactionStart {
-            reason: CompactionReason::Overflow
-        }));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::CompactionStart {
+                reason: CompactionReason::Overflow,
+                ..
+            }
+        )));
         assert_eq!(provider.seen_requests().len(), 3);
         let Message::Assistant(last) = agent.messages().last().unwrap() else {
             panic!("expected assistant");
@@ -2355,6 +2386,53 @@ mod tests {
                 &mut |_| {}
             )
             .is_err());
+    }
+
+    #[test]
+    fn compaction_streams_its_progress_and_reports_the_new_size() {
+        let (agent, _) = agent(
+            ScriptedProvider::new(vec![text_reply(
+                "SUMMARY: the first question was asked and answered in full.",
+            )]),
+            ToolRegistry::new(),
+        );
+        let mut answered = text_reply("second answer");
+        answered.usage = Usage {
+            input: 50_000,
+            ..Usage::default()
+        };
+        let mut agent = agent.with_messages(vec![
+            Message::User(UserMessage::text("first question")),
+            Message::Assistant(text_reply("first answer")),
+            Message::User(UserMessage::text("second question")),
+            Message::Assistant(answered),
+        ]);
+        let mut events = Vec::new();
+        agent
+            .compact(
+                CompactionReason::Manual,
+                None,
+                &CancelToken::new(),
+                &mut |e| events.push(e),
+            )
+            .unwrap();
+
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::CompactionStart { prompt_tokens, .. } if *prompt_tokens > 0
+        )));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::CompactionUpdate(StreamEvent::TextDelta(text)) if text.starts_with("SUMMARY")
+        )));
+        // The kept reply's usage measured the old context: the new size is
+        // the estimate of the summary and the tail, not that figure.
+        let after = events.iter().find_map(|e| match e {
+            AgentEvent::Compacted { tokens_after, .. } => Some(*tokens_after),
+            _ => None,
+        });
+        assert!(after.is_some_and(|tokens| tokens > 0 && tokens < 1_000));
+        assert_eq!(context_tokens(agent.messages()), after.unwrap());
     }
 
     #[test]

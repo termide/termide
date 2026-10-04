@@ -433,7 +433,10 @@ read so far and the speed over those not served from its cache
 (`⏫ 14s ▰▰▰▰▱▱▱▱ (↑24k/48k, 1k tok/s)`); once
 tokens stream, a `✍️` generation line with the running duration, estimated
 tokens and speed; and below either the run clock. The exact input count and
-prefill speed come with the finished block. An external agent shows no live
+prefill speed come with the finished block. A compaction, `/compact` between
+runs included, shows the same `⏫`/`✍️` lines for its summary call, and the
+status bar's context figure drops to the summary and the kept tail as soon as it
+ends. An external agent shows no live
 prefill line, as its message starts with its first text. Reopening a
 conversation restores each block's time, its reasoning, the turn's
 prefill/generation lines and each tool call's duration from the log.

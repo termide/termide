@@ -107,11 +107,12 @@ fn main() {
                     eprintln!("\n[session write failed: {error}]");
                 }
             }
-            AgentEvent::CompactionStart { reason } => eprintln!("\n[compacting: {reason:?}]"),
+            AgentEvent::CompactionStart { reason, .. } => eprintln!("\n[compacting: {reason:?}]"),
             AgentEvent::Compacted {
                 summary,
                 kept,
                 tokens_before,
+                ..
             } => {
                 eprintln!("[compacted {tokens_before} tokens, kept {kept} messages]");
                 if let Err(error) = session.append_compaction(&summary, tokens_before, kept) {

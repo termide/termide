@@ -1125,6 +1125,61 @@ fn the_live_footer_shows_generation_meta_and_a_clock() {
 }
 
 #[test]
+fn a_compaction_between_runs_shows_its_progress_and_the_new_context() {
+    let text_of = |panel: &AgentPanel| -> Vec<String> {
+        panel
+            .live_footer_lines(60)
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect())
+            .collect()
+    };
+    let mut panel = panel(vec![]);
+    panel.context_tokens = 90_000;
+    panel.apply(AgentEvent::CompactionStart {
+        reason: termide_agent_core::CompactionReason::Manual,
+        prompt_tokens: 80_000,
+    });
+    // The summary call reads the old transcript: a `⏫` line with its size,
+    // and the clock keeps ticking although no run is in flight.
+    let lines = text_of(&panel);
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(
+        lines[0].contains("⏫") && lines[0].contains("↑~80k"),
+        "{lines:?}"
+    );
+    panel.last_anim = Instant::now() - Duration::from_secs(1);
+    assert!(panel
+        .tick()
+        .iter()
+        .any(|e| matches!(e, PanelEvent::NeedsRedraw)));
+
+    // Its summary streams: the `✍️` line, with nothing in the transcript.
+    let items = panel.transcript.items().len();
+    panel.apply(AgentEvent::CompactionUpdate(StreamEvent::TextDelta(
+        "the summary so far".into(),
+    )));
+    let lines = text_of(&panel);
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(
+        lines[0].contains('✍') && lines[0].contains('↓'),
+        "{lines:?}"
+    );
+    assert_eq!(panel.transcript.items().len(), items);
+
+    // Done: the context shows its new size at once, and nothing is left
+    // ticking.
+    panel.apply(AgentEvent::Compacted {
+        summary: "the summary".into(),
+        kept: 2,
+        tokens_before: 90_000,
+        tokens_after: 3_000,
+    });
+    assert_eq!(panel.context_tokens, 3_000);
+    assert!(panel.activity.is_none());
+    assert!(text_of(&panel).is_empty());
+}
+
+#[test]
 fn the_live_footer_shows_the_prefill_until_the_first_token() {
     let text_of = |panel: &AgentPanel| -> Vec<String> {
         panel
@@ -3661,6 +3716,7 @@ fn switching_off_mid_session_refuses_until_a_compaction_takes_it_out() {
         summary: "earlier".into(),
         kept: 1,
         tokens_before: 1000,
+        tokens_after: 200,
     });
     assert!(panel.context_stale);
     panel.tick();

@@ -133,7 +133,12 @@ impl AgentPanel {
         // reopening a session otherwise shows nothing but the run clock.
         // An external agent's message starts with its first text, so it has
         // no prefill to show.
-        if activity.phase == Phase::Prefill && !self.external {
+        let reading = match activity.phase {
+            Phase::Prefill => true,
+            Phase::Compact => activity.first_token.is_none(),
+            Phase::Generating | Phase::Tool => false,
+        };
+        if reading && !self.external {
             let prefill_ms = activity.msg_start.elapsed().as_millis() as u32;
             let dur = transcript::fmt_dur(prefill_ms);
             let text = match (activity.prefill, activity.prompt_tokens) {
@@ -157,7 +162,7 @@ impl AgentPanel {
         // is still known (the cost needs it), but nothing is being generated.
         // An external agent sends its text in bursts and reports no tokens, so
         // there is no generation to time: none is shown for it.
-        if let (Phase::Generating, Some(first_token), false) =
+        if let (Phase::Generating | Phase::Compact, Some(first_token), false) =
             (activity.phase, activity.first_token, self.external)
         {
             let gen_ms = first_token.elapsed().as_millis() as u32;

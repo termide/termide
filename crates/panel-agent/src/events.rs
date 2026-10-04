@@ -52,6 +52,14 @@ impl AgentPanel {
         }
     }
 
+    /// A `/compact` between runs leaves no activity behind; one inside a run
+    /// is replaced by the next message's.
+    fn end_compaction(&mut self) {
+        if !self.busy {
+            self.activity = None;
+        }
+    }
+
     /// Apply one runtime event to the transcript and the session log.
     pub(crate) fn apply(&mut self, event: AgentEvent) {
         match event {
@@ -162,6 +170,12 @@ impl AgentPanel {
                 }
             }
             AgentEvent::MessageUpdate(StreamEvent::Retry {
+                attempt,
+                max_attempts,
+                delay_ms,
+                error,
+            })
+            | AgentEvent::CompactionUpdate(StreamEvent::Retry {
                 attempt,
                 max_attempts,
                 delay_ms,
@@ -339,18 +353,45 @@ impl AgentPanel {
                 steering,
                 follow_up,
             } => self.set_queued((steering, follow_up)),
-            AgentEvent::CompactionStart { .. } => {
-                self.set_phase(Phase::Compact);
+            AgentEvent::CompactionStart { prompt_tokens, .. } => {
+                // The summary call shows the same prefill and generation lines
+                // as a model message, under its own phase.
+                self.activity = Some(Activity {
+                    prompt_tokens: Some(prompt_tokens),
+                    ..Activity::new(Phase::Compact)
+                });
                 self.notice(
                     termide_i18n::t().agent_notice_compacting(),
                     NoticeKind::Info,
                 )
             }
+            AgentEvent::CompactionUpdate(event) => {
+                if let Some(activity) = self.activity.as_mut().filter(|a| a.phase == Phase::Compact)
+                {
+                    match event {
+                        StreamEvent::TextDelta(delta) | StreamEvent::ThinkingDelta(delta) => {
+                            activity.first_token.get_or_insert_with(Instant::now);
+                            activity.gen_chars += delta.chars().count();
+                        }
+                        StreamEvent::PrefillProgress {
+                            processed,
+                            total,
+                            cached,
+                        } => activity.prefill = Some((processed, total, cached)),
+                        _ => {}
+                    }
+                }
+            }
             AgentEvent::Compacted {
                 summary,
                 kept,
                 tokens_before,
+                tokens_after,
             } => {
+                // The next reply's usage would correct the figure only once
+                // the next turn finishes.
+                self.context_tokens = tokens_after;
+                self.end_compaction();
                 self.notice(
                     termide_i18n::t().agent_notice_compacted_fmt(tokens_before, kept),
                     NoticeKind::Info,
@@ -366,10 +407,13 @@ impl AgentPanel {
                     self.context_stale = true;
                 }
             }
-            AgentEvent::CompactionFailed { error } => self.notice(
-                termide_i18n::t().agent_notice_compaction_failed_fmt(&error.to_string()),
-                NoticeKind::Warn,
-            ),
+            AgentEvent::CompactionFailed { error } => {
+                self.end_compaction();
+                self.notice(
+                    termide_i18n::t().agent_notice_compaction_failed_fmt(&error.to_string()),
+                    NoticeKind::Warn,
+                );
+            }
             AgentEvent::GoalJudged { done, reason } => self.on_goal_verdict(done, &reason),
             AgentEvent::GoalJudgeFailed { error } => {
                 self.goal_task = None;
@@ -536,7 +580,10 @@ impl AgentPanel {
         }
         // While the agent works, keep the ticking timer and the block's
         // spinner moving without waiting for an event (throttled to ~10 fps).
-        if self.is_busy() && self.last_anim.elapsed() >= Duration::from_millis(100) {
+        // A `/compact` between runs leaves the runtime idle but still works.
+        if (self.is_busy() || self.activity.is_some())
+            && self.last_anim.elapsed() >= Duration::from_millis(100)
+        {
             self.last_anim = Instant::now();
             changed = true;
         }
