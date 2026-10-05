@@ -38,6 +38,11 @@ const MAX_LINE_CHARS: usize = 400;
 const MAX_PARAGRAPH_CHARS: usize = 500;
 /// Matching lines or paragraphs a document keeps for ranking.
 const EXCERPTS_PER_DOC: usize = 40;
+/// Bytes of one line that are read; the rest of a longer one (minified code,
+/// data on one line) is skipped, so a huge file costs no huge buffer.
+const MAX_READ_LINE_BYTES: usize = 64 * 1024;
+/// Bytes a paragraph gathers before it is cut, for prose with no blank line.
+const MAX_READ_PARAGRAPH_BYTES: usize = 64 * 1024;
 /// Matching lines a code hit shows.
 const SHOWN_LINES: usize = 3;
 /// Matching paragraphs a prose hit shows.
@@ -347,17 +352,28 @@ impl Walk<'_> {
     }
 
     /// Read `path` line by line, calling `each` with the line number and
-    /// text; `None` when the deadline came first.
+    /// text, a line cut to [`MAX_READ_LINE_BYTES`]; `None` when the deadline
+    /// came first. A file that cannot be opened (gone since the walk saw it)
+    /// is read as empty.
     fn lines(&self, path: &Path, mut each: impl FnMut(usize, &str)) -> Option<()> {
-        let file = std::fs::File::open(path).ok()?;
+        let Ok(file) = std::fs::File::open(path) else {
+            return Some(());
+        };
         let mut reader = std::io::BufReader::new(file);
         let mut buffer = Vec::new();
         let mut number = 0;
         loop {
             buffer.clear();
-            match reader.read_until(b'\n', &mut buffer) {
+            let limit = MAX_READ_LINE_BYTES as u64;
+            match reader.by_ref().take(limit).read_until(b'\n', &mut buffer) {
                 Ok(0) | Err(_) => return Some(()),
                 Ok(_) => {}
+            }
+            if buffer.len() == MAX_READ_LINE_BYTES
+                && buffer.last() != Some(&b'\n')
+                && reader.skip_until(b'\n').is_err()
+            {
+                return Some(());
             }
             number += 1;
             if number % 4096 == 0 && self.out_of_time() {
@@ -419,6 +435,7 @@ impl Walk<'_> {
         };
         let mut paragraph: Vec<String> = Vec::new();
         let mut paragraph_start = 0;
+        let mut paragraph_bytes = 0;
         let mut in_fence = false;
         let flush_paragraph = |paragraph: &mut Vec<String>, start: usize, section: &mut Section| {
             if paragraph.is_empty() {
@@ -474,8 +491,13 @@ impl Walk<'_> {
             } else {
                 if paragraph.is_empty() {
                     paragraph_start = number;
+                    paragraph_bytes = 0;
                 }
+                paragraph_bytes += line.len();
                 paragraph.push(line.trim().to_string());
+                if paragraph_bytes > MAX_READ_PARAGRAPH_BYTES {
+                    flush_paragraph(&mut paragraph, paragraph_start, &mut section);
+                }
             }
         })?;
         flush_paragraph(&mut paragraph, paragraph_start, &mut section);
@@ -506,6 +528,38 @@ mod tests {
 
     fn later() -> Instant {
         Instant::now() + std::time::Duration::from_secs(60)
+    }
+
+    #[test]
+    fn an_overlong_line_is_read_up_to_its_bound_and_the_next_one_still_is() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path();
+        let line = format!(
+            "walrus {} narwhal\nseal\n",
+            "x ".repeat(MAX_READ_LINE_BYTES)
+        );
+        std::fs::write(project.join("bundle.js"), &line).unwrap();
+        std::fs::write(project.join("dump.txt"), &line).unwrap();
+        let none = PathFilter::default();
+        let find = |word: &str| {
+            let patterns = vec![word.to_string()];
+            let words = [query_words(word)];
+            let (hits, cut_short) = search(
+                project,
+                &[],
+                &query(&words, &patterns, &none),
+                10,
+                later(),
+                &CancelToken::new(),
+            );
+            assert!(!cut_short);
+            let mut labels: Vec<String> = hits.into_iter().map(|h| h.label).collect();
+            labels.sort_unstable();
+            labels
+        };
+        assert_eq!(find("walrus"), ["bundle.js", "dump.txt"]);
+        assert!(find("narwhal").is_empty(), "past the bound is not read");
+        assert_eq!(find("seal"), ["bundle.js", "dump.txt"]);
     }
 
     #[test]

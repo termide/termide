@@ -574,20 +574,12 @@ impl RecallTool {
                 OPEN_CONTEXT_ENTRIES,
                 OPEN_CONTEXT_ENTRIES,
                 OPEN_BLOCK_BYTES,
-            );
+            )
+            .map(cut_output);
         }
         if let Some(rest) = reference.strip_prefix("commit:") {
             let (name, sha) = rest.rsplit_once('@').unwrap_or(("", rest));
-            let shown = git::open(&self.setup.repos, name, sha, cancel)?;
-            return Ok(if shown.len() > MAX_OUTPUT_BYTES {
-                let mut end = MAX_OUTPUT_BYTES;
-                while !shown.is_char_boundary(end) {
-                    end -= 1;
-                }
-                format!("{}\n[cut]", &shown[..end])
-            } else {
-                shown
-            });
+            return git::open(&self.setup.repos, name, sha, cancel).map(cut_output);
         }
         if let Some(rest) = reference.strip_prefix("file:") {
             let (path, line) = rest.rsplit_once(':').unwrap_or((rest, "1"));
@@ -597,6 +589,18 @@ impl RecallTool {
             "`{reference}` is not a reference: session:<id>#<entry>, commit:<repo>@<sha> or file:<path>:<line>"
         ))
     }
+}
+
+/// `shown` cut to [`MAX_OUTPUT_BYTES`] on a character boundary, marked.
+fn cut_output(shown: String) -> String {
+    if shown.len() <= MAX_OUTPUT_BYTES {
+        return shown;
+    }
+    let mut end = MAX_OUTPUT_BYTES;
+    while !shown.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}\n[cut]", &shown[..end])
 }
 
 fn string_list(value: &Value) -> Vec<String> {
@@ -758,6 +762,15 @@ mod tests {
         assert!(cut.starts_with('…') && cut.ends_with('…'));
         assert!(cut.contains("walrus"));
         assert_eq!(snippet("short   text\nhere", &[]), "short text here");
+    }
+
+    #[test]
+    fn opened_context_is_cut_to_the_output_bound() {
+        assert_eq!(cut_output("short".into()), "short");
+        let long = "ж".repeat(MAX_OUTPUT_BYTES);
+        let cut = cut_output(long);
+        assert!(cut.ends_with("\n[cut]"));
+        assert!(cut.len() <= MAX_OUTPUT_BYTES + "\n[cut]".len());
     }
 
     #[test]

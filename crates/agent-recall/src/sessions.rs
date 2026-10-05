@@ -5,11 +5,12 @@
 //! out, what a compaction replaced is kept (the originals are still in the
 //! file). Each message block becomes a document, weighted by kind. Parsed
 //! files stay in a process-wide cache keyed by size and modification time,
-//! so a second search does not read 20 MB of logs again.
+//! so a second search does not read 20 MB of logs again; the few session
+//! directories searched last are kept, each behind its own lock.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError};
 use std::time::SystemTime;
 
 use regex::Regex;
@@ -98,15 +99,58 @@ struct ParsedFile {
     docs: Vec<SessionDoc>,
 }
 
+/// Session directories whose parsed logs stay cached, most recently
+/// searched first; another one pushes the oldest out.
+const CACHED_DIRS: usize = 4;
+
+/// The parsed logs of one session directory.
 #[derive(Debug, Default)]
 struct Cache {
     vocabulary: Vocabulary,
     files: HashMap<PathBuf, ParsedFile>,
 }
 
-fn cache() -> &'static Mutex<Cache> {
-    static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
-    CACHE.get_or_init(Mutex::default)
+/// The cached directories, most recent first.
+type Caches = Vec<(PathBuf, Arc<Mutex<Cache>>)>;
+
+/// The cache of `dir`, made the most recent.
+fn cache(dir: &Path) -> Arc<Mutex<Cache>> {
+    static CACHES: OnceLock<Mutex<Caches>> = OnceLock::new();
+    let mut caches = CACHES
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let entry = match caches.iter().position(|(cached, _)| cached == dir) {
+        Some(at) => caches.remove(at),
+        None => (dir.to_path_buf(), Arc::default()),
+    };
+    let shared = Arc::clone(&entry.1);
+    caches.insert(0, entry);
+    caches.truncate(CACHED_DIRS);
+    shared
+}
+
+/// `cache` locked, waiting for another search of the same directory no
+/// longer than `deadline`; `None` when that came first or the run was
+/// cancelled.
+fn lock_until<'a>(
+    cache: &'a Mutex<Cache>,
+    deadline: Option<std::time::Instant>,
+    cancel: &CancelToken,
+) -> Option<MutexGuard<'a, Cache>> {
+    loop {
+        match cache.try_lock() {
+            Ok(guard) => return Some(guard),
+            Err(TryLockError::Poisoned(poisoned)) => return Some(poisoned.into_inner()),
+            Err(TryLockError::WouldBlock) => {
+                if cancel.is_cancelled() || deadline.is_some_and(|d| std::time::Instant::now() > d)
+                {
+                    return None;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+    }
 }
 
 /// Every `*.jsonl` under `dir`, recursively; checkpoint copies are skipped.
@@ -420,9 +464,10 @@ pub fn search(
     limit: usize,
     cancel: &CancelToken,
 ) -> (Vec<Hit>, bool) {
-    let mut cache = cache()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let shared = cache(dir);
+    let Some(mut cache) = lock_until(&shared, query.deadline, cancel) else {
+        return (Vec::new(), !cancel.is_cancelled());
+    };
     let mut files: Vec<(PathBuf, Option<SystemTime>, u64)> = log_files(dir)
         .into_iter()
         .filter_map(|path| {
@@ -436,7 +481,7 @@ pub fn search(
     let stale: Vec<PathBuf> = cache
         .files
         .keys()
-        .filter(|path| path.starts_with(dir) && !live.contains(path))
+        .filter(|path| !live.contains(path))
         .cloned()
         .collect();
     for path in stale {
@@ -683,6 +728,21 @@ pub(crate) mod tests {
             now: termide_agent_core::message::now_millis(),
             deadline: None,
         }
+    }
+
+    #[test]
+    fn the_cache_keeps_the_last_directories_and_a_busy_one_waits_no_longer_than_the_deadline() {
+        let first = cache(Path::new("/cache-test/0"));
+        assert!(Arc::ptr_eq(&first, &cache(Path::new("/cache-test/0"))));
+        for n in 1..=CACHED_DIRS {
+            cache(Path::new(&format!("/cache-test/{n}")));
+        }
+        assert!(!Arc::ptr_eq(&first, &cache(Path::new("/cache-test/0"))));
+
+        let busy = Mutex::new(Cache::default());
+        let _held = busy.lock().unwrap();
+        let now = std::time::Instant::now();
+        assert!(lock_until(&busy, Some(now), &CancelToken::new()).is_none());
     }
 
     #[test]
