@@ -443,7 +443,7 @@ Logs live in the project directory, not in a cache directory — see
 
 ## License
 
-By contributing to TermIDE, you agree that your contributions will be licensed under the [MIT License](LICENSE).
+By contributing to TermIDE, you agree that your contributions will be licensed under the [MIT License](LICENSE). You keep the copyright to your contributions; there is no CLA or copyright assignment.
 
 ---
 

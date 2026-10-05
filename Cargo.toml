@@ -85,7 +85,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [package.metadata.deb]
 maintainer = "Nick Nizovtsev <nizovtsevnv@gmail.com>"
-copyright = "2025, Nick Nizovtsev <nizovtsevnv@gmail.com>"
+copyright = "2025-2026, Nick Nizovtsev <nizovtsevnv@gmail.com> and TermIDE contributors"
 license-file = ["LICENSE", "4"]
 extended-description = """\
 TermIDE is an all-in-one terminal workspace for workstations and servers, written \
