@@ -993,6 +993,7 @@ agent_notice_slash_shadowed_fmt = "/{name} chạy {runs} và che {hidden} cùng 
 agent_notice_slash_skill_hint_fmt = "gọi kỹ năng bằng /skill:{name}"
 agent_notice_unknown_key_fmt = "{file}: `{key}` không phải thiết lập mà termide đọc"
 agent_notice_unknown_tool_text_fmt = "{file}: không có công cụ tích hợp nào mang tên này nên văn bản không được dùng"
+agent_notice_empty_tool_text_fmt = "{file}: phần thân trống nên cả tệp bị bỏ qua và văn bản đi kèm được giữ nguyên"
 agent_notice_loop_stopped_max_fmt = "đã dừng vòng lặp sau {count} lần"
 agent_notice_goal_stopped_max_fmt = "đã dừng mục tiêu sau {count} lượt"
 agent_notice_goal_working_fmt = "đang hướng tới mục tiêu — /goal stop để kết thúc:\n{goal}"

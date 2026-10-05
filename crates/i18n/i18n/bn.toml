@@ -993,6 +993,7 @@ agent_notice_slash_shadowed_fmt = "/{name} {runs} চালায় এবং �
 agent_notice_slash_skill_hint_fmt = "স্কিলটি /skill:{name} হিসেবে ডাকুন"
 agent_notice_unknown_key_fmt = "{file}: `{key}` termide-এর পড়া কোনো সেটিং নয়"
 agent_notice_unknown_tool_text_fmt = "{file}: এই নামে কোনো অন্তর্নির্মিত টুল নেই, তাই লেখাটি ব্যবহার হয় না"
+agent_notice_empty_tool_text_fmt = "{file}: মূল অংশ ফাঁকা, তাই পুরো ফাইলটি বাদ যায় এবং সরবরাহকৃত লেখাই থাকে"
 agent_notice_loop_stopped_max_fmt = "{count}টি পুনরাবৃত্তির পরে লুপ থামানো হয়েছে"
 agent_notice_goal_stopped_max_fmt = "{count}টি টার্নের পরে লক্ষ্য থামানো হয়েছে"
 agent_notice_goal_working_fmt = "লক্ষ্যের দিকে কাজ চলছে — থামাতে /goal stop:\n{goal}"

@@ -993,6 +993,7 @@ agent_notice_slash_shadowed_fmt = "/{name}은(는) {runs}을(를) 실행하고 �
 agent_notice_slash_skill_hint_fmt = "스킬은 /skill:{name}으로 호출하세요"
 agent_notice_unknown_key_fmt = "{file}: `{key}`은(는) termide가 읽는 설정이 아닙니다"
 agent_notice_unknown_tool_text_fmt = "{file}: 이 이름의 내장 도구가 없어 이 텍스트는 사용되지 않습니다"
+agent_notice_empty_tool_text_fmt = "{file}: 본문이 비어 있어 파일 전체를 건너뛰고 기본 제공 텍스트를 유지합니다"
 agent_notice_loop_stopped_max_fmt = "{count}회 반복 후 루프 중지됨"
 agent_notice_goal_stopped_max_fmt = "{count}턴 후 목표 중지됨"
 agent_notice_goal_working_fmt = "목표를 향해 작업 중 — /goal stop으로 종료:\n{goal}"

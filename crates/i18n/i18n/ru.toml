@@ -1031,6 +1031,7 @@ agent_notice_slash_shadowed_fmt = "/{name} запускает {runs} и скры
 agent_notice_slash_skill_hint_fmt = "скилл вызывается как /skill:{name}"
 agent_notice_unknown_key_fmt = "{file}: `{key}` — не настройка, которую читает termide"
 agent_notice_unknown_tool_text_fmt = "{file}: встроенного инструмента с таким именем нет, текст не используется"
+agent_notice_empty_tool_text_fmt = "{file}: тело пустое, поэтому файл пропускается целиком и остаются поставляемые тексты"
 agent_notice_loop_stopped_max_fmt = "цикл остановлен после {count} итераций"
 agent_notice_goal_stopped_max_fmt = "цель остановлена после {count} ходов"
 agent_notice_goal_working_fmt = "работаю к цели — /goal stop для завершения:\n{goal}"

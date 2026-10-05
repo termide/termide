@@ -856,6 +856,8 @@ pub trait Translation: Send + Sync {
     fn agent_notice_unknown_key_fmt(&self, file: &str, key: &str) -> String;
     /// A tool text named after no built-in tool.
     fn agent_notice_unknown_tool_text_fmt(&self, file: &str) -> String;
+    /// A tool text with no body, passed over whole.
+    fn agent_notice_empty_tool_text_fmt(&self, file: &str) -> String;
     fn agent_notice_loop_stopped_max_fmt(&self, count: usize) -> String;
     fn agent_notice_goal_stopped_max_fmt(&self, count: usize) -> String;
     fn agent_notice_goal_working_fmt(&self, goal: &str) -> String;

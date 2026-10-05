@@ -1011,6 +1011,7 @@ agent_notice_slash_shadowed_fmt = "/{name} 运行{runs}，同名的{hidden}被�
 agent_notice_slash_skill_hint_fmt = "技能可用 /skill:{name} 调用"
 agent_notice_unknown_key_fmt = "{file}：`{key}` 不是 termide 读取的设置"
 agent_notice_unknown_tool_text_fmt = "{file}：没有同名的内置工具，因此不会使用此文本"
+agent_notice_empty_tool_text_fmt = "{file}：正文为空，因此整个文件被跳过，仍使用自带文本"
 agent_notice_loop_stopped_max_fmt = "循环在 {count} 次迭代后停止"
 agent_notice_goal_stopped_max_fmt = "目标在 {count} 轮后停止"
 agent_notice_goal_working_fmt = "正在朝目标工作 — /goal stop 结束：\n{goal}"

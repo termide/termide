@@ -1345,8 +1345,11 @@ level only. The body is the description the model sees with the tool;
 `guideline.1:`, `guideline.2:`, … are rules added to the prompt's guidelines,
 in their order. In `task.md`, `{{agents}}` is where the agents it can delegate
 to are listed. Reword a file to change how the agent uses that tool; the tool
-itself, its arguments and what it returns stay the same. Another key, or a file
-named after no built-in tool, is reported under the banner when a panel opens.
+itself, its arguments and what it returns stay the same. An edit reaches a
+panel the next time it takes up its agent (a new panel, a switch of agent or of
+tools) and every task it hands to a subagent from then on. A file with an empty
+body is passed over whole, its front matter too; that, another key, or a file
+named after no built-in tool is reported under the banner when a panel opens.
 
 ```markdown
 ---

@@ -993,6 +993,7 @@ agent_notice_slash_shadowed_fmt = "/{name} menjalankan {runs} dan menyembunyikan
 agent_notice_slash_skill_hint_fmt = "panggil skill sebagai /skill:{name}"
 agent_notice_unknown_key_fmt = "{file}: `{key}` bukan pengaturan yang dibaca termide"
 agent_notice_unknown_tool_text_fmt = "{file}: tidak ada alat bawaan dengan nama ini, jadi teksnya tidak dipakai"
+agent_notice_empty_tool_text_fmt = "{file}: isinya kosong, jadi seluruh berkas dilewati dan teks bawaan tetap dipakai"
 agent_notice_loop_stopped_max_fmt = "loop dihentikan setelah {count} iterasi"
 agent_notice_goal_stopped_max_fmt = "tujuan dihentikan setelah {count} giliran"
 agent_notice_goal_working_fmt = "bekerja menuju tujuan — /goal stop untuk berhenti:\n{goal}"

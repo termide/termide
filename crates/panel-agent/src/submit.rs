@@ -786,6 +786,9 @@ impl AgentPanel {
                 DefinitionProblem::UnknownTool { file } => {
                     t.agent_notice_unknown_tool_text_fmt(&file.display().to_string())
                 }
+                DefinitionProblem::EmptyToolText { file } => {
+                    t.agent_notice_empty_tool_text_fmt(&file.display().to_string())
+                }
             };
             self.notice(text, NoticeKind::Warn);
         }

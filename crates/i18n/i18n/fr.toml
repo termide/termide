@@ -993,6 +993,7 @@ agent_notice_slash_shadowed_fmt = "/{name} lance « {runs} » et masque « {hidd
 agent_notice_slash_skill_hint_fmt = "appelez le skill avec /skill:{name}"
 agent_notice_unknown_key_fmt = "{file} : `{key}` n’est pas un réglage lu par termide"
 agent_notice_unknown_tool_text_fmt = "{file} : aucun outil intégré ne porte ce nom, le texte n’est donc pas utilisé"
+agent_notice_empty_tool_text_fmt = "{file} : le corps est vide, le fichier entier est donc ignoré et les textes fournis restent"
 agent_notice_loop_stopped_max_fmt = "boucle arrêtée après {count} itérations"
 agent_notice_goal_stopped_max_fmt = "objectif arrêté après {count} tours"
 agent_notice_goal_working_fmt = "travail vers l'objectif — /goal stop pour arrêter :\n{goal}"

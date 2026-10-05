@@ -993,6 +993,7 @@ agent_notice_slash_shadowed_fmt = "/{name} executa o {runs} e oculta o {hidden} 
 agent_notice_slash_skill_hint_fmt = "chame a skill como /skill:{name}"
 agent_notice_unknown_key_fmt = "{file}: `{key}` não é uma configuração que o termide lê"
 agent_notice_unknown_tool_text_fmt = "{file}: nenhuma ferramenta embutida tem este nome, então o texto não é usado"
+agent_notice_empty_tool_text_fmt = "{file}: o corpo está vazio, então o arquivo inteiro é ignorado e os textos embutidos permanecem"
 agent_notice_loop_stopped_max_fmt = "loop parado após {count} iterações"
 agent_notice_goal_stopped_max_fmt = "objetivo parado após {count} turnos"
 agent_notice_goal_working_fmt = "trabalhando rumo ao objetivo — /goal stop para encerrar:\n{goal}"

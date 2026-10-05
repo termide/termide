@@ -475,6 +475,9 @@ pub enum DefinitionProblem {
     UnknownKey { file: PathBuf, key: String },
     /// A `tools/<name>.md` named after no built-in tool.
     UnknownTool { file: PathBuf },
+    /// A `tools/<name>.md` with no body: the whole file is passed over, its
+    /// front matter too, and the shipped texts stay.
+    EmptyToolText { file: PathBuf },
 }
 
 /// The front matter of `agents/<name>/AGENT.md`: what sets an agent apart
@@ -759,7 +762,11 @@ impl AgentDirs {
                 problems.push(DefinitionProblem::UnknownTool { file });
                 continue;
             }
-            for key in split_front_matter(&text).0.into_keys() {
+            let (fields, body) = split_front_matter(&text);
+            if body.trim().is_empty() {
+                problems.push(DefinitionProblem::EmptyToolText { file: file.clone() });
+            }
+            for key in fields.into_keys() {
                 if !ToolText::is_known_key(&key) {
                     problems.push(DefinitionProblem::UnknownKey {
                         file: file.clone(),
@@ -1242,6 +1249,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(tools.join("web-search.md"), "Search.\n").unwrap();
+        std::fs::write(tools.join("write.md"), "---\nsnippet: put\n---\n\n").unwrap();
         std::fs::write(tools.join("bash.md.new"), "---\nwhatever: 1\n---\n").unwrap();
 
         let dirs = AgentDirs::new(tmp.path(), None, Some(&global));
@@ -1258,6 +1266,9 @@ mod tests {
                 },
                 DefinitionProblem::UnknownTool {
                     file: tools.join("web-search.md"),
+                },
+                DefinitionProblem::EmptyToolText {
+                    file: tools.join("write.md"),
                 },
             ]
         );

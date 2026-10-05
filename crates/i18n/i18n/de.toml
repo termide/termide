@@ -994,6 +994,7 @@ agent_notice_slash_shadowed_fmt = "/{name} führt „{runs}“ aus und verdeckt 
 agent_notice_slash_skill_hint_fmt = "Skill als /skill:{name} aufrufen"
 agent_notice_unknown_key_fmt = "{file}: `{key}` ist keine Einstellung, die termide liest"
 agent_notice_unknown_tool_text_fmt = "{file}: kein eingebautes Werkzeug trägt diesen Namen, der Text wird nicht verwendet"
+agent_notice_empty_tool_text_fmt = "{file}: der Hauptteil ist leer, daher wird die ganze Datei übergangen und die mitgelieferten Texte bleiben"
 agent_notice_loop_stopped_max_fmt = "Schleife nach {count} Durchläufen gestoppt"
 agent_notice_goal_stopped_max_fmt = "Ziel nach {count} Runden gestoppt"
 agent_notice_goal_working_fmt = "arbeite auf das Ziel hin — /goal stop zum Beenden:\n{goal}"
