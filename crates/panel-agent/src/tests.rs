@@ -4795,6 +4795,54 @@ fn shadowed_names_are_reported_when_the_panel_opens() {
     )));
 }
 
+/// Definitions with a typo'd key and a tool text named after no tool.
+struct Misdefined;
+
+impl AgentCatalog for Misdefined {
+    fn list(&self) -> Vec<AgentEntry> {
+        Agents.list()
+    }
+    fn resolve(&self, name: &str) -> Option<AgentProfile> {
+        Agents.resolve(name)
+    }
+    fn definition_problems(&self) -> Vec<termide_agent_core::DefinitionProblem> {
+        vec![
+            termide_agent_core::DefinitionProblem::UnknownKey {
+                file: "/ai/agents/review/AGENT.md".into(),
+                key: "descripton".into(),
+            },
+            termide_agent_core::DefinitionProblem::UnknownTool {
+                file: "/ai/tools/web-search.md".into(),
+            },
+        ]
+    }
+}
+
+#[test]
+fn definitions_with_what_nothing_reads_are_reported_when_the_panel_opens() {
+    let panel = AgentPanel::new(AgentPanelSetup {
+        catalog: Arc::new(Misdefined),
+        ..setup(vec![])
+    });
+    let warnings: Vec<&str> = panel
+        .transcript()
+        .items()
+        .iter()
+        .filter_map(|item| match item {
+            Item::Notice {
+                text,
+                kind: NoticeKind::Warn,
+            } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert!(
+        warnings[0].contains("/ai/agents/review/AGENT.md") && warnings[0].contains("descripton")
+    );
+    assert!(warnings[1].contains("/ai/tools/web-search.md"));
+}
+
 /// A tool with nothing behind it, standing in for one an MCP server sent.
 struct Late(&'static str);
 

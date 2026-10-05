@@ -455,6 +455,28 @@ fn move_legacy_default_template(
     Ok(true)
 }
 
+/// The front-matter keys an `AGENT.md` is read for, besides `env.<NAME>`.
+const AGENT_KEYS: [&str; 7] = [
+    "description",
+    "model",
+    "mode",
+    "tools",
+    "prompt",
+    "command",
+    "timeout",
+];
+
+/// Something a definition file says that termide does not read, reported
+/// when a panel opens so that a typo does not pass for a setting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DefinitionProblem {
+    /// A front-matter key nothing reads, in an agent's `AGENT.md` or a tool
+    /// text.
+    UnknownKey { file: PathBuf, key: String },
+    /// A `tools/<name>.md` named after no built-in tool.
+    UnknownTool { file: PathBuf },
+}
+
 /// The front matter of `agents/<name>/AGENT.md`: what sets an agent apart
 /// from the configured defaults. Every field is optional; an absent one keeps
 /// the default.
@@ -679,13 +701,21 @@ impl AgentDirs {
     /// seed) and logged.
     #[must_use]
     pub fn tool_texts(&self) -> BTreeMap<String, ToolText> {
+        self.tool_text_files()
+            .into_iter()
+            .map(|(name, _, text)| (name, ToolText::from_file(&text)))
+            .collect()
+    }
+
+    /// The configuration level's `tools/<name>.md` files: name, path, text.
+    fn tool_text_files(&self) -> Vec<(String, PathBuf, String)> {
         let Some(dir) = self.global.as_ref().map(|g| g.join(TOOLS_DIR)) else {
-            return BTreeMap::new();
+            return Vec::new();
         };
         let Ok(read_dir) = std::fs::read_dir(&dir) else {
-            return BTreeMap::new();
+            return Vec::new();
         };
-        let mut texts = BTreeMap::new();
+        let mut files = Vec::new();
         for entry in read_dir.flatten() {
             let path = entry.path();
             let Some(name) = path
@@ -693,17 +723,52 @@ impl AgentDirs {
                 .is_some_and(|e| e == "md")
                 .then(|| path.file_stem().and_then(|s| s.to_str()))
                 .flatten()
+                .map(str::to_string)
             else {
                 continue;
             };
             match std::fs::read_to_string(&path) {
-                Ok(text) => {
-                    texts.insert(name.to_string(), ToolText::from_file(&text));
-                }
+                Ok(text) => files.push((name, path, text)),
                 Err(error) => log::warn!("cannot read {}: {error}", path.display()),
             }
         }
-        texts
+        files.sort();
+        files
+    }
+
+    /// What the agents' `AGENT.md` files and the tool texts say that nothing
+    /// reads: unknown front-matter keys, and tool texts named after no tool.
+    #[must_use]
+    pub fn definition_problems(&self) -> Vec<DefinitionProblem> {
+        let mut problems = Vec::new();
+        for agent in self.agents() {
+            let Some((file, text)) = self.agent_file(&agent) else {
+                continue;
+            };
+            for key in split_front_matter(&text).0.into_keys() {
+                if !AGENT_KEYS.contains(&key.as_str()) && !key.starts_with("env.") {
+                    problems.push(DefinitionProblem::UnknownKey {
+                        file: file.clone(),
+                        key,
+                    });
+                }
+            }
+        }
+        for (name, file, text) in self.tool_text_files() {
+            if !SEED_TOOLS.iter().any(|(tool, _)| *tool == name) {
+                problems.push(DefinitionProblem::UnknownTool { file });
+                continue;
+            }
+            for key in split_front_matter(&text).0.into_keys() {
+                if !ToolText::is_known_key(&key) {
+                    problems.push(DefinitionProblem::UnknownKey {
+                        file: file.clone(),
+                        key,
+                    });
+                }
+            }
+        }
+        problems
     }
 
     /// The `recall` solver's texts: `system/recall.md` from the configuration
@@ -1152,6 +1217,50 @@ mod tests {
             Some(project.join(PROJECT_AGENT_DIR).join("agents/review"))
         );
         assert_eq!(dirs.agent_dir("missing"), None);
+    }
+
+    #[test]
+    fn definitions_report_what_nothing_reads() {
+        let tmp = tempfile::tempdir().unwrap();
+        let global = tmp.path().join("ai");
+        // What termide ships reports nothing.
+        ensure_global_layout(&global).unwrap();
+        let shipped = AgentDirs::new(tmp.path(), None, Some(&global));
+        assert_eq!(shipped.definition_problems(), []);
+        let review = global.join("agents/review");
+        std::fs::create_dir_all(&review).unwrap();
+        std::fs::write(
+            review.join(AGENT_FILE),
+            "---\ndescripton: typo\nmodel: m\nenv.KEY: v\n---\nYou review.\n",
+        )
+        .unwrap();
+        let tools = global.join(TOOLS_DIR);
+        std::fs::create_dir_all(&tools).unwrap();
+        std::fs::write(
+            tools.join("read.md"),
+            "---\nsnipet: look\nguideline.1: g\n---\nRead.\n",
+        )
+        .unwrap();
+        std::fs::write(tools.join("web-search.md"), "Search.\n").unwrap();
+        std::fs::write(tools.join("bash.md.new"), "---\nwhatever: 1\n---\n").unwrap();
+
+        let dirs = AgentDirs::new(tmp.path(), None, Some(&global));
+        assert_eq!(
+            dirs.definition_problems(),
+            [
+                DefinitionProblem::UnknownKey {
+                    file: review.join(AGENT_FILE),
+                    key: "descripton".into(),
+                },
+                DefinitionProblem::UnknownKey {
+                    file: tools.join("read.md"),
+                    key: "snipet".into(),
+                },
+                DefinitionProblem::UnknownTool {
+                    file: tools.join("web-search.md"),
+                },
+            ]
+        );
     }
 
     #[test]

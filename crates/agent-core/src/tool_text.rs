@@ -87,6 +87,16 @@ impl ToolText {
         }
     }
 
+    /// Whether `key` is one a tool text's front matter is read for:
+    /// `snippet` or `guideline.<number>`.
+    #[must_use]
+    pub fn is_known_key(key: &str) -> bool {
+        key == "snippet"
+            || key
+                .strip_prefix("guideline.")
+                .is_some_and(|n| n.trim().parse::<u32>().is_ok())
+    }
+
     /// The shipped texts of the tool `name`; empty for a name with no seed.
     #[must_use]
     pub fn seed(name: &str) -> &'static ToolText {

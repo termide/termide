@@ -342,6 +342,11 @@ pub trait AgentCatalog: Send + Sync {
     fn skills(&self) -> Vec<SkillInfo> {
         Vec::new()
     }
+    /// What the agent and tool definitions say that nothing reads, reported
+    /// when the panel opens.
+    fn definition_problems(&self) -> Vec<termide_agent_core::DefinitionProblem> {
+        Vec::new()
+    }
     /// The session's permission mode is now `mode`: what the catalog runs
     /// on the session's behalf (a delegated task) follows. The default runs
     /// nothing.
@@ -1039,9 +1044,11 @@ impl AgentPanel {
             scrollbars: ScrollBars::default(),
             banner_hits: Vec::new(),
         };
-        // Names defined twice are reported once, when the panel opens; under
+        // Names defined twice and definitions with what nothing reads are
+        // reported once, when the panel opens; under
         // a fresh session's banner the notices sit below it.
         panel.notice_slash_conflicts();
+        panel.notice_definition_problems();
         panel.refresh_recent_sessions();
         panel
     }

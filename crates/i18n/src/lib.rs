@@ -852,6 +852,10 @@ pub trait Translation: Send + Sync {
     fn agent_notice_slash_shadowed_fmt(&self, name: &str, runs: &str, hidden: &str) -> String;
     /// How to reach a skill whose `/name` another kind takes.
     fn agent_notice_slash_skill_hint_fmt(&self, name: &str) -> String;
+    /// A front-matter key nothing reads, in an agent or tool definition.
+    fn agent_notice_unknown_key_fmt(&self, file: &str, key: &str) -> String;
+    /// A tool text named after no built-in tool.
+    fn agent_notice_unknown_tool_text_fmt(&self, file: &str) -> String;
     fn agent_notice_loop_stopped_max_fmt(&self, count: usize) -> String;
     fn agent_notice_goal_stopped_max_fmt(&self, count: usize) -> String;
     fn agent_notice_goal_working_fmt(&self, goal: &str) -> String;

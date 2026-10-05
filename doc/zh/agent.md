@@ -391,7 +391,7 @@ You review the changes you are given. …
 {{tools}}
 ```
 
-front matter 由 `键: 值` 行组成；以 `#` 开头的行是注释，值可以加引号。`model` 是配置端点上的模型 id；`mode` 是代理启动时的权限模式（`ask`、`plan`、`edit`、`configured`、`auto` 或 `all`）；`tools` 以逗号分隔列出代理保留的内置工具（列表也可以放在方括号中，或在 `tools:` 下写成 `- 名称` 行的 YAML 列表），包括 `task`；没有该字段时代理拥有全部工具，`tools: []` 则一个也不保留。
+front matter 由 `键: 值` 行组成；以 `#` 开头的行是注释，值可以加引号。`model` 是配置端点上的模型 id；`mode` 是代理启动时的权限模式（`ask`、`plan`、`edit`、`configured`、`auto` 或 `all`）；`tools` 以逗号分隔列出代理保留的内置工具（列表也可以放在方括号中，或在 `tools:` 下写成 `- 名称` 行的 YAML 列表），包括 `task`；没有该字段时代理拥有全部工具，`tools: []` 则一个也不保留。termide 不读取的键（例如拼写错误的 `descripton:`）会在面板打开时显示在横幅下方。
 
 在会话中途切换代理会为下一个请求替换提示词和工具；只有当定义中指定了模型和模式时，它们才会改变。会话日志会记录这次切换，与 **Model** 标签的切换一样。重新打开的会话会以它最后运行时的代理身份恢复，保存的布局也会记住它。
 
@@ -488,7 +488,7 @@ keep_recent_tokens = 4096   # 原样保留的最近消息（最多为窗口的�
 
 ### 工具文本
 
-模型被告知的每个内置工具的说明同样是文件：`read`、`edit`、`write`、`bash`、`question`、`suggest_command`、`task`、`skill`、`fetch`、`web_search` 和 `recall` 各有一个 `tools/<name>.md`，像 `system/` 文件一样写入并保持最新，且只从配置层级读取。正文是模型随工具看到的描述；前置元数据中的 `snippet:` 是它在系统提示词工具列表中的那一行（省略则该工具不进入列表，但仍可调用），`guideline.1:`、`guideline.2:`……是按顺序加入提示词准则的规则。在 `task.md` 中，`{{agents}}` 处列出可以委派的代理。改写文件即可改变代理使用该工具的方式；工具本身、它的参数和返回内容保持不变。
+模型被告知的每个内置工具的说明同样是文件：`read`、`edit`、`write`、`bash`、`question`、`suggest_command`、`task`、`skill`、`fetch`、`web_search` 和 `recall` 各有一个 `tools/<name>.md`，像 `system/` 文件一样写入并保持最新，且只从配置层级读取。正文是模型随工具看到的描述；前置元数据中的 `snippet:` 是它在系统提示词工具列表中的那一行（省略则该工具不进入列表，但仍可调用），`guideline.1:`、`guideline.2:`……是按顺序加入提示词准则的规则。在 `task.md` 中，`{{agents}}` 处列出可以委派的代理。改写文件即可改变代理使用该工具的方式；工具本身、它的参数和返回内容保持不变。其他键或不以内置工具命名的文件会在面板打开时显示在横幅下方。
 
 ```markdown
 ---

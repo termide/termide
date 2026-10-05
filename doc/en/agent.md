@@ -1132,7 +1132,8 @@ agent keeps, separated by commas (brackets around the list are fine too, and so 
 YAML list of `- name` lines under `tools:`),
 `task` included; without it the agent has them all, and `tools: []` leaves
 none. Skills and MCP servers' tools are not governed by
-it: they come with what you configured.
+it: they come with what you configured. A key termide does not read — a typo
+such as `descripton:` — is reported under the banner when a panel opens.
 
 Switching agents mid-session swaps the prompt and the tools for the next
 request; the model and the mode change only when the definition names them,
@@ -1339,7 +1340,8 @@ level only. The body is the description the model sees with the tool;
 `guideline.1:`, `guideline.2:`, … are rules added to the prompt's guidelines,
 in their order. In `task.md`, `{{agents}}` is where the agents it can delegate
 to are listed. Reword a file to change how the agent uses that tool; the tool
-itself, its arguments and what it returns stay the same.
+itself, its arguments and what it returns stay the same. Another key, or a file
+named after no built-in tool, is reported under the banner when a panel opens.
 
 ```markdown
 ---

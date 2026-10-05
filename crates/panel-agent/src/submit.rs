@@ -7,8 +7,8 @@ use std::sync::PoisonError;
 use std::time::Duration;
 
 use termide_agent_core::{
-    CancelToken, CommandScript, Decision, Message, PromptError, Session, SkillInfo, Timing,
-    UserMessage,
+    CancelToken, CommandScript, Decision, DefinitionProblem, Message, PromptError, Session,
+    SkillInfo, Timing, UserMessage,
 };
 use termide_core::{Panel, PanelEvent};
 use termide_ui::ChoiceForm;
@@ -772,6 +772,22 @@ impl AgentPanel {
     pub(crate) fn notice_slash_conflicts(&mut self) {
         for conflict in self.slash_conflicts() {
             self.notice(conflict.describe(), NoticeKind::Warn);
+        }
+    }
+
+    /// One warning per front-matter key or tool text nothing reads.
+    pub(crate) fn notice_definition_problems(&mut self) {
+        let t = termide_i18n::t();
+        for problem in self.catalog.definition_problems() {
+            let text = match problem {
+                DefinitionProblem::UnknownKey { file, key } => {
+                    t.agent_notice_unknown_key_fmt(&file.display().to_string(), &key)
+                }
+                DefinitionProblem::UnknownTool { file } => {
+                    t.agent_notice_unknown_tool_text_fmt(&file.display().to_string())
+                }
+            };
+            self.notice(text, NoticeKind::Warn);
         }
     }
 

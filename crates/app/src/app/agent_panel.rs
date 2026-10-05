@@ -390,6 +390,10 @@ impl AgentCatalog for FsCatalog {
         self.dirs.skills()
     }
 
+    fn definition_problems(&self) -> Vec<termide_agent_core::DefinitionProblem> {
+        self.dirs.definition_problems()
+    }
+
     fn list(&self) -> Vec<AgentEntry> {
         self.dirs
             .agents()

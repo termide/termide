@@ -1257,6 +1257,17 @@ impl Translation for RuntimeTranslation {
         self.format("agent_notice_slash_skill_hint_fmt", &[("name", name)])
     }
 
+    fn agent_notice_unknown_key_fmt(&self, file: &str, key: &str) -> String {
+        self.format(
+            "agent_notice_unknown_key_fmt",
+            &[("file", file), ("key", key)],
+        )
+    }
+
+    fn agent_notice_unknown_tool_text_fmt(&self, file: &str) -> String {
+        self.format("agent_notice_unknown_tool_text_fmt", &[("file", file)])
+    }
+
     fn agent_notice_loop_stopped_max_fmt(&self, count: usize) -> String {
         self.format(
             "agent_notice_loop_stopped_max_fmt",
