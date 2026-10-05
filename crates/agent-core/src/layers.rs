@@ -216,34 +216,51 @@ fn companion_files(dir: &Path) -> Vec<String> {
 
 /// Split the YAML front matter (`---` fenced `key: value` lines, `#` lines
 /// being comments) off a Markdown file. Returns the fields and the body; a file without front
-/// matter is all body.
+/// matter is all body. A key with no value followed by `- item` lines (a YAML
+/// block list) gets the items joined by `, `, the inline list form. A leading
+/// byte order mark is dropped.
 #[must_use]
 pub fn split_front_matter(text: &str) -> (BTreeMap<String, String>, &str) {
     let mut fields = BTreeMap::new();
-    let Some(rest) = text.strip_prefix("---") else {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let mut lines = text.split_inclusive('\n');
+    let Some(first) = lines.next().filter(|line| line.trim_end() == "---") else {
         return (fields, text);
     };
-    let Some(rest) = rest
-        .strip_prefix('\n')
-        .or_else(|| rest.strip_prefix("\r\n"))
-    else {
-        return (fields, text);
-    };
-    let Some(end) = rest.find("\n---") else {
-        return (fields, text);
-    };
-    for line in rest[..end].lines() {
-        if line.trim_start().starts_with('#') {
+    let mut offset = first.len();
+    // The key whose value is a block list being read, if any.
+    let mut list_key: Option<String> = None;
+    for line in lines {
+        offset += line.len();
+        let line = line.trim_end();
+        if line == "---" {
+            return (fields, &text[offset..]);
+        }
+        let stripped = line.trim_start();
+        if stripped.is_empty() || stripped.starts_with('#') {
             continue;
         }
+        if let Some(key) = &list_key {
+            if let Some(item) = stripped.strip_prefix('-') {
+                let item = unquote(item.trim());
+                let value: &mut String = fields.entry(key.clone()).or_default();
+                if !value.is_empty() {
+                    value.push_str(", ");
+                }
+                value.push_str(item);
+                continue;
+            }
+        }
         let Some((key, value)) = line.split_once(':') else {
+            list_key = None;
             continue;
         };
-        fields.insert(key.trim().to_string(), unquote(value.trim()).to_string());
+        let key = key.trim().to_string();
+        let value = unquote(value.trim()).to_string();
+        list_key = value.is_empty().then(|| key.clone());
+        fields.insert(key, value);
     }
-    let body = &rest[end + 4..];
-    let body = body.strip_prefix('\n').unwrap_or(body);
-    (fields, body)
+    (BTreeMap::new(), text)
 }
 
 /// `value` without the quotes around it, when one pair of the same quote
@@ -316,8 +333,9 @@ fn dot_new(path: &Path) -> PathBuf {
 }
 
 /// Lay out the `ai` directory of the configuration and keep its shipped assets
-/// current. Empty `agents/`, `skills/`, `prompts/`, `commands/`, `system/` and
-/// `shims/` are created. Each shipped file (`AGENTS.md`, the `system/` prompts)
+/// current. Empty `agents/`, `skills/`, `prompts/`, `commands/`, `system/`,
+/// `tools/`, `shims/` and `web/engines/` are created. Each shipped file
+/// (`AGENTS.md`, the `system/` prompts, the `tools/` texts, the search engines)
 /// is then reconciled against the version it was last written from, recorded in
 /// `.seeds.toml`:
 ///
@@ -954,6 +972,17 @@ impl AgentDirs {
             .find(|path| path.is_dir())
     }
 
+    /// The `AGENT.md` to edit for `agent`: the one in effect, from the highest
+    /// root that has one, else where it would go in the agent's directory.
+    #[must_use]
+    pub fn agent_path(&self, agent: &str) -> Option<PathBuf> {
+        let dir = self.agent_dir(agent)?;
+        Some(
+            self.find_file(Path::new("agents").join(agent).join(AGENT_FILE))
+                .unwrap_or_else(|| dir.join(AGENT_FILE)),
+        )
+    }
+
     /// The file of prompt `name` (`prompts/<name>.md`) in the highest root that
     /// defines it, for editing or removing it.
     #[must_use]
@@ -1076,6 +1105,28 @@ mod tests {
         );
         assert_eq!(dirs.agent_dir(DEFAULT_AGENT), None);
         assert_eq!(dirs.agent_dir("missing"), None);
+    }
+
+    #[test]
+    fn agent_path_is_the_agent_md_in_effect() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("proj");
+        let global = tmp.path().join("config/ai");
+        let local = project.join(PROJECT_AGENT_DIR).join("agents/review");
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(local.join("checklist.md"), "- risks").unwrap();
+        let defined = global.join("agents/review");
+        std::fs::create_dir_all(&defined).unwrap();
+        std::fs::write(defined.join(AGENT_FILE), "Review.").unwrap();
+        std::fs::create_dir_all(global.join("agents/new")).unwrap();
+
+        let dirs = AgentDirs::new(&project, Some(&project), Some(&global));
+        assert_eq!(dirs.agent_path("review"), Some(defined.join(AGENT_FILE)));
+        assert_eq!(
+            dirs.agent_path("new"),
+            Some(global.join("agents/new").join(AGENT_FILE))
+        );
+        assert_eq!(dirs.agent_path(DEFAULT_AGENT), None);
     }
 
     #[test]
@@ -1401,6 +1452,33 @@ mod tests {
         assert_eq!(fields["name"], "x");
         assert_eq!(body, "body\n");
         assert_eq!(split_front_matter("plain").1, "plain");
+    }
+
+    #[test]
+    fn front_matter_edge_cases_never_leak_into_the_body() {
+        let (fields, body) = split_front_matter("---\n---\nBody.\n");
+        assert!(fields.is_empty());
+        assert_eq!(body, "Body.\n");
+
+        let (fields, body) = split_front_matter("\u{feff}---\r\nsnippet: s\r\n---\r\nBody.\r\n");
+        assert_eq!(fields["snippet"], "s");
+        assert_eq!(body, "Body.\r\n");
+
+        let (fields, body) = split_front_matter("---\na: b\n----\nc: d\n---\nBody");
+        assert_eq!(fields["c"], "d", "only a bare `---` line closes it");
+        assert_eq!(body, "Body");
+
+        assert_eq!(split_front_matter("---\na: b\n").1, "---\na: b\n");
+    }
+
+    #[test]
+    fn a_block_list_reads_as_the_inline_one() {
+        let (fields, _) = split_front_matter(
+            "---\ntools:\n  - read\n  - \"bash\"\n# note\nmode: plan\nempty:\n---\n",
+        );
+        assert_eq!(fields["tools"], "read, bash");
+        assert_eq!(fields["mode"], "plan");
+        assert_eq!(fields["empty"], "");
     }
     #[test]
     fn prompts_come_from_markdown_files_and_expand_their_arguments() {

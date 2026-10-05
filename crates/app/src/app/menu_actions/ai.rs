@@ -172,9 +172,9 @@ impl App {
             let name = name.to_string();
             match section {
                 AiSection::Agents => {
-                    if let Some(dir) = self.state.ai_dirs().agent_dir(&name) {
+                    if let Some(path) = self.state.ai_dirs().agent_path(&name) {
                         self.state.close_menu();
-                        self.open_path_in_editor(dir.join(termide_agent_core::AGENT_FILE))?;
+                        self.open_path_in_editor(path)?;
                     }
                 }
                 AiSection::Skills => {

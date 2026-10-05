@@ -965,8 +965,8 @@ of `permissions.rs`, so it runs in every mode.
   single shared budget, tried first, let a slow code walk in a home-rooted
   project starve the sources after it. The result names a source its limit
   stopped. `paths`
-  (globs) and `since` narrow all three, `paths` restated inside each nested
-  repository.
+  (globs) narrow all three, restated inside each nested repository; `since`
+  narrows sessions and commits only.
 - Files are notes and documents as much as code, so the source is `files`,
   not `code`, and prose is treated as prose: a Markdown file is a document per
   heading section (a long decision log is many results, each labelled with

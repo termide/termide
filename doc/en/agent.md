@@ -1122,7 +1122,8 @@ The front matter is `key: value` lines; a line starting with `#` is a
 comment, and a value may be quoted. `model` is a model id at the configured
 endpoint; `mode` is the permission mode the agent starts in (`ask`, `plan`,
 `edit`, `configured`, `auto` or `all`); `tools` lists the built-in tools the
-agent keeps, separated by commas (brackets around the list are fine too),
+agent keeps, separated by commas (brackets around the list are fine too, and so is a
+YAML list of `- name` lines under `tools:`),
 `task` included; without it the agent has them all, and `tools: []` leaves
 none. Skills and MCP servers' tools are not governed by
 it: they come with what you configured.

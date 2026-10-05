@@ -503,12 +503,11 @@ impl Session {
     /// it does not clutter the session list or the disk.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        !self.entries.iter().any(|e| {
-            matches!(
-                e.kind,
-                EntryKind::Message { .. } | EntryKind::SessionName { .. }
-            )
-        })
+        self.name().is_none()
+            && !self
+                .entries
+                .iter()
+                .any(|e| matches!(e.kind, EntryKind::Message { .. }))
     }
 
     /// Delete the session's file from disk, consuming the session (its lock is
@@ -682,7 +681,7 @@ impl Session {
     }
 
     /// The conversation's name: the last one set on the current branch, or
-    /// the one the file was created with.
+    /// the one the file was created with; an empty one set last clears it.
     #[must_use]
     pub fn name(&self) -> Option<&str> {
         self.branch()
@@ -693,6 +692,7 @@ impl Session {
                 _ => None,
             })
             .or(self.header.name.as_deref())
+            .filter(|name| !name.is_empty())
     }
 
     /// Name (or rename) the conversation. An empty name clears it.
@@ -948,6 +948,15 @@ mod tests {
         session.append_agent_change("default").unwrap();
         assert!(session.is_empty());
         // A user-given name marks intent to keep it.
+        session.set_name("keep me").unwrap();
+        assert!(!session.is_empty());
+        // Clearing the name gives the default label back and the intent up.
+        session.set_name(" ").unwrap();
+        assert_eq!(session.name(), None);
+        assert!(session.is_empty());
+        let reopened = Session::open(session.path()).unwrap();
+        assert_eq!(reopened.name(), None);
+        assert_eq!(SessionSummary::from(&reopened).name, None);
         session.set_name("keep me").unwrap();
         assert!(!session.is_empty());
 

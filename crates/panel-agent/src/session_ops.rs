@@ -525,7 +525,15 @@ impl AgentPanel {
         let Some(path) = self.recent_to_rename.take() else {
             return vec![];
         };
-        let result = Session::open_exclusive(&path).and_then(|mut session| session.set_name(name));
+        // A session with no messages is listed only for its name: cleared, it
+        // is an untouched one, discarded as such rather than left unlisted.
+        let result = Session::open_exclusive(&path).and_then(|mut session| {
+            session.set_name(name)?;
+            if session.is_empty() {
+                session.discard()?;
+            }
+            Ok(())
+        });
         let selected = self.recent_selected;
         self.load_recent_sessions();
         self.recent_selected = self
@@ -533,6 +541,9 @@ impl AgentPanel {
             .iter()
             .position(|summary| summary.path == path)
             .unwrap_or_else(|| selected.min(self.recent_sessions.len().saturating_sub(1)));
+        if self.recent_sessions.is_empty() {
+            self.chat_focus = false;
+        }
         match result {
             Ok(_) => vec![PanelEvent::NeedsRedraw],
             Err(error) => {

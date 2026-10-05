@@ -116,8 +116,14 @@ impl Sources {
     };
 
     fn parse(value: &Value) -> Result<Self, String> {
-        let Some(items) = value.as_array() else {
-            return Ok(Self::ALL);
+        let single;
+        let items = match value {
+            Value::Array(items) => items.as_slice(),
+            Value::String(_) => {
+                single = [value.clone()];
+                &single[..]
+            }
+            _ => return Ok(Self::ALL),
         };
         if items.is_empty() {
             return Ok(Self::ALL);
@@ -744,8 +750,11 @@ mod tests {
         assert_eq!(request.paths, ["crates/agent-core"]);
         assert_eq!(request.limit, MAX_LIMIT);
         assert!(request.since.is_some());
+        let single = parse_request(&json!({ "queries": "x", "sources": "git" })).unwrap();
+        assert!(single.sources.git && !single.sources.sessions && !single.sources.files);
         assert!(parse_request(&json!({})).is_err());
         assert!(parse_request(&json!({ "queries": ["x"], "sources": ["web"] })).is_err());
+        assert!(parse_request(&json!({ "queries": ["x"], "sources": "web" })).is_err());
         assert!(parse_request(&json!({ "queries": ["x"], "since": "soon" })).is_err());
     }
 

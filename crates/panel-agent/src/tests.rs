@@ -3129,7 +3129,49 @@ fn f2_in_the_banner_list_renames_the_picked_session_not_the_fresh_one() {
 
     // Asked again, the prompt offers the name it now has.
     let events = panel.handle_key(chord(KeyCode::F(2), KeyModifiers::NONE));
-    assert_eq!(input(&events).0, "renamed");
+    let (initial, action) = input(&events);
+    assert_eq!(initial, "renamed");
+
+    // An empty answer clears the name: the row falls back to its first
+    // prompt instead of going blank.
+    panel.handle_command(PanelCommand::InputSubmitted {
+        action,
+        text: String::new(),
+    });
+    assert_eq!(panel.recent_sessions.len(), 2);
+    assert!(panel.recent_sessions.iter().all(|s| s.name.is_none()));
+}
+
+#[test]
+fn clearing_the_name_of_a_listed_session_with_no_messages_discards_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let named = {
+        let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
+        session.set_name("only a name").unwrap();
+        session.path().to_path_buf()
+    };
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![])
+    });
+    assert_eq!(panel.recent_sessions.len(), 1);
+    panel.handle_key(chord(KeyCode::Tab, KeyModifiers::NONE));
+    assert!(panel.chat_focus);
+    let events = panel.handle_key(chord(KeyCode::F(2), KeyModifiers::NONE));
+    let [PanelEvent::ShowInput {
+        on_submit: InputAction::Custom(action),
+        ..
+    }] = events.as_slice()
+    else {
+        panic!("expected a rename prompt, got {events:?}");
+    };
+    panel.handle_command(PanelCommand::InputSubmitted {
+        action: action.clone(),
+        text: String::new(),
+    });
+    assert!(panel.recent_sessions.is_empty());
+    assert!(!named.exists(), "an untouched session is not left unlisted");
+    assert!(!panel.chat_focus, "the keyboard goes back to the prompt");
 }
 
 #[test]
