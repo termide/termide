@@ -3901,6 +3901,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-stemmers"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e46a2036019fdb888131db7a4c847a1063a7493f971ed94ea82c67eada63ca54"
+dependencies = [
+ "serde",
+ "serde_derive",
+]
+
+[[package]]
 name = "rustc_version"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4965,6 +4975,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "termide-agent-recall"
+version = "0.38.0"
+dependencies = [
+ "glob",
+ "ignore",
+ "log",
+ "regex",
+ "rust-stemmers",
+ "serde_json",
+ "tempfile",
+ "termide-agent-core",
+]
+
+[[package]]
 name = "termide-agent-tools"
 version = "0.38.0"
 dependencies = [
@@ -5012,6 +5036,7 @@ dependencies = [
  "termide-agent-hooks",
  "termide-agent-mcp",
  "termide-agent-providers",
+ "termide-agent-recall",
  "termide-agent-tools",
  "termide-agent-web",
  "termide-app-core",

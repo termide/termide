@@ -432,6 +432,9 @@ pub struct Agent {
     /// Whether the user messages of this loop are a task another agent
     /// wrote, not the user's words.
     delegated: bool,
+    /// The id of the session log this loop's conversation is written to,
+    /// when there is one; tools see it in [`SessionView::id`].
+    session_id: Option<String>,
 }
 
 impl Agent {
@@ -461,6 +464,7 @@ impl Agent {
             intent: IntentLog::new(),
             intent_seeded: false,
             delegated: false,
+            session_id: None,
         }
     }
 
@@ -485,6 +489,15 @@ impl Agent {
     #[must_use]
     pub fn with_asker(mut self, asker: UserAsker) -> Self {
         self.asker = Some(asker);
+        self
+    }
+
+    /// The id of the session log the conversation is written to, so a tool
+    /// can tell that log from the others (`recall` leaves it out: its
+    /// content is already in the context).
+    #[must_use]
+    pub fn with_session_id(mut self, id: Option<String>) -> Self {
+        self.session_id = id;
         self
     }
 
@@ -883,6 +896,7 @@ impl Agent {
             suggester: self.suggester.clone(),
             shell_run: self.shell_run.clone(),
             session: Some(SessionView {
+                id: self.session_id.clone(),
                 intent: self.intent.clone(),
                 provider: Arc::clone(&self.provider),
                 model: self.model.clone(),

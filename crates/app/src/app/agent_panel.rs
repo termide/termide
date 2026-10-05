@@ -19,6 +19,7 @@ use termide_agent_core::{
 use termide_agent_hooks::CommandHooks;
 use termide_agent_mcp::{Connections, TokenStore};
 use termide_agent_providers::{AnthropicProvider, Compat, OpenAiCompatProvider, ReasoningParam};
+use termide_agent_recall::{RecallSetup, RecallTool, RepoRoot, Solver, TimeLimits};
 use termide_agent_tools::{
     builtin_tools, BashTool, QuestionTool, SkillTool, SubagentRun, SuggestCommandTool, TaskTool,
 };
@@ -32,7 +33,7 @@ use termide_panel_agent::{
 use super::App;
 
 mod headless;
-pub use headless::{run_agent_headless, HeadlessOutput};
+pub use headless::{run_agent_headless, run_recall, HeadlessOutput};
 
 impl App {
     /// Open a new agent panel. Like a new terminal, each call opens another
@@ -308,6 +309,8 @@ struct FsCatalog {
     subagents: Option<Arc<Subagents>>,
     /// The web tools' service; set once the settings are known.
     web: Option<Arc<Web>>,
+    /// The project's `recall`; set once the settings are known.
+    recall: Option<Arc<RecallTool>>,
 }
 
 impl FsCatalog {
@@ -341,6 +344,7 @@ impl FsCatalog {
             dirs,
             subagents: None,
             web: None,
+            recall: None,
         }
     }
 }
@@ -430,7 +434,7 @@ impl AgentCatalog for FsCatalog {
         let mut tools = if backend.is_some() {
             termide_agent_core::ToolRegistry::new()
         } else {
-            base_tools(&self.dirs, self.web.as_ref())
+            base_tools(&self.dirs, self.web.as_ref(), self.recall.as_ref())
         };
         // Someone watches the panel's agent to answer its questions and to
         // confirm a command it is offered; a subagent and headless mode build
@@ -520,10 +524,17 @@ impl FsCatalog {
 
 /// The built-in tools followed by the web tools, before an agent's `tools`
 /// list narrows them.
-fn base_tools(dirs: &AgentDirs, web: Option<&Arc<Web>>) -> ToolRegistry {
+fn base_tools(
+    dirs: &AgentDirs,
+    web: Option<&Arc<Web>>,
+    recall: Option<&Arc<RecallTool>>,
+) -> ToolRegistry {
     let mut tools = builtin_tools(dirs.shims_dir());
     for tool in web.map(web_tools).unwrap_or_default() {
         tools.insert(tool);
+    }
+    if let Some(recall) = recall {
+        tools.insert(Arc::clone(recall) as Arc<dyn termide_agent_core::Tool>);
     }
     tools
 }
@@ -761,13 +772,16 @@ fn api_key_of(connection: &Connection) -> Option<String> {
         .flatten()
 }
 
-/// The `auto` mode reviewer: the texts of `system/classify.md`, and the
-/// model of the `auto_reviewer` connection when one is named. A name that
-/// matches no connection, or one that drives a CLI agent, reviews with the
-/// session's model.
-fn reviewer_setup(settings: &AiSettings, dirs: &AgentDirs) -> ReviewerSetup {
-    let name = settings.auto_reviewer.trim();
-    let model = match settings.connections.get(name) {
+/// The model of the connection `name` for a side call (`purpose` names it in
+/// the warning): `None` when the name is empty, or matches no connection or
+/// one that drives a CLI agent — the session's model then serves.
+fn side_model(
+    settings: &AiSettings,
+    name: &str,
+    purpose: &str,
+) -> Option<(Arc<dyn Provider>, ModelSpec)> {
+    let name = name.trim();
+    match settings.connections.get(name) {
         _ if name.is_empty() => None,
         Some(connection) if !termide_config::is_cli_provider(&connection.provider) => {
             let spec = ModelSpec {
@@ -780,22 +794,59 @@ fn reviewer_setup(settings: &AiSettings, dirs: &AgentDirs) -> ReviewerSetup {
             Some((build_provider(connection, api_key_of(connection)), spec))
         }
         _ => {
-            log::warn!(
-                "auto_reviewer names no model connection {name:?}; the session's model reviews"
-            );
+            log::warn!("{purpose} names no model connection {name:?}; the session's model serves");
             None
         }
-    };
+    }
+}
+
+/// The `auto` mode reviewer: the texts of `system/classify.md`, and the
+/// model of the `auto_reviewer` connection when one is named. A name that
+/// matches no connection, or one that drives a CLI agent, reviews with the
+/// session's model.
+fn reviewer_setup(settings: &AiSettings, dirs: &AgentDirs) -> ReviewerSetup {
     ReviewerSetup {
         prompt: dirs.classify_prompt(),
-        model,
+        model: side_model(settings, &settings.auto_reviewer, "auto_reviewer"),
     }
+}
+
+/// The `recall` tool of a project: its session logs, the repositories it
+/// holds, and the solver when `[ai.recall]` turns it on.
+fn recall_tool(settings: &AiSettings, dirs: &AgentDirs, project_root: &Path) -> Arc<RecallTool> {
+    let project_root =
+        dunce::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
+    let repos = termide_git::project_repos(&project_root)
+        .into_iter()
+        .map(|root| RepoRoot::new(root, &project_root))
+        .collect();
+    let solver = settings.recall.solver.then(|| Solver {
+        prompt: dirs.recall_prompt(),
+        model: side_model(
+            settings,
+            &settings.recall.connection,
+            "[ai.recall] connection",
+        ),
+    });
+    let seconds = |secs: u64| std::time::Duration::from_secs(secs.max(1));
+    Arc::new(RecallTool::new(RecallSetup {
+        sessions_dir: session_dir_of(&project_root),
+        project_root,
+        repos,
+        solver,
+        time_limits: TimeLimits {
+            sessions: seconds(settings.recall.sessions_timeout_secs),
+            git: seconds(settings.recall.git_timeout_secs),
+            files: seconds(settings.recall.files_timeout_secs),
+        },
+    }))
 }
 
 struct Subagents {
     active: ActiveSlot,
     dirs: AgentDirs,
     web: Arc<Web>,
+    recall: Arc<RecallTool>,
     cwd: PathBuf,
     project_root: PathBuf,
     rules: PermissionRules,
@@ -829,7 +880,7 @@ impl Subagents {
                 "{name} is an external agent and cannot be run as a subagent"
             ));
         }
-        let mut tools = base_tools(&self.dirs, Some(&self.web));
+        let mut tools = base_tools(&self.dirs, Some(&self.web), Some(&self.recall));
         restrict_tools(&mut tools, &definition.spec.tools, name);
         let skills = self.dirs.skills();
         if !skills.is_empty() {
@@ -965,6 +1016,8 @@ fn agent_setup(
     let mut catalog = FsCatalog::new(&cwd, project_root);
     let web = shared_web(&settings.web, &catalog.dirs);
     catalog.web = Some(Arc::clone(&web));
+    let recall = recall_tool(settings, &catalog.dirs, project_root);
+    catalog.recall = Some(Arc::clone(&recall));
     // The subagent runner shares the provider, the rules and the model
     // defaults, so a delegated agent runs like the panel would run it.
     let active: ActiveSlot = Arc::new(std::sync::RwLock::new(Active {
@@ -977,6 +1030,7 @@ fn agent_setup(
         active: Arc::clone(&active),
         dirs: catalog.dirs.clone(),
         web,
+        recall,
         cwd: cwd.clone(),
         project_root: project_root.to_path_buf(),
         rules: settings.permissions.clone(),
@@ -1750,6 +1804,7 @@ mod tests {
                 context_window: local.effective_context_window(),
             })),
             dirs: catalog.dirs.clone(),
+            recall: recall_tool(&settings, &catalog.dirs, tmp.path()),
             web: shared_web(&settings.web, &catalog.dirs),
             cwd: tmp.path().to_path_buf(),
             project_root: tmp.path().to_path_buf(),

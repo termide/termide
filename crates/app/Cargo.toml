@@ -66,6 +66,7 @@ termide-agent-core = { path = "../agent-core" }
 termide-agent-providers = { path = "../agent-providers" }
 termide-agent-tools = { path = "../agent-tools" }
 termide-agent-mcp = { path = "../agent-mcp" }
+termide-agent-recall = { path = "../agent-recall" }
 termide-agent-web = { path = "../agent-web" }
 termide-agent-hooks = { path = "../agent-hooks" }
 termide-agent-acp = { path = "../agent-acp" }

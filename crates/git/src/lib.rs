@@ -46,7 +46,7 @@ pub use operations::{
     unstage_file, unstage_files,
 };
 pub use remote_url::get_commit_web_url;
-pub use repo_manager::RepoManager;
+pub use repo_manager::{project_repos, RepoManager};
 pub use stash::{
     stash_apply, stash_diff, stash_drop, stash_info, stash_list, stash_pop, stash_push,
     stash_rename, StashEntry, StashInfo,

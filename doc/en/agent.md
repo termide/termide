@@ -605,9 +605,12 @@ provide (see [MCP servers](#mcp-servers)). The panel's own agent also has
 - **web_search** asks a search engine and returns titles, links and snippets.
 - **fetch** loads a web page and returns its text as markdown, paged like
   `read` when it is long.
+- **recall** searches the project's earlier agent sessions, its git history
+  and its code for past work, decisions and their reasons; see
+  [Recall](#recall).
 
-Searching the project is done through `bash` with the tools you already have
-(`rg`, `find`), rather than through a separate search tool.
+Searching the project's files by pattern is done through `bash` with the tools
+you already have (`rg`, `find`), rather than through a separate search tool.
 
 One more tool, **skill**, appears when skills are defined; see
 [Skills](#skills).
@@ -705,6 +708,82 @@ A file the agent edits while it is open in an editor is reloaded there at
 once, cursor and scroll position kept, unless that editor has unsaved changes;
 then the editor keeps them and marks the conflict, as with any change on disk
 (see [Changes on disk](editor.md#changes-on-disk)).
+
+### Recall
+
+`recall` searches what the project already knows — the logs of its earlier
+agent sessions, its git history and its files — and ranks the results
+together. It is how the agent finds what was decided, tried or discussed
+before ("why did we drop tokio", "where did the compaction work stop") without
+a separate memory to keep up: the logs, the commits and the files are the
+record, and the tool writes nothing. It serves a project of notes and documents
+as well as one of code.
+
+- **Sessions**: the project's logs under `ai/sessions/` (the project root and
+  the directories under it), along each log's live branch — what `/undo` or a
+  rewind took back is left out, what a compaction summarised is still found.
+  Your messages, the agent's answers, compaction summaries and handoff briefs
+  count most, tool calls less, reasoning and tool output least (only the first
+  4 KB of an output is searched). The session the panel is in is left out, as
+  its content is in the context already. A `git commit` a session ran is
+  linked to its commit.
+- **Git**: commits whose message holds a word of the query, and commits that
+  added or removed an identifier it names (`git log -S`), in every repository
+  the project holds — the one it is in, its submodules, or the repositories of
+  a folder that only contains them, as the git panels find them. A project that
+  is one directory of a larger repository sees that directory's history.
+- **Files**: notes, documents and code under the project with a word of the
+  query. Text files (Markdown, plain text, reStructuredText, Org, AsciiDoc) are
+  prose: a Markdown file is searched heading by heading, so each section of a
+  long file — each entry of a decision log — is a result of its own, labelled
+  with its headings; a match is shown as its whole paragraph, and a recently
+  changed file ranks above a stale one. Any other file is code: one result per
+  file, shown by its matching lines. As with ripgrep, hidden entries, ignored
+  files and binary files are skipped, and the walk stays on one file system (a
+  mounted disk or a virtual machine's files under the project are not read);
+  files of any size are read line by line. Every repository nested in the
+  project is walked with its own `.gitignore`, so one the outer repository
+  ignores is still searched; the session logs are not read as files.
+
+Words match by stem, in English and Russian, and identifiers by their parts,
+so `split_command_line`, `splitCommandLine` and "split the command line" meet,
+and "сессия" finds "сессии"; a Russian word is also matched by its stem
+without the case ending, so a name the stemmer does not know ("сомбала",
+"сомбалу") is found in every case. The agent passes several phrasings of what
+it looks for, and each is ranked on its own: a result needs most of one
+phrasing's weight, where a rare word counts for far more than common ones. Each result carries a reference —
+`session:<id>#<entry>`, `commit:<repo>@<sha>` or `file:<path>:<line>` — and the
+agent calls `recall` again with `open` set to a reference to see the entries
+around a session result or the commit itself, and reads a file from the line
+given. A search can be narrowed to
+`sources` (`sessions`, `git`, `files`), `paths` (project paths or globs) and
+`since` (a date).
+
+`recall` only reads, so it never asks for permission, in plan mode too;
+subagents and `termide --prompt` runs have it as well, and an agent's `tools`
+list can leave it out like any other tool.
+
+With the solver on, one more model call reads the results and answers the
+question from them, citing the references, and the results follow the answer
+so the agent can check it. It is off by default.
+
+The three sources search side by side, each with its own time limit, a minute
+by default: what a source found by its limit is ranked with the rest, and the
+result says which source stopped. So a project where one source is slow — the
+files of a project rooted in the home directory, say — does not cost the others
+their time, and a search lasts as long as its slowest source.
+
+```toml
+[ai.recall]
+sessions_timeout_secs = 60   # how long each source may search
+git_timeout_secs = 60
+files_timeout_secs = 60
+solver = false               # answer from the results with one model call
+connection = ""              # the connection whose model answers; empty uses the session's
+```
+
+The solver's instructions are `system/recall.md` (see
+[Service prompts](#service-prompts)).
 
 ## Permissions
 
@@ -1234,6 +1313,11 @@ files, can pick it up — add it to `.gitignore`) or to **start a new session
 from it**, seeding the fresh session with the brief. Reword `handoff.md` to
 change what a brief contains.
 
+[Recall](#recall)'s solver uses `recall.md`: the system prompt of the call that
+answers from the search results, with the question line in its front matter
+(`request:`, `{{question}}` for the queries); the results follow it. Reword it
+to change how the answer is drawn or cited.
+
 ### Skills
 
 A skill is a directory with a `SKILL.md` in the [agentskills.io](https://agentskills.io)
@@ -1547,3 +1631,14 @@ what the rules leave open, and a call it cannot decide is refused; in
 needs, or set `mode = "all"` for unattended work. Plan mode has no meaning
 without the panel and is treated as `auto`, and an external (`command`) agent cannot be run this
 way.
+
+`termide --recall "<query>"` runs the [recall](#recall) search without the UI
+and prints the results — the text the agent would read — or, with
+`--output json`, one object with the results (and the solver's answer when it
+is on). It exits `1` when nothing is found. Another agent can call it through
+its shell, and it shows quickly what `recall` finds for a question.
+
+```
+termide --recall "why did we drop tokio"
+termide --recall "compaction summary" --output json
+```

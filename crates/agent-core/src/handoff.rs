@@ -6,6 +6,11 @@
 
 use crate::layers::split_front_matter;
 
+/// The first line of the request that seeds a fresh session with a handoff
+/// brief, the brief following after a blank line; `recall` recognises a
+/// brief in a session log by it.
+pub const CONTINUATION_LEAD: &str = "Continue the work described in this handoff brief:";
+
 /// The seed of `system/handoff.md`.
 pub const SEED_HANDOFF: &str = include_str!("../assets/system/handoff.md");
 

@@ -28,6 +28,29 @@ fn sort_by_display_name(repos: &mut [PathBuf]) {
 /// merely *contains* git projects (`~/projects` with `repo-a/`, `repo-b/`).
 const NESTED_REPO_DEPTH: usize = 2;
 
+/// The repositories a project at `project_root` holds, by the git panels'
+/// rules: the one the root is inside (the nearest `.git` above it, so a
+/// submodule rather than its superproject), and below it the submodules of a
+/// root that is a repository or the repositories nested in one that is not.
+/// Paths are canonical, sorted. Blocking, but cheap: an upward search and a
+/// walk of a few directory levels.
+pub fn project_repos(project_root: &Path) -> Vec<PathBuf> {
+    let canonical = |path: &Path| dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut all = std::collections::BTreeSet::new();
+    if let Some(root) = crate::find_repo_root(project_root) {
+        all.insert(canonical(&root));
+    }
+    let depth = if project_root.join(".git").exists() {
+        SUBMODULE_DEPTH
+    } else {
+        NESTED_REPO_DEPTH
+    };
+    for repo in find_all_repos(project_root, depth) {
+        all.insert(canonical(&repo));
+    }
+    all.into_iter().collect()
+}
+
 /// Manages repository selection for git panels.
 ///
 /// The constructor finds top-level repo roots synchronously (cheap: just
@@ -282,6 +305,20 @@ fn spawn_repo_walk(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_repos_covers_a_folder_of_repositories_and_a_root_inside_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(tmp.path()).unwrap();
+        for repo in ["a", "group/b"] {
+            std::fs::create_dir_all(root.join(repo).join(".git")).unwrap();
+        }
+        // A folder of repositories: the nested ones, no upward match.
+        assert_eq!(project_repos(&root), [root.join("a"), root.join("group/b")]);
+        // A directory inside a repository: that repository.
+        std::fs::create_dir_all(root.join("a/src")).unwrap();
+        assert_eq!(project_repos(&root.join("a/src")), [root.join("a")]);
+    }
 
     #[test]
     fn test_empty() {

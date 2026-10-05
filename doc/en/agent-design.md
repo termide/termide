@@ -695,7 +695,7 @@ JSONL with typed items *(unverified)*. OpenCode, Goose, Hermes: SQLite.
 
 Decision: **append-only JSONL, one file per session** under the termide data
 dir, every entry with `id` and `parent_id` so branching needs no migration.
-Search across sessions is out of scope; if it comes, termide's `db` crate exists.
+Search across sessions is the `recall` tool (§6d).
 
 ## 6a. Compaction
 
@@ -893,6 +893,80 @@ tool windows restore the same way — a reference to the conversation, not its
 content — and Claude Code's `--continue` is the CLI shape of it. A missing log
 starts a fresh session in the same project; no configured model skips the
 panel, as an unavailable image backend skips an image panel.
+
+## 6d. Recall
+
+The agents keep memory three ways. Claude Code's auto-memory and Gemini
+CLI's `save_memory` have the model write facts to Markdown files loaded into
+later prompts; Anthropic's memory tool (`memory_20250818`) gives it a file
+directory to manage; Hermes keeps bounded `MEMORY.md`/`USER.md` files and
+searches past sessions with SQLite FTS5 *(unverified)*. Memory services
+(Mem0, Letta, Zep) extract facts into vector or graph stores. A coding agent's
+memory is mostly derivable — code, git and its own logs are the record — and
+a copy of it goes stale and needs a write path, curation and trust (a fetched
+page can ask to be remembered); what must always apply is already in
+`AGENTS.md`, which the user curates.
+
+Decision (`crates/agent-recall`): no memory store; a read-only built-in tool
+that searches the project's session logs, git history and files. Built in
+rather than an agent, a skill or an MCP server: those reach the logs through
+`bash` or an unknown tool name, which plan mode refuses and a subagent's
+`AutoDenyPrompter` denies, and the log format belongs to `session.rs`
+(`Session::read_branch` walks the live branch, so a rewind's dead entries stay
+out and a compaction's originals stay in). `recall` sits on the read-only lists
+of `permissions.rs`, so it runs in every mode.
+
+- Ranking is deterministic: BM25 per source over Snowball-stemmed terms
+  (English, Russian) with identifiers split at `_` and camelCase, a recency
+  weight for sessions and commits, reciprocal rank fusion across sources.
+  Each phrasing of a query is scored on its own and a document keeps its
+  best: a first version scored the union, and five phrasings of "сомбалу"
+  diluted the one rare word under a coverage floor until only "нет смысла"
+  matched. Coverage is by IDF weight, a word no document has counting as the
+  rarest. Snowball strips verb endings too and cut an unknown name by case
+  ("сомбала" → "сомба", "сомбалу" → "сомбал"), so a Russian word is also
+  indexed by its stem without the case ending, the forms of one word
+  counting as one. Session blocks
+  are weighted by kind: compaction summaries and handoff briefs most, tool
+  output least. No persistent index: the logs are parsed into an in-process
+  cache keyed by size and mtime (23 MB of real logs scan in memory), and the
+  `db` crate's FTS5 sits behind async sqlx, which the agent crates do not run.
+- Languages without a query-expansion call: `queries` is a list, and the
+  tool's guideline asks the calling model for the request in English and the
+  user's language plus the identifiers involved.
+- Git: `log --grep -F -i` over the stems and `log -S` for identifiers, per
+  repository the git panels would find (`termide_git::project_repos`); a
+  project inside a larger repository gets its directory as a pathspec. Files:
+  ripgrep's defaults (hidden, ignored and binary files skipped) plus one file
+  system, any file size read line by line, every nested repository walked
+  with its own ignore rules, the `sessions/` tree left to its own source. A
+  first version skipped roots outside git and files over 1 MB; both were
+  dropped as arbitrary — notes outside git are what a home-rooted project
+  holds — and time limits bound a large tree instead. The sources search on
+  threads side by side, each against its own limit (`[ai.recall]
+  sessions_timeout_secs`, `git_timeout_secs`, `files_timeout_secs`, 60 s): a
+  single shared budget, tried first, let a slow code walk in a home-rooted
+  project starve the sources after it. The result names a source its limit
+  stopped. `paths`
+  (globs) and `since` narrow all three, `paths` restated inside each nested
+  repository.
+- Files are notes and documents as much as code, so the source is `files`,
+  not `code`, and prose is treated as prose: a Markdown file is a document per
+  heading section (a long decision log is many results, each labelled with
+  its headings), a match is shown as its paragraph rather than a wrapped line,
+  and a prose file's mtime weighs in as recency does for sessions and
+  commits. Code stays one document per file, shown by line, with no age
+  weight — an old file that defines something is no less relevant.
+- Results carry references (`session:<id>#<entry>`, `commit:<repo>@<sha>`,
+  `file:<path>:<line>`); `open` shows a session entry's surroundings or the
+  commit, since `read` on a multi-megabyte log is useless. The calling
+  session's own log is excluded through `SessionView::id`.
+- The solver is an option of the tool, not an agent loop: one `one_shot` call
+  on `[ai.recall] connection` (or the session's model) answers from the
+  results with citations, prompt in `system/recall.md`; the results always
+  follow the answer, and a failed call returns them alone. Off by default.
+- `termide --recall` runs the same search headless, for an evaluation set
+  and for other agents.
 
 ## 7. Panel ↔ agent boundary
 

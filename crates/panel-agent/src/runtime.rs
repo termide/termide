@@ -295,6 +295,7 @@ pub(crate) fn spawn_runtime(
     .with_goal_prompt(goal_prompt.clone())
     .with_handoff_prompt(handoff_prompt.clone())
     .with_messages(messages)
+    .with_session_id(session.map(|s| s.id().to_string()))
     .with_asker(asker)
     .with_suggester(suggester);
     if let Some(run) = shell_run {

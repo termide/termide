@@ -139,6 +139,10 @@ pub struct AiSettings {
     #[serde(default)]
     pub web: WebSettings,
 
+    /// The `recall` tool's solver.
+    #[serde(default)]
+    pub recall: RecallSettings,
+
     /// Ring the terminal bell when an agent panel waits for the user out of
     /// sight: a permission or question card, or a long run that finished.
     #[serde(default = "agent_defaults::bell_on_attention")]
@@ -311,6 +315,46 @@ impl FoldBlocks {
     }
 }
 
+/// `[ai.recall]`: how long each source of a `recall` search may take, and whether it
+/// answers from its results with one model call before handing them back,
+/// and with which model.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecallSettings {
+    /// Seconds each source may search; the sources search side by side, and
+    /// what one found by its limit is returned, with a note that it stopped.
+    #[serde(default = "recall_defaults::timeout_secs")]
+    pub sessions_timeout_secs: u64,
+    #[serde(default = "recall_defaults::timeout_secs")]
+    pub git_timeout_secs: u64,
+    #[serde(default = "recall_defaults::timeout_secs")]
+    pub files_timeout_secs: u64,
+    /// Answer from the results instead of returning them as found.
+    #[serde(default)]
+    pub solver: bool,
+    /// The connection whose model answers. Empty answers with the model the
+    /// session runs on.
+    #[serde(default)]
+    pub connection: String,
+}
+
+impl Default for RecallSettings {
+    fn default() -> Self {
+        Self {
+            sessions_timeout_secs: recall_defaults::timeout_secs(),
+            git_timeout_secs: recall_defaults::timeout_secs(),
+            files_timeout_secs: recall_defaults::timeout_secs(),
+            solver: false,
+            connection: String::new(),
+        }
+    }
+}
+
+mod recall_defaults {
+    pub fn timeout_secs() -> u64 {
+        60
+    }
+}
+
 /// `[ai.web]`: how the agent's web tools reach the web.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WebSettings {
@@ -438,6 +482,7 @@ impl Default for AiSettings {
             compaction: termide_agent_core::CompactionPolicy::default(),
             fold_blocks: FoldBlocks::default(),
             web: WebSettings::default(),
+            recall: RecallSettings::default(),
             bell_on_attention: agent_defaults::bell_on_attention(),
         }
     }

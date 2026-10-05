@@ -23,6 +23,7 @@ use crate::hooks::{HookConfig, HOOKS_FILE};
 use crate::mcp::{mcp_servers_from_json, McpServerConfig, MCP_FILE, MCP_JSON_FILE};
 use crate::permissions::Mode;
 use crate::plan::{PlanPrompt, SEED_PLAN};
+use crate::recall::{RecallPrompt, SEED_RECALL};
 use crate::refusals::{Refusals, SEED_PERMISSIONS};
 
 /// The `ai` directory inside the configuration directory.
@@ -272,6 +273,7 @@ fn shipped_assets() -> Vec<(String, &'static str)> {
         (format!("{SYSTEM_DIR}/plan.md"), SEED_PLAN),
         (format!("{SYSTEM_DIR}/goal.md"), SEED_GOAL),
         (format!("{SYSTEM_DIR}/handoff.md"), SEED_HANDOFF),
+        (format!("{SYSTEM_DIR}/recall.md"), SEED_RECALL),
         (format!("{SYSTEM_DIR}/classify.md"), SEED_CLASSIFY),
         (format!("{SYSTEM_DIR}/permissions.md"), SEED_PERMISSIONS),
     ];
@@ -613,6 +615,13 @@ impl AgentDirs {
     #[must_use]
     pub fn handoff_prompt(&self) -> HandoffPrompt {
         HandoffPrompt::from_file(&self.system_file("handoff.md", SEED_HANDOFF))
+    }
+
+    /// The `recall` solver's texts: `system/recall.md` from the configuration
+    /// level, else the shipped seed.
+    #[must_use]
+    pub fn recall_prompt(&self) -> RecallPrompt {
+        RecallPrompt::from_file(&self.system_file("recall.md", SEED_RECALL))
     }
 
     /// The `auto` mode reviewer's texts: `system/classify.md`, the seed

@@ -6,16 +6,16 @@ use std::sync::Arc;
 
 use termide_agent_core::{
     build_system_prompt, discover_context_files, ensure_global_layout, subject_of, Agent,
-    AgentDirs, AgentEvent, AutoDenyPrompter, CancelToken, Message, Mode, ModelSpec,
-    PermissionHooks, PromptOptions, StopReason, StreamEvent, ToolContext, UserMessage,
+    AgentDirs, AgentEvent, AutoDenyPrompter, CancelToken, IntentLog, Message, Mode, ModelSpec,
+    PermissionHooks, PromptOptions, SessionView, StopReason, StreamEvent, ToolContext, UserMessage,
     DEFAULT_AGENT, GLOBAL_AGENT_DIR,
 };
 use termide_agent_tools::SkillTool;
 use termide_config::AiSettings;
 
 use super::{
-    api_key_of, base_tools, build_provider, resolve_model, restrict_tools, reviewer_setup,
-    shared_web, usable_connection,
+    api_key_of, base_tools, build_provider, recall_tool, resolve_model, restrict_tools,
+    reviewer_setup, shared_web, usable_connection,
 };
 
 /// How a headless run reports its result.
@@ -75,7 +75,8 @@ pub fn run_agent_headless(
     }
 
     let web = shared_web(&settings.web, &dirs);
-    let mut tools = base_tools(&dirs, Some(&web));
+    let recall = recall_tool(settings, &dirs, project_root);
+    let mut tools = base_tools(&dirs, Some(&web), Some(&recall));
     restrict_tools(&mut tools, &definition.spec.tools, name);
     let skills = dirs.skills();
     if !skills.is_empty() {
@@ -262,4 +263,41 @@ fn stop_label(reason: StopReason) -> &'static str {
         StopReason::Error => "error",
         StopReason::Aborted => "aborted",
     }
+}
+
+/// `termide --recall <query>`: run the agent's `recall` search for the
+/// project at `project_root` and print the results — the text the model
+/// would read, or with `json` one object with the hits (and the solver's
+/// answer when `[ai.recall]` turns it on). There is no session, so the
+/// solver answers with the default connection's model unless it names its
+/// own. Returns the process exit code: 0 with results, 1 without.
+pub fn run_recall(settings: &AiSettings, project_root: &Path, query: &str, json: bool) -> i32 {
+    let global = termide_config::get_config_dir()
+        .ok()
+        .map(|dir| dir.join(GLOBAL_AGENT_DIR));
+    let dirs = AgentDirs::new(project_root, Some(project_root), global.as_deref());
+    let tool = recall_tool(settings, &dirs, project_root);
+    let session = usable_connection(settings).map(|(_, connection)| SessionView {
+        id: None,
+        intent: IntentLog::new(),
+        provider: build_provider(connection, api_key_of(connection)),
+        model: ModelSpec {
+            provider: "agent".to_string(),
+            id: connection.model.clone(),
+            context_window: connection.effective_context_window(),
+            max_tokens: None,
+            thinking: termide_agent_core::ThinkingLevel::Off,
+        },
+    });
+    let outcome = tool.search(
+        termide_agent_recall::SearchRequest::new(query),
+        session.as_ref(),
+        &CancelToken::new(),
+    );
+    if json {
+        println!("{}", termide_agent_recall::to_json(&outcome));
+    } else {
+        println!("{}", termide_agent_recall::render(&outcome));
+    }
+    i32::from(outcome.hits.is_empty())
 }

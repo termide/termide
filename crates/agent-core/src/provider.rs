@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::cancel::CancelToken;
-use crate::message::{AssistantMessage, Message};
+use crate::message::{AssistantMessage, Message, StopReason, UserMessage};
 
 /// How much reasoning effort to request from a model that supports it.
 ///
@@ -205,9 +205,67 @@ pub trait Provider: Send + Sync {
     }
 }
 
+/// Ask `provider` one question: `system` as the system prompt, `user` as the
+/// only turn, no tools and no reasoning. The reply's text comes back; a call
+/// that fails, is aborted or answers nothing is an `Err` with the reason.
+///
+/// # Errors
+///
+/// When the call ends in an error or an abort, or the reply has no text.
+pub fn one_shot(
+    provider: &dyn Provider,
+    model: &ModelSpec,
+    system: &str,
+    user: &str,
+    cancel: &CancelToken,
+) -> Result<String, String> {
+    let messages = [Message::User(UserMessage::text(user))];
+    let request = Request {
+        model,
+        system_prompt: system,
+        messages: &messages,
+        tools: &[],
+        thinking: ThinkingLevel::Off,
+    };
+    let reply = provider.stream(&request, &mut |_| {}, cancel);
+    if matches!(reply.stop_reason, StopReason::Error | StopReason::Aborted) {
+        return Err(reply
+            .error_message
+            .unwrap_or_else(|| "the call did not finish".to_string()));
+    }
+    let text = reply.plain_text();
+    if text.trim().is_empty() {
+        return Err("the model answered nothing".to_string());
+    }
+    Ok(text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::ThinkingLevel::{self, High, Low, Max, Medium, Minimal, Off, XHigh};
+
+    #[test]
+    fn one_shot_returns_the_text_or_the_reason_it_failed() {
+        use crate::agent::test_support::{text_reply, ScriptedProvider};
+        let model = super::ModelSpec {
+            provider: "scripted".into(),
+            id: "m".into(),
+            context_window: 8_000,
+            max_tokens: None,
+            thinking: Off,
+        };
+        let cancel = crate::CancelToken::new();
+        let provider = ScriptedProvider::new(vec![text_reply("answer"), text_reply("  ")]);
+        assert_eq!(
+            super::one_shot(&provider, &model, "sys", "question", &cancel).as_deref(),
+            Ok("answer")
+        );
+        let seen = provider.seen_requests();
+        assert_eq!(seen[0].len(), 1);
+        assert!(super::one_shot(&provider, &model, "sys", "q", &cancel).is_err());
+        // The script is exhausted: the provider reports an error.
+        assert!(super::one_shot(&provider, &model, "sys", "q", &cancel).is_err());
+    }
 
     #[test]
     fn a_level_falls_to_the_nearest_one_offered() {

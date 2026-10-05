@@ -3,7 +3,7 @@ mod completions;
 mod ui;
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 use crossterm::{event::PopKeyboardEnhancementFlags, execute, terminal::enable_raw_mode};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
@@ -17,6 +17,7 @@ use termide_theme::{set_ansi16_mode, set_themes_dir};
 
 #[derive(Parser)]
 #[command(name = "termide", version = termide_core::VERSION, about = "Terminal IDE")]
+#[command(group(ArgGroup::new("headless").args(["prompt", "recall"])))]
 struct Cli {
     /// Override minimum log level (trace, debug, info, warn, error)
     #[arg(long)]
@@ -89,16 +90,28 @@ struct Cli {
     #[arg(long, value_name = "PROMPT")]
     prompt: Option<String>,
 
+    /// Search the project's earlier agent sessions, git history and code the
+    /// way the agent's `recall` tool does, print the ranked results (or, with
+    /// `[ai.recall] solver = true`, the answer drawn from them) and exit:
+    /// `termide --recall "why no tokio"`. Exits 1 when nothing is found.
+    #[arg(long, value_name = "QUERY", conflicts_with = "prompt")]
+    recall: Option<String>,
+
     /// Which agent definition the `--prompt` run uses; the default agent
     /// otherwise.
-    #[arg(long, value_name = "NAME", requires = "prompt")]
+    #[arg(
+        long,
+        value_name = "NAME",
+        requires = "prompt",
+        conflicts_with = "recall"
+    )]
     agent: Option<String>,
 
     /// How a `--prompt` run reports: `text` (the answer on stdout, the
     /// default), `json` (one object with the answer, token usage, the tool
     /// calls and the status) or `stream-json` (one JSON object per event as
-    /// it happens).
-    #[arg(long, value_name = "FORMAT", requires = "prompt", value_parser = ["text", "json", "stream-json"], default_value = "text")]
+    /// it happens). A `--recall` run takes `text` or `json`.
+    #[arg(long, value_name = "FORMAT", requires = "headless", value_parser = ["text", "json", "stream-json"], default_value = "text")]
     output: String,
 
     /// File(s) or directories to open. Given a path, termide starts in a
@@ -406,6 +419,19 @@ fn main() -> Result<()> {
 
     // Headless agent run: no UI, plain stdout, like --diagnostics. Config and
     // translations are up; the terminal is still untouched.
+    if let Some(query) = cli.recall.clone() {
+        if cli.output == "stream-json" {
+            eprintln!("termide: --recall reports as text or json");
+            std::process::exit(2);
+        }
+        let code = termide_app::run_recall(
+            &config.ai,
+            &project_root,
+            query.trim(),
+            cli.output == "json",
+        );
+        std::process::exit(code);
+    }
     if let Some(prompt) = cli.prompt.clone() {
         let prompt = if prompt == "-" {
             use std::io::Read;
@@ -622,6 +648,17 @@ mod cli_tests {
         );
         assert!(Cli::try_parse_from(["termide", "--prompt", "x", "--output", "yaml"]).is_err());
         assert!(Cli::try_parse_from(["termide", "--output", "json"]).is_err());
+    }
+
+    #[test]
+    fn recall_flag_takes_a_query_and_an_output_but_not_a_prompt() {
+        let cli = Cli::try_parse_from(["termide", "--recall", "why no tokio"]).unwrap();
+        assert_eq!(cli.recall.as_deref(), Some("why no tokio"));
+        assert_eq!(cli.output, "text");
+        let json = Cli::try_parse_from(["termide", "--recall", "x", "--output", "json"]).unwrap();
+        assert_eq!(json.output, "json");
+        assert!(Cli::try_parse_from(["termide", "--recall", "x", "--prompt", "y"]).is_err());
+        assert!(Cli::try_parse_from(["termide", "--recall", "x", "--agent", "a"]).is_err());
     }
 
     #[test]

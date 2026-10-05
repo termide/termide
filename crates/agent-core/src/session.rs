@@ -154,6 +154,57 @@ enum HeaderTag {
     Session,
 }
 
+/// The header and every entry of the log at `path`, in file order. Malformed
+/// lines are skipped with a warning so one bad write does not lose a session.
+fn read_file(path: &Path) -> std::io::Result<(SessionHeader, Vec<Entry>)> {
+    let reader = BufReader::new(File::open(path)?);
+    let mut header = None;
+    let mut entries = Vec::new();
+    for (index, line) in reader.lines().enumerate() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<Line>(&line) {
+            Ok(Line::Header(h)) if header.is_none() => header = Some(h.header),
+            Ok(Line::Header(_)) => {
+                log::warn!("{}: duplicate header at line {}", path.display(), index + 1)
+            }
+            Ok(Line::Entry(entry)) => entries.push(entry),
+            Err(error) => log::warn!(
+                "{}: skipping malformed line {}: {error}",
+                path.display(),
+                index + 1
+            ),
+        }
+    }
+    let header = header.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{} has no session header", path.display()),
+        )
+    })?;
+    Ok((header, entries))
+}
+
+/// The entries from the root to `leaf`, oldest first; `path` names the log
+/// in the warning about a dangling parent.
+fn branch_of<'a>(entries: &'a [Entry], leaf: Option<&str>, path: &Path) -> Vec<&'a Entry> {
+    let by_id: HashMap<&str, &Entry> = entries.iter().map(|e| (e.id.as_str(), e)).collect();
+    let mut branch = Vec::new();
+    let mut current = leaf;
+    while let Some(id) = current {
+        let Some(entry) = by_id.get(id) else {
+            log::warn!("{}: dangling parent id {id}", path.display());
+            break;
+        };
+        branch.push(*entry);
+        current = entry.parent_id.as_deref();
+    }
+    branch.reverse();
+    branch
+}
+
 #[derive(Debug)]
 pub struct Session {
     path: PathBuf,
@@ -251,33 +302,7 @@ impl Session {
     /// Load an existing session; the leaf is the last entry. Malformed lines
     /// are skipped with a warning so one bad write does not lose a session.
     pub fn open(path: &Path) -> std::io::Result<Self> {
-        let reader = BufReader::new(File::open(path)?);
-        let mut header = None;
-        let mut entries = Vec::new();
-        for (index, line) in reader.lines().enumerate() {
-            let line = line?;
-            if line.trim().is_empty() {
-                continue;
-            }
-            match serde_json::from_str::<Line>(&line) {
-                Ok(Line::Header(h)) if header.is_none() => header = Some(h.header),
-                Ok(Line::Header(_)) => {
-                    log::warn!("{}: duplicate header at line {}", path.display(), index + 1)
-                }
-                Ok(Line::Entry(entry)) => entries.push(entry),
-                Err(error) => log::warn!(
-                    "{}: skipping malformed line {}: {error}",
-                    path.display(),
-                    index + 1
-                ),
-            }
-        }
-        let header = header.ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("{} has no session header", path.display()),
-            )
-        })?;
+        let (header, entries) = read_file(path)?;
         let leaf = entries.last().map(|e| e.id.clone());
         let file = OpenOptions::new().append(true).open(path)?;
         Ok(Self {
@@ -560,20 +585,25 @@ impl Session {
     /// Entries on the path from the root to the leaf, oldest first.
     #[must_use]
     pub fn branch(&self) -> Vec<&Entry> {
-        let by_id: HashMap<&str, &Entry> =
-            self.entries.iter().map(|e| (e.id.as_str(), e)).collect();
-        let mut path = Vec::new();
-        let mut current = self.leaf.as_deref();
-        while let Some(id) = current {
-            let Some(entry) = by_id.get(id) else {
-                log::warn!("{}: dangling parent id {id}", self.path.display());
-                break;
-            };
-            path.push(*entry);
-            current = entry.parent_id.as_deref();
-        }
-        path.reverse();
-        path
+        branch_of(&self.entries, self.leaf.as_deref(), &self.path)
+    }
+
+    /// The header and the live branch of the log at `path` (root to the last
+    /// entry, oldest first), read without opening the file for writing or
+    /// claiming it, so a log another panel is appending to can be searched.
+    /// Entries a rewind left on a dead branch are not in it.
+    ///
+    /// # Errors
+    ///
+    /// When the file cannot be read or has no header.
+    pub fn read_branch(path: &Path) -> std::io::Result<(SessionHeader, Vec<Entry>)> {
+        let (header, entries) = read_file(path)?;
+        let leaf = entries.last().map(|e| e.id.as_str());
+        let branch = branch_of(&entries, leaf, path)
+            .into_iter()
+            .cloned()
+            .collect();
+        Ok((header, branch))
     }
 
     /// The transcript the model should see for the current branch, with
@@ -999,6 +1029,43 @@ mod tests {
         assert!(session.set_leaf(Some("nope")).is_err());
         session.set_leaf(None).unwrap();
         assert!(session.context_messages().is_empty());
+    }
+
+    #[test]
+    fn read_branch_gives_the_live_path_and_leaves_dead_branches_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/w")).unwrap();
+        let first = session
+            .append_message(&Message::User(UserMessage::text("one")))
+            .unwrap();
+        session
+            .append_message(&Message::Assistant(text_reply("undone")))
+            .unwrap();
+        session.rewind_to(Some(&first)).unwrap();
+        session
+            .append_message(&Message::Assistant(text_reply("kept")))
+            .unwrap();
+        let path = session.path().to_path_buf();
+
+        // Read while the session is still open for appending.
+        let (header, branch) = Session::read_branch(&path).unwrap();
+        assert_eq!(&header.id, session.id());
+        let texts: Vec<String> = branch
+            .iter()
+            .filter_map(|entry| match &entry.kind {
+                EntryKind::Message {
+                    message: Message::User(user),
+                    ..
+                } => Some(user.plain_text()),
+                EntryKind::Message {
+                    message: Message::Assistant(reply),
+                    ..
+                } => Some(reply.plain_text()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, ["one", "kept"]);
+        assert!(branch.iter().any(|e| matches!(e.kind, EntryKind::Rewind)));
     }
 
     #[test]

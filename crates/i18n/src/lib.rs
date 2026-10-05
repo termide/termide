@@ -901,6 +901,7 @@ pub trait Translation: Send + Sync {
     fn agent_tool_fetch(&self) -> &str;
     /// Agent transcript: the action verb for a `web_search` tool call.
     fn agent_tool_web_search(&self) -> &str;
+    fn agent_tool_recall(&self) -> &str;
     /// Agent transcript: the action words for a `skill` tool call.
     fn agent_tool_skill(&self) -> &str;
     /// Agent transcript: the action words for a `task` call (a subagent).

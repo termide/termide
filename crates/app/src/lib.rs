@@ -19,7 +19,7 @@ mod state_operations;
 mod state_types;
 
 // Re-export main types for convenience
-pub use app::agent_panel::{run_agent_headless, web_browser_shown, HeadlessOutput};
+pub use app::agent_panel::{run_agent_headless, run_recall, web_browser_shown, HeadlessOutput};
 pub use app::App;
 pub use layout_store::LayoutPersistence;
 pub use panel_ext::PanelExt;

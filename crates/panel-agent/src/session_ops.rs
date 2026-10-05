@@ -306,7 +306,8 @@ impl AgentPanel {
         }
         self.switch_session(None);
         self.send(format!(
-            "Continue the work described in this handoff brief:\n\n{brief}"
+            "{}\n\n{brief}",
+            termide_agent_core::handoff::CONTINUATION_LEAD
         ))
     }
 

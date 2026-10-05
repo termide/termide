@@ -153,8 +153,9 @@ pub enum Lasting {
 pub fn is_read_only_call(call: &ToolCall) -> bool {
     match call.name.as_str() {
         // The web tools read the web; nothing on this machine changes. A
-        // question to the user changes nothing either.
-        "read" | "skill" | "fetch" | "web_search" | "question" => true,
+        // question to the user changes nothing either, nor does `recall`,
+        // which only reads the project's history and code.
+        "read" | "skill" | "fetch" | "web_search" | "question" | "recall" => true,
         "bash" => {
             let parsed = split_shell(call.arguments["command"].as_str().unwrap_or(""));
             !parsed.has_substitution
@@ -709,8 +710,10 @@ impl PermissionHooks {
             // `suggest_command` changes nothing itself — it shows a card and
             // the user runs what is on it or does not — so it asks no one
             // twice; the panel withholds `[Run]` where the mode or a rule
-            // forbids the command.
-            (_, "skill" | "question" | "suggest_command") => Decision::Allow,
+            // forbids the command. `recall` reads the project's own session
+            // logs (under the configuration directory), its git history and
+            // its code, and writes nothing.
+            (_, "skill" | "question" | "suggest_command" | "recall") => Decision::Allow,
             (Mode::Plan | Mode::Edit, "fetch" | "web_search") => Decision::Allow,
             (Mode::Edit | Mode::Auto, "edit" | "write") if inside => Decision::Allow,
             // A query reads the web; a fetched URL can carry data out, so the
@@ -2795,6 +2798,29 @@ mod tests {
         );
         assert_eq!(hooks.decide(&question, &ctx()), Decision::Allow);
         assert!(is_read_only_call(&question));
+    }
+    #[test]
+    fn recall_never_asks_and_passes_plan_mode() {
+        let recall = call("recall", json!({ "queries": ["why no tokio"] }));
+        assert!(is_read_only_call(&recall));
+        for mode in Mode::ALL {
+            let hooks = PermissionHooks::new(
+                PermissionRules {
+                    mode,
+                    ..PermissionRules::default()
+                },
+                Box::new(Scripted {
+                    answers: vec![],
+                    asked: Arc::new(Mutex::new(Vec::new())),
+                }),
+            );
+            assert_eq!(hooks.decide(&recall, &ctx()), Decision::Allow, "{mode:?}");
+        }
+        let mut guard = PlanGuard::new(ModeHandle::new(Mode::Plan));
+        assert!(matches!(
+            guard.before_tool_call(&recall, &ctx()),
+            ToolDecision::Allow
+        ));
     }
     #[test]
     fn plan_mode_refuses_every_change_and_lets_reads_through() {

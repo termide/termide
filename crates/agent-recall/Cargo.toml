@@ -1,0 +1,21 @@
+[package]
+name = "termide-agent-recall"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The recall tool of the termide coding agent: ranked search over a project's agent sessions, git history and code"
+
+[dependencies]
+glob.workspace = true
+ignore.workspace = true
+log.workspace = true
+regex.workspace = true
+rust-stemmers.workspace = true
+serde_json.workspace = true
+
+termide-agent-core = { path = "../agent-core" }
+
+[dev-dependencies]
+tempfile.workspace = true

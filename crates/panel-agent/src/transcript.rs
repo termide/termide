@@ -1382,6 +1382,27 @@ fn tool_headline(
             Style::default().fg(colors.disabled),
         ),
         "web_search" => action("?", t.agent_tool_web_search(), arg("query")),
+        "recall" => {
+            // A reference to open, or the first query and how many more.
+            let subject = match call.arguments["open"].as_str() {
+                Some(reference) if !reference.trim().is_empty() => reference.trim().to_string(),
+                _ => {
+                    let queries = call.arguments["queries"].as_array();
+                    let first = queries
+                        .and_then(|list| list.first())
+                        .and_then(|q| q.as_str())
+                        .unwrap_or("")
+                        .replace('\n', " ");
+                    let more = queries.map_or(0, |list| list.len().saturating_sub(1));
+                    if more > 0 {
+                        format!("{} (+{more})", first.trim())
+                    } else {
+                        first.trim().to_string()
+                    }
+                }
+            };
+            action("↺", t.agent_tool_recall(), subject)
+        }
         "skill" => action(
             "/",
             t.agent_tool_skill(),
@@ -3234,6 +3255,17 @@ mod tests {
                 json!({ "query": "rust tui", "limit": 3 })
             )),
             format!("? {} rust tui", t.agent_tool_web_search())
+        );
+        assert_eq!(
+            text(&call(
+                "recall",
+                json!({ "queries": ["why no tokio", "почему без tokio"] })
+            )),
+            format!("↺ {} why no tokio (+1)", t.agent_tool_recall())
+        );
+        assert_eq!(
+            text(&call("recall", json!({ "open": "commit:.@08c2e3b1" }))),
+            format!("↺ {} commit:.@08c2e3b1", t.agent_tool_recall())
         );
     }
 

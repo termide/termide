@@ -111,9 +111,10 @@ impl IntentLog {
 
 /// The session a call comes from, as the reviewer needs it: what the user
 /// asked for, and the model the session runs on, which reviews unless
-/// another one is configured.
+/// another one is configured; and the id of its log, when it has one.
 #[derive(Clone)]
 pub struct SessionView {
+    pub id: Option<String>,
     pub intent: IntentLog,
     pub provider: Arc<dyn Provider>,
     pub model: ModelSpec,
@@ -122,6 +123,7 @@ pub struct SessionView {
 impl std::fmt::Debug for SessionView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SessionView")
+            .field("id", &self.id)
             .field("intent", &self.intent)
             .field("provider", &self.provider.name())
             .field("model", &self.model.id)
@@ -557,6 +559,7 @@ mod tests {
     fn session_ctx(provider: Arc<Canned>, intent: IntentLog) -> ToolContext {
         let mut ctx = ToolContext::new("/proj");
         ctx.session = Some(SessionView {
+            id: None,
             intent,
             provider,
             model: spec("session-model"),

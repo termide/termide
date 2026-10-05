@@ -36,6 +36,7 @@ pub mod message;
 pub mod permissions;
 pub mod plan;
 pub mod provider;
+pub mod recall;
 pub mod refusals;
 pub mod runtime;
 pub mod session;
@@ -89,7 +90,10 @@ pub use permissions::{
     PermissionRules, PersistRule, PersistScope, PlanGuard, RuleTables, ShellPart,
 };
 pub use plan::{PlanPrompt, SEED_PLAN};
-pub use provider::{ModelInfo, ModelSpec, Provider, Request, StreamEvent, ThinkingLevel, ToolSpec};
+pub use provider::{
+    one_shot, ModelInfo, ModelSpec, Provider, Request, StreamEvent, ThinkingLevel, ToolSpec,
+};
+pub use recall::{RecallPrompt, SEED_RECALL};
 pub use refusals::{Refusals, SEED_PERMISSIONS};
 pub use runtime::{AgentRuntime, Backend, BackendModel, BackendSetup, HostTools, PromptError};
 pub use session::{
