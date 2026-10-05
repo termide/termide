@@ -3076,6 +3076,63 @@ fn f8_in_the_banner_list_deletes_the_picked_session_not_the_fresh_one() {
 }
 
 #[test]
+fn f2_in_the_banner_list_renames_the_picked_session_not_the_fresh_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![reply("one"), reply("two")])
+    });
+    for prompt in ["first task", "second task"] {
+        type_text(&mut panel, prompt);
+        panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+        settle(&mut panel);
+        panel.handle_status_action(NEW_SESSION_ACTION);
+    }
+    let input = |events: &[PanelEvent]| match events {
+        [PanelEvent::ShowInput {
+            initial_value,
+            on_submit: InputAction::Custom(action),
+            ..
+        }] => (initial_value.clone(), action.clone()),
+        other => panic!("expected a rename prompt, got {other:?}"),
+    };
+
+    // From the prompt F2 still renames the current session.
+    let events = panel.handle_key(chord(KeyCode::F(2), KeyModifiers::NONE));
+    assert_eq!(input(&events).1, RENAME_ACTION);
+
+    // In the list it renames the session under the cursor; the rename may
+    // move it up the list, and the cursor follows it.
+    panel.handle_key(chord(KeyCode::Tab, KeyModifiers::NONE));
+    panel.handle_key(chord(KeyCode::Down, KeyModifiers::NONE));
+    let picked = panel.recent_sessions[1].path.clone();
+    let events = panel.handle_key(chord(KeyCode::F(2), KeyModifiers::NONE));
+    let (initial, action) = input(&events);
+    assert_eq!(initial, "", "an unnamed session starts empty");
+    panel.handle_command(PanelCommand::InputSubmitted {
+        action,
+        text: "renamed".to_string(),
+    });
+    let renamed = &panel.recent_sessions[panel.recent_selected];
+    assert_eq!(renamed.path, picked, "the cursor follows the session");
+    assert_eq!(renamed.name.as_deref(), Some("renamed"));
+    assert_eq!(panel.recent_sessions.len(), 2);
+    assert!(
+        panel
+            .recent_sessions
+            .iter()
+            .filter(|s| s.name.is_some())
+            .count()
+            == 1
+    );
+    assert_eq!(panel.session.as_ref().and_then(Session::name), None);
+
+    // Asked again, the prompt offers the name it now has.
+    let events = panel.handle_key(chord(KeyCode::F(2), KeyModifiers::NONE));
+    assert_eq!(input(&events).0, "renamed");
+}
+
+#[test]
 fn the_wheel_scrolls_the_banner_sessions() {
     let dir = tempfile::tempdir().unwrap();
     let mut panel = AgentPanel::new(AgentPanelSetup {

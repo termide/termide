@@ -210,8 +210,8 @@ panel's width, filling the space the panel has and scrolling through the rest
 with the wheel. A session open in another panel is left out, and comes back
 once that panel lets it go. A click opens one in place of the empty session;
 from the keyboard, `Tab` moves into the list, the arrows, `PgUp`/`PgDn` and
-`Home`/`End` walk it, `Enter` opens the session under the cursor, `F8` or
-`Delete` deletes it after a confirmation, and `Tab` or `Esc` goes back to the
+`Home`/`End` walk it, `Enter` opens the session under the cursor, `F2` renames
+it, `F8` or `Delete` deletes it after a confirmation, and `Tab` or `Esc` goes back to the
 prompt. What the panel reports before then — an MCP server connected, a
 `/name` defined twice — goes under the banner, past a dashed rule, the latest
 in view; the list of sessions gives up its rows to it first. Each MCP server
@@ -305,7 +305,7 @@ you have named or sent even one message to is always kept.
 | `Ctrl+Left` / `Ctrl+Right` | Word-by-word navigation in the prompt |
 | `Ctrl+Z` / `Ctrl+Y`, `Ctrl+Shift+Z` | Undo / redo a prompt edit |
 | `Shift+Tab` | Cycle the permission mode: ask → plan → edit → configured → auto → all |
-| `F2` | Rename this session (the same prompt as the `[≡]` menu) |
+| `F2` | Rename this session (the same prompt as the `[≡]` menu); in the banner's list of sessions, rename the one under the cursor |
 | `Ctrl+S` | Save the chat as a Markdown file (your messages and the agent's answers under who and when, each day under its own heading); also the `[≡]` menu |
 | `F3` | Open the session-info modal (model, agent, mode, directory, created/last-active times, messages, compactions, tokens, context, how much shell output was cleaned); also `/usage` and the `[≡]` menu |
 | `F4` | Pick a message to rewind the session to, as `Esc` does in the idle empty prompt |

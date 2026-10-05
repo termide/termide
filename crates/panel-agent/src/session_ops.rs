@@ -6,7 +6,7 @@ use std::sync::{Arc, PoisonError};
 
 use crate::runtime::local_minute;
 use termide_agent_core::{EntryKind, PromptError, Session, SessionSummary};
-use termide_core::{ConfirmAction, PanelEvent};
+use termide_core::{ConfirmAction, InputAction, PanelEvent};
 use termide_ui::ChoiceForm;
 
 use crate::pending::Pending;
@@ -15,7 +15,7 @@ use crate::runtime::{
 };
 use crate::{
     format_tokens, shorten_path, truncate_title, AgentPanel, Item, NoticeKind,
-    DELETE_RECENT_ACTION, DELETE_SESSION_ACTION, FORK_SESSION_ACTION,
+    DELETE_RECENT_ACTION, DELETE_SESSION_ACTION, FORK_SESSION_ACTION, RENAME_RECENT_ACTION,
 };
 
 /// Delete a session the panel is leaving when it holds no conversation, so
@@ -491,6 +491,52 @@ impl AgentPanel {
             Ok(()) => vec![PanelEvent::NeedsRedraw],
             Err(error) => {
                 log::warn!("cannot delete {}: {error}", path.display());
+                vec![
+                    PanelEvent::SetStatusMessage {
+                        message: error.to_string(),
+                        is_error: true,
+                    },
+                    PanelEvent::NeedsRedraw,
+                ]
+            }
+        }
+    }
+
+    /// Ask for a new name for the recent session under the banner list's
+    /// cursor (F2 while the list has the keyboard); the answer comes back as
+    /// `PanelCommand::InputSubmitted(RENAME_RECENT_ACTION)`.
+    pub(crate) fn ask_rename_recent_session(&mut self) -> Vec<PanelEvent> {
+        let Some(summary) = self.recent_sessions.get(self.recent_selected) else {
+            return vec![];
+        };
+        self.recent_to_rename = Some(summary.path.clone());
+        vec![PanelEvent::ShowInput {
+            prompt: termide_i18n::t().agent_rename_prompt().to_string(),
+            initial_value: summary.name.clone().unwrap_or_default(),
+            on_submit: InputAction::Custom(RENAME_RECENT_ACTION.to_string()),
+        }]
+    }
+
+    /// Rename the recent session the prompt was opened for. It is claimed
+    /// first, so one another panel opened meanwhile is left alone. The rename
+    /// is a new entry, so the session may move up the list; the cursor follows
+    /// it.
+    pub(crate) fn perform_rename_recent_session(&mut self, name: &str) -> Vec<PanelEvent> {
+        let Some(path) = self.recent_to_rename.take() else {
+            return vec![];
+        };
+        let result = Session::open_exclusive(&path).and_then(|mut session| session.set_name(name));
+        let selected = self.recent_selected;
+        self.load_recent_sessions();
+        self.recent_selected = self
+            .recent_sessions
+            .iter()
+            .position(|summary| summary.path == path)
+            .unwrap_or_else(|| selected.min(self.recent_sessions.len().saturating_sub(1)));
+        match result {
+            Ok(_) => vec![PanelEvent::NeedsRedraw],
+            Err(error) => {
+                log::warn!("cannot rename {}: {error}", path.display());
                 vec![
                     PanelEvent::SetStatusMessage {
                         message: error.to_string(),

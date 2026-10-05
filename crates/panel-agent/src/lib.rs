@@ -73,6 +73,8 @@ const DELETE_SESSION_ACTION: &str = "agent_delete_session";
 const FORK_SESSION_ACTION: &str = "agent_fork_session";
 /// Confirmation action that deletes the recent session picked in the banner.
 const DELETE_RECENT_ACTION: &str = "agent_delete_recent_session";
+/// Input action that renames the recent session picked in the banner.
+const RENAME_RECENT_ACTION: &str = "agent_rename_recent_session";
 /// Context-menu action that starts a fresh session.
 const NEW_SESSION_ACTION: &str = "agent_new_session";
 /// Context-menu action that opens the session picker.
@@ -561,6 +563,8 @@ pub struct AgentPanel {
     recent_generation: u64,
     /// The recent session a pending delete confirmation is about.
     recent_to_delete: Option<PathBuf>,
+    /// The recent session a pending rename prompt is about.
+    recent_to_rename: Option<PathBuf>,
     cwd: PathBuf,
     agent: String,
     /// The agent's description and the agent it was looked up for: the catalog
@@ -926,6 +930,7 @@ impl AgentPanel {
             recent_rows: 0,
             recent_generation: 0,
             recent_to_delete: None,
+            recent_to_rename: None,
             cwd: setup.cwd,
             model,
             configured_model: setup.model,
@@ -1552,6 +1557,11 @@ impl Panel for AgentPanel {
             }
             PanelCommand::InputSubmitted { action, text } if action == RENAME_ACTION => {
                 CommandResult::Handled(self.rename_session(&text))
+            }
+            PanelCommand::InputSubmitted { action, text } if action == RENAME_RECENT_ACTION => {
+                let events = self.perform_rename_recent_session(&text);
+                self.pending_events.extend(events);
+                CommandResult::Handled(true)
             }
             PanelCommand::Confirmed { action } if action == DELETE_SESSION_ACTION => {
                 self.perform_delete_session();

@@ -814,8 +814,12 @@ impl AgentPanel {
             return self.save_chat();
         }
         // F2 renames the session, wherever the focus sits in the panel — the
-        // same prompt as the `[≡]` menu's Rename.
+        // same prompt as the `[≡]` menu's Rename. In the banner's list of
+        // recent sessions it renames the one under the cursor instead.
         if key.code == KeyCode::F(2) && !ctrl && !alt && !shift {
+            if self.chat_focus && self.recent_list_shown() {
+                return self.ask_rename_recent_session();
+            }
             return self.handle_status_action(RENAME_ACTION);
         }
         // F3 shows a summary of the session, F4 offers a message to rewind to.
