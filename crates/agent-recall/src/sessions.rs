@@ -16,7 +16,7 @@ use regex::Regex;
 use serde_json::Value;
 use termide_agent_core::handoff::CONTINUATION_LEAD;
 use termide_agent_core::message::{AssistantContent, Message};
-use termide_agent_core::{CancelToken, EntryKind, Session};
+use termide_agent_core::{CancelToken, Entry, EntryKind, Session};
 
 use crate::filter::PathFilter;
 use crate::rank::{bm25, recency, Hit, Source, TermBag, Vocabulary};
@@ -83,6 +83,8 @@ pub struct SessionDoc {
     pub paths: Vec<String>,
     /// The commit the entry's `git commit` call made.
     pub commit: Option<String>,
+    /// Whether a compaction took the entry out of its session's context.
+    pub forgotten: bool,
     bag: TermBag,
 }
 
@@ -178,6 +180,33 @@ fn committed_sha(output: &str) -> Option<String> {
     line.captures(output).map(|c| c[1].to_string())
 }
 
+/// Where the entries of `branch` still in the session's context begin: the
+/// messages the last compaction kept, then its summary; the start without
+/// one. Mirrors how the session rebuilds its context.
+fn context_start(branch: &[Entry]) -> usize {
+    let Some((at, keep_last)) = branch
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(at, entry)| match entry.kind {
+            EntryKind::Compaction { keep_last, .. } => Some((at, keep_last)),
+            _ => None,
+        })
+    else {
+        return 0;
+    };
+    let messages: Vec<usize> = branch[..at]
+        .iter()
+        .enumerate()
+        .filter(|(_, entry)| matches!(entry.kind, EntryKind::Message { .. }))
+        .map(|(index, _)| index)
+        .collect();
+    match messages.len().checked_sub(keep_last) {
+        Some(first) => messages.get(first).copied().unwrap_or(at),
+        None => 0,
+    }
+}
+
 /// The documents of one log's live branch.
 fn parse(
     path: &Path,
@@ -207,6 +236,7 @@ fn parse(
             text,
             paths,
             commit: None,
+            forgotten: false,
             bag,
         });
     };
@@ -336,6 +366,13 @@ fn parse(
             _ => {}
         }
     }
+    let forgotten: HashSet<&str> = branch[..context_start(&branch)]
+        .iter()
+        .map(|entry| entry.id.as_str())
+        .collect();
+    for doc in &mut docs {
+        doc.forgotten = forgotten.contains(doc.entry.as_str());
+    }
     Ok((header.id, header.cwd, docs))
 }
 
@@ -346,7 +383,8 @@ pub struct SessionQuery<'a> {
     pub terms: &'a [Vec<Vec<String>>],
     /// Patterns for the snippet window.
     pub patterns: &'a [String],
-    /// The session whose content is already in the context.
+    /// The calling session, whose content is in the context already: only
+    /// what a compaction took out of it is searched.
     pub exclude: Option<&'a str>,
     pub since: Option<u64>,
     pub paths: Option<&'a PathFilter>,
@@ -454,10 +492,10 @@ pub fn search(
         let Some(parsed) = cache.files.get(path) else {
             continue;
         };
-        if query.exclude == Some(parsed.id.as_str()) {
-            continue;
-        }
-        for doc in &parsed.docs {
+        // The calling session's context holds its log, but for what a
+        // compaction took out of it.
+        let calling = query.exclude == Some(parsed.id.as_str());
+        for doc in parsed.docs.iter().filter(|doc| !calling || doc.forgotten) {
             if query.since.is_some_and(|since| doc.timestamp < since) {
                 continue;
             }
@@ -687,16 +725,30 @@ pub(crate) mod tests {
         )
         .0
         .is_empty());
-        // The session in the context is left out.
+        // Of the session in the context only what the compaction took out
+        // is searched: not the reply it kept, nor its summary.
         let id = session.id().to_string();
-        assert!(search(
+        let (found, _) = search(
             dir.path(),
             &query(&[query_words("tokio")], Some(&id)),
             10,
-            &CancelToken::new()
-        )
-        .0
-        .is_empty());
+            &CancelToken::new(),
+        );
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].reference, format!("session:{id}#{first}"));
+        // Without a compaction all of it is in the context.
+        let mut fresh = Session::create(dir.path(), dir.path()).unwrap();
+        fresh
+            .append_message(&Message::User(UserMessage::text("tokio again")))
+            .unwrap();
+        let fresh_id = fresh.id().to_string();
+        let (found, _) = search(
+            dir.path(),
+            &query(&[query_words("tokio again")], Some(&fresh_id)),
+            10,
+            &CancelToken::new(),
+        );
+        assert!(found.iter().all(|h| !h.reference.contains(&fresh_id)));
     }
 
     #[test]

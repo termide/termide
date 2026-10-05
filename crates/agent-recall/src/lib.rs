@@ -171,6 +171,9 @@ pub struct SearchRequest {
     pub limit: usize,
     /// Return the results as found even with the solver on.
     pub raw: bool,
+    /// The directory relative `paths` and the file results are relative to;
+    /// the project root when `None`.
+    pub cwd: Option<PathBuf>,
 }
 
 impl SearchRequest {
@@ -184,6 +187,7 @@ impl SearchRequest {
             since: None,
             limit: DEFAULT_LIMIT,
             raw: false,
+            cwd: None,
         }
     }
 }
@@ -393,7 +397,9 @@ impl RecallTool {
             .collect();
         let patterns = text::scan_patterns(&request.queries);
         let identifiers = text::identifiers(&request.queries);
-        let paths = PathFilter::new(&request.paths);
+        let project_root = &self.setup.project_root;
+        let cwd = request.cwd.as_deref().unwrap_or(project_root);
+        let paths = PathFilter::new(&filter::project_paths(&request.paths, cwd, project_root));
         let candidates = request.limit * CANDIDATES_PER_RESULT;
         // The whole `sessions/` tree, checkpoint copies included, is left out
         // of the file walk: the logs are searched as sessions, and read as
@@ -495,7 +501,21 @@ impl RecallTool {
                 lists.push(hits);
             }
         }
-        let hits = rank::fuse(lists, request.limit);
+        let mut hits = rank::fuse(lists, request.limit);
+        for hit in hits.iter_mut().filter(|hit| hit.source == Source::File) {
+            let Some((path, line)) = hit
+                .reference
+                .strip_prefix("file:")
+                .and_then(|rest| rest.rsplit_once(':'))
+            else {
+                continue;
+            };
+            let shown = filter::path_from_cwd(path, cwd, project_root);
+            if let Some(rest) = hit.label.strip_prefix(path) {
+                hit.label = format!("{shown}{rest}");
+            }
+            hit.reference = format!("file:{shown}:{line}");
+        }
         let answer = self.solve(&request, &hits, session, cancel);
         Outcome {
             request,
@@ -614,6 +634,7 @@ fn parse_request(arguments: &Value) -> Result<SearchRequest, String> {
         since,
         limit,
         raw: arguments["raw"].as_bool().unwrap_or(false),
+        cwd: None,
     })
 }
 
@@ -643,7 +664,7 @@ impl Tool for RecallTool {
                 "paths": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Project paths or globs to narrow to: files under them, commits touching them, session entries naming them"
+                    "description": "Paths or globs to narrow to, relative to the working directory: files under them, commits touching them, session entries naming them"
                 },
                 "since": {
                     "type": "string",
@@ -698,6 +719,10 @@ impl Tool for RecallTool {
             "searching {}…",
             request.sources.names().join(", ")
         )));
+        let request = SearchRequest {
+            cwd: Some(ctx.cwd.clone()),
+            ..request
+        };
         let outcome = self.search(request, ctx.session.as_ref(), cancel);
         if cancel.is_cancelled() {
             return ToolResultMessage::error(call, "cancelled");
@@ -805,6 +830,22 @@ mod tests {
 
         let none = tool.search(SearchRequest::new("zebra"), None, &CancelToken::new());
         assert!(render(&none).starts_with("No results"));
+
+        // From a panel working in `src`, `paths` and file results are its.
+        let from_src = SearchRequest {
+            sources: Sources {
+                sessions: false,
+                git: false,
+                files: true,
+            },
+            paths: vec!["walrus.rs".to_string()],
+            cwd: Some(project.join("src")),
+            ..SearchRequest::new("walrus")
+        };
+        let outcome = tool.search(from_src, None, &CancelToken::new());
+        assert_eq!(outcome.hits.len(), 1);
+        assert_eq!(outcome.hits[0].reference, "file:walrus.rs:1");
+        assert!(outcome.hits[0].label.starts_with("walrus.rs"));
     }
 
     #[test]

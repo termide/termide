@@ -1,6 +1,49 @@
 //! The narrowing a search may ask for: project paths and a start date.
 
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
+
+/// `paths` as the model gives them, relative to `cwd` or absolute, made
+/// relative to `project_root` as [`PathFilter`] takes them. One outside the
+/// project is kept as given, so it matches nothing rather than something else.
+#[must_use]
+pub fn project_paths(paths: &[String], cwd: &Path, project_root: &Path) -> Vec<String> {
+    paths
+        .iter()
+        .map(|path| {
+            let full = normalize(&cwd.join(path.trim()));
+            match full.strip_prefix(project_root) {
+                Ok(inside) => inside.to_string_lossy().replace('\\', "/"),
+                Err(_) => path.clone(),
+            }
+        })
+        .collect()
+}
+
+/// The project-relative `path` as seen from `cwd`: relative under it,
+/// absolute elsewhere, so the read tool finds it from there.
+#[must_use]
+pub fn path_from_cwd(path: &str, cwd: &Path, project_root: &Path) -> String {
+    let full = project_root.join(path);
+    match full.strip_prefix(cwd) {
+        Ok(inside) if !inside.as_os_str().is_empty() => inside.to_string_lossy().replace('\\', "/"),
+        _ => full.to_string_lossy().into_owned(),
+    }
+}
+
+/// `path` without `.` and `..` components, resolved lexically.
+fn normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
 
 /// The `paths` a search is narrowed to, relative to the project root: a
 /// plain path covers itself and everything under it, a glob (`*`, `?`, `[`)
@@ -188,6 +231,34 @@ pub fn parse_date(text: &str) -> Result<u64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paths_read_from_the_working_directory_and_results_point_back_to_it() {
+        let root = Path::new("/p");
+        let cwd = Path::new("/p/crates");
+        let given = [
+            "core/src".to_string(),
+            "../doc/*.md".to_string(),
+            "/p/README.md".to_string(),
+            "/elsewhere/x".to_string(),
+            ".".to_string(),
+        ];
+        assert_eq!(
+            project_paths(&given, cwd, root),
+            [
+                "crates/core/src",
+                "doc/*.md",
+                "README.md",
+                "/elsewhere/x",
+                "crates"
+            ]
+        );
+        assert_eq!(project_paths(&given[..1], root, root), ["core/src"]);
+
+        assert_eq!(path_from_cwd("crates/core/x.rs", cwd, root), "core/x.rs");
+        assert_eq!(path_from_cwd("doc/a.md", cwd, root), "/p/doc/a.md");
+        assert_eq!(path_from_cwd("doc/a.md", root, root), "doc/a.md");
+    }
 
     #[test]
     fn plain_paths_cover_their_subtree_and_globs_match() {

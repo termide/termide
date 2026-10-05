@@ -14,7 +14,8 @@ use crate::filter::{PathFilter, Scope};
 use crate::rank::{bm25, recency, Hit, Source, TermBag, Vocabulary};
 use crate::text::terms;
 
-/// How long one git command may run; a pickaxe over a long history is slow.
+/// How long showing one commit may take; a search runs to the git source's
+/// own time limit instead.
 const GIT_TIMEOUT: Duration = Duration::from_secs(8);
 /// Commits one message search takes, newest first.
 const GREP_COMMITS: usize = 300;
@@ -105,7 +106,6 @@ pub fn run_git(
         let _ = stdout.read_to_end(&mut out);
         out
     });
-    let deadline = deadline.min(Instant::now() + GIT_TIMEOUT);
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -251,7 +251,7 @@ fn find_commits(
         }
     }
     for identifier in query.identifiers.iter().take(PICKAXE_IDENTIFIERS) {
-        if cancel.is_cancelled() {
+        if cancel.is_cancelled() || Instant::now() > deadline {
             break;
         }
         let mut args = common(PICKAXE_COMMITS);
@@ -301,6 +301,11 @@ pub fn search(
             );
             let bag = TermBag::new(&mut vocabulary, terms(&text));
             found.push((repo, commit, bag));
+        }
+        // A command the deadline stopped left this repository half searched.
+        if Instant::now() > deadline && !cancel.is_cancelled() {
+            cut_short = true;
+            break;
         }
     }
     let ids = vocabulary.phrases(query.terms);
@@ -507,6 +512,36 @@ pub(crate) mod tests {
         let shown = open(&repos, "b", &sha, &CancelToken::new()).unwrap();
         assert!(shown.contains("docs: walrus notes"));
         assert!(open(&repos, "b", "zz", &CancelToken::new()).is_err());
+    }
+
+    #[test]
+    fn since_keeps_older_commits_out() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path();
+        repo_with(project, &[("x.md", "notes", "docs: walrus notes")]);
+        let repos = vec![RepoRoot::new(project.to_path_buf(), project)];
+        let words = vec!["walrus".to_string()];
+        let none = PathFilter::default();
+        let terms_ = [query_words("walrus")];
+        let mut later = query(&terms_, &words, &[], &none);
+        later.since = Some(later.now + 86_400_000);
+        let (hits, cut_short) = search(
+            &repos,
+            &later,
+            10,
+            Instant::now() + GIT_TIMEOUT,
+            &CancelToken::new(),
+        );
+        assert!(hits.is_empty());
+        assert!(!cut_short);
+        let (hits, _) = search(
+            &repos,
+            &query(&terms_, &words, &[], &none),
+            10,
+            Instant::now() + GIT_TIMEOUT,
+            &CancelToken::new(),
+        );
+        assert_eq!(hits.len(), 1);
     }
 
     #[test]

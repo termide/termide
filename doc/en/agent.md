@@ -724,8 +724,8 @@ as well as one of code.
   rewind took back is left out, what a compaction summarised is still found.
   Your messages, the agent's answers, compaction summaries and handoff briefs
   count most, tool calls less, reasoning and tool output least (only the first
-  4 KB of an output is searched). The session the panel is in is left out, as
-  its content is in the context already. A `git commit` a session ran is
+  4 KB of an output is searched). Of the session the panel is in only what a
+  compaction took out of the context is searched: the rest is there already. A `git commit` a session ran is
   linked to its commit.
 - **Git**: commits whose message holds a word of the query, and commits that
   added or removed an identifier it names (`git log -S`), in every repository
@@ -756,8 +756,10 @@ phrasing's weight, where a rare word counts for far more than common ones. Each 
 agent calls `recall` again with `open` set to a reference to see the entries
 around a session result or the commit itself, and reads a file from the line
 given. A search can be narrowed to
-`sources` (`sessions`, `git`, `files`), `paths` (project paths or globs) and
-`since` (a date).
+`sources` (`sessions`, `git`, `files`), `paths` (paths or globs, relative to
+the panel's directory like any path the agent gives) and `since` (a date, for
+sessions and commits). File results name their path the same way, so the agent
+reads them as given.
 
 `recall` only reads, so it never asks for permission, in plan mode too;
 subagents and `termide --prompt` runs have it as well, and an agent's `tools`
@@ -769,7 +771,8 @@ so the agent can check it. It is off by default.
 
 The three sources search side by side, each with its own time limit, a minute
 by default: what a source found by its limit is ranked with the rest, and the
-result says which source stopped. So a project where one source is slow — the
+result says which source stopped — git included when one slow command, a
+`git log -S` over a long history, ran into it. So a project where one source is slow — the
 files of a project rooted in the home directory, say — does not cost the others
 their time, and a search lasts as long as its slowest source.
 

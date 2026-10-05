@@ -493,8 +493,8 @@ impl Agent {
     }
 
     /// The id of the session log the conversation is written to, so a tool
-    /// can tell that log from the others (`recall` leaves it out: its
-    /// content is already in the context).
+    /// can tell that log from the others (`recall` searches only what a
+    /// compaction took out of it: the rest is in the context already).
     #[must_use]
     pub fn with_session_id(mut self, id: Option<String>) -> Self {
         self.session_id = id;
