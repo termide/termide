@@ -5895,6 +5895,28 @@ fn recording_runner() -> (ShellRunner, Arc<Mutex<Vec<String>>>) {
     (runner, seen)
 }
 
+/// A runner that records what reached the shell and then behaves like a long
+/// command: it only returns once stopped, so a test sees it still running.
+fn blocking_runner() -> (ShellRunner, Arc<Mutex<Vec<String>>>) {
+    let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+    let recorder = Arc::clone(&seen);
+    let runner = ShellRunner::new(move |command, cancel| {
+        recorder.lock().unwrap().push(command.to_string());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !cancel.is_cancelled() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        if cancel.is_cancelled() {
+            return Err("stopped".to_string());
+        }
+        Ok(ShellOutput {
+            text: "done".to_string(),
+            failed: false,
+        })
+    });
+    (runner, seen)
+}
+
 /// A panel with a runner installed, and the scripted provider behind it so a
 /// test can see whether a model was asked anything.
 fn panel_with_runner(
@@ -6067,23 +6089,7 @@ fn bang_without_a_runner_is_refused_with_a_notice() {
 
 #[test]
 fn escape_stops_a_hand_run_command() {
-    let seen: Arc<Mutex<Vec<String>>> = Arc::default();
-    let recorder = Arc::clone(&seen);
-    let runner = ShellRunner::new(move |command, cancel| {
-        recorder.lock().unwrap().push(command.to_string());
-        // Behave like a long command: wait to be stopped.
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while !cancel.is_cancelled() && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        if cancel.is_cancelled() {
-            return Err("stopped".to_string());
-        }
-        Ok(ShellOutput {
-            text: "done".to_string(),
-            failed: false,
-        })
-    });
+    let (runner, seen) = blocking_runner();
     let mut panel = AgentPanel::new(AgentPanelSetup {
         shell_run: Some(runner),
         ..setup(vec![])
@@ -6260,7 +6266,11 @@ fn plan_mode_withholds_run_from_a_suggestion() {
 
 #[test]
 fn a_second_bang_while_one_runs_is_refused() {
-    let (mut panel, seen, _) = panel_with_runner(vec![]);
+    let (runner, seen) = blocking_runner();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        shell_run: Some(runner),
+        ..setup(vec![])
+    });
     type_text(&mut panel, "$sleep 100");
     panel.submit();
     wait_for_commands(&mut panel, &seen, 1);
