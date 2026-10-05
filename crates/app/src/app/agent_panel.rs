@@ -484,8 +484,8 @@ impl AgentCatalog for FsCatalog {
         }
         // The user's `ai/tools/<name>.md` texts, before the prompt lists them.
         apply_tool_texts(&mut tools, &self.dirs.tool_texts());
-        // The configuration's `ai/AGENTS.md` is the prompt template itself,
-        // not an instruction file, so no global file joins the chain.
+        // The default agent's `AGENT.md` is the prompt template itself, not an
+        // instruction file, so no global file joins the chain.
         let context_files = discover_context_files(&self.cwd, Some(&self.project_root), None);
         let mut options = PromptOptions::new(&self.cwd, &tools, &context_files);
         options.skills = &skills;
@@ -509,11 +509,8 @@ impl FsCatalog {
     /// built-in-loop agent, the default one included, except `caller`
     /// itself (delegating to yourself is pointless) and external ones.
     fn delegatable(&self, caller: &str) -> Vec<(String, String)> {
-        let mut names: Vec<String> = std::iter::once(DEFAULT_AGENT.to_string())
-            .chain(self.dirs.agents())
-            .collect();
-        names.dedup();
-        names
+        self.dirs
+            .agents()
             .into_iter()
             .filter(|name| name != caller && self.dirs.spec(name).acp.is_none())
             .map(|name| {
@@ -1434,7 +1431,7 @@ fn merge_permission_rule(path: &Path, tool: &str, pattern: &str, decision: Decis
 #[cfg(test)]
 mod tests {
     use super::*;
-    use termide_agent_core::AGENT_FILE;
+    use termide_agent_core::{AGENT_FILE, DEFAULT_AGENT_FILE};
 
     /// A local endpoint (the one new sessions start on) and a hosted one.
     fn with_cloud() -> AiSettings {
@@ -1841,7 +1838,12 @@ mod tests {
         let global = tmp.path().join("ai");
         let review = global.join("agents/review");
         std::fs::create_dir_all(&review).unwrap();
-        std::fs::write(global.join("AGENTS.md"), "Root template.\n\n{{tools}}\n").unwrap();
+        std::fs::create_dir_all(global.join("agents/default")).unwrap();
+        std::fs::write(
+            global.join(DEFAULT_AGENT_FILE),
+            "Root template.\n\n{{tools}}\n",
+        )
+        .unwrap();
         std::fs::write(
             review.join(AGENT_FILE),
             "---\ndescription: Reviews diffs\nmodel: big\nmode: auto\ntools: read, bash, nope\n---\n\
@@ -1890,7 +1892,7 @@ mod tests {
             "---\nname: deploy\ndescription: Ship it\n---\nSteps.\n",
         )
         .unwrap();
-        std::fs::write(global.join("AGENTS.md"), "{{skills}}\n").unwrap();
+        std::fs::write(global.join(DEFAULT_AGENT_FILE), "{{skills}}\n").unwrap();
         let review = catalog.resolve("review").unwrap();
         assert_eq!(review.tools.names(), ["read", "bash", "skill"]);
 

@@ -275,6 +275,9 @@ impl App {
         let name = key.strip_prefix("item:")?.to_string();
         let dirs = self.state.ai_dirs();
         let path = match section {
+            // The default agent is edited, never renamed or removed: every
+            // panel starts as it, and its files are seeded back anyway.
+            AiSection::Agents if name == termide_agent_core::DEFAULT_AGENT => return None,
             AiSection::Agents => dirs.agent_dir(&name)?,
             AiSection::Skills => dirs
                 .skills()
@@ -395,7 +398,8 @@ impl App {
         let open_path: Option<PathBuf> = match section {
             AiSection::Agents => {
                 let dir = root.join("agents").join(name);
-                if dir.exists() {
+                // `default` exists already, and a project's would be ignored.
+                if dir.exists() || name == termide_agent_core::DEFAULT_AGENT {
                     None
                 } else {
                     std::fs::create_dir_all(&dir)?;

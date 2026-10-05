@@ -1061,8 +1061,8 @@ name defined higher hides the same name below.
 
 ```
 ai/
-  AGENTS.md                the system prompt template of the default agent
-  agents/<name>/AGENT.md   a custom agent: settings and prompt template
+  agents/default/AGENT.md  the default agent (config level only)
+  agents/<name>/AGENT.md   any other agent: settings and prompt template
   skills/<name>/SKILL.md   skills, see below
   prompts/<name>.md        prompt templates, typed as /name
   commands/<name>          command scripts, typed as /name, see below
@@ -1083,10 +1083,11 @@ ai/
   web/browser/             the web tools' browser profile (config level only)
 ```
 
-The first time the panel opens, the configuration level is laid out:
-`AGENTS.md`, the `system/` and `tools/` files and the search engines receive the shipped
-texts, `agents/`,
-`skills/`, `prompts/`, `commands/` and `shims/` are created empty. termide
+The first time the panel opens, the configuration level is laid out: the
+default agent's `AGENT.md`, the `system/` and `tools/` files and the search
+engines receive the shipped texts, `skills/`, `prompts/`, `commands/` and
+`shims/` are created empty. A default agent template kept as `ai/AGENTS.md`
+by an earlier version is moved into `agents/default/AGENT.md` then. termide
 records what it shipped (in `.seeds.toml`) and keeps these files current on
 later starts: one you never edited is refreshed when the shipped version
 changes, so upgrades reach you; one you edited is left untouched, with the new
@@ -1096,15 +1097,16 @@ Delete a file to get the shipped version back.
 ### Agents
 
 An agent is a directory under `agents/`. `default` is the one the panel
-starts as; it has no directory and speaks with `ai/AGENTS.md`. Any directory
-defines an agent you can switch to from the **Agent** status chip; the picker
-shows each agent's description. The agent is its `AGENT.md`: the front matter
-sets it apart, every field optional, and the body is its own prompt template.
-An `AGENT.md` with no body (or none at all) uses `ai/AGENTS.md`;
+starts as; only the configuration level defines it, so a project cannot
+change the agent every panel starts as. Any directory defines an agent you can
+switch to from the **Agent** status chip; the picker shows each agent's
+description. The agent is its `AGENT.md`: the front matter sets it apart,
+every field optional, and the body is its own prompt template. An `AGENT.md`
+with no body (or none at all) speaks with the default agent's template, not
+with its settings; the default agent without one with the shipped template.
 `prompt: none` means no system prompt at all: the model still gets the tools,
-but no instructions. An empty `ai/AGENTS.md` does the same for the default
-agent. The rest of the directory is the agent's own: scripts or checklists
-its prompt refers to.
+but no instructions. The rest of the directory is the agent's own: scripts or
+checklists its prompt refers to.
 
 ```markdown
 ---
@@ -1195,14 +1197,14 @@ screen but the external agent does not know them, and the panel says so.
 
 ### The system prompt
 
-The prompt the model receives is assembled from files: the template
-`ai/AGENTS.md` with placeholders the agent fills in. No prompt text is
-built into TermIDE; the template below ships as a data file
-(`crates/agent-core/assets/AGENTS.md`) and is written to the
-configuration level on first use, and from then on the file is what counts.
-Only the configuration level's `ai/AGENTS.md` is read: it is the fallback of
-every agent, so a project's `.termide/ai/AGENTS.md` is ignored, and the
-template changes only when you pick an agent whose `AGENT.md` has a body. A
+The prompt the model receives is assembled from files: the body of the
+default agent's `ai/agents/default/AGENT.md`, a template with placeholders the
+agent fills in. No prompt text is built into TermIDE; the template below ships
+as a data file (`crates/agent-core/assets/agents/default/AGENT.md`) and is
+written to the configuration level on first use, and from then on the file is
+what counts. It is the fallback of every agent, so a project's
+`.termide/ai/agents/default/` is ignored, and the template changes only when
+you pick an agent whose `AGENT.md` has a body. A
 project's own conventions go into its `AGENTS.md`, which the template takes in
 as project instructions (see below):
 
@@ -1257,7 +1259,7 @@ can see exactly what the model gets.
 ### Service prompts
 
 TermIDE's own prompts are files too, under `system/`, seeded on first use like
-`AGENTS.md`. Only the configuration level's `system/` is read: a project's is
+the default agent's `AGENT.md`. Only the configuration level's `system/` is read: a project's is
 ignored, so a checked-out repository cannot rewrite how termide summarises,
 plans or judges. Compaction, the summary that
 replaces the older part of a long session, uses two: `compact.md` is the
@@ -1594,7 +1596,7 @@ directory between the filesystem root and the panel's working directory,
 most specific last, so the panel directory's file outranks the project's. The
 project root's file is included even when the panel works outside it. Put
 your conventions there and the agent follows them; global rules go into the
-template `ai/AGENTS.md` itself. Files over 32 KiB are skipped.
+template, the default agent's `AGENT.md`, itself. Files over 32 KiB are skipped.
 
 ## Session history
 

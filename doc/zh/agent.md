@@ -351,8 +351,8 @@ auto_reviewer = "haiku"   # 连接名称；留空则由会话的模型审查
 
 ```
 ai/
-  AGENTS.md                默认代理的系统提示词模板
-  agents/<name>/AGENT.md   自定义代理：设置和提示词模板
+  agents/default/AGENT.md  默认代理（仅配置层级）
+  agents/<name>/AGENT.md   其他代理：设置和提示词模板
   skills/<name>/SKILL.md   技能，见下文
   prompts/<name>.md        提示词模板，以 /name 输入
   commands/<name>          命令脚本，以 /name 输入，见下文
@@ -373,11 +373,11 @@ ai/
   web/browser/             网络工具的浏览器配置文件（仅配置层级）
 ```
 
-面板首次打开时，会布置配置层级：`AGENTS.md`、`system/` 和 `tools/` 文件以及搜索引擎写入自带的文本，`agents/`、`skills/`、`prompts/`、`commands/` 和 `shims/` 创建为空目录。termide 会记录它提供的内容（在 `.seeds.toml` 中），并在之后启动时保持这些文件为最新：你从未编辑过的文件会在自带版本变化时刷新，因此升级内容能到达你这里；你编辑过的文件保持不动，新的默认内容写在它旁边的 `<file>.new` 中，供你随时比较和合并。删除某个文件即可恢复自带版本。
+面板首次打开时，会布置配置层级：默认代理的 `AGENT.md`、`system/` 和 `tools/` 文件以及搜索引擎写入自带的文本，`skills/`、`prompts/`、`commands/` 和 `shims/` 创建为空目录。旧版本留在 `ai/AGENTS.md` 中的默认代理模板此时会移到 `agents/default/AGENT.md`。termide 会记录它提供的内容（在 `.seeds.toml` 中），并在之后启动时保持这些文件为最新：你从未编辑过的文件会在自带版本变化时刷新，因此升级内容能到达你这里；你编辑过的文件保持不动，新的默认内容写在它旁边的 `<file>.new` 中，供你随时比较和合并。删除某个文件即可恢复自带版本。
 
 ### 代理
 
-代理是 `agents/` 下的一个目录。`default` 是面板启动时使用的代理；它没有目录，使用 `ai/AGENTS.md`。任何目录都定义一个代理，你可以通过 **Agent** 状态标签切换到它；选择器会显示每个代理的描述。代理就是它的 `AGENT.md`：front matter 设置它与默认值的不同之处（所有字段均为可选），正文是它自己的提示词模板。没有正文（或根本没有该文件）的 `AGENT.md` 使用 `ai/AGENTS.md`；`prompt: none` 表示完全没有系统提示词：模型仍然获得工具，但没有指示。空的 `ai/AGENTS.md` 对默认代理有同样效果。目录中的其余内容归该代理所有：其提示词引用的脚本或检查清单。
+代理是 `agents/` 下的一个目录。`default` 是面板启动时使用的代理；只有配置层级定义它，因此项目无法改变每个面板启动时使用的代理。任何目录都定义一个代理，你可以通过 **Agent** 状态标签切换到它；选择器会显示每个代理的描述。代理就是它的 `AGENT.md`：front matter 设置它与默认值的不同之处（所有字段均为可选），正文是它自己的提示词模板。没有正文（或根本没有该文件）的 `AGENT.md` 使用默认代理的模板，但不采用它的设置；默认代理本身没有正文时使用自带模板。`prompt: none` 表示完全没有系统提示词：模型仍然获得工具，但没有指示。目录中的其余内容归该代理所有：其提示词引用的脚本或检查清单。
 
 ```markdown
 ---
@@ -418,7 +418,7 @@ command: npx -y @agentclientprotocol/claude-agent-acp
 
 ### 系统提示词
 
-模型收到的提示词由文件组装而成：模板 `ai/AGENTS.md` 加上由代理填充的占位符。TermIDE 中没有内置任何提示词文本；下面的模板作为数据文件（`crates/agent-core/assets/AGENTS.md`）提供，首次使用时写入配置层级，此后以该文件为准。只读取配置层级的 `ai/AGENTS.md`：它是所有代理的后备模板，因此项目中的 `.termide/ai/AGENTS.md` 会被忽略，只有当你选择一个 `AGENT.md` 带有正文的代理时模板才会改变。项目自身的约定写在其 `AGENTS.md` 中，模板会将其作为项目说明纳入（见下文）：
+模型收到的提示词由文件组装而成：默认代理 `ai/agents/default/AGENT.md` 的正文，即带有由代理填充的占位符的模板。TermIDE 中没有内置任何提示词文本；下面的模板作为数据文件（`crates/agent-core/assets/agents/default/AGENT.md`）提供，首次使用时写入配置层级，此后以该文件为准。它是所有代理的后备模板，因此项目中的 `.termide/ai/agents/default/` 会被忽略，只有当你选择一个 `AGENT.md` 带有正文的代理时模板才会改变。项目自身的约定写在其 `AGENTS.md` 中，模板会将其作为项目说明纳入（见下文）：
 
 ```markdown
 You are a coding agent working inside termide, an all-in-one terminal workspace (editor, file manager, terminal, git). You help with software tasks in the current project: you read code, make targeted edits, run commands and report what you did and what you found.
@@ -457,7 +457,7 @@ When a task matches one of these, load it with the `skill` tool before starting.
 
 ### 服务提示词
 
-TermIDE 自己的提示词也是文件，位于 `system/` 下，并像 `AGENTS.md` 一样在首次使用时写入。只读取配置层级的 `system/`：项目中的同名目录会被忽略，因此检出的仓库无法改写 termide 的总结、计划和评审方式。压缩（用总结替换长会话中较早部分）使用其中两个：`compact.md` 是总结调用的系统提示词，其前置元数据（`request:`）中是最后的用户轮次，`{{focus}}` 处放入传给 `/compact` 的文字；`compacted.md` 是总结在上下文中变成的消息，`{{summary}}` 代表模型的文本。编辑它们可以改变总结保留的内容或其引入方式。
+TermIDE 自己的提示词也是文件，位于 `system/` 下，并像默认代理的 `AGENT.md` 一样在首次使用时写入。只读取配置层级的 `system/`：项目中的同名目录会被忽略，因此检出的仓库无法改写 termide 的总结、计划和评审方式。压缩（用总结替换长会话中较早部分）使用其中两个：`compact.md` 是总结调用的系统提示词，其前置元数据（`request:`）中是最后的用户轮次，`{{focus}}` 处放入传给 `/compact` 的文字；`compacted.md` 是总结在上下文中变成的消息，`{{summary}}` 代表模型的文本。编辑它们可以改变总结保留的内容或其引入方式。
 
 ```
 /compact              立即总结
@@ -616,7 +616,7 @@ exec /usr/bin/rg --max-count 5 "$@"
 
 ### 项目指令
 
-代理会从文件系统根目录到面板工作目录之间的每个目录读取 `AGENTS.md`（或同一目录中的 `CLAUDE.md`），越具体的越靠后，因此面板目录中的文件优先于项目的文件。即使面板在项目之外工作，项目根目录的文件也会被包含。把你的约定放在那里，代理就会遵循；全局规则则写进模板 `ai/AGENTS.md` 本身。超过 32 KiB 的文件会被跳过。
+代理会从文件系统根目录到面板工作目录之间的每个目录读取 `AGENTS.md`（或同一目录中的 `CLAUDE.md`），越具体的越靠后，因此面板目录中的文件优先于项目的文件。即使面板在项目之外工作，项目根目录的文件也会被包含。把你的约定放在那里，代理就会遵循；全局规则则写进模板——默认代理的 `AGENT.md`——本身。超过 32 KiB 的文件会被跳过。
 
 ## 会话历史
 

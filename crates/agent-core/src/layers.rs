@@ -31,15 +31,19 @@ use crate::tool_text::{ToolText, SEED_TOOLS, TOOLS_DIR};
 pub const GLOBAL_AGENT_DIR: &str = "ai";
 /// The `ai` directory inside a project or working directory.
 pub const PROJECT_AGENT_DIR: &str = ".termide/ai";
-/// The system prompt template of the default agent, at the root of an `ai`
-/// directory; also what a custom agent whose `AGENT.md` has no body uses.
-pub const ROOT_SOUL_FILE: &str = "AGENTS.md";
-/// The definition of a custom agent, `agents/<name>/AGENT.md`: its settings
-/// in the front matter, its system prompt template in the body. The rest of
-/// the directory is the agent's own (scripts, checklists).
+/// The definition of an agent, `agents/<name>/AGENT.md`: its settings in the
+/// front matter, its system prompt template in the body. The rest of the
+/// directory is the agent's own (scripts, checklists).
 pub const AGENT_FILE: &str = "AGENT.md";
 /// The agent used when none is chosen.
 pub const DEFAULT_AGENT: &str = "default";
+/// The default agent's definition, read from the configuration level only: a
+/// project must not change the agent every panel starts as. Its body is also
+/// the template of an agent whose `AGENT.md` has none.
+pub const DEFAULT_AGENT_FILE: &str = "agents/default/AGENT.md";
+/// Where the default agent's template lived before it had an `AGENT.md`; an
+/// existing one is moved on start.
+const LEGACY_DEFAULT_TEMPLATE: &str = "AGENTS.md";
 /// Session logs under the `ai` directory: `sessions/<working directory>/`.
 pub const SESSIONS_DIR: &str = "sessions";
 /// Skills under an `ai` directory: `skills/<name>/SKILL.md`.
@@ -285,7 +289,7 @@ fn unquote(value: &str) -> &str {
 /// [`ensure_global_layout`] seeds and keeps up to date.
 fn shipped_assets() -> Vec<(String, &'static str)> {
     let mut assets = vec![
-        (ROOT_SOUL_FILE.to_string(), SEED_TEMPLATE),
+        (DEFAULT_AGENT_FILE.to_string(), SEED_TEMPLATE),
         (format!("{SYSTEM_DIR}/compact.md"), SEED_COMPACT),
         (format!("{SYSTEM_DIR}/compacted.md"), SEED_COMPACTED),
         (format!("{SYSTEM_DIR}/plan.md"), SEED_PLAN),
@@ -333,10 +337,10 @@ fn dot_new(path: &Path) -> PathBuf {
 }
 
 /// Lay out the `ai` directory of the configuration and keep its shipped assets
-/// current. Empty `agents/`, `skills/`, `prompts/`, `commands/`, `system/`,
-/// `tools/`, `shims/` and `web/engines/` are created. Each shipped file
-/// (`AGENTS.md`, the `system/` prompts, the `tools/` texts, the search engines)
-/// is then reconciled against the version it was last written from, recorded in
+/// current. Empty `agents/default/`, `skills/`, `prompts/`, `commands/`,
+/// `system/`, `tools/`, `shims/` and `web/engines/` are created. Each shipped
+/// file (the default agent's `AGENT.md`, the `system/` prompts, the `tools/`
+/// texts, the search engines) is then reconciled against the version it was last written from, recorded in
 /// `.seeds.toml`:
 ///
 /// - missing → written;
@@ -349,7 +353,7 @@ fn dot_new(path: &Path) -> PathBuf {
 /// Safe to call on every start.
 pub fn ensure_global_layout(global: &Path) -> std::io::Result<()> {
     for dir in [
-        "agents",
+        "agents/default",
         "skills",
         "prompts",
         COMMANDS_DIR,
@@ -374,7 +378,7 @@ pub fn ensure_global_layout(global: &Path) -> std::io::Result<()> {
             BTreeMap::new()
         }),
     };
-    let mut manifest_changed = false;
+    let mut manifest_changed = move_legacy_default_template(global, &mut manifest)?;
 
     for (relative, seed) in shipped_assets() {
         let path = global.join(&relative);
@@ -423,6 +427,32 @@ pub fn ensure_global_layout(global: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Move a default agent template kept as `ai/AGENTS.md` into its `AGENT.md`,
+/// with its seed record, so an edited one stays in effect and an untouched one
+/// keeps being refreshed. An empty one meant no system prompt, which the front
+/// matter now says. Whether anything moved.
+fn move_legacy_default_template(
+    global: &Path,
+    manifest: &mut BTreeMap<String, String>,
+) -> std::io::Result<bool> {
+    let legacy = global.join(LEGACY_DEFAULT_TEMPLATE);
+    let current = global.join(DEFAULT_AGENT_FILE);
+    if !legacy.is_file() || current.exists() {
+        return Ok(false);
+    }
+    match std::fs::read_to_string(&legacy) {
+        Ok(text) if text.trim().is_empty() => {
+            std::fs::write(&current, "---\nprompt: none\n---\n")?;
+            std::fs::remove_file(&legacy)?;
+        }
+        _ => std::fs::rename(&legacy, &current)?,
+    }
+    if let Some(hash) = manifest.remove(LEGACY_DEFAULT_TEMPLATE) {
+        manifest.insert(DEFAULT_AGENT_FILE.to_string(), hash);
+    }
+    Ok(true)
 }
 
 /// The front matter of `agents/<name>/AGENT.md`: what sets an agent apart
@@ -906,14 +936,33 @@ impl AgentDirs {
         entries
     }
 
+    /// The roots `agent` is defined in, highest first: all of them, but only
+    /// the configuration level for the default agent (see
+    /// [`DEFAULT_AGENT_FILE`]).
+    fn agent_roots(&self, agent: &str) -> impl Iterator<Item = PathBuf> + '_ {
+        let roots = if agent == DEFAULT_AGENT {
+            self.global.as_slice()
+        } else {
+            self.roots.as_slice()
+        };
+        let agent = agent.to_string();
+        roots
+            .iter()
+            .map(move |root| root.join("agents").join(&agent))
+    }
+
+    /// The `AGENT.md` of `agent` in the highest root that has one.
+    fn agent_file_path(&self, agent: &str) -> Option<PathBuf> {
+        self.agent_roots(agent)
+            .map(|dir| dir.join(AGENT_FILE))
+            .find(|path| path.is_file())
+    }
+
     /// The `AGENT.md` of `agent` in the highest root that has one, with its
-    /// text; `None` for the default agent, which has no file of its own, and
-    /// when no root has one or it cannot be read (which is logged).
+    /// text; `None` when no root has one or it cannot be read (which is
+    /// logged).
     fn agent_file(&self, agent: &str) -> Option<(PathBuf, String)> {
-        if agent == DEFAULT_AGENT {
-            return None;
-        }
-        let path = self.find_file(Path::new("agents").join(agent).join(AGENT_FILE))?;
+        let path = self.agent_file_path(agent)?;
         match std::fs::read_to_string(&path) {
             Ok(text) => Some((path, text)),
             Err(error) => {
@@ -942,45 +991,33 @@ impl AgentDirs {
         }
     }
 
-    /// Names of the agents any root defines, plus the default one, which
+    /// Names of the agents any root defines, the default one first: it
     /// exists even without files.
     #[must_use]
     pub fn agents(&self) -> Vec<String> {
         let mut names: Vec<String> = self
             .merged_entries("agents")
             .into_iter()
-            .filter(|(_, path)| path.is_dir())
+            .filter(|(name, path)| name != DEFAULT_AGENT && path.is_dir())
             .map(|(name, _)| name)
             .collect();
-        if !names.iter().any(|n| n == DEFAULT_AGENT) {
-            names.insert(0, DEFAULT_AGENT.to_string());
-        }
+        names.insert(0, DEFAULT_AGENT.to_string());
         names
     }
 
     /// The directory of `agent` in the highest root that defines it, for
-    /// editing or removing it; `None` for the default agent (it has no
-    /// directory of its own) or a name no root defines.
+    /// editing or removing it; `None` for a name no root defines.
     #[must_use]
     pub fn agent_dir(&self, agent: &str) -> Option<PathBuf> {
-        if agent == DEFAULT_AGENT {
-            return None;
-        }
-        self.roots
-            .iter()
-            .map(|root| root.join("agents").join(agent))
-            .find(|path| path.is_dir())
+        self.agent_roots(agent).find(|path| path.is_dir())
     }
 
     /// The `AGENT.md` to edit for `agent`: the one in effect, from the highest
     /// root that has one, else where it would go in the agent's directory.
     #[must_use]
     pub fn agent_path(&self, agent: &str) -> Option<PathBuf> {
-        let dir = self.agent_dir(agent)?;
-        Some(
-            self.find_file(Path::new("agents").join(agent).join(AGENT_FILE))
-                .unwrap_or_else(|| dir.join(AGENT_FILE)),
-        )
+        self.agent_file_path(agent)
+            .or_else(|| Some(self.agent_dir(agent)?.join(AGENT_FILE)))
     }
 
     /// The file of prompt `name` (`prompts/<name>.md`) in the highest root that
@@ -990,12 +1027,13 @@ impl AgentDirs {
         self.find_file(Path::new(PROMPTS_DIR).join(format!("{name}.md")))
     }
 
-    /// The system prompt template of `agent`: the body of its own
-    /// `AGENT.md` when that has one, else the configuration level's root
-    /// `AGENTS.md` (which is all the default agent has). The root template is
-    /// the fallback for every agent, so a project cannot replace it: only an
-    /// agent the user picks brings a template of its own. `prompt: none` in
-    /// the front matter means no system prompt at all, not the shipped one.
+    /// The system prompt template of `agent`: the body of its `AGENT.md`. An
+    /// agent whose `AGENT.md` has no body, or that has none, speaks with the
+    /// default agent's template; the default agent then with the shipped one
+    /// (`None`). The default agent is the configuration level's, so a project
+    /// cannot replace the fallback: only an agent the user picks brings a
+    /// template of its own. `prompt: none` in the front matter means no system
+    /// prompt at all, not the default one.
     #[must_use]
     pub fn soul(&self, agent: &str) -> Option<String> {
         if let Some((path, text)) = self.agent_file(agent) {
@@ -1012,17 +1050,10 @@ impl AgentDirs {
                 return Some(body.to_string());
             }
         }
-        let path = self
-            .global
-            .as_ref()
-            .map(|global| global.join(ROOT_SOUL_FILE))
-            .filter(|path| path.is_file())?;
-        match std::fs::read_to_string(&path) {
-            Ok(text) => Some(text),
-            Err(error) => {
-                log::warn!("cannot read {}: {error}", path.display());
-                None
-            }
+        if agent == DEFAULT_AGENT {
+            None
+        } else {
+            self.soul(DEFAULT_AGENT)
         }
     }
 }
@@ -1038,8 +1069,12 @@ mod tests {
         let project = tmp.path().join("proj");
         let global = tmp.path().join("config/agent");
         for (root, name, body) in [
-            (&cwd, "AGENTS.md", "sub soul"),
-            (&global, "AGENTS.md", "global soul"),
+            (&cwd, DEFAULT_AGENT_FILE, "---\nmode: all\n---\nsub soul"),
+            (
+                &global,
+                DEFAULT_AGENT_FILE,
+                "---\nmode: plan\n---\nglobal soul",
+            ),
             (&project, "agents/review/AGENT.md", "review"),
             (
                 &project,
@@ -1063,13 +1098,25 @@ mod tests {
 
         let dirs = AgentDirs::new(&cwd, Some(&project), Some(&global));
         assert_eq!(dirs.roots().len(), 3);
-        // The root template is the configuration level's; a project's
-        // `AGENTS.md` under its `ai` directory is ignored.
+        // The default agent is the configuration level's; a project's
+        // `agents/default` is ignored, settings and template alike.
         assert_eq!(dirs.soul(DEFAULT_AGENT).as_deref(), Some("global soul"));
+        assert_eq!(dirs.spec(DEFAULT_AGENT).mode, Some(Mode::Plan));
+        assert_eq!(
+            dirs.agent_dir(DEFAULT_AGENT),
+            Some(global.join("agents/default"))
+        );
+        assert_eq!(dirs.agents()[0], DEFAULT_AGENT);
+        assert_eq!(
+            dirs.agents().iter().filter(|n| *n == DEFAULT_AGENT).count(),
+            1
+        );
         // A picked agent brings its own, from any level.
         assert_eq!(dirs.soul("review").as_deref(), Some("review"));
-        // An agent whose AGENT.md has no body speaks with the root template.
+        // An agent whose AGENT.md has no body speaks with the default one's
+        // template, not with its settings.
         assert_eq!(dirs.soul("bare").as_deref(), Some("global soul"));
+        assert_eq!(dirs.spec("bare").mode, None);
         assert_eq!(
             AgentDirs::new(&project, None, None).soul(DEFAULT_AGENT),
             None
@@ -1095,7 +1142,7 @@ mod tests {
         let agents = dirs.merged_entries("agents");
         assert_eq!(
             agents.keys().collect::<Vec<_>>(),
-            ["bare", "blank", "review"]
+            ["bare", "blank", "default", "review"]
         );
 
         // Path resolvers point at the highest root that defines the item.
@@ -1103,7 +1150,6 @@ mod tests {
             dirs.agent_dir("review"),
             Some(project.join(PROJECT_AGENT_DIR).join("agents/review"))
         );
-        assert_eq!(dirs.agent_dir(DEFAULT_AGENT), None);
         assert_eq!(dirs.agent_dir("missing"), None);
     }
 
@@ -1300,7 +1346,7 @@ mod tests {
             AgentDirs::new(tmp.path(), Some(tmp.path()), None).shims_dir(),
             None
         );
-        let soul = global.join(ROOT_SOUL_FILE);
+        let soul = global.join(DEFAULT_AGENT_FILE);
         assert_eq!(std::fs::read_to_string(&soul).unwrap(), SEED_TEMPLATE);
         assert_eq!(
             std::fs::read_to_string(global.join("system/compact.md")).unwrap(),
@@ -1360,6 +1406,48 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&soul).unwrap(), "mine");
         let dirs = AgentDirs::new(tmp.path(), None, Some(&global));
         assert_eq!(dirs.soul(DEFAULT_AGENT).as_deref(), Some("mine"));
+    }
+
+    #[test]
+    fn a_default_template_at_the_old_place_moves_into_its_agent_md() {
+        let tmp = tempfile::tempdir().unwrap();
+        let global = tmp.path().join("ai");
+        std::fs::create_dir_all(&global).unwrap();
+        std::fs::write(global.join(LEGACY_DEFAULT_TEMPLATE), "mine").unwrap();
+        ensure_global_layout(&global).unwrap();
+        assert!(!global.join(LEGACY_DEFAULT_TEMPLATE).exists());
+        let dirs = AgentDirs::new(tmp.path(), None, Some(&global));
+        assert_eq!(dirs.soul(DEFAULT_AGENT).as_deref(), Some("mine"));
+        // Edited, so the shipped version is offered beside it, once.
+        assert!(dot_new(&global.join(DEFAULT_AGENT_FILE)).exists());
+
+        // An untouched one moves with its seed record and is no `.new`.
+        let tmp = tempfile::tempdir().unwrap();
+        let global = tmp.path().join("ai");
+        std::fs::create_dir_all(&global).unwrap();
+        std::fs::write(global.join(LEGACY_DEFAULT_TEMPLATE), SEED_TEMPLATE).unwrap();
+        std::fs::write(
+            global.join(SEEDS_MANIFEST),
+            format!(
+                "\"{LEGACY_DEFAULT_TEMPLATE}\" = \"{}\"\n",
+                seed_hash(SEED_TEMPLATE)
+            ),
+        )
+        .unwrap();
+        ensure_global_layout(&global).unwrap();
+        assert!(!dot_new(&global.join(DEFAULT_AGENT_FILE)).exists());
+        let manifest = std::fs::read_to_string(global.join(SEEDS_MANIFEST)).unwrap();
+        assert!(!manifest.contains(&format!("\"{LEGACY_DEFAULT_TEMPLATE}\"")));
+
+        // An empty one meant no system prompt, and still does.
+        let tmp = tempfile::tempdir().unwrap();
+        let global = tmp.path().join("ai");
+        std::fs::create_dir_all(&global).unwrap();
+        std::fs::write(global.join(LEGACY_DEFAULT_TEMPLATE), "\n").unwrap();
+        ensure_global_layout(&global).unwrap();
+        let dirs = AgentDirs::new(tmp.path(), None, Some(&global));
+        assert_eq!(dirs.soul(DEFAULT_AGENT).as_deref(), Some(""));
+        assert_eq!(dirs.soul("other").as_deref(), Some(""));
     }
 
     /// A seed file that exists but cannot be read as text is the user's; it

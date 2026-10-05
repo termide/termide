@@ -478,7 +478,6 @@ impl AppState {
             AiSection::Agents => dirs
                 .agents()
                 .into_iter()
-                .filter(|n| n != termide_agent_core::DEFAULT_AGENT)
                 .map(|name| {
                     let is_project = dirs
                         .agent_dir(&name)

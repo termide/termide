@@ -497,8 +497,8 @@ will merge. Session logs go to `<config>/ai/sessions/<panel directory>/`,
 keyed by the directory the panel works in: the user's decision, the shape pi
 and Claude Code use (sessions under the tool's own directory), taken over the
 XDG data/config split. The configuration level is laid out on first use —
-`AGENTS.md` seeded from the shipped data file, empty `agents/`, `skills/` and
-`prompts/` — and files present are never touched again.
+the default agent's `agents/default/AGENT.md` seeded from the shipped data
+file, empty `skills/` and `prompts/` — and files present are never touched again.
 
 Agent definitions: Claude Code's `agents/*.md` and OpenCode's `agent/*.md`
 carry the settings (`description`, `model`, `tools`, `permissionMode` /
@@ -632,17 +632,20 @@ in the header feed the picker, and the built-in `/compact`, the templates
 and the scripts share one `/` namespace with the template winning a tie.
 
 The prompt is a template with `{{tools}}`, `{{guidelines}}`,
-`{{environment}}` and `{{project_instructions}}` placeholders: the `ai`
-directory's root `AGENTS.md` for the default agent (the user's decision — the
-root file of the directory is the default prompt, and a global instruction
-file would only duplicate what one can write into it), the body of
-`agents/<name>/AGENT.md` for a custom agent, which falls back to the root file
-when it has none. The root file is read from the configuration level only: as
-every agent's fallback it must not be replaceable by a checked-out project,
-only by an agent the user picks; a custom agent's `AGENT.md` may live at any
-level. No
+`{{environment}}` and `{{project_instructions}}` placeholders: the body of
+`agents/<name>/AGENT.md`, the default agent's included (a global instruction
+file would only duplicate what one can write into it). An agent whose
+`AGENT.md` has no body falls back to the default agent's. The default agent
+was once the `ai` directory's root `AGENTS.md`; it became
+`agents/default/AGENT.md` so it takes front matter like any agent and no code
+path special-cases it, and the old name stopped reading as the cross-vendor
+project instruction file. It is read from the configuration level only: as
+the agent every panel starts as and every agent's fallback it must not be
+replaceable by a checked-out project, only by an agent the user picks; any
+other agent's `AGENT.md` may live at any level. An existing root `AGENTS.md`
+is moved into place on start, its seed record with it. No
 prompt text is code: the seed is the data file
-`crates/agent-core/assets/AGENTS.md` (the former fixed prompt, base
+`crates/agent-core/assets/agents/default/AGENT.md` (the former fixed prompt, base
 guidelines included), copied to the configuration on first use; code only
 fills the placeholders from tool metadata, the environment and the instruction
 files.
