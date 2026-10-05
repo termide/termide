@@ -19,7 +19,7 @@ use termide_agent_core::{
 use termide_agent_hooks::CommandHooks;
 use termide_agent_mcp::{Connections, TokenStore};
 use termide_agent_providers::{AnthropicProvider, Compat, OpenAiCompatProvider, ReasoningParam};
-use termide_agent_recall::{RecallSetup, RecallTool, RepoRoot, Solver, TimeLimits};
+use termide_agent_recall::{RecallSetup, RecallTool, RepoFinder, Solver, TimeLimits};
 use termide_agent_tools::{
     builtin_tools, BashTool, QuestionTool, SkillTool, SubagentRun, SuggestCommandTool, TaskTool,
 };
@@ -819,10 +819,6 @@ fn reviewer_setup(settings: &AiSettings, dirs: &AgentDirs) -> ReviewerSetup {
 fn recall_tool(settings: &AiSettings, dirs: &AgentDirs, project_root: &Path) -> Arc<RecallTool> {
     let project_root =
         dunce::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
-    let repos = termide_git::project_repos(&project_root)
-        .into_iter()
-        .map(|root| RepoRoot::new(root, &project_root))
-        .collect();
     let solver = settings.recall.solver.then(|| Solver {
         prompt: dirs.recall_prompt(),
         model: side_model(
@@ -835,7 +831,9 @@ fn recall_tool(settings: &AiSettings, dirs: &AgentDirs, project_root: &Path) -> 
     Arc::new(RecallTool::new(RecallSetup {
         sessions_dir: session_dir_of(&project_root),
         project_root,
-        repos,
+        // Found at each search, on the agent's thread: a repository made
+        // after the panel opened is searched too.
+        find_repos: RepoFinder::new(termide_git::project_repos),
         solver,
         time_limits: TimeLimits {
             sessions: seconds(settings.recall.sessions_timeout_secs),

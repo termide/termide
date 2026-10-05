@@ -86,14 +86,43 @@ impl std::fmt::Debug for Solver {
     }
 }
 
+/// Finds the roots of the repositories a project holds, as the git panels
+/// do, at every search: a repository created after the panel opened, or a
+/// first commit made since, is searched as well.
+#[derive(Clone)]
+pub struct RepoFinder(Arc<FindRepos>);
+
+/// What a [`RepoFinder`] calls: the project root in, the repository roots out.
+type FindRepos = dyn Fn(&Path) -> Vec<PathBuf> + Send + Sync;
+
+impl RepoFinder {
+    pub fn new(find: impl Fn(&Path) -> Vec<PathBuf> + Send + Sync + 'static) -> Self {
+        Self(Arc::new(find))
+    }
+
+    /// The repositories of the project at `project_root`.
+    fn repos(&self, project_root: &Path) -> Vec<RepoRoot> {
+        (self.0)(project_root)
+            .into_iter()
+            .map(|root| RepoRoot::new(root, project_root))
+            .collect()
+    }
+}
+
+impl std::fmt::Debug for RepoFinder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RepoFinder")
+    }
+}
+
 /// Where the tool looks.
 #[derive(Debug, Clone)]
 pub struct RecallSetup {
     pub project_root: PathBuf,
     /// The project's session logs: `<config>/ai/sessions/<project key>/`.
     pub sessions_dir: Option<PathBuf>,
-    /// The repositories the project holds, as the git panel finds them.
-    pub repos: Vec<RepoRoot>,
+    /// The repositories the project holds.
+    pub find_repos: RepoFinder,
     pub solver: Option<Solver>,
     /// How long each source may search; what a source found by its limit is
     /// ranked, and the result says which sources it stopped.
@@ -398,6 +427,7 @@ impl RecallTool {
         let patterns = text::scan_patterns(&request.queries);
         let words = text::acronyms(&request.queries);
         let identifiers = text::identifiers(&request.queries);
+        let repos = self.setup.find_repos.repos(&self.setup.project_root);
         let project_root = &self.setup.project_root;
         let cwd = request.cwd.as_deref().unwrap_or(project_root);
         let paths = PathFilter::new(&filter::project_paths(&request.paths, cwd, project_root));
@@ -453,7 +483,7 @@ impl RecallTool {
                         now,
                     };
                     Some(git::search(
-                        &self.setup.repos,
+                        &repos,
                         &query,
                         candidates,
                         started + limits.git,
@@ -474,7 +504,7 @@ impl RecallTool {
                     };
                     Some(files::search(
                         &self.setup.project_root,
-                        &self.setup.repos,
+                        &repos,
                         &query,
                         candidates,
                         started + limits.files,
@@ -582,7 +612,8 @@ impl RecallTool {
         }
         if let Some(rest) = reference.strip_prefix("commit:") {
             let (name, sha) = rest.rsplit_once('@').unwrap_or(("", rest));
-            return git::open(&self.setup.repos, name, sha, cancel).map(cut_output);
+            let repos = self.setup.find_repos.repos(&self.setup.project_root);
+            return git::open(&repos, name, sha, cancel).map(cut_output);
         }
         if let Some(rest) = reference.strip_prefix("file:") {
             let (path, line) = rest.rsplit_once(':').unwrap_or((rest, "1"));
@@ -752,7 +783,13 @@ mod tests {
         RecallSetup {
             project_root: project.to_path_buf(),
             sessions_dir: Some(sessions.to_path_buf()),
-            repos: vec![RepoRoot::new(project.to_path_buf(), project)],
+            find_repos: RepoFinder::new(|root| {
+                if root.join(".git").exists() {
+                    vec![root.to_path_buf()]
+                } else {
+                    Vec::new()
+                }
+            }),
             solver: None,
             time_limits: TimeLimits::default(),
         }
@@ -878,6 +915,31 @@ mod tests {
         assert_eq!(outcome.hits.len(), 1);
         assert_eq!(outcome.hits[0].reference, "file:walrus.rs:1");
         assert!(outcome.hits[0].label.starts_with("walrus.rs"));
+    }
+
+    #[test]
+    fn a_repository_created_after_the_tool_is_searched() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("proj");
+        std::fs::create_dir_all(&project).unwrap();
+        let tool = RecallTool::new(setup(&project, &tmp.path().join("sessions")));
+        let git_only = || SearchRequest {
+            sources: Sources {
+                sessions: false,
+                git: true,
+                files: false,
+            },
+            ..SearchRequest::new("walrus")
+        };
+        assert!(tool
+            .search(git_only(), None, &CancelToken::new())
+            .hits
+            .is_empty());
+
+        git::tests::repo_with(&project, &[("a.txt", "a", "feat: walrus parser")]);
+        let outcome = tool.search(git_only(), None, &CancelToken::new());
+        assert_eq!(outcome.hits.len(), 1);
+        assert_eq!(outcome.hits[0].label, "feat: walrus parser");
     }
 
     #[test]
