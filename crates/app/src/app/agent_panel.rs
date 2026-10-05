@@ -775,6 +775,67 @@ fn api_key_of(connection: &Connection) -> Option<String> {
         .flatten()
 }
 
+/// A side call's provider when its connection names no model: the first
+/// model the endpoint lists answers, as it does for a session. Asked once, on
+/// the first call — side calls run on the agent's thread, never the UI's, so
+/// the request may block there.
+struct FirstListedModel {
+    inner: Arc<dyn Provider>,
+    model: std::sync::OnceLock<Option<String>>,
+}
+
+impl Provider for FirstListedModel {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    fn stream(
+        &self,
+        request: &termide_agent_core::Request<'_>,
+        on_event: &mut dyn FnMut(termide_agent_core::StreamEvent),
+        cancel: &CancelToken,
+    ) -> termide_agent_core::AssistantMessage {
+        let listed = request
+            .model
+            .id
+            .trim()
+            .is_empty()
+            .then(|| {
+                self.model
+                    .get_or_init(|| resolve_model(self.inner.as_ref(), ""))
+                    .clone()
+            })
+            .flatten();
+        let Some(id) = listed else {
+            return self.inner.stream(request, on_event, cancel);
+        };
+        let model = ModelSpec {
+            id,
+            ..request.model.clone()
+        };
+        let request = termide_agent_core::Request {
+            model: &model,
+            system_prompt: request.system_prompt,
+            messages: request.messages,
+            tools: request.tools,
+            thinking: request.thinking,
+        };
+        self.inner.stream(&request, on_event, cancel)
+    }
+
+    fn endpoint(&self) -> Option<String> {
+        self.inner.endpoint()
+    }
+
+    fn list_models(&self) -> Result<Vec<termide_agent_core::ModelInfo>, String> {
+        self.inner.list_models()
+    }
+
+    fn thinking_levels(&self, model: &str) -> Vec<ThinkingLevel> {
+        self.inner.thinking_levels(model)
+    }
+}
+
 /// The model of the connection `name` for a side call (`purpose` names it in
 /// the warning): `None` when the name is empty, or matches no connection or
 /// one that drives a CLI agent — the session's model then serves.
@@ -794,7 +855,14 @@ fn side_model(
                 max_tokens: None,
                 thinking: ThinkingLevel::Off,
             };
-            Some((build_provider(connection, api_key_of(connection)), spec))
+            let mut provider = build_provider(connection, api_key_of(connection));
+            if connection.model.trim().is_empty() {
+                provider = Arc::new(FirstListedModel {
+                    inner: provider,
+                    model: std::sync::OnceLock::new(),
+                });
+            }
+            Some((provider, spec))
         }
         _ => {
             log::warn!("{purpose} names no model connection {name:?}; the session's model serves");
@@ -1832,6 +1900,70 @@ mod tests {
                 })
                 .collect())
         }
+    }
+
+    /// A provider that answers with the model it was asked for, counting how
+    /// often it listed its models.
+    struct Echoes(std::sync::atomic::AtomicUsize);
+
+    impl Provider for Echoes {
+        fn name(&self) -> &str {
+            "echoes"
+        }
+
+        fn stream(
+            &self,
+            request: &termide_agent_core::Request<'_>,
+            _: &mut dyn FnMut(termide_agent_core::StreamEvent),
+            _: &CancelToken,
+        ) -> termide_agent_core::AssistantMessage {
+            termide_agent_core::AssistantMessage::failed(
+                "echoes",
+                request.model.id.clone(),
+                termide_agent_core::StopReason::Error,
+                "echo",
+            )
+        }
+
+        fn list_models(&self) -> Result<Vec<termide_agent_core::ModelInfo>, String> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(vec![termide_agent_core::ModelInfo {
+                id: "first".into(),
+                context_window: None,
+            }])
+        }
+    }
+
+    #[test]
+    fn a_side_call_with_no_model_named_asks_the_first_listed_once() {
+        let inner = Arc::new(Echoes(std::sync::atomic::AtomicUsize::new(0)));
+        let provider = FirstListedModel {
+            inner: Arc::clone(&inner) as Arc<dyn Provider>,
+            model: std::sync::OnceLock::new(),
+        };
+        let ask = |id: &str| {
+            let model = ModelSpec {
+                provider: "agent".into(),
+                id: id.into(),
+                context_window: 0,
+                max_tokens: None,
+                thinking: ThinkingLevel::Off,
+            };
+            let request = termide_agent_core::Request {
+                model: &model,
+                system_prompt: "",
+                messages: &[],
+                tools: &[],
+                thinking: ThinkingLevel::Off,
+            };
+            provider
+                .stream(&request, &mut |_| {}, &CancelToken::new())
+                .model
+        };
+        assert_eq!(ask(""), "first");
+        assert_eq!(ask(""), "first");
+        assert_eq!(inner.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(ask("named"), "named");
     }
 
     #[test]
