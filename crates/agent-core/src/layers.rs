@@ -992,14 +992,15 @@ impl AgentDirs {
     }
 
     /// Names of the agents any root defines, the default one first: it
-    /// exists even without files.
+    /// exists even without files. A directory is an agent by its `AGENT.md`;
+    /// one without (files an agent's prompt refers to, or a layout termide
+    /// no longer reads) defines none.
     #[must_use]
     pub fn agents(&self) -> Vec<String> {
         let mut names: Vec<String> = self
             .merged_entries("agents")
-            .into_iter()
-            .filter(|(name, path)| name != DEFAULT_AGENT && path.is_dir())
-            .map(|(name, _)| name)
+            .into_keys()
+            .filter(|name| name != DEFAULT_AGENT && self.agent_file_path(name).is_some())
             .collect();
         names.insert(0, DEFAULT_AGENT.to_string());
         names
@@ -1167,6 +1168,9 @@ mod tests {
         std::fs::create_dir_all(global.join("agents/new")).unwrap();
 
         let dirs = AgentDirs::new(&project, Some(&project), Some(&global));
+        // Defined below the directory a higher root has for it, it is still
+        // an agent; a directory with no AGENT.md anywhere is not.
+        assert_eq!(dirs.agents(), [DEFAULT_AGENT, "review"]);
         assert_eq!(dirs.agent_path("review"), Some(defined.join(AGENT_FILE)));
         assert_eq!(
             dirs.agent_path("new"),
@@ -1225,7 +1229,11 @@ mod tests {
              timeout: 30\nenv.API_KEY: $MY_KEY\nenv.BASE_URL: http://localhost:8080\n---\n",
         );
         write("unclosed", "---\ncommand: run 'open\n---\n");
-        std::fs::create_dir_all(global.join("agents/bare")).unwrap();
+        write("bare", "");
+        // No AGENT.md, no agent: not one that would run with every tool.
+        let old = global.join("agents/old");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("agent.toml"), "tools = [\"read\"]\n").unwrap();
 
         let dirs = AgentDirs::new(tmp.path(), None, Some(&global));
         let spec = dirs.spec("review");
@@ -1258,7 +1266,7 @@ mod tests {
         );
         assert_eq!(dirs.spec("unclosed").acp, None);
 
-        // A directory without an AGENT.md is an agent with the defaults.
+        // An empty AGENT.md is an agent with the defaults.
         assert_eq!(dirs.spec("bare"), AgentSpec::default());
         assert_eq!(dirs.spec(DEFAULT_AGENT), AgentSpec::default());
         assert_eq!(

@@ -1101,11 +1101,12 @@ Delete a file to get the shipped version back.
 
 An agent is a directory under `agents/`. `default` is the one the panel
 starts as; only the configuration level defines it, so a project cannot
-change the agent every panel starts as. Any directory defines an agent you can
-switch to from the **Agent** status chip; the picker shows each agent's
+change the agent every panel starts as. Any directory with an `AGENT.md`
+defines an agent you can switch to from the **Agent** status chip (an empty
+file will do; a directory without one defines none); the picker shows each agent's
 description. The agent is its `AGENT.md`: the front matter sets it apart,
 every field optional, and the body is its own prompt template. An `AGENT.md`
-with no body (or none at all) speaks with the default agent's template, not
+with no body speaks with the default agent's template, not
 with its settings; the default agent without one with the shipped template.
 `prompt: none` means no system prompt at all: the model still gets the tools,
 but no instructions. The rest of the directory is the agent's own: scripts or
