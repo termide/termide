@@ -24,7 +24,7 @@ There are many ways to contribute to TermIDE:
 
 ### Prerequisites
 
-- **Rust** 1.70 or later (stable toolchain)
+- **Rust** via [rustup](https://rustup.rs/) — the exact version is pinned in `rust-toolchain.toml` and installed automatically
 - **Git** for version control
 - A terminal emulator (ideally with true color support)
 
@@ -373,39 +373,27 @@ TermIDE has a flexible theming system. You can create and contribute new themes.
 
 ### Creating a New Theme
 
-1. Create a file in `themes/your-theme-name.toml`
-2. Use existing themes as examples (see `themes/dracula.toml` or `themes/nord.toml`)
-3. Test your theme with different panels:
+1. Create `crates/theme/themes/your-theme-name.toml`, using an existing theme
+   such as `dracula.toml` or `nord.toml` as a starting point
+2. Test your theme with different panels:
    - File Manager
    - Text Editor
    - Terminal
-   - Debug panel
-4. Ensure good contrast and readability
-5. Test in both light and dark terminal backgrounds
+   - Agent
+3. Ensure good contrast and readability
+4. Test in both light and dark terminal backgrounds
 
 ### Theme Structure
 
-```toml
-[colors]
-background = "#1e1e2e"
-foreground = "#cdd6f4"
-cursor = "#f5e0dc"
-# ... more color definitions
-
-[syntax]
-keyword = "#cba6f7"
-string = "#a6e3a1"
-# ... syntax highlighting colors
-```
+The theme file format and its color keys are described in
+[doc/en/themes.md](doc/en/themes.md#theme-file-structure).
 
 ### Submitting a Theme
 
-1. Add your theme file to the `crates/theme/themes/` directory
-2. Test it thoroughly
-3. (Optional) Render its preview with `tools/screenshots/run.sh themes` and copy
+1. (Optional) Render its preview with `tools/screenshots/run.sh themes` and copy
    `tools/screenshots/out/themes/your-theme.png` to `assets/screenshots/themes/`
-4. Update the theme list in `README.md`
-5. Submit a pull request with the title: `feat: add [theme name] theme`
+2. Update the theme list in `README.md`
+3. Submit a pull request with the title: `feat: add [theme name] theme`
 
 ## File Locations
 
