@@ -10,14 +10,10 @@ use std::ops::Range;
 
 use serde_json::{json, Value};
 use similar::{DiffOp, TextDiff};
+use termide_agent_core::ToolText;
 use termide_agent_core::{CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate};
 
 use crate::args::{optional_bool, required_str, resolve_path};
-
-const DESCRIPTION: &str = "Replace text in an existing file. `old_string` must match exactly one \
-place in the file (include a few surrounding lines to make it unique), unless `replace_all` is \
-true. Whitespace differences in indentation are tolerated, but copy the text from `read` as \
-literally as you can. Returns a unified diff of the change.";
 
 /// Diffs longer than this stay in `details` only.
 const INLINE_DIFF_LIMIT: usize = 4 * 1024;
@@ -30,7 +26,7 @@ impl Tool for EditTool {
     }
 
     fn description(&self) -> &str {
-        DESCRIPTION
+        &ToolText::seed("edit").description
     }
 
     fn parameters(&self) -> Value {
@@ -47,11 +43,11 @@ impl Tool for EditTool {
     }
 
     fn prompt_snippet(&self) -> Option<&str> {
-        Some("replace a unique piece of text in a file")
+        ToolText::seed("edit").snippet.as_deref()
     }
 
-    fn prompt_guidelines(&self) -> &[&str] {
-        &["Keep `old_string` in `edit` as small as possible while still unique."]
+    fn prompt_guidelines(&self) -> &[String] {
+        &ToolText::seed("edit").guidelines
     }
 
     fn execute(

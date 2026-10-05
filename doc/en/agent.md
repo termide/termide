@@ -1075,14 +1075,16 @@ ai/
   system/plan.md           what plan mode tells the agent, and what accepting a plan sends
   system/goal.md           how the judge decides whether a /goal is reached
   system/handoff.md        how /handoff briefs the unfinished work
+  system/recall.md         how recall's solver answers from the results
   system/classify.md       what the auto mode reviewer allows and blocks
   system/permissions.md    what the model reads when a call is refused
+  tools/<name>.md          what the model is told a built-in tool does
   web/engines/<name>.toml  search engines for web_search, see Web
   web/browser/             the web tools' browser profile (config level only)
 ```
 
 The first time the panel opens, the configuration level is laid out:
-`AGENTS.md`, the `system/` files and the search engines receive the shipped
+`AGENTS.md`, the `system/` and `tools/` files and the search engines receive the shipped
 texts, `agents/`,
 `skills/`, `prompts/`, `commands/` and `shims/` are created empty. termide
 records what it shipped (in `.seeds.toml`) and keeps these files current on
@@ -1317,6 +1319,28 @@ change what a brief contains.
 answers from the search results, with the question line in its front matter
 (`request:`, `{{question}}` for the queries); the results follow it. Reword it
 to change how the answer is drawn or cited.
+
+### Tool texts
+
+What the model is told about each built-in tool is a file too:
+`tools/<name>.md` for `read`, `edit`, `write`, `bash`, `question`,
+`suggest_command`, `task`, `skill`, `fetch`, `web_search` and `recall`, seeded
+and kept current like the `system/` files, and read from the configuration
+level only. The body is the description the model sees with the tool;
+`snippet:` in the front matter is its line in the system prompt's tool list
+(leave it out to keep the tool off the list, still callable), and
+`guideline.1:`, `guideline.2:`, … are rules added to the prompt's guidelines,
+in their order. In `task.md`, `{{agents}}` is where the agents it can delegate
+to are listed. Reword a file to change how the agent uses that tool; the tool
+itself, its arguments and what it returns stay the same.
+
+```markdown
+---
+snippet: read a file as numbered lines, paged with offset/limit
+guideline.1: Use `read` instead of `cat`, `head` or `sed -n` to look at files.
+---
+Read a text file. Returns lines prefixed with their 1-based line number. …
+```
 
 ### Skills
 

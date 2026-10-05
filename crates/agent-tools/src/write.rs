@@ -1,12 +1,10 @@
 //! `write`: create or overwrite a whole file.
 
 use serde_json::{json, Value};
+use termide_agent_core::ToolText;
 use termide_agent_core::{CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate};
 
 use crate::args::{required_str, resolve_path};
-
-const DESCRIPTION: &str = "Create a file or replace its whole content. Parent directories are \
-created as needed. Use `edit` for changes inside an existing file.";
 
 pub struct WriteTool;
 
@@ -16,7 +14,7 @@ impl Tool for WriteTool {
     }
 
     fn description(&self) -> &str {
-        DESCRIPTION
+        &ToolText::seed("write").description
     }
 
     fn parameters(&self) -> Value {
@@ -31,11 +29,11 @@ impl Tool for WriteTool {
     }
 
     fn prompt_snippet(&self) -> Option<&str> {
-        Some("create a file or replace its whole content")
+        ToolText::seed("write").snippet.as_deref()
     }
 
-    fn prompt_guidelines(&self) -> &[&str] {
-        &["Use `write` only for new files or complete rewrites; prefer `edit` otherwise."]
+    fn prompt_guidelines(&self) -> &[String] {
+        &ToolText::seed("write").guidelines
     }
 
     fn execute(

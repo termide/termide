@@ -8,16 +8,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
+use termide_agent_core::ToolText;
 use termide_agent_core::{CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate};
 
 use crate::args::{optional_u64, required_str};
 use crate::clean::clean_output;
 use crate::truncate::{head_tail, SHELL_MAX_BYTES};
-
-const DESCRIPTION: &str = "Run a bash command in the working directory and return its combined \
-stdout and stderr with the exit code. Long output keeps the beginning and the end inline and \
-saves the complete log to a file whose path is reported. Commands are killed when `timeout` \
-seconds pass (default 120, maximum 600).";
 
 /// How often the accumulated output is pushed to the UI while running.
 const UPDATE_INTERVAL: Duration = Duration::from_millis(200);
@@ -58,7 +54,7 @@ impl Tool for BashTool {
     }
 
     fn description(&self) -> &str {
-        DESCRIPTION
+        &ToolText::seed("bash").description
     }
 
     fn parameters(&self) -> Value {
@@ -73,11 +69,11 @@ impl Tool for BashTool {
     }
 
     fn prompt_snippet(&self) -> Option<&str> {
-        Some("run a shell command and get its output")
+        ToolText::seed("bash").snippet.as_deref()
     }
 
-    fn prompt_guidelines(&self) -> &[&str] {
-        &["Use `bash` for searching (`rg`, `find`), listing, building and running tests; use `read` and `edit` for files."]
+    fn prompt_guidelines(&self) -> &[String] {
+        &ToolText::seed("bash").guidelines
     }
 
     fn execute(

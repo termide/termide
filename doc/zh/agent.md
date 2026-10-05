@@ -365,13 +365,15 @@ ai/
   system/plan.md           计划模式告诉代理的内容，以及接受计划时发送的内容
   system/goal.md           评审如何判定 /goal 是否达成
   system/handoff.md        /handoff 如何整理未完成工作的简报
+  system/recall.md         recall 的求解器如何根据结果作答
   system/classify.md       auto 模式审查者允许和阻止的内容
   system/permissions.md    调用被拒绝时模型读到的内容
+  tools/<name>.md          模型被告知的内置工具的作用
   web/engines/<name>.toml  web_search 的搜索引擎，见“网络”
   web/browser/             网络工具的浏览器配置文件（仅配置层级）
 ```
 
-面板首次打开时，会布置配置层级：`AGENTS.md`、`system/` 文件和搜索引擎写入自带的文本，`agents/`、`skills/`、`prompts/`、`commands/` 和 `shims/` 创建为空目录。termide 会记录它提供的内容（在 `.seeds.toml` 中），并在之后启动时保持这些文件为最新：你从未编辑过的文件会在自带版本变化时刷新，因此升级内容能到达你这里；你编辑过的文件保持不动，新的默认内容写在它旁边的 `<file>.new` 中，供你随时比较和合并。删除某个文件即可恢复自带版本。
+面板首次打开时，会布置配置层级：`AGENTS.md`、`system/` 和 `tools/` 文件以及搜索引擎写入自带的文本，`agents/`、`skills/`、`prompts/`、`commands/` 和 `shims/` 创建为空目录。termide 会记录它提供的内容（在 `.seeds.toml` 中），并在之后启动时保持这些文件为最新：你从未编辑过的文件会在自带版本变化时刷新，因此升级内容能到达你这里；你编辑过的文件保持不动，新的默认内容写在它旁边的 `<file>.new` 中，供你随时比较和合并。删除某个文件即可恢复自带版本。
 
 ### 代理
 
@@ -483,6 +485,18 @@ keep_recent_tokens = 4096   # 原样保留的最近消息（最多为窗口的�
 `/handoff` 使用 `handoff.md`：一次只读模型调用把对话记录提炼成面向后续的简报——目标、已完成的内容、剩余的工作、关键决策、相关文件以及验证方法——供新会话或另一个代理从零接手；这与 `/compact` 不同，后者总结整个对话以便就地继续。`handoff.md` 是该调用的系统提示词，请求位于其前置元数据中。简报就绪后，一张卡片提供两个选项：**保存到 HANDOFF.md 并停止**，保存在面板目录中（另一个代理，即便是读取文件的外部代理，也能接手——请将其加入 `.gitignore`）；或 **以它开始新会话**，用简报作为新会话的开端。改写 `handoff.md` 可以改变简报包含的内容。
 
 [Recall](#recall) 的求解器使用 `recall.md`：根据搜索结果作答的那次调用的系统提示词，问题行位于其前置元数据中（`request:`，`{{question}}` 表示查询）；结果跟在其后。改写它可以改变答案的得出和引用方式。
+
+### 工具文本
+
+模型被告知的每个内置工具的说明同样是文件：`read`、`edit`、`write`、`bash`、`question`、`suggest_command`、`task`、`skill`、`fetch`、`web_search` 和 `recall` 各有一个 `tools/<name>.md`，像 `system/` 文件一样写入并保持最新，且只从配置层级读取。正文是模型随工具看到的描述；前置元数据中的 `snippet:` 是它在系统提示词工具列表中的那一行（省略则该工具不进入列表，但仍可调用），`guideline.1:`、`guideline.2:`……是按顺序加入提示词准则的规则。在 `task.md` 中，`{{agents}}` 处列出可以委派的代理。改写文件即可改变代理使用该工具的方式；工具本身、它的参数和返回内容保持不变。
+
+```markdown
+---
+snippet: read a file as numbered lines, paged with offset/limit
+guideline.1: Use `read` instead of `cat`, `head` or `sed -n` to look at files.
+---
+Read a text file. Returns lines prefixed with their 1-based line number. …
+```
 
 ### 技能
 

@@ -82,6 +82,7 @@ pub fn run_agent_headless(
     if !skills.is_empty() {
         tools.insert(Arc::new(SkillTool::new(skills.clone())));
     }
+    termide_agent_core::apply_tool_texts(&mut tools, &dirs.tool_texts());
     let context_files = discover_context_files(cwd, Some(project_root), None);
     let mut options = PromptOptions::new(cwd, &tools, &context_files);
     options.skills = &skills;

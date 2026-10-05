@@ -74,8 +74,15 @@ pub trait Tool: Send + Sync {
     }
 
     /// Usage rules merged into the system prompt's guidelines section.
-    fn prompt_guidelines(&self) -> &[&str] {
+    fn prompt_guidelines(&self) -> &[String] {
         &[]
+    }
+
+    /// The description from `template` (a tool's text, see
+    /// [`crate::tool_text`]) with the tool's own placeholders filled, such as
+    /// the agents `task` can delegate to. Nothing to fill by default.
+    fn render_description(&self, template: &str) -> String {
+        template.to_string()
     }
 
     /// Run the call. Failures are returned as a result with `is_error`

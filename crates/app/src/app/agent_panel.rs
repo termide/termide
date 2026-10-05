@@ -9,12 +9,12 @@ use anyhow::Result;
 use termide_agent_acp::AcpRuntime;
 use termide_agent_core::Mode;
 use termide_agent_core::{
-    build_system_prompt, discover_context_files, ensure_global_layout, AcpConfig, AcpFlavor, Agent,
-    AgentDirs, AgentEvent, AutoDenyPrompter, CancelToken, CompactionPolicy, Decision, IntentLog,
-    Message, ModelSpec, PermissionHooks, PermissionRules, PersistScope, PromptOptions, Provider,
-    Refusals, ReviewerSetup, Session, SessionSummary, ShellOutput, ShellRunner, ThinkingLevel,
-    Tool, ToolCall, ToolContext, ToolRegistry, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR,
-    SESSIONS_DIR,
+    apply_tool_texts, build_system_prompt, discover_context_files, ensure_global_layout, AcpConfig,
+    AcpFlavor, Agent, AgentDirs, AgentEvent, AutoDenyPrompter, CancelToken, CompactionPolicy,
+    Decision, IntentLog, Message, ModelSpec, PermissionHooks, PermissionRules, PersistScope,
+    PromptOptions, Provider, Refusals, ReviewerSetup, Session, SessionSummary, ShellOutput,
+    ShellRunner, ThinkingLevel, Tool, ToolCall, ToolContext, ToolRegistry, UserMessage,
+    DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
 };
 use termide_agent_hooks::CommandHooks;
 use termide_agent_mcp::{Connections, TokenStore};
@@ -482,6 +482,8 @@ impl AgentCatalog for FsCatalog {
         if skills.is_empty() {
             tools.remove("skill");
         }
+        // The user's `ai/tools/<name>.md` texts, before the prompt lists them.
+        apply_tool_texts(&mut tools, &self.dirs.tool_texts());
         // The configuration's `ai/AGENTS.md` is the prompt template itself,
         // not an instruction file, so no global file joins the chain.
         let context_files = discover_context_files(&self.cwd, Some(&self.project_root), None);
@@ -886,6 +888,7 @@ impl Subagents {
         if !skills.is_empty() {
             tools.insert(Arc::new(SkillTool::new(skills.clone())));
         }
+        apply_tool_texts(&mut tools, &self.dirs.tool_texts());
         let context_files = discover_context_files(&self.cwd, Some(&self.project_root), None);
         let mut options = PromptOptions::new(&self.cwd, &tools, &context_files);
         options.skills = &skills;

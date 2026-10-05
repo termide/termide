@@ -14,6 +14,7 @@
 use std::sync::Arc;
 
 use serde_json::{json, Value};
+use termide_agent_core::ToolText;
 use termide_agent_core::{CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate};
 
 use crate::args::required_str;
@@ -45,23 +46,13 @@ pub struct TaskTool {
 impl TaskTool {
     #[must_use]
     pub fn new(agents: Vec<(String, String)>, run: SubagentRun) -> Self {
-        let mut description = String::from(
-            "Delegate a self-contained task to another agent. It runs on its own — reading, \
-searching and editing as its permissions allow, without asking — and returns a final report. \
-Use it to keep a focused sub-task and the files it touches out of this conversation. Give it \
-everything it needs in the prompt; it does not see our history. Available agents:",
-        );
-        for (name, desc) in &agents {
-            description.push_str(&format!("\n- {name}"));
-            if !desc.is_empty() {
-                description.push_str(&format!(": {desc}"));
-            }
-        }
-        Self {
+        let mut tool = Self {
             agents,
             run,
-            description,
-        }
+            description: String::new(),
+        };
+        tool.description = tool.render_description(&ToolText::seed("task").description);
+        tool
     }
 }
 
@@ -72,6 +63,22 @@ impl Tool for TaskTool {
 
     fn description(&self) -> &str {
         &self.description
+    }
+
+    /// `{{agents}}` takes the agents it can delegate to, one per line.
+    fn render_description(&self, template: &str) -> String {
+        let agents: Vec<String> = self
+            .agents
+            .iter()
+            .map(|(name, desc)| {
+                if desc.is_empty() {
+                    format!("- {name}")
+                } else {
+                    format!("- {name}: {desc}")
+                }
+            })
+            .collect();
+        template.replace("{{agents}}", &agents.join("\n"))
     }
 
     fn parameters(&self) -> Value {
@@ -94,7 +101,11 @@ impl Tool for TaskTool {
     }
 
     fn prompt_snippet(&self) -> Option<&str> {
-        Some("delegate a self-contained task to another agent, which reports back")
+        ToolText::seed("task").snippet.as_deref()
+    }
+
+    fn prompt_guidelines(&self) -> &[String] {
+        &ToolText::seed("task").guidelines
     }
 
     fn execute(

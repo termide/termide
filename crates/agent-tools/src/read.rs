@@ -1,16 +1,11 @@
 //! `read`: a file as numbered lines, paged with `offset` and `limit`.
 
 use serde_json::{json, Value};
+use termide_agent_core::ToolText;
 use termide_agent_core::{CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate};
 
 use crate::args::{optional_u64, required_str, resolve_path};
 use crate::truncate::{READ_MAX_BYTES, READ_MAX_LINES};
-
-const DESCRIPTION: &str =
-    "Read a text file. Returns lines prefixed with their 1-based line number. \
-Output is capped at 2000 lines or 64 KB, whichever comes first; use `offset` (first line to \
-show) and `limit` (number of lines) to page through larger files. The result ends with a note \
-when more lines remain.";
 
 pub struct ReadTool;
 
@@ -20,7 +15,7 @@ impl Tool for ReadTool {
     }
 
     fn description(&self) -> &str {
-        DESCRIPTION
+        &ToolText::seed("read").description
     }
 
     fn parameters(&self) -> Value {
@@ -36,11 +31,11 @@ impl Tool for ReadTool {
     }
 
     fn prompt_snippet(&self) -> Option<&str> {
-        Some("read a file as numbered lines, paged with offset/limit")
+        ToolText::seed("read").snippet.as_deref()
     }
 
-    fn prompt_guidelines(&self) -> &[&str] {
-        &["Use `read` instead of `cat`, `head` or `sed -n` to look at files."]
+    fn prompt_guidelines(&self) -> &[String] {
+        &ToolText::seed("read").guidelines
     }
 
     fn execute(

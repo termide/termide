@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use termide_agent_core::{CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate};
+use termide_agent_core::{
+    CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolText, ToolUpdate,
+};
 
 use crate::web::Web;
 
@@ -13,15 +15,6 @@ const MAX_BYTES: usize = 64 * 1024;
 /// Results `web_search` returns unless asked otherwise, and at most.
 const DEFAULT_RESULTS: usize = 10;
 const MAX_RESULTS: usize = 30;
-
-const FETCH_DESCRIPTION: &str = "Load a web page and return it as markdown (links made absolute; \
-scripts, navigation and footers dropped), headed by its final URL and title. Other text types \
-come back as they are; binary content is refused. Output is capped at 2000 lines or 64 KB; use \
-`offset` (first line to show) and `limit` (number of lines) to page through a long page, which \
-is not loaded again.";
-
-const SEARCH_DESCRIPTION: &str = "Search the web. Returns a numbered list of results, each with \
-its title, URL and a snippet. Read a result with `fetch`.";
 
 pub struct FetchTool {
     web: Arc<Web>,
@@ -40,7 +33,7 @@ impl Tool for FetchTool {
     }
 
     fn description(&self) -> &str {
-        FETCH_DESCRIPTION
+        &ToolText::seed("fetch").description
     }
 
     fn parameters(&self) -> Value {
@@ -56,11 +49,11 @@ impl Tool for FetchTool {
     }
 
     fn prompt_snippet(&self) -> Option<&str> {
-        Some("load a web page as markdown, paged with offset/limit")
+        ToolText::seed("fetch").snippet.as_deref()
     }
 
-    fn prompt_guidelines(&self) -> &[&str] {
-        &["Use `fetch` instead of `curl` or `wget` to read a web page."]
+    fn prompt_guidelines(&self) -> &[String] {
+        &ToolText::seed("fetch").guidelines
     }
 
     fn execute(
@@ -162,7 +155,7 @@ impl Tool for WebSearchTool {
     }
 
     fn description(&self) -> &str {
-        SEARCH_DESCRIPTION
+        &ToolText::seed("web_search").description
     }
 
     fn parameters(&self) -> Value {
@@ -177,11 +170,11 @@ impl Tool for WebSearchTool {
     }
 
     fn prompt_snippet(&self) -> Option<&str> {
-        Some("search the web; returns titles, URLs and snippets")
+        ToolText::seed("web_search").snippet.as_deref()
     }
 
-    fn prompt_guidelines(&self) -> &[&str] {
-        &["Use `web_search` to find pages on the web, then `fetch` to read the ones that matter."]
+    fn prompt_guidelines(&self) -> &[String] {
+        &ToolText::seed("web_search").guidelines
     }
 
     fn execute(

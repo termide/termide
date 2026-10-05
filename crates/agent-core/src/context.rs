@@ -226,7 +226,7 @@ pub fn build_system_prompt(options: &PromptOptions<'_>) -> String {
     let mut guidelines: Vec<&str> = Vec::new();
     for tool in options.tools.iter() {
         for guideline in tool.prompt_guidelines() {
-            if !guidelines.contains(guideline) {
+            if !guidelines.contains(&guideline.as_str()) {
                 guidelines.push(guideline);
             }
         }

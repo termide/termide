@@ -10,16 +10,12 @@
 //! template's do.
 
 use serde_json::{json, Value};
+use termide_agent_core::ToolText;
 use termide_agent_core::{
     CancelToken, SkillInfo, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate,
 };
 
 use crate::args::{optional_str, required_str};
-
-const DESCRIPTION: &str = "Load a skill: step-by-step instructions for a kind of task. The \
-system prompt lists the available skills with a one-line description each; call this with a \
-skill's name before starting on a task it covers, and its arguments when the list shows a hint \
-after the name. Returns the skill's text and the files that come with it.";
 
 pub struct SkillTool {
     skills: Vec<SkillInfo>,
@@ -38,7 +34,7 @@ impl Tool for SkillTool {
     }
 
     fn description(&self) -> &str {
-        DESCRIPTION
+        &ToolText::seed("skill").description
     }
 
     fn parameters(&self) -> Value {
@@ -54,7 +50,11 @@ impl Tool for SkillTool {
     }
 
     fn prompt_snippet(&self) -> Option<&str> {
-        Some("load a skill's instructions by name")
+        ToolText::seed("skill").snippet.as_deref()
+    }
+
+    fn prompt_guidelines(&self) -> &[String] {
+        &ToolText::seed("skill").guidelines
     }
 
     fn execute(

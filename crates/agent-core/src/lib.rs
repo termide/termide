@@ -43,6 +43,7 @@ pub mod session;
 pub mod shell;
 pub mod suggest;
 pub mod tool;
+pub mod tool_text;
 
 pub use acp::{AcpConfig, AcpFlavor};
 pub use agent::{
@@ -104,3 +105,4 @@ pub use suggest::{
     suggestion_channel, CommandSuggester, Suggestion, SuggestionEnvelope, SuggestionReply,
 };
 pub use tool::{LateTools, Tool, ToolContext, ToolRegistry, ToolUpdate};
+pub use tool_text::{apply_tool_texts, ToolText, SEED_TOOLS, TOOLS_DIR};

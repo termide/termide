@@ -734,8 +734,25 @@ the same rule as for `shims/`; `CompactionPrompts` carries them, and a
 reopened session words its old summaries with the current file. `system/` rather than `prompts/`
 because a slash template is something the user sends and a service prompt is
 not, and rather than `tools/` because compaction is the panel's operation, not
-a tool the model calls; `tools/` stays free for overriding built-in tool
-descriptions if that is ever wanted. `/compact` is a built-in slash command
+a tool the model calls; `tools/` holds the built-in tools' own texts (below).
+
+Tool texts as files: the description, the system-prompt snippet and the
+guidelines of every built-in tool were string constants in its crate. No
+other agent exposes them — Claude Code, Codex and pi compile theirs in *(pi
+lets an extension replace a tool whole)*. Decision
+(`crates/agent-core/src/tool_text.rs`): the same rule as for `system/` —
+`tools/<name>.md` per tool, the body the description, `snippet:` and numbered
+`guideline.N:` keys in flat front matter, seeded from
+`crates/agent-core/assets/tools/` and kept current by `.seeds.toml`, read from
+the configuration level only. The seeds live in agent-core, which every tool
+crate already depends on, so a tool reads its shipped text with
+`ToolText::seed(name)` and no tool crate holds prompt text. A user's file
+that differs from the seed wraps the tool (`apply_tool_texts`) when the
+registry is finished — panel, subagent and headless alike — so tools need no
+access to the directories; `Tool::render_description` lets a tool fill its own
+placeholders (`task`'s `{{agents}}`) in either text. Parameter descriptions
+in the JSON schemas and the wording of tool results stay in code: they
+describe the call's mechanics, not how the agent should use the tool. `/compact` is a built-in slash command
 next to the templates, a `Compact` worker command between runs.
 
 ## 6b. Checkpoints and undo
