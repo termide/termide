@@ -549,16 +549,6 @@ pub const AI_SUBMENU_SKILLS: usize = 2;
 /// Index of the Prompts section in the AI submenu.
 pub const AI_SUBMENU_PROMPTS: usize = 3;
 
-/// The agent file-choice submenu (third level): which file of an agent to edit.
-/// Row keys `soul`/`toml` are decoded by the app's AI menu handler.
-pub fn get_ai_agent_choice_items() -> Vec<DropdownItem> {
-    let t = i18n::t();
-    vec![
-        DropdownItem::new(t.menu_ai_edit_prompt(), "soul"),
-        DropdownItem::new(t.menu_ai_edit_settings(), "toml"),
-    ]
-}
-
 /// Get tools submenu items
 pub fn get_tools_items(kb: Option<&termide_config::GlobalKeybindings>) -> Vec<DropdownItem> {
     let t = i18n::t();

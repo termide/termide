@@ -400,8 +400,6 @@ pub trait Translation: Send + Sync {
     fn menu_ai_prompts(&self) -> &str;
     fn menu_ai_new_project(&self) -> &str;
     fn menu_ai_new_global(&self) -> &str;
-    fn menu_ai_edit_prompt(&self) -> &str;
-    fn menu_ai_edit_settings(&self) -> &str;
     fn ai_create_agent_title(&self) -> &str;
     fn ai_create_skill_title(&self) -> &str;
     fn ai_create_prompt_title(&self) -> &str;

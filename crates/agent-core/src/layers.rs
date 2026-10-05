@@ -10,9 +10,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-use crate::acp::AcpConfig;
+use crate::acp::{split_command_line, AcpConfig, AcpFlavor, DEFAULT_TIMEOUT_SECS};
 use crate::classifier::{ClassifyPrompt, SEED_CLASSIFY};
 use crate::commands::{CommandScript, COMMANDS_DIR};
 use crate::compaction::{CompactionPrompts, SEED_COMPACT, SEED_COMPACTED};
@@ -30,12 +30,12 @@ pub const GLOBAL_AGENT_DIR: &str = "ai";
 /// The `ai` directory inside a project or working directory.
 pub const PROJECT_AGENT_DIR: &str = ".termide/ai";
 /// The system prompt template of the default agent, at the root of an `ai`
-/// directory; also what a custom agent without a `SOUL.md` uses.
+/// directory; also what a custom agent whose `AGENT.md` has no body uses.
 pub const ROOT_SOUL_FILE: &str = "AGENTS.md";
-/// The system prompt template of a custom agent: `agents/<name>/SOUL.md`.
-pub const SOUL_FILE: &str = "SOUL.md";
-/// The settings of an agent: `agents/<name>/agent.toml`.
-pub const SPEC_FILE: &str = "agent.toml";
+/// The definition of a custom agent, `agents/<name>/AGENT.md`: its settings
+/// in the front matter, its system prompt template in the body. The rest of
+/// the directory is the agent's own (scripts, checklists).
+pub const AGENT_FILE: &str = "AGENT.md";
 /// The agent used when none is chosen.
 pub const DEFAULT_AGENT: &str = "default";
 /// Session logs under the `ai` directory: `sessions/<working directory>/`.
@@ -212,8 +212,8 @@ fn companion_files(dir: &Path) -> Vec<String> {
     files
 }
 
-/// Split the YAML front matter (`---` fenced `key: value` lines) off a
-/// Markdown file. Returns the fields and the body; a file without front
+/// Split the YAML front matter (`---` fenced `key: value` lines, `#` lines
+/// being comments) off a Markdown file. Returns the fields and the body; a file without front
 /// matter is all body.
 #[must_use]
 pub fn split_front_matter(text: &str) -> (BTreeMap<String, String>, &str) {
@@ -231,15 +231,34 @@ pub fn split_front_matter(text: &str) -> (BTreeMap<String, String>, &str) {
         return (fields, text);
     };
     for line in rest[..end].lines() {
+        if line.trim_start().starts_with('#') {
+            continue;
+        }
         let Some((key, value)) = line.split_once(':') else {
             continue;
         };
-        let value = value.trim().trim_matches('"').trim_matches('\'');
-        fields.insert(key.trim().to_string(), value.to_string());
+        fields.insert(key.trim().to_string(), unquote(value.trim()).to_string());
     }
     let body = &rest[end + 4..];
     let body = body.strip_prefix('\n').unwrap_or(body);
     (fields, body)
+}
+
+/// `value` without the quotes around it, when one pair of the same quote
+/// encloses the whole of it, as a quoted YAML scalar does; a value with more
+/// of that quote inside, such as the command line `"/opt/x" --name "y"`,
+/// stays as written.
+fn unquote(value: &str) -> &str {
+    for quote in ['"', '\''] {
+        if let Some(inner) = value
+            .strip_prefix(quote)
+            .and_then(|rest| rest.strip_suffix(quote))
+            .filter(|inner| !inner.contains(quote))
+        {
+            return inner;
+        }
+    }
+    value
 }
 
 /// The shipped assets written into the configuration's `ai` directory, as
@@ -379,26 +398,98 @@ pub fn ensure_global_layout(global: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// `agents/<name>/agent.toml`: what sets an agent apart from the configured
-/// defaults. Every field is optional; an absent one keeps the default.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// The front matter of `agents/<name>/AGENT.md`: what sets an agent apart
+/// from the configured defaults. Every field is optional; an absent one keeps
+/// the default.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentSpec {
-    /// One line for the agent picker.
-    #[serde(default)]
+    /// One line for the agent picker and the `task` tool: `description`.
     pub description: String,
-    /// Model id at the configured endpoint.
-    #[serde(default)]
+    /// Model id at the configured endpoint: `model`.
     pub model: Option<String>,
-    /// Permission mode the agent starts in.
-    #[serde(default)]
+    /// Permission mode the agent starts in: `mode`.
     pub mode: Option<Mode>,
-    /// Tools the agent may use, by name; all built-in tools when absent.
-    #[serde(default)]
+    /// Tools the agent may use, by name: `tools: read, bash` (or in
+    /// brackets); all built-in tools when absent, none for `tools: []`.
     pub tools: Option<Vec<String>>,
-    /// An external agent spoken to over ACP instead of the built-in loop;
-    /// `model`, `mode` and `tools` then do not apply.
-    #[serde(default)]
+    /// An external agent spoken to over ACP instead of the built-in loop:
+    /// `command` with `timeout` and `env.<NAME>`; `model`, `mode`, `tools`
+    /// and the body then do not apply.
     pub acp: Option<AcpConfig>,
+}
+
+impl AgentSpec {
+    /// Read the settings from an `AGENT.md`'s front matter; `path` names the
+    /// file in warnings. A field that does not parse is logged and left out,
+    /// the others still count.
+    fn from_front_matter(fields: &BTreeMap<String, String>, path: &Path) -> Self {
+        let warn = |field: &str, error: &dyn std::fmt::Display| {
+            log::warn!("{}: ignoring `{field}`: {error}", path.display());
+        };
+        let text = |field: &str| {
+            fields
+                .get(field)
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+        };
+        let mode = text("mode").and_then(|value| {
+            let parsed = Mode::deserialize(serde::de::value::StrDeserializer::<
+                serde::de::value::Error,
+            >::new(value));
+            parsed.map_err(|error| warn("mode", &error)).ok()
+        });
+        let tools = text("tools").map(|value| {
+            let list = value
+                .strip_prefix('[')
+                .and_then(|inner| inner.strip_suffix(']'))
+                .unwrap_or(value);
+            list.split(',')
+                .map(|tool| unquote(tool.trim()).to_string())
+                .filter(|tool| !tool.is_empty())
+                .collect()
+        });
+        let acp = text("command").and_then(|line| {
+            let mut words = split_command_line(line)
+                .map_err(|error| warn("command", &error))
+                .ok()?;
+            let command = words.remove(0);
+            let timeout_secs = text("timeout").map_or(DEFAULT_TIMEOUT_SECS, |value| {
+                value.parse().unwrap_or_else(|error| {
+                    warn("timeout", &error);
+                    DEFAULT_TIMEOUT_SECS
+                })
+            });
+            let env = fields
+                .iter()
+                .filter_map(|(key, value)| {
+                    let name = key.strip_prefix("env.")?;
+                    (!name.is_empty()).then(|| (name.to_string(), value.clone()))
+                })
+                .collect();
+            Some(AcpConfig {
+                command,
+                args: words,
+                env,
+                timeout_secs,
+                flavor: AcpFlavor::Generic,
+            })
+        });
+        let spec = Self {
+            description: text("description").unwrap_or_default().to_string(),
+            model: text("model").map(str::to_string),
+            mode,
+            tools,
+            acp,
+        };
+        if spec.acp.is_some() {
+            for field in ["model", "mode", "tools"] {
+                if fields.contains_key(field) {
+                    warn(field, &"an external agent (`command`) does not use it");
+                }
+            }
+        }
+        spec
+    }
 }
 
 /// An agent as the roots define it: its prompt template and its settings,
@@ -747,27 +838,30 @@ impl AgentDirs {
         entries
     }
 
-    /// The settings of `agent`; defaults when no root has an `agent.toml`
-    /// or the file does not parse (which is logged).
-    #[must_use]
-    pub fn spec(&self, agent: &str) -> AgentSpec {
-        let Some(path) = self.find_file(Path::new("agents").join(agent).join(SPEC_FILE)) else {
-            return AgentSpec::default();
-        };
-        let text = match std::fs::read_to_string(&path) {
-            Ok(text) => text,
+    /// The `AGENT.md` of `agent` in the highest root that has one, with its
+    /// text; `None` for the default agent, which has no file of its own, and
+    /// when no root has one or it cannot be read (which is logged).
+    fn agent_file(&self, agent: &str) -> Option<(PathBuf, String)> {
+        if agent == DEFAULT_AGENT {
+            return None;
+        }
+        let path = self.find_file(Path::new("agents").join(agent).join(AGENT_FILE))?;
+        match std::fs::read_to_string(&path) {
+            Ok(text) => Some((path, text)),
             Err(error) => {
                 log::warn!("cannot read {}: {error}", path.display());
-                return AgentSpec::default();
-            }
-        };
-        match toml::from_str(&text) {
-            Ok(spec) => spec,
-            Err(error) => {
-                log::warn!("ignoring {}: {error}", path.display());
-                AgentSpec::default()
+                None
             }
         }
+    }
+
+    /// The settings of `agent` from its `AGENT.md`'s front matter; defaults
+    /// without one.
+    #[must_use]
+    pub fn spec(&self, agent: &str) -> AgentSpec {
+        self.agent_file(agent)
+            .map(|(path, text)| AgentSpec::from_front_matter(&split_front_matter(&text).0, &path))
+            .unwrap_or_default()
     }
 
     /// Prompt template and settings of `agent` together.
@@ -817,25 +911,33 @@ impl AgentDirs {
         self.find_file(Path::new(PROMPTS_DIR).join(format!("{name}.md")))
     }
 
-    /// The system prompt template of `agent`: its own `agents/<name>/SOUL.md`
-    /// when a root has one, else the configuration level's root `AGENTS.md`
-    /// (which is all the default agent has). The root template is the
-    /// fallback for every agent, so a project cannot replace it: only an
-    /// agent the user picks brings a template of its own. A file that exists
-    /// is the template even when empty: an empty one means no system prompt,
-    /// not the shipped one.
+    /// The system prompt template of `agent`: the body of its own
+    /// `AGENT.md` when that has one, else the configuration level's root
+    /// `AGENTS.md` (which is all the default agent has). The root template is
+    /// the fallback for every agent, so a project cannot replace it: only an
+    /// agent the user picks brings a template of its own. `prompt: none` in
+    /// the front matter means no system prompt at all, not the shipped one.
     #[must_use]
     pub fn soul(&self, agent: &str) -> Option<String> {
-        let own = (agent != DEFAULT_AGENT)
-            .then(|| self.find_file(Path::new("agents").join(agent).join(SOUL_FILE)))
-            .flatten();
-        let root = || {
-            self.global
-                .as_ref()
-                .map(|global| global.join(ROOT_SOUL_FILE))
-                .filter(|path| path.is_file())
-        };
-        let path = own.or_else(root)?;
+        if let Some((path, text)) = self.agent_file(agent) {
+            let (fields, body) = split_front_matter(&text);
+            match fields.get("prompt").map(|value| value.trim()) {
+                Some("none") => return Some(String::new()),
+                None | Some("") => {}
+                Some(other) => log::warn!(
+                    "{}: ignoring `prompt: {other}`: only `none` is known",
+                    path.display()
+                ),
+            }
+            if !body.trim().is_empty() {
+                return Some(body.to_string());
+            }
+        }
+        let path = self
+            .global
+            .as_ref()
+            .map(|global| global.join(ROOT_SOUL_FILE))
+            .filter(|path| path.is_file())?;
         match std::fs::read_to_string(&path) {
             Ok(text) => Some(text),
             Err(error) => {
@@ -859,11 +961,11 @@ mod tests {
         for (root, name, body) in [
             (&cwd, "AGENTS.md", "sub soul"),
             (&global, "AGENTS.md", "global soul"),
-            (&project, "agents/review/SOUL.md", "review"),
+            (&project, "agents/review/AGENT.md", "review"),
             (
                 &project,
-                "agents/bare/agent.toml",
-                "description = \"no soul\"",
+                "agents/bare/AGENT.md",
+                "---\ndescription: no soul\n---\n\n",
             ),
             (&cwd, "skills/a/SKILL.md", "a from sub"),
             (&project, "skills/a/SKILL.md", "a from project"),
@@ -887,16 +989,16 @@ mod tests {
         assert_eq!(dirs.soul(DEFAULT_AGENT).as_deref(), Some("global soul"));
         // A picked agent brings its own, from any level.
         assert_eq!(dirs.soul("review").as_deref(), Some("review"));
-        // An agent without a SOUL.md speaks with the root template.
+        // An agent whose AGENT.md has no body speaks with the root template.
         assert_eq!(dirs.soul("bare").as_deref(), Some("global soul"));
         assert_eq!(
             AgentDirs::new(&project, None, None).soul(DEFAULT_AGENT),
             None
         );
-        // An empty SOUL.md is an empty template, not a missing one.
+        // `prompt: none` is no system prompt, not the shipped one.
         let blank = global.join("agents/blank");
         std::fs::create_dir_all(&blank).unwrap();
-        std::fs::write(blank.join(SOUL_FILE), "").unwrap();
+        std::fs::write(blank.join(AGENT_FILE), "---\nprompt: none\n---\nignored\n").unwrap();
         assert_eq!(dirs.soul("blank").as_deref(), Some(""));
 
         let skills = dirs.merged_entries("skills");
@@ -952,36 +1054,97 @@ mod tests {
         assert_eq!(dirs.prompt_path("missing"), None);
     }
     #[test]
-    fn agent_settings_come_from_agent_toml_and_default_otherwise() {
+    fn agent_settings_come_from_the_front_matter_and_default_otherwise() {
         let tmp = tempfile::tempdir().unwrap();
         let global = tmp.path().join("ai");
-        let review = global.join("agents/review");
-        std::fs::create_dir_all(&review).unwrap();
-        std::fs::write(
-            review.join(SPEC_FILE),
-            "description = \"Reviews diffs\"\nmodel = \"big\"\nmode = \"accept-edits\"\ntools = [\"read\", \"bash\"]\n",
-        )
-        .unwrap();
-        let broken = global.join("agents/broken");
-        std::fs::create_dir_all(&broken).unwrap();
-        std::fs::write(broken.join(SPEC_FILE), "mode = 42\n").unwrap();
+        let write = |name: &str, text: &str| {
+            let dir = global.join("agents").join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(AGENT_FILE), text).unwrap();
+        };
+        write(
+            "review",
+            "---\ndescription: Reviews diffs: risks first\nmodel: big\nmode: accept-edits\n\
+             tools: read, bash\n---\nYou review.\n\n{{tools}}\n",
+        );
+        write("bracketed", "---\ntools: [\"read\", 'bash']\n---\n");
+        write("toolless", "---\ntools: []\n---\n");
+        // A field that does not parse is dropped; the others still count.
+        write("broken", "---\ndescription: still read\nmode: 42\n---\n");
+        write(
+            "claude",
+            "---\ndescription: Claude Code\n\
+             command: \"/opt/my agent/acp\" --name 'two words'\n\
+             timeout: 30\nenv.API_KEY: $MY_KEY\nenv.BASE_URL: http://localhost:8080\n---\n",
+        );
+        write("unclosed", "---\ncommand: run 'open\n---\n");
+        std::fs::create_dir_all(global.join("agents/bare")).unwrap();
 
         let dirs = AgentDirs::new(tmp.path(), None, Some(&global));
         let spec = dirs.spec("review");
-        assert_eq!(spec.description, "Reviews diffs");
+        assert_eq!(spec.description, "Reviews diffs: risks first");
         assert_eq!(spec.model.as_deref(), Some("big"));
         assert_eq!(spec.mode, Some(Mode::Edit));
+        let read_bash = Some(vec!["read".to_string(), "bash".to_string()]);
+        assert_eq!(spec.tools, read_bash);
+        assert!(spec.acp.is_none());
         assert_eq!(
-            spec.tools,
-            Some(vec!["read".to_string(), "bash".to_string()])
+            dirs.soul("review").as_deref(),
+            Some("You review.\n\n{{tools}}\n")
         );
-        assert_eq!(dirs.spec("broken"), AgentSpec::default());
+        assert_eq!(dirs.spec("bracketed").tools, read_bash);
+        assert_eq!(dirs.spec("toolless").tools, Some(Vec::new()));
+        let broken = dirs.spec("broken");
+        assert_eq!(broken.description, "still read");
+        assert_eq!(broken.mode, None);
+
+        let acp = dirs.spec("claude").acp.unwrap();
+        assert_eq!(acp.command, "/opt/my agent/acp");
+        assert_eq!(acp.args, ["--name", "two words"]);
+        assert_eq!(acp.timeout_secs, 30);
+        assert_eq!(
+            acp.env.into_iter().collect::<Vec<_>>(),
+            [
+                ("API_KEY".to_string(), "$MY_KEY".to_string()),
+                ("BASE_URL".to_string(), "http://localhost:8080".to_string()),
+            ]
+        );
+        assert_eq!(dirs.spec("unclosed").acp, None);
+
+        // A directory without an AGENT.md is an agent with the defaults.
+        assert_eq!(dirs.spec("bare"), AgentSpec::default());
         assert_eq!(dirs.spec(DEFAULT_AGENT), AgentSpec::default());
-        assert_eq!(dirs.agents(), ["default", "broken", "review"]);
-        let definition = dirs.agent("review");
-        assert_eq!(definition.name, "review");
+        assert_eq!(
+            dirs.agents(),
+            [
+                "default",
+                "bare",
+                "bracketed",
+                "broken",
+                "claude",
+                "review",
+                "toolless",
+                "unclosed"
+            ]
+        );
+        let definition = dirs.agent("bare");
+        assert_eq!(definition.name, "bare");
         assert!(definition.soul.is_none());
     }
+
+    #[test]
+    fn front_matter_values_lose_only_enclosing_quotes() {
+        let (fields, _) = split_front_matter(
+            "---\na: \"quoted\"\nb: 'single'\nc: \"/opt/x\" --name \"y\"\nd: plain\n\
+             # model: off\n---\n",
+        );
+        assert_eq!(fields["a"], "quoted");
+        assert_eq!(fields["b"], "single");
+        assert_eq!(fields["c"], "\"/opt/x\" --name \"y\"");
+        assert_eq!(fields["d"], "plain");
+        assert_eq!(fields.len(), 4);
+    }
+
     #[test]
     fn the_global_layout_is_created_once_and_never_overwritten() {
         let tmp = tempfile::tempdir().unwrap();

@@ -119,10 +119,6 @@ impl App {
 
     /// Handle a key in a section's item list.
     fn handle_ai_nested_submenu_key(&mut self, key: crossterm::event::KeyEvent) -> Result<()> {
-        // The agent file-choice (third level) takes keys while it is open.
-        if self.state.ui.ai_agent_choice.open {
-            return self.handle_ai_agent_choice_key(key);
-        }
         let Some(section) = self.state.ui.current_ai_section else {
             self.state.close_ai_nested_submenu();
             return Ok(());
@@ -175,7 +171,12 @@ impl App {
         if let Some(name) = key.strip_prefix("item:") {
             let name = name.to_string();
             match section {
-                AiSection::Agents => self.toggle_ai_agent_choice(&name),
+                AiSection::Agents => {
+                    if let Some(dir) = self.state.ai_dirs().agent_dir(&name) {
+                        self.state.close_menu();
+                        self.open_path_in_editor(dir.join(termide_agent_core::AGENT_FILE))?;
+                    }
+                }
                 AiSection::Skills => {
                     if let Some(path) = self
                         .state
@@ -204,53 +205,6 @@ impl App {
             self.ai_open_session(PathBuf::from(path))?;
         }
         Ok(())
-    }
-
-    /// Open, or toggle shut, the agent file-choice submenu (third level).
-    fn toggle_ai_agent_choice(&mut self, name: &str) {
-        if self.state.ui.ai_agent_choice.open
-            && self.state.ui.current_ai_agent.as_deref() == Some(name)
-        {
-            self.state.close_ai_agent_choice();
-        } else {
-            self.state.open_ai_agent_choice(name.to_string());
-        }
-    }
-
-    /// Handle a key in the agent file-choice submenu.
-    fn handle_ai_agent_choice_key(&mut self, key: crossterm::event::KeyEvent) -> Result<()> {
-        let count = termide_ui_render::get_ai_agent_choice_items().len();
-        match navigate_submenu(&key, &mut self.state.ui.ai_agent_choice, count, &[]) {
-            SubmenuNavAction::Close | SubmenuNavAction::Left => self.state.close_ai_agent_choice(),
-            SubmenuNavAction::Execute | SubmenuNavAction::Edit => {
-                self.execute_ai_agent_choice_action()?;
-            }
-            SubmenuNavAction::Right => self.switch_to_next_menu()?,
-            _ => {}
-        }
-        Ok(())
-    }
-
-    /// Open the agent file chosen in the third-level submenu.
-    pub(in crate::app) fn execute_ai_agent_choice_action(&mut self) -> Result<()> {
-        let Some(agent) = self.state.ui.current_ai_agent.clone() else {
-            return Ok(());
-        };
-        let items = termide_ui_render::get_ai_agent_choice_items();
-        let settings = items
-            .get(self.state.ui.ai_agent_choice.selected)
-            .map(|i| i.key == "toml")
-            .unwrap_or(false);
-        let Some(dir) = self.state.ai_dirs().agent_dir(&agent) else {
-            return Ok(());
-        };
-        let file = if settings {
-            dir.join("agent.toml")
-        } else {
-            dir.join("SOUL.md")
-        };
-        self.state.close_menu();
-        self.open_path_in_editor(file)
     }
 
     /// Open a session log: focus the agent panel already showing it, else open
@@ -445,13 +399,15 @@ impl App {
                     None
                 } else {
                     std::fs::create_dir_all(&dir)?;
+                    let file = dir.join(termide_agent_core::AGENT_FILE);
                     std::fs::write(
-                        dir.join("agent.toml"),
-                        "description = \"\"\n# model = \"\"\n# mode = \"ask\"\n",
+                        &file,
+                        format!(
+                            "---\ndescription: \n# model: \n# mode: ask\n---\n\
+                             You are {name}.\n\n{{{{tools}}}}\n"
+                        ),
                     )?;
-                    let soul = dir.join("SOUL.md");
-                    std::fs::write(&soul, format!("You are {name}.\n\n{{{{tools}}}}\n"))?;
-                    Some(soul)
+                    Some(file)
                 }
             }
             AiSection::Skills => {

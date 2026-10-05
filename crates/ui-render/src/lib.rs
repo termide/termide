@@ -12,14 +12,13 @@ pub mod status_bar;
 pub mod theme_dropdown;
 
 pub use dropdown::{
-    dropdown_geometry, dropdown_width, get_ai_agent_choice_items, get_ai_items,
-    get_bookmarks_group_items, get_bookmarks_item_count, get_bookmarks_items,
-    get_commands_group_items, get_commands_items, get_operation_action_menu_items,
-    get_options_items, get_panel_action_menu_items, get_projects_items, get_shell_items,
-    get_stash_items, get_tools_items, operation_action_dropdown_position,
-    panel_action_dropdown_position, Dropdown, DropdownItem, ListGeometry, AI_BROWSER_KEY,
-    AI_SUBMENU_AGENTS, AI_SUBMENU_ITEM_COUNT, AI_SUBMENU_PROMPTS, AI_SUBMENU_SESSIONS,
-    AI_SUBMENU_SKILLS, BOOKMARK_ADD_CURRENT, COMMAND_ADD_NEW, COMMAND_MANAGE,
+    dropdown_geometry, dropdown_width, get_ai_items, get_bookmarks_group_items,
+    get_bookmarks_item_count, get_bookmarks_items, get_commands_group_items, get_commands_items,
+    get_operation_action_menu_items, get_options_items, get_panel_action_menu_items,
+    get_projects_items, get_shell_items, get_stash_items, get_tools_items,
+    operation_action_dropdown_position, panel_action_dropdown_position, Dropdown, DropdownItem,
+    ListGeometry, AI_BROWSER_KEY, AI_SUBMENU_AGENTS, AI_SUBMENU_ITEM_COUNT, AI_SUBMENU_PROMPTS,
+    AI_SUBMENU_SESSIONS, AI_SUBMENU_SKILLS, BOOKMARK_ADD_CURRENT, COMMAND_ADD_NEW, COMMAND_MANAGE,
     OPERATION_ACTION_CANCEL, OPERATION_ACTION_PAUSE, OPERATION_ACTION_RESUME,
     OPTIONS_SUBMENU_LANGUAGE, OPTIONS_SUBMENU_THEMES, PANEL_ACTION_CLOSE, PANEL_ACTION_MOVE_DOWN,
     PANEL_ACTION_MOVE_LEFT, PANEL_ACTION_MOVE_RIGHT, PANEL_ACTION_MOVE_UP, PANEL_ACTION_SPLIT,

@@ -1,9 +1,9 @@
 //! System prompt composition and project instruction discovery.
 //!
-//! The prompt is a template — the agent's `SOUL.md` — with placeholders the
-//! builder fills: `{{tools}}` (the tool list with one-line snippets),
-//! `{{guidelines}}` (the rules the tools contribute), `{{skills}}` (the
-//! skills by name and description), `{{environment}}` and
+//! The prompt is a template — the body of the agent's `AGENT.md` — with
+//! placeholders the builder fills: `{{tools}}` (the tool list with one-line
+//! snippets), `{{guidelines}}` (the rules the tools contribute), `{{skills}}`
+//! (the skills by name and description), `{{environment}}` and
 //! `{{project_instructions}}`. No prompt text lives in code: the seed
 //! template is the data file `assets/AGENTS.md`, written to the
 //! configuration directory as `ai/AGENTS.md` on first use and read from

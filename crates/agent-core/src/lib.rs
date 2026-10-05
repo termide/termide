@@ -69,9 +69,9 @@ pub use handoff::{HandoffPrompt, SEED_HANDOFF};
 pub use hooks::{HookConfig, HookEvent, HOOKS_FILE};
 pub use layers::{
     ensure_global_layout, expand_arguments, split_front_matter, AgentDefinition, AgentDirs,
-    AgentSpec, LoadedSkill, PromptTemplate, SkillInfo, BROWSER_PROFILE_DIR, DEFAULT_AGENT,
-    GLOBAL_AGENT_DIR, PROJECT_AGENT_DIR, PROMPTS_DIR, ROOT_SOUL_FILE, SEED_ENGINES, SESSIONS_DIR,
-    SHARED_SKILLS_DIR, SHIMS_DIR, SKILLS_DIR, SKILL_FILE, SOUL_FILE, SPEC_FILE, SYSTEM_DIR,
+    AgentSpec, LoadedSkill, PromptTemplate, SkillInfo, AGENT_FILE, BROWSER_PROFILE_DIR,
+    DEFAULT_AGENT, GLOBAL_AGENT_DIR, PROJECT_AGENT_DIR, PROMPTS_DIR, ROOT_SOUL_FILE, SEED_ENGINES,
+    SESSIONS_DIR, SHARED_SKILLS_DIR, SHIMS_DIR, SKILLS_DIR, SKILL_FILE, SYSTEM_DIR,
     WEB_ENGINES_DIR,
 };
 pub use mcp::{

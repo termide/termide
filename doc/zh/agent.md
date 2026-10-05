@@ -261,7 +261,7 @@ mode = "auto"       # ask | plan | edit | configured | auto（默认）| all —
 
 ### 计划模式
 
-对于希望在改动任何一行之前先看到完整思路的任务，切换到 **plan**（通过标签、`Shift+Tab`，或 `agent.toml` 中写有 `mode = "plan"` 的代理）。开启期间，`system/plan.md` 中的指示会加入系统提示词，每个可能改变内容的工具调用都会被拒绝，并附上一条模型会读取的消息，无论规则、本会话的回答或钩子的批准如何：`edit`、`write`、MCP 工具，以及任何不在只读列表中的 shell 命令。读取项目内文件、网络和 `skill` 无需询问即可运行；读取项目外文件会询问。
+对于希望在改动任何一行之前先看到完整思路的任务，切换到 **plan**（通过标签、`Shift+Tab`，或 `AGENT.md` 中写有 `mode: plan` 的代理）。开启期间，`system/plan.md` 中的指示会加入系统提示词，每个可能改变内容的工具调用都会被拒绝，并附上一条模型会读取的消息，无论规则、本会话的回答或钩子的批准如何：`edit`、`write`、MCP 工具，以及任何不在只读列表中的 shell 命令。读取项目内文件、网络和 `skill` 无需询问即可运行；读取项目外文件会询问。
 
 代理作答后，一张卡片会询问如何处理该计划：
 
@@ -297,17 +297,17 @@ mode = "auto"       # ask | plan | edit | configured | auto（默认）| all —
 auto_reviewer = "haiku"   # 连接名称；留空则由会话的模型审查
 ```
 
-审查者同样审查委派的工作：子代理的调用会依据你的话和交给它的任务（标记为另一个代理的话）来审查。无界面运行也以同样方式使用它，只是在面板会询问的地方改为拒绝。外部（`[acp]`）代理把对话留在自己那里，因此在 `auto` 中它的请求像 `configured` 中那样询问。
+审查者同样审查委派的工作：子代理的调用会依据你的话和交给它的任务（标记为另一个代理的话）来审查。无界面运行也以同样方式使用它，只是在面板会询问的地方改为拒绝。外部（带 `command` 的）代理把对话留在自己那里，因此在 `auto` 中它的请求像 `configured` 中那样询问。
 
 ## AI 菜单
 
 顶部菜单栏中的 **AI** 菜单（位于 **项目** 之后）无需打开面板即可管理代理的资源。它有四个部分——**代理**、**会话**、**技能**、**提示词**——每个部分打开一个用 `↑`/`↓` 浏览的列表；方向键、`Enter` 和鼠标的用法与 **命令** 菜单相同。来自项目（粗体）和全局配置的项合并显示在一起（见[代理目录](#代理目录)）。
 
-- `Enter`（或 `F4`）用于编辑：它在编辑器中打开技能的 `SKILL.md` 或提示词的 `.md`；代理会打开下一级子菜单，用于编辑提示词（`SOUL.md`）或设置（`agent.toml`）；会话则恢复——聚焦已显示它的面板，没有时打开一个新的代理面板。
+- `Enter`（或 `F4`）用于编辑：它在编辑器中打开技能的 `SKILL.md` 或提示词的 `.md`；代理同样打开其 `AGENT.md`；会话则恢复——聚焦已显示它的面板，没有时打开一个新的代理面板。
 - `Delete` 删除该项（需确认）；`F2` 重命名它（对会话而言是设置其显示名称）。会话的确认框会显示会话名称（其显示名称、第一个提示或“无标题”）及其 ID。
 - 代理、技能和提示词的前两行用于创建新项——**新建（项目内）…** 位于 `.termide/ai/` 下，**新建（全局）…** 位于配置目录下——询问名称并打开新文件。会话通过运行代理创建，因此没有创建行。
 - 每个会话行右侧以暗淡文字显示最后一次工作的时间（例如“2 小时前”）。
-- 带描述的代理、技能或提示词显示为 `名称 · 描述`（代理取 `agent.toml` 中的 `description`，`SKILL.md` 或提示词取 front matter 中的 `description`）；菜单放不下的行以 `…` 结尾。
+- 带描述的代理、技能或提示词显示为 `名称 · 描述`（取 `AGENT.md`、`SKILL.md` 或提示词 front matter 中的 `description`）；菜单放不下的行以 `…` 结尾。
 
 在各部分下方，打开过代理面板后，**显示浏览器窗口** 会把代理的网络浏览器显示在屏幕上以便观看其工作（见[网络](#网络)），**隐藏浏览器窗口** 则再次将其隐藏。
 
@@ -324,8 +324,7 @@ auto_reviewer = "haiku"   # 连接名称；留空则由会话的模型审查
 ```
 ai/
   AGENTS.md                默认代理的系统提示词模板
-  agents/<name>/SOUL.md    自定义代理的模板（可选）
-  agents/<name>/agent.toml 代理的其他差异化设置（可选）
+  agents/<name>/AGENT.md   自定义代理：设置和提示词模板
   skills/<name>/SKILL.md   技能，见下文
   prompts/<name>.md        提示词模板，以 /name 输入
   commands/<name>          命令脚本，以 /name 输入，见下文
@@ -348,14 +347,21 @@ ai/
 
 ### 代理
 
-代理是 `agents/` 下的一个目录。`default` 是面板启动时使用的代理；它没有目录，使用 `ai/AGENTS.md`。任何目录都定义一个代理，你可以通过 **Agent** 状态标签切换到它；选择器会显示每个代理的描述。其中的 `SOUL.md` 是该代理自己的模板；没有时它也使用 `ai/AGENTS.md`。旁边可以放一个 `agent.toml`，可设置以下字段（均为可选）：
+代理是 `agents/` 下的一个目录。`default` 是面板启动时使用的代理；它没有目录，使用 `ai/AGENTS.md`。任何目录都定义一个代理，你可以通过 **Agent** 状态标签切换到它；选择器会显示每个代理的描述。代理就是它的 `AGENT.md`：front matter 设置它与默认值的不同之处（所有字段均为可选），正文是它自己的提示词模板。没有正文（或根本没有该文件）的 `AGENT.md` 使用 `ai/AGENTS.md`；`prompt: none` 表示完全没有系统提示词：模型仍然获得工具，但没有指示。空的 `ai/AGENTS.md` 对默认代理有同样效果。目录中的其余内容归该代理所有：其提示词引用的脚本或检查清单。
 
-```toml
-description = "Reviews diffs and points at risks"
-model = "Qwen3.8-27B-MTPLX-Optimized-Quality"   # 位于配置的端点
-mode = "edit"                                    # ask | plan | edit | configured | auto | all
-tools = ["read", "bash"]                         # 内置工具的子集
+```markdown
+---
+description: Reviews diffs and points at risks
+model: Qwen3.8-27B-MTPLX-Optimized-Quality
+mode: edit
+tools: read, bash
+---
+You review the changes you are given. …
+
+{{tools}}
 ```
+
+front matter 由 `键: 值` 行组成；以 `#` 开头的行是注释，值可以加引号。`model` 是配置端点上的模型 id；`mode` 是代理启动时的权限模式（`ask`、`plan`、`edit`、`configured`、`auto` 或 `all`）；`tools` 以逗号分隔列出代理保留的内置工具（列表也可以放在方括号中），包括 `task`；没有该字段时代理拥有全部工具，`tools: []` 则一个也不保留。
 
 在会话中途切换代理会为下一个请求替换提示词和工具；只有当定义中指定了模型和模式时，它们才会改变。会话日志会记录这次切换，与 **Model** 标签的切换一样。重新打开的会话会以它最后运行时的代理身份恢复，保存的布局也会记住它。
 
@@ -363,26 +369,26 @@ tools = ["read", "bash"]                         # 内置工具的子集
 
 当有多个代理时，每个使用内置循环的代理都会获得一个 `task` 工具，用于把一项自包含的工作交给另一个代理。受托代理运行自己的循环直到结束——使用自己的提示词、自己的工具、自己的模型——其最终回答作为该工具的结果返回；它沿途的步骤和读取的文件都不会进入主对话。这让简洁的审查者或专注的搜索者可以完成工作而不填满会话，类似于 Claude Code 的 `Task` 工具和 OpenCode 的子会话。
 
-受托代理看不到对话，因此调用方代理必须把一切都写进提示中。它在会话的当前模式下运行（除非其 `agent.toml` 指定了模式），且没有可询问的人，因此只能做规则和该模式已经允许的事：任何原本需要询问的操作都会被拒绝，并附上它会读取的原因；在 `auto` 中，这些调用改由审查者决定。外部（`[acp]`）代理不能作为受托代理，子代理本身也没有 `task` 工具，因此委派不会嵌套。停不下来的运行会在五十次模型调用后被截断。
+受托代理看不到对话，因此调用方代理必须把一切都写进提示中。它在会话的当前模式下运行（除非其 `AGENT.md` 指定了模式），且没有可询问的人，因此只能做规则和该模式已经允许的事：任何原本需要询问的操作都会被拒绝，并附上它会读取的原因；在 `auto` 中，这些调用改由审查者决定。外部代理（带 `command` 的）不能作为受托代理，子代理本身也没有 `task` 工具，因此委派不会嵌套。停不下来的运行会在五十次模型调用后被截断。
 
 ### 外部代理
 
-代理也可以完全是另一个程序：在其 `agent.toml` 中放入一个 `[acp]` 表，面板就会通过 [Agent Client Protocol](https://agentclientprotocol.com) 驱动它，而不是运行内置循环。Claude Code、Codex 和 Gemini CLI 都有 ACP 适配器或原生支持该协议：
+代理也可以完全是另一个程序：在其 `AGENT.md` 的 front matter 中写入 `command`，面板就会通过 [Agent Client Protocol](https://agentclientprotocol.com) 驱动它，而不是运行内置循环。Claude Code、Codex 和 Gemini CLI 都有 ACP 适配器或原生支持该协议：
 
-```toml
-description = "Claude Code through its ACP adapter"
-
-[acp]
-command = "npx"
-args = ["-y", "@agentclientprotocol/claude-agent-acp"]
-env = { ANTHROPIC_API_KEY = "$ANTHROPIC_API_KEY" }
+```markdown
+---
+description: Claude Code through its ACP adapter
+command: npx -y @agentclientprotocol/claude-agent-acp
+---
 ```
 
-切换到该代理时，程序在后台启动；第一个请求会等待它。它的回答、思考和工具调用像内置代理一样出现在会话中，它通过 TermIDE 读写文件，因此打开的编辑器会跟随它的编辑。它的权限请求按与内置代理相同的规则判断：只读命令，或已被 `[ai.permissions]` 规则或会话授权覆盖的请求，无需卡片即可通过，只有剩下的才会交给你——因此已授权或只读的命令从不会被询问两次。外部代理活动期间 **权限** 标签会消失：它有自己的模式，TermIDE 的模式不会为它循环切换。当代理通过 ACP 公布其模型时，**Model** 标签保留——此时它会列出这些模型并用 `session/set_model` 切换，因此你可以在 TermIDE 中选择代理的模型；不公布模型的代理不显示该标签。技能、提示词模板和 MCP 服务器同样由代理自行负责；`agent.toml` 中的 `model`、`mode` 和 `tools` 不适用。切换代理会在同一会话日志上重建对话：之前的消息仍显示在屏幕上，但外部代理并不知道它们，面板会说明这一点。
+`command` 是程序及其参数，按 shell 的方式拆分为单词（引号保留参数中的空格），但不经过 shell 运行，因此其中的内容不会被展开。程序继承 TermIDE 的环境；每个变量一行 `env.<NAME>: value`，用于添加或覆盖变量，值中的 `$NAME` 和 `${NAME}` 取自 TermIDE 的环境（`env.ANTHROPIC_BASE_URL: http://localhost:8080`）。`timeout` 是等待其启动的秒数，默认 120。
+
+切换到该代理时，程序在后台启动；第一个请求会等待它。它的回答、思考和工具调用像内置代理一样出现在会话中，它通过 TermIDE 读写文件，因此打开的编辑器会跟随它的编辑。它的权限请求按与内置代理相同的规则判断：只读命令，或已被 `[ai.permissions]` 规则或会话授权覆盖的请求，无需卡片即可通过，只有剩下的才会交给你——因此已授权或只读的命令从不会被询问两次。外部代理活动期间 **权限** 标签会消失：它有自己的模式，TermIDE 的模式不会为它循环切换。当代理通过 ACP 公布其模型时，**Model** 标签保留——此时它会列出这些模型并用 `session/set_model` 切换，因此你可以在 TermIDE 中选择代理的模型；不公布模型的代理不显示该标签。技能、提示词模板和 MCP 服务器同样由代理自行负责；其 `AGENT.md` 中的 `model`、`mode`、`tools` 和正文均不适用。切换代理会在同一会话日志上重建对话：之前的消息仍显示在屏幕上，但外部代理并不知道它们，面板会说明这一点。
 
 ### 系统提示词
 
-模型收到的提示词由文件组装而成：模板 `ai/AGENTS.md` 加上由代理填充的占位符。TermIDE 中没有内置任何提示词文本；下面的模板作为数据文件（`crates/agent-core/assets/AGENTS.md`）提供，首次使用时写入配置层级，此后以该文件为准。只读取配置层级的 `ai/AGENTS.md`：它是所有代理的后备模板，因此项目中的 `.termide/ai/AGENTS.md` 会被忽略，只有当你选择一个带有自己 `SOUL.md` 的代理时模板才会改变。项目自身的约定写在其 `AGENTS.md` 中，模板会将其作为项目说明纳入（见下文）：
+模型收到的提示词由文件组装而成：模板 `ai/AGENTS.md` 加上由代理填充的占位符。TermIDE 中没有内置任何提示词文本；下面的模板作为数据文件（`crates/agent-core/assets/AGENTS.md`）提供，首次使用时写入配置层级，此后以该文件为准。只读取配置层级的 `ai/AGENTS.md`：它是所有代理的后备模板，因此项目中的 `.termide/ai/AGENTS.md` 会被忽略，只有当你选择一个 `AGENT.md` 带有正文的代理时模板才会改变。项目自身的约定写在其 `AGENTS.md` 中，模板会将其作为项目说明纳入（见下文）：
 
 ```markdown
 You are a coding agent working inside termide, an all-in-one terminal workspace (editor, file manager, terminal, git). You help with software tasks in the current project: you read code, make targeted edits, run commands and report what you did and what you found.
@@ -595,4 +601,4 @@ termide --prompt "count the TODOs in src" --output json
 #  "tools":[{"name":"bash","subject":"rg -c TODO src","error":false}],"error":null}
 ```
 
-没有人在旁回答权限卡片，因此无界面运行只做规则和模式已经允许的事：任何需要询问的操作都会被拒绝，并附上模型会读取的原因。在默认的 `auto` 模式下，规则未决定的操作由审查者决定，它无法决定的调用会被拒绝；在 `configured` 中，为任务所需的确切命令和路径添加 `allow` 规则，或为无人值守的工作设置 `mode = "all"`。计划模式脱离面板没有意义，被视为 `auto`；外部（`[acp]`）代理不能以这种方式运行。
+没有人在旁回答权限卡片，因此无界面运行只做规则和模式已经允许的事：任何需要询问的操作都会被拒绝，并附上模型会读取的原因。在默认的 `auto` 模式下，规则未决定的操作由审查者决定，它无法决定的调用会被拒绝；在 `configured` 中，为任务所需的确切命令和路径添加 `allow` 规则，或为无人值守的工作设置 `mode = "all"`。计划模式脱离面板没有意义，被视为 `auto`；外部（带 `command` 的）代理不能以这种方式运行。

@@ -1025,7 +1025,7 @@ fn agent_setup(
     }
 
     // A CLI-adapter provider (Claude Code, Codex, Gemini CLI) is an explicit choice of
-    // backend, so it drives its own ACP adapter — over any `[acp]` the agent
+    // backend, so it drives its own ACP adapter — over any `command` the agent
     // definition might carry. Otherwise the agent's own backend (if any) wins.
     let provider_backend = cli_provider_backend(&provider_kind, &agent);
     let backend = provider_backend.clone().or(profile.backend);
@@ -1145,7 +1145,7 @@ fn cli_provider_backend(provider: &str, agent: &str) -> Option<BackendFactory> {
     // The adapters ship on npm; `npx -y` fetches on first use. `@latest`,
     // because npx otherwise keeps running the copy it fetched first, and an
     // old adapter lists old models (and none at all, for Codex). A power
-    // user who wants a pinned binary can point an agent's own `[acp]` at it
+    // user who wants a pinned binary can point an agent's own `command` at it
     // and pick a compatible provider instead.
     let config = AcpConfig {
         command: "npx".to_string(),
@@ -1377,6 +1377,7 @@ fn merge_permission_rule(path: &Path, tool: &str, pattern: &str, decision: Decis
 #[cfg(test)]
 mod tests {
     use super::*;
+    use termide_agent_core::AGENT_FILE;
 
     /// A local endpoint (the one new sessions start on) and a hosted one.
     fn with_cloud() -> AiSettings {
@@ -1734,10 +1735,10 @@ mod tests {
     fn an_agent_tools_list_governs_the_task_tool() {
         let tmp = tempfile::tempdir().unwrap();
         let global = tmp.path().join("ai");
-        for (agent, tools) in [("search", "[\"read\"]"), ("lead", "[\"read\", \"task\"]")] {
+        for (agent, tools) in [("search", "read"), ("lead", "read, task")] {
             let dir = global.join("agents").join(agent);
             std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join("agent.toml"), format!("tools = {tools}\n")).unwrap();
+            std::fs::write(dir.join(AGENT_FILE), format!("---\ntools: {tools}\n---\n")).unwrap();
         }
         let mut catalog = FsCatalog::with_global(tmp.path(), tmp.path(), Some(global));
         let settings = with_cloud();
@@ -1774,7 +1775,7 @@ mod tests {
             .is_some());
     }
 
-    /// `agent.toml` narrows the tools and names a model and a mode; a name no
+    /// `AGENT.md`'s front matter narrows the tools and names a model and a mode; a name no
     /// root defines does not resolve, the default always does.
     #[test]
     fn the_catalog_turns_definitions_into_profiles() {
@@ -1782,11 +1783,11 @@ mod tests {
         let global = tmp.path().join("ai");
         let review = global.join("agents/review");
         std::fs::create_dir_all(&review).unwrap();
-        std::fs::write(review.join("SOUL.md"), "You review.\n\n{{tools}}\n").unwrap();
         std::fs::write(global.join("AGENTS.md"), "Root template.\n\n{{tools}}\n").unwrap();
         std::fs::write(
-            review.join("agent.toml"),
-            "description = \"Reviews diffs\"\nmodel = \"big\"\nmode = \"auto\"\ntools = [\"read\", \"bash\", \"nope\"]\n",
+            review.join(AGENT_FILE),
+            "---\ndescription: Reviews diffs\nmodel: big\nmode: auto\ntools: read, bash, nope\n---\n\
+             You review.\n\n{{tools}}\n",
         )
         .unwrap();
         let catalog = FsCatalog::with_global(tmp.path(), tmp.path(), Some(global.clone()));
@@ -1835,12 +1836,12 @@ mod tests {
         let review = catalog.resolve("review").unwrap();
         assert_eq!(review.tools.names(), ["read", "bash", "skill"]);
 
-        // An [acp] table makes an external agent: no tools of ours, a backend.
+        // A `command` makes an external agent: no tools of ours, a backend.
         let outside = global.join("agents/outside");
         std::fs::create_dir_all(&outside).unwrap();
         std::fs::write(
-            outside.join("agent.toml"),
-            "description = \"Claude Code\"\n[acp]\ncommand = \"npx\"\nargs = [\"-y\", \"@agentclientprotocol/claude-agent-acp\"]\n",
+            outside.join(AGENT_FILE),
+            "---\ndescription: Claude Code\ncommand: npx -y @agentclientprotocol/claude-agent-acp\n---\n",
         )
         .unwrap();
         let outside = catalog.resolve("outside").unwrap();

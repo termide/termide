@@ -408,24 +408,10 @@ impl AppState {
         self.ui.current_ai_section = Some(section);
     }
 
-    /// Close the AI nested submenu (also closes the agent file-choice level).
+    /// Close the AI nested submenu.
     pub fn close_ai_nested_submenu(&mut self) {
         self.ui.ai_nested.close();
         self.ui.current_ai_section = None;
-        self.close_ai_agent_choice();
-    }
-
-    /// Open the agent file-choice submenu (third level) for `agent`.
-    pub fn open_ai_agent_choice(&mut self, agent: String) {
-        self.ui.ai_agent_choice.open();
-        self.ui.ai_agent_choice.selected = 0;
-        self.ui.current_ai_agent = Some(agent);
-    }
-
-    /// Close the agent file-choice submenu.
-    pub fn close_ai_agent_choice(&mut self) {
-        self.ui.ai_agent_choice.close();
-        self.ui.current_ai_agent = None;
     }
 
     /// The layered AI resource roots for this project (cwd/project/global). The

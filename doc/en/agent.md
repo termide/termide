@@ -853,8 +853,8 @@ command to run, `git branch` and `git remote` only while they list,
 ### Plan mode
 
 For a task you want to see thought through before a line changes, switch to
-**plan** (the chip, `Shift+Tab`, or an agent whose `agent.toml` says
-`mode = "plan"`). While it is on, the instructions from `system/plan.md` are
+**plan** (the chip, `Shift+Tab`, or an agent whose `AGENT.md` says
+`mode: plan`). While it is on, the instructions from `system/plan.md` are
 added to the system prompt, and every tool call that could change something
 is refused with a message the model reads, whatever the rules, the session
 answers or a hook's approval say: `edit`, `write`, MCP tools, and any shell
@@ -931,7 +931,7 @@ auto_reviewer = "haiku"   # a connection's name; empty reviews with the session'
 The reviewer judges delegated work too: a subagent's calls are reviewed
 against your words and the task it was given, marked as another agent's.
 Headless runs use it the same way, falling back to a refusal where the panel
-would ask. An external (`[acp]`) agent keeps its conversation to itself, so
+would ask. An external (`command`) agent keeps its conversation to itself, so
 in `auto` its requests are asked about as in `configured`.
 
 ## The AI menu
@@ -944,9 +944,8 @@ Items merged from the project (bold) and the global configuration are shown
 together (see [The agent directory](#the-agent-directory)).
 
 - `Enter` (or `F4`) edits: it opens a skill's `SKILL.md` or a prompt's `.md`
-  in an editor; an agent opens a further submenu to edit the prompt (`SOUL.md`)
-  or the settings (`agent.toml`); a session resumes — focusing the panel that
-  already shows it, or opening a new agent panel when none does.
+  in an editor, and an agent's `AGENT.md` the same way; a session resumes —
+  focusing the panel that already shows it, or opening a new agent panel when none does.
 - `Delete` removes the item (with a confirmation); `F2` renames it (for a
   session this sets its display name). The session confirmation names the
   session (its display name, first prompt, or "untitled") and its id.
@@ -957,8 +956,8 @@ together (see [The agent directory](#the-agent-directory)).
 - Each session row shows, dim on the right, when it was last worked on
   (e.g. "2h ago").
 - An agent, skill or prompt with a description is listed as `name ·
-  description` (the agent's `description` in `agent.toml`, the `description`
-  front matter of a `SKILL.md` or prompt); a row too long for the menu ends
+  description` (the `description` front matter of an `AGENT.md`, a
+  `SKILL.md` or a prompt); a row too long for the menu ends
   in `…`.
 
 Below the sections, once an agent panel has been opened, **Show browser
@@ -984,8 +983,7 @@ name defined higher hides the same name below.
 ```
 ai/
   AGENTS.md                the system prompt template of the default agent
-  agents/<name>/SOUL.md    the template of a custom agent (optional)
-  agents/<name>/agent.toml what else sets the agent apart (optional)
+  agents/<name>/AGENT.md   a custom agent: settings and prompt template
   skills/<name>/SKILL.md   skills, see below
   prompts/<name>.md        prompt templates, typed as /name
   commands/<name>          command scripts, typed as /name, see below
@@ -1018,20 +1016,34 @@ Delete a file to get the shipped version back.
 
 An agent is a directory under `agents/`. `default` is the one the panel
 starts as; it has no directory and speaks with `ai/AGENTS.md`. Any directory
-defines an agent you can switch to from the **Agent** status chip; the picker shows each agent's description. Its
-`SOUL.md` is the agent's own template; without one it uses `ai/AGENTS.md`
-too. An empty `SOUL.md` (or `AGENTS.md`) means no system prompt at all: the
-model still gets the tools, but no instructions. Beside it an `agent.toml` may set, every field optional:
+defines an agent you can switch to from the **Agent** status chip; the picker
+shows each agent's description. The agent is its `AGENT.md`: the front matter
+sets it apart, every field optional, and the body is its own prompt template.
+An `AGENT.md` with no body (or none at all) uses `ai/AGENTS.md`;
+`prompt: none` means no system prompt at all: the model still gets the tools,
+but no instructions. An empty `ai/AGENTS.md` does the same for the default
+agent. The rest of the directory is the agent's own: scripts or checklists
+its prompt refers to.
 
-```toml
-description = "Reviews diffs and points at risks"
-model = "Qwen3.8-27B-MTPLX-Optimized-Quality"   # at the configured endpoint
-mode = "edit"                                    # ask | plan | edit | configured | auto | all
-tools = ["read", "bash"]                         # a subset of the built-in tools
+```markdown
+---
+description: Reviews diffs and points at risks
+model: Qwen3.8-27B-MTPLX-Optimized-Quality
+mode: edit
+tools: read, bash
+---
+You review the changes you are given. …
+
+{{tools}}
 ```
 
-`tools` lists the built-in tools the agent keeps, `task` included; without
-it the agent has them all. Skills and MCP servers' tools are not governed by
+The front matter is `key: value` lines; a line starting with `#` is a
+comment, and a value may be quoted. `model` is a model id at the configured
+endpoint; `mode` is the permission mode the agent starts in (`ask`, `plan`,
+`edit`, `configured`, `auto` or `all`); `tools` lists the built-in tools the
+agent keeps, separated by commas (brackets around the list are fine too),
+`task` included; without it the agent has them all, and `tools: []` leaves
+none. Skills and MCP servers' tools are not governed by
 it: they come with what you configured.
 
 Switching agents mid-session swaps the prompt and the tools for the next
@@ -1052,31 +1064,36 @@ Claude Code's `Task` tool and OpenCode's sub-sessions do.
 
 The delegate does not see the conversation, so the calling agent must put
 everything into the prompt. It runs in the session's current mode, unless its
-`agent.toml` names one, with no one to prompt, so it can only do what the
+`AGENT.md` names one, with no one to prompt, so it can only do what the
 rules and that mode already allow: anything that would otherwise ask is
 refused with a reason it reads. In `auto` the reviewer decides those calls
-instead. External (`[acp]`)
-agents cannot be delegates, and a subagent gets no `task` tool of its own, so
-delegation does not nest. An agent whose `tools` list leaves out `task`
+instead. External agents (those with a `command`) cannot be delegates, and a
+subagent gets no `task` tool of its own, so delegation does not nest. An agent whose `tools` list leaves out `task`
 cannot delegate. A run that will not stop is cut off after fifty
 model calls.
 
 ### External agents
 
-An agent may be another program altogether: put an `[acp]` table in its
-`agent.toml` and the panel drives it over the
+An agent may be another program altogether: put a `command` in the front
+matter of its `AGENT.md` and the panel drives it over the
 [Agent Client Protocol](https://agentclientprotocol.com) instead of running
 the built-in loop. Claude Code, Codex and Gemini CLI have ACP adapters or
 speak it natively:
 
-```toml
-description = "Claude Code through its ACP adapter"
-
-[acp]
-command = "npx"
-args = ["-y", "@agentclientprotocol/claude-agent-acp"]
-env = { ANTHROPIC_API_KEY = "$ANTHROPIC_API_KEY" }
+```markdown
+---
+description: Claude Code through its ACP adapter
+command: npx -y @agentclientprotocol/claude-agent-acp
+---
 ```
+
+`command` is the program and its arguments, split as a shell splits words
+(quotes keep spaces in an argument) but not run through a shell, so nothing
+in it is expanded. The program inherits TermIDE's environment; an
+`env.<NAME>: value` line per variable adds to it or overrides it, `$NAME` and
+`${NAME}` in the value coming from TermIDE's environment
+(`env.ANTHROPIC_BASE_URL: http://localhost:8080`). `timeout` is how many
+seconds to wait for it to start, 120 by default.
 
 The program starts in the background when you switch to the agent; the first
 request waits for it. Its answers, thoughts and tool calls appear in the
@@ -1090,7 +1107,7 @@ agent is active: it has its own, and TermIDE's mode is not cycled for it. The **
 its models over ACP — it then lists them and switches with `session/set_model`,
 so you pick the agent's model in TermIDE; agents that advertise none show no
 chip. Skills, prompt templates and MCP servers are the agent's own affair too;
-`model`, `mode` and `tools` in `agent.toml` do not apply. Switching agents
+`model`, `mode`, `tools` and the body of its `AGENT.md` do not apply. Switching agents
 rebuilds the conversation on the same session log: earlier messages stay on
 screen but the external agent does not know them, and the panel says so.
 
@@ -1103,7 +1120,7 @@ built into TermIDE; the template below ships as a data file
 configuration level on first use, and from then on the file is what counts.
 Only the configuration level's `ai/AGENTS.md` is read: it is the fallback of
 every agent, so a project's `.termide/ai/AGENTS.md` is ignored, and the
-template changes only when you pick an agent with a `SOUL.md` of its own. A
+template changes only when you pick an agent whose `AGENT.md` has a body. A
 project's own conventions go into its `AGENTS.md`, which the template takes in
 as project instructions (see below):
 
@@ -1528,5 +1545,5 @@ with a reason the model reads. In the default `auto` mode the reviewer decides
 what the rules leave open, and a call it cannot decide is refused; in
 `configured`, add `allow` rules for the exact commands and paths the task
 needs, or set `mode = "all"` for unattended work. Plan mode has no meaning
-without the panel and is treated as `auto`, and an external (`[acp]`) agent cannot be run this
+without the panel and is treated as `auto`, and an external (`command`) agent cannot be run this
 way.

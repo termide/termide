@@ -440,8 +440,6 @@ impl Translation for RuntimeTranslation {
         menu_ai_prompts,
         menu_ai_new_project,
         menu_ai_new_global,
-        menu_ai_edit_prompt,
-        menu_ai_edit_settings,
         ai_create_agent_title,
         ai_create_skill_title,
         ai_create_prompt_title,

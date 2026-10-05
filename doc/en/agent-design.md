@@ -62,7 +62,7 @@ the same shape (pi leans on its extension host).
 Decision: a `task` tool, present on every built-in-loop agent once a custom
 agent exists, that runs one of the other agents to completion and returns its
 final message. It reuses the whole machinery — the same agent definitions
-(`SOUL.md`, `agent.toml` tools/model/mode), the same prompt builder, the same
+(`AGENT.md` with its tools/model/mode), the same prompt builder, the same
 permission rules — so a subagent is just an agent run without a panel. Built
 in the app (`Subagents` in `agent_panel.rs`), not in `agent-tools`: the tool
 there holds only a closure, so the tools crate stays free of the provider and
@@ -342,7 +342,7 @@ OpenCode a separate `plan` agent with edit/write/bash denied, switched with
 
 Decision: a fourth permission mode, `plan`, not a separate agent — the mode
 is already the thing the user flips mid-run, and an agent definition can
-still fix it (`mode = "plan"` in `agent.toml`, which gives OpenCode's plan
+still fix it (`mode: plan` in its `AGENT.md`, which gives OpenCode's plan
 agent for free). The guard is `PlanGuard` in `permissions.rs`, first in the
 hook chain, so it also overrides a command hook's `allow`: in plan mode only
 `read`, `skill` and a shell command made of look-only parts without
@@ -502,10 +502,21 @@ XDG data/config split. The configuration level is laid out on first use —
 
 Agent definitions: Claude Code's `agents/*.md` and OpenCode's `agent/*.md`
 carry the settings (`description`, `model`, `tools`, `permissionMode` /
-`permission`) as YAML front matter above the prompt body. Decision: the
-prompt stays a plain Markdown file (`SOUL.md`) and the settings go beside it
-in `agent.toml` — termide is TOML throughout, and a prompt without front
-matter can be copied from and to any other tool. `default` exists without
+`permission`) as YAML front matter above the prompt body. Decision: the same
+shape in a directory — `agents/<name>/AGENT.md`, settings in the front matter
+and the prompt in the body, the rest of the directory free for the agent's
+own scripts and checklists, as `skills/<name>/SKILL.md` is. termide first
+kept the prompt in `SOUL.md` and the settings beside it in `agent.toml`; one
+file won because the two were resolved through the layers independently (a
+project could replace the prompt and silently keep the user's model and
+tools), because every other Markdown file under `ai/` — skills, prompt
+templates, the `system/` prompts — already carries front matter, and because
+a Claude Code or OpenCode agent then moves over almost by copying. The
+front matter stays flat `key: value` (`#` lines are comments): `tools` is a
+comma list, optionally in brackets, and an external agent's environment is
+one `env.<NAME>` key per variable rather than a repeated key, which YAML does
+not allow. An empty body means the root template; `prompt: none` means no
+system prompt, the rarer case. `default` exists without
 files; switching agents goes through an `AgentCatalog` trait the app
 implements over the directories, so the panel chooses among definitions
 without knowing how they are stored. The switch is one `AgentRuntime::update`
@@ -624,11 +635,12 @@ The prompt is a template with `{{tools}}`, `{{guidelines}}`,
 `{{environment}}` and `{{project_instructions}}` placeholders: the `ai`
 directory's root `AGENTS.md` for the default agent (the user's decision — the
 root file of the directory is the default prompt, and a global instruction
-file would only duplicate what one can write into it), `agents/<name>/SOUL.md`
-for a custom agent, which falls back to the root file when it has none. The
-root file is read from the configuration level only: as every agent's
-fallback it must not be replaceable by a checked-out project, only by an agent
-the user picks; a custom agent's `SOUL.md` may live at any level. No
+file would only duplicate what one can write into it), the body of
+`agents/<name>/AGENT.md` for a custom agent, which falls back to the root file
+when it has none. The root file is read from the configuration level only: as
+every agent's fallback it must not be replaceable by a checked-out project,
+only by an agent the user picks; a custom agent's `AGENT.md` may live at any
+level. No
 prompt text is code: the seed is the data file
 `crates/agent-core/assets/AGENTS.md` (the former fixed prompt, base
 guidelines included), copied to the configuration on first use; code only
@@ -893,7 +905,8 @@ backend; an ACP client over stdio is the second and reuses the same panel.
 
 Done (`crates/agent-acp`): the panel drives a `Backend` trait (agent-core)
 with two implementations, `AgentRuntime` and `AcpRuntime`. termide is the
-ACP client: it starts the agent from an `[acp]` table in `agent.toml`, runs
+ACP client: it starts the agent from the `command` line in its `AGENT.md`
+(split like shell words, never run through a shell), runs
 `initialize` and `session/new` on a thread (adapters started through `npx`
 take seconds), and turns `session/update` into the loop's own `AgentEvent`s
 — `agent_message_chunk` into `MessageStart`/`TextDelta`, a `tool_call`
