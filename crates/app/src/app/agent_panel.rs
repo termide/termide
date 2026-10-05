@@ -1431,7 +1431,50 @@ fn merge_permission_rule(path: &Path, tool: &str, pattern: &str, decision: Decis
 #[cfg(test)]
 mod tests {
     use super::*;
-    use termide_agent_core::{AGENT_FILE, DEFAULT_AGENT_FILE};
+    use termide_agent_core::{AGENT_FILE, DEFAULT_AGENT_FILE, SEED_TOOLS};
+
+    /// Every built-in tool a panel can offer has a shipped text, and every
+    /// shipped text a tool: a tool whose `ToolText::seed` name is wrong, or
+    /// one added without its `assets/tools/<name>.md`, would otherwise reach
+    /// the model with no description and stay off the prompt's tool list.
+    #[test]
+    fn every_built_in_tool_has_its_shipped_text() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dirs = AgentDirs::new(tmp.path(), Some(tmp.path()), None);
+        let web = termide_agent_web::Web::new(WebConfig {
+            backend: termide_agent_web::Backend::Http,
+            engine: None,
+            chrome_path: None,
+            display: termide_agent_web::Display::Headless,
+            profile: tmp.path().join("browser"),
+        });
+        let recall = recall_tool(&AiSettings::default(), &dirs, tmp.path());
+        let mut tools = base_tools(&dirs, Some(&web), Some(&recall));
+        // Offered only with a browser to search in, which a test has not.
+        tools.insert(Arc::new(termide_agent_web::WebSearchTool::new(web)));
+        tools.insert(Arc::new(QuestionTool));
+        tools.insert(Arc::new(SuggestCommandTool));
+        let run: SubagentRun = Arc::new(|_, _, _, _, _| unreachable!());
+        tools.insert(Arc::new(TaskTool::new(
+            vec![("review".into(), "Reviews".into())],
+            run,
+        )));
+        tools.insert(Arc::new(SkillTool::new(Vec::new())));
+
+        let mut names: Vec<&str> = tools.iter().map(|tool| tool.name()).collect();
+        names.sort_unstable();
+        let mut shipped: Vec<&str> = SEED_TOOLS.iter().map(|(name, _)| *name).collect();
+        shipped.sort_unstable();
+        assert_eq!(names, shipped);
+        for tool in tools.iter() {
+            assert!(!tool.description().trim().is_empty(), "{}", tool.name());
+            assert!(
+                tool.prompt_snippet().is_some_and(|s| !s.trim().is_empty()),
+                "{}",
+                tool.name()
+            );
+        }
+    }
 
     /// A local endpoint (the one new sessions start on) and a hosted one.
     fn with_cloud() -> AiSettings {
