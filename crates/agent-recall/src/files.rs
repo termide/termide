@@ -63,11 +63,20 @@ struct WalkRoot {
 }
 
 /// The walks for `project_root` and the repositories in it.
-fn walk_roots(project_root: &Path, repos: &[RepoRoot]) -> Vec<WalkRoot> {
+fn walk_roots(project_root: &Path, panel_dir: Option<&Path>, repos: &[RepoRoot]) -> Vec<WalkRoot> {
     let mut roots = vec![WalkRoot {
         dir: project_root.to_path_buf(),
         project_dir: String::new(),
     }];
+    // A panel directory apart from the project is walked as well, named by
+    // its path; one the project lies in adds only what is around it, as
+    // every other root is left out of each walk.
+    if let Some(dir) = panel_dir.filter(|dir| !dir.starts_with(project_root)) {
+        roots.push(WalkRoot {
+            dir: dir.to_path_buf(),
+            project_dir: dir.to_string_lossy().into_owned(),
+        });
+    }
     for repo in repos.iter().filter(|r| r.name != ".") {
         roots.push(WalkRoot {
             dir: repo.root.clone(),
@@ -131,6 +140,7 @@ struct Doc {
 #[must_use]
 pub fn search(
     project_root: &Path,
+    panel_dir: Option<&Path>,
     repos: &[RepoRoot],
     query: &FileQuery<'_>,
     limit: usize,
@@ -158,7 +168,7 @@ pub fn search(
     else {
         return (Vec::new(), false);
     };
-    let roots = walk_roots(project_root, repos);
+    let roots = walk_roots(project_root, panel_dir, repos);
     let skip: HashSet<PathBuf> = roots
         .iter()
         .map(|r| r.dir.clone())
@@ -555,6 +565,7 @@ mod tests {
             let words = [query_words(word)];
             let (hits, cut_short) = search(
                 project,
+                None,
                 &[],
                 &query(&words, &patterns, &none),
                 10,
@@ -589,6 +600,7 @@ mod tests {
         let walrus = [query_words("walrus")];
         let (hits, cut_short) = search(
             project,
+            None,
             &repos,
             &query(&walrus, &patterns, &none),
             10,
@@ -613,6 +625,7 @@ mod tests {
         // A deadline already past finds nothing and says so.
         let (hits, cut_short) = search(
             project,
+            None,
             &repos,
             &query(&walrus, &patterns, &none),
             10,
@@ -640,6 +653,7 @@ mod tests {
         let none = PathFilter::default();
         let (hits, _) = search(
             project,
+            None,
             &[],
             &query(&[query_words("walrus")], &patterns, &none),
             10,
@@ -689,6 +703,7 @@ mod tests {
         let none = PathFilter::default();
         let (hits, _) = search(
             project,
+            None,
             &repos,
             &query(&[query_words("walrus")], &patterns, &none),
             10,
@@ -707,6 +722,7 @@ mod tests {
         let only_inner = PathFilter::new(&["inner".to_string()]);
         let (hits, _) = search(
             project,
+            None,
             &repos,
             &query(&[query_words("walrus")], &patterns, &only_inner),
             10,

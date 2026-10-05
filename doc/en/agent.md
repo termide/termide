@@ -745,6 +745,10 @@ as well as one of code.
   project is walked with its own `.gitignore`, so one the outer repository
   ignores is still searched; the session logs are not read as files.
 
+A panel moved to a directory outside the project searches that directory as
+well — its session logs, its repositories and its files — and names what it
+finds there by its path.
+
 Words match by stem, in English and Russian, and identifiers by their parts,
 so `split_command_line`, `splitCommandLine` and "split the command line" meet,
 and "сессия" finds "сессии"; a Russian word is also matched by its stem

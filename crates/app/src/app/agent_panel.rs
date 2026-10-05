@@ -19,7 +19,7 @@ use termide_agent_core::{
 use termide_agent_hooks::CommandHooks;
 use termide_agent_mcp::{Connections, TokenStore};
 use termide_agent_providers::{AnthropicProvider, Compat, OpenAiCompatProvider, ReasoningParam};
-use termide_agent_recall::{RecallSetup, RecallTool, RepoFinder, Solver, TimeLimits};
+use termide_agent_recall::{PanelDir, RecallSetup, RecallTool, RepoFinder, Solver, TimeLimits};
 use termide_agent_tools::{
     builtin_tools, BashTool, QuestionTool, SkillTool, SubagentRun, SuggestCommandTool, TaskTool,
 };
@@ -815,10 +815,23 @@ fn reviewer_setup(settings: &AiSettings, dirs: &AgentDirs) -> ReviewerSetup {
 }
 
 /// The `recall` tool of a project: its session logs, the repositories it
-/// holds, and the solver when `[ai.recall]` turns it on.
-fn recall_tool(settings: &AiSettings, dirs: &AgentDirs, project_root: &Path) -> Arc<RecallTool> {
+/// holds, the panel's directory at `cwd` when that lies outside it, and the
+/// solver when `[ai.recall]` turns it on.
+fn recall_tool(
+    settings: &AiSettings,
+    dirs: &AgentDirs,
+    project_root: &Path,
+    cwd: &Path,
+) -> Arc<RecallTool> {
     let project_root =
         dunce::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
+    let panel_dir = dunce::canonicalize(cwd)
+        .ok()
+        .filter(|dir| !dir.starts_with(&project_root))
+        .map(|dir| PanelDir {
+            dir,
+            sessions_dir: session_dir_of(cwd),
+        });
     let solver = settings.recall.solver.then(|| Solver {
         prompt: dirs.recall_prompt(),
         model: side_model(
@@ -834,6 +847,7 @@ fn recall_tool(settings: &AiSettings, dirs: &AgentDirs, project_root: &Path) -> 
         // Found at each search, on the agent's thread: a repository made
         // after the panel opened is searched too.
         find_repos: RepoFinder::new(termide_git::project_repos),
+        panel_dir,
         solver,
         time_limits: TimeLimits {
             sessions: seconds(settings.recall.sessions_timeout_secs),
@@ -1018,7 +1032,7 @@ fn agent_setup(
     let mut catalog = FsCatalog::new(&cwd, project_root);
     let web = shared_web(&settings.web, &catalog.dirs);
     catalog.web = Some(Arc::clone(&web));
-    let recall = recall_tool(settings, &catalog.dirs, project_root);
+    let recall = recall_tool(settings, &catalog.dirs, project_root, &cwd);
     catalog.recall = Some(Arc::clone(&recall));
     // The subagent runner shares the provider, the rules and the model
     // defaults, so a delegated agent runs like the panel would run it.
@@ -1450,7 +1464,7 @@ mod tests {
             display: termide_agent_web::Display::Headless,
             profile: tmp.path().join("browser"),
         });
-        let recall = recall_tool(&AiSettings::default(), &dirs, tmp.path());
+        let recall = recall_tool(&AiSettings::default(), &dirs, tmp.path(), tmp.path());
         let mut tools = base_tools(&dirs, Some(&web), Some(&recall));
         // Offered only with a browser to search in, which a test has not.
         tools.insert(Arc::new(termide_agent_web::WebSearchTool::new(web)));
@@ -1849,7 +1863,7 @@ mod tests {
                 context_window: local.effective_context_window(),
             })),
             dirs: catalog.dirs.clone(),
-            recall: recall_tool(&settings, &catalog.dirs, tmp.path()),
+            recall: recall_tool(&settings, &catalog.dirs, tmp.path(), tmp.path()),
             web: shared_web(&settings.web, &catalog.dirs),
             cwd: tmp.path().to_path_buf(),
             project_root: tmp.path().to_path_buf(),

@@ -55,11 +55,16 @@ impl RepoRoot {
                 name: if name.is_empty() { ".".into() } else { name },
             };
         }
-        let pathspec = project_root
-            .strip_prefix(&root)
-            .ok()
-            .map(Path::to_path_buf)
-            .filter(|p| !p.as_os_str().is_empty());
+        // A repository apart from the project (the panel's directory lies
+        // elsewhere) is named by its path, so its references stay its own.
+        let Ok(inside) = project_root.strip_prefix(&root) else {
+            return Self {
+                name: root.to_string_lossy().into_owned(),
+                root,
+                pathspec: None,
+            };
+        };
+        let pathspec = Some(inside.to_path_buf()).filter(|p| !p.as_os_str().is_empty());
         Self {
             root,
             pathspec,

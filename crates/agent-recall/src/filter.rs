@@ -3,8 +3,8 @@
 use std::path::{Component, Path, PathBuf};
 
 /// `paths` as the model gives them, relative to `cwd` or absolute, made
-/// relative to `project_root` as [`PathFilter`] takes them. One outside the
-/// project is kept as given, so it matches nothing rather than something else.
+/// relative to `project_root` as [`PathFilter`] takes them; one outside the
+/// project is made absolute, as what is searched there is named.
 #[must_use]
 pub fn project_paths(paths: &[String], cwd: &Path, project_root: &Path) -> Vec<String> {
     paths
@@ -13,7 +13,7 @@ pub fn project_paths(paths: &[String], cwd: &Path, project_root: &Path) -> Vec<S
             let full = normalize(&cwd.join(path.trim()));
             match full.strip_prefix(project_root) {
                 Ok(inside) => inside.to_string_lossy().replace('\\', "/"),
-                Err(_) => path.clone(),
+                Err(_) => full.to_string_lossy().into_owned(),
             }
         })
         .collect()
@@ -270,6 +270,7 @@ mod tests {
             "../doc/*.md".to_string(),
             "/p/README.md".to_string(),
             "/elsewhere/x".to_string(),
+            "../../q/*.md".to_string(),
             ".".to_string(),
         ];
         assert_eq!(
@@ -279,6 +280,7 @@ mod tests {
                 "doc/*.md",
                 "README.md",
                 "/elsewhere/x",
+                "/q/*.md",
                 "crates"
             ]
         );
@@ -287,6 +289,9 @@ mod tests {
         assert_eq!(path_from_cwd("crates/core/x.rs", cwd, root), "core/x.rs");
         assert_eq!(path_from_cwd("doc/a.md", cwd, root), "/p/doc/a.md");
         assert_eq!(path_from_cwd("doc/a.md", root, root), "doc/a.md");
+        // What lies outside the project is named by its absolute path.
+        let elsewhere = Path::new("/w");
+        assert_eq!(path_from_cwd("/w/notes.md", elsewhere, root), "notes.md");
     }
 
     #[test]

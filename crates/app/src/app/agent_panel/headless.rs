@@ -75,7 +75,7 @@ pub fn run_agent_headless(
     }
 
     let web = shared_web(&settings.web, &dirs);
-    let recall = recall_tool(settings, &dirs, project_root);
+    let recall = recall_tool(settings, &dirs, project_root, cwd);
     let mut tools = base_tools(&dirs, Some(&web), Some(&recall));
     restrict_tools(&mut tools, &definition.spec.tools, name);
     let skills = dirs.skills();
@@ -277,7 +277,7 @@ pub fn run_recall(settings: &AiSettings, project_root: &Path, query: &str, json:
         .ok()
         .map(|dir| dir.join(GLOBAL_AGENT_DIR));
     let dirs = AgentDirs::new(project_root, Some(project_root), global.as_deref());
-    let tool = recall_tool(settings, &dirs, project_root);
+    let tool = recall_tool(settings, &dirs, project_root, project_root);
     // The default connection answers in the session's place, as a panel's
     // model would: not one that drives a CLI agent, and with its first
     // listed model when it names none. Asked only when the solver is on.

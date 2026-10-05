@@ -115,6 +115,15 @@ impl std::fmt::Debug for RepoFinder {
     }
 }
 
+/// The panel's directory when it lies outside the project (the panel was
+/// moved there): searched as well, its files, repositories and session logs.
+#[derive(Debug, Clone)]
+pub struct PanelDir {
+    pub dir: PathBuf,
+    /// The panel's session logs there: `<config>/ai/sessions/<dir key>/`.
+    pub sessions_dir: Option<PathBuf>,
+}
+
 /// Where the tool looks.
 #[derive(Debug, Clone)]
 pub struct RecallSetup {
@@ -123,6 +132,8 @@ pub struct RecallSetup {
     pub sessions_dir: Option<PathBuf>,
     /// The repositories the project holds.
     pub find_repos: RepoFinder,
+    /// The panel's directory, when it is not inside the project.
+    pub panel_dir: Option<PanelDir>,
     pub solver: Option<Solver>,
     /// How long each source may search; what a source found by its limit is
     /// ranked, and the result says which sources it stopped.
@@ -427,7 +438,7 @@ impl RecallTool {
         let patterns = text::scan_patterns(&request.queries);
         let words = text::acronyms(&request.queries);
         let identifiers = text::identifiers(&request.queries);
-        let repos = self.setup.find_repos.repos(&self.setup.project_root);
+        let repos = self.repos();
         let project_root = &self.setup.project_root;
         let cwd = request.cwd.as_deref().unwrap_or(project_root);
         let paths = PathFilter::new(&filter::project_paths(&request.paths, cwd, project_root));
@@ -453,8 +464,18 @@ impl RecallTool {
         let (from_sessions, from_git, from_files): (Found, Found, Found) =
             std::thread::scope(|scope| {
                 let sessions = scope.spawn(|| {
-                    let dir = self.setup.sessions_dir.as_ref()?;
-                    if !request.sources.sessions {
+                    let dirs: Vec<&PathBuf> = self
+                        .setup
+                        .sessions_dir
+                        .iter()
+                        .chain(
+                            self.setup
+                                .panel_dir
+                                .iter()
+                                .filter_map(|p| p.sessions_dir.as_ref()),
+                        )
+                        .collect();
+                    if !request.sources.sessions || dirs.is_empty() {
                         return None;
                     }
                     let query = sessions::SessionQuery {
@@ -467,7 +488,18 @@ impl RecallTool {
                         now,
                         deadline: Some(started + limits.sessions),
                     };
-                    Some(sessions::search(dir, &query, candidates, cancel))
+                    // Each directory ranks its own logs; the better of the
+                    // two at each place goes first.
+                    let mut found: Vec<Hit> = Vec::new();
+                    let mut cut_short = false;
+                    for dir in dirs {
+                        let (hits, cut) = sessions::search(dir, &query, candidates, cancel);
+                        found.extend(hits);
+                        cut_short |= cut;
+                    }
+                    found.sort_by(|a, b| b.score.total_cmp(&a.score));
+                    found.truncate(candidates);
+                    Some((found, cut_short))
                 });
                 let git = scope.spawn(|| {
                     if !request.sources.git {
@@ -504,6 +536,7 @@ impl RecallTool {
                     };
                     Some(files::search(
                         &self.setup.project_root,
+                        self.setup.panel_dir.as_ref().map(|p| p.dir.as_path()),
                         &repos,
                         &query,
                         candidates,
@@ -556,6 +589,21 @@ impl RecallTool {
             answer,
             incomplete,
         }
+    }
+
+    /// The project's repositories, and those of the panel's directory when
+    /// it lies elsewhere, each once.
+    fn repos(&self) -> Vec<RepoRoot> {
+        let finder = &self.setup.find_repos;
+        let mut repos = finder.repos(&self.setup.project_root);
+        if let Some(panel) = &self.setup.panel_dir {
+            for root in (finder.0)(&panel.dir) {
+                if !repos.iter().any(|repo| repo.root == root) {
+                    repos.push(RepoRoot::new(root, &self.setup.project_root));
+                }
+            }
+        }
+        repos
     }
 
     fn solve(
@@ -612,7 +660,7 @@ impl RecallTool {
         }
         if let Some(rest) = reference.strip_prefix("commit:") {
             let (name, sha) = rest.rsplit_once('@').unwrap_or(("", rest));
-            let repos = self.setup.find_repos.repos(&self.setup.project_root);
+            let repos = self.repos();
             return git::open(&repos, name, sha, cancel).map(cut_output);
         }
         if let Some(rest) = reference.strip_prefix("file:") {
@@ -790,6 +838,7 @@ mod tests {
                     Vec::new()
                 }
             }),
+            panel_dir: None,
             solver: None,
             time_limits: TimeLimits::default(),
         }
@@ -940,6 +989,50 @@ mod tests {
         let outcome = tool.search(git_only(), None, &CancelToken::new());
         assert_eq!(outcome.hits.len(), 1);
         assert_eq!(outcome.hits[0].label, "feat: walrus parser");
+    }
+
+    #[test]
+    fn the_panel_directory_outside_the_project_is_searched_too() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("proj");
+        std::fs::create_dir_all(&project).unwrap();
+        let elsewhere = tmp.path().join("elsewhere");
+        git::tests::repo_with(
+            &elsewhere,
+            &[("notes.md", "the walrus plan\n", "feat: walrus parser")],
+        );
+        let panel_sessions = tmp.path().join("sessions/elsewhere");
+        let mut session = Session::create(&panel_sessions, &elsewhere).unwrap();
+        session
+            .append_message(&Message::User(UserMessage::text("walrus again")))
+            .unwrap();
+        let tool = RecallTool::new(RecallSetup {
+            panel_dir: Some(PanelDir {
+                dir: elsewhere.clone(),
+                sessions_dir: Some(panel_sessions),
+            }),
+            ..setup(&project, &tmp.path().join("sessions/proj"))
+        });
+        let request = SearchRequest {
+            cwd: Some(elsewhere.clone()),
+            ..SearchRequest::new("walrus")
+        };
+        let outcome = tool.search(request, None, &CancelToken::new());
+        let refs: Vec<&str> = outcome.hits.iter().map(|h| h.reference.as_str()).collect();
+        assert!(refs.contains(&"file:notes.md:1"), "{refs:?}");
+        assert!(
+            outcome.hits.iter().any(|h| h.source == Source::Session),
+            "{refs:?}"
+        );
+        let commit = refs
+            .iter()
+            .find(|r| r.starts_with("commit:"))
+            .expect("the panel's repository is searched");
+        assert!(commit.starts_with(&format!("commit:{}@", elsewhere.display())));
+        assert!(tool
+            .open(commit, &CancelToken::new())
+            .unwrap()
+            .contains("walrus parser"));
     }
 
     #[test]
