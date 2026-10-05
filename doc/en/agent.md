@@ -749,7 +749,8 @@ Words match by stem, in English and Russian, and identifiers by their parts,
 so `split_command_line`, `splitCommandLine` and "split the command line" meet,
 and "сессия" finds "сессии"; a Russian word is also matched by its stem
 without the case ending, so a name the stemmer does not know ("сомбала",
-"сомбалу") is found in every case. The agent passes several phrasings of what
+"сомбалу") is found in every case. A two-letter acronym typed in capitals
+("CI", "UI") is matched as a whole word, not inside a longer one. The agent passes several phrasings of what
 it looks for, and each is ranked on its own: a result needs most of one
 phrasing's weight, where a rare word counts for far more than common ones. Each result carries a reference —
 `session:<id>#<entry>`, `commit:<repo>@<sha>` or `file:<path>:<line>` — and the

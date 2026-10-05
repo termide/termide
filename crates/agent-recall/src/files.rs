@@ -100,6 +100,8 @@ pub struct FileQuery<'a> {
     pub terms: &'a [Vec<Vec<String>>],
     /// Substrings a line must hold one of: the stems of the query words.
     pub patterns: &'a [String],
+    /// Whole words a line may hold instead: the query's acronyms.
+    pub words: &'a [String],
     pub paths: &'a PathFilter,
     /// Directories never walked: the session logs, a source of their own.
     pub excluded: &'a [PathBuf],
@@ -135,13 +137,19 @@ pub fn search(
     deadline: Instant,
     cancel: &CancelToken,
 ) -> (Vec<Hit>, bool) {
-    if query.patterns.is_empty() {
+    if query.patterns.is_empty() && query.words.is_empty() {
         return (Vec::new(), false);
     }
     let alternation = query
         .patterns
         .iter()
         .map(|p| regex::escape(p))
+        .chain(
+            query
+                .words
+                .iter()
+                .map(|w| format!(r"\b{}\b", regex::escape(w))),
+        )
         .collect::<Vec<_>>()
         .join("|");
     let Ok(matcher) = RegexBuilder::new(&alternation)
@@ -520,6 +528,7 @@ mod tests {
         FileQuery {
             terms: terms_,
             patterns,
+            words: &[],
             paths,
             excluded: &[],
             now: termide_agent_core::message::now_millis(),

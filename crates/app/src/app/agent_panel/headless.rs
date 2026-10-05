@@ -278,18 +278,28 @@ pub fn run_recall(settings: &AiSettings, project_root: &Path, query: &str, json:
         .map(|dir| dir.join(GLOBAL_AGENT_DIR));
     let dirs = AgentDirs::new(project_root, Some(project_root), global.as_deref());
     let tool = recall_tool(settings, &dirs, project_root);
-    let session = usable_connection(settings).map(|(_, connection)| SessionView {
-        id: None,
-        intent: IntentLog::new(),
-        provider: build_provider(connection, api_key_of(connection)),
-        model: ModelSpec {
-            provider: "agent".to_string(),
-            id: connection.model.clone(),
-            context_window: connection.effective_context_window(),
-            max_tokens: None,
-            thinking: termide_agent_core::ThinkingLevel::Off,
-        },
-    });
+    // The default connection answers in the session's place, as a panel's
+    // model would: not one that drives a CLI agent, and with its first
+    // listed model when it names none. Asked only when the solver is on.
+    let session = usable_connection(settings)
+        .filter(|_| settings.recall.solver)
+        .filter(|(_, connection)| !termide_config::is_cli_provider(&connection.provider))
+        .and_then(|(_, connection)| {
+            let provider = build_provider(connection, api_key_of(connection));
+            let model = resolve_model(provider.as_ref(), &connection.model)?;
+            Some(SessionView {
+                id: None,
+                intent: IntentLog::new(),
+                provider,
+                model: ModelSpec {
+                    provider: "agent".to_string(),
+                    id: model,
+                    context_window: connection.effective_context_window(),
+                    max_tokens: None,
+                    thinking: termide_agent_core::ThinkingLevel::Off,
+                },
+            })
+        });
     let outcome = tool.search(
         termide_agent_recall::SearchRequest::new(query),
         session.as_ref(),

@@ -190,6 +190,8 @@ pub struct GitQuery<'a> {
     pub terms: &'a [Vec<Vec<String>>],
     /// Substrings for `--grep`: the stems of the query words.
     pub patterns: &'a [String],
+    /// Whole words for `--grep` as well: the query's acronyms.
+    pub words: &'a [String],
     /// Identifiers for the pickaxe.
     pub identifiers: &'a [String],
     pub since: Option<u64>,
@@ -210,6 +212,18 @@ fn pathspecs(repo: &RepoRoot, paths: &PathFilter) -> Option<Vec<String>> {
         }),
         Scope::Some(specs) => Some(specs.iter().map(|s| s.pathspec(&base)).collect()),
     }
+}
+
+/// `text` matched literally in a POSIX extended regular expression.
+fn ere_escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if r"\.[]()*+?{}|^$".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// The commits of one repository the query finds.
@@ -241,10 +255,22 @@ fn find_commits(
         args
     };
     let mut commits: Vec<Commit> = Vec::new();
-    if !query.patterns.is_empty() {
+    if !query.patterns.is_empty() || !query.words.is_empty() {
         let mut args = common(GREP_COMMITS);
-        args.extend(["-i".to_string(), "-F".to_string()]);
-        args.extend(query.patterns.iter().map(|p| format!("--grep={p}")));
+        args.extend(["-i".to_string(), "-E".to_string()]);
+        args.extend(
+            query
+                .patterns
+                .iter()
+                .map(|p| format!("--grep={}", ere_escape(p))),
+        );
+        // POSIX has no `\b`; a word is what no letter, digit or `_` touches.
+        args.extend(
+            query
+                .words
+                .iter()
+                .map(|w| format!("--grep=(^|[^[:alnum:]_]){}($|[^[:alnum:]_])", ere_escape(w))),
+        );
         match run_git(&repo.root, &finish(args), deadline, cancel) {
             Ok(out) => commits.extend(parse_log(&out)),
             Err(e) => log::warn!("recall: git log in {}: {e}", repo.root.display()),
@@ -445,6 +471,7 @@ pub(crate) mod tests {
         GitQuery {
             terms: terms_,
             patterns,
+            words: &[],
             identifiers,
             since: None,
             paths,

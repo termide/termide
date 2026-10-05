@@ -143,10 +143,14 @@ impl PathFilter {
                 }
                 PathItem::Glob(pattern) => {
                     let text = pattern.as_str();
-                    if dir.is_empty() || text.starts_with("**/") {
+                    if dir.is_empty() {
                         specs.push(Spec::Glob(text.to_string()));
-                    } else if let Some(rest) = text.strip_prefix(&format!("{dir}/")) {
-                        specs.push(Spec::Glob(rest.to_string()));
+                    } else {
+                        match restate_glob(text, dir) {
+                            Some(rest) if rest.is_empty() => return Scope::All,
+                            Some(rest) => specs.push(Spec::Glob(rest)),
+                            None => {}
+                        }
                     }
                 }
             }
@@ -157,6 +161,31 @@ impl PathFilter {
             Scope::Some(specs)
         }
     }
+}
+
+/// The glob `pattern` restated inside `dir`, both relative to the project:
+/// its leading components matched against the directory's, one by one, a
+/// `**` taking any number of them. `None` when the directory is out of its
+/// reach; empty when the pattern names the directory itself, so all of it.
+fn restate_glob(pattern: &str, dir: &str) -> Option<String> {
+    let parts: Vec<&str> = pattern.split('/').collect();
+    let mut at = 0;
+    for name in dir.split('/') {
+        match parts.get(at) {
+            // `**` reaches into this directory at any depth, and on.
+            Some(&"**") => return Some(parts[at..].join("/")),
+            Some(part) => {
+                let matched = glob::Pattern::new(part).is_ok_and(|p| p.matches(name));
+                if !matched {
+                    return None;
+                }
+                at += 1;
+            }
+            // The pattern ended above: a directory it names holds this one.
+            None => return Some(String::new()),
+        }
+    }
+    Some(parts[at..].join("/"))
 }
 
 /// What a path filter selects inside one directory.
@@ -307,6 +336,27 @@ mod tests {
             Scope::Nothing
         );
         assert_eq!(PathFilter::default().within("x"), Scope::All);
+        // A wildcard reaches a nested repository as a plain name does.
+        assert_eq!(
+            PathFilter::new(&["*/src/**".to_string()]).within("crates/foo"),
+            Scope::Nothing
+        );
+        assert_eq!(
+            PathFilter::new(&["crates/*/README.md".to_string()]).within("crates/foo"),
+            Scope::Some(vec![Spec::Glob("README.md".into())])
+        );
+        assert_eq!(
+            PathFilter::new(&["*/src/**".to_string()]).within("foo"),
+            Scope::Some(vec![Spec::Glob("src/**".into())])
+        );
+        assert_eq!(
+            PathFilter::new(&["crates/*".to_string()]).within("crates/foo"),
+            Scope::All
+        );
+        assert_eq!(
+            PathFilter::new(&["crates/**/x.rs".to_string()]).within("crates/foo/bar"),
+            Scope::Some(vec![Spec::Glob("**/x.rs".into())])
+        );
         assert_eq!(
             Spec::Plain("src".into()).pathspec(Path::new("proj")),
             "proj/src"

@@ -396,6 +396,7 @@ impl RecallTool {
             .map(|q| text::query_words(q))
             .collect();
         let patterns = text::scan_patterns(&request.queries);
+        let words = text::acronyms(&request.queries);
         let identifiers = text::identifiers(&request.queries);
         let project_root = &self.setup.project_root;
         let cwd = request.cwd.as_deref().unwrap_or(project_root);
@@ -445,6 +446,7 @@ impl RecallTool {
                     let query = git::GitQuery {
                         terms: &term_list,
                         patterns: &patterns,
+                        words: &words,
                         identifiers: &identifiers,
                         since: request.since,
                         paths: &paths,
@@ -465,6 +467,7 @@ impl RecallTool {
                     let query = files::FileQuery {
                         terms: &term_list,
                         patterns: &patterns,
+                        words: &words,
                         paths: &paths,
                         excluded: &excluded,
                         now,
@@ -802,11 +805,19 @@ mod tests {
         let project = tmp.path().join("proj");
         git::tests::repo_with(
             &project,
-            &[(
-                "src/walrus.rs",
-                "pub fn walrus() {}\n",
-                "feat: walrus support",
-            )],
+            &[
+                (
+                    "src/walrus.rs",
+                    "pub fn walrus() {}\n",
+                    "feat: walrus support",
+                ),
+                ("docs/ci.md", "Run CI on every push.\n", "ci: run on push"),
+                (
+                    "docs/decision.md",
+                    "A decision was made.\n",
+                    "docs: record the decision",
+                ),
+            ],
         );
         let sessions_dir = tmp.path().join("sessions");
         let mut session = Session::create(&sessions_dir, &project).unwrap();
@@ -840,6 +851,14 @@ mod tests {
             .open("file:src/walrus.rs:1", &CancelToken::new())
             .is_err());
         assert!(tool.open("nonsense", &CancelToken::new()).is_err());
+
+        // An acronym is found as a whole word, in commits and files, and not
+        // inside a longer one.
+        let ci = tool.search(SearchRequest::new("CI"), None, &CancelToken::new());
+        let refs: Vec<&str> = ci.hits.iter().map(|h| h.reference.as_str()).collect();
+        assert!(ci.hits.iter().any(|h| h.source == Source::Git), "{refs:?}");
+        assert!(refs.contains(&"file:docs/ci.md:1"), "{refs:?}");
+        assert!(!refs.iter().any(|r| r.contains("decision")), "{refs:?}");
 
         let none = tool.search(SearchRequest::new("zebra"), None, &CancelToken::new());
         assert!(render(&none).starts_with("No results"));

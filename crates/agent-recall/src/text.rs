@@ -233,6 +233,29 @@ pub fn scan_patterns(queries: &[String]) -> Vec<String> {
     patterns
 }
 
+/// The queries' two-character acronyms, as typed in capitals ("CI", "UI",
+/// "ИИ"), lowercased: too short for a substring scan ("ci" is inside
+/// "decision"), they are looked for as whole words instead.
+#[must_use]
+pub fn acronyms(queries: &[String]) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    for query in queries {
+        for word in words(query) {
+            for piece in parts(word) {
+                let short = piece.chars().count() == 2
+                    && piece.chars().all(char::is_alphanumeric)
+                    && piece.chars().any(char::is_uppercase)
+                    && !piece.chars().any(char::is_lowercase);
+                let lower = piece.to_lowercase();
+                if short && !found.contains(&lower) {
+                    found.push(lower);
+                }
+            }
+        }
+    }
+    found
+}
+
 /// The queries' identifiers: words with `_`, `::` neighbours or camelCase
 /// humps, as typed, for git's pickaxe (`-S`), which matches them literally.
 #[must_use]
@@ -251,6 +274,13 @@ pub fn identifiers(queries: &[String]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acronyms_are_two_capitals_as_typed() {
+        let queries = vec!["why CI fails in the UI, ИИ too, we go".to_string()];
+        assert_eq!(acronyms(&queries), ["ci", "ui", "ии"]);
+        assert!(acronyms(&["Go on".to_string()]).is_empty());
+    }
 
     #[test]
     fn identifiers_split_and_also_count_whole() {
