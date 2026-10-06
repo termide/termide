@@ -501,6 +501,8 @@ mod tests {
     /// reads a real volume does not always catch it. Here the two fields are
     /// deliberately different, on every platform.
     #[cfg(unix)]
+    // Mirrors the casts in `statvfs_bytes_of`, which explains why they stay.
+    #[allow(clippy::unnecessary_cast)]
     #[test]
     fn test_statvfs_bytes_scales_by_frsize() {
         let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
