@@ -58,12 +58,6 @@ impl AgentPanel {
         !self.external && self.is_fresh()
     }
 
-    /// The MCP servers' tools reach the built-in loop only: an external agent
-    /// is served the tools its session started with.
-    pub(crate) fn toolset_lists_mcp(&self) -> bool {
-        !self.external
-    }
-
     /// The system prompt as the agent receives it, written next to the
     /// session logs (or to the temp directory without them) so it can be
     /// opened in a viewer.
@@ -207,8 +201,7 @@ impl AgentPanel {
                 t.agent_toolset_skills().to_string(),
             )
         }));
-        let mcp = self.mcp_arrived.iter().filter(|_| self.toolset_lists_mcp());
-        items.extend(mcp.map(|(server, tool)| {
+        items.extend(self.mcp_arrived.iter().map(|(server, tool)| {
             item(
                 tool.name().to_string(),
                 tool.name().to_string(),
@@ -375,15 +368,9 @@ impl AgentPanel {
             .iter()
             .filter(|name| name.as_str() != "skill")
             .count()
-            + self.offered_skills.len();
-        let lists_mcp = self.toolset_lists_mcp();
-        let all = all + if lists_mcp { self.mcp_arrived.len() } else { 0 };
-        let is_mcp = |key: &String| self.mcp_arrived.iter().any(|(_, tool)| tool.name() == key);
-        let off = self
-            .toolset_off
-            .iter()
-            .filter(|key| lists_mcp || !is_mcp(key))
-            .count();
+            + self.offered_skills.len()
+            + self.mcp_arrived.len();
+        let off = self.toolset_off.len();
         (all.saturating_sub(off), all)
     }
 
@@ -471,15 +458,31 @@ impl AgentPanel {
         if pending && !self.is_busy() {
             let batch = std::mem::take(&mut self.waiting_tools);
             let leaving = std::mem::take(&mut self.leaving_tools);
-            let (for_worker, leaving_worker) = (batch.clone(), leaving.clone());
-            match self.runtime.update(Box::new(move |agent| {
-                for name in &leaving_worker {
-                    agent.tools_mut().remove(name);
+            let handed = if self.external && !self.has_toolset() {
+                // An external agent on its own tools takes none of ours.
+                Err(PromptError::Unsupported)
+            } else if self.external {
+                // One on termide's tools is served the whole set anew.
+                let mut served = self.tools.clone();
+                for name in &leaving {
+                    served.remove(name);
                 }
-                for tool in for_worker {
-                    agent.tools_mut().insert(tool);
+                for tool in &batch {
+                    served.insert(Arc::clone(tool));
                 }
-            })) {
+                self.runtime.update_host_tools(served)
+            } else {
+                let (for_worker, leaving_worker) = (batch.clone(), leaving.clone());
+                self.runtime.update(Box::new(move |agent| {
+                    for name in &leaving_worker {
+                        agent.tools_mut().remove(name);
+                    }
+                    for tool in for_worker {
+                        agent.tools_mut().insert(tool);
+                    }
+                }))
+            };
+            match handed {
                 Ok(()) => {
                     for name in &leaving {
                         self.tools.remove(name);

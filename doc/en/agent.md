@@ -155,7 +155,8 @@ termide takes these agents as far as they let it, so a session runs the same
 whichever connection it is on:
 
 - **Claude Code** gets termide's system prompt in place of its own and calls
-  termide's tools, served to it over a local MCP server, in place of its own.
+  termide's tools, served to it over a local MCP server, in place of its own —
+  the tools of termide's MCP servers among them, as they connect or go.
   Its built-in tools and its own settings — their rules, hooks, `CLAUDE.md`
   and MCP servers — are left out. Every call runs in termide, through the same
   checks as the built-in loop's: the permission mode, the rules, the session
@@ -253,11 +254,10 @@ provider's prompt cache, but every call to it is refused; it leaves the
 context at the next moment the cache is lost anyway — a compaction, an agent
 or model switch — and cannot be switched back on in that session. The set is
 kept in the session log, so a reopened session comes back with it. Claude Code
-has the checklist too, with the built-in tools and the skills: it is served
-termide's tools when its session starts, so an unchecked item is refused from
-the first request on rather than kept out of its context. The MCP servers'
-tools are not served to it, so they are not listed. Codex, Gemini CLI and other
-ACP agents bring their own tools, so they have no checklist.
+has the checklist too: it is served termide's tools when its session starts,
+so an unchecked item is refused from the first request on rather than kept out
+of its context. Codex, Gemini CLI and other ACP agents bring their own tools,
+so they have no checklist.
 
 The panel's `[≡]` menu is kept to the actions with no home elsewhere —
 **Session info** (also `F3` and `/usage`), **Rename session**, **Save chat as

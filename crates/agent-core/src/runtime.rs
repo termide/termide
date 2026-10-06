@@ -191,6 +191,13 @@ pub trait Backend: Send {
     fn runs_host_tools(&self) -> bool {
         false
     }
+    /// Serve `tools` in place of termide's tools the external agent has, so a
+    /// change of the set — an MCP server of termide's connecting or going —
+    /// reaches it. The built-in loop changes its tools through
+    /// [`Backend::update`] instead; the default here says it is unsupported.
+    fn update_host_tools(&self, _tools: ToolRegistry) -> Result<(), PromptError> {
+        Err(PromptError::Unsupported)
+    }
     /// Switch the backend's model for the runs that follow, reporting the
     /// agent's own error on failure. The built-in loop changes model through
     /// [`Backend::update`] instead; the default here says it is unsupported.
