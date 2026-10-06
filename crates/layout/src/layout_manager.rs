@@ -159,6 +159,18 @@ impl LayoutManager {
         }
     }
 
+    /// Focus (and expand) the first panel that waits for the user, unless the
+    /// focused one does already. Returns whether the focus moved.
+    pub fn focus_waiting_panel(&mut self) -> bool {
+        if self
+            .active_panel()
+            .is_some_and(|panel| panel.needs_attention())
+        {
+            return false;
+        }
+        self.focus_panel_where(|panel| panel.needs_attention())
+    }
+
     /// Find the best group for a panel based on its width preference.
     fn find_preferred_group(&self, panel: &dyn Panel) -> usize {
         match panel.width_preference() {
@@ -373,6 +385,7 @@ mod tests {
     struct MockPanel {
         name: &'static str,
         width_pref: WidthPreference,
+        waiting: bool,
     }
 
     impl MockPanel {
@@ -380,6 +393,7 @@ mod tests {
             Self {
                 name,
                 width_pref: WidthPreference::NoPreference,
+                waiting: false,
             }
         }
     }
@@ -404,6 +418,9 @@ mod tests {
         fn width_preference(&self) -> WidthPreference {
             self.width_pref
         }
+        fn needs_attention(&self) -> bool {
+            self.waiting
+        }
     }
 
     fn make_config(threshold: u16) -> Config {
@@ -414,6 +431,40 @@ mod tests {
 
     fn panel(name: &'static str) -> Box<dyn Panel> {
         Box::new(MockPanel::new(name))
+    }
+
+    #[test]
+    fn focus_moves_to_a_waiting_panel_unless_the_focused_one_waits() {
+        let mut lm = LayoutManager::new();
+        let config = make_config(80);
+        lm.add_panel(panel("a"), &config, 200);
+        lm.add_panel(
+            Box::new(MockPanel {
+                waiting: true,
+                ..MockPanel::new("b")
+            }),
+            &config,
+            200,
+        );
+        lm.add_panel(panel("c"), &config, 200);
+        let focused = |lm: &LayoutManager| lm.active_panel().map(|p| p.name());
+
+        assert_ne!(focused(&lm), Some("b"));
+        assert!(lm.focus_waiting_panel());
+        assert_eq!(focused(&lm), Some("b"));
+        assert!(!lm.focus_waiting_panel());
+        assert_eq!(focused(&lm), Some("b"));
+    }
+
+    #[test]
+    fn focus_stays_when_no_panel_waits() {
+        let mut lm = LayoutManager::new();
+        let config = make_config(80);
+        lm.add_panel(panel("a"), &config, 200);
+        lm.add_panel(panel("b"), &config, 200);
+        let focus = lm.focus;
+        assert!(!lm.focus_waiting_panel());
+        assert_eq!(lm.focus, focus);
     }
 
     // =========================================================================

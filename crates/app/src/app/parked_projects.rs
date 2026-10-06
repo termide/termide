@@ -148,6 +148,9 @@ impl App {
         self.layout_manager = parked.layout;
         self.layout_manager
             .redistribute_widths_proportionally(self.state.terminal.width);
+        // The project was likely entered for what waits in it; a mark on an
+        // unfocused header is easy to miss.
+        self.layout_manager.focus_waiting_panel();
         // Diagnostics published while the project was parked reached only
         // `all_diagnostics`.
         for panel in self.layout_manager.iter_all_panels_mut() {
