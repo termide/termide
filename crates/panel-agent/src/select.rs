@@ -3,7 +3,10 @@
 //! through whole rows in between. Positions are in flattened-line
 //! coordinates, so scrolling does not move the selection off its text.
 
+use std::path::Path;
+
 use ratatui::text::Line;
+use termide_core::LinkTarget;
 
 /// A cell of the rendered transcript: the flattened line and the display
 /// column on it.
@@ -87,38 +90,29 @@ impl TextSelection {
     }
 }
 
-/// The `http(s)://` URL of `line` that covers display column `col`, if any:
-/// it runs from its scheme to the first space or closing delimiter, as the
-/// terminal panel reads one, less any sentence punctuation it ends with.
+/// The link written out on `line` that covers display column `col` — a web
+/// address, or a path that exists, a relative one taken from `cwd` — with the
+/// columns it spans, by the detection the terminal panel shares.
 #[must_use]
-pub fn url_at(line: &Line<'_>, col: usize) -> Option<String> {
-    let mut chars = Vec::new();
+pub fn link_at(
+    line: &Line<'_>,
+    col: usize,
+    cwd: &Path,
+) -> Option<(std::ops::Range<usize>, LinkTarget)> {
+    // The display column each char starts at, and the line's full width.
+    let mut cols = Vec::new();
+    let mut text = String::new();
     let mut at = 0;
     for ch in line.spans.iter().flat_map(|span| span.content.chars()) {
-        chars.push((ch, at));
+        cols.push(at);
+        text.push(ch);
         at += termide_ui::str_display_width(ch.encode_utf8(&mut [0; 4]));
     }
-    let text: String = chars.iter().map(|(ch, _)| ch).collect();
-    let mut from = 0;
-    while let Some(found) = ["https://", "http://"]
-        .iter()
-        .filter_map(|scheme| text[from..].find(scheme))
-        .min()
-    {
-        let start = from + found;
-        let end = text[start..]
-            .find(|ch: char| ch.is_whitespace() || ")>]}\"'`<".contains(ch))
-            .map_or(text.len(), |len| start + len);
-        let url = text[start..end].trim_end_matches(['.', ',', ';', ':', '!', '?']);
-        let first = text[..start].chars().count();
-        let last = first + url.chars().count();
-        let cols = chars[first].1..chars.get(last).map_or(at, |(_, c)| *c);
-        if cols.contains(&col) {
-            return Some(url.to_string());
-        }
-        from = end.max(start + 1);
-    }
-    None
+    let char_at = cols.iter().rposition(|&c| c <= col)?;
+    let (range, target) = termide_core::links::link_at(&text, char_at, cwd)?;
+    let start = cols[range.start];
+    let end = cols.get(range.end).copied().unwrap_or(at);
+    (col < end).then_some((start..end, target))
 }
 
 #[cfg(test)]
@@ -161,18 +155,34 @@ mod tests {
     }
 
     #[test]
-    fn a_url_is_found_under_its_cells_only() {
+    fn a_link_is_found_under_its_cells_only() {
         let line = Line::from(vec![
             Span::raw("↓ Fetching "),
             Span::raw("https://docs.rs/x, and (http://a.b)."),
         ]);
+        let cwd = Path::new("/");
+        let url = |col| link_at(&line, col, cwd).map(|(cols, target)| (cols, target.text()));
         // `↓` is one cell wide, so the URL starts at column 11.
-        assert_eq!(url_at(&line, 10), None);
-        assert_eq!(url_at(&line, 11).as_deref(), Some("https://docs.rs/x"));
-        assert_eq!(url_at(&line, 27).as_deref(), Some("https://docs.rs/x"));
+        assert_eq!(url(10), None);
+        assert_eq!(url(11), Some((11..28, "https://docs.rs/x".to_string())));
+        assert_eq!(
+            url(27).map(|(_, url)| url).as_deref(),
+            Some("https://docs.rs/x")
+        );
         // The comma after it is sentence punctuation, not the URL.
-        assert_eq!(url_at(&line, 28), None);
-        assert_eq!(url_at(&line, 35).as_deref(), Some("http://a.b"));
-        assert_eq!(url_at(&line, 45), None);
+        assert_eq!(url(28), None);
+        assert_eq!(url(35).map(|(_, url)| url).as_deref(), Some("http://a.b"));
+        assert_eq!(url(45), None);
+    }
+
+    #[test]
+    fn a_path_that_exists_is_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "").unwrap();
+        let line = Line::from("  error: ./a.rs:3:1 and ./b.rs");
+        let (cols, target) = link_at(&line, 12, dir.path()).unwrap();
+        assert_eq!(cols, 9..15);
+        assert_eq!(target, LinkTarget::Path(dir.path().join("./a.rs")));
+        assert_eq!(link_at(&line, 25, dir.path()), None);
     }
 }

@@ -94,8 +94,6 @@ pub struct HtmlPanel {
     hist_idx: usize,
     /// Where a followed page/link opens by default (from config).
     open_links: LinkOpen,
-    /// Where a followed image link opens by default (from config).
-    open_images: LinkOpen,
     /// Fragment to scroll to once content is (re)laid out — set when content
     /// loads from a URL carrying a `#fragment`.
     pending_anchor: Option<String>,
@@ -138,7 +136,6 @@ impl HtmlPanel {
             history: Vec::new(),
             hist_idx: 0,
             open_links: LinkOpen::default(),
-            open_images: LinkOpen::default(),
             pending_anchor: None,
             loading: None,
         }
@@ -368,7 +365,6 @@ impl Panel for HtmlPanel {
             t.insert("toggle_view", &config.viewer.keybindings.toggle_view);
             self.hotkeys = t;
             self.open_links = config.viewer.open_links;
-            self.open_images = config.viewer.open_images;
         }
     }
 
@@ -761,6 +757,7 @@ impl Panel for HtmlPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use termide_core::LinkTarget;
     use termide_html::render_html;
     use termide_modal::FindField;
 
@@ -795,7 +792,6 @@ mod tests {
             history: Vec::new(),
             hist_idx: 0,
             open_links: LinkOpen::Panel,
-            open_images: LinkOpen::Panel,
             pending_anchor: None,
             loading: None,
         };
@@ -872,43 +868,25 @@ mod tests {
     }
 
     #[test]
-    fn file_backed_web_link_opens_new_panel_by_default() {
-        // Default open_links = Panel: a web link from a file-backed view opens
-        // a new viewer (not the external browser, not in place).
+    fn file_backed_links_go_to_the_app() {
+        // A web link from a file-backed view, and a local file, are the app's
+        // to open (by the open_links / open_images settings), not in place.
         let mut p = panel_from("<p>x</p>");
         let evs = p.activate_link("https://ex.com");
         assert!(
-            matches!(evs.as_slice(), [PanelEvent::OpenUrl(_)]),
+            matches!(evs.as_slice(), [PanelEvent::OpenLink(LinkTarget::Url(u))] if u == "https://ex.com"),
             "{evs:?}"
         );
-    }
-
-    #[test]
-    fn local_image_link_opens_image_preview() {
-        let mut p = panel_from("<p>x</p>");
         let evs = p.activate_link("/pics/logo.png");
         assert!(
-            matches!(evs.as_slice(), [PanelEvent::PreviewMedia(_)]),
+            matches!(evs.as_slice(), [PanelEvent::OpenLink(LinkTarget::Path(p))] if p == std::path::Path::new("/pics/logo.png")),
             "{evs:?}"
         );
-    }
-
-    #[test]
-    fn open_images_external_sends_image_to_browser() {
-        let mut p = panel_from("<p>x</p>");
-        p.open_images = LinkOpen::External;
-        // Image link → external because of open_images, even though open_links
-        // is still Panel.
-        let evs = p.activate_link("/pics/logo.png");
+        // A scheme the app does not open goes to the system opener.
+        let evs = p.activate_link("mailto:a@b.c");
         assert!(
             matches!(evs.as_slice(), [PanelEvent::OpenExternal(_)]),
             "{evs:?}"
-        );
-        // A non-image link is unaffected (still opens in a viewer).
-        let evs2 = p.activate_link("https://ex.com/page");
-        assert!(
-            matches!(evs2.as_slice(), [PanelEvent::OpenUrl(_)]),
-            "{evs2:?}"
         );
     }
 
@@ -945,14 +923,17 @@ mod tests {
     }
 
     #[test]
-    fn external_setting_opens_browser() {
-        let mut p = panel_from("<p>x</p>");
+    fn external_setting_leaves_a_fetched_page_in_place() {
+        // With links set to open externally, a link in a fetched page goes to
+        // the app (the browser) instead of replacing the page.
+        let mut p = HtmlPanel::from_source("p".into(), "x".into(), Some("https://ex.com/a".into()));
         p.open_links = LinkOpen::External;
-        let evs = p.activate_link("https://ex.com");
+        let evs = p.activate_link("https://ex.com/b");
         assert!(
-            matches!(evs.as_slice(), [PanelEvent::OpenExternal(_)]),
+            matches!(evs.as_slice(), [PanelEvent::OpenLink(LinkTarget::Url(_))]),
             "{evs:?}"
         );
+        assert_eq!(p.history.len(), 1);
     }
 
     #[test]

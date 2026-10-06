@@ -21,7 +21,7 @@ pub use terminal_info::TerminalInfo;
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyModifiers};
 use input_encoding::{arrow_modifier_param, modern_key_bytes, pty_key};
-use link_detection::{HighlightSegment, LinkType};
+use link_detection::HighlightSegment;
 #[cfg(unix)]
 use nix::sys::signal::{self, Signal};
 #[cfg(unix)]
@@ -94,7 +94,7 @@ pub struct Terminal {
     /// Cached active buffer state (main vs alt screen) for cache invalidation
     cached_use_alt_screen: bool,
     /// Currently hovered link (type, segments for multi-line highlighting)
-    hovered_link: Option<(LinkType, Vec<HighlightSegment>)>,
+    hovered_link: Option<(termide_core::LinkTarget, Vec<HighlightSegment>)>,
     /// Whether Ctrl key is pressed (tracked for link highlighting)
     ctrl_pressed: bool,
     /// Search state for text search (matches across scrollback + visible grid)

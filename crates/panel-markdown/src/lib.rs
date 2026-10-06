@@ -97,8 +97,6 @@ pub struct MarkdownPanel {
     hist_idx: usize,
     /// Where a followed page/link opens by default (from config).
     open_links: LinkOpen,
-    /// Where a followed image link opens by default (from config).
-    open_images: LinkOpen,
     /// Fragment to scroll to once content is (re)laid out — set when content
     /// loads from a URL carrying a `#fragment`.
     pending_anchor: Option<String>,
@@ -141,7 +139,6 @@ impl MarkdownPanel {
             history: Vec::new(),
             hist_idx: 0,
             open_links: LinkOpen::default(),
-            open_images: LinkOpen::default(),
             pending_anchor: None,
             loading: None,
         }
@@ -286,7 +283,6 @@ impl Panel for MarkdownPanel {
             t.insert("toggle_view", &config.viewer.keybindings.toggle_view);
             self.hotkeys = t;
             self.open_links = config.viewer.open_links;
-            self.open_images = config.viewer.open_images;
         }
     }
 
@@ -691,7 +687,6 @@ mod tests {
             history: Vec::new(),
             hist_idx: 0,
             open_links: LinkOpen::Panel,
-            open_images: LinkOpen::Panel,
             pending_anchor: None,
             loading: None,
         };

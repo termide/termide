@@ -1,48 +1,27 @@
 //! Link detection for terminal (URLs and file paths).
 //!
-//! Detects and highlights clickable links in terminal output.
+//! Joins the rows a wrapped link spans and finds the link under the pointer
+//! with the detection shared with the other panels (`termide_core::links`).
 
-use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::path::Path;
+
+use termide_core::LinkTarget;
 
 use crate::terminal::TerminalScreen;
-
-/// Cached regex for URL detection in terminal (compiled once, used many times)
-pub static URL_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?:https?|ftp)://[^\s)>\]\}"'`<]+"#).expect("URL regex pattern is valid")
-});
-
-/// Cached regex for file path detection in terminal (compiled once, used many times)
-pub static PATH_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
-    // Match Unix paths: /path, ./path, ../path, ~/path
-    // Match Windows paths: C:\path, C:/path, \\server\share
-    regex::Regex::new(
-        r#"(?:[A-Za-z]:[/\\][^\s)>\]\}"'`<:*?|]*|\\\\[^\s)>\]\}"'`<:*?|]+|(?:~|\.\.?)?/[^\s)>\]\}"'`<:*?|]+)"#
-    ).expect("Path regex pattern is valid")
-});
-
-/// Type of detected link in terminal
-#[derive(Clone, Debug, PartialEq)]
-pub enum LinkType {
-    /// HTTP/HTTPS/FTP URL
-    Url(String),
-    /// Local file path (resolved to absolute)
-    FilePath(PathBuf),
-}
 
 /// Highlight segment: (abs_row, start_col, end_col)
 pub type HighlightSegment = (usize, usize, usize);
 
 /// Detect link (URL or file path) at given position.
-/// Returns (LinkType, start_row, start_col, display_len) if found.
+/// Returns (target, start_row, start_col, display_len) if found.
 /// `display_len` is the length of the matched text on screen (in cells),
-/// which may differ from `link_text().len()` for resolved file paths.
+/// which may differ from the target's own text for a resolved file path.
 pub(crate) fn detect_link_at_position(
     screen: &TerminalScreen,
     abs_row: usize,
     col: usize,
     cwd: &Path,
-) -> Option<(LinkType, usize, usize, usize)> {
+) -> Option<(LinkTarget, usize, usize, usize)> {
     let cols = screen.cols;
 
     // Look back up to 5 lines to find where a wrapped link might have started
@@ -68,8 +47,8 @@ pub(crate) fn detect_link_at_position(
     }
 
     // Concatenate text from search_start through current row and forward.
-    // Track char offsets (= cell offsets) for each line, since regex returns
-    // byte offsets that don't match cell positions for non-ASCII content.
+    // Track char offsets (= cell offsets) for each line: the shared detection
+    // reports char ranges, which match cells where bytes would not.
     let mut combined_text = String::new();
     let mut line_starts: Vec<(usize, usize)> = Vec::new(); // (row, char_offset)
     let mut char_count: usize = 0;
@@ -102,10 +81,6 @@ pub(crate) fn detect_link_at_position(
         .find(|(row, _)| *row == abs_row)
         .map(|(_, char_offset)| char_offset + col)?;
 
-    // Convert regex byte offset to char offset (handles multi-byte chars)
-    let byte_to_char =
-        |byte_offset: usize| -> usize { combined_text[..byte_offset].chars().count() };
-
     // Helper to find start row/col from char offset
     let find_start_pos = |char_offset: usize| -> Option<(usize, usize)> {
         for (row, offset) in line_starts.iter().rev() {
@@ -116,50 +91,9 @@ pub(crate) fn detect_link_at_position(
         None
     };
 
-    // Try to detect URL first (using cached regex)
-    for m in URL_REGEX.find_iter(&combined_text) {
-        let match_start = byte_to_char(m.start());
-        let match_end = byte_to_char(m.end());
-        if cursor_char_offset >= match_start && cursor_char_offset < match_end {
-            let display_len = match_end - match_start;
-            if let Some((row, col)) = find_start_pos(match_start) {
-                return Some((LinkType::Url(m.as_str().to_string()), row, col, display_len));
-            }
-        }
-    }
-
-    // Try to detect file path (using cached regex)
-    // Matches: /path/to/file, ./path, ../path, ~/path
-    for m in PATH_REGEX.find_iter(&combined_text) {
-        let match_start = byte_to_char(m.start());
-        let match_end = byte_to_char(m.end());
-        if cursor_char_offset >= match_start && cursor_char_offset < match_end {
-            let path_str = m.as_str();
-            // Expand ~ to home directory
-            let expanded = if let Some(suffix) = path_str.strip_prefix('~') {
-                if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
-                    PathBuf::from(home).join(suffix.trim_start_matches(['/', '\\']))
-                } else {
-                    PathBuf::from(path_str)
-                }
-            } else if path_str.starts_with('/') {
-                PathBuf::from(path_str)
-            } else {
-                // Relative path - resolve against cwd
-                cwd.join(path_str)
-            };
-
-            // Check if path exists
-            if expanded.exists() {
-                let display_len = match_end - match_start;
-                if let Some((row, col)) = find_start_pos(match_start) {
-                    return Some((LinkType::FilePath(expanded), row, col, display_len));
-                }
-            }
-        }
-    }
-
-    None
+    let (range, target) = termide_core::links::link_at(&combined_text, cursor_char_offset, cwd)?;
+    let (row, col) = find_start_pos(range.start)?;
+    Some((target, row, col, range.len()))
 }
 
 /// Build highlight segments for multi-line link.
@@ -188,12 +122,4 @@ pub(crate) fn build_link_segments(
     }
 
     segments
-}
-
-/// Get the text representation of a link for display/copying
-pub(crate) fn link_text(link: &LinkType) -> String {
-    match link {
-        LinkType::Url(url) => url.clone(),
-        LinkType::FilePath(path) => path.display().to_string(),
-    }
 }

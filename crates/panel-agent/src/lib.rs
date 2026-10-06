@@ -715,6 +715,9 @@ pub struct AgentPanel {
     press: Option<select::Cell>,
     /// Text selected in the transcript with the mouse, copied by `Ctrl+C`.
     text_selection: Option<select::TextSelection>,
+    /// The regions — `(line, start, end)` in flattened-line columns — of the
+    /// link under the pointer while `Ctrl` is held, lit as one.
+    hovered_link: Option<Vec<transcript::LinkRegion>>,
     /// Large pastes held out of the input as a short placeholder, expanded back
     /// inline on submit, so a big block does not swamp the prompt box.
     pastes: Vec<Paste>,
@@ -1006,6 +1009,7 @@ impl AgentPanel {
             form_clicks: ClickTracker::new(),
             press: None,
             text_selection: None,
+            hovered_link: None,
             pastes: Vec::new(),
             paste_seq: 0,
             chat_focus: false,

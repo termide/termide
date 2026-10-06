@@ -67,7 +67,12 @@ The preview has a movable cursor and supports text selection:
   file-backed view opens in a new viewer, and a link to an **image** opens in
   the image preview. Two settings choose the default destination —
   `[viewer] open_links` for pages and `[viewer] open_images` for image links —
-  each `panel` (default) or `external`.
+  each `panel` (default) or `external`. A link to a local file opens it where
+  **Open…** would — a Markdown or HTML file in its viewer, any other text
+  file in the read-only editor — and a directory opens in the file manager; a
+  `mailto:` link goes to the system's handler. A link followed with `Ctrl+Click`
+  in the [terminal](terminal.md) or the [agent panel](agent.md) opens by the
+  same rules.
 - **`O`** always opens the link under the cursor in the external browser
   (regardless of the setting).
 - **`[` / `]`** (or **`Backspace`** for back) step back / forward through the

@@ -13,6 +13,7 @@ crossterm.workspace = true
 anyhow.workspace = true
 dirs.workspace = true
 unicode-width.workspace = true
+regex.workspace = true
 
 # For Panel trait methods
 termide-theme = { path = "../theme" }
@@ -20,3 +21,6 @@ termide-config = { path = "../config" }
 termide-project = { path = "../project" }
 termide-file-ops = { path = "../file-ops" }
 termide-keyboard = { path = "../keyboard" }
+
+[dev-dependencies]
+tempfile.workspace = true

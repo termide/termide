@@ -57,6 +57,14 @@ impl App {
             return Ok(());
         }
 
+        self.open_local_path(path)
+    }
+
+    /// Open an existing local `path` where it belongs: a directory in the
+    /// file manager, a file by its type — the rendered viewers, the image
+    /// preview, the database viewer, else the read-only editor. Open… and a
+    /// followed link share it.
+    pub(in crate::app) fn open_local_path(&mut self, path: PathBuf) -> Result<()> {
         // A directory opens in the file manager.
         if path.is_dir() {
             self.close_help_panels();

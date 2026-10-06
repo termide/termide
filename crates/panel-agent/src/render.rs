@@ -739,6 +739,19 @@ impl AgentPanel {
                         cell.set_style(style);
                     }
                 }
+                // The link under the pointer while Ctrl is held, lit whole.
+                for &(line, start, end) in self.hovered_link.iter().flatten() {
+                    if line != self.top + row {
+                        continue;
+                    }
+                    for dx in start.min(text_width as usize)..end.min(text_width as usize) {
+                        buf[(area.x + dx as u16, area.y + row as u16)].set_style(
+                            Style::default()
+                                .fg(colors.info)
+                                .add_modifier(Modifier::UNDERLINED),
+                        );
+                    }
+                }
                 // A mouse selection over the text, as a terminal shows one.
                 if let Some((start, end)) = self
                     .text_selection

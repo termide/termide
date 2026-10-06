@@ -12,7 +12,7 @@ use termide_core::PanelEvent;
 use termide_ui::{extract_hex_color_at_col, ColorPreview};
 
 use crate::input_encoding::{can_send_mouse_event, mouse_modifier_bits, mouse_route, MouseRoute};
-use crate::link_detection::{self, LinkType};
+use crate::link_detection;
 use crate::selection::{line_selection, word_selection};
 use crate::Terminal;
 
@@ -211,7 +211,7 @@ impl Terminal {
 
                 if is_new_link {
                     // Copy link text to clipboard
-                    let _ = termide_ui::clipboard::copy(&link_detection::link_text(&link_type));
+                    let _ = termide_ui::clipboard::copy(&link_type.text());
                 }
                 self.hovered_link = Some((link_type, segments));
                 self.cached_lines = None; // Force redraw
@@ -284,33 +284,8 @@ impl Terminal {
                 return vec![PanelEvent::NeedsRedraw];
             }
 
-            if let Some((ref link_type, _)) = self.hovered_link {
-                match link_type {
-                    LinkType::Url(url) => {
-                        let _ = open::that(url);
-                        return if needs_redraw {
-                            vec![PanelEvent::NeedsRedraw]
-                        } else {
-                            vec![]
-                        };
-                    }
-                    LinkType::FilePath(path) => {
-                        let (dir, file) = if path.is_dir() {
-                            (path.clone(), None)
-                        } else {
-                            (
-                                path.parent()
-                                    .map(|p| p.to_path_buf())
-                                    .unwrap_or_else(|| path.clone()),
-                                path.file_name().map(|n| n.to_os_string()),
-                            )
-                        };
-                        return vec![PanelEvent::OpenPath {
-                            path: dir,
-                            select_file: file,
-                        }];
-                    }
-                }
+            if let Some((link, _)) = &self.hovered_link {
+                return vec![PanelEvent::OpenLink(link.clone())];
             }
         }
 
