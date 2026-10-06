@@ -1010,6 +1010,11 @@ The session log keeps all of it: reopening the session shows the cleared
 conversation, as after a compaction, `recall` still finds what was cleared,
 and undoing the carry-out request brings it back.
 
+On Claude Code, Codex and Gemini CLI the card comes up too, without the
+clean-context row: such an agent keeps its own history, so there is nothing
+of termide's to clear. An external agent that answers to its own
+configuration has no plan mode and no card.
+
 ### Auto mode
 
 **auto** is for a run you trust in its direction but do not want to answer

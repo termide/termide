@@ -3802,8 +3802,9 @@ impl ConnectionCatalog for Connections {
     fn build(&self, name: &str, _agent: &str) -> Option<ConnectionChoice> {
         let entry = self.list().into_iter().find(|entry| entry.name == name)?;
         let backend: Option<BackendFactory> = (entry.kind == "codex").then(|| {
-            Arc::new(|setup: BackendSetup| Ok(Box::new(External::new(setup)) as Box<dyn Backend>))
-                as BackendFactory
+            Arc::new(|setup: BackendSetup| {
+                Ok(Box::new(External::following_modes(setup)) as Box<dyn Backend>)
+            }) as BackendFactory
         });
         Some(ConnectionChoice {
             name: entry.name,
@@ -5499,12 +5500,23 @@ impl Backend for Idle {
 /// message, through the same events as the real ACP backend.
 struct External {
     events: Mutex<Vec<AgentEvent>>,
+    /// Whether the panel's modes reach it, as with Claude Code, Codex and
+    /// Gemini CLI.
+    follows_mode: bool,
 }
 
 impl External {
     fn new(_setup: BackendSetup) -> Self {
         Self {
             events: Mutex::new(Vec::new()),
+            follows_mode: false,
+        }
+    }
+
+    fn following_modes(setup: BackendSetup) -> Self {
+        Self {
+            follows_mode: true,
+            ..Self::new(setup)
         }
     }
 }
@@ -5556,6 +5568,9 @@ impl Backend for External {
     }
     fn into_agent(self: Box<Self>) -> Option<Agent> {
         None
+    }
+    fn follows_mode(&self) -> bool {
+        self.follows_mode
     }
 }
 
@@ -6190,6 +6205,64 @@ fn plan_mode_adds_its_instructions_and_offers_to_carry_the_plan_out() {
     let shown = panel.write_system_prompt().unwrap();
     assert_eq!(std::fs::read_to_string(shown).unwrap(), "Base prompt.");
     assert!(panel.pending.is_none(), "no card outside plan mode");
+}
+
+#[test]
+fn an_external_agent_following_the_modes_is_offered_to_carry_the_plan_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        connections: Some(Arc::new(Connections)),
+        plan_prompt: PlanPrompt::from_file(
+            "---\nrequest: Do it.\nclean_request: Do it afresh.\n---\nPlan first.",
+        ),
+        ..setup(vec![])
+    });
+    assert!(panel.switch_connection("cli"));
+    let _ = panel.set_mode(Mode::Plan);
+    type_text(&mut panel, "add a feature");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+
+    // Its history is its own: no clean context to offer.
+    let form = panel.pending.as_ref().expect("plan card").form();
+    assert!(form.title().starts_with("Plan mode"), "{}", form.title());
+    let t = termide_i18n::t();
+    assert_eq!(
+        form.options(),
+        [t.agent_plan_accept_edits(), t.agent_plan_configured()]
+    );
+
+    // The first row accepts edits and sends the request that keeps the context.
+    panel.handle_key(chord(KeyCode::Char('1'), KeyModifiers::NONE));
+    let _ = panel.tick();
+    assert_eq!(panel.mode.get(), Mode::Edit);
+    settle(&mut panel);
+    let users: Vec<&str> = panel
+        .transcript()
+        .items()
+        .iter()
+        .filter_map(|i| match i {
+            Item::User { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(users, ["add a feature", "Do it."]);
+}
+
+#[test]
+fn an_external_agent_on_its_own_modes_gets_no_plan_card() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![])
+    });
+    assert!(panel.switch_agent("outside"));
+    let _ = panel.set_mode(Mode::Plan);
+    type_text(&mut panel, "add a feature");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+    assert!(panel.pending.is_none());
 }
 
 #[test]

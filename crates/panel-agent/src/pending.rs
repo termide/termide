@@ -49,6 +49,9 @@ pub(crate) enum Pending {
     /// Plan mode: the agent answered, carry the plan out or keep planning?
     Plan {
         form: ChoiceForm,
+        /// What each row carries the plan out in: the mode, and whether from
+        /// a clean context.
+        choices: Vec<(Mode, bool)>,
     },
     /// A `/handoff` brief is ready: save it to a file, or start a new session
     /// from it. The brief is kept until the choice is made.
@@ -76,7 +79,7 @@ impl Pending {
             | Pending::Command { form, .. }
             | Pending::Undo { form }
             | Pending::Rewind { form, .. }
-            | Pending::Plan { form }
+            | Pending::Plan { form, .. }
             | Pending::Handoff { form, .. }
             | Pending::Suggestion { form, .. } => form,
         }
@@ -89,7 +92,7 @@ impl Pending {
             | Pending::Command { form, .. }
             | Pending::Undo { form }
             | Pending::Rewind { form, .. }
-            | Pending::Plan { form }
+            | Pending::Plan { form, .. }
             | Pending::Handoff { form, .. }
             | Pending::Suggestion { form, .. } => form,
         }
@@ -565,9 +568,14 @@ impl AgentPanel {
 
     /// In plan mode, once the agent has answered: offer to carry the plan
     /// out, in accept-edits from a clean context or with the exploration in
-    /// it, or asking, or to keep planning.
+    /// it, or asking, or to keep planning. An external agent that follows
+    /// the panel's modes is offered the same, save the clean context: its
+    /// history is its own, so there is nothing of ours to clear.
     pub(crate) fn offer_plan(&mut self) {
-        if self.external || self.mode.get() != Mode::Plan || self.pending.is_some() {
+        if (self.external && !self.runtime.follows_mode())
+            || self.mode.get() != Mode::Plan
+            || self.pending.is_some()
+        {
             return;
         }
         // The run's closing line sits after the answer; look past it.
@@ -585,16 +593,21 @@ impl AgentPanel {
             return;
         }
         let t = termide_i18n::t();
-        let form = ChoiceForm::new(
-            t.agent_plan_carry_title(),
-            vec![
-                t.agent_plan_clean_edits().to_string(),
-                t.agent_plan_accept_edits().to_string(),
-                t.agent_plan_configured().to_string(),
-            ],
-        )
-        .with_cancel(t.agent_plan_keep());
-        self.pending = Some(Pending::Plan { form });
+        let mut rows = vec![
+            (t.agent_plan_clean_edits(), (Mode::Edit, true)),
+            (t.agent_plan_accept_edits(), (Mode::Edit, false)),
+            (t.agent_plan_configured(), (Mode::Configured, false)),
+        ];
+        if self.external {
+            rows.retain(|(_, (_, clean))| !clean);
+        }
+        let (labels, choices): (Vec<_>, Vec<_>) = rows
+            .into_iter()
+            .map(|(label, choice)| (label.to_string(), choice))
+            .unzip();
+        let form =
+            ChoiceForm::new(t.agent_plan_carry_title(), labels).with_cancel(t.agent_plan_keep());
+        self.pending = Some(Pending::Plan { form, choices });
     }
 
     /// The plan was accepted: leave plan mode for `mode` and send the
@@ -734,13 +747,12 @@ impl AgentPanel {
             (Some(Pending::Rewind { .. }), ChoiceAction::Cancelled | ChoiceAction::Custom(_)) => {
                 self.pending = None;
             }
-            (Some(Pending::Plan { .. }), ChoiceAction::Chosen(index)) => {
+            (Some(Pending::Plan { choices, .. }), ChoiceAction::Chosen(index)) => {
+                let (mode, clean) = choices
+                    .get(index)
+                    .copied()
+                    .unwrap_or((Mode::Configured, false));
                 self.pending = None;
-                let (mode, clean) = match index {
-                    0 => (Mode::Edit, true),
-                    1 => (Mode::Edit, false),
-                    _ => (Mode::Configured, false),
-                };
                 let events = self.carry_out_plan(mode, clean);
                 self.pending_events.extend(events);
             }
