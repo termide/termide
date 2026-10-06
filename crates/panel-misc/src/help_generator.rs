@@ -54,6 +54,7 @@ impl HelpGenerator {
                 t,
             ),
             Self::generate_terminal_section(&config.terminal.keybindings, t),
+            Self::generate_agent_section(t),
             Self::generate_database_section(&config.database.keybindings, t),
             Self::generate_diagnostics_section(t),
             Self::generate_operations_section(t),
@@ -705,6 +706,46 @@ impl HelpGenerator {
 
         HelpSection {
             header: t.help_terminal_keys().to_string(),
+            entries,
+        }
+    }
+
+    /// Generate agent panel keybindings section.
+    ///
+    /// The agent panel's keys are not configurable: they mirror the key
+    /// handling in `termide-panel-agent`'s `input.rs`, and the full table in
+    /// `doc/en/agent.md`. Prompt editing keys shared by every text field and
+    /// the `/` commands (listed by completion) are left out.
+    fn generate_agent_section(t: &dyn termide_i18n::Translation) -> HelpSection {
+        let entry = |keys: &str, description: &str| HelpEntry {
+            keys: keys.to_string(),
+            description: description.to_string(),
+        };
+        let entries = vec![
+            entry("Enter", t.help_desc_agent_send()),
+            entry("Shift+Enter / Ctrl+J", t.help_desc_agent_newline()),
+            entry("Esc", t.help_desc_agent_esc()),
+            entry("Tab", t.help_desc_agent_tab()),
+            entry("Shift+Tab", t.help_desc_agent_mode()),
+            entry("Ctrl+O", t.help_desc_agent_fold_all()),
+            entry("↑ / ↓", t.help_desc_agent_history()),
+            entry("$", t.help_desc_agent_shell()),
+            entry("Ctrl+↑↓ / PgUp / PgDn", t.help_desc_agent_scroll()),
+            entry("Ctrl+Home / Ctrl+End", t.help_desc_agent_jump()),
+            entry("Ctrl+C", t.help_desc_agent_copy()),
+            entry("Ctrl+S", t.help_desc_agent_save()),
+            entry("Space / ← / →", t.help_desc_agent_chat_fold()),
+            entry("o", t.help_desc_agent_chat_open()),
+            entry("F2", t.help_desc_agent_rename()),
+            entry("F3", t.help_desc_agent_info()),
+            entry("F4", t.help_desc_agent_rewind()),
+            entry("F5", t.help_desc_agent_fork()),
+            entry("F6", t.help_desc_agent_switch()),
+            entry("F7", t.help_desc_agent_new()),
+            entry("F8", t.help_desc_agent_delete()),
+        ];
+        HelpSection {
+            header: t.help_section_agent().to_string(),
             entries,
         }
     }
