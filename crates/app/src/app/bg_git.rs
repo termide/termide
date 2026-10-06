@@ -139,7 +139,8 @@ impl App {
                 }
 
                 let modal = InfoModal::new(title, lines);
-                self.state.active_modal = Some(ActiveModal::Info(Box::new(modal)));
+                self.state
+                    .show_message_modal(ActiveModal::Info(Box::new(modal)));
                 self.state.needs_redraw = true;
 
                 // Refresh all git panels

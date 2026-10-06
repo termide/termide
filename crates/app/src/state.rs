@@ -64,6 +64,11 @@ pub struct AppState {
     pub layout_info: LayoutInfo,
     /// Active modal window
     pub active_modal: Option<ActiveModal>,
+    /// Reports that finished while another modal was open, oldest first. A
+    /// report's text exists only in its modal, so it is never dropped: it
+    /// waits here until the screen is clear. Bounded — the oldest goes when
+    /// full, since a stale build report is worth less than a live question.
+    pub queued_info_modals: Vec<ActiveModal>,
     /// Action pending modal result
     pub pending_action: Option<PendingAction>,
     /// Receiver channel for background directory size calculation results
@@ -237,6 +242,7 @@ impl AppState {
             layout_mode: LayoutMode::Single,
             layout_info,
             active_modal: None,
+            queued_info_modals: Vec::new(),
             pending_action: None,
             dir_size_receiver: None,
             view_fetches: Vec::new(),
@@ -639,6 +645,58 @@ impl AppState {
         self.active_modal = Some(modal);
     }
 
+    /// Show a message that interrupts nothing: a report, an error, a result.
+    ///
+    /// A question already on screen — one that carries a `pending_action` —
+    /// keeps the screen: its answer decides a real operation, and replacing it
+    /// would lose both the question and whatever was typed into it. The message
+    /// waits instead. With no question open, or over a plain message, it shows
+    /// now; over a message it replaces it, the older one having been read.
+    pub fn show_message_modal(&mut self, modal: ActiveModal) {
+        let asking = self.active_modal.is_some() && self.pending_action.is_some();
+        if asking {
+            self.queued_info_modals.push(modal);
+            // A report nobody will ever reach is worth less than the live
+            // question ahead of it, and an unbounded queue never drains.
+            const MAX_QUEUED: usize = 8;
+            while self.queued_info_modals.len() > MAX_QUEUED {
+                self.queued_info_modals.remove(0);
+            }
+            log::debug!(
+                "A modal is open; queued a message behind it ({} waiting)",
+                self.queued_info_modals.len()
+            );
+        } else {
+            // The message that was here — a resource panel, an earlier report —
+            // is gone, and with it the kind that made it a resource panel.
+            // Leaving the kind set would have Esc and the arrows treat this
+            // report as that panel.
+            self.resource_modal_kind = None;
+            self.active_modal = Some(modal);
+        }
+    }
+
+    /// The next message waiting for the screen, if any.
+    fn take_queued_message_modal(&mut self) -> Option<ActiveModal> {
+        if self.active_modal.is_none() && !self.queued_info_modals.is_empty() {
+            Some(self.queued_info_modals.remove(0))
+        } else {
+            None
+        }
+    }
+
+    /// Give the screen to a message that was queued behind a question, if the
+    /// screen is clear now. Returns whether it did.
+    pub fn deliver_queued_message_modal(&mut self) -> bool {
+        match self.take_queued_message_modal() {
+            Some(modal) => {
+                self.active_modal = Some(modal);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Take pending action (take ownership)
     pub fn take_pending_action(&mut self) -> Option<PendingAction> {
         self.pending_action.take()
@@ -787,5 +845,97 @@ impl ModalManager for AppState {
 
     fn take_pending_action(&mut self) -> Option<PendingAction> {
         self.pending_action.take()
+    }
+}
+
+#[cfg(test)]
+mod message_queue_tests {
+    use super::{ActiveModal, AppState, PendingAction};
+    use termide_modal::{ConfirmModal, InfoModal};
+
+    /// State on the built-in defaults: `AppState::new` would read the
+    /// developer's own config file.
+    fn state() -> AppState {
+        let mut config = termide_config::Config::default();
+        config.normalize();
+        let theme = termide_theme::Theme::get_by_name(&config.general.theme);
+        AppState::with_config_and_theme(config.clone(), config, theme)
+    }
+
+    fn report(title: &str) -> ActiveModal {
+        ActiveModal::Info(Box::new(InfoModal::new(
+            title,
+            vec![(String::new(), "output".to_string())],
+        )))
+    }
+
+    fn question(title: &str) -> ActiveModal {
+        ActiveModal::Confirm(Box::new(ConfirmModal::new(title, "are you sure?")))
+    }
+
+    /// A report's text exists nowhere else, so a question on screen must not
+    /// cost it: the report waits and takes the screen once the question is
+    /// answered. Dropping it would abandon a copy mid-flight with no record.
+    #[test]
+    fn a_report_waits_behind_an_open_question() {
+        let mut s = state();
+        s.set_pending_action(PendingAction::QuitApplication, question("Quit?"));
+
+        s.show_message_modal(report("build"));
+
+        assert!(
+            matches!(s.active_modal(), Some(ActiveModal::Confirm(_))),
+            "the question keeps the screen"
+        );
+        assert!(!s.deliver_queued_message_modal(), "nothing to take yet");
+
+        s.close_modal();
+        assert!(s.deliver_queued_message_modal());
+        assert!(format!("{:?}", s.active_modal()).contains("build"));
+        assert!(!s.deliver_queued_message_modal(), "the queue drained once");
+    }
+
+    /// Over a plain message — no question behind it — the newer report wins
+    /// the screen at once; the older one has been read.
+    #[test]
+    fn a_report_over_a_plain_message_shows_at_once() {
+        let mut s = state();
+        s.show_message_modal(report("first"));
+        s.show_message_modal(report("second"));
+
+        assert!(s.queued_info_modals.is_empty());
+        assert!(format!("{:?}", s.active_modal()).contains("second"));
+    }
+
+    /// The queue is bounded: a session that never clears the screen must not
+    /// grow it without limit, and the stalest report is the least worth kept.
+    #[test]
+    fn the_queue_keeps_the_newest_and_drops_the_stalest() {
+        let mut s = state();
+        s.set_pending_action(PendingAction::QuitApplication, question("Quit?"));
+        for i in 0..12 {
+            s.show_message_modal(report(&format!("report-{i}")));
+        }
+
+        assert_eq!(s.queued_info_modals.len(), 8);
+        s.close_modal();
+        let first = s.take_queued_message_modal();
+        assert!(format!("{first:?}").contains("report-4"), "the oldest kept");
+    }
+
+    /// A resource indicator is an `Info` modal whose Esc and arrows come from
+    /// `resource_modal_kind`. A report replacing it must take that flag with
+    /// it, or Esc would close the wrong thing.
+    #[test]
+    fn a_report_replacing_a_resource_panel_clears_its_kind() {
+        use crate::state::ResourceModalKind;
+
+        let mut s = state();
+        s.show_message_modal(report("disk"));
+        s.resource_modal_kind = Some(ResourceModalKind::Disk);
+
+        s.show_message_modal(report("build"));
+
+        assert!(s.resource_modal_kind.is_none());
     }
 }

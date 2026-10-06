@@ -813,6 +813,13 @@ impl App {
             // Check and close panels that should auto-close
             self.check_auto_close_panels()?;
 
+            // A report that arrived behind an open question gets the screen
+            // once the question has been answered. Checked every turn, so it
+            // shows as soon as the modal closes, whichever key closed it.
+            if self.state.deliver_queued_message_modal() {
+                self.state.needs_redraw = true;
+            }
+
             // Render UI only when needed (reduces idle CPU from 24fps to near-zero)
             if self.state.needs_redraw {
                 terminal.draw(|frame| {

@@ -142,7 +142,8 @@ impl App {
 
             PanelEvent::ShowInfo { title, rows } => {
                 let modal = termide_modal::InfoModal::new(title, rows);
-                self.state.active_modal = Some(crate::state::ActiveModal::Info(Box::new(modal)));
+                self.state
+                    .show_message_modal(crate::state::ActiveModal::Info(Box::new(modal)));
                 self.state.needs_redraw = true;
             }
 
