@@ -3355,6 +3355,63 @@ fn escape_declines_the_models_question() {
     assert_eq!(worker.join().unwrap(), QuestionReply::Declined);
 }
 
+/// An external agent's calls reach the panel as a message of calls alone
+/// once one has run, for the log: it leaves no answer block behind, nor
+/// closes the reasoning streaming meanwhile.
+#[test]
+fn a_message_of_calls_alone_leaves_no_answer_block() {
+    let mut panel = panel(vec![]);
+    panel.external = true;
+    let call = termide_agent_core::ToolCall {
+        id: "c".into(),
+        name: "bash".into(),
+        arguments: serde_json::json!({ "command": "ls" }),
+        extra_content: None,
+    };
+    panel.apply(AgentEvent::AgentStart);
+    panel.apply(AgentEvent::ToolExecutionStart { call: call.clone() });
+    panel.apply(AgentEvent::ToolExecutionEnd {
+        result: ToolResultMessage::text(&call, "a.rs"),
+    });
+    // The agent has started reasoning about what came back.
+    panel.apply(AgentEvent::MessageStart {
+        prompt_tokens: None,
+    });
+    panel.apply(AgentEvent::MessageUpdate(StreamEvent::ThinkingDelta(
+        "so".into(),
+    )));
+    panel.apply(AgentEvent::MessageEnd(Message::Assistant(
+        AssistantMessage {
+            content: vec![AssistantContent::ToolCall(call.clone())],
+            stop_reason: StopReason::ToolUse,
+            ..reply("")
+        },
+    )));
+    panel.apply(AgentEvent::MessageEnd(Message::ToolResult(
+        ToolResultMessage::text(&call, "a.rs"),
+    )));
+    assert!(
+        !panel
+            .transcript
+            .items()
+            .iter()
+            .any(|item| matches!(item, Item::Assistant { .. })),
+        "{:?}",
+        panel.transcript.items()
+    );
+    assert!(
+        matches!(
+            panel.transcript.items().last(),
+            Some(Item::Thinking {
+                streaming: true,
+                ..
+            })
+        ),
+        "{:?}",
+        panel.transcript.items()
+    );
+}
+
 /// A question for a call the external agent gave up comes down by itself,
 /// and the next call's question is shown rather than turned away.
 #[test]

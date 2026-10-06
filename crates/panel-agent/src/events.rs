@@ -207,6 +207,14 @@ impl AgentPanel {
                         self.transcript.push(item);
                         None
                     }
+                    // An external agent's calls show as they run; the
+                    // message of them, sent once one has run, is for the log
+                    // alone, and must not close what streams meanwhile.
+                    Message::Assistant(assistant)
+                        if self.external && assistant.tool_calls().next().is_some() =>
+                    {
+                        None
+                    }
                     Message::Assistant(assistant) => {
                         if assistant.usage.total() > 0 {
                             self.context_tokens = assistant.usage.total();

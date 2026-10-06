@@ -88,11 +88,27 @@ struct Shared {
     mcp_server: Mutex<Option<McpServer>>,
     /// Calls announced without their arguments yet, by id.
     announced: Mutex<HashMap<String, Value>>,
+    /// The calls on their way into the session log.
+    calls: Mutex<CallLog>,
     /// The context's fill and size, `(used, size)`, as `usage_update` last
     /// reported them.
     context: Mutex<Option<(u64, u64)>>,
     /// The panel's live permission mode.
     mode: ModeHandle,
+}
+
+/// The agent's tool calls as the session log keeps the built-in loop's: an
+/// assistant message with the calls, then a result for each. The agent
+/// reports a call when it starts and its result when it ends, so the calls
+/// started are held back until the first of them ends — calls made together
+/// share one message, as the built-in loop's do — and a call the turn left
+/// without a result gets one saying so.
+#[derive(Default)]
+struct CallLog {
+    /// Started calls not yet in the log.
+    unlogged: Vec<ToolCall>,
+    /// Started calls without a result yet.
+    open: Vec<ToolCall>,
 }
 
 pub struct AcpRuntime {
@@ -183,6 +199,7 @@ impl AcpRuntime {
             host_tools: Mutex::new(setup.host_tools),
             mcp_server: Mutex::new(None),
             announced: Mutex::new(HashMap::new()),
+            calls: Mutex::new(CallLog::default()),
             context: Mutex::new(None),
             mode: setup.mode,
         });
@@ -698,6 +715,7 @@ impl Shared {
             Ok(_) => None,
         };
         let usage = result.as_ref().map(usage_of).unwrap_or_default();
+        self.close_unfinished_calls();
         self.close_message_with(stop, error, usage);
         let _ = self.events.send(AgentEvent::TurnEnd);
         if self.cancel.is_cancelled() {
@@ -742,18 +760,23 @@ impl Shared {
             stop_reason: stop,
             usage,
             provider: "acp".into(),
-            model: self
-                .current_model
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .clone()
-                .unwrap_or_else(|| self.name.clone()),
+            model: self.model_name(),
             error_message: error,
             timestamp: now_millis(),
         };
         let _ = self
             .events
             .send(AgentEvent::MessageEnd(Message::Assistant(message)));
+    }
+
+    /// The model to credit a message to: the agent's current one, or the
+    /// agent's name while it has named none.
+    fn model_name(&self) -> String {
+        self.current_model
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .unwrap_or_else(|| self.name.clone())
     }
 
     fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
@@ -1006,9 +1029,7 @@ impl Shared {
                         .insert(id, update.clone());
                     return;
                 }
-                let _ = self.events.send(AgentEvent::ToolExecutionStart {
-                    call: tool_call_of(update),
-                });
+                self.start_tool_call(tool_call_of(update));
                 if is_finished(update) {
                     self.finish_tool_call(update);
                 }
@@ -1027,9 +1048,7 @@ impl Shared {
                                 call[key] = value.clone();
                             }
                         }
-                        let _ = self.events.send(AgentEvent::ToolExecutionStart {
-                            call: tool_call_of(&call),
-                        });
+                        self.start_tool_call(tool_call_of(&call));
                     }
                 }
                 if is_finished(update) {
@@ -1065,6 +1084,85 @@ impl Shared {
         }
     }
 
+    /// Show a call that starts, and hold it for the log.
+    fn start_tool_call(&self, call: ToolCall) {
+        let _ = self
+            .events
+            .send(AgentEvent::ToolExecutionStart { call: call.clone() });
+        let mut calls = self.calls.lock().unwrap_or_else(PoisonError::into_inner);
+        calls.unlogged.push(call.clone());
+        calls.open.push(call);
+    }
+
+    /// Log the calls started and not yet logged, as one assistant message.
+    fn log_started_calls(&self) {
+        let calls = std::mem::take(
+            &mut self
+                .calls
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .unlogged,
+        );
+        if calls.is_empty() {
+            return;
+        }
+        let message = AssistantMessage {
+            content: calls.into_iter().map(AssistantContent::ToolCall).collect(),
+            stop_reason: StopReason::ToolUse,
+            usage: Usage::default(),
+            provider: "acp".into(),
+            model: self.model_name(),
+            error_message: None,
+            timestamp: now_millis(),
+        };
+        let _ = self
+            .events
+            .send(AgentEvent::MessageEnd(Message::Assistant(message)));
+    }
+
+    /// Log `result` after the calls it answers; a result for a call that was
+    /// never shown starting stays out of the log, which has no call for it.
+    fn log_tool_result(&self, result: ToolResultMessage) {
+        let started = {
+            let mut calls = self.calls.lock().unwrap_or_else(PoisonError::into_inner);
+            let index = calls
+                .open
+                .iter()
+                .position(|call| call.id == result.tool_call_id);
+            index.map(|index| calls.open.remove(index)).is_some()
+        };
+        if !started {
+            return;
+        }
+        self.log_started_calls();
+        let _ = self
+            .events
+            .send(AgentEvent::MessageEnd(Message::ToolResult(result)));
+    }
+
+    /// At the turn's end, give each call still without a result one saying
+    /// it did not finish, so the log holds no call left unanswered.
+    fn close_unfinished_calls(&self) {
+        let open = std::mem::take(
+            &mut self
+                .calls
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .open,
+        );
+        if open.is_empty() {
+            return;
+        }
+        self.log_started_calls();
+        for call in open {
+            let result =
+                ToolResultMessage::error(&call, "The turn ended before this call finished.");
+            let _ = self
+                .events
+                .send(AgentEvent::MessageEnd(Message::ToolResult(result)));
+        }
+    }
+
     fn finish_tool_call(&self, update: &Value) {
         let call = tool_call_of(update);
         let text = content_text(&update["content"]);
@@ -1084,7 +1182,10 @@ impl Shared {
         if let Some(path) = update["locations"][0]["path"].as_str() {
             result = result.with_details(json!({ "path": absolute(&self.cwd, path) }));
         }
-        let _ = self.events.send(AgentEvent::ToolExecutionEnd { result });
+        let _ = self.events.send(AgentEvent::ToolExecutionEnd {
+            result: result.clone(),
+        });
+        self.log_tool_result(result);
     }
 }
 
@@ -1702,6 +1803,71 @@ mod tests {
             .any(|e| matches!(e, AgentEvent::ToolExecutionEnd { .. })));
     }
 
+    /// The agent's calls reach the session log as the built-in loop's do:
+    /// calls made together in one message ahead of their results, and a call
+    /// the turn left unfinished answered with an error, never left open.
+    #[test]
+    fn calls_are_logged_with_their_results_like_the_native_loops() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, _) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::ClaudeCode,
+            None,
+            ModeHandle::new(Mode::default()),
+        );
+        let shared = &runtime.shared;
+        let call = |id: &str, command: &str| {
+            json!({ "sessionUpdate": "tool_call", "toolCallId": id,
+                "title": "mcp__termide__bash", "kind": "other",
+                "rawInput": { "command": command }, "status": "pending" })
+        };
+        let done = |id: &str, text: &str| {
+            json!({ "sessionUpdate": "tool_call_update", "toolCallId": id, "status": "completed",
+                "content": [{ "type": "content", "content": { "type": "text", "text": text } }] })
+        };
+        shared.on_update(&call("t1", "ls"));
+        shared.on_update(&call("t2", "pwd"));
+        shared.on_update(&done("t2", "/p"));
+        shared.on_update(&done("t1", "a.rs"));
+        shared.on_update(&call("t3", "sleep 9"));
+        shared.close_unfinished_calls();
+
+        let logged: Vec<String> = runtime
+            .drain()
+            .into_iter()
+            .filter_map(|e| match e {
+                AgentEvent::MessageEnd(Message::Assistant(a)) => Some(format!(
+                    "calls:{}",
+                    a.tool_calls()
+                        .map(|c| format!(
+                            "{}={}",
+                            c.id,
+                            c.arguments["command"].as_str().unwrap_or("")
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )),
+                AgentEvent::MessageEnd(Message::ToolResult(r)) => Some(format!(
+                    "result:{}:{}:{}",
+                    r.tool_call_id,
+                    r.is_error,
+                    r.plain_text()
+                )),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            logged,
+            [
+                "calls:t1=ls,t2=pwd",
+                "result:t2:false:/p",
+                "result:t1:false:a.rs",
+                "calls:t3=sleep 9",
+                "result:t3:true:The turn ended before this call finished.",
+            ]
+        );
+    }
+
     #[test]
     fn the_reported_context_fill_and_size_are_kept() {
         let dir = tempfile::tempdir().unwrap();
@@ -1925,9 +2091,14 @@ mod tests {
                 AgentEvent::MessageUpdate(_) => "update".into(),
                 AgentEvent::MessageEnd(Message::User(u)) => format!("user:{}", u.plain_text()),
                 AgentEvent::MessageEnd(Message::Assistant(a)) => {
-                    format!("assistant:{}:{:?}", a.plain_text(), a.stop_reason)
+                    let calls: Vec<&str> = a.tool_calls().map(|c| c.name.as_str()).collect();
+                    if calls.is_empty() {
+                        format!("assistant:{}:{:?}", a.plain_text(), a.stop_reason)
+                    } else {
+                        format!("calls:{}", calls.join(","))
+                    }
                 }
-                AgentEvent::MessageEnd(Message::ToolResult(_)) => "tool-result-msg".into(),
+                AgentEvent::MessageEnd(Message::ToolResult(r)) => format!("result:{}", r.tool_name),
                 AgentEvent::ToolExecutionStart { call } => {
                     format!("tool-start:{}:{}", call.name, call.arguments["title"])
                 }
@@ -1962,6 +2133,10 @@ mod tests {
                 "tool-start:write:null",
                 "tool-end:write:true",
                 "tool-end:edit:true",
+                // The agent's call reaches the log as the built-in loop's
+                // would; the client-side write it made is not a call of its.
+                "calls:edit",
+                "result:edit",
                 "msg-start",
                 "text:Done.",
                 "assistant:Done.:Stop",

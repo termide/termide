@@ -733,7 +733,9 @@ as well as one of code.
   rewind took back is left out, what a compaction summarised is still found.
   Your messages, the agent's answers, compaction summaries and handoff briefs
   count most, tool calls less, reasoning and tool output least (only the first
-  4 KB of an output is searched). Of the session the panel is in only what a
+  4 KB of an output is searched). A session on Claude Code, Codex or Gemini
+  CLI logs its tool calls and their output too, as the built-in agent's does.
+  Of the session the panel is in only what a
   compaction took out of the context is searched: the rest is there already. A `git commit` a session ran is
   linked to its commit.
 - **Git**: commits whose message holds a word of the query, and commits that
