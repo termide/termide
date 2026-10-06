@@ -936,8 +936,13 @@ The look-only commands are a short list that only look at things (`ls`,
 redirection into a file disqualifies it, while pointing a stream at another
 (`2>&1`) or at `/dev/null` does not. So do the arguments with which such a
 command writes a file or runs another program: `env` counts only without a
-command to run, `git branch`, `git tag` and `git remote` only while they
-list, `sed` only while it prints (no `-i` or `-f`, and a script of
+command to run, `git branch`, `git tag`, `git remote`, `git stash`,
+`git worktree`, `git reflog` and `git config` only while they list or get
+(never with `-c` or `-C`: a setting or another repository's config can
+run a program), `git grep` only without `-O`, the forge CLIs `gh`, `glab` and `tea` only to list, view and search
+issues, pull/merge requests, CI runs, releases, repositories and labels
+(no `--web`, no `api`; `glab ci view` and `glab ci status` ask, since they
+can retry jobs, and so does a bare `tea comments`, which posts), `sed` only while it prints (no `-i` or `-f`, and a script of
 addresses with `p`, `l`, `=`, `q` or `d`, such as `sed -n '40,80p'`; a
 substitution asks), `find` only without `-delete`, `-exec`, `-ok`, `-fprint` or `-fls`, and
 `sort -o`, `uniq` with an output file, `tree -o`/`-R`, `rg --pre` and

@@ -1612,6 +1612,7 @@ pub fn is_read_only_command(part: &str) -> bool {
             .iter()
             .any(|action| part.contains(action)),
         "git" => is_read_only_git(args),
+        "gh" | "glab" | "tea" => is_read_only_forge(head, args),
         "sed" => shell_words(&part).is_some_and(|words| is_print_only_sed(&words[1..])),
         _ => false,
     }
@@ -1988,18 +1989,213 @@ fn has_short_flag(args: &[&str], flag: char) -> bool {
         .any(|a| a.starts_with('-') && !a.starts_with("--") && a[1..].contains(flag))
 }
 
-/// `git` subcommands that only look: `branch` and `remote` count only when
-/// they list, since the same subcommands also delete, rename and rewire.
-fn is_read_only_git(args: &[&str]) -> bool {
+/// Forge CLIs — `gh` (GitHub), `glab` (GitLab), `tea` (Gitea) — in the
+/// forms that only read. `--web` is left out, since it starts a browser, and
+/// so is each `api`, which sends any request it is given.
+fn is_read_only_forge(cli: &str, args: &[&str]) -> bool {
+    if args
+        .iter()
+        .any(|a| *a == "--web" || *a == "-w" || *a == "--show-token")
+    {
+        return false;
+    }
+    let words = forge_words(args);
+    let (group, action, then) = (
+        words.first().copied(),
+        words.get(1).copied(),
+        words.get(2).copied(),
+    );
+    let listing = |action: Option<&str>| matches!(action, None | Some("list" | "ls"));
+    let index = |action: Option<&str>| action.is_some_and(|a| a.parse::<u64>().is_ok());
+    match (cli, group) {
+        (_, None) => false,
+        ("gh", Some(group)) => match group {
+            "issue" => matches!(action, Some("list" | "view" | "status")),
+            "pr" => matches!(action, Some("list" | "view" | "status" | "diff" | "checks")),
+            "run" | "workflow" | "release" | "repo" => matches!(action, Some("list" | "view")),
+            "label" => action == Some("list"),
+            "search" => true,
+            _ => false,
+        },
+        // `ci view` is an interactive view that also runs, retries and
+        // cancels jobs, and `ci status` offers to retry from its prompt.
+        ("glab", Some(group)) => match group {
+            "issue" | "release" => matches!(action, Some("list" | "view")),
+            "mr" => matches!(
+                action,
+                Some("list" | "view" | "diff" | "approvers" | "issues")
+            ),
+            "ci" => matches!(action, Some("list" | "get" | "trace")),
+            "repo" => matches!(action, Some("list" | "view" | "search" | "contributors")),
+            "label" | "milestone" => matches!(action, Some("list" | "get")),
+            _ => false,
+        },
+        // A bare `tea issues` lists and `tea issues 5` shows one; a bare
+        // `tea comments 5 text`, by contrast, posts the text.
+        ("tea", Some(group)) => match group {
+            "issues" | "issue" | "i" => listing(action) || index(action),
+            "pulls" | "pull" | "pr" => {
+                listing(action) || index(action) || matches!(action, Some("review-comments" | "rc"))
+            }
+            "repos" | "repo" => {
+                listing(action)
+                    || matches!(action, Some("search" | "s"))
+                    || action.is_some_and(|a| a.contains('/'))
+            }
+            "releases" | "release" | "r" | "labels" | "label" | "milestones" | "milestone"
+            | "ms" | "branches" | "branch" | "b" | "notifications" | "notification" | "n"
+            | "times" | "time" | "t" => listing(action),
+            "comments" | "comment" | "c" => matches!(action, Some("list" | "ls")),
+            "actions" | "action" => match action {
+                Some("runs" | "run") => {
+                    matches!(
+                        then,
+                        Some("list" | "ls" | "view" | "show" | "get" | "logs" | "log")
+                    )
+                }
+                Some("workflows" | "workflow") => {
+                    matches!(then, Some("list" | "ls" | "view" | "show" | "get"))
+                }
+                _ => false,
+            },
+            "whoami" => true,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// The positional words of a forge CLI call: options are dropped, and so is
+/// the value of an option that takes one as a word of its own (`-R owner/repo`,
+/// `--state closed`), so the value is not taken for a subcommand.
+fn forge_words<'a>(args: &[&'a str]) -> Vec<&'a str> {
+    // Options that take a value in every CLI that has them.
+    const TAKES_VALUE: [&str; 19] = [
+        "-R",
+        "--repo",
+        "-r",
+        "-o",
+        "--output",
+        "-F",
+        "-l",
+        "--login",
+        "--label",
+        "--state",
+        "-L",
+        "--limit",
+        "-p",
+        "--page",
+        "-P",
+        "--per-page",
+        "-q",
+        "--jq",
+        "--json",
+    ];
+    let mut words = Vec::with_capacity(args.len());
+    let mut iter = args.iter();
+    while let Some(&arg) = iter.next() {
+        if TAKES_VALUE.contains(&arg) {
+            iter.next();
+        } else if !arg.starts_with('-') {
+            words.push(arg);
+        }
+    }
+    words
+}
+
+/// The words of a `git branch` or `git tag` listing with the value of each
+/// listing option given as a word of its own (`--merged main`,
+/// `--sort -committerdate`) left out, so the value is not taken for the name
+/// of a branch or tag to create. The options are kept, so they still have to
+/// be listing ones.
+fn without_flag_values<'a>(args: &[&'a str]) -> Vec<&'a str> {
+    const TAKES_VALUE: [&str; 7] = [
+        "--contains",
+        "--no-contains",
+        "--merged",
+        "--no-merged",
+        "--points-at",
+        "--sort",
+        "--format",
+    ];
+    let mut kept = Vec::with_capacity(args.len());
+    let mut iter = args.iter().peekable();
+    while let Some(&arg) = iter.next() {
+        kept.push(arg);
+        if TAKES_VALUE.contains(&arg) {
+            // `--sort` takes `-committerdate`; the others take a commit.
+            iter.next_if(|next| arg == "--sort" || !next.starts_with('-'));
+        }
+    }
+    kept
+}
+
+/// `git` subcommands that only look: `branch`, `tag`, `remote`, `stash`,
+/// `worktree`, `reflog` and `config` count only when they list or get, since
+/// the same subcommands also delete, rename and rewire.
+fn is_read_only_git(mut args: &[&str]) -> bool {
+    // Global options that only choose how to look. `-c` is left out, since
+    // it can set a pager or an alias that runs a program, and so is `-C`:
+    // another repository's config (`core.fsmonitor`, `diff.external`) runs
+    // programs of its choosing even on `git status`.
+    while let ["--no-pager" | "-P" | "--no-optional-locks", rest @ ..] = args {
+        args = rest;
+    }
     let Some((&sub, rest)) = args.split_first() else {
         return false;
     };
     match sub {
-        "status" | "blame" | "rev-parse" | "ls-files" => true,
+        "status" | "blame" | "rev-parse" | "ls-files" | "ls-tree" | "cat-file" | "describe"
+        | "merge-base" | "for-each-ref" | "show-ref" | "name-rev" | "count-objects" => true,
+        // `-O` opens the matches in a pager program of its choosing.
+        "grep" => !has_short_flag(rest, 'O') && !rest.iter().any(|a| a.starts_with("--open-files")),
+        "stash" => matches!(rest.first(), Some(&("list" | "show"))),
+        "worktree" => matches!(rest.first(), Some(&"list")),
+        // `expire` and `delete` rewrite the log; a ref name shows it, but is
+        // left to ask rather than told apart from a future subcommand.
+        "reflog" => match rest.first() {
+            None => true,
+            Some(&first) => matches!(first, "show" | "list" | "exists") || first.starts_with('-'),
+        },
+        "config" => {
+            const READ: [&str; 6] = [
+                "-l",
+                "--list",
+                "--get",
+                "--get-all",
+                "--get-regexp",
+                "--get-urlmatch",
+            ];
+            const WRITE: [&str; 9] = [
+                "--add",
+                "--unset",
+                "--unset-all",
+                "--replace-all",
+                "--rename-section",
+                "--remove-section",
+                "-e",
+                "--edit",
+                "--set",
+            ];
+            // `git config user.email` reads the key; a second word would set
+            // it, and a subcommand's name is not a key.
+            let positional: Vec<&&str> = rest.iter().filter(|a| !a.starts_with('-')).collect();
+            let bare_key = matches!(positional.as_slice(), [key] if !matches!(
+                **key,
+                "set" | "unset" | "edit" | "rename-section" | "remove-section"
+            ));
+            let reads = matches!(rest.first(), Some(&("get" | "list")))
+                || rest.iter().any(|a| READ.contains(a))
+                || bare_key;
+            reads && !rest.iter().any(|a| WRITE.contains(a))
+        }
+        "diff" | "log" | "show" | "rev-list" | "shortlog" | "cherry" | "range-diff" => {
+            !rest.iter().any(|a| a.starts_with("--output"))
+        }
         // Without `--list`, a bare name creates a tag; `-d`, `-a`, `-s`,
         // `-f` and the rest are left out.
         "tag" => {
-            const LISTING: [&str; 13] = [
+            const LISTING: [&str; 16] = [
                 "-l",
                 "--list",
                 "-n",
@@ -2013,6 +2209,9 @@ fn is_read_only_git(args: &[&str]) -> bool {
                 "--no-contains",
                 "--merged",
                 "--no-merged",
+                "--points-at",
+                "--sort",
+                "--format",
             ];
             const LISTING_WITH_VALUE: [&str; 9] = [
                 "--sort=",
@@ -2026,7 +2225,7 @@ fn is_read_only_git(args: &[&str]) -> bool {
                 "--points-at=",
             ];
             let list = rest.iter().any(|a| *a == "-l" || *a == "--list");
-            rest.iter().all(|a| {
+            without_flag_values(rest).iter().all(|a| {
                 LISTING.contains(a)
                     || LISTING_WITH_VALUE.iter().any(|p| a.starts_with(p))
                     || a.strip_prefix("-n")
@@ -2034,9 +2233,8 @@ fn is_read_only_git(args: &[&str]) -> bool {
                     || (list && !a.starts_with('-'))
             })
         }
-        "diff" | "log" | "show" => !rest.iter().any(|a| a.starts_with("--output")),
         "branch" => {
-            const LISTING: [&str; 19] = [
+            const LISTING: [&str; 22] = [
                 "-a",
                 "--all",
                 "-r",
@@ -2056,6 +2254,9 @@ fn is_read_only_git(args: &[&str]) -> bool {
                 "--merged",
                 "--no-merged",
                 "--omit-empty",
+                "--points-at",
+                "--sort",
+                "--format",
             ];
             const LISTING_WITH_VALUE: [&str; 10] = [
                 "--sort=",
@@ -2072,7 +2273,7 @@ fn is_read_only_git(args: &[&str]) -> bool {
             // Without `--list`, a bare name creates a branch; with it, a
             // name is a pattern to list.
             let list = rest.iter().any(|a| *a == "-l" || *a == "--list");
-            rest.iter().all(|a| {
+            without_flag_values(rest).iter().all(|a| {
                 *a == "-l"
                     || *a == "--list"
                     || LISTING.contains(a)
@@ -2555,6 +2756,12 @@ mod tests {
             "git tag -l 'v0.*'",
             "git tag -n5 --list",
             "git tag --contains=HEAD",
+            "git tag --merged main",
+            "git tag --sort -v:refname",
+            "git branch -a --no-merged main",
+            "git branch --merged main",
+            "git branch --sort -committerdate --format %(refname:short)",
+            "git branch --points-at HEAD",
         ] {
             assert!(is_read_only_command(look), "{look}");
         }
@@ -2576,6 +2783,157 @@ mod tests {
             "git tag -d v1.0",
             "git tag -a v1 -m msg",
             "git tag -f v1",
+            "git branch --merged main feature",
+            "git tag --contains HEAD v2",
+        ] {
+            assert!(!is_read_only_command(write), "{write}");
+        }
+    }
+
+    /// Git's reading subcommands are look-only; the forms of the same
+    /// subcommands that write, and `-c`, which can run a program, are not.
+    #[test]
+    fn reading_git_subcommands_are_look_only() {
+        for look in [
+            "git --no-pager log -3",
+            "git -P show HEAD:a.rs",
+            "git ls-tree HEAD src",
+            "git cat-file -p HEAD",
+            "git rev-list --count HEAD",
+            "git shortlog -sn",
+            "git describe --tags",
+            "git grep -n foo",
+            "git reflog",
+            "git reflog -5",
+            "git reflog show main",
+            "git stash list",
+            "git stash show -p",
+            "git worktree list",
+            "git merge-base HEAD main",
+            "git for-each-ref refs/tags",
+            "git show-ref",
+            "git name-rev HEAD",
+            "git count-objects -v",
+            "git cherry -v main",
+            "git range-diff a...b",
+            "git config --get user.email",
+            "git config -l",
+            "git config get user.name",
+            "git config user.email",
+            "git config --global user.email",
+        ] {
+            assert!(is_read_only_command(look), "{look}");
+        }
+        for write in [
+            "git -c core.pager=sh log",
+            "git -C ../other log",
+            "git --no-pager commit -m x",
+            "git grep -O foo",
+            "git grep --open-files-in-pager=vim foo",
+            "git reflog expire --all",
+            "git reflog delete HEAD@{1}",
+            "git stash",
+            "git stash drop",
+            "git stash pop",
+            "git worktree add ../x",
+            "git worktree remove ../x",
+            "git config user.email a@b",
+            "git config --unset user.email",
+            "git config --get x --add y",
+            "git config -e",
+            "git config set user.name x",
+            "git config --global user.email a@b",
+            "git config edit",
+            "git rev-list --output=f HEAD",
+        ] {
+            assert!(!is_read_only_command(write), "{write}");
+        }
+    }
+
+    /// Forge CLI commands (`gh`, `glab`, `tea`) that read are look-only;
+    /// those that change something, open a browser or send a raw request are
+    /// not.
+    #[test]
+    fn reading_forge_commands_are_look_only() {
+        for look in [
+            "gh issue list --state open --limit 30",
+            "gh issue view 60 --comments",
+            "gh pr list",
+            "gh pr view 12 --json title -q .title",
+            "gh pr diff 12",
+            "gh pr checks 12",
+            "gh run list -R termide/termide",
+            "gh run view 123 --log",
+            "gh release list",
+            "gh repo view",
+            "gh search issues crash",
+            "gh -R termide/termide issue list",
+            "gh issue list --state closed --limit 5",
+            "glab issue list",
+            "glab issue view 7 -c",
+            "glab mr view 3 -F json",
+            "glab mr diff 3",
+            "glab ci list",
+            "glab ci trace 991",
+            "glab release view v1",
+            "glab repo view -R group/proj",
+            "glab milestone list",
+            "tea issues",
+            "tea issues 5",
+            "tea issues list --state closed",
+            "tea i ls -o json",
+            "tea pulls",
+            "tea pr 12",
+            "tea pulls review-comments 12",
+            "tea repos owner/name",
+            "tea releases",
+            "tea notifications",
+            "tea comments list 5",
+            "tea actions runs logs 3",
+            "tea actions workflows list",
+            "tea whoami",
+        ] {
+            assert!(is_read_only_command(look), "{look}");
+        }
+        for write in [
+            "gh",
+            "gh issue create -t x",
+            "gh issue close 60",
+            "gh issue view 60 --web",
+            "gh pr merge 12",
+            "gh pr checkout 12",
+            "gh run rerun 123",
+            "gh run download 123",
+            "gh release create v1",
+            "gh repo clone a/b",
+            "gh api repos/a/b/issues -f title=x",
+            "gh auth status --show-token",
+            "gh -R a/b issue close 5",
+            "glab",
+            "glab api projects",
+            "glab issue close 7",
+            "glab issue view 7 --web",
+            "glab mr merge 3",
+            "glab mr approve 3",
+            "glab ci view",
+            "glab ci status",
+            "glab ci retry 991",
+            "glab release download v1",
+            "glab repo clone a/b",
+            "tea",
+            "tea api /repos",
+            "tea open",
+            "tea issues close 5",
+            "tea issues create -t x",
+            "tea pulls merge 12",
+            "tea pulls checkout 12",
+            "tea pulls clean 12",
+            "tea comments 5 hello",
+            "tea notifications read",
+            "tea times add 5 1h",
+            "tea actions runs delete 3",
+            "tea actions workflows dispatch ci",
+            "tea clone a/b",
         ] {
             assert!(!is_read_only_command(write), "{write}");
         }
