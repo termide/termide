@@ -24,13 +24,16 @@ type Word = (String, Style, Option<usize>);
 type Cell = Vec<Word>;
 
 /// A clickable region: a half-open `[start, end)` column range on a rendered
-/// line that opens `url`.
+/// line that opens `url`. A link wrapped over several lines, or split by its
+/// styling, is several regions sharing one `id`.
 #[derive(Debug, Clone)]
 pub struct LinkSpan {
     pub line: usize,
     pub start: u16,
     pub end: u16,
     pub url: String,
+    /// Which link of the document the region belongs to.
+    pub id: usize,
 }
 
 /// Rendered document: wrapped lines plus link hit-areas.
@@ -212,6 +215,36 @@ impl<'c> Builder<'c> {
             self.code_buf.push_str(text);
         } else {
             self.push_text(text);
+        }
+    }
+
+    /// Append text whose bare web addresses become links, as GitHub's
+    /// autolinks do — outside code and outside a link already open. With
+    /// `restyle` an address takes the link style; without, it keeps the
+    /// text's own and is only clickable.
+    pub fn text_autolinked(&mut self, text: &str, restyle: bool) {
+        if self.in_code || self.cur_link.is_some() {
+            self.text(text);
+            return;
+        }
+        let mut at = 0;
+        for range in termide_core::links::url_ranges(text) {
+            if range.start > at {
+                self.push_text(&text[at..range.start]);
+            }
+            let url = &text[range.clone()];
+            self.cur_link = self.add_url(url.to_string());
+            let style = if restyle {
+                self.link_style()
+            } else {
+                self.cur_style()
+            };
+            self.push_span(url, style);
+            self.cur_link = None;
+            at = range.end;
+        }
+        if at < text.len() {
+            self.push_text(&text[at..]);
         }
     }
 
@@ -831,6 +864,7 @@ impl<'c> Builder<'c> {
                 start: p.start,
                 end: p.end,
                 url: self.urls[p.url_id].clone(),
+                id: p.url_id,
             })
             .collect();
         // Clamp anchors that fell past the trimmed end to the last line.
@@ -1002,6 +1036,20 @@ mod tests {
             (r.links[0].line, r.links[0].start, r.links[0].end),
             (1, 0, 4)
         );
+    }
+
+    #[test]
+    fn bare_addresses_become_links_outside_code() {
+        let colors = ThemeColors::default();
+        let mut b = Builder::new(80, &colors, false);
+        b.text_autolinked("see https://a.b/c. or ", true);
+        b.inline_code("https://not.a/link");
+        b.end_paragraph();
+        let r = b.finish();
+        assert_eq!(text_of(&r)[0], "see https://a.b/c. or https://not.a/link");
+        assert_eq!(r.links.len(), 1, "{:?}", r.links);
+        assert_eq!(r.links[0].url, "https://a.b/c");
+        assert_eq!((r.links[0].start, r.links[0].end), (4, 17));
     }
 
     #[test]

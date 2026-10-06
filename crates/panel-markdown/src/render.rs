@@ -52,7 +52,8 @@ fn event(b: &mut Builder, html: &mut HtmlState, heading: &mut Option<HeadingCap>
             if let Some(h) = heading.as_mut() {
                 h.text.push_str(&t);
             }
-            b.text(&t);
+            // A bare web address is a link, as GitHub renders one.
+            b.text_autolinked(&t, true);
         }
         Event::Code(t) => {
             if let Some(h) = heading.as_mut() {
@@ -194,6 +195,22 @@ mod tests {
                     .collect::<String>()
             })
             .collect()
+    }
+
+    #[test]
+    fn bare_urls_are_links_but_not_in_code() {
+        let r = render_markdown(
+            "See https://docs.rs/x, [the book](https://a.b).\n\n```\nhttps://in.code\n```\n",
+            80,
+            &colors(),
+            false,
+        );
+        // One link per id: "the book" is two words, two regions.
+        let mut urls: Vec<(usize, &str)> = r.links.iter().map(|l| (l.id, l.url.as_str())).collect();
+        urls.dedup();
+        let urls: Vec<&str> = urls.into_iter().map(|(_, url)| url).collect();
+        assert_eq!(urls, ["https://docs.rs/x", "https://a.b"]);
+        assert_eq!(render("See [the book](https://a.b).")[0], "See the book.");
     }
 
     #[test]

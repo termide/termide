@@ -33,7 +33,9 @@ Parsed with `pulldown-cmark` and drawn as text pseudographics:
 - Fenced code blocks, syntax-highlighted with the same engine as the editor.
 - Tables, drawn with box-drawing borders. Columns are sized to their content
   and long cells wrap onto extra lines instead of being cut off.
-- Horizontal rules and links (underlined, clickable).
+- Horizontal rules and links (underlined, clickable). A web address written
+  out in the text is a link too, as GitHub renders one; inside code it stays
+  text.
 - Images as a clickable `🖼` pictogram followed by the alt text (no terminal
   graphics protocol).
 - Embedded ```` ```mermaid ```` code blocks, rendered as the diagram itself
