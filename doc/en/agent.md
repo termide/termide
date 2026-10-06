@@ -950,6 +950,17 @@ web and `skill` run without asking; reading outside it asks. `task` runs
 too: the subagent is held to plan mode whatever its `AGENT.md` says, so it
 only reads.
 
+The default instructions have the agent work the task through with you
+before it writes the plan. It explores first and finds out the facts itself,
+handing wide searches to a subagent. Then it puts the open decisions to you in
+rounds of `question` cards, up to four questions a round, each with its
+recommended answer first. Every round builds on the answers to the last, and
+there are as many rounds as the task needs: dozens on a large one, none on a
+small, clear one. Routine choices it makes itself and names in the plan. The
+plan then gives the goal and how to tell it is done, the decisions and why,
+what is out of scope, the steps in order with the files each changes, the
+risks and the checks.
+
 When the agent answers, a card asks what to do with the plan:
 
 ```

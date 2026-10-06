@@ -363,7 +363,20 @@ a read-only annotation are blocked too, since annotations are not plumbed.
 `task` passes the guard as well: the subagent runs in plan mode whatever its
 `AGENT.md` names, behind a `PlanGuard` of its own, so delegation reads and
 never changes anything. That lets the planner hand fact-finding to a
-subagent.
+subagent, which the instructions below rely on.
+
+The instructions follow the grilling approach of Matt Pocock's skills
+(`grill-me`, `to-spec`): misalignment is the costliest failure, so the
+planner settles the open decisions with the user before writing anything.
+The decisions form a tree; each round asks those whose prerequisites are
+settled, with a recommended answer first. Facts are the agent's to look up,
+decisions the user's. A round is capped at the `question` tool's four
+questions, but the number of rounds is not: a large task may need dozens.
+The rounds go through `question` rather than the answer text because any
+answer in plan mode raises the carry-out card. The plan names goal,
+decisions, scope, steps (each leaving the project working, preparatory
+refactoring first), risks and verification. Unlike Pocock's specs, the steps
+name files: the plan is carried out at once, in the same context.
 
 ## 4b. Auto mode
 
