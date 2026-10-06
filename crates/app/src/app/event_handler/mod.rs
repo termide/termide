@@ -110,8 +110,8 @@ impl App {
                 self.start_url_fetch_in_place(url);
             }
 
-            PanelEvent::OpenUrl(url) => {
-                self.start_url_fetch(url);
+            PanelEvent::OpenLink(link) => {
+                self.event_open_link(link)?;
             }
 
             PanelEvent::ViewHtml(path) => {

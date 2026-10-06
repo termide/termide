@@ -2,10 +2,9 @@
 
 use std::path::PathBuf;
 
-use termide_core::{LinkOpen, PanelEvent};
+use termide_core::{LinkOpen, LinkTarget, PanelEvent};
 
 use crate::HtmlPanel;
-use termide_ui::text_utils::is_image_path;
 
 impl HtmlPanel {
     /// Resolve a link `href` to an absolute target: against the document URL for
@@ -29,9 +28,13 @@ impl HtmlPanel {
         href.to_string()
     }
 
-    /// Follow a link. Non-web targets go to the external opener. Web links
-    /// honor the `open_links` setting: `External` → browser; `Panel` →
-    /// in-place navigation in a fetched view, or a new viewer otherwise.
+    /// Follow a link. A same-page `#anchor` scrolls; inside a fetched page a
+    /// web link opened in the panel replaces the page in place, with history.
+    /// Anything else goes to the app as [`PanelEvent::OpenLink`], which opens
+    /// a link the same way from every panel (`open_links` and `open_images`
+    /// decide between a panel and the system opener); a scheme it does not
+    /// know (`mailto:`) goes to the system opener. `O` is the per-action
+    /// external override (handled by the caller).
     pub(crate) fn activate_link(&mut self, href: &str) -> Vec<PanelEvent> {
         if href.is_empty() {
             return vec![];
@@ -43,35 +46,21 @@ impl HtmlPanel {
             }
             return vec![PanelEvent::NeedsRedraw];
         }
+        if termide_core::links::is_foreign_scheme(href) {
+            return vec![PanelEvent::OpenExternal(PathBuf::from(href))];
+        }
         let target = self.resolve(href);
         let is_web = target.starts_with("http://") || target.starts_with("https://");
-        let is_image = is_image_path(&target);
-        // Images and pages each follow their own open-where setting; `O` is the
-        // per-action external override (handled by the caller).
-        let mode = if is_image {
-            self.open_images
-        } else {
-            self.open_links
-        };
-        if mode == LinkOpen::External {
-            return vec![PanelEvent::OpenExternal(PathBuf::from(target))];
+        if is_web && self.source_url.is_some() && self.open_links == LinkOpen::Panel {
+            self.history.truncate(self.hist_idx + 1);
+            self.history.push(target.clone());
+            self.hist_idx = self.history.len() - 1;
+            return vec![PanelEvent::NavigateUrl(target)];
         }
-        if is_web {
-            // Fetch and render in the viewer; image responses are routed to the
-            // image preview by the fetch handler.
-            if self.source_url.is_some() {
-                self.history.truncate(self.hist_idx + 1);
-                self.history.push(target.clone());
-                self.hist_idx = self.history.len() - 1;
-                vec![PanelEvent::NavigateUrl(target)]
-            } else {
-                vec![PanelEvent::OpenUrl(target)]
-            }
-        } else if is_image {
-            // Local image → built-in image preview.
-            vec![PanelEvent::PreviewMedia(PathBuf::from(target))]
-        } else {
-            vec![PanelEvent::OpenExternal(PathBuf::from(target))]
+        let base = self.file_path.parent().unwrap_or(std::path::Path::new("/"));
+        match LinkTarget::from_href(&target, base) {
+            Some(link) => vec![PanelEvent::OpenLink(link)],
+            None => vec![PanelEvent::OpenExternal(PathBuf::from(target))],
         }
     }
 

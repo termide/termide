@@ -60,6 +60,41 @@ impl App {
         Ok(())
     }
 
+    /// Follow a link clicked in any panel. A web address opens by the
+    /// `open_links` setting — fetched into a viewer, or in the browser (an
+    /// `ftp://` one always there, as the viewer cannot fetch it). A local
+    /// path opens as Open… opens one, an image by the `open_images` setting.
+    pub(super) fn event_open_link(&mut self, link: termide_core::LinkTarget) -> Result<()> {
+        use termide_core::{LinkOpen, LinkTarget};
+        let viewer = &self.state.config.viewer;
+        match link {
+            LinkTarget::Url(url) => {
+                let fetchable = url.starts_with("http://") || url.starts_with("https://");
+                if viewer.open_links == LinkOpen::External || !fetchable {
+                    self.open_external_detached(&url);
+                } else {
+                    self.close_help_panels();
+                    self.start_url_fetch(url);
+                }
+            }
+            LinkTarget::Path(path) => {
+                if !path.exists() {
+                    self.show_error_modal(format!("No such path: {}", path.display()));
+                    return Ok(());
+                }
+                let image = path.file_name().is_some_and(|name| {
+                    termide_panel_file_manager::is_raster_image(&name.to_string_lossy())
+                });
+                if image && viewer.open_images == LinkOpen::External {
+                    self.open_external_detached(&path.to_string_lossy());
+                } else {
+                    self.open_local_path(path)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Handle OpenPath event - open path in new file manager panel
     pub(super) fn event_open_path(
         &mut self,

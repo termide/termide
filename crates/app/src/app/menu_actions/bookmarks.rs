@@ -582,8 +582,8 @@ impl App {
     ///
     /// `open::that_detached` picks the platform launcher (`xdg-open`, `open`,
     /// `rundll32`) instead of hardcoding the freedesktop one, and does not wait
-    /// for the child — a bookmark must never block the UI thread.
-    fn open_path_external(&self, path: &str) {
+    /// for the child — a bookmark or a followed link must never block the UI thread.
+    pub(in crate::app) fn open_external_detached(&self, path: &str) {
         if let Err(e) = open::that_detached(path) {
             log::error!("Failed to open '{}' externally: {}", path, e);
         }
@@ -623,14 +623,14 @@ impl App {
                 // Images open in the image preview; other viewer files externally.
                 self.close_help_panels();
                 if !self.open_in_viewer_by_ext(path) {
-                    self.open_path_external(path);
+                    self.open_external_detached(path);
                 }
             }
             BookmarkType::HttpLink => {
                 // Open in the built-in viewer (text-mode browse) unless the user
                 // configured links to open in the system browser.
                 if self.state.config.viewer.open_links == termide_core::LinkOpen::External {
-                    self.open_path_external(path);
+                    self.open_external_detached(path);
                 } else {
                     self.close_help_panels();
                     self.start_url_fetch(path.to_string());

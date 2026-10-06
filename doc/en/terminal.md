@@ -129,7 +129,8 @@ When the shell announces a directory, the announcement wins over the process.
 - **Text Selection**: In the normal shell/scrollback view, click and drag with the left mouse button to select text, then `Ctrl+C` copies it. When the application inside the terminal enables xterm mouse tracking (e.g. an editor or agent), the mouse belongs to that application (it draws its own selection); hold `Alt+drag` for a local TermIDE selection instead, which `Ctrl+C` then copies
 - **Double-click**: Select the word under the cursor; **triple-click**: select the whole line
 - **Scroll Wheel**: Scroll through terminal output history until the application inside the terminal enables mouse tracking. After that, the wheel is passed through to the application
-- **Ctrl+Click on URL/path**: Open link in browser or file manager
+- **Ctrl+hover on a URL/path**: Highlight it — whole, across the rows it wraps over — and copy it to the clipboard. A path counts when it exists: absolute, `./`, `../` or `~/`; a `:line:col` after it is not part of it
+- **Ctrl+Click on URL/path**: Follow it as a viewer link opens (see [HTML preview](html.md)): a web address by `[viewer] open_links` — the built-in viewer by default, or the browser — a directory in the file manager, a file where **Open…** would open it
 - **Ctrl+Click on hex color**: Show color preview popup (e.g. `#ff0000`, `#abc`) — visible while button is held, disappears on release
 - **Application Interaction**: If a console application (e.g., `htop` or `mc`) enables xterm mouse tracking, TermIDE gives it priority for click, drag, move, and wheel events inside the terminal content area
 
