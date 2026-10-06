@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -38,6 +38,11 @@ const HOST_TOOL_PREFIX: &str = "mcp__termide__";
 
 /// The protocol version requested.
 pub const PROTOCOL_VERSION: u64 = 1;
+
+/// How long Codex and Gemini CLI wait to open their session for termide's MCP
+/// servers to answer: they list the tools of an MCP server once, when the
+/// session starts, so tools that come later never reach them.
+const MCP_SETTLE: Duration = Duration::from_secs(10);
 
 type Pending = Arc<Mutex<HashMap<u64, Sender<Result<Value, String>>>>>;
 type SharedWriter = Arc<Mutex<Option<Box<dyn Write + Send>>>>;
@@ -86,8 +91,16 @@ struct Shared {
     host_tools: Mutex<Option<HostTools>>,
     /// The server of termide's tools, alive as long as the agent.
     mcp_server: Mutex<Option<McpServer>>,
+    /// Whether termide's MCP servers have all answered, which Codex and
+    /// Gemini CLI wait on (for [`MCP_SETTLE`] at most) to open their session.
+    mcp_settled: Mutex<bool>,
+    mcp_settled_changed: Condvar,
     /// Calls announced without their arguments yet, by id.
     announced: Mutex<HashMap<String, Value>>,
+    /// The running calls of termide's own tools, by id, with the tool's name:
+    /// the agent may still ask for their permission, which termide judges on
+    /// its server, and their end may not name the tool again.
+    host_calls: Mutex<HashMap<String, String>>,
     /// The calls on their way into the session log.
     calls: Mutex<CallLog>,
     /// The context's fill and size, `(used, size)`, as `usage_update` last
@@ -202,9 +215,24 @@ impl AcpRuntime {
             model_option: Mutex::new(None),
             flavor,
             system_prompt: setup.system_prompt,
-            host_tools: Mutex::new(setup.host_tools),
+            // Codex and Gemini CLI keep their own tools: of termide's they
+            // are served those of its MCP servers only, which the panel hands
+            // over as they connect.
+            host_tools: Mutex::new(setup.host_tools.map(|host| {
+                if matches!(flavor, AcpFlavor::Codex | AcpFlavor::GeminiCli) {
+                    HostTools {
+                        tools: ToolRegistry::new(),
+                        hooks: host.hooks,
+                    }
+                } else {
+                    host
+                }
+            })),
             mcp_server: Mutex::new(None),
+            mcp_settled: Mutex::new(false),
+            mcp_settled_changed: Condvar::new(),
             announced: Mutex::new(HashMap::new()),
+            host_calls: Mutex::new(HashMap::new()),
             calls: Mutex::new(CallLog::default()),
             context: Mutex::new(None),
             told_plan: AtomicBool::new(setup.mode.get() == Mode::Plan),
@@ -367,18 +395,23 @@ impl Backend for AcpRuntime {
     /// server of them runs: a server that failed to start leaves it on its
     /// own tools.
     fn runs_host_tools(&self) -> bool {
-        let shared = &self.shared;
-        shared.flavor == AcpFlavor::ClaudeCode
-            && (shared
-                .host_tools
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .is_some()
-                || shared
-                    .mcp_server
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .is_some())
+        self.shared.flavor == AcpFlavor::ClaudeCode && self.shared.serving()
+    }
+
+    /// Codex and Gemini CLI, on the same terms as [`Self::runs_host_tools`],
+    /// and only when they take an MCP server over HTTP.
+    fn takes_mcp_tools(&self) -> bool {
+        matches!(self.shared.flavor, AcpFlavor::Codex | AcpFlavor::GeminiCli)
+            && self.shared.serving()
+    }
+
+    fn host_tools_settled(&self) {
+        *self
+            .shared
+            .mcp_settled
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = true;
+        self.shared.mcp_settled_changed.notify_all();
     }
 
     /// The set the server will start with, else the running server's. The
@@ -486,6 +519,20 @@ impl Drop for AcpRuntime {
 }
 
 impl Shared {
+    /// Whether termide's tools are still to be served, or the server of them
+    /// runs.
+    fn serving(&self) -> bool {
+        self.host_tools
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some()
+            || self
+                .mcp_server
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_some()
+    }
+
     fn handshake(self: &Arc<Self>, timeout: Duration) {
         let outcome = self.request(
             "initialize",
@@ -499,7 +546,15 @@ impl Shared {
             }),
             timeout,
         );
-        let params = self.new_session_params();
+        // Claude Code's adapter takes HTTP servers, which the others say.
+        let http = self.flavor == AcpFlavor::ClaudeCode
+            || outcome
+                .as_ref()
+                .is_ok_and(|result| result["agentCapabilities"]["mcpCapabilities"]["http"] == true);
+        if http && matches!(self.flavor, AcpFlavor::Codex | AcpFlavor::GeminiCli) {
+            self.wait_for_mcp_servers();
+        }
+        let params = self.new_session_params(http);
         let result = outcome.and_then(|_| self.request("session/new", params, timeout));
         let conn = match result {
             Ok(value) => match value["sessionId"].as_str() {
@@ -521,46 +576,83 @@ impl Shared {
         self.kick();
     }
 
+    /// Wait, for [`MCP_SETTLE`] at most, until the panel says termide's MCP
+    /// servers have all answered and their tools are handed over, so an agent
+    /// that lists them once has them. Claude Code lists them again as they
+    /// change and does not wait.
+    fn wait_for_mcp_servers(&self) {
+        let offered = self
+            .host_tools
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some();
+        if !offered {
+            return;
+        }
+        let settled = self
+            .mcp_settled
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let _ = self
+            .mcp_settled_changed
+            .wait_timeout_while(settled, MCP_SETTLE, |settled| {
+                !*settled && !self.cancel.is_cancelled()
+            });
+    }
+
     /// `session/new`'s parameters. Claude Code gets termide's tools from
     /// termide's MCP server in place of its own, termide's system prompt in
     /// place of its own, none of its own settings (their rules, hooks,
     /// `CLAUDE.md`, MCP servers), and leave to run termide's tools without
     /// asking, since termide judges each call as it runs it. Without the
-    /// server it keeps its own tools, so it still has some.
-    fn new_session_params(&self) -> Value {
+    /// server it keeps its own tools, so it still has some. Codex and Gemini
+    /// CLI keep their own tools and prompt, and get the server too when they
+    /// take one over `http`, for the tools of termide's MCP servers.
+    fn new_session_params(&self, http: bool) -> Value {
         let mut params = json!({ "cwd": self.cwd, "mcpServers": [] });
-        if self.flavor != AcpFlavor::ClaudeCode {
-            return params;
-        }
-        let mut options = json!({ "settingSources": [], "strictMcpConfig": true });
+        let serves = match self.flavor {
+            AcpFlavor::ClaudeCode | AcpFlavor::Codex | AcpFlavor::GeminiCli => http,
+            AcpFlavor::Generic => false,
+        };
         // Held until the server runs: a change of the tools meanwhile waits
-        // and then goes to the server.
+        // and then goes to the server. An agent that takes no server drops
+        // the tools here, and with them the claim that it runs them.
         let mut pending = self
             .host_tools
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        if let Some(host) = pending.take() {
-            match McpServer::start(host.tools, host.hooks, self.cwd.clone()) {
-                Ok(server) => {
-                    params["mcpServers"] = json!([{
-                        "type": "http",
-                        "name": SERVER_NAME,
-                        "url": server.url(),
-                        "headers": [
-                            { "name": "Authorization", "value": format!("Bearer {}", server.token()) }
-                        ],
-                    }]);
-                    options["tools"] = json!([]);
-                    options["allowedTools"] = json!([format!("mcp__{SERVER_NAME}")]);
-                    *self
-                        .mcp_server
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner) = Some(server);
-                }
-                Err(error) => log::warn!("cannot serve termide's tools to {}: {error}", self.name),
-            }
+        let host = pending.take().filter(|_| serves);
+        let server = host.and_then(|host| {
+            McpServer::start(host.tools, host.hooks, self.cwd.clone())
+                .map_err(|error| {
+                    log::warn!("cannot serve termide's tools to {}: {error}", self.name);
+                })
+                .ok()
+        });
+        let served = server.is_some();
+        if let Some(server) = server {
+            params["mcpServers"] = json!([{
+                "type": "http",
+                "name": SERVER_NAME,
+                "url": server.url(),
+                "headers": [
+                    { "name": "Authorization", "value": format!("Bearer {}", server.token()) }
+                ],
+            }]);
+            *self
+                .mcp_server
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(server);
         }
         drop(pending);
+        if self.flavor != AcpFlavor::ClaudeCode {
+            return params;
+        }
+        let mut options = json!({ "settingSources": [], "strictMcpConfig": true });
+        if served {
+            options["tools"] = json!([]);
+            options["allowedTools"] = json!([format!("mcp__{SERVER_NAME}")]);
+        }
         params["_meta"] = json!({
             "systemPrompt": self.system_prompt,
             "claudeCode": { "options": options },
@@ -1008,6 +1100,34 @@ impl Shared {
     }
 
     fn ask_permission(&self, params: &Value) -> Value {
+        let options = params["options"].as_array().cloned().unwrap_or_default();
+        let pick = |kinds: &[&str]| {
+            kinds.iter().find_map(|kind| {
+                options
+                    .iter()
+                    .find(|o| o["kind"].as_str() == Some(kind))
+                    .and_then(|o| o["optionId"].as_str())
+                    .map(str::to_string)
+            })
+        };
+        let selected = |chosen: Option<String>| match chosen {
+            Some(option_id) => {
+                json!({ "outcome": { "outcome": "selected", "optionId": option_id } })
+            }
+            None => json!({ "outcome": { "outcome": "cancelled" } }),
+        };
+        // A call of termide's own tool (Codex asks before every MCP call) is
+        // judged when it runs on termide's server; asking here too would
+        // put up a second card for it.
+        let id = params["toolCall"]["toolCallId"].as_str().unwrap_or("");
+        if self
+            .host_calls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains_key(id)
+        {
+            return selected(pick(&["allow_once", "allow_always"]));
+        }
         let call = permission_call(&params["toolCall"]);
         let ctx = ToolContext::new(self.cwd.clone());
         // The hooks decide the request as they would for the built-in agent:
@@ -1020,16 +1140,6 @@ impl Shared {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .before_tool_call(&call, &ctx);
-        let options = params["options"].as_array().cloned().unwrap_or_default();
-        let pick = |kinds: &[&str]| {
-            kinds.iter().find_map(|kind| {
-                options
-                    .iter()
-                    .find(|o| o["kind"].as_str() == Some(kind))
-                    .and_then(|o| o["optionId"].as_str())
-                    .map(str::to_string)
-            })
-        };
         // Always answer "once": termide stays the source of truth for grants,
         // so the agent keeps asking and termide keeps deciding silently,
         // rather than the agent remembering a rule of its own.
@@ -1039,12 +1149,7 @@ impl Shared {
             // verdict answers the request "once".
             _ => pick(&["allow_once", "allow_always"]),
         };
-        match chosen {
-            Some(option_id) => {
-                json!({ "outcome": { "outcome": "selected", "optionId": option_id } })
-            }
-            None => json!({ "outcome": { "outcome": "cancelled" } }),
-        }
+        selected(chosen)
     }
 
     /// One `session/update` into the events the panel understands.
@@ -1103,6 +1208,7 @@ impl Shared {
                         .insert(id, update.clone());
                     return;
                 }
+                self.note_host_call(update);
                 self.start_tool_call(tool_call_of(update));
                 if is_finished(update) {
                     self.finish_tool_call(update);
@@ -1122,6 +1228,7 @@ impl Shared {
                                 call[key] = value.clone();
                             }
                         }
+                        self.note_host_call(&call);
                         self.start_tool_call(tool_call_of(&call));
                     }
                 }
@@ -1237,9 +1344,32 @@ impl Shared {
         }
     }
 
+    /// Remember a call of termide's own tool by its id, until it finishes.
+    fn note_host_call(&self, update: &Value) {
+        if let Some((name, _)) = host_tool_of(update) {
+            let id = update["toolCallId"].as_str().unwrap_or("").to_string();
+            self.host_calls
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(id, name);
+        }
+    }
+
     fn finish_tool_call(&self, update: &Value) {
-        let call = tool_call_of(update);
-        let text = content_text(&update["content"]);
+        let mut call = tool_call_of(update);
+        if let Some(name) = self
+            .host_calls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&call.id)
+        {
+            call.name = name;
+        }
+        // Codex reports an MCP call's result as the MCP result, not as content.
+        let mut text = content_text(&update["content"]);
+        if text.is_empty() {
+            text = mcp_result_text(&update["rawOutput"]["result"]);
+        }
         let failed = update["status"].as_str() == Some("failed");
         let mut result = if failed {
             ToolResultMessage::error(
@@ -1268,22 +1398,22 @@ impl Shared {
 /// editor reload behave as for built-in tools, and the title travels in the
 /// arguments when the agent gives no raw input.
 fn tool_call_of(update: &Value) -> ToolCall {
+    // A call of termide's own tool shows as that tool, as the built-in loop
+    // shows it.
+    if let Some((name, arguments)) = host_tool_of(update) {
+        return ToolCall {
+            id: update["toolCallId"].as_str().unwrap_or("").to_string(),
+            name,
+            arguments,
+            extra_content: None,
+        };
+    }
     let title = update["title"].as_str().unwrap_or("").to_string();
     let mut arguments = update
         .get("rawInput")
         .filter(|v| v.is_object())
         .cloned()
         .unwrap_or_else(|| json!({}));
-    // A call of termide's own tool shows as that tool, as the built-in loop
-    // shows it.
-    if let Some(name) = title.strip_prefix(HOST_TOOL_PREFIX) {
-        return ToolCall {
-            id: update["toolCallId"].as_str().unwrap_or("").to_string(),
-            name: name.to_string(),
-            arguments,
-            extra_content: None,
-        };
-    }
     let kind = update["kind"].as_str().unwrap_or("other").to_string();
     if !title.is_empty() {
         arguments["title"] = json!(title);
@@ -1294,6 +1424,40 @@ fn tool_call_of(update: &Value) -> ToolCall {
         arguments,
         extra_content: None,
     }
+}
+
+/// The name and arguments of a call of a tool termide's MCP server serves:
+/// Claude Code titles it `mcp__termide__<tool>` with the arguments as its raw
+/// input, Codex names the server and the tool in its raw input.
+fn host_tool_of(update: &Value) -> Option<(String, Value)> {
+    let input = &update["rawInput"];
+    let object = |value: &Value| {
+        Some(value)
+            .filter(|v| v.is_object())
+            .cloned()
+            .unwrap_or_else(|| json!({}))
+    };
+    if let Some(name) = update["title"]
+        .as_str()
+        .and_then(|title| title.strip_prefix(HOST_TOOL_PREFIX))
+    {
+        return Some((name.to_string(), object(input)));
+    }
+    let tool = input["tool"]
+        .as_str()
+        .filter(|_| input["server"] == SERVER_NAME)?;
+    Some((tool.to_string(), object(&input["arguments"])))
+}
+
+/// The text of an MCP `tools/call` result's content.
+fn mcp_result_text(result: &Value) -> String {
+    let texts: Vec<&str> = result["content"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|block| block["text"].as_str())
+        .collect();
+    texts.join("\n")
 }
 
 /// The token usage a `session/prompt` result reports, when it does.
@@ -1694,12 +1858,24 @@ mod tests {
     }
 
     /// An agent that records every message it gets and answers the
-    /// handshake and `session/set_config_option`.
+    /// handshake and `session/set_config_option`; it takes MCP servers over
+    /// HTTP.
     fn recording_agent(
         dir: PathBuf,
         flavor: AcpFlavor,
         host_tools: Option<HostTools>,
         mode: ModeHandle,
+    ) -> (AcpRuntime, Arc<Mutex<Vec<Value>>>) {
+        recording_agent_with(dir, flavor, host_tools, mode, true)
+    }
+
+    /// [`recording_agent`], saying whether it takes MCP servers over HTTP.
+    fn recording_agent_with(
+        dir: PathBuf,
+        flavor: AcpFlavor,
+        host_tools: Option<HostTools>,
+        mode: ModeHandle,
+        http: bool,
     ) -> (AcpRuntime, Arc<Mutex<Vec<Value>>>) {
         let (to_agent_rx, to_agent_tx) = pipe().unwrap();
         let (from_agent_rx, from_agent_tx) = pipe().unwrap();
@@ -1714,7 +1890,10 @@ mod tests {
                 record.lock().unwrap().push(message.clone());
                 let id = message["id"].clone();
                 let result = match message["method"].as_str() {
-                    Some("initialize") => json!({ "protocolVersion": 1, "agentCapabilities": {} }),
+                    Some("initialize") => json!({
+                        "protocolVersion": 1,
+                        "agentCapabilities": { "mcpCapabilities": { "http": http } },
+                    }),
                     Some("session/new") => json!({ "sessionId": "s1" }),
                     Some(_) => json!({}),
                     None => continue,
@@ -2084,18 +2263,12 @@ mod tests {
     #[test]
     fn codex_is_put_in_the_modes_that_match_the_panels() {
         let dir = tempfile::tempdir().unwrap();
-        // Offered termide's tools, it keeps its own.
-        let host = HostTools {
-            tools: termide_agent_core::ToolRegistry::new(),
-            hooks: Box::new(termide_agent_core::NoHooks),
-        };
         let (runtime, seen) = recording_agent(
             dir.path().to_path_buf(),
             AcpFlavor::Codex,
-            Some(host),
+            None,
             ModeHandle::new(Mode::Configured),
         );
-        assert!(!runtime.runs_host_tools());
         let option = |config: &'static str, value: &'static str| {
             move |m: &Value| {
                 m["method"] == "session/set_config_option"
@@ -2115,6 +2288,132 @@ mod tests {
         seen_where(&seen, option("mode", "agent-full-access"));
         runtime.set_mode(Mode::Plan);
         seen_where(&seen, option("collaboration_mode", "plan"));
+    }
+
+    /// termide's tools, as the panel offers them to every agent.
+    fn echo_host() -> HostTools {
+        let mut tools = termide_agent_core::ToolRegistry::new();
+        tools.insert(Arc::new(Echo));
+        HostTools {
+            tools,
+            hooks: Box::new(termide_agent_core::NoHooks),
+        }
+    }
+
+    #[test]
+    fn codex_and_gemini_keep_their_tools_and_are_served_the_mcp_servers() {
+        for flavor in [AcpFlavor::Codex, AcpFlavor::GeminiCli] {
+            let dir = tempfile::tempdir().unwrap();
+            let (runtime, seen) = recording_agent(
+                dir.path().to_path_buf(),
+                flavor,
+                Some(echo_host()),
+                ModeHandle::new(Mode::Configured),
+            );
+            // It lists its tools once, so its session waits until termide's
+            // MCP servers have answered.
+            std::thread::sleep(Duration::from_millis(100));
+            assert!(!seen
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|m| m["method"] == "session/new"));
+            runtime.host_tools_settled();
+            let new = seen_where(&seen, |m| m["method"] == "session/new").remove(0);
+            let params = &new["params"];
+            assert!(params.get("_meta").is_none(), "it keeps its own prompt");
+            let server = &params["mcpServers"][0];
+            assert_eq!(server["name"], "termide");
+            assert!(!runtime.runs_host_tools());
+            assert!(runtime.takes_mcp_tools());
+            // None of termide's own tools: they would stand beside its own.
+            let url = server["url"].as_str().unwrap();
+            let auth = server["headers"][0]["value"].as_str().unwrap();
+            assert!(served_tools(url, auth).is_empty());
+            // An MCP server of termide's connected: its tools are served.
+            let mut mcp = termide_agent_core::ToolRegistry::new();
+            mcp.insert(Arc::new(Echo));
+            runtime.update_host_tools(mcp).unwrap();
+            assert_eq!(served_tools(url, auth), ["echo"]);
+        }
+    }
+
+    #[test]
+    fn a_codex_call_of_termides_tool_shows_as_it_and_is_not_asked_twice() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, _seen) = recording_agent_with(
+            dir.path().to_path_buf(),
+            AcpFlavor::Codex,
+            None,
+            ModeHandle::new(Mode::Configured),
+            false,
+        );
+        let shared = &runtime.shared;
+        // As Codex sends them: the call names the server and the tool, the
+        // permission request names the call alone, the end carries the MCP
+        // result.
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call", "toolCallId": "c1", "kind": "execute",
+            "status": "in_progress", "title": "mcp.termide.vault__secret_word",
+            "rawInput": { "server": "termide", "tool": "vault__secret_word", "arguments": { "a": 1 } },
+            "_meta": { "is_mcp_tool_call": true },
+        }));
+        let answer = shared.ask_permission(&json!({
+            "toolCall": { "toolCallId": "c1", "kind": "execute", "status": "pending" },
+            "options": [
+                { "kind": "allow_once", "optionId": "allow_once" },
+                { "kind": "reject_once", "optionId": "cancel" },
+            ],
+            "_meta": { "is_mcp_tool_approval": true },
+        }));
+        assert_eq!(answer["outcome"]["optionId"], "allow_once");
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "completed",
+            "rawOutput": { "result": { "content": [{ "type": "text", "text": "pineapple" }] } },
+        }));
+        let events = runtime.drain();
+        let started = events.iter().find_map(|e| match e {
+            AgentEvent::ToolExecutionStart { call } => Some(call.clone()),
+            _ => None,
+        });
+        let started = started.expect("the call starts");
+        assert_eq!(
+            (started.name.as_str(), &started.arguments),
+            ("vault__secret_word", &json!({ "a": 1 }))
+        );
+        let ended = events.iter().find_map(|e| match e {
+            AgentEvent::ToolExecutionEnd { result } => Some(result.clone()),
+            _ => None,
+        });
+        let ended = ended.expect("the call ends");
+        assert_eq!(
+            (ended.tool_name.as_str(), ended.plain_text().as_str()),
+            ("vault__secret_word", "pineapple")
+        );
+        // Ended, it is a call like any other again.
+        assert!(shared.host_calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_agent_without_http_servers_is_served_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, seen) = recording_agent_with(
+            dir.path().to_path_buf(),
+            AcpFlavor::Codex,
+            Some(echo_host()),
+            ModeHandle::new(Mode::Configured),
+            false,
+        );
+        let new = seen_where(&seen, |m| m["method"] == "session/new").remove(0);
+        assert_eq!(new["params"]["mcpServers"], json!([]));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while runtime.takes_mcp_tools() {
+            assert!(Instant::now() < deadline, "it still claims the tools");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(runtime
+            .update_host_tools(termide_agent_core::ToolRegistry::new())
+            .is_err());
     }
 
     #[test]

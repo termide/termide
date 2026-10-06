@@ -119,6 +119,7 @@ impl AgentPanel {
         // Dropping the old runtime cancels it and asks its worker to stop.
         self.runtime = runtime;
         self.external = external;
+        self.mcp_settled_told = false;
         self.permission_rx = permission_rx;
         self.question_rx = question_rx;
         self.suggestion_rx = suggestion_rx;

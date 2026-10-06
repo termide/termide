@@ -602,6 +602,9 @@ pub struct AgentPanel {
     /// — every way of closing it, `Enter`, `Esc` and a heading button alike,
     /// comes back as `PanelCommand::ChecklistDone`.
     toolset_list_open: bool,
+    /// Whether the external agent was told termide's MCP servers have all
+    /// answered; once per runtime.
+    mcp_settled_told: bool,
     /// What the session switched off: tool names and `skill:<name>`.
     toolset_off: BTreeSet<String>,
     /// What the running profile (its prompt and registry) was built without.
@@ -951,6 +954,7 @@ impl AgentPanel {
             mcp_lines: std::collections::HashMap::new(),
             mcp_reconnecting: BTreeSet::new(),
             toolset_list_open: false,
+            mcp_settled_told: false,
             toolset_off,
             context_off,
             blocked,
