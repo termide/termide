@@ -151,6 +151,15 @@ impl AgentPanel {
         self.follow = true;
         self.queued = (0, 0);
         self.queued_texts.clear();
+        // A paused run belonged to the runtime just dropped: it cannot be
+        // resumed, so the pause and the loop or goal it was part of end here.
+        self.paused = false;
+        self.run_paused = false;
+        self.pause_start = None;
+        self.resuming = false;
+        self.run_start = None;
+        self.loop_task = None;
+        self.goal_task = None;
         self.pause_requested = false;
         self.stop_requested = false;
         self.context_tokens = 0;

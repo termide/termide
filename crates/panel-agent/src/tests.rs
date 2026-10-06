@@ -344,6 +344,24 @@ fn a_pending_pause_lives_in_the_state_strip_and_a_pause_in_the_transcript() {
 }
 
 #[test]
+fn a_new_session_does_not_inherit_a_pause() {
+    let mut panel = AgentPanel::new(setup(vec![]));
+    panel.apply(AgentEvent::AgentStart);
+    panel.apply(AgentEvent::Paused);
+    panel.apply(AgentEvent::AgentEnd);
+    assert_eq!(
+        panel.run_buttons(),
+        vec![RunButton::Continue, RunButton::Stop]
+    );
+    // The paused run went with the old runtime: the fresh session is idle.
+    assert!(panel.switch_session(None));
+    assert!(panel.run_buttons().is_empty());
+    assert!(!panel.paused);
+    assert!(panel.pause_start.is_none());
+    assert!(panel.run_start.is_none());
+}
+
+#[test]
 fn a_pause_ticks_its_own_length_and_the_run_clock_resumes_from_the_request() {
     let mut panel = AgentPanel::new(setup(vec![]));
     panel.apply(AgentEvent::AgentStart);
