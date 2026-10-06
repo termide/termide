@@ -6722,9 +6722,10 @@ fn a_plan_carried_out_from_a_clean_context_leaves_the_exploration_out() {
     assert!(panel.pending.is_some(), "plan card");
 
     panel.handle_key(chord(KeyCode::Char('1'), KeyModifiers::NONE));
-    let _ = panel.tick();
     assert_eq!(panel.mode.get(), Mode::Edit);
-    // The request "edits" a file, so it has a checkpoint to undo.
+    // The request "edits" a file, so it has a checkpoint to undo. The run
+    // began inside `handle_key` and ends only when a tick drains its events,
+    // so the file is saved before any tick, however fast the reply comes.
     let file = dir.path().join("notes.txt");
     std::fs::write(&file, "before").unwrap();
     panel
