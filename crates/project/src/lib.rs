@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 
 mod maintenance;
 pub use maintenance::*;
+mod open_list;
+pub use open_list::{load_open_projects, save_open_projects};
 
 /// The saved layout of a project: its panels, restored on the next start
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -83,6 +83,11 @@ pub struct App {
     /// with explicit file arguments ($EDITOR mode), so editing a commit
     /// message or crontab never restores or overwrites the project layout.
     persist_layout: bool,
+    /// The open projects as last saved for reopening, `None` until saved.
+    /// Nothing is saved while only the project started in is open: a
+    /// launch for a single directory must not replace the list of the run
+    /// before.
+    saved_open_projects: Option<Vec<std::path::PathBuf>>,
     /// Terminal capabilities this process was started with. Kept so that a
     /// reattach can re-enter exactly the modes startup entered.
     keyboard_caps: termide_keyboard::KeyboardCaps,
@@ -170,6 +175,7 @@ impl App {
             normalizer: termide_keyboard::KeyNormalizer::default(),
             keyboard_caps: termide_keyboard::KeyboardCaps::default(),
             persist_layout: true,
+            saved_open_projects: None,
             last_focus_sig: None,
             settings_model_fetch: None,
         }
@@ -259,6 +265,7 @@ impl App {
             normalizer: termide_keyboard::KeyNormalizer::new(caps),
             keyboard_caps: caps,
             persist_layout: true,
+            saved_open_projects: None,
             last_focus_sig: None,
             settings_model_fetch: None,
         }
@@ -712,6 +719,7 @@ impl App {
         // Initialize terminal dimensions
         let size = terminal.size()?;
         self.state.update_terminal_size(size.width, size.height);
+        self.load_reopenable_projects();
         self.sync_open_projects();
 
         while !self.state.should_quit {

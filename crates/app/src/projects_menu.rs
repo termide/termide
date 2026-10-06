@@ -109,6 +109,8 @@ pub fn project_mark(project: &ListedProject, current: &Path) -> &'static str {
 pub enum ProjectRow {
     /// One of the fixed actions (New / Switch / Change root) by index.
     Action(usize),
+    /// Reopen the projects open together in the last run.
+    Reopen,
     Separator,
     Project(ListedProject),
 }
@@ -119,6 +121,8 @@ pub enum ProjectsTarget {
     Action(usize),
     /// A project to switch to.
     Project(PathBuf),
+    /// Reopen the projects of the last run.
+    Reopen,
     /// A separator.
     None,
 }
@@ -128,6 +132,7 @@ impl ProjectsTarget {
         match row {
             Some(ProjectRow::Action(index)) => Self::Action(*index),
             Some(ProjectRow::Project(project)) => Self::Project(project.root.clone()),
+            Some(ProjectRow::Reopen) => Self::Reopen,
             Some(ProjectRow::Separator) | None => Self::None,
         }
     }
@@ -212,6 +217,18 @@ impl AppState {
             .map(ProjectRow::Action)
             .collect();
         let mut items = get_projects_items(Some(&self.config.general.keybindings));
+        let reopenable = self
+            .reopenable_projects
+            .iter()
+            .filter(|root| !self.open_projects.iter().any(|view| view.root == **root))
+            .count();
+        if reopenable > 0 {
+            rows.push(ProjectRow::Reopen);
+            items.push(DropdownItem::new(
+                termide_i18n::t().projects_reopen_fmt(reopenable),
+                "reopen_projects",
+            ));
+        }
 
         let projects = listed_projects(&self.open_projects, &self.cache.projects);
         let open_count = projects.iter().filter(|p| p.open).count();
@@ -371,6 +388,40 @@ mod tests {
         state.open_projects = vec![open("/p/one", false)];
         state.cache.projects = known(&[("/p/one", 40)]);
         assert_eq!(rows(&state.projects_menu()), vec!["---", "● ||/p/one"]);
+    }
+
+    #[test]
+    fn the_projects_of_the_last_run_are_offered_until_open() {
+        let mut state = test_state();
+        state.project_root = PathBuf::from("/p/one");
+        state.open_projects = vec![open("/p/one", false)];
+        assert!(!state.projects_menu().rows.contains(&ProjectRow::Reopen));
+
+        state.reopenable_projects = vec![PathBuf::from("/p/two"), PathBuf::from("/p/three")];
+        let menu = state.projects_menu();
+        assert_eq!(
+            menu.rows[PROJECTS_SUBMENU_ITEM_COUNT],
+            ProjectRow::Reopen,
+            "right after the fixed actions"
+        );
+        assert_eq!(
+            menu.items[PROJECTS_SUBMENU_ITEM_COUNT].label,
+            termide_i18n::t().projects_reopen_fmt(2)
+        );
+        assert!(matches!(
+            ProjectsTarget::of(menu.rows.get(PROJECTS_SUBMENU_ITEM_COUNT)),
+            ProjectsTarget::Reopen
+        ));
+
+        // The ones open already are not counted.
+        state.open_projects.push(open("/p/two", false));
+        let menu = state.projects_menu();
+        assert_eq!(
+            menu.items[PROJECTS_SUBMENU_ITEM_COUNT].label,
+            termide_i18n::t().projects_reopen_fmt(1)
+        );
+        state.open_projects.push(open("/p/three", false));
+        assert!(!state.projects_menu().rows.contains(&ProjectRow::Reopen));
     }
 
     #[test]

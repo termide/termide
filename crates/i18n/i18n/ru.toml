@@ -912,6 +912,7 @@ command_report_no_output = "(нет вывода)"
 [formats]
 projects_delete_fmt = "Раскладка {path}"
 app_quit_background_fmt = "Открыты в фоне: {projects}"
+projects_reopen_fmt = "Открыть проекты прошлого запуска ({count})"
 replace_done_fmt = "Заменено {count} вхождений в {files} файлах."
 replace_confirm_fmt = "Заменить {count} вхождений в {files} файлах?"
 replace_selection_fmt = "{selected}/{total} файлов · {matches} замен"

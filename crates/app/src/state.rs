@@ -142,6 +142,9 @@ pub struct AppState {
     /// Projects open in this instance, for the menus to show (they sort it).
     /// `App` keeps it in step with the parked panels it holds.
     pub open_projects: Vec<crate::open_projects::OpenProjectView>,
+    /// Projects open together in the last run, offered by the Projects menu
+    /// until they are reopened or another project is opened by hand.
+    pub reopenable_projects: Vec<PathBuf>,
     /// Unified operation manager for file operations (copy, move, delete, upload, download).
     /// This is the new centralized system that will eventually replace the individual
     /// operation handles (local_copy_operation, batch_download_operation, etc.).
@@ -269,6 +272,7 @@ impl AppState {
             project_bookmarks: None,
             project_root: std::env::current_dir().unwrap_or_default(),
             open_projects: Vec::new(),
+            reopenable_projects: Vec::new(),
             operation_manager: None, // Will be initialized when VfsManager is available
             active_operation_id: None,
             last_operation_paused: false,

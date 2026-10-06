@@ -892,6 +892,7 @@ settings_remove_project_override_message = "项目专属设置将丢失。.termi
 [formats]
 projects_delete_fmt = "{path} 的布局"
 app_quit_background_fmt = "在后台打开：{projects}"
+projects_reopen_fmt = "重新打开上次运行的项目（{count}）"
 replace_done_fmt = "已在 {files} 个文件中替换 {count} 处。"
 replace_confirm_fmt = "在 {files} 个文件中替换 {count} 处？"
 replace_selection_fmt = "{selected}/{total} 个文件 · {matches} 处替换"

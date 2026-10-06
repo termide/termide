@@ -90,6 +90,11 @@ impl App {
     /// what `root` kept and what follows the user there.
     pub(super) fn enter_project(&mut self, root: PathBuf) -> Result<EnteredProject> {
         std::env::set_current_dir(&root)?;
+        if !self.open_projects.is_open(&root) {
+            // A project opened by hand starts a new set: the last run's is
+            // no longer offered.
+            self.state.reopenable_projects.clear();
+        }
         log::info!("Changed working directory to: {:?}", root);
 
         // Operations run for the instance, not for a project, so their panel
@@ -166,8 +171,9 @@ impl App {
     }
 
     /// Bring `state.open_projects`, which the menus draw, in step with the
-    /// open projects.
+    /// open projects, and save the set for reopening when it changed.
     pub(super) fn sync_open_projects(&mut self) {
+        self.save_open_projects();
         let views: Vec<OpenProjectView> =
             self.open_projects
                 .roots()
@@ -182,6 +188,56 @@ impl App {
             self.state.open_projects = views;
             self.state.needs_redraw = true;
         }
+    }
+
+    /// Save the roots of the open projects for the next run to reopen, once
+    /// more than one has been open and whenever they change since.
+    fn save_open_projects(&mut self) {
+        if !self.persist_layout {
+            return;
+        }
+        let roots: Vec<PathBuf> = self.open_projects.roots().map(Path::to_path_buf).collect();
+        let unchanged = match &self.saved_open_projects {
+            Some(saved) => *saved == roots,
+            None => roots.len() < 2,
+        };
+        if unchanged {
+            return;
+        }
+        if let Err(e) = termide_project::save_open_projects(&roots) {
+            log::error!("Failed to save the open projects: {}", e);
+        }
+        self.saved_open_projects = Some(roots);
+    }
+
+    /// Read the projects open together in the last run, those that still
+    /// exist and are not open now, for the Projects menu to offer.
+    pub(super) fn load_reopenable_projects(&mut self) {
+        if !self.persist_layout {
+            return;
+        }
+        let mut roots: Vec<PathBuf> = Vec::new();
+        for root in termide_project::load_open_projects() {
+            let root = project_root_of(root);
+            if root.is_dir() && !self.open_projects.is_open(&root) && !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+        self.state.reopenable_projects = roots;
+    }
+
+    /// Open the projects of the last run in the background. Their layouts
+    /// load the first time each is entered; the current project stays.
+    pub(super) fn reopen_previous_projects(&mut self) {
+        let roots = std::mem::take(&mut self.state.reopenable_projects);
+        let mut opened = 0;
+        for root in roots {
+            if self.open_projects.open_pending(root) {
+                opened += 1;
+            }
+        }
+        log::info!("Reopened {} projects of the last run", opened);
+        self.sync_open_projects();
     }
 
     /// Tick the panels of the parked projects. What they raise waits for
@@ -257,14 +313,14 @@ impl App {
     /// Ask before closing the parked project at `root`. `menu` is where to
     /// return afterwards, see `PendingAction::CloseProject`.
     pub(super) fn confirm_close_project(&mut self, root: PathBuf, menu: Option<usize>) {
-        let Some(live) = self
+        if root == self.project_root || !self.open_projects.is_open(&root) {
+            return;
+        }
+        // A project reopened but not entered yet has nothing running.
+        let live = self
             .open_projects
             .parked()
-            .find(|(parked_root, _)| *parked_root == root)
-            .map(|(_, parked)| parked.requires_confirmation())
-        else {
-            return;
-        };
+            .any(|(parked_root, parked)| parked_root == root && parked.requires_confirmation());
         let t = i18n::t();
         let mut message = display_root(&root);
         if live {
@@ -281,8 +337,9 @@ impl App {
         );
     }
 
-    /// Close the parked project at `root`: save its layout and drop its
-    /// panels, which stops the processes in its terminals.
+    /// Close the parked (or not yet loaded) project at `root`: save its
+    /// layout and drop its panels, which stops the processes in its
+    /// terminals.
     pub(super) fn close_project(&mut self, root: &Path, menu: Option<usize>) -> Result<()> {
         if let Some(mut parked) = self.open_projects.close(root) {
             // As closing an editor panel does: the server forgets the file.

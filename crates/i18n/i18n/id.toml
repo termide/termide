@@ -879,6 +879,7 @@ command_report_no_output = "(tidak ada output)"
 [formats]
 projects_delete_fmt = "Tata letak {path}"
 app_quit_background_fmt = "Terbuka di latar belakang: {projects}"
+projects_reopen_fmt = "Buka kembali proyek dari jalankan terakhir ({count})"
 batch_result_errors_fmt = "kesalahan: {count}"
 batch_result_skipped_fmt = "dilewati: {count}"
 editor_deletion_marker = "{count} baris dihapus"

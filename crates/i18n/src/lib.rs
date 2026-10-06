@@ -1157,6 +1157,7 @@ pub trait Translation: Send + Sync {
     fn projects_close_warning(&self) -> &str;
     fn projects_already_open(&self) -> &str;
     fn projects_already_current(&self) -> &str;
+    fn projects_reopen_fmt(&self, count: usize) -> String;
 
     // Detached sessions
     fn detach_instance(&self) -> &str;

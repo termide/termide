@@ -879,6 +879,7 @@ command_report_no_output = "(ไม่มีเอาต์พุต)"
 [formats]
 projects_delete_fmt = "เลย์เอาต์ของ {path}"
 app_quit_background_fmt = "เปิดอยู่เบื้องหลัง: {projects}"
+projects_reopen_fmt = "เปิดโปรเจกต์จากการเรียกใช้ครั้งก่อนอีกครั้ง ({count})"
 language_changed = "เปลี่ยนภาษาเป็น {name}"
 theme_changed = "เปลี่ยนธีมเป็น {name}"
 batch_result_errors_fmt = "ข้อผิดพลาด: {count}"

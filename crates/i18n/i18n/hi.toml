@@ -879,6 +879,7 @@ command_report_no_output = "(कोई आउटपुट नहीं)"
 [formats]
 projects_delete_fmt = "{path} का लेआउट"
 app_quit_background_fmt = "पृष्ठभूमि में खुले: {projects}"
+projects_reopen_fmt = "पिछले रन के प्रोजेक्ट फिर से खोलें ({count})"
 language_changed = "भाषा {name} में बदली गई"
 theme_changed = "थीम {name} में बदली गई"
 batch_result_errors_fmt = "त्रुटियां: {count}"

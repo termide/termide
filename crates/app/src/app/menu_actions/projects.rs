@@ -246,6 +246,10 @@ impl App {
                     self.switch_to_project(path)?;
                 }
             }
+            ProjectsTarget::Reopen => {
+                self.state.close_menu();
+                self.reopen_previous_projects();
+            }
             ProjectsTarget::Action(PROJECTS_SUBMENU_NEW) => {
                 self.state.close_menu();
                 self.handle_new_project()?;

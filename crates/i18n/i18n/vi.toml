@@ -879,6 +879,7 @@ command_report_no_output = "(không có đầu ra)"
 [formats]
 projects_delete_fmt = "Bố cục của {path}"
 app_quit_background_fmt = "Đang mở trong nền: {projects}"
+projects_reopen_fmt = "Mở lại các dự án của lần chạy trước ({count})"
 batch_result_errors_fmt = "lỗi: {count}"
 batch_result_skipped_fmt = "bỏ qua: {count}"
 editor_deletion_marker = "Đã xóa {count} dòng"

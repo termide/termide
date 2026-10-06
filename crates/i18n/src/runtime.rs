@@ -2040,6 +2040,10 @@ impl Translation for RuntimeTranslation {
         self.format("app_quit_background_fmt", &[("projects", projects)])
     }
 
+    fn projects_reopen_fmt(&self, count: usize) -> String {
+        self.format("projects_reopen_fmt", &[("count", &count.to_string())])
+    }
+
     fn replace_done_fmt(&self, count: usize, files: usize) -> String {
         self.format(
             "replace_done_fmt",

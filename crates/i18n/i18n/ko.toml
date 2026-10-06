@@ -879,6 +879,7 @@ command_report_no_output = "(출력 없음)"
 [formats]
 projects_delete_fmt = "{path}의 레이아웃"
 app_quit_background_fmt = "백그라운드에서 열림: {projects}"
+projects_reopen_fmt = "지난 실행의 프로젝트 다시 열기 ({count})"
 batch_result_errors_fmt = "오류: {count}"
 batch_result_skipped_fmt = "건너뜀: {count}"
 editor_deletion_marker = "{count}줄 삭제됨"

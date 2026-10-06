@@ -879,6 +879,7 @@ command_report_no_output = "(出力なし)"
 [formats]
 projects_delete_fmt = "{path} のレイアウト"
 app_quit_background_fmt = "バックグラウンドで開いています: {projects}"
+projects_reopen_fmt = "前回の起動のプロジェクトを再度開く（{count}）"
 batch_result_errors_fmt = "エラー: {count}"
 batch_result_skipped_fmt = "スキップ: {count}"
 editor_deletion_marker = "{count}行削除"
