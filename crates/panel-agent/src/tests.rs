@@ -3258,7 +3258,7 @@ fn the_models_questions_are_answered_one_card_at_a_time() {
     panel.handle_key(chord(KeyCode::Char('2'), KeyModifiers::NONE));
     assert_eq!(
         panel.pending.as_ref().unwrap().form().title(),
-        "Agent asks (2/2)"
+        "Agent asks (← 2/2)"
     );
     // Several picks, and an answer of the user's own among them.
     panel.handle_key(chord(KeyCode::Char('1'), KeyModifiers::NONE));
@@ -3281,6 +3281,65 @@ fn the_models_questions_are_answered_one_card_at_a_time() {
             QuestionAnswer {
                 chosen: vec!["core".into(), "app".into()],
                 custom: Some("docs".into()),
+            },
+        ])
+    );
+}
+
+#[test]
+fn the_arrows_step_back_to_an_answered_question_and_its_answer_shows() {
+    let mut panel = panel(vec![]);
+    let worker = ask_in_worker(
+        &mut panel,
+        vec![
+            question("Which approach?", &["Channel", "Slot"], false),
+            question("Which crates?", &["core", "ui", "app"], true),
+            question("Name?", &[], false),
+        ],
+    );
+    let title = |panel: &AgentPanel| panel.pending.as_ref().unwrap().form().title().to_string();
+    let key = |panel: &mut AgentPanel, code| panel.handle_key(chord(code, KeyModifiers::NONE));
+    // The first question has nothing before it: `←` is not a step there.
+    assert_eq!(title(&panel), "Agent asks (1/3)");
+    key(&mut panel, KeyCode::Char('2'));
+    key(&mut panel, KeyCode::Char('1'));
+    key(&mut panel, KeyCode::Char('3'));
+    key(&mut panel, KeyCode::Char('5'));
+    assert_eq!(title(&panel), "Agent asks (← 3/3)");
+
+    // Back to the second: its picks show, and `→` leads on again.
+    key(&mut panel, KeyCode::Left);
+    assert_eq!(title(&panel), "Agent asks (← 2/3 →)");
+    let form = panel.pending.as_ref().unwrap().form();
+    assert!(form.is_checked(0) && !form.is_checked(1) && form.is_checked(2));
+    // Back to the first: its choice is selected; a new one moves on to the
+    // second, which keeps its answer and can be stepped past.
+    key(&mut panel, KeyCode::Left);
+    assert_eq!(title(&panel), "Agent asks (1/3 →)");
+    assert_eq!(panel.pending.as_ref().unwrap().form().selected(), 1);
+    key(&mut panel, KeyCode::Char('1'));
+    assert_eq!(title(&panel), "Agent asks (← 2/3 →)");
+    key(&mut panel, KeyCode::Right);
+    assert_eq!(title(&panel), "Agent asks (← 3/3)");
+    // The last is answered in the user's own words; the set goes back.
+    key(&mut panel, KeyCode::Char('1'));
+    type_text(&mut panel, "relay");
+    key(&mut panel, KeyCode::Enter);
+    assert!(panel.pending.is_none());
+    assert_eq!(
+        worker.join().unwrap(),
+        QuestionReply::Answered(vec![
+            QuestionAnswer {
+                chosen: vec!["Channel".into()],
+                custom: None,
+            },
+            QuestionAnswer {
+                chosen: vec!["core".into(), "app".into()],
+                custom: None,
+            },
+            QuestionAnswer {
+                chosen: vec![],
+                custom: Some("relay".into()),
             },
         ])
     );

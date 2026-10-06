@@ -627,8 +627,12 @@ checkbox that `Space`, `Enter` or its digit toggles, and **Submit** sends them.
 or, where several can be picked, alongside them. `↑`/`↓`, digits and clicks
 work as on a permission card; **Decline and stop the run**, or `Esc`, tells the
 agent you declined and stops the run, so you can say what you want in your own
-message. Waiting for an answer counts as the call's pause (`‖`), as a
-permission question does. Asking never needs a permission, in plan mode too.
+message. With several questions, `←` goes back to the one before and `→`
+on past one already answered, as the arrows in the title show
+(`Agent asks (← 2/3 →)`): an answer given before shows picked, and
+answering again moves on to the next. The answers go back once the last
+question is answered. Waiting for an answer counts as the call's pause
+(`‖`), as a permission question does. Asking never needs a permission, in plan mode too.
 Only the panel's own agent has this tool: a subagent and a `termide --prompt`
 run have no one to ask and decide on their own. An agent whose `tools` list leaves out
 `question` does not ask either.

@@ -24,11 +24,13 @@ pub(crate) enum Pending {
         /// What each of the form's rows answers, in their order.
         answers: Vec<PermissionAnswer>,
     },
-    /// The model's questions, asked one card at a time; `answers` holds those
-    /// already given, and `form` asks the next.
+    /// The model's questions, asked one card at a time; `answers` holds one
+    /// slot per question, filled as they are answered, and `form` asks
+    /// question `current`. `←` and `→` step between them.
     Question {
         envelope: QuestionEnvelope,
-        answers: Vec<QuestionAnswer>,
+        answers: Vec<Option<QuestionAnswer>>,
+        current: usize,
         form: ChoiceForm,
     },
     Command {
@@ -98,15 +100,29 @@ impl Pending {
 /// title, with the position among several; the question itself as the
 /// detail; the choices with their descriptions, checkboxes when several can
 /// be picked; a row for an answer of the user's own, and one that declines.
-pub(crate) fn question_form(envelope: &QuestionEnvelope, index: usize) -> ChoiceForm {
+/// The answer given to it before, if any, shows picked; `←` steps back
+/// while there is a question before, `→` on once this one is answered.
+pub(crate) fn question_form(
+    envelope: &QuestionEnvelope,
+    index: usize,
+    answers: &[Option<QuestionAnswer>],
+) -> ChoiceForm {
     let t = termide_i18n::t();
     let question = &envelope.questions[index];
     let mut title = t.agent_question_title().to_string();
     if !question.header.is_empty() {
         title.push_str(&format!(": {}", question.header));
     }
+    let back = index > 0;
+    let forward = index + 1 < envelope.questions.len() && answers[index].is_some();
     if envelope.questions.len() > 1 {
-        title.push_str(&format!(" ({}/{})", index + 1, envelope.questions.len()));
+        let left = if back { "← " } else { "" };
+        let right = if forward { " →" } else { "" };
+        title.push_str(&format!(
+            " ({left}{}/{}{right})",
+            index + 1,
+            envelope.questions.len()
+        ));
     }
     let (labels, descriptions) = question
         .options
@@ -120,6 +136,25 @@ pub(crate) fn question_form(envelope: &QuestionEnvelope, index: usize) -> Choice
         .with_cancel(t.agent_question_decline());
     if question.multi_select {
         form = form.with_multi(t.agent_question_submit());
+    }
+    form = form.with_steps(back, forward);
+    if let Some(Some(given)) = answers.get(index) {
+        let picked: Vec<usize> = given
+            .chosen
+            .iter()
+            .filter_map(|label| question.options.iter().position(|o| &o.label == label))
+            .collect();
+        if let Some(custom) = &given.custom {
+            form = form.with_custom_answer(custom.clone());
+        }
+        form = form.with_checked(&picked);
+        // On the pick, or on the own answer's row when that was the answer.
+        let row = match (picked.first(), &given.custom) {
+            (Some(&first), _) => first,
+            (None, Some(_)) => question.options.len(),
+            (None, None) => 0,
+        };
+        form = form.with_selected(row);
     }
     form
 }
@@ -298,14 +333,16 @@ impl AgentPanel {
                 let _ = envelope.reply.send(QuestionReply::Declined);
                 continue;
             }
-            let form = question_form(&envelope, 0);
+            let answers = vec![None; envelope.questions.len()];
+            let form = question_form(&envelope, 0, &answers);
             events.push(PanelEvent::SetStatusMessage {
                 message: envelope.questions[0].question.clone(),
                 is_error: false,
             });
             self.pending = Some(Pending::Question {
                 envelope,
-                answers: Vec::new(),
+                answers,
+                current: 0,
                 form,
             });
             self.raise_attention(true);
@@ -314,29 +351,64 @@ impl AgentPanel {
         events
     }
 
-    /// Record the answer to the question on the card, then ask the next one,
-    /// or send them all back once the last is answered.
+    /// Record the answer to the question on the card, then ask the next one
+    /// (showing the answer it had, when the user came back to change an
+    /// earlier one), or send them all back once the last is answered.
     pub(crate) fn answer_question(&mut self, answer: QuestionAnswer) {
         let Some(Pending::Question {
             envelope,
             mut answers,
+            current,
             ..
         }) = self.pending.take()
         else {
             return;
         };
-        answers.push(answer);
-        if answers.len() < envelope.questions.len() {
-            let form = question_form(&envelope, answers.len());
-            self.pending = Some(Pending::Question {
-                envelope,
-                answers,
-                form,
-            });
+        answers[current] = Some(answer);
+        let next = current + 1;
+        if next < envelope.questions.len() {
+            self.show_question(envelope, answers, next);
             return;
         }
         self.end_permission_wait();
+        let answers = answers.into_iter().flatten().collect();
         let _ = envelope.reply.send(QuestionReply::Answered(answers));
+    }
+
+    /// `←` or `→` on a question's card: show the question before or after,
+    /// with the answer it was given. The card only offers a step that leads
+    /// somewhere, so the bounds are a formality.
+    pub(crate) fn step_question(&mut self, forward: bool) {
+        let Some(Pending::Question {
+            envelope,
+            answers,
+            current,
+            ..
+        }) = self.pending.take()
+        else {
+            return;
+        };
+        let target = if forward {
+            (current + 1).min(envelope.questions.len() - 1)
+        } else {
+            current.saturating_sub(1)
+        };
+        self.show_question(envelope, answers, target);
+    }
+
+    fn show_question(
+        &mut self,
+        envelope: QuestionEnvelope,
+        answers: Vec<Option<QuestionAnswer>>,
+        index: usize,
+    ) {
+        let form = question_form(&envelope, index, &answers);
+        self.pending = Some(Pending::Question {
+            envelope,
+            answers,
+            current: index,
+            form,
+        });
     }
 
     /// A permission question is up: the running call's wait starts counting.
@@ -595,8 +667,10 @@ impl AgentPanel {
                 }
                 self.abort();
             }
-            // Only a question's card lets several rows be picked.
-            (_, ChoiceAction::Submitted { .. }) => {}
+            (Some(Pending::Question { .. }), ChoiceAction::Back) => self.step_question(false),
+            (Some(Pending::Question { .. }), ChoiceAction::Forward) => self.step_question(true),
+            // Only a question's card lets several rows be picked, or steps.
+            (_, ChoiceAction::Submitted { .. } | ChoiceAction::Back | ChoiceAction::Forward) => {}
             (Some(Pending::Command { .. }), ChoiceAction::Chosen(index)) => {
                 let Some(Pending::Command { script, args, .. }) = self.pending.take() else {
                     return true;
