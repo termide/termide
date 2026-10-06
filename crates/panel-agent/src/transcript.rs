@@ -1039,10 +1039,23 @@ fn shell_command(call: &ToolCall) -> Option<String> {
     })
 }
 
-/// A shell call's type glyph and its localized action, in the accent: `$
-/// Running `.
-fn shell_prefix(colors: &ThemeColors) -> Vec<Span<'static>> {
-    let accent = Style::default().fg(colors.info);
+/// The color of a tool call's type glyph and action: the accent while it
+/// runs, then success or error by how it ended. Only the prefix carries it;
+/// the subject keeps its own style.
+fn tool_state_color(running: bool, ok: bool, colors: &ThemeColors) -> ratatui::style::Color {
+    if running {
+        colors.info
+    } else if ok {
+        colors.success
+    } else {
+        colors.error
+    }
+}
+
+/// A shell call's type glyph and its localized action, in the call's state
+/// color: `$ Running `.
+fn shell_prefix(state: ratatui::style::Color) -> Vec<Span<'static>> {
+    let accent = Style::default().fg(state);
     vec![
         Span::styled("$ ", accent),
         Span::styled(format!("{} ", termide_i18n::t().agent_tool_bash()), accent),
@@ -1056,10 +1069,11 @@ fn command_lines(
     command: &str,
     marker: Option<Span<'static>>,
     width: u16,
+    state: ratatui::style::Color,
     colors: &ThemeColors,
 ) -> Vec<Line<'static>> {
     let dim = Style::default().fg(colors.disabled);
-    let mut prefix = shell_prefix(colors);
+    let mut prefix = shell_prefix(state);
     prefix.extend(marker);
     let indent: usize = prefix.iter().map(|s| width_of(&s.content)).sum();
     let avail = (width as usize).saturating_sub(indent);
@@ -1082,22 +1096,6 @@ fn command_lines(
         push_rows(line, &mut lines);
     }
     lines
-}
-
-/// A failed call's headline: every span but the fold marker in the error
-/// color, which stands in for the `✗` a single row does not carry.
-fn paint_failed(spans: Vec<Span<'static>>, colors: &ThemeColors) -> Vec<Span<'static>> {
-    spans
-        .into_iter()
-        .map(|span| {
-            if matches!(span.content.as_ref(), "▸ " | "▾ ") {
-                span
-            } else {
-                let style = span.style.fg(colors.error);
-                span.style(style)
-            }
-        })
-        .collect()
 }
 
 /// `spans` cut to at most `max` display columns, the last kept one ending in
@@ -1334,6 +1332,7 @@ fn tool_headline(
     call: &ToolCall,
     marker: Option<Span<'static>>,
     width: u16,
+    state: ratatui::style::Color,
     colors: &ThemeColors,
 ) -> Vec<Span<'static>> {
     let t = termide_i18n::t();
@@ -1350,8 +1349,8 @@ fn tool_headline(
     // fetched, `?` for a search, `/` for a skill as it is typed by hand, `&`
     // for a subagent, as a shell backgrounds a job, `*` for an MCP tool, `¿`
     // for a question to the user — then its localized action in the same
-    // accent and its subject.
-    let accent = Style::default().fg(colors.info);
+    // state color and its subject.
+    let accent = Style::default().fg(state);
     let styled_action = |glyph: &str, verb: &str, subject: String, style: Style| {
         let mut spans = vec![
             Span::styled(format!("{glyph} "), accent),
@@ -1445,9 +1444,7 @@ fn tool_headline(
             let mut spans = vec![
                 Span::styled(
                     call.name.clone(),
-                    Style::default()
-                        .fg(colors.info)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(state).add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(" "),
             ];
@@ -1834,11 +1831,12 @@ fn render_body(
             let all: Vec<&str> = body.trim().lines().collect();
             let marker = foldable.then(|| Span::styled(if collapsed { "▸ " } else { "▾ " }, dim));
             // The meta of a finished call is how long it took (`🕒`, when
-            // known), never a wall-clock time. A single-row block carries the `🕒` alone and shows a failure by
-            // painting its headline; a taller one ends with a meta row that
-            // adds the status glyph.
+            // known), never a wall-clock time. A single-row block carries the
+            // `🕒` alone, its prefix's color telling how it ended; a taller one
+            // ends with a meta row that adds the status glyph.
             let finished = !at.is_empty();
             let ok = result.as_ref().is_none_or(|r| !r.is_error);
+            let state = tool_state_color(running, ok, colors);
             // A wait on a permission answer comes first, as the pause it was
             // (`‖`, marked while the question is up), then the call's own
             // duration.
@@ -1861,7 +1859,6 @@ fn render_body(
                 clock.push(Span::styled(format!("🕒 {}", fmt_dur(*ms)), dim));
             }
             let one_row = |head: Vec<Span<'static>>, clip: bool| {
-                let head = if ok { head } else { paint_failed(head, colors) };
                 row_with_meta(head, clock.clone(), clip, width)
             };
             if collapsed {
@@ -1871,21 +1868,22 @@ fn render_body(
                 // permission answer ticks.
                 let head = match shell_command(call) {
                     Some(command) => {
-                        let mut head = shell_prefix(colors);
+                        let mut head = shell_prefix(state);
                         head.extend(marker);
                         let first = command.lines().next().unwrap_or("").to_string();
                         head.push(Span::styled(first, dim));
                         head
                     }
-                    None => tool_headline(call, marker, width, colors),
+                    None => tool_headline(call, marker, width, state, colors),
                 };
-                let head = if ok { head } else { paint_failed(head, colors) };
                 let meta = if finished { Vec::new() } else { clock };
                 return row_with_meta(head, meta, true, width);
             }
             let mut lines = match shell_command(call) {
-                Some(command) => command_lines(&command, marker, width, colors),
-                None => vec![Line::from(tool_headline(call, marker, width, colors))],
+                Some(command) => command_lines(&command, marker, width, state, colors),
+                None => vec![Line::from(tool_headline(
+                    call, marker, width, state, colors,
+                ))],
             };
             // An edit's result is a unified diff, painted like the git diff
             // panel paints one.
@@ -2120,7 +2118,7 @@ mod tests {
     fn skill_task_and_mcp_calls_open_with_a_glyph_and_an_action() {
         let colors = ThemeColors::default();
         let headline = |name: &str, args: Value| -> String {
-            tool_headline(&call(name, args), None, 80, &colors)
+            tool_headline(&call(name, args), None, 80, colors.info, &colors)
                 .iter()
                 .map(|span| span.content.as_ref())
                 .collect()
@@ -2769,6 +2767,43 @@ mod tests {
     }
 
     #[test]
+    fn a_call_prefix_is_accent_while_running_then_success() {
+        let colors = ThemeColors::default();
+        let mut transcript = Transcript::default();
+        transcript.push(Item::Tool {
+            call: call("bash", json!({ "command": "true" })),
+            result: None,
+            live: None,
+            at: String::new(),
+            duration_ms: None,
+            waited_ms: None,
+            waiting: false,
+        });
+        let fg_of = |lines: &[Line<'static>], content: &str| {
+            lines[0]
+                .spans
+                .iter()
+                .find(|s| s.content == content)
+                .and_then(|s| s.style.fg)
+        };
+        let lines = transcript.lines(40, &colors, false).to_vec();
+        assert_eq!(fg_of(&lines, "$ "), Some(colors.info));
+        let mut transcript = Transcript::default();
+        transcript.push(Item::Tool {
+            call: call("bash", json!({ "command": "true" })),
+            result: Some(ToolResultMessage::text(&call("bash", json!({})), "")),
+            live: None,
+            at: "12:00:00".into(),
+            duration_ms: Some(500),
+            waited_ms: None,
+            waiting: false,
+        });
+        let lines = transcript.lines(40, &colors, false).to_vec();
+        assert_eq!(fg_of(&lines, "$ "), Some(colors.success));
+        assert_ne!(fg_of(&lines, "true"), Some(colors.success));
+    }
+
+    #[test]
     fn a_failed_one_row_call_is_painted_instead_of_marked() {
         let colors = ThemeColors::default();
         let mut transcript = Transcript::default();
@@ -2791,12 +2826,18 @@ mod tests {
             text.starts_with("$ Running ▸ exit 1") && !text.contains('✗'),
             "{text}"
         );
-        let command = lines[0]
-            .spans
-            .iter()
-            .find(|s| s.content == "exit 1")
-            .unwrap();
-        assert_eq!(command.style.fg, Some(colors.error));
+        // Only the prefix takes the error color; the command stays dim.
+        let fg_of = |content: &str| {
+            lines[0]
+                .spans
+                .iter()
+                .find(|s| s.content == content)
+                .unwrap()
+                .style
+                .fg
+        };
+        assert_eq!(fg_of("$ "), Some(colors.error));
+        assert_eq!(fg_of("exit 1"), Some(colors.disabled));
         // Unfolded, the output is there and the meta row keeps the `✗`.
         assert!(transcript.toggle_expanded(0));
         let lines = text_of(transcript.lines(40, &colors, false));
@@ -3229,7 +3270,7 @@ mod tests {
     fn web_tools_head_with_their_glyph_and_subject() {
         let colors = ThemeColors::default();
         let text = |call: &ToolCall| -> String {
-            tool_headline(call, None, 80, &colors)
+            tool_headline(call, None, 80, colors.info, &colors)
                 .iter()
                 .map(|span| span.content.as_ref())
                 .collect()
@@ -3244,6 +3285,7 @@ mod tests {
             &call("fetch", json!({ "url": "https://docs.rs" })),
             None,
             80,
+            colors.info,
             &colors,
         );
         let url = spans.last().unwrap();

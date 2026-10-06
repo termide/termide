@@ -768,7 +768,12 @@ fn a_selected_diff_keeps_its_colors() {
     // the plain selection.
     assert_eq!(buf[(4, row_of("+new"))].bg, colors.success);
     assert_eq!(buf[(4, row_of("-old"))].bg, colors.error);
-    assert_eq!(buf[(4, row_of("a.rs"))].bg, colors.fg);
+    // The headline's path, past its success-colored prefix.
+    let y = row_of("a.rs");
+    let x = (0..width)
+        .find(|&x| buf[(x, y)].symbol() == "a" && buf[(x + 1, y)].symbol() == ".")
+        .unwrap();
+    assert_eq!(buf[(x, y)].bg, colors.fg);
 }
 
 fn render_buf(panel: &mut AgentPanel, width: u16, height: u16) -> Buffer {

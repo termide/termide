@@ -347,9 +347,11 @@ folded to a preview that keeps the first line and the last few, with a
 worth hiding, so it is shown in full with no fold marker; so is any finished
 block that takes a single row unfolded. A finished tool call
 folds to a single line: its headline (a shell call's first command line)
-alone; how long it took (`🕒`) shows once it is unfolded. A single row carries no `✓`; a
-failed call shows its headline in the error colour instead, and its unfolded
-form ends with the `✗`. Durations grow from seconds to minutes, hours and
+alone; how long it took (`🕒`) shows once it is unfolded. A tool call's mark
+and action are in the accent while it runs, then turn the success colour once
+it succeeds or the error colour once it fails; its subject keeps its own
+colour. A single row carries no `✓`, the colour of its mark telling how it
+ended; the unfolded form of a failed call ends with the `✗`. Durations grow from seconds to minutes, hours and
 days (`2s`, `1m13s`, `2h5m`, `3d4h`). Finished reasoning folds the same
 way, to its first line alone; unfolded, it shows the `⏫`/`✍️` lines. A block still in progress — a
 streaming reasoning, a running tool call with its live output — is always shown
