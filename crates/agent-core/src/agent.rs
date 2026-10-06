@@ -174,20 +174,55 @@ pub fn execute_tool(
     cancel: &CancelToken,
     on_update: &mut dyn FnMut(ToolUpdate),
 ) -> ToolResultMessage {
-    if cancel.is_cancelled() {
-        return ToolResultMessage::error(call, "The run was cancelled before this tool ran.");
+    match judge_tool_call(tools, call, hooks, ctx, cancel) {
+        Judgment::Run(judged) => run_judged_call(tools, judged, ctx, cancel, on_update),
+        Judgment::Done(result) => result,
     }
-    let Some(tool) = tools.get(&call.name) else {
+}
+
+/// A call the hooks let run: with the arguments they settled on, and who
+/// decided.
+#[derive(Debug)]
+pub struct JudgedCall {
+    pub call: ToolCall,
+    pub permission: Option<Box<PermissionNote>>,
+}
+
+/// What the hooks made of a call: run it, or its result is already known.
+#[derive(Debug)]
+pub enum Judgment {
+    Run(JudgedCall),
+    /// The result of a call that does not run: cancelled, unknown or blocked.
+    Done(ToolResultMessage),
+}
+
+/// The first half of [`execute_tool`]: the hooks judge the call. Apart from
+/// the run so that a host serving several calls at once holds its hooks
+/// only while they judge, not while a tool runs.
+pub fn judge_tool_call(
+    tools: &ToolRegistry,
+    call: &ToolCall,
+    hooks: &mut dyn Hooks,
+    ctx: &ToolContext,
+    cancel: &CancelToken,
+) -> Judgment {
+    if cancel.is_cancelled() {
+        return Judgment::Done(ToolResultMessage::error(
+            call,
+            "The run was cancelled before this tool ran.",
+        ));
+    }
+    if tools.get(&call.name).is_none() {
         log::warn!("model requested unknown tool `{}`", call.name);
-        return ToolResultMessage::error(
+        return Judgment::Done(ToolResultMessage::error(
             call,
             format!(
                 "Unknown tool `{}`. Available tools: {}.",
                 call.name,
                 tools.names().join(", ")
             ),
-        );
-    };
+        ));
+    }
     let decision = hooks.before_tool_call(call, ctx);
     let permission = hooks.take_permission().map(Box::new);
     let effective = match decision {
@@ -202,11 +237,28 @@ pub fn execute_tool(
         ToolDecision::Block { reason } => {
             let mut result = ToolResultMessage::error(call, format!("Tool call blocked: {reason}"));
             result.permission = permission;
-            return result;
+            return Judgment::Done(result);
         }
     };
-    let mut result = tool.execute(&effective, ctx, on_update, cancel);
-    result.permission = permission;
+    Judgment::Run(JudgedCall {
+        call: effective,
+        permission,
+    })
+}
+
+/// The second half of [`execute_tool`]: run a call the hooks let through.
+pub fn run_judged_call(
+    tools: &ToolRegistry,
+    judged: JudgedCall,
+    ctx: &ToolContext,
+    cancel: &CancelToken,
+    on_update: &mut dyn FnMut(ToolUpdate),
+) -> ToolResultMessage {
+    let Some(tool) = tools.get(&judged.call.name) else {
+        return ToolResultMessage::error(&judged.call, "The tool is gone.");
+    };
+    let mut result = tool.execute(&judged.call, ctx, on_update, cancel);
+    result.permission = judged.permission;
     result
 }
 

@@ -27,7 +27,10 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use serde_json::{json, Value};
-use termide_agent_core::{execute_tool, CancelToken, Hooks, ToolCall, ToolContext, ToolRegistry};
+use termide_agent_core::{
+    judge_tool_call, run_judged_call, CancelToken, Hooks, Judgment, ToolCall, ToolContext,
+    ToolRegistry,
+};
 
 use crate::client::PROTOCOL_VERSION;
 
@@ -44,8 +47,9 @@ const KEEPALIVE: Duration = Duration::from_secs(10);
 
 struct Shared {
     tools: ToolRegistry,
-    /// One call at a time goes through the hooks: they may block on a
-    /// permission card, and the panel answers one question at a time.
+    /// One call at a time is judged by the hooks: they may block on a
+    /// permission card, and the panel answers one question at a time. The
+    /// tools themselves run outside, so a long call holds up no other.
     hooks: Mutex<Box<dyn Hooks + Send>>,
     cwd: PathBuf,
     token: String,
@@ -406,21 +410,17 @@ fn call_tool(shared: &Shared, id: &Value, params: &Value, cancel: CancelToken) -
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .insert(key.clone(), cancel.clone());
-    let result = {
-        let mut hooks = shared.hooks.lock().unwrap_or_else(PoisonError::into_inner);
-        let result = execute_tool(
-            &shared.tools,
-            &call,
-            hooks.as_mut(),
-            &ToolContext {
-                withdrawn: Some(cancel.clone()),
-                ..ToolContext::new(shared.cwd.clone())
-            },
-            &cancel,
-            &mut |_| {},
-        );
-        hooks.after_tool_call(&call, result)
+    let ctx = ToolContext {
+        withdrawn: Some(cancel.clone()),
+        ..ToolContext::new(shared.cwd.clone())
     };
+    let hooks = || shared.hooks.lock().unwrap_or_else(PoisonError::into_inner);
+    let judged = judge_tool_call(&shared.tools, &call, hooks().as_mut(), &ctx, &cancel);
+    let result = match judged {
+        Judgment::Run(judged) => run_judged_call(&shared.tools, judged, &ctx, &cancel, &mut |_| {}),
+        Judgment::Done(result) => result,
+    };
+    let result = hooks().after_tool_call(&call, result);
     shared
         .running
         .lock()
@@ -661,6 +661,43 @@ mod tests {
             assert!(std::time::Instant::now() < deadline, "the call ran on");
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    /// A long call holds up no other: the hooks judge one call at a time,
+    /// but the tools run side by side.
+    #[test]
+    fn a_long_call_holds_up_no_other() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut tools = ToolRegistry::new();
+        tools.insert(Arc::new(Echo));
+        tools.insert(Arc::new(UntilCancelled(Arc::clone(&cancelled))));
+        let server = McpServer::start_with(
+            tools,
+            Box::new(Guard),
+            PathBuf::from("/tmp"),
+            Duration::from_millis(20),
+        )
+        .unwrap();
+        let mut long = post_streamed(
+            &server,
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                     "params": { "name": "wait", "arguments": {} } }),
+        );
+        let mut head = [0u8; 15];
+        long.read_exact(&mut head).unwrap();
+        let (_, body) = post(
+            &server,
+            server.token(),
+            &json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                     "params": { "name": "echo", "arguments": { "text": "meanwhile" } } }),
+        );
+        let reply: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(reply["result"]["content"][0]["text"], "meanwhile");
+        assert!(
+            !cancelled.load(Ordering::Acquire),
+            "the long call still runs"
+        );
+        drop(long);
     }
 
     #[test]

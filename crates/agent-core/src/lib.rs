@@ -48,8 +48,8 @@ pub mod tool_text;
 
 pub use acp::{AcpConfig, AcpFlavor};
 pub use agent::{
-    execute_tool, Agent, AgentConfig, AgentEvent, ChainedHooks, Hooks, NoHooks, QueueHandle,
-    QueueMode, ToolDecision,
+    execute_tool, judge_tool_call, run_judged_call, Agent, AgentConfig, AgentEvent, ChainedHooks,
+    Hooks, JudgedCall, Judgment, NoHooks, QueueHandle, QueueMode, ToolDecision,
 };
 pub use ask::{
     question_channel, Question, QuestionAnswer, QuestionEnvelope, QuestionOption, QuestionReply,

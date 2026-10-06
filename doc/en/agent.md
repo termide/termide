@@ -159,10 +159,12 @@ whichever connection it is on:
   Its built-in tools and its own settings — their rules, hooks, `CLAUDE.md`
   and MCP servers — are left out. Every call runs in termide, through the same
   checks as the built-in loop's: the permission mode, the rules, the session
-  answers, plan mode and the `/undo` checkpoints. A call may run as long as it
-  needs — a subagent, a long build, a card you have not got to — without
-  Claude Code giving up on it; if Claude Code does give a call up, the call
-  stops and its permission card comes down, so the calls after it go on.
+  answers, plan mode and the `/undo` checkpoints. Calls Claude Code makes
+  together run side by side; only their permission decisions take turns. A
+  call may run as long as it needs — a subagent, a long build, a card you have
+  not got to — without Claude Code giving up on it; if Claude Code does give
+  a call up, the call stops and its permission card comes down, so the calls
+  after it go on.
 - **Codex** keeps its own system prompt and tools; termide puts it in the
   modes that match the panel's (`ask`, `configured` and `auto`: ask for approval,
   `plan`: that plus its plan collaboration mode, `edit`: approve for me,
