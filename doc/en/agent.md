@@ -361,7 +361,7 @@ differences were ignored. `Ctrl+C` and `o` on the block give the result as
 the model got it. Durations grow from seconds to minutes, hours and
 days (`2s`, `1m13s`, `2h5m`, `3d4h`). Finished reasoning folds the same
 way, to its first line alone; unfolded, it shows the `⏫`/`✍️` lines. Its
-`@ Thinking` is in the accent while it streams, and in the plain text colour
+`@ Thinking` is in the accent while it streams, and dim like the reasoning
 once it finishes. A block still in progress — a
 streaming reasoning, a running tool call with its live output — is always shown
 unfolded and folds only once it finishes. Your

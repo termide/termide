@@ -1715,11 +1715,15 @@ fn render_body(
             ..
         } => {
             // Reasoning is its own dim block, marked with `@`: the accent while
-            // it streams, like a running tool, then the plain foreground.
+            // it streams, like a running tool, then dim like the reasoning.
             // Folded, a finished block is its first line alone with the turn's
             // cost at the row's end; unfolded (and always while it streams)
             // the whole text wraps under the marker.
-            let accent = Style::default().fg(if *streaming { colors.info } else { colors.fg });
+            let accent = Style::default().fg(if *streaming {
+                colors.info
+            } else {
+                colors.disabled
+            });
             let reasoning = text.trim();
             if reasoning.is_empty() {
                 return Vec::new();
@@ -2887,7 +2891,7 @@ mod tests {
     }
 
     #[test]
-    fn a_thinking_marker_is_accent_while_streaming_then_plain() {
+    fn a_thinking_marker_is_accent_while_streaming_then_dim() {
         let colors = ThemeColors::default();
         let mut transcript = Transcript::default();
         transcript.stream_thinking("Weighing the options.");
@@ -2901,7 +2905,7 @@ mod tests {
         };
         assert_eq!(at_fg(&mut transcript), Some(colors.info));
         transcript.finish_thinking("12:00:00", None);
-        assert_eq!(at_fg(&mut transcript), Some(colors.fg));
+        assert_eq!(at_fg(&mut transcript), Some(colors.disabled));
     }
 
     #[test]
