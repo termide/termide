@@ -418,7 +418,7 @@ fn collapse_ws(s: &str) -> String {
         if ch.is_ascii_whitespace() {
             in_ws = true;
         } else {
-            if in_ws && !out.is_empty() {
+            if in_ws {
                 out.push(' ');
             }
             in_ws = false;

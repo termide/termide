@@ -784,8 +784,8 @@ impl<'c> Builder<'c> {
         let mut cur_prefix_w = first_w;
         let mut avail = self.width.saturating_sub(first_w).max(1);
 
-        for (text, style, link) in words {
-            let ww = text.width();
+        for word in words {
+            let ww: usize = word.iter().map(|(text, _, _)| text.width()).sum();
             if cur_text_w > 0 && cur_text_w + 1 + ww > avail {
                 out.push(Line::from(std::mem::take(&mut cur)));
                 cur = cont_prefix.clone();
@@ -797,17 +797,20 @@ impl<'c> Builder<'c> {
                 cur.push(Span::raw(" "));
                 cur_text_w += 1;
             }
-            let start = cur_prefix_w + cur_text_w;
-            if let Some(url_id) = link {
-                self.pending_links.push(PendingLink {
-                    line: base + out.len(),
-                    start: start as u16,
-                    end: (start + ww) as u16,
-                    url_id,
-                });
+            for (text, style, link) in word {
+                let start = cur_prefix_w + cur_text_w;
+                let w = text.width();
+                if let Some(url_id) = link {
+                    self.pending_links.push(PendingLink {
+                        line: base + out.len(),
+                        start: start as u16,
+                        end: (start + w) as u16,
+                        url_id,
+                    });
+                }
+                cur.push(Span::styled(text, style));
+                cur_text_w += w;
             }
-            cur.push(Span::styled(text, style));
-            cur_text_w += ww;
         }
         out.push(Line::from(cur));
         self.lines.extend(out);
@@ -845,16 +848,26 @@ impl<'c> Builder<'c> {
     }
 }
 
-/// Split styled runs into whitespace-delimited words, preserving style + link.
-fn split_words(runs: &[Word]) -> Vec<Word> {
+/// Split styled runs into space-delimited words, each the fragments it is
+/// made of with their style and link: runs with no space between them form
+/// one word (`[docs](u).`, `**bold**ly`), so wrapping never inserts one.
+fn split_words(runs: &[Word]) -> Vec<Vec<Word>> {
     let mut words = Vec::new();
+    let mut cur: Vec<Word> = Vec::new();
     for (text, style, link) in runs {
-        for piece in text.split(' ') {
-            if piece.is_empty() {
-                continue;
+        for (i, piece) in text.split(' ').enumerate() {
+            // A space before this piece ends the word; a run that starts
+            // without one carries on the word the previous run left open.
+            if i > 0 && !cur.is_empty() {
+                words.push(std::mem::take(&mut cur));
             }
-            words.push((piece.to_string(), *style, *link));
+            if !piece.is_empty() {
+                cur.push((piece.to_string(), *style, *link));
+            }
         }
+    }
+    if !cur.is_empty() {
+        words.push(cur);
     }
     words
 }
@@ -946,6 +959,50 @@ fn char_width(ch: char) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn text_of(r: &Rendered) -> Vec<String> {
+        r.lines
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn runs_without_a_space_between_stay_one_word() {
+        let colors = ThemeColors::default();
+        let mut b = Builder::new(80, &colors, false);
+        b.text("see ");
+        b.start_link("https://a.b".into());
+        b.text("docs");
+        b.end_link();
+        b.text(". and ");
+        b.start_strong();
+        b.text("bold");
+        b.pop_style();
+        b.text("ly");
+        b.end_paragraph();
+        let r = b.finish();
+        assert_eq!(text_of(&r)[0], "see docs. and boldly");
+        assert_eq!((r.links[0].start, r.links[0].end), (4, 8));
+    }
+
+    #[test]
+    fn a_word_made_of_runs_wraps_whole() {
+        let colors = ThemeColors::default();
+        let mut b = Builder::new(10, &colors, false);
+        b.text("aaaaa ");
+        b.start_link("https://a.b".into());
+        b.text("bbbb");
+        b.end_link();
+        b.text("!");
+        b.end_paragraph();
+        let r = b.finish();
+        assert_eq!(text_of(&r)[..2], ["aaaaa", "bbbb!"]);
+        assert_eq!(
+            (r.links[0].line, r.links[0].start, r.links[0].end),
+            (1, 0, 4)
+        );
+    }
 
     #[test]
     fn columns_take_full_content_when_it_fits() {
