@@ -490,27 +490,123 @@ impl TextArea {
     /// Move cursor up.
     pub fn move_up(&mut self) -> bool {
         self.clear_selection();
-        if self.cursor.row > 0 {
-            self.cursor.row -= 1;
-            let line_len = self.current_line_len();
-            self.cursor.col = self.cursor.col.min(line_len);
-            true
-        } else {
-            false
-        }
+        self.step_vertical(false)
     }
 
     /// Move cursor down.
     pub fn move_down(&mut self) -> bool {
         self.clear_selection();
-        if self.cursor.row + 1 < self.lines.len() {
-            self.cursor.row += 1;
-            let line_len = self.current_line_len();
-            self.cursor.col = self.cursor.col.min(line_len);
-            true
-        } else {
-            false
+        self.step_vertical(true)
+    }
+
+    /// Move the cursor one row up or down, leaving the selection to the
+    /// caller. The row is a visual one when the last render recorded a
+    /// soft-wrap that still matches the text, a logical one otherwise.
+    /// Returns `false` at the first or last row, so a host can give the arrow
+    /// another meaning there (prompt history).
+    fn step_vertical(&mut self, down: bool) -> bool {
+        if self.wrap_matches_text() {
+            return self.step_visual(down);
         }
+        let target = if down {
+            self.cursor.row + 1
+        } else {
+            match self.cursor.row.checked_sub(1) {
+                Some(row) => row,
+                None => return false,
+            }
+        };
+        if target >= self.lines.len() {
+            return false;
+        }
+        self.cursor.row = target;
+        self.cursor.col = self.cursor.col.min(self.current_line_len());
+        true
+    }
+
+    /// Whether the recorded soft-wrap describes the current text: every
+    /// logical row, in order, split into contiguous ranges covering it whole.
+    /// An edit since the last render leaves it stale, and stepping by it would
+    /// land on the wrong character.
+    fn wrap_matches_text(&self) -> bool {
+        if self.wrap_rows.is_empty() {
+            return false;
+        }
+        let mut rows = self.wrap_rows.iter().peekable();
+        for (r, line) in self.lines.iter().enumerate() {
+            let len = line.chars().count();
+            let mut next = 0;
+            let mut seen = false;
+            while let Some(&&(row, start, end)) = rows.peek() {
+                if row != r {
+                    break;
+                }
+                if start != next || end < start {
+                    return false;
+                }
+                next = end;
+                seen = true;
+                rows.next();
+            }
+            if !seen || next != len {
+                return false;
+            }
+        }
+        rows.next().is_none()
+    }
+
+    /// [`TextArea::step_vertical`] over the recorded soft-wrap: keep the
+    /// cursor's display column on the neighbouring visual row.
+    fn step_visual(&mut self, down: bool) -> bool {
+        let rows = &self.wrap_rows;
+        // The cursor sits on the last visual row of its line that starts at or
+        // before it: at a wrap boundary that is the row below, as rendered.
+        let Some(current) = rows
+            .iter()
+            .rposition(|&(row, start, _)| row == self.cursor.row && start <= self.cursor.col)
+        else {
+            return false;
+        };
+        let target = if down {
+            current + 1
+        } else {
+            match current.checked_sub(1) {
+                Some(i) => i,
+                None => return false,
+            }
+        };
+        let Some(&(row, start, end)) = rows.get(target) else {
+            return false;
+        };
+        let (_, cur_start, _) = rows[current];
+        let line = &self.lines[self.cursor.row];
+        let column = crate::grapheme_utils::str_display_width(
+            &line
+                .chars()
+                .skip(cur_start)
+                .take(self.cursor.col - cur_start)
+                .collect::<String>(),
+        );
+        // Every row but a line's last ends where the next begins, so its
+        // `end` itself is drawn on the row below: stop one short of it.
+        let last_of_line = rows.get(target + 1).is_none_or(|next| next.0 != row);
+        let limit = if last_of_line || end == start {
+            end
+        } else {
+            end - 1
+        };
+        let mut col = start;
+        let mut width = 0usize;
+        for c in self.lines[row].chars().skip(start).take(limit - start) {
+            let cw = crate::grapheme_utils::str_display_width(&c.to_string()).max(1);
+            if width + cw > column {
+                break;
+            }
+            width += cw;
+            col += 1;
+        }
+        self.cursor = CursorPos::new(row, col);
+        true
     }
 
     /// Move to start of line (Home).
@@ -636,27 +732,13 @@ impl TextArea {
     /// Move up with selection.
     pub fn move_up_with_selection(&mut self) -> bool {
         self.start_selection();
-        if self.cursor.row > 0 {
-            self.cursor.row -= 1;
-            let line_len = self.current_line_len();
-            self.cursor.col = self.cursor.col.min(line_len);
-            true
-        } else {
-            false
-        }
+        self.step_vertical(false)
     }
 
     /// Move down with selection.
     pub fn move_down_with_selection(&mut self) -> bool {
         self.start_selection();
-        if self.cursor.row + 1 < self.lines.len() {
-            self.cursor.row += 1;
-            let line_len = self.current_line_len();
-            self.cursor.col = self.cursor.col.min(line_len);
-            true
-        } else {
-            false
-        }
+        self.step_vertical(true)
     }
 
     /// Move to home with selection.
@@ -917,6 +999,36 @@ mod tests {
         // A plain move drops the selection, as after a keyboard edit.
         ta.move_right();
         assert!(!ta.has_selection());
+    }
+
+    #[test]
+    fn vertical_moves_follow_the_recorded_wrap_while_it_matches() {
+        // "abcdef" drawn as "abc" / "def", then "wxyz" on its own line.
+        let mut ta = TextArea::with_text("abcdef\nwxyz");
+        ta.set_wrap(vec![(0, 0, 3), (0, 3, 6), (1, 0, 4)], 0);
+        ta.set_cursor(1, 1);
+        assert!(ta.move_up());
+        assert_eq!(ta.cursor(), CursorPos::new(0, 4));
+        assert!(ta.move_up());
+        assert_eq!(ta.cursor(), CursorPos::new(0, 1));
+        assert!(!ta.move_up(), "the first visual row is the edge");
+        assert!(ta.move_down());
+        assert!(ta.move_down());
+        assert_eq!(ta.cursor(), CursorPos::new(1, 1));
+        assert!(!ta.move_down(), "the last visual row is the edge");
+        // Past the end of a row that wraps, the column stops short of the
+        // boundary, which is drawn on the row below.
+        ta.set_cursor(1, 4);
+        assert!(ta.move_up());
+        assert_eq!(ta.cursor(), CursorPos::new(0, 6));
+        assert!(ta.move_up());
+        assert_eq!(ta.cursor(), CursorPos::new(0, 2));
+        // An edit since the render makes the wrap stale: logical rows again.
+        ta.insert('x');
+        ta.set_cursor(1, 0);
+        assert!(ta.move_up());
+        assert_eq!(ta.cursor(), CursorPos::new(0, 0));
+        assert!(!ta.move_up());
     }
 
     #[test]

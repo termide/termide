@@ -265,8 +265,6 @@ impl AgentPanel {
         history
     }
 
-    /// Show an earlier (`older`) or later request in the input, the way a
-    /// shell recalls its history; past the newest, the draft comes back.
     /// Take the messages still waiting in the queue back into the input, to
     /// edit them before they go: ahead of what is typed, as they were sent
     /// first. Returns whether there were any, so `↑` walks history only once
@@ -291,6 +289,14 @@ impl AgentPanel {
         true
     }
 
+    /// Show an earlier (`older`) or later request in the input, the way a
+    /// shell recalls its history; past the newest, the draft comes back.
+    /// Returns `false` with nothing further to show.
+    ///
+    /// The cursor lands on the edge the arrow came in through, so the next
+    /// press of the same arrow moves on through history at once instead of
+    /// first walking every row of a long recalled request: at the start going
+    /// back, at the end going forward.
     pub(crate) fn recall(&mut self, older: bool) -> bool {
         let history = self.history();
         let next = match (self.history_pos, older) {
@@ -298,8 +304,8 @@ impl AgentPanel {
                 self.draft = self.input_text();
                 Some(history.len() - 1)
             }
-            (None, _) => return false,
-            (Some(pos), true) => Some(pos.saturating_sub(1)),
+            (None, _) | (Some(0), true) => return false,
+            (Some(pos), true) => Some(pos - 1),
             (Some(pos), false) if pos + 1 < history.len() => Some(pos + 1),
             (Some(_), false) => None,
         };
@@ -309,15 +315,16 @@ impl AgentPanel {
             None => std::mem::take(&mut self.draft),
         };
         self.set_input(&text);
+        if older {
+            self.input_area_mut().move_to_start();
+        }
         true
     }
 
     /// Replace the input with `text`, cursor at its end.
     pub(crate) fn set_input(&mut self, text: &str) {
         self.input.set_field_text(0, text);
-        let area = self.input_area_mut();
-        while area.move_down() {}
-        area.move_end();
+        self.input_area_mut().move_to_end();
     }
 
     /// Recompute the `/command` popup after the input changed: it shows

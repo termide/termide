@@ -6159,6 +6159,60 @@ fn arrow_keys_recall_earlier_requests_and_bring_the_draft_back() {
 }
 
 #[test]
+fn up_walks_past_multi_line_requests_without_stepping_through_their_rows() {
+    let mut panel = panel(vec![reply("a"), reply("b")]);
+    for request in [["one", "two"], ["three", "four"]] {
+        type_text(&mut panel, request[0]);
+        panel.handle_key(chord(KeyCode::Enter, KeyModifiers::SHIFT));
+        type_text(&mut panel, request[1]);
+        panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+        settle(&mut panel);
+    }
+    // Going back lands at the start, so the next ↑ is already history.
+    panel.handle_key(chord(KeyCode::Up, KeyModifiers::NONE));
+    assert_eq!(panel.input_text(), "three\nfour");
+    {
+        let c = panel.input_area().cursor();
+        assert_eq!((c.row, c.col), (0, 0));
+    }
+    panel.handle_key(chord(KeyCode::Up, KeyModifiers::NONE));
+    assert_eq!(panel.input_text(), "one\ntwo");
+    // ↓ first walks the rows, then moves on, landing at the end.
+    panel.handle_key(chord(KeyCode::Down, KeyModifiers::NONE));
+    assert_eq!(panel.input_text(), "one\ntwo");
+    panel.handle_key(chord(KeyCode::Down, KeyModifiers::NONE));
+    assert_eq!(panel.input_text(), "three\nfour");
+    {
+        let c = panel.input_area().cursor();
+        assert_eq!((c.row, c.col), (1, 4));
+    }
+}
+
+#[test]
+fn up_moves_through_a_soft_wrapped_line_before_recalling() {
+    let mut panel = panel(vec![reply("a")]);
+    type_text(&mut panel, "earlier");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+    // One logical line, several rows once wrapped to a narrow panel.
+    let long = "word ".repeat(30);
+    type_text(&mut panel, &long);
+    render_text(&mut panel, 40, 20);
+    let end = panel.input_area().cursor();
+    panel.handle_key(chord(KeyCode::Up, KeyModifiers::NONE));
+    assert_eq!(panel.input_text(), long, "↑ stays in the wrapped draft");
+    let up = panel.input_area().cursor();
+    assert_eq!(up.row, 0);
+    assert!(up.col < end.col, "{up:?} vs {end:?}");
+    // Up to the first visual row, then history.
+    for _ in 0..10 {
+        render_text(&mut panel, 40, 20);
+        panel.handle_key(chord(KeyCode::Up, KeyModifiers::NONE));
+    }
+    assert_eq!(panel.input_text(), "earlier");
+}
+
+#[test]
 fn typing_a_slash_offers_templates_and_tab_or_enter_completes() {
     let mut panel = panel(vec![reply("ok")]);
     type_text(&mut panel, "/re");
