@@ -938,6 +938,17 @@ impl Shared {
         let _ = self
             .events
             .send(AgentEvent::MessageEnd(Message::User(message.clone())));
+        // What this turn took is no longer waiting: the panel's queue strip
+        // drops it now, not when the turn ends.
+        let queued = self
+            .queue
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len();
+        let _ = self.events.send(AgentEvent::QueueUpdate {
+            steering: queued,
+            follow_up: 0,
+        });
         let text = message.plain_text();
         let mut prompt = Vec::new();
         // Kept out of the log, like the plan note: the log holds the
@@ -2795,6 +2806,7 @@ mod tests {
                 "start",
                 "turn",
                 "user:first",
+                "queue",
                 "msg-start",
                 "think",
                 "text:Editing ",
@@ -2835,6 +2847,87 @@ mod tests {
         assert!(events.iter().any(|e| matches!(e, AgentEvent::MessageEnd(Message::Assistant(a)) if a.stop_reason == StopReason::Aborted)));
         // An abort drops what was steered.
         assert_eq!(runtime.queue_lens(), (0, 0));
+    }
+
+    /// A message typed while a turn runs leaves the queue strip as soon as
+    /// the next turn takes it, not when that turn ends.
+    #[test]
+    fn a_message_taken_by_the_next_turn_leaves_the_queue_at_once() {
+        let (to_agent_rx, to_agent_tx) = pipe().unwrap();
+        let (from_agent_rx, from_agent_tx) = pipe().unwrap();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let (prompted_tx, prompted_rx) = std::sync::mpsc::channel::<()>();
+        std::thread::spawn(move || {
+            let mut out = from_agent_tx;
+            let mut prompts = 0;
+            for line in BufReader::new(to_agent_rx).lines() {
+                let Ok(line) = line else { break };
+                let message: Value = serde_json::from_str(&line).unwrap();
+                let result = match message["method"].as_str() {
+                    Some("initialize") => json!({ "protocolVersion": 1 }),
+                    Some("session/new") => json!({ "sessionId": "s1" }),
+                    Some("session/prompt") => {
+                        prompts += 1;
+                        if prompts == 1 {
+                            // The first turn runs until the test lets it end.
+                            prompted_tx.send(()).unwrap();
+                            release_rx.recv().unwrap();
+                        }
+                        json!({ "stopReason": "end_turn" })
+                    }
+                    Some(_) => json!({}),
+                    None => continue,
+                };
+                let reply = json!({ "jsonrpc": "2.0", "id": message["id"], "result": result });
+                writeln!(out, "{reply}").unwrap();
+            }
+        });
+        let cancel = CancelToken::new();
+        let (prompter, permissions) = permission_channel(cancel.clone());
+        let runtime = AcpRuntime::from_streams(
+            "fake",
+            from_agent_rx,
+            to_agent_tx,
+            BackendSetup {
+                cwd: PathBuf::from("/tmp"),
+                prompter,
+                cancel,
+                rules: PermissionRules::default(),
+                persist: None,
+                mode: ModeHandle::new(Mode::default()),
+                system_prompt: String::new(),
+                plan: PlanPrompt::default(),
+                host_tools: None,
+                resume: None,
+                history: Vec::new(),
+            },
+            1,
+            AcpFlavor::Generic,
+        );
+        runtime.prompt(UserMessage::text("first")).unwrap();
+        prompted_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        runtime.steer(UserMessage::text("later"));
+        release_tx.send(()).unwrap();
+        let events = drain_until_end(&runtime, &permissions, PermissionAnswer::Deny);
+
+        let taken = events
+            .iter()
+            .position(|e| matches!(e, AgentEvent::MessageEnd(Message::User(u)) if u.plain_text() == "later"))
+            .expect("the queued message runs as the next turn");
+        let after: Vec<&AgentEvent> = events[taken..]
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::QueueUpdate { .. } | AgentEvent::TurnEnd))
+            .collect();
+        assert!(
+            matches!(
+                after.first(),
+                Some(AgentEvent::QueueUpdate {
+                    steering: 0,
+                    follow_up: 0
+                })
+            ),
+            "the queue empties before the turn ends: {after:?}"
+        );
     }
 
     #[test]
