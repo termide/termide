@@ -586,16 +586,24 @@ impl<'c> Builder<'c> {
             cache.set_document(&code);
         }
         let bar = Style::default().fg(self.colors.disabled);
+        // Code keeps every character: a line wider than the block wraps onto
+        // rows of its own, each behind the bar, rather than being clipped.
+        let budget = self.width.saturating_sub(2).max(1);
         for (i, line) in code.lines().enumerate() {
-            let mut spans: Vec<Span<'static>> = vec![Span::styled("┊ ", bar)];
-            if cache.has_syntax() {
-                for (text, style) in cache.get_line_segments(i, line) {
-                    spans.push(Span::styled(text.to_string(), *style));
-                }
+            let segments: Vec<Span<'static>> = if cache.has_syntax() {
+                cache
+                    .get_line_segments(i, line)
+                    .iter()
+                    .map(|(text, style)| Span::styled(text.to_string(), *style))
+                    .collect()
             } else {
-                spans.push(Span::styled(line.to_string(), self.base_style()));
+                vec![Span::styled(line.to_string(), self.base_style())]
+            };
+            for row in wrap_code_row(segments, budget) {
+                let mut spans = vec![Span::styled("┊ ", bar)];
+                spans.extend(row);
+                self.lines.push(Line::from(spans));
             }
-            self.lines.push(Line::from(spans));
         }
     }
 
@@ -985,6 +993,37 @@ fn distribute(base: &[usize], weights: &[usize], spare: usize) -> Vec<usize> {
     out
 }
 
+/// Cut a code line's styled segments into rows of at most `width` columns,
+/// breaking between characters; an empty line stays one empty row.
+fn wrap_code_row(segments: Vec<Span<'static>>, width: usize) -> Vec<Vec<Span<'static>>> {
+    let mut rows = vec![Vec::new()];
+    let mut used = 0;
+    for segment in segments {
+        let style = segment.style;
+        let mut buf = String::new();
+        for ch in segment.content.chars() {
+            let w = char_width(ch);
+            if used > 0 && used + w > width {
+                if !buf.is_empty() {
+                    rows.last_mut()
+                        .expect("rows starts non-empty")
+                        .push(Span::styled(std::mem::take(&mut buf), style));
+                }
+                rows.push(Vec::new());
+                used = 0;
+            }
+            buf.push(ch);
+            used += w;
+        }
+        if !buf.is_empty() {
+            rows.last_mut()
+                .expect("rows starts non-empty")
+                .push(Span::styled(buf, style));
+        }
+    }
+    rows
+}
+
 /// Display width of a single character (best-effort).
 fn char_width(ch: char) -> usize {
     ch.to_string().width()
@@ -999,6 +1038,29 @@ mod tests {
             .iter()
             .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
             .collect()
+    }
+
+    /// A command too wide for the block is still all there to read and
+    /// copy: it wraps behind the bar instead of being clipped.
+    #[test]
+    fn a_long_code_line_wraps_behind_the_bar() {
+        let colors = ThemeColors::default();
+        let mut b = Builder::new(12, &colors, false);
+        b.start_code_block("");
+        b.text("git push origin 0.39.0\n\nok\n");
+        b.end_code_block();
+        let rows: Vec<String> = text_of(&b.finish())
+            .into_iter()
+            .filter(|row| !row.is_empty())
+            .collect();
+        assert_eq!(
+            rows,
+            ["┊ git push o", "┊ rigin 0.39", "┊ .0", "┊ ", "┊ ok"],
+            "every row fits the width and the text reads whole"
+        );
+        for row in &rows {
+            assert!(row.width() <= 12, "{row:?} is wider than the block");
+        }
     }
 
     #[test]
