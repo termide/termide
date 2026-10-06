@@ -253,6 +253,17 @@ pub(crate) fn statvfs_bytes(path: &Path) -> Option<(u64, u64)> {
         stat
     };
 
+    statvfs_bytes_of(&stat)
+}
+
+/// Scale the block counts of an already-taken `statvfs` snapshot to bytes.
+///
+/// Split from [`statvfs_bytes`] so the scaling can be tested against a single
+/// snapshot: two `statvfs` calls cannot be compared byte for byte, because
+/// every other writer on the volume moves `f_bavail` between them.
+#[cfg(unix)]
+#[allow(clippy::unnecessary_cast)]
+fn statvfs_bytes_of(stat: &libc::statvfs) -> Option<(u64, u64)> {
     let block_size = {
         let frsize = stat.f_frsize as u64;
         if frsize == 0 {
@@ -451,21 +462,75 @@ mod tests {
         }
     }
 
-    /// `statvfs` block counts are fundamental-block counts. Cross-check against
-    /// a raw `statvfs` call, and assert the figure stays physically plausible:
-    /// on macOS scaling by `f_bsize` (1 MiB) instead of `f_frsize` (4 KiB)
-    /// inflated a 1.8 TB volume to ~464 TB.
+    /// `statvfs` figures stay physically plausible on a live volume.
+    ///
+    /// The block-size scaling itself is pinned exactly by
+    /// [`test_statvfs_bytes_scales_by_frsize`] and
+    /// [`test_statvfs_bytes_falls_back_to_bsize`], which need no volume.
+    /// This one only checks the shape of the answer, because it cannot check
+    /// the numbers: comparing against a second `statvfs` call races with every
+    /// other writer on the volume. Measured on macOS under load, `f_bavail`
+    /// moved up to 3072 blocks (12 MiB) between two back-to-back calls, so no
+    /// tolerance small enough to mean anything would have held.
+    ///
+    /// The plausibility bound still catches the original bug: scaling by
+    /// `f_bsize` (1 MiB) instead of `f_frsize` (4 KiB) inflates a 606 GiB
+    /// volume to 151 TiB, far past the 64 TiB ceiling below.
     #[cfg(unix)]
-    // The casts mirror `statvfs_bytes`, which explains why they stay.
-    #[allow(clippy::unnecessary_cast)]
     #[test]
-    fn test_statvfs_bytes_matches_statvfs_and_is_plausible() {
+    fn test_statvfs_bytes_is_plausible_on_a_live_volume() {
         let path = std::path::Path::new("/");
         let (available, total) = statvfs_bytes(path).expect("statvfs on /");
 
+        assert!(
+            total < 64 * 1024u64.pow(4),
+            "total {total} bytes is beyond any plausible single volume"
+        );
+        assert!(
+            available > 0 && available < total,
+            "available {available} outside 0..{total}"
+        );
+    }
+
+    /// The scaling itself, pinned on a synthetic snapshot so it holds on every
+    /// platform and cannot race a live volume.
+    ///
+    /// The original bug was scaling by `f_bsize` where `f_frsize` was the
+    /// fundamental size. On macOS those differ by 256x, but on a platform
+    /// where they are equal the mistake is invisible — so a test that only
+    /// reads a real volume does not always catch it. Here the two fields are
+    /// deliberately different, on every platform.
+    #[cfg(unix)]
+    #[test]
+    fn test_statvfs_bytes_scales_by_frsize() {
+        let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+        stat.f_bsize = 1024 * 1024; // optimal I/O size, deliberately larger
+        stat.f_frsize = 4096; // fundamental block size
+        stat.f_blocks = 1_000_000;
+        stat.f_bavail = 250_000;
+
+        let (available, total) = statvfs_bytes_of(&stat).expect("scaling");
+        assert_eq!(total, 1_000_000 * 4096);
+        assert_eq!(available, 250_000 * 4096);
+        assert_ne!(
+            total,
+            stat.f_blocks as u64 * stat.f_bsize as u64,
+            "total was scaled by f_bsize, which inflates the volume"
+        );
+    }
+
+    /// A snapshot taken off a real volume scales exactly, with no second call
+    /// to race against: the counts and the bytes come from the same one.
+    #[cfg(unix)]
+    // Mirrors the casts in `statvfs_bytes_of`, which explains why they stay.
+    #[allow(clippy::unnecessary_cast)]
+    #[test]
+    fn test_statvfs_bytes_of_a_live_snapshot_is_exact() {
         let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
         let c_path = std::ffi::CString::new("/").unwrap();
         assert_eq!(unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) }, 0);
+
+        let (available, total) = statvfs_bytes_of(&stat).expect("scaling");
         let block = {
             let frsize = stat.f_frsize as u64;
             if frsize == 0 {
@@ -477,14 +542,23 @@ mod tests {
 
         assert_eq!(total, stat.f_blocks as u64 * block);
         assert_eq!(available, stat.f_bavail as u64 * block);
-        assert!(
-            total < 64 * 1024u64.pow(4),
-            "total {total} bytes is beyond any plausible single volume"
-        );
-        assert!(
-            available > 0 && available < total,
-            "available {available} outside 0..{total}"
-        );
+    }
+
+    /// Some platforms leave `f_frsize` unset; the counts then scale by
+    /// `f_bsize`. When neither is set there is nothing to scale by.
+    #[cfg(unix)]
+    #[test]
+    fn test_statvfs_bytes_falls_back_to_bsize() {
+        let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+        stat.f_bsize = 8192;
+        stat.f_frsize = 0;
+        stat.f_blocks = 100;
+        stat.f_bavail = 50;
+
+        assert_eq!(statvfs_bytes_of(&stat), Some((50 * 8192, 100 * 8192)));
+
+        stat.f_bsize = 0;
+        assert_eq!(statvfs_bytes_of(&stat), None);
     }
 
     #[cfg(unix)]
