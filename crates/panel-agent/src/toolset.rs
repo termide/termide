@@ -44,6 +44,26 @@ impl Hooks for ToolsetGuard {
 }
 
 impl AgentPanel {
+    /// Whether the session has a toolset of termide's: the model calls
+    /// termide's tools, the built-in loop's or those served to an external
+    /// agent in place of its own.
+    pub(crate) fn has_toolset(&self) -> bool {
+        self.runtime.runs_host_tools()
+    }
+
+    /// Whether switching something off still takes it out of the context. An
+    /// external agent got its tools when its session started, so for it
+    /// switching off only ever refuses.
+    fn toolset_fresh(&self) -> bool {
+        !self.external && self.is_fresh()
+    }
+
+    /// The MCP servers' tools reach the built-in loop only: an external agent
+    /// is served the tools its session started with.
+    pub(crate) fn toolset_lists_mcp(&self) -> bool {
+        !self.external
+    }
+
     /// The system prompt as the agent receives it, written next to the
     /// session logs (or to the temp directory without them) so it can be
     /// opened in a viewer.
@@ -146,7 +166,7 @@ impl AgentPanel {
     /// allowed and refused, and what is out of it stays out.
     pub(crate) fn toolset_items(&self) -> Vec<ChecklistItem> {
         let t = termide_i18n::t();
-        let fresh = self.is_fresh();
+        let fresh = self.toolset_fresh();
         let item = |key: String, label: String, group: String| {
             let off = self.toolset_off.contains(&key);
             let in_context = !self.context_off.contains(&key);
@@ -187,7 +207,8 @@ impl AgentPanel {
                 t.agent_toolset_skills().to_string(),
             )
         }));
-        items.extend(self.mcp_arrived.iter().map(|(server, tool)| {
+        let mcp = self.mcp_arrived.iter().filter(|_| self.toolset_lists_mcp());
+        items.extend(mcp.map(|(server, tool)| {
             item(
                 tool.name().to_string(),
                 tool.name().to_string(),
@@ -227,7 +248,7 @@ impl AgentPanel {
     /// the first request that takes it out of the context at once; later it
     /// is refused until a compaction takes it out.
     pub(crate) fn apply_toolset(&mut self, checked: &[String]) {
-        let fresh = self.is_fresh();
+        let fresh = self.toolset_fresh();
         let before = self.toolset_off.clone();
         let mut off = self.toolset_off.clone();
         for item in self.toolset_items() {
@@ -354,9 +375,15 @@ impl AgentPanel {
             .iter()
             .filter(|name| name.as_str() != "skill")
             .count()
-            + self.offered_skills.len()
-            + self.mcp_arrived.len();
-        let off = self.toolset_off.len();
+            + self.offered_skills.len();
+        let lists_mcp = self.toolset_lists_mcp();
+        let all = all + if lists_mcp { self.mcp_arrived.len() } else { 0 };
+        let is_mcp = |key: &String| self.mcp_arrived.iter().any(|(_, tool)| tool.name() == key);
+        let off = self
+            .toolset_off
+            .iter()
+            .filter(|key| lists_mcp || !is_mcp(key))
+            .count();
         (all.saturating_sub(off), all)
     }
 

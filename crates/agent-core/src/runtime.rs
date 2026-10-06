@@ -184,6 +184,13 @@ pub trait Backend: Send {
     /// The session's permission mode is now `mode`. The built-in loop reads
     /// the shared handle; an external agent maps it onto its own modes.
     fn set_mode(&self, _mode: Mode) {}
+    /// Whether the model calls termide's tools: the built-in loop's, or those
+    /// served to an external agent in place of its own. The default — an
+    /// external agent on its own tools — does not, so the session has no
+    /// toolset of termide's to show or switch.
+    fn runs_host_tools(&self) -> bool {
+        false
+    }
     /// Switch the backend's model for the runs that follow, reporting the
     /// agent's own error on failure. The built-in loop changes model through
     /// [`Backend::update`] instead; the default here says it is unsupported.
@@ -201,6 +208,10 @@ impl Backend for AgentRuntime {
 
     /// The loop's hooks read the shared mode handle.
     fn follows_mode(&self) -> bool {
+        true
+    }
+
+    fn runs_host_tools(&self) -> bool {
         true
     }
 

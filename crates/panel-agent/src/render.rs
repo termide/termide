@@ -275,9 +275,9 @@ impl AgentPanel {
 
     /// Rows the banner's fields take, before its list of sessions: the
     /// agent's name as the title, its description (when it has one), a
-    /// blank, cwd, connection, model and tools (for our own agent).
+    /// blank, cwd, connection, model and tools (when they are termide's).
     pub(crate) fn banner_field_rows(&mut self) -> usize {
-        5 + usize::from(!self.agent_description().is_empty()) + usize::from(!self.external)
+        5 + usize::from(!self.agent_description().is_empty()) + usize::from(self.has_toolset())
     }
 
     /// The welcome banner shown while the session is empty: a logo on the left
@@ -372,7 +372,7 @@ impl AgentPanel {
         ]);
         // What the session may use, re-pickable before the first request,
         // when switching it off keeps it out of the context altogether.
-        if !self.external {
+        if self.has_toolset() {
             let (on, all) = self.toolset_counts();
             info.push((
                 field(t.agent_banner_tools(), format!("{on}/{all}"), true),
@@ -819,6 +819,22 @@ impl AgentPanel {
                         self.mode.get().label(),
                         SegmentKind::Active,
                         MODE_ACTION,
+                    ),
+                ]);
+            }
+            if self.has_toolset() {
+                let (on, all) = self.toolset_counts();
+                segments.extend([
+                    sep(),
+                    StatusSegment::clickable(
+                        t.agent_chip_tools(),
+                        SegmentKind::Label,
+                        TOOLSET_ACTION,
+                    ),
+                    StatusSegment::clickable(
+                        format!("{on}/{all}"),
+                        SegmentKind::Active,
+                        TOOLSET_ACTION,
                     ),
                 ]);
             }
