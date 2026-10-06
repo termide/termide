@@ -102,6 +102,10 @@ pub struct ActiveOperation {
     pub batch_current_file_total: u64,
     /// Whether the operation is currently in scanning phase (e.g., counting files before delete).
     pub is_scanning: bool,
+    /// Root of the project current when the operation started. Operations
+    /// outlive a switch of project, and a command runs in the project it
+    /// was started from.
+    pub project: std::path::PathBuf,
 }
 
 impl ActiveOperation {
@@ -113,6 +117,7 @@ impl ActiveOperation {
         dest: String,
         total_files: usize,
         total_bytes: u64,
+        project: std::path::PathBuf,
     ) -> Self {
         Self {
             id,
@@ -131,6 +136,7 @@ impl ActiveOperation {
             batch_bytes_offset: 0,
             batch_current_file_total: 0,
             is_scanning: false,
+            project,
         }
     }
 }

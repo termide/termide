@@ -120,7 +120,15 @@ impl AppState {
         total_files: usize,
         total_bytes: u64,
     ) {
-        let op = ActiveOperation::new(id, op_type, source, dest, total_files, total_bytes);
+        let op = ActiveOperation::new(
+            id,
+            op_type,
+            source,
+            dest,
+            total_files,
+            total_bytes,
+            self.project_root.clone(),
+        );
         self.active_operations.insert(id, op);
         self.operations_panel_dirty = true;
     }

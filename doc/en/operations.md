@@ -10,6 +10,11 @@ bar, source/destination, transferred bytes and elapsed time.
 The panel opens automatically when the first background operation
 starts. It can also be opened from the application menu.
 
+Operations keep running when you switch to another project, and the
+panel goes along with you: it is shown in the project you switch to,
+not left behind in the one you left. A command's card names the
+project it runs in when that is not the current one.
+
 It takes only the rows its cards need and leaves the rest of the column
 to the panels next to it, growing and shrinking as operations start and
 finish; with nothing to show it is a header and a one-line notice. It

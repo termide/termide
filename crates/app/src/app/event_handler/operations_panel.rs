@@ -75,7 +75,7 @@ impl App {
                     .downcast_mut::<termide_panel_operations::OperationsPanel>()
                 {
                     let ops_list = self.state.operations_list();
-                    ops_panel.update_operations(&ops_list);
+                    ops_panel.update_operations(&ops_list, &self.project_root);
                     return;
                 }
             }
@@ -234,7 +234,7 @@ impl App {
                 {
                     // Update operations snapshot
                     let ops_list = self.state.operations_list();
-                    ops_panel.update_operations(&ops_list);
+                    ops_panel.update_operations(&ops_list, &self.project_root);
 
                     // Select the specific operation
                     if let Some(index) = ops_list.iter().position(|op| op.id == op_id) {

@@ -188,6 +188,7 @@ impl App {
                         command_name: command.name.clone(),
                         operation_id: Some(op_id),
                         pid: Some(pid),
+                        project: self.project_root.clone(),
                     });
 
                 self.open_operations_panel()?;

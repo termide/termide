@@ -75,14 +75,27 @@ fn display_root(root: &Path) -> String {
     termide_core::util::shorten_home_path(&root.display().to_string())
 }
 
+/// What entering a project hands back to finish the switch with.
+pub(super) struct EnteredProject {
+    /// What the project kept when it was open already (`None` when it opens
+    /// now and its layout has yet to be set up).
+    pub restored: Option<ParkedProject>,
+    /// The operations panel of the project left, for
+    /// [`App::carry_operations_panel`].
+    pub operations_panel: Option<Box<dyn Panel>>,
+}
+
 impl App {
     /// Make `root` the current project: park the current one and hand back
-    /// what `root` kept when it was open already (`None` when it opens now
-    /// and its layout has yet to be set up).
-    pub(super) fn enter_project(&mut self, root: PathBuf) -> Result<Option<ParkedProject>> {
+    /// what `root` kept and what follows the user there.
+    pub(super) fn enter_project(&mut self, root: PathBuf) -> Result<EnteredProject> {
         std::env::set_current_dir(&root)?;
         log::info!("Changed working directory to: {:?}", root);
 
+        // Operations run for the instance, not for a project, so their panel
+        // leaves with the user: one left in a parked layout would keep cards
+        // of operations that end while it is off screen.
+        let operations_panel = self.close_operations_panel();
         self.auto_save_layout();
         // Parked panels skip background work and catch up once shown again.
         for panel in self.layout_manager.iter_all_panels_mut() {
@@ -94,7 +107,19 @@ impl App {
         };
         let restored = self.open_projects.switch(root.clone(), leaving);
         self.set_project_root(root);
-        Ok(restored)
+        Ok(EnteredProject {
+            restored,
+            operations_panel,
+        })
+    }
+
+    /// Put the operations panel taken from the project left into the layout
+    /// of the one entered, without taking the focus.
+    pub(super) fn carry_operations_panel(&mut self, panel: Option<Box<dyn Panel>>) {
+        if let Some(panel) = panel {
+            self.add_panel_without_focus(panel);
+            self.state.operations_panel_dirty = true;
+        }
     }
 
     /// Point everything that depends on the project root at `root`.

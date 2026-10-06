@@ -122,7 +122,9 @@ impl App {
     }
 
     /// Close all Operations panels (called when no active operations remain)
-    pub(super) fn close_operations_panel(&mut self) {
+    /// and hand back the one closed, for a project switch to carry it over.
+    pub(super) fn close_operations_panel(&mut self) -> Option<Box<dyn termide_core::Panel>> {
+        let mut closed = None;
         let mut groups_to_remove = Vec::new();
 
         for group_idx in (0..self.layout_manager.panel_groups.len()).rev() {
@@ -138,7 +140,7 @@ impl App {
                 }
 
                 for panel_idx in panels_to_remove {
-                    group.remove_panel(panel_idx);
+                    closed = group.remove_panel(panel_idx).or(closed);
                 }
 
                 if group.is_empty() {
@@ -164,7 +166,10 @@ impl App {
                 .redistribute_widths_proportionally(terminal_width);
         }
 
-        self.auto_save_layout();
+        if closed.is_some() {
+            self.auto_save_layout();
+        }
+        closed
     }
 
     /// Close all Help panels (called before opening new panel)
@@ -382,7 +387,8 @@ impl App {
         if new_project_root == self.project_root {
             return Ok(());
         }
-        match self.enter_project(new_project_root)? {
+        let entered = self.enter_project(new_project_root)?;
+        match entered.restored {
             Some(parked) => self.restore_parked_project(parked),
             None => {
                 if let Err(e) = self.load_layout() {
@@ -393,6 +399,7 @@ impl App {
                 }
             }
         }
+        self.carry_operations_panel(entered.operations_panel);
         self.update_terminal_title();
         self.sync_open_projects();
         Ok(())
@@ -475,13 +482,14 @@ impl App {
         }
 
         // 2. Park the current project and enter the new one
-        self.enter_project(new_project_root.clone())?;
+        let entered = self.enter_project(new_project_root.clone())?;
 
         // 3. Create fresh layout with default panels (2 FileManagers)
         let fm1 = FileManager::new_with_path(new_project_root.clone());
         let fm2 = FileManager::new_with_path(new_project_root);
         self.add_panel(Box::new(fm1));
         self.add_panel(Box::new(fm2));
+        self.carry_operations_panel(entered.operations_panel);
 
         // 4. Save the new layout
         self.auto_save_layout();

@@ -198,6 +198,18 @@ fn render_snapshot_card(
         y += 1;
     }
 
+    // Project of a command started in another one
+    if let Some(project) = &op.project {
+        let project = truncate_left(project, content_width);
+        buf.set_line(
+            inner.x,
+            y,
+            &Line::from(Span::styled(project, Style::default().fg(disabled_color))),
+            inner.width,
+        );
+        y += 1;
+    }
+
     // Files count (skip for commands, during scanning show "Found: N")
     if !is_command {
         let files = if is_scanning {

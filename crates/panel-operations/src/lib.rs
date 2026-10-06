@@ -38,11 +38,14 @@ pub struct OperationSnapshot {
     pub is_scanning: bool,
     pub started_at: Instant,
     pub speed: f64, // bytes per second
+    /// The project a command runs in, when it is not the current one.
+    pub project: Option<String>,
 }
 
 impl OperationSnapshot {
-    /// Create a snapshot from an ActiveOperation reference.
-    pub fn from_active(op: &ActiveOperation) -> Self {
+    /// Create a snapshot from an ActiveOperation reference, with
+    /// `current_project` the root of the project on screen.
+    pub fn from_active(op: &ActiveOperation, current_project: &Path) -> Self {
         Self {
             id: op.id,
             op_type: op.op_type,
@@ -53,6 +56,8 @@ impl OperationSnapshot {
             is_scanning: op.is_scanning,
             started_at: op.started_at,
             speed: op.speed_tracker.speed(),
+            project: (op.op_type.is_command() && op.project != current_project)
+                .then(|| termide_core::util::shorten_home_path(&op.project.display().to_string())),
         }
     }
 
@@ -63,10 +68,10 @@ impl OperationSnapshot {
         let has_dest = !self.dest.is_empty();
         let has_data = !self.is_scanning && self.op_type.has_data_progress();
         // Content lines:
-        //   Command: elapsed(1) only (name is in border title)
+        //   Command: dest(?) + project(?) + elapsed(1) (name is in border title)
         //   File op: bar(1) + source(1) + dest(?) + files(1) + data+speed(?) + elapsed(1)
         let content_lines: u16 = if is_command {
-            has_dest as u16 + 1
+            has_dest as u16 + self.project.is_some() as u16 + 1
         } else {
             1 // progress bar
             + 1 // source path
@@ -114,12 +119,13 @@ impl OperationsPanel {
         }
     }
 
-    /// Update operations snapshot from active operations.
+    /// Update operations snapshot from active operations, with
+    /// `current_project` the root of the project on screen.
     /// Should be called before rendering.
-    pub fn update_operations(&mut self, operations: &[&ActiveOperation]) {
+    pub fn update_operations(&mut self, operations: &[&ActiveOperation], current_project: &Path) {
         self.operations = operations
             .iter()
-            .map(|op| OperationSnapshot::from_active(op))
+            .map(|op| OperationSnapshot::from_active(op, current_project))
             .collect();
 
         // Ensure selected index is valid
@@ -470,6 +476,7 @@ mod tests {
             is_scanning: false,
             started_at: Instant::now(),
             speed: 0.0,
+            project: None,
         });
         panel.selected_index = 0;
         panel
@@ -495,6 +502,41 @@ mod tests {
             panel.height_mode(),
             HeightMode::FitContent(2 * one_card + 2)
         );
+    }
+
+    /// A command started in another project names it on its card, one line
+    /// taller; a file operation shows its paths and never does.
+    #[test]
+    fn a_command_of_another_project_names_it() {
+        let here = Path::new("/work/here");
+        let command = |project: &str| {
+            ActiveOperation::new(
+                OperationId(1),
+                OperationType::CommandReport,
+                "build".into(),
+                String::new(),
+                0,
+                0,
+                project.into(),
+            )
+        };
+
+        let local = OperationSnapshot::from_active(&command("/work/here"), here);
+        assert_eq!(local.project, None);
+        let other = OperationSnapshot::from_active(&command("/work/there"), here);
+        assert_eq!(other.project.as_deref(), Some("/work/there"));
+        assert_eq!(other.card_height(), local.card_height() + 1);
+
+        let copy = ActiveOperation::new(
+            OperationId(2),
+            OperationType::Copy,
+            "a".into(),
+            "b".into(),
+            1,
+            1,
+            "/work/there".into(),
+        );
+        assert_eq!(OperationSnapshot::from_active(&copy, here).project, None);
     }
 
     /// Cancelling is always gated behind a confirmation modal: the key must

@@ -113,7 +113,7 @@ Background and report commands appear in the [Operations](operations.md) panel, 
 
 ### Report window
 
-When a report command finishes, a window titled with the command's label and `✓` (exit code 0) or `✗` (any other exit code) shows its output: standard output first, then standard error. Indentation and blank lines inside the output are kept, tabs are expanded to four spaces, and blank lines before and after each stream are dropped; a command with no output shows `(no output)`. If several report commands finish at the same moment, only the last one's window is shown.
+When a report command finishes, a window titled with the command's label and `✓` (exit code 0) or `✗` (any other exit code) shows its output: standard output first, then standard error. Indentation and blank lines inside the output are kept, tabs are expanded to four spaces, and blank lines before and after each stream are dropped; a command with no output shows `(no output)`. The window opens in whichever project is current; a command started in another project adds that project's path to the title. If several report commands finish at the same moment, only the last one's window is shown.
 
 | Key | Action |
 |-----|--------|

@@ -73,6 +73,8 @@ pub struct CommandOperationHandle {
     pub operation_id: Option<termide_file_ops::OperationId>,
     /// Process ID for killing the command on cancel
     pub pid: Option<u32>,
+    /// Root of the project the command runs in
+    pub project: std::path::PathBuf,
 }
 
 /// Kill a background command process by PID (cross-platform).
