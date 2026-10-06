@@ -13,7 +13,7 @@ use termide_agent_core::{
     Suggestion, SuggestionReply, ThinkingLevel, Timing, ToolCall, ToolContext, ToolDecision,
     ToolResultMessage, ToolUpdate, Usage, UserMessage,
 };
-use termide_core::{ConfirmAction, PanelConfig, SegmentKind};
+use termide_core::{ConfirmAction, LinkTarget, PanelConfig, SegmentKind};
 use termide_ui::{ChoiceAction, ChoiceForm};
 
 use crate::input::file_completions;
@@ -637,7 +637,7 @@ fn a_drag_selects_transcript_text_for_copy() {
 }
 
 #[test]
-fn a_ctrl_click_on_a_url_opens_it_in_the_browser() {
+fn a_ctrl_click_on_a_url_follows_it() {
     let mut panel = panel(vec![reply("See https://docs.rs now")]);
     type_text(&mut panel, "hi there");
     panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
@@ -666,21 +666,78 @@ fn a_ctrl_click_on_a_url_opens_it_in_the_browser() {
             area,
         )
     };
+    let opens = |events: &[PanelEvent]| events.iter().any(|e| matches!(e, PanelEvent::OpenLink(_)));
     let events = click(&mut panel, x, KeyModifiers::CONTROL);
     assert!(
-        matches!(events.as_slice(), [PanelEvent::OpenExternal(url)] if url.to_str() == Some("https://docs.rs")),
+        matches!(events.as_slice(), [PanelEvent::OpenLink(LinkTarget::Url(url))] if url == "https://docs.rs"),
         "{events:?}"
     );
     // A plain click selects the block instead, and Ctrl+click beside the URL
     // opens nothing.
-    let events = click(&mut panel, x, KeyModifiers::NONE);
-    assert!(!events
+    assert!(!opens(&click(&mut panel, x, KeyModifiers::NONE)));
+    assert!(!opens(&click(&mut panel, x - 9, KeyModifiers::CONTROL)));
+}
+
+#[test]
+fn a_markdown_link_is_followed_and_lit_whole() {
+    let mut panel = panel(vec![reply("Read [the docs](https://docs.rs/x) first")]);
+    type_text(&mut panel, "hi there");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+    let rows = render_text(&mut panel, 40, 12);
+    let area = panel.transcript_area;
+    let y = rows
         .iter()
-        .any(|e| matches!(e, PanelEvent::OpenExternal(_))));
-    let events = click(&mut panel, x - 9, KeyModifiers::CONTROL);
-    assert!(!events
-        .iter()
-        .any(|e| matches!(e, PanelEvent::OpenExternal(_))));
+        .position(|r| r.contains("the docs"))
+        .expect("the link is on screen") as u16;
+    let row = &rows[y as usize];
+    let x = row[..row.find("the docs").unwrap()].chars().count() as u16;
+    let mouse = |kind, column, modifiers| MouseEvent {
+        kind,
+        column,
+        row: y,
+        modifiers,
+    };
+    // Ctrl over "the" lights "the docs", both words of the one link.
+    let events = panel.handle_mouse(mouse(MouseEventKind::Moved, x, KeyModifiers::CONTROL), area);
+    assert!(
+        matches!(events.as_slice(), [PanelEvent::NeedsRedraw]),
+        "{events:?}"
+    );
+    let buf = render_buf(&mut panel, 40, 12);
+    let info = ThemeColors::default().info;
+    // Each word is lit; the space between them is not part of the link.
+    for dx in (0..3).chain(4..8) {
+        let cell = &buf[(x + dx, y)];
+        assert!(
+            cell.modifier.contains(Modifier::UNDERLINED) && cell.fg == info,
+            "{dx}: {cell:?}"
+        );
+    }
+    // Releasing Ctrl puts it out.
+    panel.handle_mouse(mouse(MouseEventKind::Moved, x, KeyModifiers::NONE), area);
+    assert!(panel.hovered_link.is_none());
+    // Ctrl+click on "docs" follows the hidden address.
+    panel.handle_mouse(
+        mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            x + 5,
+            KeyModifiers::CONTROL,
+        ),
+        area,
+    );
+    let events = panel.handle_mouse(
+        mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            x + 5,
+            KeyModifiers::CONTROL,
+        ),
+        area,
+    );
+    assert!(
+        matches!(events.as_slice(), [PanelEvent::OpenLink(LinkTarget::Url(url))] if url == "https://docs.rs/x"),
+        "{events:?}"
+    );
 }
 
 #[test]

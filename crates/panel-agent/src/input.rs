@@ -3,7 +3,7 @@
 
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use termide_agent_core::{now_millis, CommandScript, ToolResultMessage, UserMessage};
-use termide_core::{KeyChord, Panel, PanelEvent};
+use termide_core::{KeyChord, LinkTarget, Panel, PanelEvent};
 use termide_ui::textarea::TextArea;
 use termide_ui::{ChoiceAction, CompletionAction, CompletionItem, CompletionList, FieldEdit};
 
@@ -151,6 +151,41 @@ impl AgentPanel {
             line: self.top + (row - area.y) as usize,
             col: col as usize,
         }
+    }
+
+    /// The link under transcript cell `cell`, with the regions to light: one
+    /// a block marks up (an answer's `[text](href)`, a tool call's path or
+    /// URL), else a web address or an existing path written out on the row.
+    pub(crate) fn link_under(
+        &self,
+        cell: select::Cell,
+    ) -> Option<(LinkTarget, Vec<transcript::LinkRegion>)> {
+        if let Some((href, regions)) = self.transcript.link_at(cell.line, cell.col) {
+            return Some((LinkTarget::from_href(&href, &self.cwd)?, regions));
+        }
+        let line = self.transcript.rendered().get(cell.line)?;
+        let (cols, target) = select::link_at(line, cell.col, &self.cwd)?;
+        Some((target, vec![(cell.line, cols.start, cols.end)]))
+    }
+
+    /// Light the link under the pointer while `Ctrl` is held, as the terminal
+    /// panel does; whether what is lit changed.
+    fn hover_link(&mut self, event: MouseEvent) -> bool {
+        let area = self.transcript_area;
+        let inside = event.column >= area.x
+            && event.column < area.x + area.width
+            && event.row >= area.y
+            && event.row < area.y + area.height;
+        let lit =
+            (event.modifiers.contains(KeyModifiers::CONTROL) && inside && self.pending.is_none())
+                .then(|| self.link_under(self.cell_at(event.column, event.row)))
+                .flatten()
+                .map(|(_, regions)| regions);
+        if lit == self.hovered_link {
+            return false;
+        }
+        self.hovered_link = lit;
+        true
     }
 
     /// A click on transcript line `line`: focus the chat and select the block
@@ -1140,6 +1175,9 @@ impl AgentPanel {
 
     /// The body of [`Panel::handle_mouse`].
     pub(crate) fn on_mouse(&mut self, event: MouseEvent) -> Vec<PanelEvent> {
+        if matches!(event.kind, MouseEventKind::Moved) && self.hover_link(event) {
+            return vec![PanelEvent::NeedsRedraw];
+        }
         // The prompt box claims its own presses and drags: a press places the
         // cursor, a drag selects the text under it. It is asked first because
         // the bar sits below the transcript, whose rows would otherwise take
@@ -1200,16 +1238,12 @@ impl AgentPanel {
                     return vec![PanelEvent::NeedsRedraw];
                 }
                 self.text_selection = None;
-                // Ctrl+click on a URL opens it in the browser, as it does in
-                // the terminal panel.
+                // Ctrl+click follows a link, as it does in the terminal
+                // panel; the app opens it the same way from every panel.
                 if event.modifiers.contains(KeyModifiers::CONTROL) {
-                    let url = self
-                        .transcript
-                        .rendered()
-                        .get(press.line)
-                        .and_then(|line| select::url_at(line, press.col));
-                    if let Some(url) = url {
-                        return vec![PanelEvent::OpenExternal(url.into())];
+                    if let Some((target, _)) = self.link_under(press) {
+                        self.hovered_link = None;
+                        return vec![PanelEvent::OpenLink(target)];
                     }
                 }
                 return self.click_line(press.line);

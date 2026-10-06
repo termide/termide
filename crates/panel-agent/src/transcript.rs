@@ -255,6 +255,30 @@ struct Cached {
     /// Whether the item folds at this width (see [`render_item`]).
     foldable: bool,
     lines: Vec<Line<'static>>,
+    /// The links the item marks up, on its own lines.
+    links: Vec<RowLink>,
+}
+
+/// A lit stretch of a link: `(line, start, end)`, a `[start, end)` column
+/// range on a flattened line.
+pub(crate) type LinkRegion = (usize, usize, usize);
+
+/// A link a block marks up rather than writes out — a Markdown
+/// `[text](href)` in an answer, a tool call's path or URL in its wrapped
+/// headline — as a `[start, end)` column range on one of the rendered lines.
+/// A link wrapped over several lines is several of these sharing an `id`.
+/// A web address or path written out in plain text is found on its row
+/// instead (`select::link_at`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RowLink {
+    pub line: usize,
+    pub start: usize,
+    pub end: usize,
+    /// The target as the block gives it: a URL, or a path that may be
+    /// relative to the working directory.
+    pub href: String,
+    /// Which link of its block the region belongs to.
+    pub id: usize,
 }
 
 #[derive(Default)]
@@ -272,6 +296,8 @@ pub struct Transcript {
     flat: Vec<Line<'static>>,
     /// Item index per flattened line, for click-to-expand.
     line_item: Vec<usize>,
+    /// The marked-up links on the flattened lines, with their item.
+    flat_links: Vec<(usize, RowLink)>,
     flat_dirty: bool,
     /// Live footer lines appended after the last item while the agent works
     /// (the ticking generation and clock meta with the spinner); empty when
@@ -316,6 +342,7 @@ impl Transcript {
         self.cache.clear();
         self.flat.clear();
         self.line_item.clear();
+        self.flat_links.clear();
         self.flat_dirty = true;
     }
 
@@ -764,7 +791,7 @@ impl Transcript {
                 None => true,
             };
             if stale {
-                let (lines, foldable) = render_item(
+                let (lines, foldable, links) = render_item(
                     &self.items[index],
                     self.collapsed[index],
                     self.fold,
@@ -777,6 +804,7 @@ impl Transcript {
                     is_light,
                     foldable,
                     lines,
+                    links,
                 });
                 self.flat_dirty = true;
             }
@@ -784,8 +812,20 @@ impl Transcript {
         if self.flat_dirty {
             self.flat.clear();
             self.line_item.clear();
+            self.flat_links.clear();
             for (index, cached) in self.cache.iter().enumerate() {
                 if let Some(cached) = cached {
+                    let base = self.flat.len();
+                    self.flat_links.extend(cached.links.iter().map(|link| {
+                        let line = base + link.line;
+                        (
+                            index,
+                            RowLink {
+                                line,
+                                ..link.clone()
+                            },
+                        )
+                    }));
                     self.flat.extend(cached.lines.iter().cloned());
                     self.line_item
                         .extend(std::iter::repeat_n(index, cached.lines.len()));
@@ -813,6 +853,24 @@ impl Transcript {
                 self.items.get(index + 1),
                 Some(Item::Thinking { .. } | Item::Tool { .. } | Item::Notice { .. })
             )
+    }
+
+    /// The marked-up link under display column `col` of flattened line
+    /// `line`, with every region of it — a link wrapped over several lines
+    /// is lit whole.
+    #[must_use]
+    pub(crate) fn link_at(&self, line: usize, col: usize) -> Option<(String, Vec<LinkRegion>)> {
+        let (item, hit) = self
+            .flat_links
+            .iter()
+            .find(|(_, link)| link.line == line && (link.start..link.end).contains(&col))?;
+        let regions = self
+            .flat_links
+            .iter()
+            .filter(|(i, link)| i == item && link.id == hit.id)
+            .map(|(_, link)| (link.line, link.start, link.end))
+            .collect();
+        Some((hit.href.clone(), regions))
     }
 
     /// The flattened lines as last laid out by [`Transcript::lines`].
@@ -1167,10 +1225,12 @@ fn row_with_meta(
 /// glyph, the action and the fold marker — instead of being clipped, with
 /// `meta` at the last row's end when it fits there, else on a row of its own.
 /// A row too narrow to leave a useful subject beside the prefix clips it.
+/// Each subject row's `(row, start, end)` columns go to `subject_rows`.
 fn wrapped_row_with_meta(
     mut head: Vec<Span<'static>>,
     meta: Vec<Span<'static>>,
     width: u16,
+    subject_rows: &mut Vec<(usize, usize, usize)>,
 ) -> Vec<Line<'static>> {
     /// Columns of subject worth wrapping into; narrower, the headline clips.
     const MIN_SUBJECT: usize = 12;
@@ -1181,17 +1241,22 @@ fn wrapped_row_with_meta(
     // The scrollbar gutter at the edge.
     let avail = (width as usize).saturating_sub(indent + 1);
     if avail < MIN_SUBJECT {
+        let end = (indent + width_of(&subject.content)).min(width as usize);
+        subject_rows.push((0, indent, end));
         head.push(subject);
         return row_with_meta(head, meta, true, width);
     }
     let mut prefix = Some(head);
     let mut lines: Vec<Line<'static>> = wrap_row(&subject.content, avail)
         .into_iter()
-        .map(|row| {
+        .enumerate()
+        .map(|(i, row)| {
             let mut spans = prefix
                 .take()
                 .unwrap_or_else(|| vec![Span::raw(" ".repeat(indent))]);
-            spans.push(Span::styled(row.trim_end().to_string(), subject.style));
+            let row = row.trim_end().to_string();
+            subject_rows.push((i, indent, indent + width_of(&row)));
+            spans.push(Span::styled(row, subject.style));
             Line::from(spans)
         })
         .collect();
@@ -1200,6 +1265,37 @@ fn wrapped_row_with_meta(
         lines.extend(row_with_meta(last.spans, meta, false, width));
     }
     lines
+}
+
+/// What a tool call's headline subject links to: the file a read, write or
+/// edit touched, the page a fetch loaded.
+fn headline_href(call: &ToolCall) -> Option<String> {
+    let key = match call.name.as_str() {
+        "read" | "write" | "edit" => "path",
+        "fetch" => "url",
+        _ => return None,
+    };
+    let href = call.arguments.get(key)?.as_str()?.trim();
+    (!href.is_empty()).then(|| href.to_string())
+}
+
+/// The links of a tool headline: its subject's rows, when the subject is a
+/// path or a URL.
+fn headline_links(call: &ToolCall, subject_rows: Vec<(usize, usize, usize)>) -> Vec<RowLink> {
+    let Some(href) = headline_href(call) else {
+        return Vec::new();
+    };
+    subject_rows
+        .into_iter()
+        .filter(|(_, start, end)| start < end)
+        .map(|(line, start, end)| RowLink {
+            line,
+            start,
+            end,
+            href: href.clone(),
+            id: 0,
+        })
+        .collect()
 }
 
 /// Split `line` into rows no wider than `width` columns, breaking after the
@@ -1574,13 +1670,15 @@ fn render_item(
     width: u16,
     colors: &ThemeColors,
     is_light: bool,
-) -> (Vec<Line<'static>>, bool) {
+) -> (Vec<Line<'static>>, bool, Vec<RowLink>) {
     let mut foldable = is_foldable(item, fold);
     // Only reasoning can be foldable yet fit one row unfolded: a foldable tool
     // call has output or a second command line below its headline.
     if foldable && matches!(item, Item::Thinking { .. }) {
-        foldable = render_body(item, false, false, width, colors, is_light).len() > 1;
+        foldable =
+            render_body(item, false, false, width, colors, is_light, &mut Vec::new()).len() > 1;
     }
+    let mut links = Vec::new();
     let mut lines = render_body(
         item,
         collapsed && foldable,
@@ -1588,17 +1686,22 @@ fn render_item(
         width,
         colors,
         is_light,
+        &mut links,
     );
     // The answer draws no dividing rule; a blank line above sets it apart
     // from the steps before it. Reasoning and tool calls stack with no gap.
     if matches!(item, Item::Assistant { .. }) && !lines.is_empty() {
         lines.insert(0, Line::default());
+        for link in &mut links {
+            link.line += 1;
+        }
     }
-    (lines, foldable)
+    (lines, foldable, links)
 }
 
 /// The lines of `item` itself, without the gap [`render_item`] puts above it;
-/// `foldable` decides whether it carries a fold marker.
+/// `foldable` decides whether it carries a fold marker. The links it marks up
+/// go to `links`.
 fn render_body(
     item: &Item,
     collapsed: bool,
@@ -1606,6 +1709,7 @@ fn render_body(
     width: u16,
     colors: &ThemeColors,
     is_light: bool,
+    links: &mut Vec<RowLink>,
 ) -> Vec<Line<'static>> {
     let t = termide_i18n::t();
     let dim = Style::default().fg(colors.disabled);
@@ -1831,8 +1935,16 @@ fn render_body(
             if !answer.is_empty() {
                 // Reserve the marker's width and indent wrapped lines under it,
                 // so the accent `›` never pushes the first line over the edge.
-                let body = render_markdown(answer, width.saturating_sub(2), colors, is_light).lines;
-                for (i, mut line) in body.into_iter().enumerate() {
+                let body = render_markdown(answer, width.saturating_sub(2), colors, is_light);
+                // Past the `› ` mark the answer's links sit two columns in.
+                links.extend(body.links.into_iter().map(|link| RowLink {
+                    line: lines.len() + link.line,
+                    start: link.start as usize + 2,
+                    end: link.end as usize + 2,
+                    href: link.url,
+                    id: link.id,
+                }));
+                for (i, mut line) in body.lines.into_iter().enumerate() {
                     line.spans.insert(
                         0,
                         if i == 0 {
@@ -1989,20 +2101,32 @@ fn render_body(
                         head.push(Span::styled(first, dim));
                         row_with_meta(head, meta, true, width)
                     }
-                    None => wrapped_row_with_meta(
-                        tool_headline(call, marker, width, state, colors),
-                        meta,
-                        width,
-                    ),
+                    None => {
+                        let mut rows = Vec::new();
+                        let lines = wrapped_row_with_meta(
+                            tool_headline(call, marker, width, state, colors),
+                            meta,
+                            width,
+                            &mut rows,
+                        );
+                        links.extend(headline_links(call, rows));
+                        lines
+                    }
                 };
             }
             let mut lines = match shell_command(call) {
                 Some(command) => command_lines(&command, marker, width, state, colors),
-                None => wrapped_row_with_meta(
-                    tool_headline(call, marker, width, state, colors),
-                    stats,
-                    width,
-                ),
+                None => {
+                    let mut rows = Vec::new();
+                    let lines = wrapped_row_with_meta(
+                        tool_headline(call, marker, width, state, colors),
+                        stats,
+                        width,
+                        &mut rows,
+                    );
+                    links.extend(headline_links(call, rows));
+                    lines
+                }
             };
             // An edit's result is a unified diff, painted like the git diff
             // panel paints one.
@@ -3316,6 +3440,58 @@ mod tests {
         let indent = rows[0].find("clear:").unwrap();
         let indent = width_of(&rows[0][..indent]);
         assert!(rows[1].starts_with(&" ".repeat(indent)), "{rows:?}");
+    }
+
+    #[test]
+    fn a_wrapped_fetch_headline_links_every_row_to_its_url() {
+        let colors = ThemeColors::default();
+        let mut transcript = Transcript::default();
+        let url = "https://docs.rs/termide/latest/termide/links/index.html";
+        transcript.push(Item::Tool {
+            call: call("fetch", json!({ "url": url })),
+            result: Some(ToolResultMessage::text(&call("fetch", json!({})), "page")),
+            live: None,
+            at: "12:00:00".into(),
+            duration_ms: Some(10),
+            waited_ms: None,
+            waiting: false,
+        });
+        let rows = text_of(transcript.lines(40, &colors, false));
+        assert!(rows.len() > 1, "{rows:?}");
+        // The second row's piece of the address opens the whole of it, and
+        // lights the rows above and below with it.
+        let col = rows[1].len() - rows[1].trim_start().len();
+        let (href, regions) = transcript.link_at(1, col).expect("a link");
+        assert_eq!(href, url);
+        assert_eq!(regions.len(), rows.len(), "{regions:?}");
+        // The indent before it is not the link.
+        assert!(transcript.link_at(1, col - 1).is_none());
+    }
+
+    #[test]
+    fn an_answer_link_sits_past_the_mark_and_the_gap() {
+        let colors = ThemeColors::default();
+        let mut transcript = Transcript::default();
+        transcript.push(Item::Assistant {
+            text: "see [x](a.md)".into(),
+            error: None,
+            at: String::new(),
+            cost: None,
+            run_ms: None,
+            streaming: false,
+        });
+        let rows = text_of(transcript.lines(40, &colors, false));
+        let line = rows.iter().position(|r| r.contains("see x")).unwrap();
+        let row = &rows[line];
+        let col = row[..row.find(" x").unwrap()].chars().count() + 1;
+        assert_eq!(
+            transcript
+                .link_at(line, col)
+                .map(|(href, _)| href)
+                .as_deref(),
+            Some("a.md")
+        );
+        assert!(transcript.link_at(line, col - 1).is_none());
     }
 
     #[test]
