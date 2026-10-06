@@ -312,3 +312,18 @@ pub fn run_recall(settings: &AiSettings, project_root: &Path, query: &str, json:
     }
     i32::from(outcome.hits.is_empty())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recall_from_the_command_line_exits_zero_only_with_results() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("notes.txt"), "the walrus plan\n").unwrap();
+        let settings = AiSettings::default();
+        assert_eq!(run_recall(&settings, tmp.path(), "walrus", false), 0);
+        assert_eq!(run_recall(&settings, tmp.path(), "walrus", true), 0);
+        assert_eq!(run_recall(&settings, tmp.path(), "zebra", false), 1);
+    }
+}

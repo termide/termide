@@ -973,6 +973,33 @@ mod tests {
     }
 
     #[test]
+    fn a_cancelled_search_finds_nothing_and_says_it_was_cancelled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("proj");
+        git::tests::repo_with(&project, &[("a.md", "walrus\n", "feat: walrus")]);
+        let tool = RecallTool::new(setup(&project, &tmp.path().join("sessions")));
+        let cancel = CancelToken::new();
+        cancel.cancel();
+        let outcome = tool.search(SearchRequest::new("walrus"), None, &cancel);
+        assert!(outcome.hits.is_empty());
+        assert!(outcome.incomplete.is_empty(), "a cancel is no time limit");
+
+        let call = termide_agent_core::ToolCall {
+            id: "c1".into(),
+            name: "recall".into(),
+            arguments: json!({ "queries": ["walrus"] }),
+            extra_content: None,
+        };
+        let result = tool.execute(
+            &call,
+            &termide_agent_core::ToolContext::new(&project),
+            &mut |_| {},
+            &cancel,
+        );
+        assert!(result.is_error);
+    }
+
+    #[test]
     fn a_repository_created_after_the_tool_is_searched() {
         let tmp = tempfile::tempdir().unwrap();
         let project = tmp.path().join("proj");

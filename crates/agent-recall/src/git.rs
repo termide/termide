@@ -547,6 +547,23 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_git_command_past_its_deadline_is_stopped() {
+        let tmp = tempfile::tempdir().unwrap();
+        repo_with(tmp.path(), &[("a.txt", "a", "init")]);
+        // An alias that runs a shell command: a git that takes its time.
+        let args = ["-c", "alias.slow=!sleep 5", "slow"].map(String::from);
+        let started = Instant::now();
+        let result = run_git(
+            tmp.path(),
+            &args,
+            Some(started + Duration::from_millis(200)),
+            &CancelToken::new(),
+        );
+        assert!(result.is_err());
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
     fn since_keeps_older_commits_out() {
         let tmp = tempfile::tempdir().unwrap();
         let project = tmp.path();
