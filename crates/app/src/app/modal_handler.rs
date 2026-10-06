@@ -149,6 +149,11 @@ impl App {
                                 self.return_to_projects(menu)?;
                                 return Ok(());
                             }
+                            // A refused quit is answered by the refusal. Keeping
+                            // it pending — as before — let a later modal's Enter
+                            // run it: a quit dismissed with Esc came back to end
+                            // the app when an unrelated report modal closed.
+                            PendingAction::QuitApplication => {}
                             other => self.state.pending_action = Some(other),
                         }
                     }
@@ -474,8 +479,14 @@ impl App {
                     }
                 }
                 PendingAction::QuitApplication => {
-                    // User confirmed quit - exit application
-                    self.state.quit();
+                    // Only an accepted answer quits. Quit always asks behind a
+                    // ConfirmModal, whose result is a `bool`; every other arm of
+                    // this match checks that bool and this one did not, so a
+                    // quit the user refused — or an answer from any other modal
+                    // — ended the application.
+                    if quit_is_confirmed(&*value) {
+                        self.state.quit();
+                    }
                 }
                 PendingAction::CancelOperation(op_id) => {
                     // User confirmed cancelling the background operation.
@@ -1018,5 +1029,35 @@ impl App {
             }
         }
         Ok(())
+    }
+}
+
+/// Whether a modal answer accepts quitting.
+///
+/// Quit asks behind a `ConfirmModal`, which answers with a `bool`. Any other
+/// value means the answer did not come from that confirmation — an
+/// `InfoModal` reports `()` — and quitting on it would end the application
+/// on a keystroke that only dismissed a message.
+fn quit_is_confirmed(value: &dyn std::any::Any) -> bool {
+    value.downcast_ref::<bool>().copied().unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quit_is_confirmed;
+
+    #[test]
+    fn only_an_accepted_confirmation_quits() {
+        assert!(quit_is_confirmed(&true));
+        assert!(!quit_is_confirmed(&false));
+    }
+
+    /// The report of a finished command is an `InfoModal`, whose Enter
+    /// answers `()`. It must not be read as consent to quit: a quit refused
+    /// earlier used to stay pending, and the next modal's Enter ran it.
+    #[test]
+    fn a_message_modal_answering_nothing_does_not_quit() {
+        assert!(!quit_is_confirmed(&()));
+        assert!(!quit_is_confirmed(&String::from("yes")));
     }
 }

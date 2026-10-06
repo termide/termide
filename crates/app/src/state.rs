@@ -317,6 +317,9 @@ impl AppState {
 
     /// Request application quit
     pub fn quit(&mut self) {
+        // Logged: without this a quit and a crash look the same in the
+        // journal — the run simply stops, with no record of why.
+        log::info!("Quit requested");
         self.should_quit = true;
     }
 
