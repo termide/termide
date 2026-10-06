@@ -92,7 +92,7 @@ impl RepoRoot {
 pub fn run_git(
     dir: &Path,
     args: &[String],
-    deadline: Instant,
+    deadline: Option<Instant>,
     cancel: &CancelToken,
 ) -> Result<String, String> {
     let mut child = Command::new("git")
@@ -114,7 +114,7 @@ pub fn run_git(
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
-            Ok(None) if cancel.is_cancelled() || Instant::now() > deadline => {
+            Ok(None) if cancel.is_cancelled() || deadline.is_some_and(|d| Instant::now() > d) => {
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(if cancel.is_cancelled() {
@@ -235,7 +235,7 @@ fn ere_escape(text: &str) -> String {
 fn find_commits(
     repo: &RepoRoot,
     query: &GitQuery<'_>,
-    deadline: Instant,
+    deadline: Option<Instant>,
     cancel: &CancelToken,
 ) -> Vec<Commit> {
     let Some(specs) = pathspecs(repo, query.paths) else {
@@ -282,7 +282,7 @@ fn find_commits(
         }
     }
     for identifier in query.identifiers.iter().take(PICKAXE_IDENTIFIERS) {
-        if cancel.is_cancelled() || Instant::now() > deadline {
+        if cancel.is_cancelled() || deadline.is_some_and(|d| Instant::now() > d) {
             break;
         }
         let mut args = common(PICKAXE_COMMITS);
@@ -312,14 +312,14 @@ pub fn search(
     repos: &[RepoRoot],
     query: &GitQuery<'_>,
     limit: usize,
-    deadline: Instant,
+    deadline: Option<Instant>,
     cancel: &CancelToken,
 ) -> (Vec<Hit>, bool) {
     let mut vocabulary = Vocabulary::default();
     let mut found: Vec<(&RepoRoot, Commit, TermBag)> = Vec::new();
     let mut cut_short = false;
     for repo in repos {
-        if Instant::now() > deadline {
+        if deadline.is_some_and(|d| Instant::now() > d) {
             cut_short = true;
             break;
         }
@@ -334,7 +334,7 @@ pub fn search(
             found.push((repo, commit, bag));
         }
         // A command the deadline stopped left this repository half searched.
-        if Instant::now() > deadline && !cancel.is_cancelled() {
+        if deadline.is_some_and(|d| Instant::now() > d) && !cancel.is_cancelled() {
             cut_short = true;
             break;
         }
@@ -421,7 +421,7 @@ pub fn open(
         sha.to_string(),
         "--".to_string(),
     ];
-    let deadline = Instant::now() + GIT_TIMEOUT;
+    let deadline = Some(Instant::now() + GIT_TIMEOUT);
     for repo in candidates {
         if let Ok(out) = run_git(&repo.root, &args, deadline, cancel) {
             return Ok(format!(
@@ -509,7 +509,7 @@ pub(crate) mod tests {
             &repos,
             &query(&[query_words("walrus")], &words, &[], &none),
             10,
-            Instant::now() + GIT_TIMEOUT,
+            Some(Instant::now() + GIT_TIMEOUT),
             &CancelToken::new(),
         );
         let refs: Vec<&str> = hits.iter().map(|h| h.reference.as_str()).collect();
@@ -522,7 +522,7 @@ pub(crate) mod tests {
             &repos,
             &query(&[query_words("split_command_line")], &[], &ids, &none),
             10,
-            Instant::now() + GIT_TIMEOUT,
+            Some(Instant::now() + GIT_TIMEOUT),
             &CancelToken::new(),
         );
         assert_eq!(hits.len(), 1);
@@ -534,7 +534,7 @@ pub(crate) mod tests {
             &repos,
             &query(&[query_words("walrus")], &words, &[], &only_b),
             10,
-            Instant::now() + GIT_TIMEOUT,
+            Some(Instant::now() + GIT_TIMEOUT),
             &CancelToken::new(),
         );
         assert_eq!(hits.len(), 1);
@@ -561,7 +561,7 @@ pub(crate) mod tests {
             &repos,
             &later,
             10,
-            Instant::now() + GIT_TIMEOUT,
+            Some(Instant::now() + GIT_TIMEOUT),
             &CancelToken::new(),
         );
         assert!(hits.is_empty());
@@ -570,7 +570,7 @@ pub(crate) mod tests {
             &repos,
             &query(&terms_, &words, &[], &none),
             10,
-            Instant::now() + GIT_TIMEOUT,
+            Some(Instant::now() + GIT_TIMEOUT),
             &CancelToken::new(),
         );
         assert_eq!(hits.len(), 1);
@@ -596,7 +596,7 @@ pub(crate) mod tests {
             &[repo],
             &query(&[query_words("walrus")], &words, &[], &none),
             10,
-            Instant::now() + GIT_TIMEOUT,
+            Some(Instant::now() + GIT_TIMEOUT),
             &CancelToken::new(),
         );
         assert_eq!(hits.len(), 1);

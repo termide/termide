@@ -144,7 +144,7 @@ pub fn search(
     repos: &[RepoRoot],
     query: &FileQuery<'_>,
     limit: usize,
-    deadline: Instant,
+    deadline: Option<Instant>,
     cancel: &CancelToken,
 ) -> (Vec<Hit>, bool) {
     if query.patterns.is_empty() && query.words.is_empty() {
@@ -292,13 +292,13 @@ struct Walk<'a> {
     skip: &'a HashSet<PathBuf>,
     filter: Option<&'a PathFilter>,
     matcher: &'a Regex,
-    deadline: Instant,
+    deadline: Option<Instant>,
     cancel: &'a CancelToken,
 }
 
 impl Walk<'_> {
     fn out_of_time(&self) -> bool {
-        self.cancel.is_cancelled() || Instant::now() > self.deadline
+        self.cancel.is_cancelled() || self.deadline.is_some_and(|d| Instant::now() > d)
     }
 
     /// Walk the root; `false` when the deadline or a cancel stopped it.
@@ -545,8 +545,8 @@ mod tests {
         }
     }
 
-    fn later() -> Instant {
-        Instant::now() + std::time::Duration::from_secs(60)
+    fn later() -> Option<Instant> {
+        Some(Instant::now() + std::time::Duration::from_secs(60))
     }
 
     #[test]
@@ -629,7 +629,7 @@ mod tests {
             &repos,
             &query(&walrus, &patterns, &none),
             10,
-            Instant::now(),
+            Some(Instant::now()),
             &CancelToken::new(),
         );
         assert!(hits.is_empty() && cut_short);

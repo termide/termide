@@ -783,7 +783,7 @@ their time, and a search lasts as long as its slowest source.
 
 ```toml
 [ai.recall]
-sessions_timeout_secs = 60   # how long each source may search
+sessions_timeout_secs = 60   # how long each source may search, in seconds; 0 is no limit
 git_timeout_secs = 60
 files_timeout_secs = 60
 solver = false               # answer from the results with one model call

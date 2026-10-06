@@ -224,7 +224,7 @@ display = "headless"     # headless（无窗口）；minimized；visible
 
 ```toml
 [ai.recall]
-sessions_timeout_secs = 60   # 每个来源最多可搜索的时间
+sessions_timeout_secs = 60   # 每个来源最多可搜索的秒数；0 表示不限
 git_timeout_secs = 60
 files_timeout_secs = 60
 solver = false               # 用一次模型调用根据结果作答

@@ -803,7 +803,7 @@ line» сходятся, а «сессия» находит «сессии»; р
 
 ```toml
 [ai.recall]
-sessions_timeout_secs = 60   # сколько может искать каждый источник
+sessions_timeout_secs = 60   # сколько секунд может искать каждый источник; 0 — без лимита
 git_timeout_secs = 60
 files_timeout_secs = 60
 solver = false               # отвечать по результатам одним вызовом модели

@@ -38,22 +38,27 @@ pub const DEFAULT_TIME_LIMIT: Duration = Duration::from_secs(60);
 /// How long each source may search. The sources search side by side, each
 /// against its own limit, so a source a project makes slow (files in a huge
 /// tree) does not take the others' time; a search lasts as long as its
-/// slowest source.
+/// slowest source. `None` is no limit: the source searches through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TimeLimits {
-    pub sessions: Duration,
-    pub git: Duration,
-    pub files: Duration,
+    pub sessions: Option<Duration>,
+    pub git: Option<Duration>,
+    pub files: Option<Duration>,
 }
 
 impl Default for TimeLimits {
     fn default() -> Self {
         Self {
-            sessions: DEFAULT_TIME_LIMIT,
-            git: DEFAULT_TIME_LIMIT,
-            files: DEFAULT_TIME_LIMIT,
+            sessions: Some(DEFAULT_TIME_LIMIT),
+            git: Some(DEFAULT_TIME_LIMIT),
+            files: Some(DEFAULT_TIME_LIMIT),
         }
     }
+}
+
+/// When a source started at `started` must stop; `None` without a limit.
+fn deadline(started: Instant, limit: Option<Duration>) -> Option<Instant> {
+    limit.and_then(|limit| started.checked_add(limit))
 }
 /// Results a search returns unless asked for another number.
 const DEFAULT_LIMIT: usize = 10;
@@ -486,7 +491,7 @@ impl RecallTool {
                         paths: Some(&paths),
                         project_root: Some(&self.setup.project_root),
                         now,
-                        deadline: Some(started + limits.sessions),
+                        deadline: deadline(started, limits.sessions),
                     };
                     // Each directory ranks its own logs; the better of the
                     // two at each place goes first.
@@ -518,7 +523,7 @@ impl RecallTool {
                         &repos,
                         &query,
                         candidates,
-                        started + limits.git,
+                        deadline(started, limits.git),
                         cancel,
                     ))
                 });
@@ -540,7 +545,7 @@ impl RecallTool {
                         &repos,
                         &query,
                         candidates,
-                        started + limits.files,
+                        deadline(started, limits.files),
                         cancel,
                     ))
                 });
@@ -561,7 +566,8 @@ impl RecallTool {
             ("files", limits.files, from_files),
         ] {
             if let Some((hits, cut_short)) = found {
-                if cut_short {
+                // Only a limit cuts a source short.
+                if let (true, Some(limit)) = (cut_short, limit) {
                     incomplete.push((name, limit));
                 }
                 lists.push(hits);
@@ -1073,13 +1079,30 @@ mod tests {
             .unwrap();
         let mut setup = setup(&project, &sessions_dir);
         // Files have no time at all; the sessions still have theirs.
-        setup.time_limits.files = Duration::ZERO;
+        setup.time_limits.files = Some(Duration::ZERO);
         let outcome =
             RecallTool::new(setup).search(SearchRequest::new("walrus"), None, &CancelToken::new());
         assert_eq!(outcome.incomplete, [("files", Duration::ZERO)]);
         assert!(outcome.hits.iter().any(|h| h.source == Source::Session));
         assert!(render(&outcome).contains("Not searched through: files at its 0 s limit"));
         assert_eq!(to_json(&outcome)["incomplete"], json!(["files"]));
+
+        // Without a limit a source searches through.
+        let unlimited = RecallSetup {
+            time_limits: TimeLimits {
+                sessions: None,
+                git: None,
+                files: None,
+            },
+            ..self::tests::setup(&project, &sessions_dir)
+        };
+        let outcome = RecallTool::new(unlimited).search(
+            SearchRequest::new("walrus"),
+            None,
+            &CancelToken::new(),
+        );
+        assert!(outcome.incomplete.is_empty());
+        assert!(outcome.hits.iter().any(|h| h.source == Source::File));
     }
 
     #[test]

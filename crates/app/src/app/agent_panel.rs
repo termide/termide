@@ -908,7 +908,8 @@ fn recall_tool(
             "[ai.recall] connection",
         ),
     });
-    let seconds = |secs: u64| std::time::Duration::from_secs(secs.max(1));
+    // 0 is no limit.
+    let seconds = |secs: u64| (secs > 0).then(|| std::time::Duration::from_secs(secs));
     Arc::new(RecallTool::new(RecallSetup {
         sessions_dir: session_dir_of(&project_root),
         project_root,

@@ -139,7 +139,7 @@ pub struct AiSettings {
     #[serde(default)]
     pub web: WebSettings,
 
-    /// The `recall` tool's solver.
+    /// The `recall` tool: its sources' time limits and its solver.
     #[serde(default)]
     pub recall: RecallSettings,
 
@@ -320,8 +320,9 @@ impl FoldBlocks {
 /// and with which model.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecallSettings {
-    /// Seconds each source may search; the sources search side by side, and
-    /// what one found by its limit is returned, with a note that it stopped.
+    /// Seconds each source may search, 0 for no limit; the sources search
+    /// side by side, and what one found by its limit is returned, with a
+    /// note that it stopped.
     #[serde(default = "recall_defaults::timeout_secs")]
     pub sessions_timeout_secs: u64,
     #[serde(default = "recall_defaults::timeout_secs")]
@@ -1267,6 +1268,28 @@ impl Config {
 #[cfg(test)]
 mod ai_settings_tests {
     use super::*;
+
+    #[test]
+    fn recall_settings_keep_their_defaults_where_left_out() {
+        let parsed: AiSettings = toml::from_str(
+            r#"
+            [recall]
+            git_timeout_secs = 0
+            solver = true
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.recall,
+            RecallSettings {
+                git_timeout_secs: 0,
+                solver: true,
+                ..RecallSettings::default()
+            }
+        );
+        assert_eq!(parsed.recall.files_timeout_secs, 60);
+        assert_eq!(AiSettings::default().recall, RecallSettings::default());
+    }
 
     #[test]
     fn new_sessions_start_on_the_named_connection_or_the_first() {
