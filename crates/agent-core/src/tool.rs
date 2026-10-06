@@ -30,6 +30,11 @@ pub struct ToolContext {
     /// The session the call comes from, for the `auto` mode reviewer; `None`
     /// for a call from outside termide's own loop.
     pub session: Option<SessionView>,
+    /// The call's own cancel token, when the call can be given up apart from
+    /// the run — an external agent that stopped waiting for it: a question
+    /// asked on its behalf is withdrawn with it. `None` for a call of
+    /// termide's own loop, whose questions end with the run.
+    pub withdrawn: Option<CancelToken>,
 }
 
 impl ToolContext {
@@ -42,6 +47,7 @@ impl ToolContext {
             suggester: None,
             shell_run: None,
             session: None,
+            withdrawn: None,
         }
     }
 }

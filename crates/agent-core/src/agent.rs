@@ -908,6 +908,7 @@ impl Agent {
                 provider: Arc::clone(&self.provider),
                 model: self.model.clone(),
             }),
+            withdrawn: None,
         };
         execute_tool(&self.tools, call, hooks, &ctx, cancel, &mut on_update)
     }

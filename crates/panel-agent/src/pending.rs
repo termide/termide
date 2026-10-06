@@ -218,9 +218,27 @@ pub(crate) fn suggestion_form(
 }
 
 impl AgentPanel {
+    /// Take down a permission card no one waits for any more — the external
+    /// agent gave the call up, or the run stopped — so it neither lingers
+    /// nor turns away the next call's question. Whether one was taken down.
+    pub(crate) fn drop_withdrawn_permission(&mut self) -> bool {
+        let withdrawn = matches!(
+            &self.pending,
+            Some(Pending::Permission { envelope, .. }) if envelope.withdrawn.is_cancelled()
+        );
+        if withdrawn {
+            self.pending = None;
+            self.end_permission_wait();
+        }
+        withdrawn
+    }
+
     pub(crate) fn poll_permissions(&mut self) -> Vec<PanelEvent> {
         let mut events = Vec::new();
         while let Ok(envelope) = self.permission_rx.try_recv() {
+            // The card before may have been given up just now: its prompter
+            // returned before this question could be sent.
+            self.drop_withdrawn_permission();
             if self.pending.is_some() {
                 // Prompts are sequential on the agent thread; a second one
                 // cannot arrive before the first is answered. Deny defensively.

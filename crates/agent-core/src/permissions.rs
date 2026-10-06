@@ -495,6 +495,19 @@ pub enum PersistScope {
 pub trait PermissionPrompter: Send {
     fn ask(&mut self, request: &PermissionRequest) -> PermissionAnswer;
 
+    /// [`Self::ask`] for a call that can be given up while the question is
+    /// open: once `withdrawn` is cancelled the question is taken back and
+    /// the call denied. A prompter that answers at once has nothing to take
+    /// back.
+    fn ask_for_call(
+        &mut self,
+        request: &PermissionRequest,
+        withdrawn: Option<&CancelToken>,
+    ) -> PermissionAnswer {
+        let _ = withdrawn;
+        self.ask(request)
+    }
+
     /// Whether a person answers; a prompter that answers alone is recorded
     /// as such, not as the user.
     fn attended(&self) -> bool {
@@ -538,6 +551,9 @@ pub struct PermissionEnvelope {
     pub id: u64,
     pub request: PermissionRequest,
     pub reply: Sender<PermissionAnswer>,
+    /// Cancelled once no one waits for the answer any more — the call was
+    /// given up — so the panel takes the card down.
+    pub withdrawn: CancelToken,
 }
 
 /// Cloneable, so the hooks of calls that come in another way — tools served
@@ -564,12 +580,23 @@ pub fn permission_channel(cancel: CancelToken) -> (ChannelPrompter, Receiver<Per
 
 impl PermissionPrompter for ChannelPrompter {
     fn ask(&mut self, request: &PermissionRequest) -> PermissionAnswer {
+        self.ask_for_call(request, None)
+    }
+
+    fn ask_for_call(
+        &mut self,
+        request: &PermissionRequest,
+        withdrawn: Option<&CancelToken>,
+    ) -> PermissionAnswer {
         let (reply, answer) = mpsc::channel();
         self.next_id += 1;
+        // Cancelled here too when the run stops, so the card goes either way.
+        let withdrawn = withdrawn.cloned().unwrap_or_default();
         let envelope = PermissionEnvelope {
             id: self.next_id,
             request: request.clone(),
             reply,
+            withdrawn: withdrawn.clone(),
         };
         if self.tx.send(envelope).is_err() {
             // The panel is gone; nobody can approve anything.
@@ -578,7 +605,10 @@ impl PermissionPrompter for ChannelPrompter {
         loop {
             match answer.recv_timeout(Duration::from_millis(100)) {
                 Ok(answer) => return answer,
-                Err(RecvTimeoutError::Timeout) if self.cancel.is_cancelled() => {
+                Err(RecvTimeoutError::Timeout)
+                    if self.cancel.is_cancelled() || withdrawn.is_cancelled() =>
+                {
+                    withdrawn.cancel();
                     return PermissionAnswer::Deny;
                 }
                 Err(RecvTimeoutError::Timeout) => {}
@@ -986,7 +1016,7 @@ impl PermissionHooks {
                     can_allow_session,
                     parts,
                 };
-                let answer = self.prompter.ask(&request);
+                let answer = self.prompter.ask_for_call(&request, ctx.withdrawn.as_ref());
                 // Allowing what the paused reviewer sent to the user hands
                 // the decisions back to it.
                 if matches!(

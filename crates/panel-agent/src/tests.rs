@@ -3355,6 +3355,56 @@ fn escape_declines_the_models_question() {
     assert_eq!(worker.join().unwrap(), QuestionReply::Declined);
 }
 
+/// A question for a call the external agent gave up comes down by itself,
+/// and the next call's question is shown rather than turned away.
+#[test]
+fn a_withdrawn_permission_question_comes_down() {
+    let mut panel = panel(vec![]);
+    let (prompter, rx) = permission_channel(CancelToken::new());
+    panel.permission_rx = rx;
+    let request = |command: &str| termide_agent_core::PermissionRequest {
+        tool: "bash".into(),
+        subject: command.into(),
+        call: termide_agent_core::ToolCall {
+            id: "c".into(),
+            name: "bash".into(),
+            arguments: serde_json::json!({ "command": command }),
+            extra_content: None,
+        },
+        suggested_pattern: String::new(),
+        can_persist: false,
+        can_allow_session: true,
+        parts: Vec::new(),
+    };
+    let wait_for = |panel: &mut AgentPanel, subject: &str| {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            panel.tick();
+            if let Some(Pending::Permission { envelope, .. }) = &panel.pending {
+                if envelope.request.subject == subject {
+                    return;
+                }
+            }
+            assert!(Instant::now() < deadline, "no card for {subject}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+    let withdrawn = CancelToken::new();
+    let mut first = prompter.clone();
+    let token = withdrawn.clone();
+    let worker = std::thread::spawn(move || first.ask_for_call(&request("git push"), Some(&token)));
+    wait_for(&mut panel, "git push");
+
+    withdrawn.cancel();
+    assert_eq!(worker.join().unwrap(), PermissionAnswer::Deny);
+    let mut second = prompter.clone();
+    let worker = std::thread::spawn(move || second.ask(&request("git fetch")));
+    // The given-up card goes and the next question takes its place.
+    wait_for(&mut panel, "git fetch");
+    assert!(panel.answer_permission(PermissionAnswer::AllowOnce));
+    assert_eq!(worker.join().unwrap(), PermissionAnswer::AllowOnce);
+}
+
 #[test]
 fn permission_prompt_is_answered_in_the_panel() {
     let mut panel = panel(vec![]);
@@ -3971,6 +4021,7 @@ fn a_permission_wait_is_timed_apart_from_the_call() {
                 }],
             },
             reply,
+            withdrawn: termide_agent_core::CancelToken::default(),
         },
         form: ChoiceForm::new("", vec![]),
         answers: Vec::new(),
@@ -4034,6 +4085,7 @@ fn a_grant_reaches_the_panel_rules_so_it_survives_a_rebuild() {
                     }],
                 },
                 reply,
+                withdrawn: termide_agent_core::CancelToken::default(),
             },
             form: ChoiceForm::new("", vec![]),
             answers: Vec::new(),
