@@ -1619,10 +1619,10 @@ fn render_body(
             content
         }
         Item::System { text } => {
-            // The system prompt, marked with an accent `#`, dim. It folds like a
-            // tool: collapsed shows the first few lines and a skipped-line note,
-            // behind a `▸`; expanded shows a `▾` and wraps the whole thing.
-            let accent = Style::default().fg(colors.info);
+            // The system prompt, marked with `#`, dim throughout — it is
+            // reference, not a step. It folds like a tool: collapsed shows the
+            // first few lines and a skipped-line note, behind a `▸`; expanded
+            // shows a `▾` and wraps the whole thing.
             let prompt = text.trim();
             let all: Vec<&str> = prompt.lines().collect();
             // The first line carries the `#` and the fold marker (when foldable);
@@ -1631,7 +1631,7 @@ fn render_body(
                 if !first {
                     return vec![Span::raw("  ")];
                 }
-                let mut spans = vec![Span::styled("# ", accent)];
+                let mut spans = vec![Span::styled("# ", dim)];
                 if foldable {
                     spans.push(Span::styled(if collapsed { "▸ " } else { "▾ " }, dim));
                 }
@@ -1667,12 +1667,18 @@ fn render_body(
             framed.append(&mut lines);
             framed
         }
-        Item::Thinking { text, cost, .. } => {
-            // Reasoning is its own dim block, marked with an accent `@`. Folded, a finished block is its
-            // first line alone with the turn's cost at the row's end; unfolded
-            // (and always while it streams) the whole text wraps under the
-            // marker.
-            let accent = Style::default().fg(colors.info);
+        Item::Thinking {
+            text,
+            cost,
+            streaming,
+            ..
+        } => {
+            // Reasoning is its own dim block, marked with `@`: the accent while
+            // it streams, like a running tool, then the plain foreground.
+            // Folded, a finished block is its first line alone with the turn's
+            // cost at the row's end; unfolded (and always while it streams)
+            // the whole text wraps under the marker.
+            let accent = Style::default().fg(if *streaming { colors.info } else { colors.fg });
             let reasoning = text.trim();
             if reasoning.is_empty() {
                 return Vec::new();
@@ -1688,14 +1694,7 @@ fn render_body(
             if collapsed {
                 // Still streaming, the headline follows the reasoning: its
                 // latest line, not the first.
-                let streaming = matches!(
-                    item,
-                    Item::Thinking {
-                        streaming: true,
-                        ..
-                    }
-                );
-                let line = if streaming {
+                let line = if *streaming {
                     reasoning.lines().rev().find(|l| !l.trim().is_empty())
                 } else {
                     reasoning.lines().next()
@@ -2896,6 +2895,24 @@ mod tests {
     }
 
     #[test]
+    fn a_thinking_marker_is_accent_while_streaming_then_plain() {
+        let colors = ThemeColors::default();
+        let mut transcript = Transcript::default();
+        transcript.stream_thinking("Weighing the options.");
+        let at_fg = |transcript: &mut Transcript| {
+            transcript
+                .lines(60, &colors, false)
+                .iter()
+                .flat_map(|l| l.spans.iter())
+                .find(|s| s.content == "@ ")
+                .and_then(|s| s.style.fg)
+        };
+        assert_eq!(at_fg(&mut transcript), Some(colors.info));
+        transcript.finish_thinking("12:00:00", None);
+        assert_eq!(at_fg(&mut transcript), Some(colors.fg));
+    }
+
+    #[test]
     fn a_running_tool_shows_in_full_then_folds_to_one_line() {
         let colors = ThemeColors::default();
         let mut transcript = Transcript::default();
@@ -3264,6 +3281,14 @@ mod tests {
         assert!(lines.iter().any(|l| l.contains("# ▾ rule 1")));
         assert!(lines.iter().any(|l| l.contains("rule 4")));
         assert!(lines.iter().any(|l| l.contains("rule 8")));
+        // The `#` is dim like the prompt itself, not an accent.
+        let hash_fg = transcript
+            .lines(60, &colors, false)
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .find(|s| s.content == "# ")
+            .and_then(|s| s.style.fg);
+        assert_eq!(hash_fg, Some(colors.disabled));
     }
 
     #[test]

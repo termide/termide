@@ -336,11 +336,12 @@ you have named or sent even one message to is always kept.
 | `Ctrl+↑` / `Ctrl+↓`, `PageUp` / `PageDown` | Scroll the session |
 | `Ctrl+Home` / `Ctrl+End` | Jump to the start, or back to following the newest output |
 
-The conversation is a stack of blocks, each opened by an accent-coloured mark:
+The conversation is a stack of blocks, each opened by a mark:
 `› ` for your message and for the agent's answer, `@ ` for its reasoning, `$ `
 for a shell call, `< ` for a file read, `> ` for a write, `± ` for an edit,
 `/ ` for a skill, `& ` for a subagent, `* ` for an MCP tool, `¿ ` for a
-question to you, `# ` for the system prompt. The answer is shown in full;
+question to you, `# ` for the system prompt. The marks are in the accent,
+except the system prompt's `#`, dim like the prompt itself. The answer is shown in full;
 a user message or the system prompt longer than five lines is
 folded to a preview that keeps the first line and the last few, with a
 `… N more lines` note between them. A block of five lines or fewer has nothing
@@ -353,7 +354,9 @@ it succeeds or the error colour once it fails; its subject keeps its own
 colour. A single row carries no `✓`, the colour of its mark telling how it
 ended; the unfolded form of a failed call ends with the `✗`. Durations grow from seconds to minutes, hours and
 days (`2s`, `1m13s`, `2h5m`, `3d4h`). Finished reasoning folds the same
-way, to its first line alone; unfolded, it shows the `⏫`/`✍️` lines. A block still in progress — a
+way, to its first line alone; unfolded, it shows the `⏫`/`✍️` lines. Its
+`@ Thinking` is in the accent while it streams, and in the plain text colour
+once it finishes. A block still in progress — a
 streaming reasoning, a running tool call with its live output — is always shown
 unfolded and folds only once it finishes. Your
 message reads as plain text on a faint background; the reasoning, the system
