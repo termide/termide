@@ -284,8 +284,15 @@ impl AgentPanel {
     /// and what the agent is set up with (agent, directory, connection, model)
     /// on the right, at the top of the transcript area, with the recent sessions
     /// filling the rows below. On a narrow panel the logo is dropped and only
-    /// the details show.
-    pub(crate) fn render_welcome(&mut self, area: Rect, buf: &mut Buffer, colors: &ThemeColors) {
+    /// the details show. The list's keyboard cursor is drawn only while
+    /// `panel_focused`, so a background panel does not draw the eye.
+    pub(crate) fn render_welcome(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        colors: &ThemeColors,
+        panel_focused: bool,
+    ) {
         const LOGO: [&str; WELCOME_LOGO_ROWS] = [
             "╭───────╮",
             "│ ▀█ █▀ │",
@@ -392,6 +399,7 @@ impl AgentPanel {
         let list_need = if total > 0 { total + 2 } else { 0 };
         let margin = usize::from(area.height as usize > header_len + list_need);
         let rows = total.min((area.height as usize).saturating_sub(margin + header_len + 2));
+        let cursor_shown = self.chat_focus && panel_focused;
         self.recent_rows = rows;
         let list_start = header_len + 2;
         if rows > 0 {
@@ -466,7 +474,7 @@ impl AgentPanel {
             }
             // The session under the keyboard cursor is shown inverted, like
             // a selected chat block.
-            if self.chat_focus && *hit == Some(BannerHit::Session(self.recent_selected)) {
+            if cursor_shown && *hit == Some(BannerHit::Session(self.recent_selected)) {
                 for x in x..x + w {
                     buf[(x, y)].set_style(Style::default().fg(colors.bg).bg(colors.fg));
                 }
@@ -484,7 +492,7 @@ impl AgentPanel {
                 rows,
                 total,
                 colors,
-                self.chat_focus,
+                cursor_shown,
             );
         }
     }
@@ -676,8 +684,11 @@ impl AgentPanel {
             // brought to a block only when the selection moves (see
             // `scroll_selected_into_view`), not on every frame. Here we only
             // note the block's flat-line range to tint.
-            // The rule or gap around a block stays out of the highlight.
-            selected_range = self.transcript.content_lines_of(self.selected);
+            // The rule or gap around a block stays out of the highlight, and
+            // a background panel shows none, so it does not draw the eye.
+            if ctx.is_focused {
+                selected_range = self.transcript.content_lines_of(self.selected);
+            }
         }
         let lines = self.transcript.lines(text_width, &colors, is_light);
         // The block under the chat cursor is shown inverted (text and
@@ -697,7 +708,7 @@ impl AgentPanel {
                 height: transcript_height - shown as u16 - rule_rows,
                 ..area
             };
-            self.render_welcome(welcome, buf, &colors);
+            self.render_welcome(welcome, buf, &colors, ctx.is_focused);
             if shown > 0 {
                 let rule_y = area.y + welcome.height;
                 let rule = transcript::separator(text_width + 1, &colors);

@@ -774,6 +774,13 @@ fn a_selected_diff_keeps_its_colors() {
         .find(|&x| buf[(x, y)].symbol() == "a" && buf[(x + 1, y)].symbol() == ".")
         .unwrap();
     assert_eq!(buf[(x, y)].bg, colors.fg);
+
+    // A panel out of focus draws no cursor, so it does not draw the eye.
+    let buf = render_buf_focused(&mut panel, width, height, false);
+    assert!(
+        (0..height).all(|y| (0..width).all(|x| buf[(x, y)].bg != colors.fg)),
+        "no block shown inverted"
+    );
 }
 
 fn render_buf(panel: &mut AgentPanel, width: u16, height: u16) -> Buffer {
@@ -2985,6 +2992,11 @@ fn tab_walks_the_banner_sessions_and_enter_opens_one() {
     );
     panel.handle_key(chord(KeyCode::Tab, KeyModifiers::NONE));
     assert!(panel.chat_focus);
+    // The cursor shows only while the panel is focused.
+    let colors = ThemeColors::default();
+    let inverted = |buf: &Buffer| (0..12).any(|y| (0..80).any(|x| buf[(x, y)].bg == colors.fg));
+    assert!(inverted(&render_buf(&mut panel, 80, 12)));
+    assert!(!inverted(&render_buf_focused(&mut panel, 80, 12, false)));
     panel.handle_key(chord(KeyCode::Down, KeyModifiers::NONE));
     panel.handle_key(chord(KeyCode::Down, KeyModifiers::NONE));
     panel.handle_key(chord(KeyCode::Down, KeyModifiers::NONE));
