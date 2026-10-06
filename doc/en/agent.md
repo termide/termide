@@ -252,8 +252,12 @@ session an unchecked item stays in the context, so as not to throw away the
 provider's prompt cache, but every call to it is refused; it leaves the
 context at the next moment the cache is lost anyway — a compaction, an agent
 or model switch — and cannot be switched back on in that session. The set is
-kept in the session log, so a reopened session comes back with it. An external
-agent over ACP brings its own tools, so it has no checklist.
+kept in the session log, so a reopened session comes back with it. Claude Code
+has the checklist too, with the built-in tools and the skills: it is served
+termide's tools when its session starts, so an unchecked item is refused from
+the first request on rather than kept out of its context. The MCP servers'
+tools are not served to it, so they are not listed. Codex, Gemini CLI and other
+ACP agents bring their own tools, so they have no checklist.
 
 The panel's `[≡]` menu is kept to the actions with no home elsewhere —
 **Session info** (also `F3` and `/usage`), **Rename session**, **Save chat as

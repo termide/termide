@@ -21,7 +21,7 @@ use crate::pending::Pending;
 use crate::render::context_bar;
 use crate::runtime::{push_history, session_model};
 use crate::submit::{parse_duration, parse_loop_args, slash_command};
-use crate::toolset::{Blocked, ToolsetGuard};
+use crate::toolset::{Blocked, ToolsetGuard, TOOLSET_ACTION};
 
 /// Replays one scripted assistant message per model call and records
 /// which model each call asked for.
@@ -5509,6 +5509,8 @@ struct External {
     /// Whether the panel's modes reach it, as with Claude Code, Codex and
     /// Gemini CLI.
     follows_mode: bool,
+    /// Whether its model calls termide's tools, as Claude Code's does.
+    host_tools: bool,
 }
 
 impl External {
@@ -5516,6 +5518,15 @@ impl External {
         Self {
             events: Mutex::new(Vec::new()),
             follows_mode: false,
+            host_tools: false,
+        }
+    }
+
+    fn on_termides_tools(setup: BackendSetup) -> Self {
+        Self {
+            follows_mode: true,
+            host_tools: true,
+            ..Self::new(setup)
         }
     }
 
@@ -5578,6 +5589,9 @@ impl Backend for External {
     fn follows_mode(&self) -> bool {
         self.follows_mode
     }
+    fn runs_host_tools(&self) -> bool {
+        self.host_tools
+    }
 }
 
 #[test]
@@ -5637,6 +5651,65 @@ fn an_external_agent_replaces_the_loop_and_hides_its_knobs() {
     assert!(panel.switch_agent("default"));
     assert!(!panel.external);
     assert_eq!(chip(&panel, MODE_ACTION), "configured");
+}
+
+#[test]
+fn an_external_agent_on_termides_tools_lists_and_refuses_them() {
+    let external = |host_tools: bool| {
+        let mut panel = AgentPanel::new(AgentPanelSetup {
+            backend: Some(Arc::new(move |setup: BackendSetup| {
+                let backend = if host_tools {
+                    External::on_termides_tools(setup)
+                } else {
+                    External::new(setup)
+                };
+                Ok(Box::new(backend) as Box<dyn Backend>)
+            })),
+            ..setup(vec![])
+        });
+        panel.offered_tools = vec!["read".into(), "bash".into()];
+        panel.mcp_arrived = vec![(
+            "db".into(),
+            Arc::new(Late("db__query")) as Arc<dyn termide_agent_core::Tool>,
+        )];
+        panel
+    };
+
+    // On its own tools there is nothing of termide's to show.
+    let mut own = external(false);
+    assert!(own.external);
+    assert!(own.handle_status_action(TOOLSET_ACTION).is_empty());
+    assert!(!own
+        .status_segments()
+        .iter()
+        .any(|s| s.action == Some(TOOLSET_ACTION)));
+
+    // On termide's tools the list and the chip are there, without the MCP
+    // servers' tools, which are not served to it.
+    let mut panel = external(true);
+    assert!(panel.external && panel.is_fresh());
+    assert_eq!(chip(&panel, TOOLSET_ACTION), "2/2");
+    let events = panel.handle_status_action(TOOLSET_ACTION);
+    let Some(PanelEvent::ShowChecklist { items, groups, .. }) = events.first() else {
+        panic!("the toolset list opens: {events:?}");
+    };
+    let keys: Vec<&str> = items.iter().map(|i| i.key.as_str()).collect();
+    assert_eq!(keys, ["read", "bash"]);
+    assert!(groups.is_empty());
+
+    // Its session took the tools when it started: switched off, even before
+    // the first request, a tool is refused rather than taken out.
+    panel.apply_toolset(&["read".to_string()]);
+    assert!(panel.toolset_off.contains("bash"));
+    assert!(panel.context_off.is_empty());
+    assert!(panel.blocked.read().unwrap().contains("bash"));
+    assert_eq!(chip(&panel, TOOLSET_ACTION), "1/2");
+    let items = panel.toolset_items();
+    let bash = items.iter().find(|i| i.key == "bash").unwrap();
+    assert!(
+        bash.enabled && !bash.checked && !bash.note.is_empty(),
+        "{bash:?}"
+    );
 }
 
 /// An external agent that advertises two models and records the one picked.

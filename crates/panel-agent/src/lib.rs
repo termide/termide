@@ -1314,8 +1314,8 @@ impl Panel for AgentPanel {
                     on_select: SelectAction::Custom(CONNECTION_ACTION.to_string()),
                 }]
             }
-            // An external agent brings its own tools; nothing of ours to list.
-            TOOLSET_ACTION if self.external => Vec::new(),
+            // An external agent on its own tools: nothing of ours to list.
+            TOOLSET_ACTION if !self.has_toolset() => Vec::new(),
             TOOLSET_ACTION => {
                 let groups = self.toolset_groups();
                 let prompt = self.toolset_prompt(&groups);

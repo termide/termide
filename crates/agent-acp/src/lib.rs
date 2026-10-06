@@ -363,6 +363,24 @@ impl Backend for AcpRuntime {
         self.shared.flavor != AcpFlavor::Generic
     }
 
+    /// Claude Code, while termide's tools are still to be served or the
+    /// server of them runs: a server that failed to start leaves it on its
+    /// own tools.
+    fn runs_host_tools(&self) -> bool {
+        let shared = &self.shared;
+        shared.flavor == AcpFlavor::ClaudeCode
+            && (shared
+                .host_tools
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_some()
+                || shared
+                    .mcp_server
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .is_some())
+    }
+
     fn set_mode(&self, mode: Mode) {
         // The hooks read the shared handle; Codex and Gemini CLI are told, off
         // the UI thread.
@@ -1779,6 +1797,7 @@ mod tests {
             .unwrap()
             .starts_with("Bearer "));
         assert!(runtime.follows_mode());
+        assert!(runtime.runs_host_tools());
         // Its calls of termide's tools show under their own names.
         let call = tool_call_of(&json!({
             "toolCallId": "t1", "title": "mcp__termide__bash", "kind": "other",
@@ -2005,12 +2024,18 @@ mod tests {
     #[test]
     fn codex_is_put_in_the_modes_that_match_the_panels() {
         let dir = tempfile::tempdir().unwrap();
+        // Offered termide's tools, it keeps its own.
+        let host = HostTools {
+            tools: termide_agent_core::ToolRegistry::new(),
+            hooks: Box::new(termide_agent_core::NoHooks),
+        };
         let (runtime, seen) = recording_agent(
             dir.path().to_path_buf(),
             AcpFlavor::Codex,
-            None,
+            Some(host),
             ModeHandle::new(Mode::Configured),
         );
+        assert!(!runtime.runs_host_tools());
         let option = |config: &'static str, value: &'static str| {
             move |m: &Value| {
                 m["method"] == "session/set_config_option"
