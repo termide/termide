@@ -946,7 +946,9 @@ added to the system prompt, and every tool call that could change something
 is refused with a message the model reads, whatever the rules, the session
 answers or a hook's approval say: `edit`, `write`, MCP tools, and any shell
 command that is not on the look-only list. Reading inside the project, the
-web and `skill` run without asking; reading outside it asks.
+web and `skill` run without asking; reading outside it asks. `task` runs
+too: the subagent is held to plan mode whatever its `AGENT.md` says, so it
+only reads.
 
 When the agent answers, a card asks what to do with the plan:
 
@@ -1158,7 +1160,8 @@ Claude Code's `Task` tool and OpenCode's sub-sessions do.
 
 The delegate does not see the conversation, so the calling agent must put
 everything into the prompt. It runs in the session's current mode, unless its
-`AGENT.md` names one, with no one to prompt, so it can only do what the
+`AGENT.md` names one (plan mode overrides that: a delegate of a planning
+agent only reads), with no one to prompt, so it can only do what the
 rules and that mode already allow: anything that would otherwise ask is
 refused with a reason it reads. In `auto` the reviewer decides those calls
 instead. External agents (those with a `command`) cannot be delegates, and a

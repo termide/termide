@@ -345,7 +345,8 @@ is already the thing the user flips mid-run, and an agent definition can
 still fix it (`mode: plan` in its `AGENT.md`, which gives OpenCode's plan
 agent for free). The guard is `PlanGuard` in `permissions.rs`, first in the
 hook chain, so it also overrides a command hook's `allow`: in plan mode only
-`read`, `skill` and a shell command made of look-only parts without
+the reading tools (`read`, `skill`, the web tools, `question`, `recall`),
+`task` (see below) and a shell command made of look-only parts without
 substitution pass; everything else is blocked with a fixed reason the model
 reads. Instructions come from `ai/system/plan.md`, appended to the system
 prompt while the mode is on (the panel updates the worker's prompt on the
@@ -358,6 +359,11 @@ same file, so the plan stays in context. The plan is the answer in the
 session, not a file: the session log is the record, and the panel's `/undo`
 checkpoints cover the changes the accepted plan then makes. Not covered: MCP tools with
 a read-only annotation are blocked too, since annotations are not plumbed.
+
+`task` passes the guard as well: the subagent runs in plan mode whatever its
+`AGENT.md` names, behind a `PlanGuard` of its own, so delegation reads and
+never changes anything. That lets the planner hand fact-finding to a
+subagent.
 
 ## 4b. Auto mode
 

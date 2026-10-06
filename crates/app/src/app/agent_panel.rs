@@ -10,11 +10,11 @@ use termide_agent_acp::AcpRuntime;
 use termide_agent_core::Mode;
 use termide_agent_core::{
     apply_tool_texts, build_system_prompt, discover_context_files, ensure_global_layout, AcpConfig,
-    AcpFlavor, Agent, AgentDirs, AgentEvent, AutoDenyPrompter, CancelToken, CompactionPolicy,
-    Decision, IntentLog, Message, ModelSpec, PermissionHooks, PermissionRules, PersistScope,
-    PromptOptions, Provider, Refusals, ReviewerSetup, Session, SessionSummary, ShellOutput,
-    ShellRunner, ThinkingLevel, Tool, ToolCall, ToolContext, ToolRegistry, UserMessage,
-    DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
+    AcpFlavor, Agent, AgentDirs, AgentEvent, AutoDenyPrompter, CancelToken, ChainedHooks,
+    CompactionPolicy, Decision, IntentLog, Message, ModeHandle, ModelSpec, PermissionHooks,
+    PermissionRules, PersistScope, PlanGuard, PromptOptions, Provider, Refusals, ReviewerSetup,
+    Session, SessionSummary, ShellOutput, ShellRunner, ThinkingLevel, Tool, ToolCall, ToolContext,
+    ToolRegistry, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
 };
 use termide_agent_hooks::CommandHooks;
 use termide_agent_mcp::{Connections, TokenStore};
@@ -946,6 +946,16 @@ struct Subagents {
     refusals: Refusals,
 }
 
+/// The mode a subagent runs in: its own, else the delegating agent's. Plan
+/// mode lets a delegation through only because the subagent cannot change
+/// anything either, so it overrides the agent's own mode.
+fn subagent_mode(parent: Mode, own: Option<Mode>) -> Mode {
+    match parent {
+        Mode::Plan => Mode::Plan,
+        parent => own.unwrap_or(parent),
+    }
+}
+
 /// A runaway subagent is cut off after this many model calls.
 const SUBAGENT_MAX_TURNS: usize = 50;
 
@@ -998,7 +1008,8 @@ impl Subagents {
             thinking: self.reasoning,
         };
         let mut rules = self.rules.clone();
-        rules.mode = definition.spec.mode.unwrap_or_else(|| self.mode.get());
+        rules.mode = subagent_mode(self.mode.get(), definition.spec.mode);
+        let plan_guard = PlanGuard::new(ModeHandle::new(rules.mode)).with_refusals(&self.refusals);
         // The reviewer judges the subagent's calls against what the user asked
         // the delegating agent; the task itself counts as that agent's words.
         let parent = ctx
@@ -1014,7 +1025,7 @@ impl Subagents {
         // Mirror the sub-run's own progress up as it goes, and stop a run
         // that will not stop itself. The parent's cancel aborts it too.
         let budget = CancelToken::new();
-        let mut hooks = PermissionHooks::new(
+        let permissions = PermissionHooks::new(
             rules,
             Box::new(AutoDenyPrompter::new(
                 self.refusals.unattended_subagent.clone(),
@@ -1022,6 +1033,9 @@ impl Subagents {
         )
         .with_classifier(Box::new(self.reviewer.classifier(budget.clone())))
         .with_refusals(self.refusals.clone());
+        // The guard goes first, as in the panel's own chain: in plan mode a
+        // session answer must not let a change through.
+        let mut hooks = ChainedHooks::new(vec![Box::new(plan_guard), Box::new(permissions)]);
         let mut turns = 0usize;
         let mut progress = String::new();
         {
@@ -1973,6 +1987,14 @@ mod tests {
         assert_eq!(resolve_model(&provider, "").as_deref(), Some("first"));
         assert_eq!(resolve_model(&provider, "named").as_deref(), Some("named"));
         assert_eq!(resolve_model(&Lists(vec![]), ""), None);
+    }
+
+    #[test]
+    fn plan_mode_holds_a_subagent_whatever_its_own_mode() {
+        assert_eq!(subagent_mode(Mode::Plan, Some(Mode::All)), Mode::Plan);
+        assert_eq!(subagent_mode(Mode::Plan, None), Mode::Plan);
+        assert_eq!(subagent_mode(Mode::Edit, Some(Mode::Ask)), Mode::Ask);
+        assert_eq!(subagent_mode(Mode::Auto, None), Mode::Auto);
     }
 
     /// With subagents wired, every agent gets `task`, unless its `tools`

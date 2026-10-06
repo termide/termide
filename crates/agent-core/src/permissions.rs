@@ -169,7 +169,8 @@ pub fn is_read_only_call(call: &ToolCall) -> bool {
 /// Refuses every call that could change something while the shared mode is
 /// [`Mode::Plan`]. It sits first in the hook chain, ahead of command hooks,
 /// so nothing — not even a hook's approval — lets a change through in plan
-/// mode; in every other mode it does nothing.
+/// mode; in every other mode it does nothing. A delegation to another agent
+/// goes through: the subagent runs in plan mode under a guard of its own.
 pub struct PlanGuard {
     mode: ModeHandle,
     /// What the model reads for a refusal.
@@ -198,7 +199,7 @@ impl PlanGuard {
 
 impl Hooks for PlanGuard {
     fn before_tool_call(&mut self, call: &ToolCall, _ctx: &ToolContext) -> ToolDecision {
-        if self.mode.get() == Mode::Plan && !is_read_only_call(call) {
+        if self.mode.get() == Mode::Plan && !is_read_only_call(call) && call.name != "task" {
             self.refused = true;
             ToolDecision::Block {
                 reason: self.reason.clone(),
@@ -715,6 +716,8 @@ impl PermissionHooks {
             // its code, and writes nothing.
             (_, "skill" | "question" | "suggest_command" | "recall") => Decision::Allow,
             (Mode::Plan | Mode::Edit, "fetch" | "web_search") => Decision::Allow,
+            // The subagent is held to plan mode too, so it only reads.
+            (Mode::Plan, "task") => Decision::Allow,
             (Mode::Edit | Mode::Auto, "edit" | "write") if inside => Decision::Allow,
             // A query reads the web; a fetched URL can carry data out, so the
             // reviewer sees it.
@@ -2822,6 +2825,33 @@ mod tests {
             ToolDecision::Allow
         ));
     }
+    /// A delegation passes plan mode's guard and needs no answer: the
+    /// subagent is held to plan mode in turn.
+    #[test]
+    fn plan_mode_lets_a_task_through() {
+        let task = call("task", json!({ "agent": "explore", "prompt": "find it" }));
+        let mut guard = PlanGuard::new(ModeHandle::new(Mode::Plan));
+        assert!(matches!(
+            guard.before_tool_call(&task, &ctx()),
+            ToolDecision::Allow
+        ));
+        let decide = |mode| {
+            PermissionHooks::new(
+                PermissionRules {
+                    mode,
+                    ..PermissionRules::default()
+                },
+                Box::new(Scripted {
+                    answers: vec![],
+                    asked: Arc::new(Mutex::new(Vec::new())),
+                }),
+            )
+            .decide(&task, &ctx())
+        };
+        assert_eq!(decide(Mode::Plan), Decision::Allow);
+        assert_eq!(decide(Mode::Ask), Decision::Ask);
+    }
+
     #[test]
     fn plan_mode_refuses_every_change_and_lets_reads_through() {
         let mode = ModeHandle::new(Mode::Plan);
