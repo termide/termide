@@ -347,8 +347,10 @@ folded to a preview that keeps the first line and the last few, with a
 `… N more lines` note between them. A block of five lines or fewer has nothing
 worth hiding, so it is shown in full with no fold marker; so is any finished
 block that takes a single row unfolded. A finished tool call
-folds to a single line: its headline (a shell call's first command line)
-alone; how long it took (`🕒`) shows once it is unfolded. A tool call's mark
+folds to its headline alone: a shell call's first command line, clipped to
+one row like folded reasoning, or any other call's subject — a path, a URL, a
+query, a subagent's task — wrapped under the action rather than clipped; how
+long it took (`🕒`) shows once it is unfolded. A tool call's mark
 and action are in the accent while it runs, then turn the success colour once
 it succeeds or the error colour once it fails; its subject keeps its own
 colour. A single row carries no `✓`, the colour of its mark telling how it

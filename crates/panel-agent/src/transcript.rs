@@ -1163,6 +1163,45 @@ fn row_with_meta(
     vec![Line::from(head), right_meta(width as u16, meta)]
 }
 
+/// A tool headline whose subject (its last span) wraps under the prefix — the
+/// glyph, the action and the fold marker — instead of being clipped, with
+/// `meta` at the last row's end when it fits there, else on a row of its own.
+/// A row too narrow to leave a useful subject beside the prefix clips it.
+fn wrapped_row_with_meta(
+    mut head: Vec<Span<'static>>,
+    meta: Vec<Span<'static>>,
+    width: u16,
+) -> Vec<Line<'static>> {
+    /// Columns of subject worth wrapping into; narrower, the headline clips.
+    const MIN_SUBJECT: usize = 12;
+    let Some(subject) = head.pop() else {
+        return row_with_meta(head, meta, true, width);
+    };
+    let indent: usize = head.iter().map(|s| width_of(&s.content)).sum();
+    // The scrollbar gutter at the edge.
+    let avail = (width as usize).saturating_sub(indent + 1);
+    if avail < MIN_SUBJECT {
+        head.push(subject);
+        return row_with_meta(head, meta, true, width);
+    }
+    let mut prefix = Some(head);
+    let mut lines: Vec<Line<'static>> = wrap_row(&subject.content, avail)
+        .into_iter()
+        .map(|row| {
+            let mut spans = prefix
+                .take()
+                .unwrap_or_else(|| vec![Span::raw(" ".repeat(indent))]);
+            spans.push(Span::styled(row.trim_end().to_string(), subject.style));
+            Line::from(spans)
+        })
+        .collect();
+    if !meta.is_empty() {
+        let last = lines.pop().unwrap_or_default();
+        lines.extend(row_with_meta(last.spans, meta, false, width));
+    }
+    lines
+}
+
 /// Split `line` into rows no wider than `width` columns, breaking after the
 /// last space in reach and mid-word only when a row has none. Spaces are kept,
 /// so a command reads exactly as it was run.
@@ -1939,30 +1978,31 @@ fn render_body(
                 // call's first command line — and its timing is one unfold
                 // away; a live one keeps the meta, where a wait on a
                 // permission answer ticks.
-                let head = match shell_command(call) {
+                // A shell call's command clips to its first line; any other
+                // call's subject wraps, read in full without unfolding.
+                let meta = if finished { stats } else { clock };
+                return match shell_command(call) {
                     Some(command) => {
                         let mut head = shell_prefix(state);
                         head.extend(marker);
                         let first = command.lines().next().unwrap_or("").to_string();
                         head.push(Span::styled(first, dim));
-                        head
+                        row_with_meta(head, meta, true, width)
                     }
-                    None => tool_headline(call, marker, width, state, colors),
+                    None => wrapped_row_with_meta(
+                        tool_headline(call, marker, width, state, colors),
+                        meta,
+                        width,
+                    ),
                 };
-                let meta = if finished { stats } else { clock };
-                return row_with_meta(head, meta, true, width);
             }
             let mut lines = match shell_command(call) {
                 Some(command) => command_lines(&command, marker, width, state, colors),
-                None => {
-                    let clip = !stats.is_empty();
-                    row_with_meta(
-                        tool_headline(call, marker, width, state, colors),
-                        stats,
-                        clip,
-                        width,
-                    )
-                }
+                None => wrapped_row_with_meta(
+                    tool_headline(call, marker, width, state, colors),
+                    stats,
+                    width,
+                ),
             };
             // An edit's result is a unified diff, painted like the git diff
             // panel paints one.
@@ -3221,21 +3261,76 @@ mod tests {
     }
 
     #[test]
-    fn an_edit_keeps_its_counts_when_the_path_is_clipped() {
+    fn an_edit_wraps_a_long_path_and_keeps_its_counts() {
         let colors = ThemeColors::default();
         let mut transcript = Transcript::default();
+        let path = "/a/very/long/path/that/does/not/fit/the/row/at/all/a.rs";
         push_edit(
             &mut transcript,
-            "/a/very/long/path/that/does/not/fit/the/row/at/all/a.rs",
+            path,
             edit_result("Edited a.rs (1 replacement).", ""),
         );
-        // Folded, and unfolded, the counts stand at the row's end.
+        // Folded, and unfolded, the path wraps whole and the counts follow it.
         let folded = text_of(transcript.lines(40, &colors, false));
-        assert_eq!(folded.len(), 1, "{folded:?}");
-        assert!(folded[0].ends_with("+1 −2"), "{folded:?}");
+        assert!(folded.len() > 1, "{folded:?}");
+        assert!(folded.iter().all(|row| width_of(row) <= 40), "{folded:?}");
+        assert!(!folded.concat().contains('…'), "{folded:?}");
+        let joined: String = folded.iter().map(|row| row.trim()).collect();
+        assert!(joined.contains(path), "{folded:?}");
+        assert!(folded.last().unwrap().ends_with("+1 −2"), "{folded:?}");
         assert!(transcript.toggle_expanded(0));
         let unfolded = text_of(transcript.lines(40, &colors, false));
-        assert!(unfolded[0].ends_with("+1 −2"), "{unfolded:?}");
+        assert!(
+            unfolded.iter().any(|row| row.ends_with("+1 −2")),
+            "{unfolded:?}"
+        );
+    }
+
+    #[test]
+    fn a_folded_task_wraps_its_subject_under_the_action() {
+        let colors = ThemeColors::default();
+        let mut transcript = Transcript::default();
+        transcript.push(Item::Tool {
+            call: call(
+                "task",
+                json!({ "agent": "clear", "prompt": "check every call site of the parser and report which ones skip validation" }),
+            ),
+            result: Some(ToolResultMessage::text(&call("task", json!({})), "done")),
+            live: None,
+            at: "12:00:00".into(),
+            duration_ms: Some(10),
+            waited_ms: None,
+            waiting: false,
+        });
+        let rows = text_of(transcript.lines(40, &colors, false));
+        assert!(rows.len() > 1, "{rows:?}");
+        assert!(rows.iter().all(|row| width_of(row) <= 40), "{rows:?}");
+        assert!(!rows.concat().contains('…'), "{rows:?}");
+        let joined = rows
+            .iter()
+            .map(|row| row.trim())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(joined.ends_with("which ones skip validation"), "{rows:?}");
+        // Continuation rows line up under the subject, past the action.
+        let indent = rows[0].find("clear:").unwrap();
+        let indent = width_of(&rows[0][..indent]);
+        assert!(rows[1].starts_with(&" ".repeat(indent)), "{rows:?}");
+    }
+
+    #[test]
+    fn folded_reasoning_still_clips_to_one_row() {
+        let colors = ThemeColors::default();
+        let mut transcript = Transcript::default();
+        transcript.push(Item::Thinking {
+            text: "a long first line of reasoning that goes well past the row\nmore".into(),
+            streaming: false,
+            at: "12:00:00".into(),
+            cost: None,
+        });
+        let rows = text_of(transcript.lines(40, &colors, false));
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert!(rows[0].ends_with('…'), "{rows:?}");
     }
 
     #[test]
