@@ -932,8 +932,10 @@ The look-only commands are a short list that only look at things (`ls`,
 redirection into a file disqualifies it, while pointing a stream at another
 (`2>&1`) or at `/dev/null` does not. So do the arguments with which such a
 command writes a file or runs another program: `env` counts only without a
-command to run, `git branch` and `git remote` only while they list,
-`find` only without `-delete`, `-exec`, `-ok`, `-fprint` or `-fls`, and
+command to run, `git branch`, `git tag` and `git remote` only while they
+list, `sed` only while it prints (no `-i` or `-f`, and a script of
+addresses with `p`, `l`, `=`, `q` or `d`, such as `sed -n '40,80p'`; a
+substitution asks), `find` only without `-delete`, `-exec`, `-ok`, `-fprint` or `-fls`, and
 `sort -o`, `uniq` with an output file, `tree -o`/`-R`, `rg --pre` and
 `git diff --output` ask. Loading a skill never asks.
 
@@ -945,10 +947,11 @@ For a task you want to see thought through before a line changes, switch to
 added to the system prompt, and every tool call that could change something
 is refused with a message the model reads, whatever the rules, the session
 answers or a hook's approval say: `edit`, `write`, MCP tools, and any shell
-command that is not on the look-only list. Reading inside the project, the
-web and `skill` run without asking; reading outside it asks. `task` runs
-too: the subagent is held to plan mode whatever its `AGENT.md` says, so it
-only reads.
+command that is not on the look-only list; for a command the message names
+the part that is not, so the agent can take another way. Reading inside the
+project, the web and `skill` run without asking; reading outside it asks.
+`task` runs too: the subagent is held to plan mode whatever its `AGENT.md`
+says, so it only reads.
 
 The default instructions have the agent work the task through with you
 before it writes the plan. It explores first and finds out the facts itself,
