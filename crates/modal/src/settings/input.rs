@@ -1162,7 +1162,7 @@ mod keybinding_picker_tests {
                 .collect();
             let expected = match slot.key {
                 Some(i) => ["Alt+W", "Alt+X", "F10"][i],
-                None => "+",
+                None => crate::settings::render::KB_ADD_BUTTON,
             };
             assert_eq!(text, expected, "slot {slot:?}");
         }
@@ -1218,6 +1218,47 @@ mod keybinding_picker_tests {
 
         press(&mut modal, KeyCode::F(2), KeyModifiers::ALT);
         assert_eq!(keys(&modal), vec!["Alt+W", "Alt+X", "F10", "Alt+F2"]);
+    }
+
+    /// Walking right past the last key lands on the `[+]` button, which is
+    /// then inverted like a selected key; before that it is not.
+    #[test]
+    fn the_plus_button_is_inverted_under_the_cursor() {
+        let mut modal = kb_modal();
+        let area = Rect::new(0, 0, 110, 40);
+        let row = kb_binding_names(0)
+            .iter()
+            .position(|n| *n == "close_panel")
+            .unwrap();
+        let add_modifiers = |modal: &mut SettingsModal| {
+            let mut buf = Buffer::empty(area);
+            modal.render(area, &mut buf, &termide_theme::Theme::default());
+            let (y, add) = modal
+                .kb_rows
+                .iter()
+                .find(|(i, _)| *i == row)
+                .and_then(|(_, slots)| slots.iter().find(|s| s.key.is_none()))
+                .map(|s| {
+                    let y = (0..area.height)
+                        .find(|&y| buf[(s.span.0, y)].symbol() == "[")
+                        .expect("the [+] is drawn");
+                    (y, *s)
+                })
+                .expect("the [+] slot is drawn");
+            (add.span.0..add.span.1)
+                .map(|x| buf[(x, y)].modifier)
+                .collect::<Vec<_>>()
+        };
+
+        assert!(add_modifiers(&mut modal)
+            .iter()
+            .all(|m| !m.contains(ratatui::style::Modifier::REVERSED)));
+        for _ in 0..3 {
+            press(&mut modal, KeyCode::Right, KeyModifiers::NONE);
+        }
+        assert!(add_modifiers(&mut modal)
+            .iter()
+            .all(|m| m.contains(ratatui::style::Modifier::REVERSED)));
     }
 
     /// The `+` is drawn on the focused row only, so a click at its column on

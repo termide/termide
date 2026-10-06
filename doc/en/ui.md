@@ -60,13 +60,13 @@ Navigate bindings with `Up/Down`. Each row lists every key the action accepts �
 
 | Shortcut | Action |
 |----------|--------|
-| `Left` / `Right` | Move the cursor between the keys of the row; past the last key it lands on the `+` slot |
-| `Enter` | Capture a keypress for the slot under the cursor — replaces that key, or adds a new alternative on `+` |
+| `Left` / `Right` | Move the cursor between the keys of the row; past the last key it lands on the `[+]` button |
+| `Enter` | Capture a keypress for the slot under the cursor — replaces that key, or adds a new alternative on `[+]` |
 | `Delete` | Remove the key under the cursor |
 | `Shift+Delete` / `Backspace` | Clear every key of the action |
 | `Escape` | Leave the list, or abandon a capture in progress |
 
-The focused row ends with a `+` slot; clicking it, or pressing `Enter` on it, captures a keypress and appends it. Clicking a key selects it, so the next `Enter` or `Delete` acts on what was clicked; a double click on a key captures it. A chord the action already accepts is refused and the reason is shown; a chord another action holds is stored with a warning naming where. While a keypress is being captured the row keeps showing its keys, the one to be overwritten marked in the warning colour.
+The focused row ends with a `[+]` button; clicking it, or pressing `Enter` on it, captures a keypress and appends it. Clicking a key selects it, so the next `Enter` or `Delete` acts on what was clicked; a double click on a key captures it. A chord the action already accepts is refused and the reason is shown; a chord another action holds is stored with a warning naming where. While a keypress is being captured the row keeps showing its keys, the one to be overwritten marked in the warning colour.
 
 The active section highlight in the sidebar is cleared when focus leaves it — the current section name is shown in the content-area header, so a dual highlight would just be misleading.
 

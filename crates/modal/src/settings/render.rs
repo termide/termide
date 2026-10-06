@@ -596,7 +596,10 @@ impl SettingsModal {
 }
 
 /// Lay out a binding's keys in `width` columns starting at `x`, optionally
-/// ending with the `+` slot.
+/// ending with the `[+]` button.
+///
+/// Keys are separated by `, `; the button by a plain space, so it reads as a
+/// button next to the list rather than one more key in it.
 ///
 /// The row is right-anchored: when the keys do not all fit, the earliest ones
 /// are dropped so the newest alternatives and the `+` slot stay visible —
@@ -612,7 +615,7 @@ fn kb_row_layout(
     show_add: bool,
 ) -> Vec<KbSlot> {
     const SEP: &str = ", ";
-    const ADD: &str = "+";
+    const ADD_SEP: &str = " ";
 
     let mut texts: Vec<(&str, Option<usize>)> = keys
         .iter()
@@ -620,19 +623,24 @@ fn kb_row_layout(
         .map(|(i, k)| (k.as_str(), Some(i)))
         .collect();
     if show_add {
-        texts.push((ADD, None));
+        texts.push((KB_ADD_BUTTON, None));
     }
     if texts.is_empty() || width == 0 {
         return Vec::new();
     }
 
     let width_of = |index: usize| UnicodeWidthStr::width(texts[index].0);
+    // Columns between item `index` and the one before it.
+    let lead_of = |index: usize| match texts[index].1 {
+        Some(_) => SEP.width(),
+        None => ADD_SEP.width(),
+    };
 
     // Widest window ending at the last item that still fits.
     let mut first = texts.len() - 1;
     let mut used = width_of(first);
     while first > 0 {
-        let cost = SEP.width() + width_of(first - 1);
+        let cost = lead_of(first) + width_of(first - 1);
         if used + cost > width {
             break;
         }
@@ -644,9 +652,9 @@ fn kb_row_layout(
 
     let mut slots = Vec::with_capacity(texts.len() - first);
     let mut col = x;
-    let mut lead = 0usize;
-    for &(text, key) in &texts[first..] {
+    for (index, &(text, key)) in texts.iter().enumerate().skip(first) {
         let own = UnicodeWidthStr::width(text);
+        let lead = if index == first { 0 } else { lead_of(index) };
         if col as usize + lead + own > x as usize + width {
             break;
         }
@@ -656,10 +664,13 @@ fn kb_row_layout(
             span: (col, col + own as u16),
         });
         col += own as u16;
-        lead = SEP.width();
     }
     slots
 }
+
+/// The button closing the focused keybinding row; a click or `Enter` on it
+/// captures a new alternative.
+pub(super) const KB_ADD_BUTTON: &str = "[+]";
 
 impl SettingsModal {
     fn render_keybindings(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
@@ -749,7 +760,7 @@ impl SettingsModal {
                     buf.set_string(
                         prev,
                         y,
-                        ", ",
+                        if slot.key.is_some() { ", " } else { " " },
                         Style::default().fg(if is_focused_row || capturing.is_some() {
                             theme.selected_fg
                         } else {
@@ -759,15 +770,19 @@ impl SettingsModal {
                 }
                 let text = match slot.key {
                     Some(i) => keys[i].as_str(),
-                    None => "+",
+                    None => KB_ADD_BUTTON,
                 };
                 let style = match (slot.key, capturing) {
-                    // The `+` under an Append capture is the slot being filled.
+                    // The `[+]` under an Append capture is the slot being filled.
                     (None, Some(KbCapture::Append)) => Style::default()
                         .fg(theme.warning)
                         .add_modifier(Modifier::BOLD),
+                    // Under the cursor the button is inverted like a selected key.
+                    (None, None) if self.kb_key_cursor >= keys.len() => Style::default()
+                        .fg(theme.selected_fg)
+                        .add_modifier(Modifier::BOLD | Modifier::REVERSED),
                     (None, _) => Style::default()
-                        .fg(theme.accented_fg)
+                        .fg(theme.selected_fg)
                         .add_modifier(Modifier::BOLD),
                     // Only the key the captured chord will overwrite takes the
                     // warning colour; the rest of the row stays as it was, so

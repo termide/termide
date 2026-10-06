@@ -315,7 +315,7 @@ panels.
 The same shape is editable without touching the file: in Settings →
 Keybindings each row lists every key its action accepts, `Left`/`Right`
 move a cursor between them, `Enter` captures a chord for the key under
-the cursor, and the `+` drawn at the end of the focused row appends a
+the cursor, and the `[+]` drawn at the end of the focused row appends a
 new alternative. See [ui.md](ui.md#settings-modal).
 
 ### Unbound actions
