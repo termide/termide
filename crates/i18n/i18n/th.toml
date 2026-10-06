@@ -577,6 +577,7 @@ agent_toolset_note_new_session = "ไม่อยู่ในบริบท; �
 agent_tool_read = "กำลังอ่าน"
 agent_tool_write = "กำลังเขียน"
 agent_tool_edit = "กำลังแก้ไข"
+agent_edit_loose_match = "จับคู่โดยไม่สนใจความต่างของช่องว่าง"
 agent_tool_fetch = "กำลังดึง"
 agent_tool_web_search = "กำลังค้นหา"
 agent_tool_recall = "กำลังค้นประวัติ"

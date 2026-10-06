@@ -928,6 +928,9 @@ pub trait Translation: Send + Sync {
     fn agent_tool_write(&self) -> &str;
     /// Agent transcript: the action verb for an `edit` tool call.
     fn agent_tool_edit(&self) -> &str;
+    /// Agent transcript: the note under an edit whose text matched only
+    /// once whitespace differences were ignored.
+    fn agent_edit_loose_match(&self) -> &str;
     /// Agent transcript: the action verb for a `fetch` tool call.
     fn agent_tool_fetch(&self) -> &str;
     /// Agent transcript: the action verb for a `web_search` tool call.

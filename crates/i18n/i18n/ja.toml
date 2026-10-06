@@ -576,6 +576,7 @@ agent_toolset_note_new_session = "コンテキスト外。新規セッション�
 agent_tool_read = "読み取り中"
 agent_tool_write = "書き込み中"
 agent_tool_edit = "編集中"
+agent_edit_loose_match = "空白の違いを無視して一致"
 agent_tool_fetch = "取得中"
 agent_tool_web_search = "検索中"
 agent_tool_recall = "履歴を検索中"

@@ -1240,6 +1240,47 @@ fn diff_kinds(lines: &[&str]) -> Vec<DiffKind> {
         .collect()
 }
 
+/// What an edit's block shows in place of the tool's text, drawn from the
+/// result's details (for the UI, never the model): the hunks of the full diff
+/// — the headline already names the file, so the summary and the `---`/`+++`
+/// header are left to Copy and Open — and the added/removed line counts for
+/// the headline. `None` without details (a failed edit), so the text shows.
+struct EditView {
+    hunks: String,
+    added: usize,
+    removed: usize,
+    /// The match was not exact (whitespace differed), worth a note.
+    loose: bool,
+}
+
+fn edit_view(result: &ToolResultMessage) -> Option<EditView> {
+    let details = result.details.as_ref()?;
+    let diff = details.get("diff")?.as_str()?;
+    let start = diff
+        .find("\n@@")
+        .map(|i| i + 1)
+        .or_else(|| diff.starts_with("@@").then_some(0))?;
+    let hunks = diff[start..].trim_end().to_string();
+    let (mut added, mut removed) = (0, 0);
+    for line in hunks.lines() {
+        match line.as_bytes().first() {
+            Some(b'+') => added += 1,
+            Some(b'-') => removed += 1,
+            _ => {}
+        }
+    }
+    let loose = details
+        .get("strategy")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| !s.is_empty());
+    Some(EditView {
+        hunks,
+        added,
+        removed,
+        loose,
+    })
+}
+
 /// One indented line of tool output: dim, or — for an edit's diff — colored
 /// the way the git diff panel colors it, an added or removed line tinted
 /// across the whole row.
@@ -1820,14 +1861,43 @@ fn render_body(
             waiting,
         } => {
             let running = is_live(item);
-            let body = match (result, live) {
-                (Some(result), _) => result.plain_text(),
-                (None, Some(live)) => live.clone(),
-                (None, None) => String::new(),
+            let edit = result
+                .as_ref()
+                .filter(|_| call.name == "edit")
+                .and_then(edit_view);
+            let body = match (&edit, result, live) {
+                (Some(edit), _, _) => edit.hunks.clone(),
+                (None, Some(result), _) => result.plain_text(),
+                (None, None, Some(live)) => live.clone(),
+                (None, None, None) => String::new(),
             };
             // Trim the stray blank lines a command's output ends with, so the
             // padding stays even.
             let all: Vec<&str> = body.trim().lines().collect();
+            // An edit's line counts stand at its headline's end, kept when a
+            // long path is clipped.
+            let stats: Vec<Span<'static>> = edit
+                .as_ref()
+                .map(|edit| {
+                    let mut spans = Vec::new();
+                    if edit.added > 0 {
+                        spans.push(Span::styled(
+                            format!("+{}", edit.added),
+                            Style::default().fg(colors.success),
+                        ));
+                    }
+                    if edit.removed > 0 {
+                        if !spans.is_empty() {
+                            spans.push(Span::raw(" "));
+                        }
+                        spans.push(Span::styled(
+                            format!("−{}", edit.removed),
+                            Style::default().fg(colors.error),
+                        ));
+                    }
+                    spans
+                })
+                .unwrap_or_default();
             let marker = foldable.then(|| Span::styled(if collapsed { "▸ " } else { "▾ " }, dim));
             // The meta of a finished call is how long it took (`🕒`, when
             // known), never a wall-clock time. A single-row block carries the
@@ -1875,14 +1945,20 @@ fn render_body(
                     }
                     None => tool_headline(call, marker, width, state, colors),
                 };
-                let meta = if finished { Vec::new() } else { clock };
+                let meta = if finished { stats } else { clock };
                 return row_with_meta(head, meta, true, width);
             }
             let mut lines = match shell_command(call) {
                 Some(command) => command_lines(&command, marker, width, state, colors),
-                None => vec![Line::from(tool_headline(
-                    call, marker, width, state, colors,
-                ))],
+                None => {
+                    let clip = !stats.is_empty();
+                    row_with_meta(
+                        tool_headline(call, marker, width, state, colors),
+                        stats,
+                        clip,
+                        width,
+                    )
+                }
             };
             // An edit's result is a unified diff, painted like the git diff
             // panel paints one.
@@ -1902,8 +1978,9 @@ fn render_body(
                 ));
             }
             for (i, line) in all.iter().enumerate().take(end).skip(start) {
-                if call.name == "question" {
-                    // The answers are prose: they wrap rather than clip.
+                if call.name == "question" || kind(i) == Some(DiffKind::Summary) {
+                    // The answers, and an edit's text outside a diff (an
+                    // error), are prose: they wrap rather than clip.
                     lines.extend(prose_output_lines(line, width, colors));
                 } else {
                     lines.push(output_line(line, kind(i), width, colors));
@@ -1913,6 +1990,13 @@ fn render_body(
                 lines.push(Line::styled(
                     format!("  {}", t.agent_more_lines(all.len() - end)),
                     dim,
+                ));
+            }
+            if edit.as_ref().is_some_and(|edit| edit.loose) {
+                lines.extend(prose_output_lines(
+                    t.agent_edit_loose_match(),
+                    width,
+                    colors,
                 ));
             }
             // Who let the call run or refused it, unless the rules simply did;
@@ -2803,6 +2887,24 @@ mod tests {
     }
 
     #[test]
+    fn a_thinking_marker_is_accent_while_streaming_then_plain() {
+        let colors = ThemeColors::default();
+        let mut transcript = Transcript::default();
+        transcript.stream_thinking("Weighing the options.");
+        let at_fg = |transcript: &mut Transcript| {
+            transcript
+                .lines(60, &colors, false)
+                .iter()
+                .flat_map(|l| l.spans.iter())
+                .find(|s| s.content == "@ ")
+                .and_then(|s| s.style.fg)
+        };
+        assert_eq!(at_fg(&mut transcript), Some(colors.info));
+        transcript.finish_thinking("12:00:00", None);
+        assert_eq!(at_fg(&mut transcript), Some(colors.fg));
+    }
+
+    #[test]
     fn a_failed_one_row_call_is_painted_instead_of_marked() {
         let colors = ThemeColors::default();
         let mut transcript = Transcript::default();
@@ -2892,24 +2994,6 @@ mod tests {
         // The running call is its headline alone, its output folded away.
         assert!(lines.iter().any(|l| l.contains("cargo build")), "{lines:?}");
         assert!(!lines.iter().any(|l| l.contains("Compiling")), "{lines:?}");
-    }
-
-    #[test]
-    fn a_thinking_marker_is_accent_while_streaming_then_plain() {
-        let colors = ThemeColors::default();
-        let mut transcript = Transcript::default();
-        transcript.stream_thinking("Weighing the options.");
-        let at_fg = |transcript: &mut Transcript| {
-            transcript
-                .lines(60, &colors, false)
-                .iter()
-                .flat_map(|l| l.spans.iter())
-                .find(|s| s.content == "@ ")
-                .and_then(|s| s.style.fg)
-        };
-        assert_eq!(at_fg(&mut transcript), Some(colors.info));
-        transcript.finish_thinking("12:00:00", None);
-        assert_eq!(at_fg(&mut transcript), Some(colors.fg));
     }
 
     #[test]
@@ -3076,7 +3160,112 @@ mod tests {
         assert_eq!(style_of("--- dashes").0.fg, Some(colors.error));
         assert_eq!(style_of("--- a/a.rs").0.fg, Some(colors.info));
         assert_eq!(style_of(" keep").0.fg, Some(colors.fg));
+        // Without details (an older session), the text shows as it came.
         assert_eq!(style_of("Edited a.rs (1 replacement).").0.bg, None);
+    }
+
+    /// An edit result as the tool returns it: the model's text, which names
+    /// the file, and the details the UI draws from.
+    fn edit_result(text: &str, strategy: &str) -> ToolResultMessage {
+        let diff = "--- a/a.rs\n+++ b/a.rs\n@@ -1,3 +1,2 @@\n keep\n-old\n-gone\n+new\n";
+        ToolResultMessage::text(&call("edit", json!({})), text).with_details(json!({
+            "path": "a.rs",
+            "replacements": 1,
+            "strategy": strategy,
+            "diff": diff,
+        }))
+    }
+
+    fn push_edit(transcript: &mut Transcript, path: &str, result: ToolResultMessage) {
+        transcript.push(Item::Tool {
+            call: call("edit", json!({ "path": path })),
+            result: Some(result),
+            live: None,
+            at: "12:00:00".into(),
+            duration_ms: Some(10),
+            waited_ms: None,
+            waiting: false,
+        });
+    }
+
+    #[test]
+    fn an_edit_shows_its_hunks_and_counts_from_the_details() {
+        let colors = ThemeColors::default();
+        let mut transcript = Transcript::default();
+        transcript.set_fold(FoldMode::Never);
+        // The model was told the diff is too large; the user still sees it.
+        push_edit(
+            &mut transcript,
+            "a.rs",
+            edit_result(
+                "Edited /abs/a.rs (1 replacement). The diff is too large to show inline.",
+                "",
+            ),
+        );
+        let lines = text_of(transcript.lines(40, &colors, false));
+        assert!(
+            lines[0].contains("a.rs") && lines[0].ends_with("+1 −2"),
+            "{lines:?}"
+        );
+        assert!(lines.iter().any(|l| l.contains("@@ -1,3 +1,2 @@")));
+        assert!(lines.iter().any(|l| l.contains("+new")));
+        // The summary and the file header repeat the headline's path.
+        assert!(!lines
+            .iter()
+            .any(|l| l.contains("Edited") || l.contains("--- a/")));
+        assert!(!lines.iter().any(|l| l.contains("whitespace")));
+    }
+
+    #[test]
+    fn an_edit_keeps_its_counts_when_the_path_is_clipped() {
+        let colors = ThemeColors::default();
+        let mut transcript = Transcript::default();
+        push_edit(
+            &mut transcript,
+            "/a/very/long/path/that/does/not/fit/the/row/at/all/a.rs",
+            edit_result("Edited a.rs (1 replacement).", ""),
+        );
+        // Folded, and unfolded, the counts stand at the row's end.
+        let folded = text_of(transcript.lines(40, &colors, false));
+        assert_eq!(folded.len(), 1, "{folded:?}");
+        assert!(folded[0].ends_with("+1 −2"), "{folded:?}");
+        assert!(transcript.toggle_expanded(0));
+        let unfolded = text_of(transcript.lines(40, &colors, false));
+        assert!(unfolded[0].ends_with("+1 −2"), "{unfolded:?}");
+    }
+
+    #[test]
+    fn a_loose_edit_match_is_noted() {
+        let colors = ThemeColors::default();
+        let mut transcript = Transcript::default();
+        transcript.set_fold(FoldMode::Never);
+        push_edit(
+            &mut transcript,
+            "a.rs",
+            edit_result(
+                "Edited a.rs (1 replacement, matched ignoring indentation).",
+                "ignoring indentation",
+            ),
+        );
+        let joined = text_of(transcript.lines(60, &colors, false)).join("\n");
+        assert!(joined.contains("whitespace"), "{joined}");
+    }
+
+    #[test]
+    fn a_failed_edit_wraps_its_error() {
+        let colors = ThemeColors::default();
+        let mut transcript = Transcript::default();
+        transcript.set_fold(FoldMode::Never);
+        push_edit(
+            &mut transcript,
+            "a.rs",
+            ToolResultMessage::error(
+                &call("edit", json!({})),
+                "old_string not found in /a/long/path/to/a.rs; read the file again.",
+            ),
+        );
+        let joined = text_of(transcript.lines(30, &colors, false)).join(" ");
+        assert!(joined.contains("again."), "{joined}");
     }
 
     #[test]

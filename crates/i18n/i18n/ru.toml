@@ -591,6 +591,7 @@ agent_toolset_note_new_session = "вне контекста; вернётся в
 agent_tool_read = "Читаю"
 agent_tool_write = "Записываю"
 agent_tool_edit = "Редактирую"
+agent_edit_loose_match = "Совпадение с точностью до пробелов"
 agent_tool_fetch = "Загружаю"
 agent_tool_web_search = "Ищу"
 agent_tool_recall = "Вспоминаю"

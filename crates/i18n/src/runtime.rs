@@ -658,6 +658,7 @@ impl Translation for RuntimeTranslation {
         agent_tool_read,
         agent_tool_write,
         agent_tool_edit,
+        agent_edit_loose_match,
         agent_tool_fetch,
         agent_tool_web_search,
         agent_tool_recall,

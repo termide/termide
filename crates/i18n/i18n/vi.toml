@@ -577,6 +577,7 @@ agent_toolset_note_new_session = "ngoài ngữ cảnh; trở lại ở phiên m�
 agent_tool_read = "Đang đọc"
 agent_tool_write = "Đang ghi"
 agent_tool_edit = "Đang sửa"
+agent_edit_loose_match = "Khớp khi bỏ qua khác biệt khoảng trắng"
 agent_tool_fetch = "Đang tải"
 agent_tool_web_search = "Đang tìm"
 agent_tool_recall = "Đang nhớ lại"

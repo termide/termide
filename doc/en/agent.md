@@ -352,7 +352,13 @@ alone; how long it took (`🕒`) shows once it is unfolded. A tool call's mark
 and action are in the accent while it runs, then turn the success colour once
 it succeeds or the error colour once it fails; its subject keeps its own
 colour. A single row carries no `✓`, the colour of its mark telling how it
-ended; the unfolded form of a failed call ends with the `✗`. Durations grow from seconds to minutes, hours and
+ended; the unfolded form of a failed call ends with the `✗`. An edit's
+headline ends with the lines it added and removed (`+3 −1`), folded or not,
+and its unfolded form shows the diff's hunks alone, the file being in the
+headline — the whole diff, even one too large to have been sent to the model
+inline; a note under it says when the text matched only once whitespace
+differences were ignored. `Ctrl+C` and `o` on the block give the result as
+the model got it. Durations grow from seconds to minutes, hours and
 days (`2s`, `1m13s`, `2h5m`, `3d4h`). Finished reasoning folds the same
 way, to its first line alone; unfolded, it shows the `⏫`/`✍️` lines. Its
 `@ Thinking` is in the accent while it streams, and in the plain text colour

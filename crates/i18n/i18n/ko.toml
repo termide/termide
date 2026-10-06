@@ -576,6 +576,7 @@ agent_toolset_note_new_session = "컨텍스트에서 빠짐. 새 세션에서 �
 agent_tool_read = "읽는 중"
 agent_tool_write = "쓰는 중"
 agent_tool_edit = "편집 중"
+agent_edit_loose_match = "공백 차이를 무시하고 일치"
 agent_tool_fetch = "가져오는 중"
 agent_tool_web_search = "검색 중"
 agent_tool_recall = "기록 검색 중"

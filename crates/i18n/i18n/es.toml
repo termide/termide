@@ -576,6 +576,7 @@ agent_toolset_note_new_session = "fuera del contexto; vuelve en una nueva sesió
 agent_tool_read = "Leyendo"
 agent_tool_write = "Escribiendo"
 agent_tool_edit = "Editando"
+agent_edit_loose_match = "Coincidencia ignorando diferencias de espacios"
 agent_tool_fetch = "Obteniendo"
 agent_tool_web_search = "Buscando"
 agent_tool_recall = "Recordando"

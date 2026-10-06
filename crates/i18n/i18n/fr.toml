@@ -576,6 +576,7 @@ agent_toolset_note_new_session = "hors du contexte ; de retour dans une nouvelle
 agent_tool_read = "Lecture"
 agent_tool_write = "Écriture"
 agent_tool_edit = "Modification"
+agent_edit_loose_match = "Correspondance aux espaces près"
 agent_tool_fetch = "Récupération"
 agent_tool_web_search = "Recherche"
 agent_tool_recall = "Rappel"

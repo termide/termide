@@ -577,6 +577,7 @@ agent_toolset_note_new_session = "संदर्भ से बाहर; नए
 agent_tool_read = "पढ़ रहा है"
 agent_tool_write = "लिख रहा है"
 agent_tool_edit = "संपादित कर रहा है"
+agent_edit_loose_match = "रिक्त स्थान के अंतर को अनदेखा कर मिलान किया"
 agent_tool_fetch = "ला रहा है"
 agent_tool_web_search = "खोज रहा है"
 agent_tool_recall = "इतिहास खोज रहा है"

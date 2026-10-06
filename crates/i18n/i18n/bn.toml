@@ -577,6 +577,7 @@ agent_toolset_note_new_session = "কনটেক্সটের বাইরে
 agent_tool_read = "পড়ছে"
 agent_tool_write = "লিখছে"
 agent_tool_edit = "সম্পাদনা করছে"
+agent_edit_loose_match = "ফাঁকা স্থানের পার্থক্য উপেক্ষা করে মিলেছে"
 agent_tool_fetch = "আনছে"
 agent_tool_web_search = "খুঁজছে"
 agent_tool_recall = "ইতিহাসে খুঁজছে"
