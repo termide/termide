@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Styled text split words apart**: `**bold**ly` read "bold ly" and `[docs](u).` read "docs .".
 - **The context bar ran up to a cell ahead** of the figures beside it.
 - **The auto mode reviewer and the recall solver failed** on a connection that names no model.
+- **Claude Code could not ask a question or offer a command on a card**: its `question` and `suggest_command` calls found no one to ask, so commands ended up as text in its reply.
+- **Long lines in code blocks were cut off** at the panel's edge in the agent chat and the Markdown and HTML viewers; they now wrap.
+- **A paused run's controls carried over into a newly opened session.**
 
 
 [0.38.0]: https://github.com/termide/termide/releases/tag/0.38.0
