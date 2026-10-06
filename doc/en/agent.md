@@ -485,7 +485,7 @@ the context window sit flush right; on a narrow terminal the chips on the left
 are cut, never these. The totals are `↑` the prompt tokens billed in full (the
 uncached input and what was written to the prompt cache), `↻` those the cache
 served, shown once there are any, and `↓` the output: `↑2.1k ↻48k ↓900`. The
-window is the tokens used of it with a fill bar, `35k/262k ▰▰▱▱▱▱▱▱`; for
+window is the tokens used of it with a fill bar, `66k/262k ▰▰▱▱▱▱▱▱`; for
 Claude Code, Codex and Gemini CLI both come from what the agent reports, and the window
 shows once it has.
 Agent, mode, reasoning, connection and model are buttons. Clicking **Reasoning** lists

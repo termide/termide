@@ -85,10 +85,12 @@ pub(crate) fn state_strip<'a>(
     lines
 }
 
-/// An eight-cell fill bar for a 0–100 percentage, e.g. `▰▰▱▱▱▱▱▱` at 20%.
+/// An eight-cell fill bar for a 0–100 percentage, e.g. `▰▰▱▱▱▱▱▱` at 25%.
+/// Cells round to the nearest, so the bar never runs more than half a cell
+/// ahead of or behind the figure it stands beside.
 pub(crate) fn context_bar(percent: u64) -> String {
     const CELLS: u64 = 8;
-    let filled = (percent * CELLS).div_ceil(100).min(CELLS);
+    let filled = ((percent * CELLS + 50) / 100).min(CELLS);
     let mut bar = String::with_capacity(CELLS as usize * 3);
     for i in 0..CELLS {
         bar.push(if i < filled { '▰' } else { '▱' });

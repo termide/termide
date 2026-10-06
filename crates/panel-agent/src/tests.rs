@@ -1042,6 +1042,12 @@ fn the_context_bar_fills_with_the_percentage() {
     assert_eq!(context_bar(0), "▱▱▱▱▱▱▱▱");
     assert_eq!(context_bar(12), "▰▱▱▱▱▱▱▱");
     assert_eq!(context_bar(50), "▰▰▰▰▱▱▱▱");
+    // Cells round to the nearest: a cell begun is not a cell filled.
+    assert_eq!(context_bar(1), "▱▱▱▱▱▱▱▱");
+    assert_eq!(context_bar(13), "▰▱▱▱▱▱▱▱");
+    assert_eq!(context_bar(51), "▰▰▰▰▱▱▱▱");
+    assert_eq!(context_bar(87), "▰▰▰▰▰▰▰▱");
+    assert_eq!(context_bar(94), "▰▰▰▰▰▰▰▰");
     assert_eq!(context_bar(100), "▰▰▰▰▰▰▰▰");
     assert_eq!(context_bar(200), "▰▰▰▰▰▰▰▰");
 }
