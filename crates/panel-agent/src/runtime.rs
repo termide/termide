@@ -254,6 +254,7 @@ pub(crate) fn spawn_runtime(
             persist: persist_rule.map(|f| Box::new(f) as PersistRule),
             mode: mode.clone(),
             system_prompt: system_prompt.to_string(),
+            plan: plan_prompt.clone(),
             host_tools: Some(HostTools {
                 tools: tools.clone(),
                 hooks: Box::new(ChainedHooks::new(host_chain)),

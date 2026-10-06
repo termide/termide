@@ -1353,6 +1353,10 @@ prompt while the mode is on, and `request:` in its front matter is the
 message sent when you accept the plan; `clean_request:`, the one sent when
 you accept it from a clean context (without it, `request:` serves). Reword the body to change what a plan
 must contain, or the request to change how the agent is told to go ahead.
+Claude Code takes its system prompt once, when its session starts, so a
+switch of plan mode after that reaches it as a note before your next
+message, which the session log leaves out: the body when the mode comes on,
+`leave:` when it goes off.
 
 `/goal <what to achieve>` uses `goal.md`: the agent works toward the goal, and
 after each turn a judge — a separate, read-only model call — decides whether it

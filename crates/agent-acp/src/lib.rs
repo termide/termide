@@ -27,8 +27,8 @@ use serde_json::{json, Value};
 use termide_agent_core::{
     expand_env, now_millis, AcpConfig, AcpFlavor, Agent, AgentEvent, AssistantContent,
     AssistantMessage, Backend, BackendModel, BackendSetup, CancelToken, Hooks, HostTools, Message,
-    Mode, ModeHandle, PermissionHooks, PromptError, StopReason, StreamEvent, ToolCall, ToolContext,
-    ToolDecision, ToolResultMessage, Usage, UserMessage,
+    Mode, ModeHandle, PermissionHooks, PlanPrompt, PromptError, StopReason, StreamEvent, ToolCall,
+    ToolContext, ToolDecision, ToolResultMessage, Usage, UserMessage,
 };
 use termide_agent_mcp::{McpServer, SERVER_NAME};
 
@@ -95,6 +95,12 @@ struct Shared {
     context: Mutex<Option<(u64, u64)>>,
     /// The panel's live permission mode.
     mode: ModeHandle,
+    /// Plan mode's texts, for telling Claude Code of a switch.
+    plan: PlanPrompt,
+    /// Whether what Claude Code was last told — its system prompt, then the
+    /// notes since — has plan mode on. The prompt is fixed for the session,
+    /// so a later switch reaches it as a note before the next turn.
+    told_plan: AtomicBool,
 }
 
 /// The agent's tool calls as the session log keeps the built-in loop's: an
@@ -201,7 +207,9 @@ impl AcpRuntime {
             announced: Mutex::new(HashMap::new()),
             calls: Mutex::new(CallLog::default()),
             context: Mutex::new(None),
+            told_plan: AtomicBool::new(setup.mode.get() == Mode::Plan),
             mode: setup.mode,
+            plan: setup.plan,
         });
         let for_reader = Arc::clone(&shared);
         std::thread::spawn(move || for_reader.read_loop(reader));
@@ -685,17 +693,37 @@ impl Shared {
         std::thread::spawn(move || this.run_turn(&session_id, message));
     }
 
+    /// Claude Code runs on termide's system prompt, fixed when its session
+    /// started, so a plan-mode switch since would leave it on the wrong
+    /// instructions: the next turn opens with a note of the switch, kept out
+    /// of the session log. Codex and Gemini CLI are switched to their own
+    /// modes instead.
+    fn plan_switch_note(&self) -> Option<String> {
+        if self.flavor != AcpFlavor::ClaudeCode {
+            return None;
+        }
+        let on = self.mode.get() == Mode::Plan;
+        let told = self.told_plan.swap(on, Ordering::AcqRel);
+        let note = self.plan.switch_note(told, on)?;
+        Some(format!("<system-reminder>\n{note}\n</system-reminder>"))
+    }
+
     fn run_turn(self: &Arc<Self>, session_id: &str, message: UserMessage) {
         let _ = self.events.send(AgentEvent::TurnStart);
         let _ = self
             .events
             .send(AgentEvent::MessageEnd(Message::User(message.clone())));
         let text = message.plain_text();
+        let mut prompt = Vec::new();
+        if let Some(note) = self.plan_switch_note() {
+            prompt.push(json!({ "type": "text", "text": note }));
+        }
+        prompt.push(json!({ "type": "text", "text": text }));
         let result = self.request(
             "session/prompt",
             json!({
                 "sessionId": session_id,
-                "prompt": [{ "type": "text", "text": text }]
+                "prompt": prompt
             }),
             Duration::from_secs(60 * 60 * 24),
         );
@@ -1547,6 +1575,7 @@ mod tests {
                 persist: None,
                 mode: ModeHandle::new(Mode::default()),
                 system_prompt: String::new(),
+                plan: PlanPrompt::default(),
                 host_tools: None,
             },
             5,
@@ -1661,6 +1690,7 @@ mod tests {
                 persist: None,
                 mode,
                 system_prompt: "termide's prompt".into(),
+                plan: PlanPrompt::default(),
                 host_tools,
             },
             5,
@@ -1758,6 +1788,74 @@ mod tests {
             (call.name.as_str(), &call.arguments),
             ("bash", &json!({ "command": "ls" }))
         );
+    }
+
+    /// Prompt `text` and wait for the turn to end; the text blocks the agent
+    /// got for it.
+    fn prompt_blocks(
+        runtime: &AcpRuntime,
+        seen: &Arc<Mutex<Vec<Value>>>,
+        text: &str,
+    ) -> Vec<String> {
+        runtime.prompt(UserMessage::text(text)).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !runtime
+            .drain()
+            .iter()
+            .any(|e| matches!(e, AgentEvent::AgentEnd))
+        {
+            assert!(Instant::now() < deadline, "the turn never ended");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let sent = seen_where(seen, |m| {
+            m["method"] == "session/prompt"
+                && m["params"]["prompt"]
+                    .as_array()
+                    .and_then(|blocks| blocks.last())
+                    .is_some_and(|block| block["text"] == text)
+        })
+        .remove(0);
+        sent["params"]["prompt"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|block| block["text"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn claude_code_is_told_of_a_plan_mode_switch_before_the_next_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let mode = ModeHandle::new(Mode::Plan);
+        let (runtime, seen) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::ClaudeCode,
+            None,
+            mode.clone(),
+        );
+        let plan = PlanPrompt::default();
+        // Started in plan mode, its system prompt already says so.
+        assert_eq!(prompt_blocks(&runtime, &seen, "one"), ["one"]);
+        mode.set(Mode::Edit);
+        let two = prompt_blocks(&runtime, &seen, "two");
+        assert_eq!(two.len(), 2, "{two:?}");
+        assert!(two[0].starts_with("<system-reminder>") && two[0].contains(&plan.leave));
+        assert_eq!(prompt_blocks(&runtime, &seen, "three"), ["three"]);
+        mode.set(Mode::Plan);
+        let four = prompt_blocks(&runtime, &seen, "four");
+        assert!(four[0].contains(&plan.instructions), "{four:?}");
+        assert_eq!(four[1], "four");
+
+        // Codex is put in its own plan mode instead: no note.
+        let mode = ModeHandle::new(Mode::Plan);
+        let (codex, seen) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::Codex,
+            None,
+            mode.clone(),
+        );
+        mode.set(Mode::Edit);
+        assert_eq!(prompt_blocks(&codex, &seen, "go"), ["go"]);
     }
 
     #[test]
@@ -2024,6 +2122,7 @@ mod tests {
                 persist: None,
                 mode: ModeHandle::new(Mode::default()),
                 system_prompt: String::new(),
+                plan: PlanPrompt::default(),
                 host_tools: None,
             },
             5,
@@ -2185,6 +2284,7 @@ mod tests {
                 persist: None,
                 mode: ModeHandle::new(Mode::default()),
                 system_prompt: String::new(),
+                plan: PlanPrompt::default(),
                 host_tools: None,
             },
             1,

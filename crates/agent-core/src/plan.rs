@@ -18,6 +18,9 @@ pub struct PlanPrompt {
     /// The user turn sent when the plan is carried out from a clean
     /// context; empty means [`Self::request`] serves.
     pub clean_request: String,
+    /// Told to an agent whose system prompt cannot change mid-session (Claude
+    /// Code) when plan mode goes off after its prompt held the instructions.
+    pub leave: String,
 }
 
 impl Default for PlanPrompt {
@@ -27,16 +30,34 @@ impl Default for PlanPrompt {
 }
 
 impl PlanPrompt {
-    /// Parse `plan.md`: front matter `request:` and `clean_request:` plus
-    /// the instructions.
+    /// Parse `plan.md`: front matter `request:`, `clean_request:` and
+    /// `leave:` plus the instructions.
     #[must_use]
     pub fn from_file(text: &str) -> Self {
         let (fields, body) = split_front_matter(text);
+        let field = |key: &str| fields.get(key).cloned().unwrap_or_default();
         Self {
             instructions: body.trim().to_string(),
-            request: fields.get("request").cloned().unwrap_or_default(),
-            clean_request: fields.get("clean_request").cloned().unwrap_or_default(),
+            request: field("request"),
+            clean_request: field("clean_request"),
+            leave: field("leave"),
         }
+    }
+
+    /// What to tell an agent whose system prompt was fixed when its session
+    /// started, before a turn in which plan mode is `on` while its prompt was
+    /// built with the mode `prompt_has_plan`: the instructions when the mode
+    /// came on, `leave` when it went off; `None` when nothing changed or the
+    /// text for the change is empty.
+    #[must_use]
+    pub fn switch_note(&self, prompt_has_plan: bool, on: bool) -> Option<&str> {
+        let note = match (prompt_has_plan, on) {
+            (false, true) => &self.instructions,
+            (true, false) => &self.leave,
+            _ => return None,
+        };
+        let note = note.trim();
+        (!note.is_empty()).then_some(note)
     }
 
     /// The request that carries the plan out, from a clean context or not.
@@ -87,5 +108,21 @@ mod tests {
         assert_eq!(bare.apply("base"), "base\n\nOnly instructions.");
         let empty = PlanPrompt::from_file("---\nrequest: go\n---\n");
         assert_eq!(empty.apply("base"), "base");
+    }
+
+    #[test]
+    fn a_switch_note_tells_only_a_change_of_mode() {
+        let plan = PlanPrompt::default();
+        assert!(plan.leave.contains("Plan mode is off"));
+        assert_eq!(
+            plan.switch_note(false, true),
+            Some(plan.instructions.as_str())
+        );
+        assert_eq!(plan.switch_note(true, false), Some(plan.leave.as_str()));
+        assert_eq!(plan.switch_note(true, true), None);
+        assert_eq!(plan.switch_note(false, false), None);
+        // A file without `leave:` says nothing when the mode goes off.
+        let bare = PlanPrompt::from_file("Plan.");
+        assert_eq!(bare.switch_note(true, false), None);
     }
 }

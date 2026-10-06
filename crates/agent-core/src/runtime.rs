@@ -15,6 +15,7 @@ use crate::cancel::CancelToken;
 use crate::compaction::CompactionReason;
 use crate::message::UserMessage;
 use crate::permissions::{ChannelPrompter, Mode, ModeHandle, PermissionRules, PersistRule};
+use crate::plan::PlanPrompt;
 use crate::provider::ModelSpec;
 use crate::tool::ToolRegistry;
 use std::path::PathBuf;
@@ -88,6 +89,10 @@ pub struct BackendSetup {
     /// termide's system prompt for the agent, for a backend that takes it in
     /// place of its own.
     pub system_prompt: String,
+    /// Plan mode's texts. `system_prompt` holds the instructions when the
+    /// session starts in plan mode; a backend whose prompt cannot change
+    /// later tells the agent of a switch with them.
+    pub plan: PlanPrompt,
     /// termide's tools, for a backend that has the agent call them in place
     /// of its own; `None` offers none.
     pub host_tools: Option<HostTools>,
