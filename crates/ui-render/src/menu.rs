@@ -33,7 +33,7 @@ pub struct MenuRenderParams<'a> {
     /// Battery info, if available on this system
     pub battery: Option<BatteryInfo>,
     /// A project open in the background waits for the user: the Projects
-    /// title is drawn on the warning colour.
+    /// title is followed by the attention mark.
     pub projects_attention: bool,
 }
 
@@ -132,14 +132,26 @@ pub struct MenuLayout {
     pub total_width: usize,
 }
 
-/// Menu layout cached per UI language. Widths depend on the translated labels,
-/// so this is rebuilt (and leaked) alongside [`get_menu_items`] on a language
-/// switch; see that function for the leak/`&'static` rationale.
-static CACHED_LAYOUT: std::sync::RwLock<Option<(u64, &'static MenuLayout)>> =
+/// Menu layouts cached per UI language, without and with the Projects
+/// attention mark. Widths depend on the translated labels, so these are
+/// rebuilt (and leaked) alongside [`get_menu_items`] on a language switch;
+/// see that function for the leak/`&'static` rationale.
+#[allow(clippy::type_complexity)]
+static CACHED_LAYOUT: std::sync::RwLock<Option<(u64, [&'static MenuLayout; 2])>> =
     std::sync::RwLock::new(None);
 
+/// Whether the menu bar last drawn showed the Projects attention mark. The
+/// mark widens the Projects title and shifts the items after it, so every
+/// position lookup (clicks, dropdown anchors) follows what is on screen.
+static PROJECTS_MARKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// What follows the Projects title while a background project waits.
+fn projects_mark() -> String {
+    format!(" {}", termide_core::attention_mark())
+}
+
 impl MenuLayout {
-    fn build() -> MenuLayout {
+    fn build(projects_marked: bool) -> MenuLayout {
         let menu_items = get_menu_items();
         let mut x_positions = [0u16; MENU_ITEM_COUNT];
         let mut widths = [0u16; MENU_ITEM_COUNT];
@@ -148,6 +160,9 @@ impl MenuLayout {
         for (i, item) in menu_items.iter().enumerate() {
             x_positions[i] = x;
             widths[i] = str_display_width(item) as u16;
+            if i == PROJECTS_MENU_INDEX && projects_marked {
+                widths[i] += str_display_width(&projects_mark()) as u16;
+            }
             x += widths[i] + 2; // item + "  " separator
         }
 
@@ -159,24 +174,29 @@ impl MenuLayout {
         }
     }
 
+    /// The layout of the menu bar as last drawn.
     pub fn compute() -> &'static Self {
+        let marked = usize::from(PROJECTS_MARKED.load(std::sync::atomic::Ordering::Relaxed));
         let generation = i18n::language_generation();
         if let Ok(guard) = CACHED_LAYOUT.read() {
-            if let Some((cached_gen, layout)) = *guard {
+            if let Some((cached_gen, layouts)) = *guard {
                 if cached_gen == generation {
-                    return layout;
+                    return layouts[marked];
                 }
             }
         }
         let mut guard = CACHED_LAYOUT.write().expect("menu layout cache poisoned");
-        if let Some((cached_gen, layout)) = *guard {
+        if let Some((cached_gen, layouts)) = *guard {
             if cached_gen == generation {
-                return layout;
+                return layouts[marked];
             }
         }
-        let leaked: &'static MenuLayout = Box::leak(Box::new(Self::build()));
-        *guard = Some((generation, leaked));
-        leaked
+        let layouts: [&'static MenuLayout; 2] = [
+            Box::leak(Box::new(Self::build(false))),
+            Box::leak(Box::new(Self::build(true))),
+        ];
+        *guard = Some((generation, layouts));
+        layouts[marked]
     }
 }
 
@@ -278,6 +298,10 @@ pub fn get_resource_indicator_ranges(
 
 /// Render top menu in Midnight Commander style
 pub fn render_menu(frame: &mut Frame, area: Rect, params: &MenuRenderParams) {
+    PROJECTS_MARKED.store(
+        params.projects_attention,
+        std::sync::atomic::Ordering::Relaxed,
+    );
     let mut spans = vec![Span::raw(" ")];
     let menu_items = get_menu_items();
     let t = i18n::t();
@@ -290,18 +314,17 @@ pub fn render_menu(frame: &mut Frame, area: Rect, params: &MenuRenderParams) {
                 .fg(params.theme.selected_fg)
                 .bg(params.theme.selected_bg)
                 .add_modifier(Modifier::BOLD)
-        } else if i == PROJECTS_MENU_INDEX && params.projects_attention {
-            // A badge, not a text colour: several themes (the default
-            // included) give menu titles the warning colour already.
-            Style::default()
-                .fg(params.theme.bg)
-                .bg(params.theme.warning)
-                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(params.theme.accented_fg)
         };
 
         spans.push(Span::styled(item.as_str(), style));
+        if i == PROJECTS_MENU_INDEX && params.projects_attention {
+            // A mark, not a colour: several themes (the default included)
+            // give menu titles the warning colour already, and a badge
+            // reads as the selected item.
+            spans.push(Span::styled(projects_mark(), style));
+        }
         spans.push(Span::raw("  "));
     }
 
@@ -461,5 +484,19 @@ mod tests {
         // Switching back restores the original labels.
         i18n::set_language("en").unwrap();
         assert_eq!(*get_menu_items(), en);
+    }
+
+    #[test]
+    fn the_projects_mark_widens_projects_and_shifts_the_items_after_it() {
+        let plain = MenuLayout::build(false);
+        let marked = MenuLayout::build(true);
+        let extra = str_display_width(&projects_mark()) as u16;
+        for i in 0..MENU_ITEM_COUNT {
+            let width = plain.widths[i] + if i == PROJECTS_MENU_INDEX { extra } else { 0 };
+            assert_eq!(marked.widths[i], width);
+            let shift = if i > PROJECTS_MENU_INDEX { extra } else { 0 };
+            assert_eq!(marked.x_positions[i], plain.x_positions[i] + shift);
+        }
+        assert_eq!(marked.total_width, plain.total_width + extra as usize);
     }
 }

@@ -3,7 +3,6 @@
 use anyhow::Result;
 use crossterm::event::{MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
-use unicode_width::UnicodeWidthStr;
 
 use super::App;
 use crate::PanelExt;
@@ -480,14 +479,12 @@ impl App {
 
     /// Handle click on menu bar
     fn handle_menu_click(&mut self, x: u16) -> Result<()> {
-        let mut current_x = 1_u16;
+        // The layout of the bar as drawn, the Projects attention mark included
+        let layout = termide_ui_render::MenuLayout::compute();
 
-        // Get menu items with translations
-        let menu_items = termide_ui_render::menu::get_menu_items();
-
-        for (i, item) in menu_items.iter().enumerate() {
-            let item_width = item.width() as u16;
-            if x >= current_x && x < current_x + item_width {
+        for (i, (&item_x, &item_width)) in layout.x_positions.iter().zip(&layout.widths).enumerate()
+        {
+            if x >= item_x && x < item_x + item_width {
                 // Toggle: if this menu item is already open, close it
                 if self.state.is_menu_open() && self.state.ui.selected_menu_item == Some(i) {
                     // Restore theme if nested submenu was open
@@ -502,7 +499,6 @@ impl App {
                 }
                 return Ok(());
             }
-            current_x += item_width + 2; // +2 for spaces
         }
 
         // Check network/CPU/RAM/clock indicator clicks (right side of menu bar)

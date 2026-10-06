@@ -35,8 +35,8 @@ pub use panel::{
 };
 pub use scrollbar::{ScrollAxis, ScrollBarGeometry, ScrollBars};
 pub use terminal_caps::{
-    get_terminal_caps, init_icon_mode, init_terminal_caps, refresh_terminal_caps, use_emoji_icons,
-    ColorDepth, TerminalCaps,
+    attention_mark, get_terminal_caps, init_icon_mode, init_terminal_caps, refresh_terminal_caps,
+    use_emoji_icons, ColorDepth, TerminalCaps,
 };
 pub use terminal_modes::{
     adopt_variation_selector_width, enter_terminal_modes, leave_terminal_modes,

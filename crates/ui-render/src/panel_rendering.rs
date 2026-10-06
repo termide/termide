@@ -138,7 +138,9 @@ fn cut_to_width(text: &str, max_width: usize, cut: TitleCut) -> String {
 }
 
 use termide_config::Config;
-use termide_core::{use_emoji_icons, Panel, PanelConfig, RenderContext, ThemeColors, TitleCut};
+use termide_core::{
+    attention_mark, use_emoji_icons, Panel, PanelConfig, RenderContext, ThemeColors, TitleCut,
+};
 
 /// Get emoji icon for a panel type.
 ///
@@ -295,19 +297,40 @@ mod tests {
     }
 
     #[test]
-    fn an_unfocused_panel_that_waits_highlights_its_title() {
+    fn an_unfocused_panel_that_waits_shows_the_mark_in_its_icon_slot() {
+        // Tests run without emoji icons: no icon unless the panel waits.
+        assert_eq!(
+            header_icon(&Waiting(true), false),
+            Some((attention_mark(), true))
+        );
+        // Focused, or with nothing waiting, the slot holds no mark.
+        assert_eq!(header_icon(&Waiting(true), true), None);
+        assert_eq!(header_icon(&Waiting(false), false), None);
+    }
+
+    #[test]
+    fn only_the_mark_takes_the_warning_colour() {
         let theme = Theme::default();
-        let warn = title_style(&Waiting(true), false, &theme);
-        assert_eq!(warn.fg, Some(theme.warning));
-        // Focused, or with nothing waiting, the title follows the border.
-        assert_eq!(
-            title_style(&Waiting(true), true, &theme),
-            border_style(true, &theme)
-        );
-        assert_eq!(
-            title_style(&Waiting(false), false, &theme),
-            border_style(false, &theme)
-        );
+        let style = border_style(false, &theme);
+        let (spans, width) = header_buttons(&Waiting(true), false, style, &theme, " ");
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, format!("[≡] {} ", attention_mark()));
+        assert_eq!(width, text.width());
+        for span in &spans {
+            let expected = if span.content == attention_mark() {
+                Some(theme.warning)
+            } else {
+                style.fg
+            };
+            assert_eq!(span.style.fg, expected, "span {:?}", span.content);
+        }
+        // Without the mark the unicode header keeps its plain shape.
+        let (spans, _) = header_buttons(&Waiting(false), false, style, &theme, " ");
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "[≡] ");
+        let (spans, _) = header_buttons(&Waiting(false), false, style, &theme, "");
+        let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "[≡]");
     }
 
     #[test]
@@ -421,16 +444,56 @@ fn border_style(is_focused: bool, theme: &Theme) -> Style {
     }
 }
 
-/// Style of a panel's header text: the border's, except an unfocused panel
-/// that waits for the user stands out in the warning color.
-fn title_style(panel: &dyn Panel, is_focused: bool, theme: &Theme) -> Style {
+/// The icon slot of a panel header: the attention mark while an unfocused
+/// panel waits for the user, else the panel's own icon (emoji mode only).
+/// The mark takes the icon's place, so the header keeps its width when an
+/// emoji icon is shown; colour alone would read as focus.
+fn header_icon(panel: &dyn Panel, is_focused: bool) -> Option<(&'static str, bool)> {
     if !is_focused && panel.needs_attention() {
-        Style::default()
-            .fg(theme.warning)
-            .add_modifier(Modifier::BOLD)
+        Some((attention_mark(), true))
+    } else if use_emoji_icons() {
+        Some((
+            panel.icon().unwrap_or_else(|| panel_icon(panel.name())),
+            false,
+        ))
     } else {
-        border_style(is_focused, theme)
+        None
     }
+}
+
+/// Spans of the header's `[≡] icon` part, followed by `trailing` when it
+/// has an icon, and their width. The attention mark is drawn in the warning
+/// colour, the rest in `style`.
+fn header_buttons(
+    panel: &dyn Panel,
+    is_focused: bool,
+    style: Style,
+    theme: &Theme,
+    trailing: &'static str,
+) -> (Vec<Span<'static>>, usize) {
+    let mut spans = vec![Span::styled("[≡]", style)];
+    match header_icon(panel, is_focused) {
+        Some((icon, attention)) => {
+            let icon_style = if attention {
+                Style::default()
+                    .fg(theme.warning)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                style
+            };
+            spans.push(Span::styled(" ", style));
+            spans.push(Span::styled(icon, icon_style));
+            spans.push(Span::styled(trailing, style));
+        }
+        // Without emoji the header has no icon; keep the space before the
+        // title the expanded header always had.
+        None => spans.push(Span::styled(
+            if trailing.is_empty() { "" } else { " " },
+            style,
+        )),
+    }
+    let width = spans.iter().map(|span| span.content.width()).sum();
+    (spans, width)
 }
 
 /// Render collapsed panel (header only, 1 line).
@@ -448,7 +511,7 @@ pub fn render_collapsed_panel(
 
     let title = panel.title();
     let style = border_style(is_focused, theme);
-    let title_style = title_style(panel, is_focused, theme);
+    let title_style = style;
 
     let y = area.y;
 
@@ -457,17 +520,12 @@ pub fn render_collapsed_panel(
         buf[(area.x, y)].set_symbol("─").set_style(style);
     }
 
-    // Buttons: [≡] icon with emoji, or [≡] in unicode mode
-    let buttons: std::borrow::Cow<'_, str> = if use_emoji_icons() {
-        let icon = panel.icon().unwrap_or_else(|| panel_icon(panel.name()));
-        format!("[≡] {icon}").into()
-    } else {
-        std::borrow::Cow::Borrowed("[≡]")
-    };
-    let buttons_width = buttons.width() as u16;
+    // Buttons: [≡] and the icon slot
+    let (buttons, buttons_width) = header_buttons(panel, is_focused, style, theme, "");
+    let buttons_width = buttons_width as u16;
 
     if area.width > 1 + buttons_width {
-        buf.set_string(area.x + 1, y, buttons, title_style);
+        buf.set_line(area.x + 1, y, &Line::from(buttons), buttons_width);
     }
 
     // Title (smart truncation preserving spinner and status)
@@ -510,22 +568,15 @@ pub fn render_expanded_panel(
 
     let title = panel.title();
     let style = border_style(is_focused, theme);
-    let title_style = title_style(&**panel, is_focused, theme);
+    let title_style = style;
 
     // Create title: [≡] icon Title (with emoji) or [≡] Title (unicode mode)
     // Smart truncate title to fit within panel width
-    let buttons_text = if use_emoji_icons() {
-        let icon = panel.icon().unwrap_or_else(|| panel_icon(panel.name()));
-        format!("[≡] {icon} ")
-    } else {
-        "[≡] ".to_string()
-    };
-    let buttons_width = buttons_text.width();
+    let (mut title_spans, buttons_width) = header_buttons(&**panel, is_focused, style, theme, " ");
     // Available width: panel width - 2 (borders) - buttons - 1 (trailing space)
     let available_for_title = (area.width as usize).saturating_sub(2 + buttons_width + 1);
     let truncated_title = smart_truncate_title(&title, available_for_title, panel.title_cut());
     let title_line = panel.colorize_title(&truncated_title, title_style);
-    let mut title_spans = vec![Span::styled(buttons_text, title_style)];
     title_spans.extend(title_line.spans);
     title_spans.push(Span::styled(" ", title_style));
 

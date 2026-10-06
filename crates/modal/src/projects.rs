@@ -2,8 +2,8 @@
 //!
 //! Lists the projects as the Projects menu does: the open ones first, then
 //! the others below a separator. Each takes one row — the mark (● current,
-//! ○ open in the background), when it was last worked on, the path, and 🔔
-//! when a panel of it waits for the user — and the row under the cursor is
+//! ○ open in the background), when it was last worked on, the path, and the
+//! attention mark when a panel of it waits for the user — and the row under the cursor is
 //! inverted, as in the agent's session list.
 
 use anyhow::Result;
@@ -28,8 +28,6 @@ use crate::{calculate_modal_width, centered_rect_with_size, Modal, ModalResult, 
 pub const CURRENT_MARK: &str = "●";
 /// Marks a project open in the background.
 pub const OPEN_MARK: &str = "○";
-/// Marks a project with a panel that waits for the user.
-pub const ATTENTION_MARK: &str = "🔔";
 
 /// Action returned by the projects modal
 #[derive(Debug, Clone)]
@@ -80,7 +78,7 @@ impl ProjectItem {
             format!("{} ", self.modified)
         };
         let tail = if self.attention {
-            format!(" {ATTENTION_MARK}")
+            format!(" {}", termide_core::attention_mark())
         } else {
             String::new()
         };
@@ -340,10 +338,6 @@ impl Modal for ProjectsModal {
                             .fg(theme.bg)
                             .bg(theme.fg)
                             .add_modifier(Modifier::BOLD)
-                    } else if item.attention {
-                        Style::default()
-                            .fg(theme.warning)
-                            .add_modifier(Modifier::BOLD)
                     } else if item.is_current {
                         Style::default().fg(theme.accented_fg)
                     } else {
@@ -543,7 +537,13 @@ mod tests {
         let mut background = item("~/api", false, true);
         background.modified = "2026-10-03 14:22".into();
         background.attention = true;
-        assert_eq!(background.label(), "○ 2026-10-03 14:22 ~/api 🔔");
+        assert_eq!(
+            background.label(),
+            format!(
+                "○ 2026-10-03 14:22 ~/api {}",
+                termide_core::attention_mark()
+            )
+        );
         assert_eq!(item("~/x", true, true).label(), "● ~/x");
         assert_eq!(item("~/y", false, false).label(), "  ~/y");
     }
@@ -554,7 +554,8 @@ mod tests {
         long.attention = true;
         let (mark, time, rest) = long.segments(20);
         let fitted = format!("{mark}{time}{rest}");
-        assert!(fitted.ends_with("project 🔔"), "{fitted}");
+        let tail = format!("project {}", termide_core::attention_mark());
+        assert!(fitted.ends_with(&tail), "{fitted}");
         assert!(fitted.starts_with("○ …"), "{fitted}");
         assert_eq!(str_display_width(&fitted), 20);
     }

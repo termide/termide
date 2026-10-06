@@ -16,7 +16,7 @@ use termide_ui_render::{
 use crate::open_projects::OpenProjectView;
 use crate::AppState;
 
-pub use termide_modal::projects::{ATTENTION_MARK, CURRENT_MARK, OPEN_MARK};
+pub use termide_modal::projects::{CURRENT_MARK, OPEN_MARK};
 
 /// A project as the Projects menu and the project switcher list it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -182,7 +182,7 @@ fn project_items(
                 termide_core::util::shorten_home_path(&project.root.display().to_string());
             if project.attention {
                 label.push(' ');
-                label.push_str(ATTENTION_MARK);
+                label.push_str(termide_core::attention_mark());
             }
             let time = project
                 .modified
@@ -201,9 +201,6 @@ fn project_items(
                 .with_shortcut(shortcut);
             if project.root == current {
                 item = item.with_project();
-            }
-            if project.attention {
-                item = item.with_attention();
             }
             item
         })
@@ -367,15 +364,14 @@ mod tests {
             vec![
                 "---".to_string(),
                 "● ||/p/one".to_string(),
-                "○ ||/p/two 🔔".to_string(),
+                format!("○ ||/p/two {}", termide_core::attention_mark()),
                 "---".to_string(),
                 format!("  |{}|/p/four", time(20)),
                 format!("  |{}|/p/three", time(10)),
             ]
         );
         let first = PROJECTS_SUBMENU_ITEM_COUNT + 1;
-        assert!(menu.items[first].is_project && !menu.items[first].attention);
-        assert!(menu.items[first + 1].attention);
+        assert!(menu.items[first].is_project);
         assert!(menu.items[first..]
             .iter()
             .all(|item| item.is_separator || item.cut_start));

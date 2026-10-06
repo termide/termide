@@ -221,6 +221,16 @@ pub fn use_emoji_icons() -> bool {
     USE_EMOJI.get().copied().unwrap_or(false)
 }
 
+/// Mark of something that waits for the user: a panel header, the Projects
+/// menu, a project row. A bell with emoji icons, `!` without them.
+pub fn attention_mark() -> &'static str {
+    if use_emoji_icons() {
+        "🔔"
+    } else {
+        "!"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
