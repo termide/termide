@@ -329,8 +329,9 @@ fn handle(shared: &Shared, message: &Value) -> Option<Value> {
     Some(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
 }
 
-/// Answer a `tools/call` as an event stream: the headers at once, a comment
-/// every [`KEEPALIVE`] while the call runs, then the response as one event.
+/// Answer a `tools/call` as an event stream: the headers at once, a progress
+/// notification (or, with no progress token, a comment) every [`KEEPALIVE`]
+/// while the call runs, then the response as one event.
 /// A write that fails, or a read that finds the connection closed, means the
 /// client gave up: the call is cancelled, and whatever it waits on with it.
 fn stream_tool_call(
@@ -353,15 +354,37 @@ fn stream_tool_call(
             let result = call_tool(shared, id, &message["params"], call_cancel);
             let _ = done.send(result);
         });
+        // A comment keeps the connection open, but Claude Code also aborts a
+        // call that sends "no response or progress" for five minutes, and only
+        // a progress notification counts as progress there. The client asks
+        // for them by naming a token; one that names none gets the comment.
+        let progress_token = message["params"]["_meta"]
+            .get("progressToken")
+            .filter(|token| token.is_string() || token.is_number())
+            .cloned();
+        let mut ticks = 0u64;
         let mut alive = true;
         let result = loop {
             match result.recv_timeout(shared.keepalive) {
                 Ok(result) => break Some(result),
                 Err(RecvTimeoutError::Disconnected) => break None,
                 Err(RecvTimeoutError::Timeout) if alive => {
+                    ticks += 1;
+                    let beat = match &progress_token {
+                        // `progress` must grow with each notification.
+                        Some(token) => {
+                            let note = json!({
+                                "jsonrpc": "2.0",
+                                "method": "notifications/progress",
+                                "params": { "progressToken": token, "progress": ticks },
+                            });
+                            format!("event: message\ndata: {note}\n\n")
+                        }
+                        None => ": keepalive\n\n".to_string(),
+                    };
                     alive = !client_gone(&stream)
                         && stream
-                            .write_all(b": keepalive\n\n")
+                            .write_all(beat.as_bytes())
                             .and_then(|()| stream.flush())
                             .is_ok();
                     if !alive {
@@ -661,6 +684,46 @@ mod tests {
             assert!(std::time::Instant::now() < deadline, "the call ran on");
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    /// A call that names a progress token hears growing progress while it
+    /// runs: Claude Code aborts one silent for five minutes, and a keepalive
+    /// comment is not progress to it.
+    #[test]
+    fn a_long_call_reports_progress_to_its_token() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut tools = ToolRegistry::new();
+        tools.insert(Arc::new(UntilCancelled(Arc::clone(&cancelled))));
+        let server = McpServer::start_with(
+            tools,
+            Box::new(Guard),
+            PathBuf::from("/tmp"),
+            Duration::from_millis(20),
+        )
+        .unwrap();
+        let stream = post_streamed(
+            &server,
+            &json!({ "jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                     "params": { "name": "wait", "arguments": {},
+                                 "_meta": { "progressToken": 9 } } }),
+        );
+        let mut progress = Vec::new();
+        for line in BufReader::new(&stream).lines() {
+            let line = line.unwrap();
+            assert_ne!(line, ": keepalive", "a comment instead of progress");
+            if let Some(data) = line.strip_prefix("data: ") {
+                let note: Value = serde_json::from_str(data).unwrap();
+                assert_eq!(note["method"], "notifications/progress");
+                assert_eq!(note["params"]["progressToken"], 9);
+                progress.push(note["params"]["progress"].as_u64().unwrap());
+                if progress.len() == 2 {
+                    break;
+                }
+            }
+        }
+        assert!(progress[0] < progress[1], "{progress:?}");
+        assert!(!cancelled.load(Ordering::Acquire), "the call still runs");
+        drop(stream);
     }
 
     /// A long call holds up no other: the hooks judge one call at a time,
