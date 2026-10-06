@@ -1104,12 +1104,13 @@ mod tests {
             .unwrap();
         let whole = session.context_messages();
         session.append_pruned().unwrap();
-        session
-            .append_message(&Message::User(UserMessage::text("do it")))
-            .unwrap();
+        // One message, logged and expected alike: two would differ in their
+        // timestamps whenever a millisecond passes between them.
+        let next = Message::User(UserMessage::text("do it"));
+        session.append_message(&next).unwrap();
 
         let mut expected = prune_to_decisions(&whole);
-        expected.push(Message::User(UserMessage::text("do it")));
+        expected.push(next);
         assert_eq!(expected.len(), 3);
         assert_eq!(session.context_messages(), expected);
         let timed: Vec<Message> = session
