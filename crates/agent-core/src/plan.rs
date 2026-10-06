@@ -15,6 +15,9 @@ pub struct PlanPrompt {
     pub instructions: String,
     /// The user turn sent when the plan is accepted.
     pub request: String,
+    /// The user turn sent when the plan is carried out from a clean
+    /// context; empty means [`Self::request`] serves.
+    pub clean_request: String,
 }
 
 impl Default for PlanPrompt {
@@ -24,13 +27,25 @@ impl Default for PlanPrompt {
 }
 
 impl PlanPrompt {
-    /// Parse `plan.md`: front matter `request:` plus the instructions.
+    /// Parse `plan.md`: front matter `request:` and `clean_request:` plus
+    /// the instructions.
     #[must_use]
     pub fn from_file(text: &str) -> Self {
         let (fields, body) = split_front_matter(text);
         Self {
             instructions: body.trim().to_string(),
             request: fields.get("request").cloned().unwrap_or_default(),
+            clean_request: fields.get("clean_request").cloned().unwrap_or_default(),
+        }
+    }
+
+    /// The request that carries the plan out, from a clean context or not.
+    #[must_use]
+    pub fn request(&self, clean: bool) -> &str {
+        if clean && !self.clean_request.trim().is_empty() {
+            &self.clean_request
+        } else {
+            &self.request
         }
     }
 
@@ -62,8 +77,13 @@ mod tests {
         assert!(full.starts_with("You are an agent.\n\n# Plan mode"));
         assert_eq!(plan.apply(""), plan.instructions);
 
+        assert!(plan.request(true).contains("cleared from your context"));
+        assert_eq!(plan.request(false), plan.request);
+
         let bare = PlanPrompt::from_file("Only instructions.");
         assert_eq!(bare.request, "");
+        let old = PlanPrompt::from_file("---\nrequest: go\n---\nPlan.");
+        assert_eq!(old.request(true), "go");
         assert_eq!(bare.apply("base"), "base\n\nOnly instructions.");
         let empty = PlanPrompt::from_file("---\nrequest: go\n---\n");
         assert_eq!(empty.apply("base"), "base");

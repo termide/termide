@@ -647,6 +647,13 @@ impl Agent {
         self.intent_seeded = true;
     }
 
+    /// Clear a plan's exploration from the transcript, see
+    /// [`crate::prune::prune_to_decisions`]. The reviewer's record of the
+    /// user's words is kept as it is.
+    pub fn prune_to_decisions(&mut self) {
+        self.messages = crate::prune::prune_to_decisions(&self.messages);
+    }
+
     /// Run the loop for one user prompt until the agent has nothing left to
     /// do, is cancelled, or hits an error.
     pub fn run(

@@ -6005,7 +6005,7 @@ fn plan_mode_adds_its_instructions_and_offers_to_carry_the_plan_out() {
     assert_eq!(panel.mode.get(), Mode::Plan);
 
     panel.offer_plan();
-    panel.handle_key(chord(KeyCode::Char('1'), KeyModifiers::NONE));
+    panel.handle_key(chord(KeyCode::Char('2'), KeyModifiers::NONE));
     let _ = panel.tick();
     assert_eq!(panel.mode.get(), Mode::Edit);
     settle(&mut panel);
@@ -6022,6 +6022,97 @@ fn plan_mode_adds_its_instructions_and_offers_to_carry_the_plan_out() {
     let shown = panel.write_system_prompt().unwrap();
     assert_eq!(std::fs::read_to_string(shown).unwrap(), "Base prompt.");
     assert!(panel.pending.is_none(), "no card outside plan mode");
+}
+
+#[test]
+fn a_plan_carried_out_from_a_clean_context_leaves_the_exploration_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut looking = reply("");
+    looking.stop_reason = StopReason::ToolUse;
+    looking.content = vec![
+        AssistantContent::Text {
+            text: "Let me look.".into(),
+        },
+        AssistantContent::ToolCall(ToolCall {
+            id: "r1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({ "path": "src/main.rs" }),
+            extra_content: None,
+        }),
+    ];
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        plan_prompt: PlanPrompt::from_file(
+            "---\nrequest: Do it.\nclean_request: Do it afresh.\n---\nPlan first.",
+        ),
+        ..setup(vec![looking, reply("the plan"), reply("done")])
+    });
+    for _ in 0..4 {
+        panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));
+    }
+    assert_eq!(panel.mode.get(), Mode::Plan);
+    type_text(&mut panel, "add a feature");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+    assert!(panel.pending.is_some(), "plan card");
+
+    panel.handle_key(chord(KeyCode::Char('1'), KeyModifiers::NONE));
+    let _ = panel.tick();
+    assert_eq!(panel.mode.get(), Mode::Edit);
+    // The request "edits" a file, so it has a checkpoint to undo.
+    let file = dir.path().join("notes.txt");
+    std::fs::write(&file, "before").unwrap();
+    panel
+        .checkpoints
+        .as_ref()
+        .unwrap()
+        .lock()
+        .unwrap()
+        .save(&file)
+        .unwrap();
+    settle(&mut panel);
+
+    // The log keeps the exploration; the context rebuilt from it does not.
+    let reopened = Session::open(panel.session_path().unwrap()).unwrap();
+    assert!(reopened
+        .branch()
+        .iter()
+        .any(|entry| matches!(entry.kind, EntryKind::Pruned)));
+    let shape: Vec<String> = reopened
+        .context_messages()
+        .iter()
+        .map(|message| match message {
+            Message::User(user) => format!("user:{}", user.plain_text()),
+            Message::Assistant(assistant) => format!("assistant:{}", assistant.plain_text()),
+            Message::ToolResult(result) => format!("result:{}", result.tool_name),
+        })
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            "user:add a feature",
+            "assistant:the plan",
+            "user:Do it afresh.",
+            "assistant:done",
+        ]
+    );
+
+    // Undoing the request leads back to before the clearing, so the
+    // exploration comes back with it.
+    let branch = reopened.branch();
+    let cleared = branch
+        .iter()
+        .find(|entry| matches!(entry.kind, EntryKind::Pruned))
+        .unwrap();
+    let checkpoints = panel
+        .checkpoints
+        .as_ref()
+        .unwrap()
+        .lock()
+        .unwrap()
+        .checkpoints();
+    assert_eq!(checkpoints.len(), 1);
+    assert_eq!(checkpoints[0].leaf_before, cleared.parent_id);
 }
 
 /// A runner that records what reached the shell and answers from a table, so

@@ -461,6 +461,7 @@ agent_rewind_files_only = "Восстановить только файлы"
 # Agent panel — rollback picker
 # Agent panel — plan-mode card
 agent_plan_carry_title = "Режим плана: выполнить план?"
+agent_plan_clean_edits = "Да, принимая правки, с чистого контекста"
 agent_plan_accept_edits = "Да, принимая правки"
 agent_plan_configured = "Да, по правилам из настроек"
 agent_plan_keep = "Продолжить планирование"

@@ -454,6 +454,7 @@ agent_rewind_files_only = "Restore the files only"
 # Agent panel — rollback picker
 # Agent panel — plan-mode card
 agent_plan_carry_title = "Plan mode: carry the plan out?"
+agent_plan_clean_edits = "Yes, accepting edits, from a clean context"
 agent_plan_accept_edits = "Yes, accepting edits"
 agent_plan_configured = "Yes, under the configured rules"
 agent_plan_keep = "Keep planning"

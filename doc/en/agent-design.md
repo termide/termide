@@ -378,6 +378,21 @@ decisions, scope, steps (each leaving the project working, preparatory
 refactoring first), risks and verification. Unlike Pocock's specs, the steps
 name files: the plan is carried out at once, in the same context.
 
+The carry-out card also offers to start "from a clean context". Pocock's
+phase-boundary rule keeps grilling and implementation in one context, since
+the implementation wants the reasoning verbatim, and warns that a summary
+flattens decisions; but dozens of rounds plus their exploration can leave
+the implementation outside the window's good part, with an automatic
+compaction due mid-work. So clearing is an option, not the default, and it is
+mechanical, not a summary: `prune_to_decisions` (`agent-core/src/prune.rs`)
+keeps the user's messages, the `question` and `skill` calls with their
+results and every answer a run closed with, and drops the rest, keeping each
+kept call paired with its result. The log records an `EntryKind::Pruned`
+with no payload and the replay applies the same function, so live and
+reopened history agree; a rewind past the entry restores the whole history,
+and `recall` counts what was cleared as out of context. Claude Code's
+plan-approval dialog has a similar "clear context" choice.
+
 ## 4b. Auto mode
 
 | Agent | Who decides | What the judge sees | No verdict | Repeated denials |

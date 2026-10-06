@@ -592,6 +592,9 @@ pub trait Translation: Send + Sync {
     // Agent panel — plan-mode carry-out card
     /// The plan card's question when the plan is ready
     fn agent_plan_carry_title(&self) -> &str;
+    /// Plan card: carry it out, accepting edits, with the exploration
+    /// cleared from the context
+    fn agent_plan_clean_edits(&self) -> &str;
     /// Plan card: carry it out, accepting edits
     fn agent_plan_accept_edits(&self) -> &str;
     /// Plan card: carry it out under the configured rules

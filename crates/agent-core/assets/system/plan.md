@@ -1,5 +1,6 @@
 ---
 request: Carry out the plan above. Work through it step by step and check each step as you go; if something turns out to be different from what the plan assumed, say so and adapt instead of forcing the plan.
+clean_request: Carry out the plan above. The exploration behind it was cleared from your context: read what a step touches before changing it, and check each step as you go; if something turns out to be different from what the plan assumed, say so and adapt instead of forcing the plan.
 ---
 # Plan mode
 You are in plan mode: the user wants a plan they agree with before anything is changed. Tools that change files or run commands with side effects are refused while plan mode is on; do not try to work around that, and do not ask for permission to edit.

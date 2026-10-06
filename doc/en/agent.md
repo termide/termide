@@ -964,19 +964,32 @@ risks and the checks.
 When the agent answers, a card asks what to do with the plan:
 
 ```
-┌ Plan mode: carry the plan out? ────┐
-│ 1. Yes, accepting edits            │
-│ 2. Yes, under the configured rules │
-│ 3. Keep planning                   │
-└────────────────────────────────────┘
+┌ Plan mode: carry the plan out? ──────────────┐
+│ 1. Yes, accepting edits, from a clean context│
+│ 2. Yes, accepting edits                      │
+│ 3. Yes, under the configured rules           │
+│ 4. Keep planning                             │
+└──────────────────────────────────────────────┘
 ```
 
-The first two leave plan mode for edit or configured and send the request
-named in the front matter of `system/plan.md` (`request:`), so the same
-session goes on to carry the plan out with it in context; the third (or
-`Esc`) keeps plan mode, and whatever you type next refines the plan. The
-plan is the agent's answer in the session, nothing is written to a file; the
-`/undo` checkpoints cover the changes that follow.
+The first three leave plan mode for edit or configured and send the request
+named in the front matter of `system/plan.md`, so the same session goes on to
+carry the plan out; the last (or `Esc`) keeps plan mode, and whatever you
+type next refines the plan. The plan is the agent's answer in the session,
+nothing is written to a file; the `/undo` checkpoints cover the changes that
+follow.
+
+The second and third keep everything the planning read in the context and
+send `request:`. The first clears the exploration out of the context before
+it sends `clean_request:`: what stays is your messages, the questions you
+answered with your answers, the skills loaded and every answer the agent
+ended a run with, the plan among them; the files read, the commands run, the
+web pages and the subagents' reports go. Nothing is summarised, so the
+decisions stay word for word, and the agent re-reads what each step touches.
+It suits a long planning session whose exploration would crowd the work.
+The session log keeps all of it: reopening the session shows the cleared
+conversation, as after a compaction, `recall` still finds what was cleared,
+and undoing the carry-out request brings it back.
 
 ### Auto mode
 
@@ -1313,7 +1326,8 @@ keep_recent_tokens = 4096   # recent messages kept verbatim (at most a quarter o
 
 [Plan mode](#plan-mode) uses `plan.md`: its body is appended to the system
 prompt while the mode is on, and `request:` in its front matter is the
-message sent when you accept the plan. Reword the body to change what a plan
+message sent when you accept the plan; `clean_request:`, the one sent when
+you accept it from a clean context (without it, `request:` serves). Reword the body to change what a plan
 must contain, or the request to change how the agent is told to go ahead.
 
 `/goal <what to achieve>` uses `goal.md`: the agent works toward the goal, and

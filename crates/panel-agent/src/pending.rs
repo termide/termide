@@ -474,7 +474,8 @@ impl AgentPanel {
     }
 
     /// In plan mode, once the agent has answered: offer to carry the plan
-    /// out, in accept-edits or asking, or to keep planning.
+    /// out, in accept-edits from a clean context or with the exploration in
+    /// it, or asking, or to keep planning.
     pub(crate) fn offer_plan(&mut self) {
         if self.external || self.mode.get() != Mode::Plan || self.pending.is_some() {
             return;
@@ -497,6 +498,7 @@ impl AgentPanel {
         let form = ChoiceForm::new(
             t.agent_plan_carry_title(),
             vec![
+                t.agent_plan_clean_edits().to_string(),
                 t.agent_plan_accept_edits().to_string(),
                 t.agent_plan_configured().to_string(),
             ],
@@ -506,10 +508,27 @@ impl AgentPanel {
     }
 
     /// The plan was accepted: leave plan mode for `mode` and send the
-    /// request that carries it out.
-    pub(crate) fn carry_out_plan(&mut self, mode: Mode) -> Vec<PanelEvent> {
+    /// request that carries it out. From a `clean` context, the exploration
+    /// is cleared first, in the log and in the agent's history alike; the
+    /// commands reach the agent in order, so before the request.
+    pub(crate) fn carry_out_plan(&mut self, mode: Mode, clean: bool) -> Vec<PanelEvent> {
+        if clean {
+            if let Some(session) = &mut self.session {
+                if let Err(error) = session.append_pruned() {
+                    log::warn!("agent session write failed: {error}");
+                }
+            }
+            if let Err(error) = self
+                .runtime
+                .update(Box::new(|agent| agent.prune_to_decisions()))
+            {
+                log::warn!("agent context not cleared: {error:?}");
+            }
+            // Known again with the next reply, as after a session switch.
+            self.context_tokens = 0;
+        }
         let mut events = vec![self.set_mode(mode)];
-        let request = self.plan_prompt.request.trim().to_string();
+        let request = self.plan_prompt.request(clean).trim().to_string();
         if request.is_empty() {
             self.notice(
                 termide_i18n::t().agent_notice_plan_no_request(),
@@ -625,12 +644,12 @@ impl AgentPanel {
             }
             (Some(Pending::Plan { .. }), ChoiceAction::Chosen(index)) => {
                 self.pending = None;
-                let mode = if index == 0 {
-                    Mode::Edit
-                } else {
-                    Mode::Configured
+                let (mode, clean) = match index {
+                    0 => (Mode::Edit, true),
+                    1 => (Mode::Edit, false),
+                    _ => (Mode::Configured, false),
                 };
-                let events = self.carry_out_plan(mode);
+                let events = self.carry_out_plan(mode, clean);
                 self.pending_events.extend(events);
             }
             (Some(Pending::Plan { .. }), ChoiceAction::Cancelled | ChoiceAction::Custom(_)) => {
