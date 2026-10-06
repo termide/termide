@@ -5509,8 +5509,9 @@ struct External {
     /// Whether the panel's modes reach it, as with Claude Code, Codex and
     /// Gemini CLI.
     follows_mode: bool,
-    /// Whether its model calls termide's tools, as Claude Code's does.
-    host_tools: bool,
+    /// The names of termide's tools it was last served, when its model
+    /// calls them, as Claude Code's does.
+    served: Option<Arc<Mutex<Vec<String>>>>,
 }
 
 impl External {
@@ -5518,14 +5519,14 @@ impl External {
         Self {
             events: Mutex::new(Vec::new()),
             follows_mode: false,
-            host_tools: false,
+            served: None,
         }
     }
 
-    fn on_termides_tools(setup: BackendSetup) -> Self {
+    fn on_termides_tools(setup: BackendSetup, served: Arc<Mutex<Vec<String>>>) -> Self {
         Self {
             follows_mode: true,
-            host_tools: true,
+            served: Some(served),
             ..Self::new(setup)
         }
     }
@@ -5590,7 +5591,12 @@ impl Backend for External {
         self.follows_mode
     }
     fn runs_host_tools(&self) -> bool {
-        self.host_tools
+        self.served.is_some()
+    }
+    fn update_host_tools(&self, tools: ToolRegistry) -> Result<(), PromptError> {
+        let served = self.served.as_ref().ok_or(PromptError::Unsupported)?;
+        *served.lock().unwrap() = tools.names().iter().map(|n| n.to_string()).collect();
+        Ok(())
     }
 }
 
@@ -5654,28 +5660,35 @@ fn an_external_agent_replaces_the_loop_and_hides_its_knobs() {
 }
 
 #[test]
-fn an_external_agent_on_termides_tools_lists_and_refuses_them() {
-    let external = |host_tools: bool| {
+fn an_external_agent_on_termides_tools_lists_gets_and_refuses_them() {
+    let served = Arc::new(Mutex::new(Vec::new()));
+    let external = |on_ours: bool| {
+        let (tx, rx) = mpsc::channel();
+        let served = Arc::clone(&served);
         let mut panel = AgentPanel::new(AgentPanelSetup {
             backend: Some(Arc::new(move |setup: BackendSetup| {
-                let backend = if host_tools {
-                    External::on_termides_tools(setup)
+                let backend = if on_ours {
+                    External::on_termides_tools(setup, Arc::clone(&served))
                 } else {
                     External::new(setup)
                 };
                 Ok(Box::new(backend) as Box<dyn Backend>)
             })),
+            late_tools: Some(rx),
             ..setup(vec![])
         });
         panel.offered_tools = vec!["read".into(), "bash".into()];
-        panel.mcp_arrived = vec![(
-            "db".into(),
-            Arc::new(Late("db__query")) as Arc<dyn termide_agent_core::Tool>,
-        )];
+        // An MCP server of termide's connects after the agent started.
+        tx.send(LateTools::Ready {
+            source: "db".into(),
+            tools: vec![Arc::new(Late("db__query")) as Arc<dyn termide_agent_core::Tool>],
+        })
+        .unwrap();
+        panel.tick();
         panel
     };
 
-    // On its own tools there is nothing of termide's to show.
+    // On its own tools there is nothing of termide's to show or serve.
     let mut own = external(false);
     assert!(own.external);
     assert!(own.handle_status_action(TOOLSET_ACTION).is_empty());
@@ -5683,27 +5696,32 @@ fn an_external_agent_on_termides_tools_lists_and_refuses_them() {
         .status_segments()
         .iter()
         .any(|s| s.action == Some(TOOLSET_ACTION)));
+    assert!(served.lock().unwrap().is_empty());
 
-    // On termide's tools the list and the chip are there, without the MCP
-    // servers' tools, which are not served to it.
+    // On termide's tools it is served the MCP server's tools as they come,
+    // and the list and the chip are there, with them.
     let mut panel = external(true);
     assert!(panel.external && panel.is_fresh());
-    assert_eq!(chip(&panel, TOOLSET_ACTION), "2/2");
+    assert!(
+        served.lock().unwrap().iter().any(|n| n == "db__query"),
+        "{served:?}"
+    );
+    assert!(panel.waiting_tools.is_empty());
+    assert_eq!(chip(&panel, TOOLSET_ACTION), "3/3");
     let events = panel.handle_status_action(TOOLSET_ACTION);
-    let Some(PanelEvent::ShowChecklist { items, groups, .. }) = events.first() else {
+    let Some(PanelEvent::ShowChecklist { items, .. }) = events.first() else {
         panic!("the toolset list opens: {events:?}");
     };
     let keys: Vec<&str> = items.iter().map(|i| i.key.as_str()).collect();
-    assert_eq!(keys, ["read", "bash"]);
-    assert!(groups.is_empty());
+    assert_eq!(keys, ["read", "bash", "db__query"]);
 
     // Its session took the tools when it started: switched off, even before
     // the first request, a tool is refused rather than taken out.
-    panel.apply_toolset(&["read".to_string()]);
+    panel.apply_toolset(&["read".to_string(), "db__query".to_string()]);
     assert!(panel.toolset_off.contains("bash"));
     assert!(panel.context_off.is_empty());
     assert!(panel.blocked.read().unwrap().contains("bash"));
-    assert_eq!(chip(&panel, TOOLSET_ACTION), "1/2");
+    assert_eq!(chip(&panel, TOOLSET_ACTION), "2/3");
     let items = panel.toolset_items();
     let bash = items.iter().find(|i| i.key == "bash").unwrap();
     assert!(

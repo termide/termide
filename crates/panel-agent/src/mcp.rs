@@ -146,9 +146,6 @@ impl AgentPanel {
     /// it, and only some have the sign-in, so that one keeps its column.
     pub(crate) fn toolset_groups(&self) -> Vec<ChecklistGroup> {
         let t = termide_i18n::t();
-        if !self.toolset_lists_mcp() {
-            return Vec::new();
-        }
         self.catalog
             .mcp_status()
             .into_iter()

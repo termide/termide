@@ -5,9 +5,12 @@
 //!
 //! The transport is MCP's Streamable HTTP in its simplest form, on the
 //! loopback only: every JSON-RPC message is a `POST`, a request gets its
-//! response as the body, a notification gets `202`. There is no standalone
-//! server stream (`GET` is refused, which the protocol allows). A bearer
-//! token, handed to the agent with the URL, keeps other local processes out.
+//! response as the body, a notification gets `202`. A `GET` opens the
+//! standalone server stream, which carries `notifications/tools/list_changed`
+//! whenever [`McpServer::set_tools`] changes the set, so the agent lists the
+//! tools again: an MCP server of termide's that connects after the agent's
+//! session started still reaches it. A bearer token, handed to the agent with
+//! the URL, keeps other local processes out.
 //!
 //! A tool call is answered as a server-sent event stream when the client
 //! accepts one: the headers go out at once and a comment line every few
@@ -22,7 +25,7 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError, RwLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -46,7 +49,10 @@ const MAX_BODY: usize = 16 * 1024 * 1024;
 const KEEPALIVE: Duration = Duration::from_secs(10);
 
 struct Shared {
-    tools: ToolRegistry,
+    tools: RwLock<ToolRegistry>,
+    /// Bumped by every change of `tools`; the server streams wait on it.
+    generation: Mutex<u64>,
+    changed: Condvar,
     /// One call at a time is judged by the hooks: they may block on a
     /// permission card, and the panel answers one question at a time. The
     /// tools themselves run outside, so a long call holds up no other.
@@ -88,7 +94,9 @@ impl McpServer {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         let addr = listener.local_addr()?;
         let shared = Arc::new(Shared {
-            tools,
+            tools: RwLock::new(tools),
+            generation: Mutex::new(0),
+            changed: Condvar::new(),
             hooks: Mutex::new(hooks),
             cwd,
             token: new_token(),
@@ -132,11 +140,35 @@ impl McpServer {
     pub fn token(&self) -> &str {
         &self.shared.token
     }
+
+    /// Serve `tools` from now on, and tell the agent the list changed. A call
+    /// already running keeps the tool it started with.
+    pub fn set_tools(&self, tools: ToolRegistry) {
+        *self
+            .shared
+            .tools
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = tools;
+        *self
+            .shared
+            .generation
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) += 1;
+        self.shared.changed.notify_all();
+    }
 }
 
 impl Drop for McpServer {
     fn drop(&mut self) {
         self.shared.stop.store(true, Ordering::Release);
+        // Wake the server streams so they see the flag and close.
+        drop(
+            self.shared
+                .generation
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+        );
+        self.shared.changed.notify_all();
         for cancel in self
             .shared
             .running
@@ -256,6 +288,9 @@ fn serve(shared: &Shared, mut stream: TcpStream) -> std::io::Result<()> {
     if request.authorization.as_deref() != Some(expected.as_str()) {
         return respond(&mut stream, "401 Unauthorized", "");
     }
+    if request.method == "GET" && request.accepts_stream {
+        return server_stream(shared, stream);
+    }
     if request.method != "POST" {
         return respond(&mut stream, "405 Method Not Allowed", "");
     }
@@ -304,13 +339,15 @@ fn handle(shared: &Shared, message: &Value) -> Option<Value> {
     let result = match method {
         "initialize" => json!({
             "protocolVersion": params["protocolVersion"].as_str().unwrap_or(PROTOCOL_VERSION),
-            "capabilities": { "tools": { "listChanged": false } },
+            "capabilities": { "tools": { "listChanged": true } },
             "serverInfo": { "name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION") },
         }),
         "ping" => json!({}),
         "tools/list" => {
             let tools: Vec<Value> = shared
                 .tools
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
                 .specs()
                 .into_iter()
                 .map(|spec| {
@@ -403,6 +440,50 @@ fn stream_tool_call(
     })
 }
 
+/// The standalone server stream a `GET` opens: a
+/// `notifications/tools/list_changed` for every change of the tools since it
+/// started, a comment every [`KEEPALIVE`] otherwise, until the client goes or
+/// the server stops.
+fn server_stream(shared: &Shared, mut stream: TcpStream) -> std::io::Result<()> {
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n"
+    )?;
+    stream.flush()?;
+    let lock = || {
+        shared
+            .generation
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    };
+    // A change between the agent's first `tools/list` and this stream would
+    // be lost, so a stream opened after any change starts with the
+    // notification: one listing too many costs nothing.
+    let mut seen = 0;
+    loop {
+        let (generation, _) = shared
+            .changed
+            .wait_timeout_while(lock(), shared.keepalive, |generation| {
+                *generation == seen && !shared.stop.load(Ordering::Acquire)
+            })
+            .unwrap_or_else(PoisonError::into_inner);
+        let now = *generation;
+        drop(generation);
+        if shared.stop.load(Ordering::Acquire) || client_gone(&stream) {
+            return Ok(());
+        }
+        let event = if now == seen {
+            ": keepalive\n\n".to_string()
+        } else {
+            seen = now;
+            let note = json!({ "jsonrpc": "2.0", "method": "notifications/tools/list_changed" });
+            format!("event: message\ndata: {note}\n\n")
+        };
+        stream.write_all(event.as_bytes())?;
+        stream.flush()?;
+    }
+}
+
 /// Whether the client closed its end: a read that would otherwise wait
 /// returns end of stream at once. The client sends nothing more on a
 /// request's connection, so there is nothing to read past.
@@ -438,9 +519,15 @@ fn call_tool(shared: &Shared, id: &Value, params: &Value, cancel: CancelToken) -
         ..ToolContext::new(shared.cwd.clone())
     };
     let hooks = || shared.hooks.lock().unwrap_or_else(PoisonError::into_inner);
-    let judged = judge_tool_call(&shared.tools, &call, hooks().as_mut(), &ctx, &cancel);
+    // The set as it stands now: a change while the call runs leaves it be.
+    let tools = shared
+        .tools
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    let judged = judge_tool_call(&tools, &call, hooks().as_mut(), &ctx, &cancel);
     let result = match judged {
-        Judgment::Run(judged) => run_judged_call(&shared.tools, judged, &ctx, &cancel, &mut |_| {}),
+        Judgment::Run(judged) => run_judged_call(&tools, judged, &ctx, &cancel, &mut |_| {}),
         Judgment::Done(result) => result,
     };
     let result = hooks().after_tool_call(&call, result);

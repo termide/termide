@@ -28,7 +28,7 @@ use termide_agent_core::{
     expand_env, now_millis, AcpConfig, AcpFlavor, Agent, AgentEvent, AssistantContent,
     AssistantMessage, Backend, BackendModel, BackendSetup, CancelToken, Hooks, HostTools, Message,
     Mode, ModeHandle, PermissionHooks, PlanPrompt, PromptError, StopReason, StreamEvent, ToolCall,
-    ToolContext, ToolDecision, ToolResultMessage, Usage, UserMessage,
+    ToolContext, ToolDecision, ToolRegistry, ToolResultMessage, Usage, UserMessage,
 };
 use termide_agent_mcp::{McpServer, SERVER_NAME};
 
@@ -381,6 +381,32 @@ impl Backend for AcpRuntime {
                     .is_some())
     }
 
+    /// The set the server will start with, else the running server's. The
+    /// locks are taken in the order `session/new` takes them, which holds the
+    /// first while it starts the server, so no change falls between the two.
+    fn update_host_tools(&self, tools: ToolRegistry) -> Result<(), PromptError> {
+        let shared = &self.shared;
+        let mut pending = shared
+            .host_tools
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(host) = pending.as_mut() {
+            host.tools = tools;
+            return Ok(());
+        }
+        match &*shared
+            .mcp_server
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+        {
+            Some(server) => {
+                server.set_tools(tools);
+                Ok(())
+            }
+            None => Err(PromptError::Unsupported),
+        }
+    }
+
     fn set_mode(&self, mode: Mode) {
         // The hooks read the shared handle; Codex and Gemini CLI are told, off
         // the UI thread.
@@ -507,12 +533,13 @@ impl Shared {
             return params;
         }
         let mut options = json!({ "settingSources": [], "strictMcpConfig": true });
-        if let Some(host) = self
+        // Held until the server runs: a change of the tools meanwhile waits
+        // and then goes to the server.
+        let mut pending = self
             .host_tools
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        {
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(host) = pending.take() {
             match McpServer::start(host.tools, host.hooks, self.cwd.clone()) {
                 Ok(server) => {
                     params["mcpServers"] = json!([{
@@ -533,6 +560,7 @@ impl Shared {
                 Err(error) => log::warn!("cannot serve termide's tools to {}: {error}", self.name),
             }
         }
+        drop(pending);
         params["_meta"] = json!({
             "systemPrompt": self.system_prompt,
             "claudeCode": { "options": options },
@@ -1763,6 +1791,30 @@ mod tests {
         }
     }
 
+    /// The names of the tools termide's MCP server at `url` lists.
+    fn served_tools(url: &str, auth: &str) -> Vec<String> {
+        use std::io::Read;
+        let addr = url.trim_start_matches("http://").trim_end_matches("/mcp");
+        let mut stream = std::net::TcpStream::connect(addr).unwrap();
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }).to_string();
+        write!(
+            stream,
+            "POST /mcp HTTP/1.1\r\nHost: x\r\nAuthorization: {auth}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        let (_, body) = response.split_once("\r\n\r\n").unwrap();
+        let reply: Value = serde_json::from_str(body).unwrap();
+        reply["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap().to_string())
+            .collect()
+    }
+
     #[test]
     fn claude_code_gets_termides_prompt_and_tools_and_none_of_its_own() {
         let dir = tempfile::tempdir().unwrap();
@@ -1798,6 +1850,14 @@ mod tests {
             .starts_with("Bearer "));
         assert!(runtime.follows_mode());
         assert!(runtime.runs_host_tools());
+        // A change of the set reaches the running server.
+        let url = server["url"].as_str().unwrap();
+        let auth = server["headers"][0]["value"].as_str().unwrap();
+        assert_eq!(served_tools(url, auth), ["echo"]);
+        runtime
+            .update_host_tools(termide_agent_core::ToolRegistry::new())
+            .unwrap();
+        assert!(served_tools(url, auth).is_empty());
         // Its calls of termide's tools show under their own names.
         let call = tool_call_of(&json!({
             "toolCallId": "t1", "title": "mcp__termide__bash", "kind": "other",
