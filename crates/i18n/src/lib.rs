@@ -721,7 +721,6 @@ pub trait Translation: Send + Sync {
     fn agent_project_command(&self) -> &str;
     fn agent_hint_loop(&self) -> &str;
     fn agent_hint_goal(&self) -> &str;
-    fn agent_notice_external_history(&self) -> &str;
     fn agent_model_request_dropped(&self) -> &str;
     fn settings_header_appearance(&self) -> &str;
     fn settings_header_input(&self) -> &str;

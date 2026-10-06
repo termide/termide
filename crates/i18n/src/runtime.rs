@@ -183,7 +183,6 @@ impl Translation for RuntimeTranslation {
         agent_project_command,
         agent_hint_loop,
         agent_hint_goal,
-        agent_notice_external_history,
         agent_model_request_dropped,
         settings_header_appearance,
         settings_header_input,

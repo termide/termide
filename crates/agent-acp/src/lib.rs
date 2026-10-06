@@ -24,11 +24,13 @@ use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
+use termide_agent_core::recap;
 use termide_agent_core::{
     expand_env, now_millis, AcpConfig, AcpFlavor, Agent, AgentEvent, AssistantContent,
-    AssistantMessage, Backend, BackendModel, BackendSetup, CancelToken, Hooks, HostTools, Message,
-    Mode, ModeHandle, PermissionHooks, PlanPrompt, PromptError, StopReason, StreamEvent, ToolCall,
-    ToolContext, ToolDecision, ToolRegistry, ToolResultMessage, Usage, UserMessage,
+    AssistantMessage, Backend, BackendModel, BackendSetup, CancelToken, ExternalSessionRef, Hooks,
+    HostTools, Message, Mode, ModeHandle, PermissionHooks, PlanPrompt, PromptError, StopReason,
+    StreamEvent, ToolCall, ToolContext, ToolDecision, ToolRegistry, ToolResultMessage, Usage,
+    UserMessage, ACP_PROVIDER, RECAP_LIMIT,
 };
 use termide_agent_mcp::{McpServer, SERVER_NAME};
 
@@ -115,6 +117,16 @@ struct Shared {
     /// notes since — has plan mode on. The prompt is fixed for the session,
     /// so a later switch reaches it as a note before the next turn.
     told_plan: AtomicBool,
+    /// The agent's own session to resume, when the log names one.
+    resume: Option<ExternalSessionRef>,
+    /// The conversation so far, until the handshake knows whether the
+    /// agent resumed it or is to be told a recap of it.
+    history: Mutex<Vec<Message>>,
+    /// The recap that goes before the first request, see [`recap`].
+    recap: Mutex<Option<String>>,
+    /// Set while `session/load` replays the conversation, which the panel
+    /// already shows and the log already holds.
+    replaying: AtomicBool,
 }
 
 /// The agent's tool calls as the session log keeps the built-in loop's: an
@@ -239,6 +251,10 @@ impl AcpRuntime {
             told_plan: AtomicBool::new(setup.mode.get() == Mode::Plan),
             mode: setup.mode,
             plan: setup.plan,
+            resume: setup.resume,
+            history: Mutex::new(setup.history),
+            recap: Mutex::new(None),
+            replaying: AtomicBool::new(false),
         });
         let for_reader = Arc::clone(&shared);
         std::thread::spawn(move || for_reader.read_loop(reader));
@@ -556,7 +572,8 @@ impl Shared {
             self.wait_for_mcp_servers();
         }
         let params = self.new_session_params(http);
-        let result = outcome.and_then(|_| self.request("session/new", params, timeout));
+        let result =
+            outcome.and_then(|init| self.open_session(&init["agentCapabilities"], params, timeout));
         let conn = match result {
             Ok(value) => match value["sessionId"].as_str() {
                 Some(id) => {
@@ -575,6 +592,66 @@ impl Shared {
             self.apply_mode(self.mode.get());
         }
         self.kick();
+    }
+
+    /// Open the session the conversation goes on in: the agent's own, when
+    /// the log names one of this agent's and the agent can take it up again
+    /// — through `session/resume`, else `session/load`, whose replay of what
+    /// the panel already shows is dropped — or else a new one, recorded in
+    /// the log and told a recap of the conversation before its first request.
+    fn open_session(
+        &self,
+        capabilities: &Value,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, String> {
+        let history =
+            std::mem::take(&mut *self.history.lock().unwrap_or_else(PoisonError::into_inner));
+        let resume = self
+            .resume
+            .as_ref()
+            .filter(|resume| resume.agent == self.name);
+        let method = if capabilities["sessionCapabilities"]["resume"].is_object() {
+            Some("session/resume")
+        } else if capabilities["loadSession"] == true {
+            Some("session/load")
+        } else {
+            None
+        };
+        if let (Some(resume), Some(method)) = (resume, method) {
+            let mut resume_params = params.clone();
+            resume_params["sessionId"] = json!(resume.session_id);
+            self.replaying
+                .store(method == "session/load", Ordering::Release);
+            let result = self.request(method, resume_params, timeout);
+            self.replaying.store(false, Ordering::Release);
+            match result {
+                Ok(mut value) => {
+                    if !value.is_object() {
+                        value = json!({});
+                    }
+                    value["sessionId"] = json!(resume.session_id);
+                    return Ok(value);
+                }
+                // Gone from the agent's own store, most likely: the
+                // conversation goes on in a new session, told the recap.
+                Err(error) => log::warn!(
+                    "acp {}: cannot resume session {}: {error}",
+                    self.name,
+                    resume.session_id
+                ),
+            }
+        }
+        let value = self.request("session/new", params, timeout)?;
+        if let Some(id) = value["sessionId"].as_str() {
+            let _ = self.events.send(AgentEvent::ExternalSession {
+                agent: self.name.clone(),
+                session_id: id.to_string(),
+            });
+            *self.recap.lock().unwrap_or_else(PoisonError::into_inner) =
+                recap(&history, RECAP_LIMIT);
+        }
+        Ok(value)
     }
 
     /// Wait, for [`MCP_SETTLE`] at most, until the panel says termide's MCP
@@ -807,7 +884,12 @@ impl Shared {
                     .unwrap_or_else(PoisonError::into_inner)
                     .clear();
                 let _ = self.events.send(AgentEvent::MessageEnd(Message::Assistant(
-                    AssistantMessage::failed("acp", &self.name, StopReason::Error, error.clone()),
+                    AssistantMessage::failed(
+                        ACP_PROVIDER,
+                        &self.name,
+                        StopReason::Error,
+                        error.clone(),
+                    ),
                 )));
                 let _ = self.events.send(AgentEvent::AgentEnd);
                 self.busy.store(false, Ordering::Release);
@@ -854,6 +936,16 @@ impl Shared {
             .send(AgentEvent::MessageEnd(Message::User(message.clone())));
         let text = message.plain_text();
         let mut prompt = Vec::new();
+        // Kept out of the log, like the plan note: the log holds the
+        // conversation itself.
+        if let Some(recap) = self
+            .recap
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+        {
+            prompt.push(json!({ "type": "text", "text": recap }));
+        }
         if let Some(note) = self.plan_switch_note() {
             prompt.push(json!({ "type": "text", "text": note }));
         }
@@ -926,7 +1018,7 @@ impl Shared {
                 .unwrap_or_default(),
             stop_reason: stop,
             usage,
-            provider: "acp".into(),
+            provider: ACP_PROVIDER.into(),
             model: self.model_name(),
             error_message: error,
             timestamp: now_millis(),
@@ -1155,7 +1247,21 @@ impl Shared {
 
     /// One `session/update` into the events the panel understands.
     fn on_update(&self, update: &Value) {
-        match update["sessionUpdate"].as_str().unwrap_or("") {
+        let kind = update["sessionUpdate"].as_str().unwrap_or("");
+        if self.replaying.load(Ordering::Acquire)
+            && matches!(
+                kind,
+                "user_message_chunk"
+                    | "agent_message_chunk"
+                    | "agent_thought_chunk"
+                    | "tool_call"
+                    | "tool_call_update"
+                    | "plan"
+            )
+        {
+            return;
+        }
+        match kind {
             "agent_message_chunk" => {
                 let text = update["content"]["text"].as_str().unwrap_or("").to_string();
                 let mut open = self
@@ -1292,7 +1398,7 @@ impl Shared {
             content: calls.into_iter().map(AssistantContent::ToolCall).collect(),
             stop_reason: StopReason::ToolUse,
             usage: Usage::default(),
-            provider: "acp".into(),
+            provider: ACP_PROVIDER.into(),
             model: self.model_name(),
             error_message: None,
             timestamp: now_millis(),
@@ -1797,6 +1903,8 @@ mod tests {
                 system_prompt: String::new(),
                 plan: PlanPrompt::default(),
                 host_tools: None,
+                resume: None,
+                history: Vec::new(),
             },
             5,
             AcpFlavor::Generic,
@@ -1927,6 +2035,8 @@ mod tests {
                 system_prompt: "termide's prompt".into(),
                 plan: PlanPrompt::default(),
                 host_tools,
+                resume: None,
+                history: Vec::new(),
             },
             5,
             flavor,
@@ -2572,6 +2682,8 @@ mod tests {
                 system_prompt: String::new(),
                 plan: PlanPrompt::default(),
                 host_tools: None,
+                resume: None,
+                history: Vec::new(),
             },
             5,
             AcpFlavor::Generic,
@@ -2627,7 +2739,7 @@ mod tests {
         let events = drain_until_end(&runtime, &permissions, PermissionAnswer::AllowSession);
         assert!(!runtime.is_busy());
 
-        let kinds: Vec<String> = events
+        let mut kinds: Vec<String> = events
             .iter()
             .map(|e| match e {
                 AgentEvent::AgentStart => "start".into(),
@@ -2662,9 +2774,15 @@ mod tests {
                 AgentEvent::TurnEnd => "turn-end".into(),
                 AgentEvent::QueueUpdate { .. } => "queue".into(),
                 AgentEvent::AgentEnd => "end".into(),
+                AgentEvent::ExternalSession { session_id, .. } => format!("session:{session_id}"),
                 _ => "other".into(),
             })
             .collect();
+        // The handshake runs on its own thread, so where the session it
+        // opened is reported among the turn's first events is not fixed.
+        let opened = kinds.iter().position(|k| k == "session:s1");
+        assert!(opened.is_some(), "the new session is reported: {kinds:?}");
+        kinds.remove(opened.unwrap());
         assert_eq!(
             kinds,
             [
@@ -2734,6 +2852,8 @@ mod tests {
                 system_prompt: String::new(),
                 plan: PlanPrompt::default(),
                 host_tools: None,
+                resume: None,
+                history: Vec::new(),
             },
             1,
             AcpFlavor::Generic,
@@ -2796,5 +2916,280 @@ mod tests {
             rx.try_recv().is_err(),
             "a read-only command must not reach the user"
         );
+    }
+
+    /// An agent whose `initialize` advertises `capabilities` and which knows
+    /// session `old`: `session/resume` and `session/load` take it up (unless
+    /// `forgotten`), the load replaying an exchange first; `session/new`
+    /// opens `fresh`; a prompt is answered "ok".
+    fn session_agent(
+        dir: PathBuf,
+        capabilities: Value,
+        forgotten: bool,
+        resume: Option<ExternalSessionRef>,
+        history: Vec<Message>,
+    ) -> (AcpRuntime, Arc<Mutex<Vec<Value>>>) {
+        let (to_agent_rx, to_agent_tx) = pipe().unwrap();
+        let (from_agent_rx, from_agent_tx) = pipe().unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let record = Arc::clone(&seen);
+        std::thread::spawn(move || {
+            let mut out = from_agent_tx;
+            let mut send = |value: Value| writeln!(out, "{value}").unwrap();
+            let mut reader = BufReader::new(to_agent_rx).lines();
+            while let Some(Ok(line)) = reader.next() {
+                let message: Value = serde_json::from_str(&line).unwrap();
+                record.lock().unwrap().push(message.clone());
+                let id = message["id"].clone();
+                let session = message["params"]["sessionId"].clone();
+                let update = |u: Value| json!({ "jsonrpc": "2.0", "method": "session/update", "params": { "sessionId": session, "update": u } });
+                let result = match message["method"].as_str() {
+                    Some("initialize") => {
+                        json!({ "protocolVersion": 1, "agentCapabilities": capabilities })
+                    }
+                    Some("session/resume" | "session/load") if forgotten => {
+                        send(
+                            json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32002, "message": "no such session" } }),
+                        );
+                        continue;
+                    }
+                    Some("session/load") => {
+                        send(update(
+                            json!({ "sessionUpdate": "user_message_chunk", "content": { "type": "text", "text": "old request" } }),
+                        ));
+                        send(update(
+                            json!({ "sessionUpdate": "agent_message_chunk", "content": { "type": "text", "text": "old answer" } }),
+                        ));
+                        send(update(
+                            json!({ "sessionUpdate": "tool_call", "toolCallId": "old-call", "title": "Read", "kind": "read", "rawInput": {} }),
+                        ));
+                        json!({})
+                    }
+                    Some("session/resume") => json!({}),
+                    Some("session/new") => json!({ "sessionId": "fresh" }),
+                    Some("session/prompt") => {
+                        send(update(
+                            json!({ "sessionUpdate": "agent_message_chunk", "content": { "type": "text", "text": "ok" } }),
+                        ));
+                        json!({ "stopReason": "end_turn" })
+                    }
+                    Some(_) => json!({}),
+                    None => continue,
+                };
+                send(json!({ "jsonrpc": "2.0", "id": id, "result": result }));
+            }
+        });
+        let cancel = CancelToken::new();
+        let (prompter, _permissions) = permission_channel(cancel.clone());
+        let runtime = AcpRuntime::from_streams(
+            "fake",
+            from_agent_rx,
+            to_agent_tx,
+            BackendSetup {
+                cwd: dir,
+                prompter,
+                cancel,
+                rules: PermissionRules::default(),
+                persist: None,
+                mode: ModeHandle::new(Mode::default()),
+                system_prompt: String::new(),
+                plan: PlanPrompt::default(),
+                host_tools: None,
+                resume,
+                history,
+            },
+            5,
+            AcpFlavor::Generic,
+        );
+        (runtime, seen)
+    }
+
+    fn old_session(agent: &str) -> Option<ExternalSessionRef> {
+        Some(ExternalSessionRef {
+            agent: agent.into(),
+            session_id: "old".into(),
+        })
+    }
+
+    fn earlier() -> Vec<Message> {
+        vec![
+            Message::User(UserMessage::text("earlier request")),
+            Message::Assistant(AssistantMessage {
+                content: vec![AssistantContent::Text {
+                    text: "earlier answer".into(),
+                }],
+                stop_reason: StopReason::Stop,
+                usage: Usage::default(),
+                provider: ACP_PROVIDER.into(),
+                model: "fake".into(),
+                error_message: None,
+                timestamp: 0,
+            }),
+        ]
+    }
+
+    /// Prompt `text`, wait for the turn to end and return every event since
+    /// the runtime started, with the prompt the agent got.
+    fn run_prompt(
+        runtime: &AcpRuntime,
+        seen: &Arc<Mutex<Vec<Value>>>,
+        text: &str,
+    ) -> (Vec<AgentEvent>, Vec<Value>) {
+        runtime.prompt(UserMessage::text(text)).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut events = Vec::new();
+        while !events.iter().any(|e| matches!(e, AgentEvent::AgentEnd)) {
+            assert!(
+                Instant::now() < deadline,
+                "the turn never ended: {events:?}"
+            );
+            events.extend(runtime.drain());
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let sent = seen_where(seen, |m| m["method"] == "session/prompt").remove(0);
+        (events, sent["params"]["prompt"].as_array().unwrap().clone())
+    }
+
+    fn methods(seen: &Arc<Mutex<Vec<Value>>>) -> Vec<String> {
+        seen.lock()
+            .unwrap()
+            .iter()
+            .filter_map(|m| m["method"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    fn opened(events: &[AgentEvent]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::ExternalSession { agent, session_id } => {
+                    Some(format!("{agent}:{session_id}"))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_agent_that_resumes_takes_its_own_session_up_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, seen) = session_agent(
+            dir.path().to_path_buf(),
+            json!({ "loadSession": true, "sessionCapabilities": { "resume": {} } }),
+            false,
+            old_session("fake"),
+            earlier(),
+        );
+        let (events, prompt) = run_prompt(&runtime, &seen, "next");
+        assert_eq!(
+            methods(&seen),
+            ["initialize", "session/resume", "session/prompt"]
+        );
+        let resumed = seen_where(&seen, |m| m["method"] == "session/resume").remove(0);
+        assert_eq!(resumed["params"]["sessionId"], "old");
+        assert_eq!(resumed["params"]["cwd"], json!(dir.path()));
+        // The prompt goes to the resumed session, alone: the agent knows the rest.
+        let sent = seen_where(&seen, |m| m["method"] == "session/prompt").remove(0);
+        assert_eq!(sent["params"]["sessionId"], "old");
+        assert_eq!(prompt, [json!({ "type": "text", "text": "next" })]);
+        assert!(opened(&events).is_empty(), "nothing new to record");
+    }
+
+    #[test]
+    fn a_loaded_session_replays_nothing_into_the_panel() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, seen) = session_agent(
+            dir.path().to_path_buf(),
+            json!({ "loadSession": true }),
+            false,
+            old_session("fake"),
+            earlier(),
+        );
+        let (events, prompt) = run_prompt(&runtime, &seen, "next");
+        assert_eq!(
+            methods(&seen),
+            ["initialize", "session/load", "session/prompt"]
+        );
+        assert_eq!(prompt.len(), 1);
+        let text: String = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::MessageUpdate(StreamEvent::TextDelta(delta)) => Some(delta.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            text, "ok",
+            "the replay must not reach the panel: {events:?}"
+        );
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. })));
+    }
+
+    #[test]
+    fn a_new_session_is_recorded_and_told_a_recap_once() {
+        let dir = tempfile::tempdir().unwrap();
+        // No way to resume: the agent advertises none.
+        let (runtime, seen) = session_agent(
+            dir.path().to_path_buf(),
+            json!({}),
+            false,
+            old_session("fake"),
+            earlier(),
+        );
+        let (events, prompt) = run_prompt(&runtime, &seen, "next");
+        assert_eq!(
+            methods(&seen),
+            ["initialize", "session/new", "session/prompt"]
+        );
+        assert_eq!(opened(&events), ["fake:fresh"]);
+        assert_eq!(prompt.len(), 2);
+        let recap = prompt[0]["text"].as_str().unwrap();
+        assert!(recap.contains("earlier request") && recap.contains("earlier answer"));
+        assert_eq!(prompt[1]["text"], "next");
+        // The recap is not part of what the panel logs as the request.
+        let logged = events.iter().find_map(|e| match e {
+            AgentEvent::MessageEnd(Message::User(user)) => Some(user.plain_text()),
+            _ => None,
+        });
+        assert_eq!(logged.as_deref(), Some("next"));
+
+        seen.lock().unwrap().clear();
+        let (_, prompt) = run_prompt(&runtime, &seen, "again");
+        assert_eq!(prompt, [json!({ "type": "text", "text": "again" })]);
+    }
+
+    #[test]
+    fn a_session_the_agent_lost_or_never_had_starts_anew_with_the_recap() {
+        for (forgotten, resume) in [(true, old_session("fake")), (false, old_session("other"))] {
+            let dir = tempfile::tempdir().unwrap();
+            let (runtime, seen) = session_agent(
+                dir.path().to_path_buf(),
+                json!({ "sessionCapabilities": { "resume": {} } }),
+                forgotten,
+                resume,
+                earlier(),
+            );
+            let (events, prompt) = run_prompt(&runtime, &seen, "next");
+            assert!(methods(&seen).contains(&"session/new".to_string()));
+            assert_eq!(
+                methods(&seen).contains(&"session/resume".to_string()),
+                forgotten,
+                "another agent's session is never asked for"
+            );
+            assert_eq!(opened(&events), ["fake:fresh"]);
+            assert_eq!(prompt.len(), 2);
+        }
+    }
+
+    #[test]
+    fn a_fresh_conversation_gets_no_recap() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, seen) =
+            session_agent(dir.path().to_path_buf(), json!({}), false, None, Vec::new());
+        let (events, prompt) = run_prompt(&runtime, &seen, "first");
+        assert_eq!(opened(&events), ["fake:fresh"]);
+        assert_eq!(prompt, [json!({ "type": "text", "text": "first" })]);
     }
 }

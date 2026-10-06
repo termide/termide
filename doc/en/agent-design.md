@@ -1047,9 +1047,17 @@ onto the offered `allow_once`/`allow_always`/`reject_once` options),
 write surfaces as a `write` tool call for the editor reload), terminals not
 advertised. Model and mode chips are hidden for an external agent —
 `Backend::update` answers `Unsupported` — and switching between engines
-rebuilds the runtime on the same session log, whose history is shown but not
-known to the external agent (ACP's `session/load` is the way to change that
-later). Still hand-written JSON-RPC rather than the `agent-client-protocol`
+rebuilds the runtime on the same session log. The agent's session id goes
+into that log as an `external_session` entry (with the log's header id and
+`cwd`); `Session::external_session` hands it back while the branch is still
+what that session holds — no rewind, compaction, pruning, agent or connection
+change and no built-in answer since, and the same log in the same place, so a
+fork or a move drops it. The backend takes it up with `session/resume`, else
+`session/load` (its replay dropped, since the panel shows the log already);
+otherwise it opens a new session and sends a recap
+(`recap::recap`, the `prune_to_decisions` cut rendered as tagged text, newest
+kept within `RECAP_LIMIT`) as a text block before the first prompt, outside
+the log. Still hand-written JSON-RPC rather than the `agent-client-protocol`
 crate: the surface used is small, and the crate would bring tokio.
 
 ## 8. Provider

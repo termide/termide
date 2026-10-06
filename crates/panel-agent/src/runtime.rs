@@ -259,14 +259,12 @@ pub(crate) fn spawn_runtime(
                 tools: tools.clone(),
                 hooks: Box::new(ChainedHooks::new(host_chain)),
             }),
+            // The conversation goes on in the agent's own session when it
+            // still holds it, else the agent is told a recap of it.
+            resume: session.and_then(Session::external_session),
+            history: messages.clone(),
         }) {
             Ok(runtime) => {
-                if !messages.is_empty() {
-                    transcript.push(Item::Notice {
-                        text: termide_i18n::t().agent_notice_external_history().into(),
-                        kind: NoticeKind::Info,
-                    });
-                }
                 return Spawned {
                     runtime,
                     permission_rx: external_rx,

@@ -451,6 +451,13 @@ pub enum AgentEvent {
     /// the run can be resumed. Not emitted on a natural finish.
     Paused,
     AgentEnd,
+    /// An external agent opened a session of its own for the conversation,
+    /// which the log records so a reopened session can resume it. Never from
+    /// the built-in loop.
+    ExternalSession {
+        agent: String,
+        session_id: String,
+    },
 }
 
 /// Transcript owner and loop driver. Single-threaded by design: the runtime

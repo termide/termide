@@ -17,6 +17,7 @@ use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
+use crate::acp::ACP_PROVIDER;
 use crate::compaction::CompactionPrompts;
 use crate::context::file_timestamp;
 use crate::message::{now_millis, Message};
@@ -116,6 +117,25 @@ pub enum EntryKind {
     /// this entry are cut down to the decisions, see
     /// [`crate::prune::prune_to_decisions`]. They stay in the file whole.
     Pruned,
+    /// An external agent opened its own session for this branch: `agent` is
+    /// the name it runs under, `session_id` the id it gave, `log` the header
+    /// id and `cwd` the working directory of this log when it did. A
+    /// reopened session asks the agent to resume it, see
+    /// [`Session::external_session`].
+    ExternalSession {
+        agent: String,
+        session_id: String,
+        log: String,
+        cwd: PathBuf,
+    },
+}
+
+/// An external agent's own session that still holds this branch's
+/// conversation, see [`Session::external_session`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternalSessionRef {
+    pub agent: String,
+    pub session_id: String,
 }
 
 /// The model a session last recorded, see [`Session::current_model`].
@@ -644,7 +664,8 @@ impl Session {
                 | EntryKind::ReasoningChange { .. }
                 | EntryKind::ThinkingChange { .. }
                 | EntryKind::Toolset { .. }
-                | EntryKind::ConnectionChange { .. } => {}
+                | EntryKind::ConnectionChange { .. }
+                | EntryKind::ExternalSession { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
                 } => {
@@ -680,7 +701,8 @@ impl Session {
                 | EntryKind::ReasoningChange { .. }
                 | EntryKind::ThinkingChange { .. }
                 | EntryKind::Toolset { .. }
-                | EntryKind::ConnectionChange { .. } => {}
+                | EntryKind::ConnectionChange { .. }
+                | EntryKind::ExternalSession { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
                 } => {
@@ -772,7 +794,8 @@ impl Session {
                 | EntryKind::ReasoningChange { .. }
                 | EntryKind::ThinkingChange { .. }
                 | EntryKind::Toolset { .. }
-                | EntryKind::ConnectionChange { .. } => None,
+                | EntryKind::ConnectionChange { .. }
+                | EntryKind::ExternalSession { .. } => None,
             })
     }
 
@@ -823,6 +846,68 @@ impl Session {
                 EntryKind::ConnectionChange { connection } => Some(connection.clone()),
                 _ => None,
             })
+    }
+
+    /// Record that the external agent `agent` opened its own session
+    /// `session_id` for this branch.
+    pub fn append_external_session(
+        &mut self,
+        agent: &str,
+        session_id: &str,
+    ) -> std::io::Result<String> {
+        self.append(EntryKind::ExternalSession {
+            agent: agent.to_string(),
+            session_id: session_id.to_string(),
+            log: self.header.id.clone(),
+            cwd: self.header.cwd.clone(),
+        })
+    }
+
+    /// The external agent's session that holds this branch's conversation as
+    /// the branch has it, for the agent to resume: the last one recorded,
+    /// unless the branch has since gone where that session cannot follow —
+    /// a request undone, the context compacted or cleared, another agent or
+    /// connection taken. A fork or a move into another directory leaves it
+    /// behind too: the session belongs to the log and the place it was
+    /// opened for, and two logs resuming one session would tangle it. The
+    /// external agent checks the session is still its own when it resumes.
+    #[must_use]
+    pub fn external_session(&self) -> Option<ExternalSessionRef> {
+        for entry in self.branch().into_iter().rev() {
+            match &entry.kind {
+                EntryKind::ExternalSession {
+                    agent,
+                    session_id,
+                    log,
+                    cwd,
+                } => {
+                    return (*log == self.header.id && *cwd == self.header.cwd).then(|| {
+                        ExternalSessionRef {
+                            agent: agent.clone(),
+                            session_id: session_id.clone(),
+                        }
+                    });
+                }
+                EntryKind::Rewind
+                | EntryKind::Compaction { .. }
+                | EntryKind::Pruned
+                | EntryKind::AgentChange { .. }
+                | EntryKind::ConnectionChange { .. } => return None,
+                // The built-in loop answered in the meantime (the agent could
+                // not start): the agent's session never saw that exchange.
+                EntryKind::Message {
+                    message: Message::Assistant(assistant),
+                    ..
+                } if assistant.provider != ACP_PROVIDER => return None,
+                EntryKind::Message { .. }
+                | EntryKind::ModelChange { .. }
+                | EntryKind::SessionName { .. }
+                | EntryKind::ReasoningChange { .. }
+                | EntryKind::ThinkingChange { .. }
+                | EntryKind::Toolset { .. } => {}
+            }
+        }
+        None
     }
 
     pub fn append_toolset(&mut self, disabled: &[String]) -> std::io::Result<String> {
@@ -924,7 +1009,8 @@ impl From<&Session> for SessionSummary {
             | EntryKind::ReasoningChange { .. }
             | EntryKind::ThinkingChange { .. }
             | EntryKind::Toolset { .. }
-            | EntryKind::ConnectionChange { .. } => None,
+            | EntryKind::ConnectionChange { .. }
+            | EntryKind::ExternalSession { .. } => None,
         });
         let first_prompt = messages.clone().find_map(|m| match m {
             Message::User(user) => Some(user.plain_text()),
@@ -969,7 +1055,7 @@ fn write_line(file: &mut File, line: &Line) -> std::io::Result<()> {
 mod tests {
     use super::*;
     use crate::agent::test_support::text_reply;
-    use crate::message::UserMessage;
+    use crate::message::{AssistantMessage, UserMessage};
 
     #[test]
     fn is_empty_tracks_conversation_and_discard_removes_the_file() {
@@ -1006,6 +1092,91 @@ mod tests {
         assert!(path.exists());
         chatted.discard().unwrap();
         assert!(!path.exists());
+    }
+
+    /// A reply of the external agent, as its backend logs it.
+    fn agent_reply(text: &str) -> Message {
+        Message::Assistant(AssistantMessage {
+            provider: ACP_PROVIDER.into(),
+            ..text_reply(text)
+        })
+    }
+
+    #[test]
+    fn an_external_session_is_resumed_while_the_branch_is_still_its_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
+        session.append_agent_change("claude").unwrap();
+        assert_eq!(session.external_session(), None);
+        session.append_external_session("claude", "s1").unwrap();
+        let start = session
+            .append_message(&Message::User(UserMessage::text("one")))
+            .unwrap();
+        session.append_message(&agent_reply("answer")).unwrap();
+        // What the session holds does not change with these.
+        session.append_toolset(&["bash".into()]).unwrap();
+        session.set_name("named").unwrap();
+        let expected = Some(ExternalSessionRef {
+            agent: "claude".into(),
+            session_id: "s1".into(),
+        });
+        assert_eq!(session.external_session(), expected);
+        // It survives a reopen.
+        let path = session.path().to_path_buf();
+        drop(session);
+        let mut session = Session::open(&path).unwrap();
+        assert_eq!(session.external_session(), expected);
+
+        // An undone request is still in the agent's session.
+        session.rewind_to(Some(&start)).unwrap();
+        assert_eq!(session.external_session(), None);
+        // A new one after it is resumed again.
+        session.append_external_session("claude", "s2").unwrap();
+        assert_eq!(
+            session.external_session().map(|r| r.session_id),
+            Some("s2".into())
+        );
+        // The built-in loop answered in between: the agent never saw it.
+        session
+            .append_message(&Message::Assistant(text_reply("built-in")))
+            .unwrap();
+        assert_eq!(session.external_session(), None);
+    }
+
+    #[test]
+    fn another_agent_a_compaction_a_fork_or_a_move_leave_the_external_session_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let fresh = |dir: &Path| {
+            let mut session = Session::create(dir, Path::new("/work")).unwrap();
+            session.append_external_session("claude", "s1").unwrap();
+            session
+                .append_message(&Message::User(UserMessage::text("one")))
+                .unwrap();
+            assert!(session.external_session().is_some());
+            session
+        };
+        let mut switched = fresh(dir.path());
+        switched.append_agent_change("default").unwrap();
+        assert_eq!(switched.external_session(), None);
+        let mut reconnected = fresh(dir.path());
+        reconnected.append_connection_change("cloud").unwrap();
+        assert_eq!(reconnected.external_session(), None);
+        let mut compacted = fresh(dir.path());
+        compacted.append_compaction("gist", 100, 1).unwrap();
+        assert_eq!(compacted.external_session(), None);
+        let mut cleared = fresh(dir.path());
+        cleared.append_pruned().unwrap();
+        assert_eq!(cleared.external_session(), None);
+
+        let original = fresh(dir.path());
+        let fork = Session::open(&original.fork(Path::new("/work"), None).unwrap()).unwrap();
+        assert_eq!(fork.external_session(), None);
+        assert!(original.external_session().is_some());
+        let elsewhere = tempfile::tempdir().unwrap();
+        let moved = original
+            .move_into(elsewhere.path(), Path::new("/elsewhere"))
+            .unwrap();
+        assert_eq!(Session::open(&moved).unwrap().external_session(), None);
     }
 
     #[test]

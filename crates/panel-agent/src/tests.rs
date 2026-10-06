@@ -5528,8 +5528,16 @@ impl Backend for Idle {
     }
 }
 
+thread_local! {
+    /// What the last [`External`] started on this thread was handed: the
+    /// session to resume and the history, as `role:text`.
+    static EXTERNAL_START: std::cell::RefCell<Option<(Option<String>, Vec<String>)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 /// An "external agent" for tests: answers every prompt with one text
-/// message, through the same events as the real ACP backend.
+/// message, through the same events as the real ACP backend, and like it
+/// reports the session it opened when it was given none to resume.
 struct External {
     events: Mutex<Vec<AgentEvent>>,
     /// Whether the panel's modes reach it, as with Claude Code, Codex and
@@ -5546,9 +5554,29 @@ struct External {
 }
 
 impl External {
-    fn new(_setup: BackendSetup) -> Self {
+    fn new(setup: BackendSetup) -> Self {
+        let resume = setup
+            .resume
+            .map(|r| format!("{}:{}", r.agent, r.session_id));
+        let history = setup
+            .history
+            .iter()
+            .map(|message| match message {
+                Message::User(user) => format!("user:{}", user.plain_text()),
+                Message::Assistant(assistant) => format!("assistant:{}", assistant.plain_text()),
+                Message::ToolResult(result) => format!("result:{}", result.tool_name),
+            })
+            .collect();
+        let mut events = Vec::new();
+        if resume.is_none() {
+            events.push(AgentEvent::ExternalSession {
+                agent: "outside".into(),
+                session_id: "ext-1".into(),
+            });
+        }
+        EXTERNAL_START.with(|start| *start.borrow_mut() = Some((resume, history)));
         Self {
-            events: Mutex::new(Vec::new()),
+            events: Mutex::new(events),
             follows_mode: false,
             served: None,
             takes_mcp: false,
@@ -5670,12 +5698,14 @@ fn an_external_agent_replaces_the_loop_and_hides_its_knobs() {
     assert!(!texts.iter().any(|t| t.starts_with("Mode")), "{texts:?}");
     assert!(!texts.iter().any(|t| t.starts_with("Model")), "{texts:?}");
     assert!(texts.contains(&" (acp)".to_string()));
-    // The earlier conversation is shown, and marked as unknown to the agent.
+    // The earlier conversation is shown, and handed to the agent, which has
+    // no session of its own to resume yet.
     let items = panel.transcript().items();
     assert!(matches!(&items[0], Item::User { text, .. } if text == "hello"));
-    assert!(items.iter().any(
-            |i| matches!(i, Item::Notice { text, .. } if text.contains("not known to the external agent"))
-        ));
+    assert_eq!(
+        EXTERNAL_START.with(|start| start.borrow_mut().take()),
+        Some((None, vec!["user:hello".into(), "assistant:native".into()]))
+    );
 
     // Model and mode are not ours any more.
     let events = panel.handle_status_action(MODE_ACTION);
@@ -5697,10 +5727,24 @@ fn an_external_agent_replaces_the_loop_and_hides_its_knobs() {
     assert!(panel.transcript().items().iter().all(
         |i| !matches!(i, Item::Assistant { text, cost: Some(_), .. } if text == "from outside")
     ));
-    // The log records both the switch and the external agent's answer.
+    // The log records the switch, the session the agent opened and its
+    // answer.
     let session = Session::open(panel.session_path().unwrap()).unwrap();
     assert_eq!(session.current_agent().as_deref(), Some("outside"));
     assert_eq!(session.context_messages().len(), 4);
+    assert_eq!(
+        session.external_session().map(|r| r.session_id),
+        Some("ext-1".into())
+    );
+    // Reopened, the conversation goes on in the agent's own session.
+    let session = panel.session.take();
+    panel.switch_session(session);
+    assert_eq!(
+        EXTERNAL_START
+            .with(|start| start.borrow_mut().take())
+            .and_then(|(resume, _)| resume),
+        Some("outside:ext-1".into())
+    );
 
     // Back to the built-in loop.
     assert!(panel.switch_agent("default"));

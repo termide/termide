@@ -422,6 +422,13 @@ impl AgentPanel {
                     NoticeKind::Warn,
                 );
             }
+            AgentEvent::ExternalSession { agent, session_id } => {
+                if let Some(session) = &mut self.session {
+                    if let Err(error) = session.append_external_session(&agent, &session_id) {
+                        log::warn!("agent session write failed: {error}");
+                    }
+                }
+            }
             AgentEvent::GoalJudged { done, reason } => self.on_goal_verdict(done, &reason),
             AgentEvent::GoalJudgeFailed { error } => {
                 self.goal_task = None;

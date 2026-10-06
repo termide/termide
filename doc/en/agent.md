@@ -1277,9 +1277,20 @@ agent is active: it has its own, and TermIDE's mode is not cycled for it. The **
 its models over ACP — it then lists them and switches with `session/set_model`,
 so you pick the agent's model in TermIDE; agents that advertise none show no
 chip. Skills, prompt templates and MCP servers are the agent's own affair too;
-`model`, `mode`, `tools` and the body of its `AGENT.md` do not apply. Switching agents
-rebuilds the conversation on the same session log: earlier messages stay on
-screen but the external agent does not know them, and the panel says so.
+`model`, `mode`, `tools` and the body of its `AGENT.md` do not apply.
+
+The session log records the agent's own session, so a reopened session, or a
+switch back to the agent, continues that session through ACP's
+`session/resume` or `session/load` when the agent offers either (Claude Code
+does), and the agent knows the whole conversation, its tool calls included.
+When it cannot — the agent offers neither or has lost the session, the
+session was forked, moved to another directory, compacted or rewound since,
+or it began with another agent — the agent opens a new session and its first
+request is preceded by a recap of the conversation: the requests, the
+questions asked with their answers, the skills loaded and the answers that
+ended each run, word for word, the newest kept when the history is long. File
+contents and command output are left out of the recap, so the agent re-reads
+what it needs. The recap is not written to the log.
 
 ### The system prompt
 

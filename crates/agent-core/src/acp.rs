@@ -13,6 +13,10 @@
 
 use std::collections::BTreeMap;
 
+/// The provider an external agent's messages are logged under: the
+/// model behind it is the agent's business.
+pub const ACP_PROVIDER: &str = "acp";
+
 /// Seconds to wait for an external agent to start when its file names none.
 pub const DEFAULT_TIMEOUT_SECS: u64 = 120;
 

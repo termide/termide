@@ -13,10 +13,11 @@ use std::thread::JoinHandle;
 use crate::agent::{Agent, AgentEvent, Hooks, QueueHandle};
 use crate::cancel::CancelToken;
 use crate::compaction::CompactionReason;
-use crate::message::UserMessage;
+use crate::message::{Message, UserMessage};
 use crate::permissions::{ChannelPrompter, Mode, ModeHandle, PermissionRules, PersistRule};
 use crate::plan::PlanPrompt;
 use crate::provider::ModelSpec;
+use crate::session::ExternalSessionRef;
 use crate::tool::ToolRegistry;
 use std::path::PathBuf;
 
@@ -96,6 +97,12 @@ pub struct BackendSetup {
     /// termide's tools, for a backend that has the agent call them in place
     /// of its own; `None` offers none.
     pub host_tools: Option<HostTools>,
+    /// The agent's own session of this conversation, when the log names
+    /// one it can still resume.
+    pub resume: Option<ExternalSessionRef>,
+    /// The conversation so far, as the log has it, for an agent that
+    /// cannot resume a session of its own: it is told a recap instead.
+    pub history: Vec<Message>,
 }
 
 /// termide's tools served to an external agent, and the hooks every call
