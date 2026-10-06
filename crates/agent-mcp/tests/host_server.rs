@@ -4,7 +4,6 @@
 //! session started.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::Duration;
@@ -60,8 +59,12 @@ fn names(events: &Receiver<LateTools>) -> Vec<String> {
 
 #[test]
 fn a_change_of_the_served_tools_reaches_the_connected_agent() {
-    let server =
-        McpServer::start(registry(&["read"]), Box::new(NoHooks), PathBuf::from(".")).unwrap();
+    let server = McpServer::start(
+        registry(&["read"]),
+        Box::new(NoHooks),
+        termide_agent_core::ToolContext::new("."),
+    )
+    .unwrap();
     let config = McpServerConfig {
         url: Some(server.url()),
         headers: [(

@@ -22,7 +22,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, PoisonError, RwLock};
@@ -61,7 +60,8 @@ struct Shared {
     /// permission card, and the panel answers one question at a time. The
     /// tools themselves run outside, so a long call holds up no other.
     hooks: Mutex<Box<dyn Hooks + Send>>,
-    cwd: PathBuf,
+    /// What every call runs with: its directory and whom to ask.
+    context: ToolContext,
     token: String,
     /// The cancel token of each call in flight, by its JSON-RPC id, for
     /// `notifications/cancelled`.
@@ -83,19 +83,19 @@ pub struct McpServer {
 
 impl McpServer {
     /// Serve `tools` on a free loopback port. Each call runs through `hooks`
-    /// in `cwd`, as the built-in loop would run it.
+    /// with `context`, as the built-in loop would run it.
     pub fn start(
         tools: ToolRegistry,
         hooks: Box<dyn Hooks + Send>,
-        cwd: PathBuf,
+        context: ToolContext,
     ) -> std::io::Result<Self> {
-        Self::start_with(tools, hooks, cwd, KEEPALIVE)
+        Self::start_with(tools, hooks, context, KEEPALIVE)
     }
 
     fn start_with(
         tools: ToolRegistry,
         hooks: Box<dyn Hooks + Send>,
-        cwd: PathBuf,
+        context: ToolContext,
         keepalive: Duration,
     ) -> std::io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
@@ -105,7 +105,7 @@ impl McpServer {
             generation: Mutex::new(0),
             changed: Condvar::new(),
             hooks: Mutex::new(hooks),
-            cwd,
+            context,
             token: new_token(),
             running: Mutex::new(HashMap::new()),
             details: Mutex::new(VecDeque::new()),
@@ -545,7 +545,7 @@ fn call_tool(shared: &Shared, id: &Value, params: &Value, cancel: CancelToken) -
         .insert(key.clone(), cancel.clone());
     let ctx = ToolContext {
         withdrawn: Some(cancel.clone()),
-        ..ToolContext::new(shared.cwd.clone())
+        ..shared.context.clone()
     };
     let hooks = || shared.hooks.lock().unwrap_or_else(PoisonError::into_inner);
     // The set as it stands now: a change while the call runs leaves it be.
@@ -696,7 +696,7 @@ mod tests {
     fn server() -> McpServer {
         let mut tools = ToolRegistry::new();
         tools.insert(Arc::new(Echo));
-        McpServer::start(tools, Box::new(Guard), PathBuf::from("/tmp")).unwrap()
+        McpServer::start(tools, Box::new(Guard), ToolContext::new("/tmp")).unwrap()
     }
 
     #[test]
@@ -724,6 +724,66 @@ mod tests {
             server.take_details("echo", &args("one")),
             None,
             "taken once"
+        );
+    }
+
+    /// Says which of the context's people a call was given.
+    struct WhoIsThere;
+
+    impl Tool for WhoIsThere {
+        fn name(&self) -> &str {
+            "who"
+        }
+        fn description(&self) -> &str {
+            "Report the call's context"
+        }
+        fn parameters(&self) -> Value {
+            json!({ "type": "object" })
+        }
+        fn execute(
+            &self,
+            call: &ToolCall,
+            ctx: &ToolContext,
+            _on_update: &mut dyn FnMut(ToolUpdate),
+            _cancel: &CancelToken,
+        ) -> ToolResultMessage {
+            let text = format!(
+                "{} asker={} suggester={} withdrawn={}",
+                ctx.cwd.display(),
+                ctx.asker.is_some(),
+                ctx.suggester.is_some(),
+                ctx.withdrawn.is_some(),
+            );
+            ToolResultMessage::text(call, text)
+        }
+    }
+
+    /// `question` and `suggest_command` served to an external agent reach
+    /// the user only through the context the server was started with.
+    #[test]
+    fn a_call_runs_with_the_servers_context() {
+        let mut tools = ToolRegistry::new();
+        tools.insert(Arc::new(WhoIsThere));
+        let cancel = CancelToken::new();
+        let (asker, _questions) = termide_agent_core::question_channel(cancel.clone());
+        let (suggester, _suggestions) = termide_agent_core::suggestion_channel(cancel);
+        let context = ToolContext {
+            asker: Some(asker),
+            suggester: Some(suggester),
+            ..ToolContext::new("/work")
+        };
+        let server = McpServer::start(tools, Box::new(Guard), context).unwrap();
+        let token = server.token().to_string();
+        let (_, body) = post(
+            &server,
+            &token,
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                     "params": { "name": "who", "arguments": {} } }),
+        );
+        let result = &serde_json::from_str::<Value>(&body).unwrap()["result"];
+        assert_eq!(
+            result["content"][0]["text"],
+            "/work asker=true suggester=true withdrawn=true"
         );
     }
 
@@ -788,7 +848,7 @@ mod tests {
         let server = McpServer::start_with(
             tools,
             Box::new(Guard),
-            PathBuf::from("/tmp"),
+            ToolContext::new("/tmp"),
             Duration::from_millis(20),
         )
         .unwrap();
@@ -821,7 +881,7 @@ mod tests {
         let server = McpServer::start_with(
             tools,
             Box::new(Guard),
-            PathBuf::from("/tmp"),
+            ToolContext::new("/tmp"),
             Duration::from_millis(20),
         )
         .unwrap();
@@ -852,7 +912,7 @@ mod tests {
         let server = McpServer::start_with(
             tools,
             Box::new(Guard),
-            PathBuf::from("/tmp"),
+            ToolContext::new("/tmp"),
             Duration::from_millis(20),
         )
         .unwrap();
@@ -892,7 +952,7 @@ mod tests {
         let server = McpServer::start_with(
             tools,
             Box::new(Guard),
-            PathBuf::from("/tmp"),
+            ToolContext::new("/tmp"),
             Duration::from_millis(20),
         )
         .unwrap();

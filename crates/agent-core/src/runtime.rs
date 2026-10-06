@@ -18,7 +18,7 @@ use crate::permissions::{ChannelPrompter, Mode, ModeHandle, PermissionRules, Per
 use crate::plan::PlanPrompt;
 use crate::provider::ModelSpec;
 use crate::session::ExternalSessionRef;
-use crate::tool::ToolRegistry;
+use crate::tool::{ToolContext, ToolRegistry};
 use std::path::PathBuf;
 
 /// Why a prompt was not accepted.
@@ -111,6 +111,11 @@ pub struct BackendSetup {
 pub struct HostTools {
     pub tools: ToolRegistry,
     pub hooks: Box<dyn Hooks>,
+    /// What each call runs with besides its directory, which is the
+    /// agent's: the panel's asker, suggester and shell runner, so
+    /// `question` and `suggest_command` reach the user as they do from the
+    /// built-in loop.
+    pub context: ToolContext,
 }
 
 /// What the panel drives: the built-in agent on its worker thread, or an

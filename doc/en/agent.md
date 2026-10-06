@@ -621,8 +621,9 @@ session log on a dead branch.
 ## Tools
 
 The agent's built-in tools are listed below, plus those its MCP servers
-provide (see [MCP servers](#mcp-servers)). The panel's own agent also has
-**question** and **suggest_command**, described after the list.
+provide (see [MCP servers](#mcp-servers)). The panel's own agent, and Claude
+Code on termide's tools, also have **question** and **suggest_command**,
+described after the list.
 
 - **read** returns a file with line numbers, paged with an offset when a file
   is long.
@@ -663,8 +664,8 @@ on past one already answered, as the arrows in the title show
 answering again moves on to the next. The answers go back once the last
 question is answered. Waiting for an answer counts as the call's pause
 (`‖`), as a permission question does. Asking never needs a permission, in plan mode too.
-Only the panel's own agent has this tool: a subagent and a `termide --prompt`
-run have no one to ask and decide on their own. An agent whose `tools` list leaves out
+Only the panel's agent has this tool, Claude Code on termide's tools included:
+a subagent and a `termide --prompt` run have no one to ask and decide on their own. An agent whose `tools` list leaves out
 `question` does not ask either.
 
 **suggest_command** hands you a command instead of running it. The agent puts
@@ -684,7 +685,7 @@ rules: where plan mode is on or a `deny` rule covers the command, **Run** and
 **Edit first** are left off and only **Copy** and **Don't run** remain. Offering a command costs
 no permission — it changes nothing by itself — so the agent can always reach you
 this way; only your confirmation reaches the shell. Like `question`, the tool
-belongs to the panel's agent alone.
+belongs to the panel's agent alone, Claude Code included.
 
 ### Web
 

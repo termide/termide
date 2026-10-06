@@ -11,7 +11,7 @@ use termide_agent_core::{
     CompactionPrompts, GoalPrompt, HandoffPrompt, Hooks, HostTools, LoggedMessage, Message, Mode,
     ModeHandle, ModelInfo, ModelSpec, PermissionEnvelope, PermissionHooks, PermissionRules,
     PersistRule, PlanGuard, PlanPrompt, Provider, QuestionEnvelope, Refusals, ReviewerSetup,
-    Session, ShellRunner, SuggestionEnvelope, Timing, ToolRegistry,
+    Session, ShellRunner, SuggestionEnvelope, Timing, ToolContext, ToolRegistry,
 };
 
 use crate::toolset::{Blocked, ToolsetGuard};
@@ -173,11 +173,11 @@ pub(crate) fn spawn_runtime(
 ) -> Spawned {
     let cancel = CancelToken::new();
     let (prompter, permission_rx) = permission_channel(cancel.clone());
-    // The `question` tool asks through this; an external agent asks its own
-    // way, so its asker is dropped and nothing ever arrives.
+    // The `question` tool asks through this, from the built-in loop or from
+    // an external agent served termide's tools.
     let (asker, question_rx) = question_channel(cancel.clone());
     // The `suggest_command` tool offers commands through this, and waits for
-    // the card; like the asker, an external agent has no use for it.
+    // the card; it reaches an external agent the same way.
     let (suggester, suggestion_rx) = suggestion_channel(cancel.clone());
     let system_prompt = if rules.mode == Mode::Plan {
         plan_prompt.apply(system_prompt)
@@ -258,6 +258,12 @@ pub(crate) fn spawn_runtime(
             host_tools: Some(HostTools {
                 tools: tools.clone(),
                 hooks: Box::new(ChainedHooks::new(host_chain)),
+                context: ToolContext {
+                    asker: Some(asker.clone()),
+                    suggester: Some(suggester.clone()),
+                    shell_run: shell_run.clone(),
+                    ..ToolContext::new(cwd)
+                },
             }),
             // The conversation goes on in the agent's own session when it
             // still holds it, else the agent is told a recap of it.

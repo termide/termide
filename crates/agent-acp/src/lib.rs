@@ -235,7 +235,7 @@ impl AcpRuntime {
                 if matches!(flavor, AcpFlavor::Codex | AcpFlavor::GeminiCli) {
                     HostTools {
                         tools: ToolRegistry::new(),
-                        hooks: host.hooks,
+                        ..host
                     }
                 } else {
                     host
@@ -701,7 +701,11 @@ impl Shared {
             .unwrap_or_else(PoisonError::into_inner);
         let host = pending.take().filter(|_| serves);
         let server = host.and_then(|host| {
-            McpServer::start(host.tools, host.hooks, self.cwd.clone())
+            let context = ToolContext {
+                cwd: self.cwd.clone(),
+                ..host.context
+            };
+            McpServer::start(host.tools, host.hooks, context)
                 .map_err(|error| {
                     log::warn!("cannot serve termide's tools to {}: {error}", self.name);
                 })
@@ -2176,6 +2180,7 @@ mod tests {
         let host = HostTools {
             tools,
             hooks: Box::new(termide_agent_core::NoHooks),
+            context: ToolContext::new(PathBuf::new()),
         };
         let (runtime, seen) = recording_agent(
             dir.path().to_path_buf(),
@@ -2471,6 +2476,7 @@ mod tests {
         HostTools {
             tools,
             hooks: Box::new(termide_agent_core::NoHooks),
+            context: ToolContext::new(PathBuf::new()),
         }
     }
 
