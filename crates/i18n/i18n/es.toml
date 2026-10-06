@@ -656,9 +656,9 @@ settings_general_resource_interval = "Intervalo de monitor de recursos (ms)"
 settings_general_project_retention = "Retención de proyectos (días)"
 settings_general_theme = "Tema"
 settings_general_vim_mode = "Modo Vim"
-settings_kb_hint_bindings = "Enter=reasignar  Esc=atrás  Del=borrar"
-settings_kb_hint_capturing = "Pulse una tecla  Esc=cancelar"
-settings_kb_press_key = "Pulse una tecla..."
+settings_kb_hint_bindings = "←/→=elegir  Enter=sobrescribir  +=añadir  Supr=quitar  Esc=atrás"
+settings_kb_hint_capturing = "Pulse una tecla para añadirla  Esc=cancelar"
+settings_kb_hint_capturing_replace = "Pulse una tecla para reemplazar  Esc=cancelar"
 settings_logging_file_path = "Ruta del archivo de registro"
 settings_logging_min_level = "Nivel mínimo de registro"
 settings_lsp_add_server = "+ Añadir servidor"
@@ -1037,6 +1037,9 @@ projects_delete_failed_fmt = "No se pudo eliminar la disposición guardada: {err
 command_edit_title_fmt = "Editar comando: {name}"
 command_run_failed_fmt = "No se pudo ejecutar el comando: {error}"
 command_name_taken_fmt = "Ya existe un comando llamado «{name}»"
+settings_kb_key_taken_fmt = "{key} ya está asignada a esta acción"
+settings_kb_conflict_fmt = "{key} también está asignada a {held}"
+
 [plurals]
 day = { one = "", other = "s" }
 element = { one = "elemento", other = "elementos" }

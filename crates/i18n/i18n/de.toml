@@ -657,9 +657,9 @@ settings_general_resource_interval = "Ressourcenmonitor-Intervall (ms)"
 settings_general_project_retention = "Projektaufbewahrung (Tage)"
 settings_general_theme = "Farbschema"
 settings_general_vim_mode = "Vim-Modus"
-settings_kb_hint_bindings = "Enter=neu belegen  Esc=zurück  Del=löschen"
-settings_kb_hint_capturing = "Taste drücken  Esc=abbrechen"
-settings_kb_press_key = "Taste drücken..."
+settings_kb_hint_bindings = "←/→=wählen  Enter=überschreiben  +=hinzufügen  Del=entfernen  Esc=zurück"
+settings_kb_hint_capturing = "Taste zum Hinzufügen drücken  Esc=abbrechen"
+settings_kb_hint_capturing_replace = "Taste drücken zum Ersetzen  Esc=abbrechen"
 settings_logging_file_path = "Pfad der Protokolldatei"
 settings_logging_min_level = "Minimale Protokollstufe"
 settings_lsp_add_server = "+ Server hinzufügen"
@@ -1038,6 +1038,9 @@ projects_delete_failed_fmt = "Gespeichertes Layout konnte nicht gelöscht werden
 command_edit_title_fmt = "Befehl bearbeiten: {name}"
 command_run_failed_fmt = "Befehl konnte nicht ausgeführt werden: {error}"
 command_name_taken_fmt = "Ein Befehl namens „{name}“ existiert bereits"
+settings_kb_key_taken_fmt = "{key} ist dieser Aktion schon zugeordnet"
+settings_kb_conflict_fmt = "{key} ist auch {held} zugeordnet"
+
 [plurals]
 day = { one = "", other = "en" }
 element = { one = "Element", other = "Elemente" }

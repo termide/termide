@@ -14,10 +14,10 @@ use unicode_width::UnicodeWidthStr;
 use crate::base::button_style;
 
 use super::fields::{fields_for_tab, ContentRow, FieldDescriptor, FieldType};
-use super::kb::{get_kb_value, kb_binding_names};
+use super::kb::{kb_binding_names, kb_keys_of};
 use super::{
-    button_labels, button_spans, FocusArea, KbMode, LspMode, SettingsModal, SettingsTab,
-    SidebarRow, BUTTON_RESET, ENUM_PICKER_MAX_VISIBLE,
+    button_labels, button_spans, FocusArea, KbCapture, KbMode, KbRow, KbSlot, LspMode,
+    SettingsModal, SettingsTab, SidebarRow, BUTTON_RESET, ENUM_PICKER_MAX_VISIBLE,
 };
 
 /// Width reserved for field labels, and therefore where values line up.
@@ -593,7 +593,75 @@ impl SettingsModal {
             _ => raw,
         }
     }
+}
 
+/// Lay out a binding's keys in `width` columns starting at `x`, optionally
+/// ending with the `+` slot.
+///
+/// The row is right-anchored: when the keys do not all fit, the earliest ones
+/// are dropped so the newest alternatives and the `+` slot stay visible —
+/// those are what the user has just been working on. The slot under
+/// `selected` is never dropped; if keeping the tail would push it off, the
+/// window slides left and the tail is cut instead. `selected` may be
+/// `keys.len()`, which is the `+` slot.
+fn kb_row_layout(
+    keys: &[String],
+    x: u16,
+    width: usize,
+    selected: usize,
+    show_add: bool,
+) -> Vec<KbSlot> {
+    const SEP: &str = ", ";
+    const ADD: &str = "+";
+
+    let mut texts: Vec<(&str, Option<usize>)> = keys
+        .iter()
+        .enumerate()
+        .map(|(i, k)| (k.as_str(), Some(i)))
+        .collect();
+    if show_add {
+        texts.push((ADD, None));
+    }
+    if texts.is_empty() || width == 0 {
+        return Vec::new();
+    }
+
+    let width_of = |index: usize| UnicodeWidthStr::width(texts[index].0);
+
+    // Widest window ending at the last item that still fits.
+    let mut first = texts.len() - 1;
+    let mut used = width_of(first);
+    while first > 0 {
+        let cost = SEP.width() + width_of(first - 1);
+        if used + cost > width {
+            break;
+        }
+        used += cost;
+        first -= 1;
+    }
+    // The selected slot must be on screen even when that costs the tail.
+    first = first.min(selected.min(texts.len() - 1));
+
+    let mut slots = Vec::with_capacity(texts.len() - first);
+    let mut col = x;
+    let mut lead = 0usize;
+    for &(text, key) in &texts[first..] {
+        let own = UnicodeWidthStr::width(text);
+        if col as usize + lead + own > x as usize + width {
+            break;
+        }
+        col += lead as u16;
+        slots.push(KbSlot {
+            key,
+            span: (col, col + own as u16),
+        });
+        col += own as u16;
+        lead = SEP.width();
+    }
+    slots
+}
+
+impl SettingsModal {
     fn render_keybindings(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         if area.height == 0 || area.width < 4 {
             return;
@@ -612,6 +680,13 @@ impl SettingsModal {
         }
 
         let label_width = 28.min(area.width as usize / 2);
+        let val_x = area.x + 2 + label_width as u16;
+        let val_width = (area.x + area.width).saturating_sub(val_x) as usize;
+
+        // The drawn slots are recorded per binding index, not per screen row,
+        // so a click resolves against the row it was drawn on even if the list
+        // scrolled between the frame and the click.
+        self.kb_rows.clear();
 
         for row in 0..visible {
             let idx = self.kb_scroll + row;
@@ -620,9 +695,13 @@ impl SettingsModal {
             }
             let y = list_y + row as u16;
             let is_focused_row = self.focus == FocusArea::Content && self.kb_cursor == idx;
-            let is_capturing = self.kb_mode == KbMode::Capturing && self.kb_cursor == idx;
+            let capturing = match self.kb_mode {
+                KbMode::Bindings => None,
+                KbMode::Capturing(target) if self.kb_cursor == idx => Some(target),
+                KbMode::Capturing(_) => None,
+            };
 
-            if is_focused_row || is_capturing {
+            if is_focused_row || capturing.is_some() {
                 for x in area.x..area.x + area.width {
                     buf[(x, y)]
                         .set_style(Style::default().bg(theme.selected_bg).fg(theme.selected_fg));
@@ -630,7 +709,7 @@ impl SettingsModal {
             }
 
             let name = names[idx];
-            let label_style = if is_focused_row || is_capturing {
+            let label_style = if is_focused_row || capturing.is_some() {
                 Style::default()
                     .fg(theme.selected_fg)
                     .add_modifier(Modifier::BOLD)
@@ -645,26 +724,75 @@ impl SettingsModal {
             };
             buf.set_string(area.x + 2, y, &display_name, label_style);
 
-            let val_x = area.x + 2 + label_width as u16;
-            if is_capturing {
-                buf.set_string(
-                    val_x,
-                    y,
-                    i18n::t().settings_kb_press_key(),
-                    Style::default()
+            let keys = kb_keys_of(&self.config, self.kb_section, name);
+            // The `+` slot belongs to the focused row only. While a key is
+            // being captured the row keeps showing its current keys, so
+            // replacing one does not hide the others. The slot the captured key
+            // lands on — the `+` to append, the key itself to replace — is
+            // drawn in the warning colour, so what a keystroke will do is
+            // visible without reading the hint line.
+            let show_add = is_focused_row;
+            let selected = match capturing {
+                Some(KbCapture::Append) => keys.len(),
+                Some(KbCapture::Replace(i)) => i,
+                None => self.kb_key_cursor.min(keys.len()),
+            };
+
+            let mut drawn: KbRow = Vec::new();
+            let mut prev_end: Option<u16> = None;
+            for slot in kb_row_layout(&keys, val_x, val_width, selected, show_add) {
+                let (start, end) = slot.span;
+                // The layout reserves room for the separator between items;
+                // drawing it here keeps each span pointing at its key alone,
+                // which is what a click has to hit.
+                if let Some(prev) = prev_end {
+                    buf.set_string(
+                        prev,
+                        y,
+                        ", ",
+                        Style::default().fg(if is_focused_row || capturing.is_some() {
+                            theme.selected_fg
+                        } else {
+                            theme.disabled
+                        }),
+                    );
+                }
+                let text = match slot.key {
+                    Some(i) => keys[i].as_str(),
+                    None => "+",
+                };
+                let style = match (slot.key, capturing) {
+                    // The `+` under an Append capture is the slot being filled.
+                    (None, Some(KbCapture::Append)) => Style::default()
+                        .fg(theme.warning)
+                        .add_modifier(Modifier::BOLD),
+                    (None, _) => Style::default()
                         .fg(theme.accented_fg)
                         .add_modifier(Modifier::BOLD),
-                );
-            } else {
-                let val = get_kb_value(&self.config, self.kb_section, name);
-                let val_style = if is_focused_row {
-                    Style::default().fg(theme.selected_fg)
-                } else {
-                    Style::default().fg(theme.accented_fg)
+                    // Only the key the captured chord will overwrite takes the
+                    // warning colour; the rest of the row stays as it was, so
+                    // the user can see which alternative is about to change.
+                    (Some(i), Some(KbCapture::Replace(r))) if i == r => Style::default()
+                        .fg(theme.warning)
+                        .add_modifier(Modifier::BOLD),
+                    (Some(i), None) if is_focused_row && i == self.kb_key_cursor => {
+                        // Inverted again on the already-inverted row, the way the
+                        // connection buttons mark their chosen one.
+                        Style::default()
+                            .fg(theme.selected_fg)
+                            .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+                    }
+                    (Some(_), _) if is_focused_row || capturing.is_some() => {
+                        Style::default().fg(theme.selected_fg)
+                    }
+                    (Some(_), _) => Style::default().fg(theme.accented_fg),
                 };
-                let max_val = (area.x + area.width).saturating_sub(val_x) as usize;
-                let display_val = fit_width(val, max_val);
-                buf.set_string(val_x, y, &display_val, val_style);
+                buf.set_string(start, y, text, style);
+                prev_end = Some(end);
+                drawn.push(slot);
+            }
+            if !drawn.is_empty() {
+                self.kb_rows.push((idx, drawn));
             }
         }
 
@@ -678,7 +806,8 @@ impl SettingsModal {
         } else {
             let hint = match self.kb_mode {
                 KbMode::Bindings => it.settings_kb_hint_bindings(),
-                KbMode::Capturing => it.settings_kb_hint_capturing(),
+                KbMode::Capturing(KbCapture::Append) => it.settings_kb_hint_capturing(),
+                KbMode::Capturing(KbCapture::Replace(_)) => it.settings_kb_hint_capturing_replace(),
             };
             buf.set_string(
                 area.x + 2,
@@ -689,7 +818,6 @@ impl SettingsModal {
         }
     }
 }
-
 impl SettingsModal {
     /// Draw the open enum dropdown over the form.
     ///
@@ -848,5 +976,46 @@ mod label_column_tests {
         assert!(UnicodeWidthStr::width(cut.as_str()) <= 40, "{cut}");
         // A value that fits is left as it is.
         assert_eq!(fit_width("ask".into(), 40), "ask");
+    }
+}
+
+#[cfg(test)]
+mod kb_row_layout_tests {
+    use super::*;
+
+    /// A narrow value column cuts the earliest alternatives, never the key
+    /// under the cursor. When keeping the tail would push the selected key
+    /// off, the window slides left and the tail — the `+` included — is cut
+    /// instead; the key being acted on is what matters.
+    #[test]
+    fn a_narrow_row_keeps_the_selected_key() {
+        // "Alt+W, Alt+X, F10" is 17 columns; 12 hold only part of it.
+        let keys: Vec<String> = ["Alt+W", "Alt+X", "F10"]
+            .iter()
+            .map(|k| k.to_string())
+            .collect();
+
+        let wide = kb_row_layout(&keys, 0, 40, 0, true);
+        assert_eq!(wide.len(), 4, "three keys and the + slot");
+
+        // Cursor on the first key: it is kept, the tail is cut.
+        let head = kb_row_layout(&keys, 0, 12, 0, true);
+        assert_eq!(
+            head.iter().map(|s| s.key).collect::<Vec<_>>(),
+            vec![Some(0), Some(1)],
+            "the selected key survives, the tail is cut: {head:?}"
+        );
+
+        // Cursor on the last key: the tail, and with it the + slot, survive.
+        let tail = kb_row_layout(&keys, 0, 12, 2, true);
+        assert_eq!(
+            tail.iter().map(|s| s.key).collect::<Vec<_>>(),
+            vec![Some(2), None],
+            "with the cursor on the last key, the earlier ones are cut"
+        );
+
+        // The + slot is kept whenever there is room for it.
+        let add = kb_row_layout(&keys, 0, 40, 3, true);
+        assert!(add.iter().any(|s| s.key.is_none()), "the + slot is drawn");
     }
 }

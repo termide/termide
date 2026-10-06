@@ -44,7 +44,7 @@ Opened with `Alt+P` or menu **Options → Edit preferences**. The previous horiz
 |----------|--------|
 | `Up` / `Down` | Move within the current zone (sections / fields / buttons) |
 | `Tab` / `Shift+Tab` | Cycle focus zones (Sidebar ↔ Content ↔ Buttons) |
-| `Left` / `Right` | Do **not** change the zone: used for editing values (cycle enum, toggle bool) and for collapsing the Keybindings group in the sidebar |
+| `Left` / `Right` | Do **not** change the zone: used for editing values (cycle enum, toggle bool), for moving between the keys of a keybinding row, and for collapsing the Keybindings group in the sidebar |
 | `Enter` / `Space` | Activate: in sidebar — enter the section; in content — toggle bool/enum or start editing number/text; on a group header — toggle expand |
 | `Escape` | Close the modal (Cancel) |
 | Mouse wheel | Scroll sidebar / content |
@@ -55,8 +55,18 @@ Opened with `Alt+P` or menu **Options → Edit preferences**. The previous horiz
 - **Number** / **OptionalText** — `Enter` enters inline edit mode
 - **LSP → Servers** — server list items are prefixed with a bullet `•`; there is also a `+ Add Server` row
 
-**Keybindings — key capture:**  
-Navigate bindings with `Up/Down`, press `Enter` to enter Capturing mode (the next keypress becomes the new binding), `Delete`/`Backspace` clears a binding.
+**Keybindings — editing a binding:**  
+Navigate bindings with `Up/Down`. Each row lists every key the action accepts — `Alt+W, Alt+X, F10` — and a cursor sits on one of them:
+
+| Shortcut | Action |
+|----------|--------|
+| `Left` / `Right` | Move the cursor between the keys of the row; past the last key it lands on the `+` slot |
+| `Enter` | Capture a keypress for the slot under the cursor — replaces that key, or adds a new alternative on `+` |
+| `Delete` | Remove the key under the cursor |
+| `Shift+Delete` / `Backspace` | Clear every key of the action |
+| `Escape` | Leave the list, or abandon a capture in progress |
+
+The focused row ends with a `+` slot; clicking it, or pressing `Enter` on it, captures a keypress and appends it. Clicking a key selects it, so the next `Enter` or `Delete` acts on what was clicked; a double click on a key captures it. A chord the action already accepts is refused and the reason is shown; a chord another action holds is stored with a warning naming where. While a keypress is being captured the row keeps showing its keys, the one to be overwritten marked in the warning colour.
 
 The active section highlight in the sidebar is cleared when focus leaves it — the current section name is shown in the content-area header, so a dual highlight would just be misleading.
 

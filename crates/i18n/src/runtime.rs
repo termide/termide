@@ -747,7 +747,7 @@ impl Translation for RuntimeTranslation {
         directory_switcher_process_running,
         settings_kb_hint_bindings,
         settings_kb_hint_capturing,
-        settings_kb_press_key,
+        settings_kb_hint_capturing_replace,
         projects_title,
         time_just_now,
         time_short_hours,
@@ -1757,6 +1757,14 @@ impl Translation for RuntimeTranslation {
     // Settings modal — Logging fields
     // Settings modal — VFS fields
     // Settings modal — Keybindings hints
+    fn settings_kb_key_taken_fmt(&self, key: &str) -> String {
+        self.format("settings_kb_key_taken_fmt", &[("key", key)])
+    }
+
+    fn settings_kb_conflict_fmt(&self, key: &str, held: &str) -> String {
+        self.format("settings_kb_conflict_fmt", &[("key", key), ("held", held)])
+    }
+
     fn time_minutes_ago(&self, count: usize) -> String {
         let plural = self.pluralize(count, "minute");
         self.format(

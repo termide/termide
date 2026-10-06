@@ -389,9 +389,9 @@ settings_logging_min_level = "Min log level"
 settings_vfs_connection_timeout = "Connection timeout (secs)"
 
 # Settings modal — Keybindings hints
-settings_kb_hint_bindings = "Enter=rebind  Esc=back  Del=clear"
-settings_kb_hint_capturing = "Press any key  Esc=cancel"
-settings_kb_press_key = "Press key..."
+settings_kb_hint_bindings = "←/→=choose  Enter=replace  +=add  Del=remove  Esc=back"
+settings_kb_hint_capturing = "Press a key to add it  Esc=cancel"
+settings_kb_hint_capturing_replace = "Press a key to replace  Esc=cancel"
 tools_diagnostics = "Diagnostics"
 tools_operations = "Operations"
 tools_outline = "Outline"
@@ -1071,6 +1071,8 @@ projects_delete_failed_fmt = "Failed to delete the saved layout: {error}"
 command_edit_title_fmt = "Edit command: {name}"
 command_run_failed_fmt = "Failed to run command: {error}"
 command_name_taken_fmt = "A command named \"{name}\" already exists"
+settings_kb_key_taken_fmt = "{key} is already bound to this action"
+settings_kb_conflict_fmt = "{key} is also bound to {held}"
 
 [plurals]
 day = { one = "", other = "s" }

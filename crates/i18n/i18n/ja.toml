@@ -656,9 +656,9 @@ settings_general_resource_interval = "リソースモニターの間隔 (ms)"
 settings_general_project_retention = "プロジェクト保持日数"
 settings_general_theme = "テーマ"
 settings_general_vim_mode = "Vim モード"
-settings_kb_hint_bindings = "Enter=再割当て  Esc=戻る  Del=クリア"
-settings_kb_hint_capturing = "キーを押してください  Esc=キャンセル"
-settings_kb_press_key = "キーを押してください…"
+settings_kb_hint_bindings = "←/→=選択  Enter=上書き  +=追加  Del=削除  Esc=戻る"
+settings_kb_hint_capturing = "キーを押すと追加されます  Esc=キャンセル"
+settings_kb_hint_capturing_replace = "キーを押すと上書きされます  Esc=キャンセル"
 settings_logging_file_path = "ログファイルのパス"
 settings_logging_min_level = "最小ログレベル"
 settings_lsp_add_server = "+ サーバーを追加"
@@ -1037,6 +1037,9 @@ projects_delete_failed_fmt = "保存済みのレイアウトを削除できま�
 command_edit_title_fmt = "コマンドを編集: {name}"
 command_run_failed_fmt = "コマンドを実行できませんでした: {error}"
 command_name_taken_fmt = "「{name}」という名前のコマンドは既にあります"
+settings_kb_key_taken_fmt = "{key} はこのアクションに割り当て済みです"
+settings_kb_conflict_fmt = "{key} は {held} にも割り当てられています"
+
 [plurals]
 day = { one = "", other = "" }
 element = { one = "アイテム", other = "アイテム" }

@@ -657,9 +657,9 @@ settings_general_resource_interval = "संसाधन मॉनिटर अ�
 settings_general_project_retention = "प्रोजेक्ट प्रतिधारण (दिन)"
 settings_general_theme = "थीम"
 settings_general_vim_mode = "Vim मोड"
-settings_kb_hint_bindings = "Enter=पुनर्नियुक्त  Esc=वापस  Del=साफ़"
-settings_kb_hint_capturing = "कोई कुंजी दबाएँ  Esc=रद्द"
-settings_kb_press_key = "कुंजी दबाएँ..."
+settings_kb_hint_bindings = "←/→=चुनें  Enter=अधिलेखित  +=जोड़ें  Del=हटाना  Esc=रद्द"
+settings_kb_hint_capturing = "जोड़ने के लिये कोई कुंजी दबाएँ  Esc=रद्द"
+settings_kb_hint_capturing_replace = "बदलने के लिए कोई कुंजी दबाएँ  Esc=रद्द"
 settings_logging_file_path = "लॉग फ़ाइल पथ"
 settings_logging_min_level = "न्यूनतम लॉग स्तर"
 settings_lsp_add_server = "+ सर्वर जोड़ें"
@@ -1037,6 +1037,9 @@ projects_delete_failed_fmt = "सहेजा गया लेआउट हट�
 command_edit_title_fmt = "कमांड संपादित करें: {name}"
 command_run_failed_fmt = "कमांड चलाई नहीं जा सकी: {error}"
 command_name_taken_fmt = "\"{name}\" नाम का कमांड पहले से मौजूद है"
+settings_kb_key_taken_fmt = "{key} इस क्रिया से पहले से बंधी है"
+settings_kb_conflict_fmt = "{key} {held} से भी बंधी है"
+
 [plurals]
 # Hindi has simple plural (same form for 1 and many in most cases)
 day = { one = "", other = "" }

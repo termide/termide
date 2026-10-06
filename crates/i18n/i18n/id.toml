@@ -657,9 +657,9 @@ settings_general_resource_interval = "Interval monitor sumber daya (ms)"
 settings_general_project_retention = "Retensi proyek (hari)"
 settings_general_theme = "Tema"
 settings_general_vim_mode = "Mode Vim"
-settings_kb_hint_bindings = "Enter=tetapkan ulang  Esc=kembali  Del=hapus"
-settings_kb_hint_capturing = "Tekan tombol  Esc=batal"
-settings_kb_press_key = "Tekan tombol..."
+settings_kb_hint_bindings = "←/→=pilih  Enter=timpa  +=tambah  Del=hapus  Esc=kembali"
+settings_kb_hint_capturing = "Tekan tombol untuk menambah  Esc=Batal"
+settings_kb_hint_capturing_replace = "Tekan tombol untuk mengganti  Esc=batal"
 settings_logging_file_path = "Path berkas log"
 settings_logging_min_level = "Level log minimum"
 settings_lsp_add_server = "+ Tambah server"
@@ -1037,6 +1037,9 @@ projects_delete_failed_fmt = "Gagal menghapus tata letak tersimpan: {error}"
 command_edit_title_fmt = "Edit perintah: {name}"
 command_run_failed_fmt = "Gagal menjalankan perintah: {error}"
 command_name_taken_fmt = "Perintah bernama \"{name}\" sudah ada"
+settings_kb_key_taken_fmt = "{key} sudah ditetapkan ke aksi ini"
+settings_kb_conflict_fmt = "{key} juga ditetapkan ke {held}"
+
 [plurals]
 day = { one = "", other = "" }
 element = { one = "elemen", other = "elemen" }

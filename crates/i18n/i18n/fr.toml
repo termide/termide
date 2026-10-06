@@ -656,9 +656,9 @@ settings_general_resource_interval = "Intervalle du moniteur (ms)"
 settings_general_project_retention = "Conservation des projets (jours)"
 settings_general_theme = "Thème"
 settings_general_vim_mode = "Mode Vim"
-settings_kb_hint_bindings = "Entrée=réaffecter  Échap=retour  Suppr=effacer"
-settings_kb_hint_capturing = "Appuyez sur une touche  Échap=annuler"
-settings_kb_press_key = "Appuyez sur une touche…"
+settings_kb_hint_bindings = "←/→=choisir  Entrée=écraser  +=ajouter  Suppr=enlever  Échap=retour"
+settings_kb_hint_capturing = "Appuyez sur une touche pour l'ajouter  Échap=annuler"
+settings_kb_hint_capturing_replace = "Appuyez sur une touche pour remplacer  Échap=annuler"
 settings_logging_file_path = "Chemin du fichier journal"
 settings_logging_min_level = "Niveau minimal du journal"
 settings_lsp_add_server = "+ Ajouter un serveur"
@@ -1037,6 +1037,9 @@ projects_delete_failed_fmt = "Échec de la suppression de la disposition enregis
 command_edit_title_fmt = "Modifier la commande : {name}"
 command_run_failed_fmt = "Échec de l'exécution de la commande : {error}"
 command_name_taken_fmt = "Une commande nommée « {name} » existe déjà"
+settings_kb_key_taken_fmt = "{key} est déjà affectée à cette action"
+settings_kb_conflict_fmt = "{key} est aussi affectée à {held}"
+
 [plurals]
 day = { one = "", other = "s" }
 element = { one = "élément", other = "éléments" }

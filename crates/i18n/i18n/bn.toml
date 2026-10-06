@@ -657,9 +657,9 @@ settings_general_resource_interval = "সম্পদ মনিটর বির�
 settings_general_project_retention = "প্রকল্প সংরক্ষণ (দিন)"
 settings_general_theme = "থিম"
 settings_general_vim_mode = "Vim মোড"
-settings_kb_hint_bindings = "Enter=পুনর্বরাদ্দ  Esc=ফেরত  Del=মুছুন"
-settings_kb_hint_capturing = "একটি কী চাপুন  Esc=বাতিল"
-settings_kb_press_key = "কী চাপুন..."
+settings_kb_hint_bindings = "←/→=বেছে নিন  Enter=ওভাররাইট  +=যোগ করুন  Del=সরান  Esc=ফেরত"
+settings_kb_hint_capturing = "যোগ করতে একটি কী চাপুন  Esc=বাতিল"
+settings_kb_hint_capturing_replace = "বদলাতে একটি কী চাপুন  Esc=বাতিল"
 settings_logging_file_path = "লগ ফাইলের পথ"
 settings_logging_min_level = "সর্বনিম্ন লগ স্তর"
 settings_lsp_add_server = "+ সার্ভার যোগ করুন"
@@ -1037,6 +1037,9 @@ projects_delete_failed_fmt = "সংরক্ষিত লেআউট মোছ
 command_edit_title_fmt = "কমান্ড সম্পাদনা: {name}"
 command_run_failed_fmt = "কমান্ড চালানো যায়নি: {error}"
 command_name_taken_fmt = "\"{name}\" নামের কমান্ড আগে থেকেই আছে"
+settings_kb_key_taken_fmt = "{key} এই ক্রিয়ার সঙ্গে ইতিমধ্যে বাঁধা"
+settings_kb_conflict_fmt = "{key} {held}-এর সঙ্গেও বাঁধা"
+
 [plurals]
 day = { one = "", other = "" }
 element = { one = "আইটেম", other = "আইটেম" }

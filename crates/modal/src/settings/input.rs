@@ -3,7 +3,8 @@
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use termide_config::{Config, KeyBinding, LspServerSettings};
+use termide_config::{Config, KeyBinding, LspServerSettings, ParsedKeyBinding};
+use termide_i18n as i18n;
 
 use crate::base::field_char_at;
 use crate::ModalResult;
@@ -12,10 +13,12 @@ use super::fields::{
     apply_enum_value, cycle_enum_backward, cycle_enum_forward, fields_for_tab, toggle_field,
     ContentRow, FieldType,
 };
-use super::kb::{format_key_event, get_kb_binding, kb_binding_names, set_kb_value, KB_SECTIONS};
+use super::kb::{
+    format_key_event, get_kb_binding, kb_binding_names, kb_keys_of, kb_section_key, set_kb_value,
+};
 use super::{
-    button_labels, EnumPicker, FocusArea, KbMode, LspMode, SettingsModal, SettingsResult,
-    SettingsTab, SidebarRow, BUTTON_APPLY, BUTTON_PROJECT_OVERRIDE, BUTTON_RESET,
+    button_labels, EnumPicker, FocusArea, KbCapture, KbMode, LspMode, SettingsModal,
+    SettingsResult, SettingsTab, SidebarRow, BUTTON_APPLY, BUTTON_PROJECT_OVERRIDE, BUTTON_RESET,
     ENUM_PICKER_MAX_VISIBLE,
 };
 
@@ -665,33 +668,45 @@ impl SettingsModal {
         }
     }
 
-    /// Look up an existing binding string in `self.config` to warn the
-    /// user about a same-section / cross-section clash before the new
-    /// assignment overwrites it. The check is intentionally string-based
-    /// (not parsed) so it matches what the user sees in the picker;
-    /// canonicalization at parse time means logically-equivalent strings
-    /// (`"Alt++"` vs `"Alt+Shift+="`) reach this function in the same
-    /// canonical form because the picker always produces the canonical
-    /// shape through `format_key_event`.
+    /// Warn about a chord that another action already has, comparing parsed
+    /// keys rather than strings.
+    ///
+    /// A string compare let logically-equivalent chords through as distinct:
+    /// `"Alt++"` and `"Alt+Shift+="`, or `"Ctrl+Й"` and `"Ctrl+Q"`, name the
+    /// same physical key yet differ as text. `parse_keybinding` canonicalizes
+    /// both to one `ParsedKeyBinding`, so comparing those is both stricter
+    /// and cheaper than the string it replaces.
     fn find_conflict_for_binding(
         &self,
-        new_binding: &str,
+        new_binding: &ParsedKeyBinding,
         new_section: &str,
         new_action: &str,
     ) -> Option<String> {
-        for (loc, _, display) in termide_config::enumerate_bindings(&self.config) {
-            if display != new_binding {
+        for (loc, parsed, display) in termide_config::enumerate_bindings(&self.config) {
+            if &parsed != new_binding {
                 continue;
             }
             if loc.section == new_section && loc.action == new_action {
                 continue;
             }
-            return Some(format!(
-                "{} is also bound to {}.{}",
-                new_binding, loc.section, loc.action
-            ));
+            return Some(i18n::t().settings_kb_conflict_fmt(&display, &loc.display()));
         }
         None
+    }
+
+    /// Whether this action already accepts `parsed`, under any of the spellings
+    /// that canonicalize to it. Adding such a chord would only put a duplicate
+    /// in the row, so the picker refuses it and says so.
+    fn action_already_has_key(
+        &self,
+        section: usize,
+        action: &str,
+        parsed: &ParsedKeyBinding,
+    ) -> bool {
+        kb_keys_of(&self.config, section, action)
+            .iter()
+            .filter_map(|k| termide_config::parse_keybinding(k).ok())
+            .any(|k| &k == parsed)
     }
 
     pub(super) fn handle_keybindings_key(
@@ -701,40 +716,62 @@ impl SettingsModal {
         match self.kb_mode {
             KbMode::Bindings => {
                 let names = kb_binding_names(self.kb_section);
+                if self.kb_cursor >= names.len() {
+                    return Ok(None);
+                }
+                let name = names[self.kb_cursor];
+                let keys = kb_keys_of(&self.config, self.kb_section, name);
+                // The cursor runs over the bound keys plus one more slot: the
+                // `+` at the end of the row, where a new alternative is added.
+                let last = keys.len();
                 match key.code {
                     KeyCode::Up => {
                         if self.kb_cursor > 0 {
                             self.kb_cursor -= 1;
+                            self.kb_key_cursor = 0;
                         }
                     }
                     KeyCode::Down => {
-                        if self.kb_cursor < names.len().saturating_sub(1) {
+                        if self.kb_cursor + 1 < names.len() {
                             self.kb_cursor += 1;
+                            self.kb_key_cursor = 0;
                         }
                     }
-                    KeyCode::Enter => {
-                        self.kb_mode = KbMode::Capturing;
+                    // Left/Right walk the keys of this row. They are free here:
+                    // the sidebar takes them for its own tree, and this tab has
+                    // no enum or bool field to cycle.
+                    KeyCode::Left => {
+                        self.kb_key_cursor = self.kb_key_cursor.min(last).saturating_sub(1);
                     }
-                    // Delete peels off one alternative at a time, so a
-                    // binding like `Alt+W, Alt+X, F10` can be trimmed instead
-                    // of only wiped. Shift+Delete clears the action outright.
+                    KeyCode::Right => {
+                        self.kb_key_cursor = (self.kb_key_cursor.min(last) + 1).min(last);
+                    }
+                    KeyCode::Enter => {
+                        self.kb_capture_message = None;
+                        self.kb_mode = KbMode::Capturing(if self.kb_key_cursor >= last {
+                            KbCapture::Append
+                        } else {
+                            KbCapture::Replace(self.kb_key_cursor)
+                        });
+                    }
+                    // Delete takes the key the cursor is on. Shift+Delete or
+                    // Backspace clears the action outright, as before.
+                    KeyCode::Delete if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                        self.set_kb_keys(name, None);
+                    }
                     KeyCode::Delete | KeyCode::Backspace => {
-                        if self.kb_cursor < names.len() {
-                            let name = names[self.kb_cursor];
-                            let clear_all = key.modifiers.contains(KeyModifiers::SHIFT)
-                                || key.code == KeyCode::Backspace;
-                            let current = get_kb_binding(&self.config, self.kb_section, name);
-                            let next = match (clear_all, current) {
-                                (false, Some(binding)) => binding.without_last_key(),
-                                _ => None,
-                            };
-                            set_kb_value(
-                                &mut self.config,
-                                self.kb_section,
-                                name,
-                                next.unwrap_or(KeyBinding::Single(String::new())),
-                            );
-                            self.mark_dirty();
+                        if self.kb_key_cursor < last {
+                            let binding = get_kb_binding(&self.config, self.kb_section, name);
+                            let next = binding.and_then(|b| b.without_key_at(self.kb_key_cursor));
+                            self.set_kb_keys(name, next);
+                            // Stay on a key: the one that slid into this slot is
+                            // the natural next thing to act on, and when none
+                            // slid in, the last remaining one. Landing on the
+                            // `+` slot instead would make the next Delete do
+                            // nothing, so clearing a row by hand stalled.
+                            let remaining = kb_keys_of(&self.config, self.kb_section, name).len();
+                            self.kb_key_cursor =
+                                self.kb_key_cursor.min(remaining.saturating_sub(1));
                         }
                     }
                     KeyCode::Esc | KeyCode::BackTab => {
@@ -751,7 +788,7 @@ impl SettingsModal {
                     _ => {}
                 }
             }
-            KbMode::Capturing => {
+            KbMode::Capturing(capture) => {
                 if key.code == KeyCode::Esc || key.code == KeyCode::Tab {
                     self.kb_mode = KbMode::Bindings;
                     self.kb_capture_message = None;
@@ -762,29 +799,540 @@ impl SettingsModal {
                     let names = kb_binding_names(self.kb_section);
                     if self.kb_cursor < names.len() {
                         let action = names[self.kb_cursor];
-                        let section_name = KB_SECTIONS
-                            .get(self.kb_section)
-                            .copied()
-                            .unwrap_or("")
-                            .to_lowercase();
-                        // Pre-check for an existing binding so the user
-                        // sees a warning and the conflict resolver gets a
-                        // chance to inform them.
-                        let conflict_msg =
-                            self.find_conflict_for_binding(&binding_str, &section_name, action);
-                        set_kb_value(
-                            &mut self.config,
-                            self.kb_section,
-                            action,
-                            KeyBinding::Single(binding_str),
-                        );
-                        self.mark_dirty();
-                        self.kb_capture_message = conflict_msg;
+                        self.apply_captured_key(capture, action, &binding_str);
                     }
                 }
                 self.kb_mode = KbMode::Bindings;
             }
         }
         Ok(None)
+    }
+
+    /// Write a captured chord into the action under the cursor.
+    ///
+    /// A chord the action already accepts is refused rather than stored: a
+    /// second spelling of a key it already answers to would only clutter the
+    /// row. A chord another action has is stored with a warning, as before —
+    /// which of the two should win is the user's call, not ours.
+    fn apply_captured_key(&mut self, capture: KbCapture, action: &str, binding_str: &str) {
+        let parsed = match termide_config::parse_keybinding(binding_str) {
+            Ok(parsed) => parsed,
+            Err(_) => return,
+        };
+        if self.action_already_has_key(self.kb_section, action, &parsed) {
+            self.kb_capture_message = Some(i18n::t().settings_kb_key_taken_fmt(binding_str));
+            return;
+        }
+
+        let current = get_kb_binding(&self.config, self.kb_section, action);
+        let next = match capture {
+            KbCapture::Append => current
+                .map(|b| b.push_key(binding_str))
+                .unwrap_or_else(|| KeyBinding::Single(binding_str.to_string())),
+            KbCapture::Replace(index) => {
+                let mut keys = kb_keys_of(&self.config, self.kb_section, action);
+                if index >= keys.len() {
+                    keys.push(binding_str.to_string());
+                } else {
+                    keys[index] = binding_str.to_string();
+                }
+                if keys.len() == 1 {
+                    KeyBinding::Single(keys.remove(0))
+                } else {
+                    KeyBinding::Multiple(keys)
+                }
+            }
+        };
+        self.set_kb_keys(action, Some(next));
+
+        // Keep the cursor on the key just written, so a second `Enter` edits
+        // the same one instead of jumping to the end of the row.
+        self.kb_key_cursor = match capture {
+            KbCapture::Append => kb_keys_of(&self.config, self.kb_section, action)
+                .len()
+                .saturating_sub(1),
+            KbCapture::Replace(index) => index,
+        };
+
+        let section_name = kb_section_key(self.kb_section);
+        self.kb_capture_message = self.find_conflict_for_binding(&parsed, section_name, action);
+    }
+
+    /// Store `binding` for the row under the cursor, clearing it when `None`.
+    fn set_kb_keys(&mut self, action: &str, binding: Option<KeyBinding>) {
+        set_kb_value(
+            &mut self.config,
+            self.kb_section,
+            action,
+            binding.unwrap_or_else(|| KeyBinding::Single(String::new())),
+        );
+        self.mark_dirty();
+    }
+}
+
+#[cfg(test)]
+mod keybinding_picker_tests {
+    use super::*;
+    use crate::Modal;
+    use crossterm::event::KeyEvent;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+
+    /// Global section, `close_panel` row — which ships bound to three keys.
+    fn kb_modal() -> SettingsModal {
+        let mut config = Config::default();
+        config.normalize();
+        let mut modal = SettingsModal::new(config, false);
+        modal.active_tab = SettingsTab::Keybindings;
+        modal.focus = FocusArea::Content;
+        modal.kb_section = 0;
+        modal.kb_cursor = kb_binding_names(0)
+            .iter()
+            .position(|n| *n == "close_panel")
+            .expect("close_panel is listed");
+        modal
+    }
+
+    fn press(modal: &mut SettingsModal, code: KeyCode, modifiers: KeyModifiers) {
+        let chord = termide_core::KeyChord::identity(KeyEvent::new(code, modifiers));
+        modal.handle_key(chord).unwrap();
+    }
+
+    fn keys(modal: &SettingsModal) -> Vec<String> {
+        kb_keys_of(&modal.config, 0, "close_panel")
+    }
+
+    /// The row starts with the cursor on its first key.
+    #[test]
+    fn arrows_walk_the_keys_of_the_row() {
+        let mut modal = kb_modal();
+        assert_eq!(keys(&modal), vec!["Alt+W", "Alt+X", "F10"]);
+        assert_eq!(modal.kb_key_cursor, 0);
+
+        press(&mut modal, KeyCode::Right, KeyModifiers::NONE);
+        assert_eq!(modal.kb_key_cursor, 1);
+        press(&mut modal, KeyCode::Right, KeyModifiers::NONE);
+        assert_eq!(modal.kb_key_cursor, 2);
+        // The next stop past the last key is the `+` slot.
+        press(&mut modal, KeyCode::Right, KeyModifiers::NONE);
+        assert_eq!(modal.kb_key_cursor, 3);
+        press(&mut modal, KeyCode::Right, KeyModifiers::NONE);
+        assert_eq!(modal.kb_key_cursor, 3, "the row has no further slot");
+
+        press(&mut modal, KeyCode::Left, KeyModifiers::NONE);
+        assert_eq!(modal.kb_key_cursor, 2);
+    }
+
+    /// Regression: `Enter` used to write a `Single`, so rebinding one key of
+    /// `Alt+W, Alt+X, F10` silently dropped the other two.
+    #[test]
+    fn enter_replaces_only_the_key_under_the_cursor() {
+        let mut modal = kb_modal();
+        press(&mut modal, KeyCode::Right, KeyModifiers::NONE);
+        press(&mut modal, KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(modal.kb_mode, KbMode::Capturing(KbCapture::Replace(1)));
+
+        press(&mut modal, KeyCode::F(7), KeyModifiers::CONTROL);
+        assert_eq!(keys(&modal), vec!["Alt+W", "Ctrl+F7", "F10"]);
+        assert_eq!(
+            modal.kb_key_cursor, 1,
+            "the cursor stays on what was written"
+        );
+    }
+
+    /// `Enter` on the `+` slot appends instead of replacing.
+    #[test]
+    fn the_plus_slot_adds_another_alternative() {
+        let mut modal = kb_modal();
+        for _ in 0..3 {
+            press(&mut modal, KeyCode::Right, KeyModifiers::NONE);
+        }
+        assert_eq!(modal.kb_key_cursor, 3, "the cursor is on the + slot");
+        press(&mut modal, KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(modal.kb_mode, KbMode::Capturing(KbCapture::Append));
+
+        press(&mut modal, KeyCode::F(3), KeyModifiers::ALT);
+        assert_eq!(keys(&modal), vec!["Alt+W", "Alt+X", "F10", "Alt+F3"]);
+    }
+
+    /// Adding a chord the action already answers to would only put a duplicate
+    /// in the row, so it is refused and said out loud.
+    #[test]
+    fn a_key_the_action_already_has_is_refused() {
+        let mut modal = kb_modal();
+        for _ in 0..3 {
+            press(&mut modal, KeyCode::Right, KeyModifiers::NONE);
+        }
+        press(&mut modal, KeyCode::Enter, KeyModifiers::NONE);
+        // `Alt+W` is already the first alternative; a different spelling of the
+        // same physical chord is refused just the same.
+        press(&mut modal, KeyCode::Char('w'), KeyModifiers::ALT);
+
+        assert_eq!(
+            keys(&modal),
+            vec!["Alt+W", "Alt+X", "F10"],
+            "the duplicate was not stored"
+        );
+        assert!(
+            modal
+                .kb_capture_message
+                .as_deref()
+                .is_some_and(|m| m.contains("Alt+W")),
+            "the user is told why: {:?}",
+            modal.kb_capture_message
+        );
+    }
+
+    /// `"Alt+Shift+="` and `"Alt++"` are one physical chord. A string compare
+    /// let the second spelling through as if it were new.
+    #[test]
+    fn a_equivalent_spelling_of_an_existing_key_is_refused_too() {
+        let mut modal = kb_modal();
+        modal.config.general.keybindings.close_panel =
+            Some(KeyBinding::Single("Alt+Shift+=".to_string()));
+        for _ in 0..2 {
+            press(&mut modal, KeyCode::Right, KeyModifiers::NONE);
+        }
+        press(&mut modal, KeyCode::Enter, KeyModifiers::NONE);
+        // The picker produces `Alt++` for that chord; it canonicalizes to the
+        // same parsed binding the row already holds.
+        let captured = format_key_event(&KeyEvent::new(
+            KeyCode::Char('+'),
+            KeyModifiers::ALT | KeyModifiers::SHIFT,
+        ));
+        press(
+            &mut modal,
+            KeyCode::Char('+'),
+            KeyModifiers::ALT | KeyModifiers::SHIFT,
+        );
+
+        assert_eq!(
+            kb_keys_of(&modal.config, 0, "close_panel"),
+            vec!["Alt+Shift+="],
+            "{captured} names the key already there"
+        );
+    }
+
+    /// Delete takes the key the cursor is on, not always the last one.
+    #[test]
+    fn delete_removes_the_selected_key() {
+        let mut modal = kb_modal();
+        press(&mut modal, KeyCode::Right, KeyModifiers::NONE);
+        press(&mut modal, KeyCode::Delete, KeyModifiers::NONE);
+        assert_eq!(keys(&modal), vec!["Alt+W", "F10"]);
+
+        press(&mut modal, KeyCode::Delete, KeyModifiers::NONE);
+        assert_eq!(keys(&modal), vec!["Alt+W"], "the next key slid into place");
+
+        press(&mut modal, KeyCode::Delete, KeyModifiers::NONE);
+        assert!(keys(&modal).is_empty(), "the last one clears the row");
+    }
+
+    /// Shift+Delete still clears the whole action, as it did before.
+    #[test]
+    fn shift_delete_clears_the_action() {
+        let mut modal = kb_modal();
+        press(&mut modal, KeyCode::Delete, KeyModifiers::SHIFT);
+        assert!(keys(&modal).is_empty());
+    }
+
+    /// `Esc` leaves the binding untouched.
+    #[test]
+    fn escape_abandons_the_capture() {
+        let mut modal = kb_modal();
+        press(&mut modal, KeyCode::Enter, KeyModifiers::NONE);
+        press(&mut modal, KeyCode::Esc, KeyModifiers::NONE);
+        assert_eq!(modal.kb_mode, KbMode::Bindings);
+        assert_eq!(keys(&modal), vec!["Alt+W", "Alt+X", "F10"]);
+    }
+
+    /// A chord another action holds is stored — which should win is the
+    /// user's call — but with a warning naming where it is also bound.
+    #[test]
+    fn a_chord_held_elsewhere_is_stored_with_a_warning() {
+        let mut modal = kb_modal();
+        for _ in 0..3 {
+            press(&mut modal, KeyCode::Right, KeyModifiers::NONE);
+        }
+        press(&mut modal, KeyCode::Enter, KeyModifiers::NONE);
+        // `Alt+Q` is `quit`'s binding in the same section.
+        press(&mut modal, KeyCode::Char('q'), KeyModifiers::ALT);
+
+        assert!(keys(&modal).contains(&"Alt+Q".to_string()));
+        let msg = modal.kb_capture_message.clone().unwrap_or_default();
+        assert!(msg.contains("Alt+Q"), "{msg}");
+        assert!(msg.contains("quit"), "{msg} names the other action");
+    }
+
+    /// Regression: rebinding a *global* action used to warn about itself. The
+    /// picker compared the sidebar's `Global` against the `general` the conflict
+    /// list reports, so the "skip my own binding" test never matched and the
+    /// chord just written into this very action came back as a clash.
+    #[test]
+    fn rebinding_a_global_action_does_not_report_itself() {
+        let mut modal = kb_modal();
+        // `Ctrl+F4` is bound to nothing in the default config.
+        for _ in 0..3 {
+            press(&mut modal, KeyCode::Right, KeyModifiers::NONE);
+        }
+        press(&mut modal, KeyCode::Enter, KeyModifiers::NONE);
+        press(&mut modal, KeyCode::F(4), KeyModifiers::CONTROL);
+
+        assert!(
+            kb_keys_of(&modal.config, 0, "close_panel").contains(&"Ctrl+F4".to_string()),
+            "the chord was stored"
+        );
+        assert_eq!(
+            modal.kb_capture_message, None,
+            "a free chord on a global action is no conflict"
+        );
+    }
+
+    /// Moving between rows restarts the key cursor: a row's own first key is
+    /// the thing to act on, not wherever the last row happened to be.
+    #[test]
+    fn changing_row_resets_the_key_cursor() {
+        let mut modal = kb_modal();
+        press(&mut modal, KeyCode::Right, KeyModifiers::NONE);
+        press(&mut modal, KeyCode::Right, KeyModifiers::NONE);
+        assert_eq!(modal.kb_key_cursor, 2);
+
+        press(&mut modal, KeyCode::Down, KeyModifiers::NONE);
+        assert_eq!(modal.kb_key_cursor, 0);
+    }
+
+    /// A row with no keys still takes a first binding: the cursor sits on the
+    /// `+` slot, and `Enter` captures.
+    #[test]
+    fn an_unbound_row_binds_from_the_plus_slot() {
+        let mut modal = kb_modal();
+        modal.config.general.keybindings.close_panel = Some(KeyBinding::Single(String::new()));
+        assert_eq!(keys(&modal), Vec::<String>::new());
+
+        press(&mut modal, KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(modal.kb_mode, KbMode::Capturing(KbCapture::Append));
+        press(&mut modal, KeyCode::F(9), KeyModifiers::NONE);
+        assert_eq!(keys(&modal), vec!["F9"]);
+    }
+
+    /// The row shows every alternative, with the `+` slot after them.
+    #[test]
+    fn the_row_draws_every_key_and_the_slot() {
+        let mut modal = kb_modal();
+        let area = Rect::new(0, 0, 110, 40);
+        let mut buf = Buffer::empty(area);
+        modal.render(area, &mut buf, &termide_theme::Theme::default());
+
+        let row = kb_binding_names(0)
+            .iter()
+            .position(|n| *n == "close_panel")
+            .unwrap();
+        let slots = modal
+            .kb_rows
+            .iter()
+            .find(|(i, _)| *i == row)
+            .map(|(_, s)| s.clone())
+            .expect("the row recorded its slots");
+        assert_eq!(
+            slots.iter().map(|s| s.key).collect::<Vec<_>>(),
+            vec![Some(0), Some(1), Some(2), None],
+            "three keys then the + slot"
+        );
+
+        // The line those slots were drawn on, read back out of the buffer:
+        // found by its label rather than by recomputing the row's y.
+        let (y, line) = (0..area.height)
+            .map(|y| {
+                let line: String = (0..area.width)
+                    .map(|x| buf[(x, y)].symbol().chars().next().unwrap_or(' '))
+                    .collect();
+                (y, line)
+            })
+            .find(|(_, l)| l.contains("close_panel"))
+            .expect("the close_panel row is drawn");
+        assert!(
+            line.contains("Alt+W, Alt+X, F10"),
+            "all three alternatives, comma-separated: {line:?}"
+        );
+
+        // Each slot holds what its span says it holds.
+        for slot in &slots {
+            let text: String = (slot.span.0..slot.span.1)
+                .map(|x| buf[(x, y)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            let expected = match slot.key {
+                Some(i) => ["Alt+W", "Alt+X", "F10"][i],
+                None => "+",
+            };
+            assert_eq!(text, expected, "slot {slot:?}");
+        }
+    }
+
+    /// A click on a key selects it, so the next Delete takes that one.
+    #[test]
+    fn clicking_a_key_selects_it() {
+        let mut modal = kb_modal();
+        let area = Rect::new(0, 0, 110, 40);
+        let mut buf = Buffer::empty(area);
+        modal.render(area, &mut buf, &termide_theme::Theme::default());
+
+        let row = kb_binding_names(0)
+            .iter()
+            .position(|n| *n == "close_panel")
+            .unwrap();
+        let slots = modal
+            .kb_rows
+            .iter()
+            .find(|(i, _)| *i == row)
+            .map(|(_, s)| s.clone())
+            .expect("slots recorded");
+        let key = slots[1];
+        modal.kb_click(row, (key.span.0 + key.span.1) / 2);
+        assert_eq!(modal.kb_key_cursor, 1);
+
+        press(&mut modal, KeyCode::Delete, KeyModifiers::NONE);
+        assert_eq!(keys(&modal), vec!["Alt+W", "F10"]);
+    }
+
+    /// A click on the `+` starts capturing right away.
+    #[test]
+    fn clicking_the_plus_starts_a_capture() {
+        let mut modal = kb_modal();
+        let area = Rect::new(0, 0, 110, 40);
+        let mut buf = Buffer::empty(area);
+        modal.render(area, &mut buf, &termide_theme::Theme::default());
+
+        let row = kb_binding_names(0)
+            .iter()
+            .position(|n| *n == "close_panel")
+            .unwrap();
+        let add = modal
+            .kb_rows
+            .iter()
+            .find(|(i, _)| *i == row)
+            .and_then(|(_, slots)| slots.iter().find(|s| s.key.is_none()))
+            .copied()
+            .expect("the + slot is drawn");
+        modal.kb_click(row, add.span.0);
+        assert_eq!(modal.kb_mode, KbMode::Capturing(KbCapture::Append));
+
+        press(&mut modal, KeyCode::F(2), KeyModifiers::ALT);
+        assert_eq!(keys(&modal), vec!["Alt+W", "Alt+X", "F10", "Alt+F2"]);
+    }
+
+    /// The `+` is drawn on the focused row only, so a click at its column on
+    /// another row selects that row rather than adding to it.
+    #[test]
+    fn the_plus_slot_does_not_leak_across_rows() {
+        let mut modal = kb_modal();
+        let area = Rect::new(0, 0, 110, 40);
+        let mut buf = Buffer::empty(area);
+        modal.render(area, &mut buf, &termide_theme::Theme::default());
+
+        let row = kb_binding_names(0)
+            .iter()
+            .position(|n| *n == "close_panel")
+            .unwrap();
+        let add = modal
+            .kb_rows
+            .iter()
+            .find(|(i, _)| *i == row)
+            .and_then(|(_, slots)| slots.iter().find(|s| s.key.is_none()))
+            .copied()
+            .expect("the + slot is drawn");
+
+        let other = row + 1;
+        modal.kb_click(other, add.span.0);
+        assert_eq!(modal.kb_cursor, other);
+        assert_eq!(
+            modal.kb_mode,
+            KbMode::Bindings,
+            "a click at the + column of a different row only selects it"
+        );
+    }
+}
+
+#[cfg(test)]
+mod keybinding_double_click_tests {
+    use super::*;
+    use crate::settings::{KbSlot, SettingsTab};
+    use crate::Modal;
+    use crossterm::event::KeyEvent;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+
+    fn kb_modal() -> (SettingsModal, Vec<KbSlot>) {
+        let mut config = Config::default();
+        config.normalize();
+        let mut modal = SettingsModal::new(config, false);
+        modal.active_tab = SettingsTab::Keybindings;
+        modal.focus = FocusArea::Content;
+        modal.kb_section = 0;
+        modal.kb_cursor = kb_binding_names(0)
+            .iter()
+            .position(|n| *n == "close_panel")
+            .unwrap();
+        let area = Rect::new(0, 0, 110, 40);
+        let mut buf = Buffer::empty(area);
+        modal.render(area, &mut buf, &termide_theme::Theme::default());
+        let row = modal.kb_cursor;
+        let slots = modal
+            .kb_rows
+            .iter()
+            .find(|(i, _)| *i == row)
+            .map(|(_, s)| s.clone())
+            .expect("slots recorded");
+        (modal, slots)
+    }
+
+    /// A second click on the same key captures it.
+    #[test]
+    fn a_double_click_on_one_key_captures_it() {
+        let (mut modal, slots) = kb_modal();
+        let row = modal.kb_cursor;
+        let key = slots[1];
+        let at = (key.span.0 + key.span.1) / 2;
+
+        modal.kb_click(row, at);
+        assert_eq!(modal.kb_mode, KbMode::Bindings, "the first click selects");
+        modal.kb_click(row, at);
+        assert_eq!(modal.kb_mode, KbMode::Capturing(KbCapture::Replace(1)));
+    }
+
+    /// Two quick clicks on *different* keys of one row are not a double click
+    /// on either: the tracker is keyed by slot, not by row.
+    #[test]
+    fn quick_clicks_on_different_keys_are_not_a_double_click() {
+        let (mut modal, slots) = kb_modal();
+        let row = modal.kb_cursor;
+
+        modal.kb_click(row, (slots[0].span.0 + slots[0].span.1) / 2);
+        modal.kb_click(row, (slots[1].span.0 + slots[1].span.1) / 2);
+
+        assert_eq!(
+            modal.kb_mode,
+            KbMode::Bindings,
+            "moving across the row must not start a capture"
+        );
+        assert_eq!(modal.kb_key_cursor, 1);
+    }
+
+    /// The captured key lands on the key that was double-clicked.
+    #[test]
+    fn a_double_click_then_a_key_replaces_that_key() {
+        let (mut modal, slots) = kb_modal();
+        let row = modal.kb_cursor;
+        let at = (slots[2].span.0 + slots[2].span.1) / 2;
+
+        modal.kb_click(row, at);
+        modal.kb_click(row, at);
+        let chord =
+            termide_core::KeyChord::identity(KeyEvent::new(KeyCode::F(8), KeyModifiers::CONTROL));
+        modal.handle_key(chord).unwrap();
+
+        assert_eq!(
+            kb_keys_of(&modal.config, 0, "close_panel"),
+            vec!["Alt+W", "Alt+X", "Ctrl+F8"]
+        );
     }
 }

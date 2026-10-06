@@ -22,8 +22,6 @@ mod kb;
 mod render;
 mod state;
 
-use kb::kb_binding_names;
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -109,13 +107,42 @@ enum LspMode {
     ServerEdit,
 }
 
+/// One slot drawn in a binding row's value column: a bound key, or the `+`
+/// slot that adds another alternative.
+///
+/// `key` is the index into the binding's key list; `None` marks the `+` slot,
+/// which is not a key yet and so has no index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct KbSlot {
+    pub key: Option<usize>,
+    /// Half-open column span `[start, end)`, shared by the renderer and the
+    /// click hit-test so the two cannot disagree about where a key is.
+    pub span: (u16, u16),
+}
+
+/// The slots drawn in one binding row, in the order they are drawn.
+pub(super) type KbRow = Vec<KbSlot>;
+
 /// Keybindings tab sub-mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum KbMode {
     /// Browsing bindings for the active section — user picks one to rebind.
     Bindings,
-    /// Capturing a keypress for the selected binding.
-    Capturing,
+    /// Capturing a keypress; where it lands is what the cursor was on.
+    Capturing(KbCapture),
+}
+
+/// What a captured keypress writes to.
+///
+/// An action can hold several alternatives, so capture has to know which one
+/// it is rewriting: `Enter` on a key replaces that key, `Enter` on the `+`
+/// slot at the end of the row adds a new one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KbCapture {
+    /// Overwrite the alternative at this index into the binding's key list.
+    Replace(usize),
+    /// Append after every alternative the action already has.
+    Append,
 }
 
 /// Result returned when the settings modal closes.
@@ -250,8 +277,23 @@ pub struct SettingsModal {
     kb_section: usize,
     /// Cursor within the binding list of the current section.
     kb_cursor: usize,
+    /// Cursor within the key list of the row under `kb_cursor`. `keys().len()`
+    /// means the `+` slot at the end of the row, where a new alternative is
+    /// added; every smaller index is one of the keys already bound.
+    kb_key_cursor: usize,
     /// Scroll offset for binding list.
     kb_scroll: usize,
+    /// The slots drawn on each visible row, keyed by the row's index in
+    /// `kb_binding_names(kb_section)`. A slot whose `key` is `None` is the
+    /// `+` at the end of the row. Keyed by row index rather than screen row
+    /// so a click resolves against the row it was drawn on even if the list
+    /// scrolled in between. Filled by `render_keybindings`.
+    kb_rows: Vec<(usize, KbRow)>,
+    /// Double-click tracking for the Keybindings list, keyed by row and the
+    /// column its slot starts at. Separate from `clicks`, which tracks text
+    /// fields by row: two quick clicks on *different* keys of one row are not
+    /// a double click on either.
+    kb_clicks: termide_ui::ClickTracker<(u16, u16)>,
     /// Inline message shown after capturing a keybinding (e.g. conflict
     /// warning). Cleared on the next user action.
     kb_capture_message: Option<String>,
@@ -499,10 +541,7 @@ impl Modal for SettingsModal {
                 let rel_y = mouse.row as usize - content_area.y as usize;
                 if self.active_tab == SettingsTab::Keybindings {
                     let idx = self.kb_scroll + rel_y;
-                    let names = kb_binding_names(self.kb_section);
-                    if idx < names.len() {
-                        self.kb_cursor = idx;
-                    }
+                    self.kb_click(idx, mouse.column);
                 } else {
                     let idx = self.content_scroll + rel_y;
                     let rows = self.content_rows();

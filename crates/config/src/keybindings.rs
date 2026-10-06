@@ -96,18 +96,43 @@ impl KeyBinding {
             .join(", ")
     }
 
-    /// Drop the last alternative, or `None` once nothing is left.
+    /// This binding plus one more alternative, at the end.
     ///
-    /// Removing them one at a time is what makes a multi-key binding
-    /// editable at all: the capture dialog can only add.
-    pub fn without_last_key(&self) -> Option<KeyBinding> {
+    /// An unbound action stores `Single("")`; taking that on adds the first
+    /// real key rather than keeping the empty one in front of it.
+    #[must_use]
+    pub fn push_key(&self, key: &str) -> KeyBinding {
         let mut keys: Vec<String> = self
             .keys()
             .iter()
             .filter(|k| !k.is_empty())
             .cloned()
             .collect();
-        keys.pop();
+        keys.push(key.to_string());
+        if keys.len() == 1 {
+            KeyBinding::Single(keys.remove(0))
+        } else {
+            KeyBinding::Multiple(keys)
+        }
+    }
+
+    /// Drop one alternative by index, or `None` once nothing is left.
+    ///
+    /// Indexing rather than always dropping the last is what lets the
+    /// Settings picker remove the key the cursor actually sits on. An index
+    /// past the end changes nothing, so a stale cursor cannot clear a binding.
+    #[must_use]
+    pub fn without_key_at(&self, index: usize) -> Option<KeyBinding> {
+        let mut keys: Vec<String> = self
+            .keys()
+            .iter()
+            .filter(|k| !k.is_empty())
+            .cloned()
+            .collect();
+        if index >= keys.len() {
+            return Some(self.clone());
+        }
+        keys.remove(index);
         match keys.len() {
             0 => None,
             1 => Some(KeyBinding::Single(keys.remove(0))),
@@ -735,12 +760,54 @@ mod key_list_tests {
             "F10".to_string(),
         ]);
 
-        let binding = binding.without_last_key().expect("two remain");
-        assert_eq!(binding.display_all(), "Alt+W, Alt+X");
+        let binding = binding.without_key_at(1).expect("two remain");
+        assert_eq!(binding.display_all(), "Alt+W, F10");
 
-        let binding = binding.without_last_key().expect("one remains");
-        assert_eq!(binding, KeyBinding::Single("Alt+W".to_string()));
+        let binding = binding.without_key_at(0).expect("one remains");
+        assert_eq!(binding, KeyBinding::Single("F10".to_string()));
 
-        assert_eq!(binding.without_last_key(), None, "the last one clears it");
+        assert_eq!(binding.without_key_at(0), None, "the last one clears it");
+    }
+
+    /// The picker deletes the key under the cursor, so an index that has gone
+    /// stale — a row re-read after the list shrank — must leave the binding
+    /// alone rather than clear it.
+    #[test]
+    fn an_index_past_the_end_changes_nothing() {
+        let binding = KeyBinding::Multiple(vec!["Alt+W".to_string(), "F10".to_string()]);
+        assert_eq!(binding.without_key_at(2), Some(binding.clone()));
+        assert_eq!(
+            KeyBinding::Single(String::new()).without_key_at(0),
+            Some(KeyBinding::Single(String::new()))
+        );
+    }
+
+    #[test]
+    fn a_key_is_added_at_the_end() {
+        let empty = KeyBinding::Single(String::new());
+        assert_eq!(empty.push_key("F10"), KeyBinding::Single("F10".to_string()));
+
+        let single = KeyBinding::Single("Alt+W".to_string());
+        assert_eq!(
+            single.push_key("F10"),
+            KeyBinding::Multiple(vec!["Alt+W".to_string(), "F10".to_string()])
+        );
+
+        let multi = KeyBinding::Multiple(vec!["Alt+W".to_string(), "Alt+X".to_string()]);
+        assert_eq!(
+            multi.push_key("F10").display_all(),
+            "Alt+W, Alt+X, F10",
+            "the new alternative goes last"
+        );
+    }
+
+    /// Adding to a binding, then removing what was added, is the round trip
+    /// the picker performs; it must land back on the original shape, including
+    /// the collapse from `Multiple` of one back to `Single`.
+    #[test]
+    fn adding_then_removing_returns_the_original() {
+        let single = KeyBinding::Single("Alt+W".to_string());
+        let added = single.push_key("F10");
+        assert_eq!(added.without_key_at(1), Some(single));
     }
 }

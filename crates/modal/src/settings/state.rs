@@ -7,9 +7,9 @@ use termide_i18n as i18n;
 
 use super::connection;
 use super::fields::{fields_for_tab, get_field_value, ContentRow, FieldType};
-use super::kb::KB_SECTIONS;
+use super::kb::{kb_binding_names, kb_keys_of, KB_SECTIONS};
 use super::{
-    FocusArea, KbMode, LspMode, SettingsModal, SettingsTab, SidebarRow, BUTTON_APPLY,
+    FocusArea, KbCapture, KbMode, LspMode, SettingsModal, SettingsTab, SidebarRow, BUTTON_APPLY,
     TOP_LEVEL_TABS,
 };
 
@@ -50,7 +50,10 @@ impl SettingsModal {
             kb_mode: KbMode::Bindings,
             kb_section: 0,
             kb_cursor: 0,
+            kb_key_cursor: 0,
             kb_scroll: 0,
+            kb_rows: Vec::new(),
+            kb_clicks: termide_ui::ClickTracker::new(),
             kb_capture_message: None,
             selected_button: BUTTON_APPLY,
             dirty: false,
@@ -170,12 +173,22 @@ impl SettingsModal {
             SidebarRow::KbChild(idx) => {
                 self.active_tab = SettingsTab::Keybindings;
                 self.kb_section = idx;
-                self.kb_mode = KbMode::Bindings;
-                self.kb_cursor = 0;
-                self.kb_scroll = 0;
+                self.reset_kb_cursors();
                 self.editing = false;
             }
         }
+    }
+
+    /// Put every Keybindings-tab cursor back at the start, and drop the click
+    /// spans the last frame recorded: they belong to the section they were
+    /// drawn for, and a click must not be resolved against another one.
+    pub(super) fn reset_kb_cursors(&mut self) {
+        self.kb_mode = KbMode::Bindings;
+        self.kb_cursor = 0;
+        self.kb_key_cursor = 0;
+        self.kb_scroll = 0;
+        self.kb_rows.clear();
+        self.kb_capture_message = None;
     }
 
     /// Activate a row explicitly (Enter / mouse click). Toggles group header,
@@ -186,12 +199,67 @@ impl SettingsModal {
                 self.keybindings_expanded = !self.keybindings_expanded;
                 if self.keybindings_expanded {
                     self.active_tab = SettingsTab::Keybindings;
-                    self.kb_mode = KbMode::Bindings;
-                    self.kb_cursor = 0;
-                    self.kb_scroll = 0;
+                    self.reset_kb_cursors();
                 }
             }
             other => self.preview_sidebar_row(other),
+        }
+    }
+
+    /// Act on a click inside the Keybindings list.
+    ///
+    /// `row` is the binding row and `column` the screen column, both resolved
+    /// by the caller. A click on a key of the row selects that key, so the
+    /// next `Enter` or `Delete` acts on what was clicked rather than on the
+    /// first alternative. A click on the `+` slot starts capturing straight
+    /// away: the slot is one column wide and drawn only on the focused row, so
+    /// hitting it is deliberate. A second click on the same key within the
+    /// double-click interval captures it, the way a double click edits a text
+    /// field elsewhere in the modal.
+    pub(super) fn kb_click(&mut self, row: usize, column: u16) {
+        let names = kb_binding_names(self.kb_section);
+        if row >= names.len() {
+            return;
+        }
+        self.kb_cursor = row;
+        self.kb_capture_message = None;
+
+        // Resolve the click against the slots this row was drawn with, so a
+        // row whose keys were cut off by the width cannot be hit on a column
+        // that showed something else. The `+` is in the slots of the focused
+        // row only, so a click at its column on another row is not an add.
+        let hit = self
+            .kb_rows
+            .iter()
+            .find(|(i, _)| *i == row)
+            .and_then(|(_, slots)| {
+                slots
+                    .iter()
+                    .find(|s| s.span.0 <= column && column < s.span.1)
+            })
+            .map(|slot| (slot.key, slot.span.0));
+
+        // A double click is two clicks on the *same* slot: keying the tracker
+        // by the slot's start column keeps two quick clicks on different keys
+        // of one row from reading as a double click on either.
+        let slot_id = (row as u16, hit.map(|(_, start)| start).unwrap_or(column));
+        let double = self.kb_clicks.click(slot_id) >= 2;
+
+        match hit {
+            // The `+` slot: add another alternative.
+            Some((None, _)) => {
+                let keys = kb_keys_of(&self.config, self.kb_section, names[row]);
+                self.kb_key_cursor = keys.len();
+                self.kb_mode = KbMode::Capturing(KbCapture::Append);
+            }
+            Some((Some(key), _)) => {
+                self.kb_key_cursor = key;
+                if double {
+                    self.kb_mode = KbMode::Capturing(KbCapture::Replace(key));
+                }
+            }
+            // Empty part of the row: select the first key, ready for arrows.
+            None => self.kb_key_cursor = 0,
         }
     }
 

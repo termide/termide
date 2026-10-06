@@ -1114,7 +1114,9 @@ pub trait Translation: Send + Sync {
     // Settings modal — Keybindings hints
     fn settings_kb_hint_bindings(&self) -> &str;
     fn settings_kb_hint_capturing(&self) -> &str;
-    fn settings_kb_press_key(&self) -> &str;
+    fn settings_kb_hint_capturing_replace(&self) -> &str;
+    fn settings_kb_key_taken_fmt(&self, key: &str) -> String;
+    fn settings_kb_conflict_fmt(&self, key: &str, held: &str) -> String;
 
     // Sessions
     fn projects_title(&self) -> &str;

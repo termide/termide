@@ -339,15 +339,49 @@ pub(super) fn get_kb_value(config: &Config, section: usize, name: &str) -> Strin
     }
 }
 
-/// Set a binding.
-/// Read a binding as a value, not as text — Delete needs to remove one key
-/// from it and put the rest back.
+/// The section name `termide_config::enumerate_bindings` reports for a
+/// sidebar section index.
+///
+/// They are not the same strings: the sidebar says `Global`, the enumerator
+/// says `general`. Comparing them directly made every global action look as
+/// though it conflicted with itself, because the "skip my own binding" test
+/// never matched.
+pub(super) fn kb_section_key(section: usize) -> &'static str {
+    match section {
+        0 => "general",
+        1 => "editor",
+        2 => "file_manager",
+        3 => "git_status",
+        4 => "git_diff",
+        5 => "git_log",
+        6 => "terminal",
+        7 => "database",
+        8 => "viewer",
+        _ => "",
+    }
+}
+
+/// The keys an action currently accepts, empty strings dropped.
+///
+/// This is the list the picker puts a cursor into: its indices are what
+/// `without_key_at` and `push_key` take, and its length is the `+` slot.
+/// Reading it through `KeyBinding::keys()` keeps those indices aligned with
+/// what the row shows.
+pub(super) fn kb_keys_of(config: &Config, section: usize, name: &str) -> Vec<String> {
+    get_kb_value(config, section, name)
+        .split(", ")
+        .filter(|k| !k.is_empty())
+        .map(|k| k.to_string())
+        .collect()
+}
+
+/// Read a binding as a value, not as text — the picker needs to replace or
+/// remove one key of it and put the rest back.
 pub(super) fn get_kb_binding(config: &Config, section: usize, name: &str) -> Option<KeyBinding> {
-    let text = get_kb_value(config, section, name);
-    if text.is_empty() {
+    let keys = kb_keys_of(config, section, name);
+    if keys.is_empty() {
         return None;
     }
-    let keys: Vec<String> = text.split(", ").map(|s| s.to_string()).collect();
     Some(if keys.len() == 1 {
         KeyBinding::Single(keys.into_iter().next().unwrap_or_default())
     } else {

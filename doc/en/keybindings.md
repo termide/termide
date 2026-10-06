@@ -265,8 +265,10 @@ the affected actions to Universal-tier alternatives in
 ## Conflict detection
 
 Settings → Keybindings shows an inline warning when you assign a chord
-already in use by another action. Three classes of conflict are
-detected:
+already in use by another action. A chord the same action already
+accepts is refused outright — it would only put a second spelling of a
+key the action already answers to into the row — and the reason is shown
+in its place. Three classes of conflict are detected:
 
 - **Same section** — two actions in the same section share the chord;
   the second one becomes unreachable.
@@ -309,6 +311,12 @@ normalizer rewrites back to the slash / backslash chord.
 Multiple alternatives are supported for any action: list them in an
 array. The first form is the canonical display string shown in help
 panels.
+
+The same shape is editable without touching the file: in Settings →
+Keybindings each row lists every key its action accepts, `Left`/`Right`
+move a cursor between them, `Enter` captures a chord for the key under
+the cursor, and the `+` drawn at the end of the focused row appends a
+new alternative. See [ui.md](ui.md#settings-modal).
 
 ### Unbound actions
 

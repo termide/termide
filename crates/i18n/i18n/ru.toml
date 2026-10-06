@@ -396,9 +396,9 @@ settings_logging_min_level = "Мин. уровень логов"
 settings_vfs_connection_timeout = "Таймаут соединения (сек)"
 
 # Settings modal — Keybindings hints
-settings_kb_hint_bindings = "Enter=переназначить  Esc=назад  Del=очистить"
-settings_kb_hint_capturing = "Нажмите клавишу  Esc=отмена"
-settings_kb_press_key = "Нажмите клавишу..."
+settings_kb_hint_bindings = "←/→=выбор  Enter=заменить  +=добавить  Del=убрать  Esc=назад"
+settings_kb_hint_capturing = "Нажмите клавишу — добавится  Esc=отмена"
+settings_kb_hint_capturing_replace = "Нажмите клавишу — заменится  Esc=отмена"
 tools_diagnostics = "Диагностика"
 tools_operations = "Операции"
 tools_outline = "Структура"
@@ -1071,6 +1071,8 @@ projects_delete_failed_fmt = "Не удалось удалить сохранё�
 command_edit_title_fmt = "Изменить команду: {name}"
 command_run_failed_fmt = "Не удалось запустить команду: {error}"
 command_name_taken_fmt = "Команда «{name}» уже есть"
+settings_kb_key_taken_fmt = "{key} уже назначена этому действию"
+settings_kb_conflict_fmt = "{key} также назначена {held}"
 
 [plurals]
 # Russian pluralization: 1 день, 2-4 дня, 5+ дней

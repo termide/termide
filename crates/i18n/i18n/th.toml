@@ -657,9 +657,9 @@ settings_general_resource_interval = "ช่วงเวลาของ Resource
 settings_general_project_retention = "เก็บโปรเจกต์ (วัน)"
 settings_general_theme = "ธีม"
 settings_general_vim_mode = "โหมด Vim"
-settings_kb_hint_bindings = "Enter=กำหนดใหม่  Esc=กลับ  Del=ลบ"
-settings_kb_hint_capturing = "กดปุ่มใด ๆ  Esc=ยกเลิก"
-settings_kb_press_key = "กดปุ่ม..."
+settings_kb_hint_bindings = "←/→=เลือก  Enter=เขียนทับ  +=เพิ่ม  Del=ลบ  Esc=กลับ"
+settings_kb_hint_capturing = "กดปุ่มเพื่อเพิ่ม  Esc=ยกเลิก"
+settings_kb_hint_capturing_replace = "กดปุ่มเพื่อเขียนทับ  Esc=ยกเลิก"
 settings_logging_file_path = "พาธไฟล์ log"
 settings_logging_min_level = "ระดับ log ต่ำสุด"
 settings_lsp_add_server = "+ เพิ่มเซิร์ฟเวอร์"
@@ -1037,6 +1037,9 @@ projects_delete_failed_fmt = "ลบเลย์เอาต์ที่บั�
 command_edit_title_fmt = "แก้ไขคำสั่ง: {name}"
 command_run_failed_fmt = "รันคำสั่งไม่สำเร็จ: {error}"
 command_name_taken_fmt = "มีคำสั่งชื่อ \"{name}\" อยู่แล้ว"
+settings_kb_key_taken_fmt = "{key} ผูกกับการนี้อยู่แล้ว"
+settings_kb_conflict_fmt = "{key} ผูกกับ {held} ด้วย"
+
 [plurals]
 # Thai doesn't have plural forms
 day = { one = "", other = "" }

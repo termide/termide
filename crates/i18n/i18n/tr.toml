@@ -657,9 +657,9 @@ settings_general_resource_interval = "Kaynak izleme aralığı (ms)"
 settings_general_project_retention = "Proje saklama (gün)"
 settings_general_theme = "Tema"
 settings_general_vim_mode = "Vim modu"
-settings_kb_hint_bindings = "Enter=yeniden ata  Esc=geri  Del=temizle"
-settings_kb_hint_capturing = "Bir tuşa basın  Esc=iptal"
-settings_kb_press_key = "Tuşa basın..."
+settings_kb_hint_bindings = "←/→=seç  Enter=üzerine yaz  +=ekle  Sil=kaldır  Esc=geri"
+settings_kb_hint_capturing = "Eklemek için bir tuşa basın  Esc=İptal"
+settings_kb_hint_capturing_replace = "Üzerine yazmak için bir tuşa basın  Esc=İptal"
 settings_logging_file_path = "Günlük dosya yolu"
 settings_logging_min_level = "Min. günlük düzeyi"
 settings_lsp_add_server = "+ Sunucu ekle"
@@ -1037,6 +1037,9 @@ projects_delete_failed_fmt = "Kaydedilen düzen silinemedi: {error}"
 command_edit_title_fmt = "Komutu düzenle: {name}"
 command_run_failed_fmt = "Komut çalıştırılamadı: {error}"
 command_name_taken_fmt = "\"{name}\" adlı bir komut zaten var"
+settings_kb_key_taken_fmt = "{key} bu eyleme zaten atanmış"
+settings_kb_conflict_fmt = "{key} ayrıca {held} tuşuna atanmış"
+
 [plurals]
 day = { one = "", other = "" }
 element = { one = "öğe", other = "öğe" }

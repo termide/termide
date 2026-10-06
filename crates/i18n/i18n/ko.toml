@@ -656,9 +656,9 @@ settings_general_resource_interval = "리소스 모니터 간격 (ms)"
 settings_general_project_retention = "프로젝트 보존 일수"
 settings_general_theme = "테마"
 settings_general_vim_mode = "Vim 모드"
-settings_kb_hint_bindings = "Enter=재할당  Esc=뒤로  Del=삭제"
-settings_kb_hint_capturing = "키를 누르세요  Esc=취소"
-settings_kb_press_key = "키를 누르세요..."
+settings_kb_hint_bindings = "←/→=선택  Enter=덮어쓰기  +=추가  Del=제거  Esc=뒤로"
+settings_kb_hint_capturing = "키를 누르면 추가됩니다  Esc=취소"
+settings_kb_hint_capturing_replace = "키를 누르면 덮어쓰기됩니다  Esc=취소"
 settings_logging_file_path = "로그 파일 경로"
 settings_logging_min_level = "최소 로그 레벨"
 settings_lsp_add_server = "+ 서버 추가"
@@ -1037,6 +1037,9 @@ projects_delete_failed_fmt = "저장된 레이아웃을 삭제하지 못했습�
 command_edit_title_fmt = "명령 편집: {name}"
 command_run_failed_fmt = "명령을 실행하지 못했습니다: {error}"
 command_name_taken_fmt = "\"{name}\" 명령이 이미 있습니다"
+settings_kb_key_taken_fmt = "{key}는 이 작업에 이미 할당되어 있습니다"
+settings_kb_conflict_fmt = "{key}는 {held}에도 할당되어 있습니다"
+
 [plurals]
 day = { one = "", other = "" }
 element = { one = "항목", other = "항목" }

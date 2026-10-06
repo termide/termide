@@ -657,9 +657,9 @@ settings_general_resource_interval = "Khoảng thời gian giám sát tài nguy�
 settings_general_project_retention = "Lưu dự án (ngày)"
 settings_general_theme = "Giao diện"
 settings_general_vim_mode = "Chế độ Vim"
-settings_kb_hint_bindings = "Enter=gán lại  Esc=quay lại  Del=xóa"
-settings_kb_hint_capturing = "Nhấn phím  Esc=hủy"
-settings_kb_press_key = "Nhấn phím..."
+settings_kb_hint_bindings = "←/→=chọn  Enter=ghi đè  +=thêm  Del=bỏ  Esc=quay lại"
+settings_kb_hint_capturing = "Nhấn phím để thêm  Esc=Hủy"
+settings_kb_hint_capturing_replace = "Nhấn phím để ghi đè  Esc=Hủy"
 settings_logging_file_path = "Đường dẫn tệp nhật ký"
 settings_logging_min_level = "Mức nhật ký tối thiểu"
 settings_lsp_add_server = "+ Thêm máy chủ"
@@ -1037,6 +1037,9 @@ projects_delete_failed_fmt = "Không thể xóa bố cục đã lưu: {error}"
 command_edit_title_fmt = "Sửa lệnh: {name}"
 command_run_failed_fmt = "Không thể chạy lệnh: {error}"
 command_name_taken_fmt = "Đã có lệnh tên \"{name}\""
+settings_kb_key_taken_fmt = "{key} đã được gán cho hành động này"
+settings_kb_conflict_fmt = "{key} cũng đã gán cho {held}"
+
 [plurals]
 day = { one = "", other = "" }
 element = { one = "mục", other = "mục" }
