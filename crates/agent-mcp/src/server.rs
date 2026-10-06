@@ -19,7 +19,7 @@
 //! idle timeout. The same writes notice a client that went away, and the
 //! call is then cancelled, taking down a question asked on its behalf.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
@@ -48,6 +48,10 @@ const MAX_BODY: usize = 16 * 1024 * 1024;
 /// drop a request that has been silent for minutes (five in Bun's `fetch`).
 const KEEPALIVE: Duration = Duration::from_secs(10);
 
+/// How many finished calls keep their details for [`McpServer::take_details`];
+/// the agent reports a call's end right after its reply, so a few suffice.
+const KEPT_DETAILS: usize = 32;
+
 struct Shared {
     tools: RwLock<ToolRegistry>,
     /// Bumped by every change of `tools`; the server streams wait on it.
@@ -62,6 +66,9 @@ struct Shared {
     /// The cancel token of each call in flight, by its JSON-RPC id, for
     /// `notifications/cancelled`.
     running: Mutex<HashMap<String, CancelToken>>,
+    /// The details of finished calls — for termide's UI, never sent to the
+    /// agent — as name, arguments and details, oldest first.
+    details: Mutex<VecDeque<(String, Value, Value)>>,
     stop: AtomicBool,
     /// [`KEEPALIVE`]; shorter in tests.
     keepalive: Duration,
@@ -101,6 +108,7 @@ impl McpServer {
             cwd,
             token: new_token(),
             running: Mutex::new(HashMap::new()),
+            details: Mutex::new(VecDeque::new()),
             stop: AtomicBool::new(false),
             keepalive,
         });
@@ -155,6 +163,27 @@ impl McpServer {
             .lock()
             .unwrap_or_else(PoisonError::into_inner) += 1;
         self.shared.changed.notify_all();
+    }
+
+    /// The details of a finished call of `name` with `arguments`, which the
+    /// MCP reply leaves out: the agent reports the call to termide with the
+    /// reply's text only. Taken once; with no exact match, the one call of
+    /// `name` kept, if just one is.
+    pub fn take_details(&self, name: &str, arguments: &Value) -> Option<Value> {
+        let mut kept = self
+            .shared
+            .details
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let index = kept
+            .iter()
+            .position(|(n, args, _)| n == name && args == arguments)
+            .or_else(|| {
+                let mut same = kept.iter().enumerate().filter(|(_, (n, ..))| n == name);
+                let first = same.next()?.0;
+                same.next().is_none().then_some(first)
+            })?;
+        kept.remove(index).map(|(.., details)| details)
     }
 }
 
@@ -536,6 +565,16 @@ fn call_tool(shared: &Shared, id: &Value, params: &Value, cancel: CancelToken) -
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .remove(&key);
+    if let Some(details) = result.details.clone() {
+        let mut kept = shared
+            .details
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if kept.len() == KEPT_DETAILS {
+            kept.pop_front();
+        }
+        kept.push_back((call.name.clone(), call.arguments.clone(), details));
+    }
     json!({
         "content": [{ "type": "text", "text": result.plain_text() }],
         "isError": result.is_error,
@@ -567,7 +606,8 @@ mod tests {
             _on_update: &mut dyn FnMut(ToolUpdate),
             _cancel: &CancelToken,
         ) -> ToolResultMessage {
-            ToolResultMessage::text(call, call.arguments["text"].as_str().unwrap_or(""))
+            let text = call.arguments["text"].as_str().unwrap_or("");
+            ToolResultMessage::text(call, text).with_details(json!({ "said": text }))
         }
     }
 
@@ -657,6 +697,34 @@ mod tests {
         let mut tools = ToolRegistry::new();
         tools.insert(Arc::new(Echo));
         McpServer::start(tools, Box::new(Guard), PathBuf::from("/tmp")).unwrap()
+    }
+
+    #[test]
+    fn a_call_keeps_its_details_out_of_the_reply_for_termide_to_take() {
+        let server = server();
+        let token = server.token().to_string();
+        let call = |id: u64, text: &str| {
+            json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call",
+                    "params": { "name": "echo", "arguments": { "text": text } } })
+        };
+        let (_, body) = post(&server, &token, &call(1, "one"));
+        assert!(!body.contains("said"), "details stay out of the reply");
+        post(&server, &token, &call(2, "two"));
+        let args = |text: &str| json!({ "text": text });
+        assert_eq!(
+            server.take_details("echo", &args("two")),
+            Some(json!({ "said": "two" }))
+        );
+        // No exact match, but the one call of the name kept.
+        assert_eq!(
+            server.take_details("echo", &args("other")),
+            Some(json!({ "said": "one" }))
+        );
+        assert_eq!(
+            server.take_details("echo", &args("one")),
+            None,
+            "taken once"
+        );
     }
 
     #[test]

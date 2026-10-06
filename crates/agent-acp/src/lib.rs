@@ -97,10 +97,11 @@ struct Shared {
     mcp_settled_changed: Condvar,
     /// Calls announced without their arguments yet, by id.
     announced: Mutex<HashMap<String, Value>>,
-    /// The running calls of termide's own tools, by id, with the tool's name:
-    /// the agent may still ask for their permission, which termide judges on
-    /// its server, and their end may not name the tool again.
-    host_calls: Mutex<HashMap<String, String>>,
+    /// The running calls of termide's own tools, by id, with the tool's name
+    /// and arguments: the agent may still ask for their permission, which
+    /// termide judges on its server, their end may not name the tool again,
+    /// and the details the server kept for the UI are found by them.
+    host_calls: Mutex<HashMap<String, (String, Value)>>,
     /// The calls on their way into the session log.
     calls: Mutex<CallLog>,
     /// The context's fill and size, `(used, size)`, as `usage_update` last
@@ -1346,25 +1347,32 @@ impl Shared {
 
     /// Remember a call of termide's own tool by its id, until it finishes.
     fn note_host_call(&self, update: &Value) {
-        if let Some((name, _)) = host_tool_of(update) {
+        if let Some(host) = host_tool_of(update) {
             let id = update["toolCallId"].as_str().unwrap_or("").to_string();
             self.host_calls
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .insert(id, name);
+                .insert(id, host);
         }
     }
 
     fn finish_tool_call(&self, update: &Value) {
         let mut call = tool_call_of(update);
-        if let Some(name) = self
+        let host = self
             .host_calls
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .remove(&call.id)
-        {
+            .remove(&call.id);
+        // termide ran it: the details its tool gave, which the MCP reply
+        // leaves out, so its block draws as for the built-in agent.
+        let host_details = host.and_then(|(name, arguments)| {
             call.name = name;
-        }
+            self.mcp_server
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .as_ref()?
+                .take_details(&call.name, &arguments)
+        });
         // Codex reports an MCP call's result as the MCP result, not as content.
         let mut text = content_text(&update["content"]);
         if text.is_empty() {
@@ -1383,7 +1391,9 @@ impl Shared {
         } else {
             ToolResultMessage::text(&call, text)
         };
-        if let Some(path) = update["locations"][0]["path"].as_str() {
+        if let Some(details) = host_details {
+            result = result.with_details(details);
+        } else if let Some(path) = update["locations"][0]["path"].as_str() {
             result = result.with_details(json!({ "path": absolute(&self.cwd, path) }));
         }
         let _ = self.events.send(AgentEvent::ToolExecutionEnd {
@@ -1966,16 +1976,31 @@ mod tests {
             _on_update: &mut dyn FnMut(termide_agent_core::ToolUpdate),
             _cancel: &CancelToken,
         ) -> ToolResultMessage {
-            ToolResultMessage::text(call, "echoed")
+            ToolResultMessage::text(call, "echoed").with_details(json!({ "said": "echoed" }))
         }
     }
 
     /// The names of the tools termide's MCP server at `url` lists.
     fn served_tools(url: &str, auth: &str) -> Vec<String> {
+        let reply = post_mcp(
+            url,
+            auth,
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+        );
+        reply["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    /// Send `body` to termide's MCP server at `url` and return its reply.
+    fn post_mcp(url: &str, auth: &str, body: &Value) -> Value {
         use std::io::Read;
         let addr = url.trim_start_matches("http://").trim_end_matches("/mcp");
         let mut stream = std::net::TcpStream::connect(addr).unwrap();
-        let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }).to_string();
+        let body = body.to_string();
         write!(
             stream,
             "POST /mcp HTTP/1.1\r\nHost: x\r\nAuthorization: {auth}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
@@ -1985,13 +2010,52 @@ mod tests {
         let mut response = String::new();
         stream.read_to_string(&mut response).unwrap();
         let (_, body) = response.split_once("\r\n\r\n").unwrap();
-        let reply: Value = serde_json::from_str(body).unwrap();
-        reply["result"]["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|tool| tool["name"].as_str().unwrap().to_string())
-            .collect()
+        serde_json::from_str(body).unwrap()
+    }
+
+    #[test]
+    fn a_call_of_termides_tool_ends_with_the_details_its_reply_left_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, seen) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::ClaudeCode,
+            Some(echo_host()),
+            ModeHandle::new(Mode::default()),
+        );
+        let new = seen_where(&seen, |m| m["method"] == "session/new").remove(0);
+        let server = &new["params"]["mcpServers"][0];
+        let url = server["url"].as_str().unwrap();
+        let auth = server["headers"][0]["value"].as_str().unwrap();
+        // As Claude Code goes about it: the call is announced, its arguments
+        // follow, the server runs it, and the end carries the reply's text.
+        let shared = &runtime.shared;
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call", "toolCallId": "t1", "kind": "other",
+            "status": "pending", "title": "mcp__termide__echo", "rawInput": {},
+        }));
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "t1",
+            "rawInput": { "text": "hi" },
+        }));
+        let reply = post_mcp(
+            url,
+            auth,
+            &json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+                     "params": { "name": "echo", "arguments": { "text": "hi" } } }),
+        );
+        assert!(reply["result"].get("details").is_none());
+        assert!(!reply.to_string().contains("said"), "not for the model");
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed",
+            "content": [{ "type": "content", "content": { "type": "text", "text": "echoed" } }],
+        }));
+        let ended = runtime.drain().into_iter().find_map(|e| match e {
+            AgentEvent::ToolExecutionEnd { result } => Some(result),
+            _ => None,
+        });
+        let ended = ended.expect("the call ends");
+        assert_eq!(ended.tool_name, "echo");
+        assert_eq!(ended.details, Some(json!({ "said": "echoed" })));
     }
 
     #[test]
