@@ -457,11 +457,11 @@ fn the_stop_control_is_red_only_while_a_stop_is_under_way() {
     panel.apply(AgentEvent::AgentStart);
     let colors = panel.colors;
     assert_eq!(
-        panel.run_button_color(RunButton::Pause),
+        panel.run_button_color(RunButton::Pause, true),
         colors.border_focused
     );
     assert_eq!(
-        panel.run_button_color(RunButton::Stop),
+        panel.run_button_color(RunButton::Stop, true),
         colors.border_focused
     );
     panel.request_pause();
@@ -469,7 +469,12 @@ fn the_stop_control_is_red_only_while_a_stop_is_under_way() {
     // A stop under way leaves stop alone, red, and a second press adds
     // no second notice.
     assert_eq!(panel.run_buttons(), vec![RunButton::Stop]);
-    assert_eq!(panel.run_button_color(RunButton::Stop), colors.error);
+    assert_eq!(panel.run_button_color(RunButton::Stop, true), colors.error);
+    // In the background every control dims with the frame, red stop too.
+    assert_eq!(
+        panel.run_button_color(RunButton::Stop, false),
+        colors.border
+    );
     let lines = panel.transcript.line_count();
     panel.abort();
     assert_eq!(panel.transcript.line_count(), lines);
@@ -477,8 +482,12 @@ fn the_stop_control_is_red_only_while_a_stop_is_under_way() {
     panel.apply(AgentEvent::AgentStart);
     assert_eq!(panel.run_buttons(), vec![RunButton::Pause, RunButton::Stop]);
     assert_eq!(
-        panel.run_button_color(RunButton::Stop),
+        panel.run_button_color(RunButton::Stop, true),
         colors.border_focused
+    );
+    assert_eq!(
+        panel.run_button_color(RunButton::Pause, false),
+        colors.border
     );
 }
 

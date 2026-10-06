@@ -512,8 +512,12 @@ impl AgentPanel {
     /// A run control's color: the panel border's accent at rest, so a
     /// control reads as part of the frame rather than engaged just because
     /// a run is on; continue is green and stop red only while the pause or
-    /// stop they stand for is under way.
-    pub(crate) fn run_button_color(&self, button: RunButton) -> Color {
+    /// stop they stand for is under way. A panel in the background dims
+    /// them all to the inactive border color, as it does its frame.
+    pub(crate) fn run_button_color(&self, button: RunButton, focused: bool) -> Color {
+        if !focused {
+            return self.colors.border;
+        }
         match button {
             RunButton::Pause => self.colors.border_focused,
             RunButton::Continue => self.colors.success,
@@ -522,7 +526,15 @@ impl AgentPanel {
         }
     }
 
-    pub(crate) fn render_input(&mut self, area: Rect, buf: &mut Buffer, focused: bool) {
+    /// `panel_focused` colors the run controls; `focused` (the input's own
+    /// focus) brightens the bar's border.
+    pub(crate) fn render_input(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        focused: bool,
+        panel_focused: bool,
+    ) {
         let colors = self.colors;
         // The run controls sit at the right end of the top border, always in
         // view whatever the transcript's scroll.
@@ -538,7 +550,7 @@ impl AgentPanel {
                 };
                 (
                     label.to_string(),
-                    Style::default().fg(self.run_button_color(button)),
+                    Style::default().fg(self.run_button_color(button, panel_focused)),
                 )
             })
             .collect();
@@ -768,7 +780,12 @@ impl AgentPanel {
             }
         }
         let input_area = self.input_area;
-        self.render_input(input_area, buf, ctx.is_focused && !self.chat_focus);
+        self.render_input(
+            input_area,
+            buf,
+            ctx.is_focused && !self.chat_focus,
+            ctx.is_focused,
+        );
         if form_rows >= 3 {
             if let Some(pending) = &mut self.pending {
                 pending
