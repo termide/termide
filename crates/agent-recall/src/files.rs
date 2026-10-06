@@ -86,6 +86,10 @@ fn walk_roots(project_root: &Path, panel_dir: Option<&Path>, repos: &[RepoRoot])
     roots
 }
 
+fn canonical(path: &Path) -> PathBuf {
+    dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 fn looks_binary(path: &Path) -> bool {
     let Ok(mut file) = std::fs::File::open(path) else {
         return true;
@@ -168,11 +172,17 @@ pub fn search(
     else {
         return (Vec::new(), false);
     };
-    let roots = walk_roots(project_root, panel_dir, repos);
+    // Every directory is compared in its canonical form, so a root or an
+    // excluded directory reached through a symlink (a configuration kept in
+    // a dotfiles repository the project is) is still recognised in the walk.
+    let mut roots = walk_roots(project_root, panel_dir, repos);
+    for root in &mut roots {
+        root.dir = canonical(&root.dir);
+    }
     let skip: HashSet<PathBuf> = roots
         .iter()
         .map(|r| r.dir.clone())
-        .chain(query.excluded.iter().cloned())
+        .chain(query.excluded.iter().map(|dir| canonical(dir)))
         .collect();
     let mut vocabulary = Vocabulary::default();
     let mut docs: Vec<Doc> = Vec::new();

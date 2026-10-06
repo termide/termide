@@ -1064,6 +1064,27 @@ mod tests {
             .collect();
         assert_eq!(found, ["notes.txt"]);
         assert!(outcome.hits.iter().any(|h| h.source == Source::Session));
+
+        // Named through a symlink, as a configuration kept in a dotfiles
+        // repository is, the logs are still left out of the walk.
+        #[cfg(unix)]
+        {
+            let elsewhere = tempfile::tempdir().unwrap();
+            let link = elsewhere.path().join("config");
+            std::os::unix::fs::symlink(project.join("config"), &link).unwrap();
+            let outcome = RecallTool::new(setup(project, &link.join("ai/sessions/proj"))).search(
+                SearchRequest::new("walrus"),
+                None,
+                &CancelToken::new(),
+            );
+            let found: Vec<&str> = outcome
+                .hits
+                .iter()
+                .filter(|h| h.source == Source::File)
+                .map(|h| h.label.as_str())
+                .collect();
+            assert_eq!(found, ["notes.txt"]);
+        }
     }
 
     #[test]

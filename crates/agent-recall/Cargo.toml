@@ -8,6 +8,7 @@ repository.workspace = true
 description = "The recall tool of the termide coding agent: ranked search over a project's agent sessions, git history and code"
 
 [dependencies]
+dunce.workspace = true
 glob.workspace = true
 ignore.workspace = true
 log.workspace = true
