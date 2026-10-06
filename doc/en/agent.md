@@ -176,6 +176,13 @@ whichever connection it is on:
   plan mode is off, `edit`: `autoEdit`, `all`: `yolo`) and decides what it
   asks.
 
+Codex and Gemini CLI also get the tools of termide's MCP servers, served over
+the same local MCP server beside their own and checked as Claude Code's calls
+are; their own MCP configuration still applies. They read the list of an MCP
+server's tools only once, when their session starts, so the session waits up
+to ten seconds for termide's MCP servers to answer. A server that connects
+later, or is reloaded, reaches them in the next session.
+
 All three keep their own conversation loop: they compact their context themselves,
 a run cannot pause between steps, and there is no prefill or generation
 timing (token totals show when the agent reports them, as Claude Code does).
@@ -256,8 +263,9 @@ or model switch — and cannot be switched back on in that session. The set is
 kept in the session log, so a reopened session comes back with it. Claude Code
 has the checklist too: it is served termide's tools when its session starts,
 so an unchecked item is refused from the first request on rather than kept out
-of its context. Codex, Gemini CLI and other ACP agents bring their own tools,
-so they have no checklist.
+of its context. Codex and Gemini CLI have it once an MCP server of termide's
+has connected, with those servers' tools alone. Other ACP agents bring their
+own tools, so they have no checklist.
 
 The panel's `[≡]` menu is kept to the actions with no home elsewhere —
 **Session info** (also `F3` and `/usage`), **Rename session**, **Save chat as

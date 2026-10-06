@@ -191,13 +191,25 @@ pub trait Backend: Send {
     fn runs_host_tools(&self) -> bool {
         false
     }
-    /// Serve `tools` in place of termide's tools the external agent has, so a
-    /// change of the set — an MCP server of termide's connecting or going —
-    /// reaches it. The built-in loop changes its tools through
+    /// Whether an external agent on its own tools is served the tools of
+    /// termide's MCP servers beside them, through termide's checks. The
+    /// default takes none.
+    fn takes_mcp_tools(&self) -> bool {
+        false
+    }
+    /// Serve `tools` in place of the termide tools the external agent has
+    /// (all of them, or its MCP servers' alone, as the two above say), so
+    /// that a change of the set, such as an MCP server of termide's
+    /// connecting or going, reaches it. The built-in loop changes its tools through
     /// [`Backend::update`] instead; the default here says it is unsupported.
     fn update_host_tools(&self, _tools: ToolRegistry) -> Result<(), PromptError> {
         Err(PromptError::Unsupported)
     }
+    /// termide's MCP servers have all answered (connected, failed or waiting
+    /// for a sign-in) and their tools are handed over: an agent that lists
+    /// its tools once, when its session starts, may start it now. The
+    /// default has nothing waiting on it.
+    fn host_tools_settled(&self) {}
     /// Switch the backend's model for the runs that follow, reporting the
     /// agent's own error on failure. The built-in loop changes model through
     /// [`Backend::update`] instead; the default here says it is unsupported.

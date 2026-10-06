@@ -5512,6 +5512,11 @@ struct External {
     /// The names of termide's tools it was last served, when its model
     /// calls them, as Claude Code's does.
     served: Option<Arc<Mutex<Vec<String>>>>,
+    /// Whether, on its own tools, it takes termide's MCP servers' beside
+    /// them, as Codex and Gemini CLI do; they go to `served`.
+    takes_mcp: bool,
+    /// What it was served when told the MCP servers had all answered.
+    settled: Arc<Mutex<Option<Vec<String>>>>,
 }
 
 impl External {
@@ -5520,6 +5525,17 @@ impl External {
             events: Mutex::new(Vec::new()),
             follows_mode: false,
             served: None,
+            takes_mcp: false,
+            settled: Arc::default(),
+        }
+    }
+
+    fn taking_mcp_tools(setup: BackendSetup, served: Arc<Mutex<Vec<String>>>) -> Self {
+        Self {
+            follows_mode: true,
+            served: Some(served),
+            takes_mcp: true,
+            ..Self::new(setup)
         }
     }
 
@@ -5591,7 +5607,14 @@ impl Backend for External {
         self.follows_mode
     }
     fn runs_host_tools(&self) -> bool {
-        self.served.is_some()
+        self.served.is_some() && !self.takes_mcp
+    }
+    fn takes_mcp_tools(&self) -> bool {
+        self.takes_mcp
+    }
+    fn host_tools_settled(&self) {
+        let served = self.served.as_ref().map(|s| s.lock().unwrap().clone());
+        *self.settled.lock().unwrap() = Some(served.unwrap_or_default());
     }
     fn update_host_tools(&self, tools: ToolRegistry) -> Result<(), PromptError> {
         let served = self.served.as_ref().ok_or(PromptError::Unsupported)?;
@@ -5727,6 +5750,111 @@ fn an_external_agent_on_termides_tools_lists_gets_and_refuses_them() {
     assert!(
         bash.enabled && !bash.checked && !bash.note.is_empty(),
         "{bash:?}"
+    );
+}
+
+#[test]
+fn an_external_agent_on_its_own_tools_gets_and_lists_the_mcp_servers_alone() {
+    let served = Arc::new(Mutex::new(Vec::new()));
+    let (tx, rx) = mpsc::channel();
+    let for_backend = Arc::clone(&served);
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        backend: Some(Arc::new(move |setup: BackendSetup| {
+            Ok(
+                Box::new(External::taking_mcp_tools(setup, Arc::clone(&for_backend)))
+                    as Box<dyn Backend>,
+            )
+        })),
+        late_tools: Some(rx),
+        ..setup(vec![])
+    });
+    panel.offered_tools = vec!["read".into(), "bash".into()];
+    // No MCP tools yet: nothing of termide's to show.
+    assert!(!panel
+        .status_segments()
+        .iter()
+        .any(|s| s.action == Some(TOOLSET_ACTION)));
+
+    tx.send(LateTools::Ready {
+        source: "db".into(),
+        tools: vec![
+            Arc::new(Late("db__query")) as Arc<dyn termide_agent_core::Tool>,
+            Arc::new(Late("db__drop")) as Arc<dyn termide_agent_core::Tool>,
+        ],
+    })
+    .unwrap();
+    panel.tick();
+    // Served the MCP server's tools, none of termide's own beside its own.
+    assert_eq!(*served.lock().unwrap(), ["db__query", "db__drop"]);
+    assert_eq!(chip(&panel, TOOLSET_ACTION), "2/2");
+    let events = panel.handle_status_action(TOOLSET_ACTION);
+    let Some(PanelEvent::ShowChecklist { items, .. }) = events.first() else {
+        panic!("the toolset list opens: {events:?}");
+    };
+    let keys: Vec<&str> = items.iter().map(|i| i.key.as_str()).collect();
+    assert_eq!(keys, ["db__query", "db__drop"]);
+
+    // Switched off, one is refused.
+    panel.apply_toolset(&["db__query".to_string()]);
+    assert!(panel.blocked.read().unwrap().contains("db__drop"));
+    assert_eq!(chip(&panel, TOOLSET_ACTION), "1/2");
+}
+
+/// A catalog whose MCP servers stand as a test sets them.
+struct Statuses(Arc<Mutex<Vec<termide_agent_core::McpServerState>>>);
+
+impl AgentCatalog for Statuses {
+    fn list(&self) -> Vec<AgentEntry> {
+        Agents.list()
+    }
+    fn resolve(&self, name: &str) -> Option<AgentProfile> {
+        Agents.resolve(name)
+    }
+    fn mcp_status(&self) -> Vec<termide_agent_core::McpServerState> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+#[test]
+fn an_agent_that_lists_its_tools_once_is_told_when_the_mcp_servers_answered() {
+    use termide_agent_core::{McpServerState, McpSignIn, McpStatus};
+    let state = |status| McpServerState {
+        name: "db".into(),
+        status,
+        sign_in: McpSignIn::None,
+    };
+    let statuses = Arc::new(Mutex::new(vec![state(McpStatus::Connecting)]));
+    let served = Arc::new(Mutex::new(Vec::new()));
+    let settled: Arc<Mutex<Option<Vec<String>>>> = Arc::default();
+    let (tx, rx) = mpsc::channel();
+    let (for_backend, settled_for_backend) = (Arc::clone(&served), Arc::clone(&settled));
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        backend: Some(Arc::new(move |setup: BackendSetup| {
+            let mut backend = External::taking_mcp_tools(setup, Arc::clone(&for_backend));
+            backend.settled = Arc::clone(&settled_for_backend);
+            Ok(Box::new(backend) as Box<dyn Backend>)
+        })),
+        catalog: Arc::new(Statuses(Arc::clone(&statuses))),
+        late_tools: Some(rx),
+        ..setup(vec![])
+    });
+    // Still connecting: not yet.
+    panel.tick();
+    assert!(settled.lock().unwrap().is_none());
+    // Reported connected, its tools not here yet: not yet either.
+    *statuses.lock().unwrap() = vec![state(McpStatus::Ready { tools: 1 })];
+    panel.tick();
+    assert!(settled.lock().unwrap().is_none());
+    // Its tools came: handed over first, then told.
+    tx.send(LateTools::Ready {
+        source: "db".into(),
+        tools: vec![Arc::new(Late("db__query")) as Arc<dyn termide_agent_core::Tool>],
+    })
+    .unwrap();
+    panel.tick();
+    assert_eq!(
+        settled.lock().unwrap().as_deref(),
+        Some(&["db__query".to_string()][..])
     );
 }
 
