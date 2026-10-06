@@ -466,6 +466,7 @@ agent_rewind_files_only = "仅恢复文件"
 # Agent panel — rollback picker
 # Agent panel — plan-mode card
 agent_plan_carry_title = "计划模式：执行该计划？"
+agent_plan_clean_edits = "是，接受修改，并清理上下文"
 agent_plan_accept_edits = "是，接受修改"
 agent_plan_configured = "是，按配置的规则"
 agent_plan_keep = "继续规划"

@@ -1,6 +1,6 @@
 ---
 rule_denied: denied by the permission rules, which the user set; do not try to reach the same thing another way
-plan_mode: plan mode: only reading is allowed; describe the change in the plan and wait for the user to leave plan mode
+plan_mode: plan mode: only reading is allowed; read files and line ranges with `read`, search with `rg`, and describe any change in the plan instead of making it
 reviewer_blocked: blocked by the auto-mode reviewer: {{reason}} Do not reach the same outcome another way; continue with a safer alternative, or tell the user what you need them to run or allow.
 user_denied: denied by the user
 user_denied_session: denied by the user for this session
@@ -14,7 +14,8 @@ takes the reviewer's reason or the words you denied with. A key left out
 keeps the shipped text.
 
 - rule_denied: a `deny` rule matched.
-- plan_mode: plan mode refused a call that could change something.
+- plan_mode: plan mode refused a call that could change something; for a
+  shell command termide adds the part that is not look-only.
 - reviewer_blocked: the auto mode reviewer blocked the call.
 - user_denied, user_denied_session, user_denied_reason: you denied it on the
   permission card — once, for the session, or with words of your own.

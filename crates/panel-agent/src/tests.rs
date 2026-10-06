@@ -3258,7 +3258,7 @@ fn the_models_questions_are_answered_one_card_at_a_time() {
     panel.handle_key(chord(KeyCode::Char('2'), KeyModifiers::NONE));
     assert_eq!(
         panel.pending.as_ref().unwrap().form().title(),
-        "Agent asks (2/2)"
+        "Agent asks (← 2/2)"
     );
     // Several picks, and an answer of the user's own among them.
     panel.handle_key(chord(KeyCode::Char('1'), KeyModifiers::NONE));
@@ -3281,6 +3281,65 @@ fn the_models_questions_are_answered_one_card_at_a_time() {
             QuestionAnswer {
                 chosen: vec!["core".into(), "app".into()],
                 custom: Some("docs".into()),
+            },
+        ])
+    );
+}
+
+#[test]
+fn the_arrows_step_back_to_an_answered_question_and_its_answer_shows() {
+    let mut panel = panel(vec![]);
+    let worker = ask_in_worker(
+        &mut panel,
+        vec![
+            question("Which approach?", &["Channel", "Slot"], false),
+            question("Which crates?", &["core", "ui", "app"], true),
+            question("Name?", &[], false),
+        ],
+    );
+    let title = |panel: &AgentPanel| panel.pending.as_ref().unwrap().form().title().to_string();
+    let key = |panel: &mut AgentPanel, code| panel.handle_key(chord(code, KeyModifiers::NONE));
+    // The first question has nothing before it: `←` is not a step there.
+    assert_eq!(title(&panel), "Agent asks (1/3)");
+    key(&mut panel, KeyCode::Char('2'));
+    key(&mut panel, KeyCode::Char('1'));
+    key(&mut panel, KeyCode::Char('3'));
+    key(&mut panel, KeyCode::Char('5'));
+    assert_eq!(title(&panel), "Agent asks (← 3/3)");
+
+    // Back to the second: its picks show, and `→` leads on again.
+    key(&mut panel, KeyCode::Left);
+    assert_eq!(title(&panel), "Agent asks (← 2/3 →)");
+    let form = panel.pending.as_ref().unwrap().form();
+    assert!(form.is_checked(0) && !form.is_checked(1) && form.is_checked(2));
+    // Back to the first: its choice is selected; a new one moves on to the
+    // second, which keeps its answer and can be stepped past.
+    key(&mut panel, KeyCode::Left);
+    assert_eq!(title(&panel), "Agent asks (1/3 →)");
+    assert_eq!(panel.pending.as_ref().unwrap().form().selected(), 1);
+    key(&mut panel, KeyCode::Char('1'));
+    assert_eq!(title(&panel), "Agent asks (← 2/3 →)");
+    key(&mut panel, KeyCode::Right);
+    assert_eq!(title(&panel), "Agent asks (← 3/3)");
+    // The last is answered in the user's own words; the set goes back.
+    key(&mut panel, KeyCode::Char('1'));
+    type_text(&mut panel, "relay");
+    key(&mut panel, KeyCode::Enter);
+    assert!(panel.pending.is_none());
+    assert_eq!(
+        worker.join().unwrap(),
+        QuestionReply::Answered(vec![
+            QuestionAnswer {
+                chosen: vec!["Channel".into()],
+                custom: None,
+            },
+            QuestionAnswer {
+                chosen: vec!["core".into(), "app".into()],
+                custom: None,
+            },
+            QuestionAnswer {
+                chosen: vec![],
+                custom: Some("relay".into()),
             },
         ])
     );
@@ -6005,7 +6064,7 @@ fn plan_mode_adds_its_instructions_and_offers_to_carry_the_plan_out() {
     assert_eq!(panel.mode.get(), Mode::Plan);
 
     panel.offer_plan();
-    panel.handle_key(chord(KeyCode::Char('1'), KeyModifiers::NONE));
+    panel.handle_key(chord(KeyCode::Char('2'), KeyModifiers::NONE));
     let _ = panel.tick();
     assert_eq!(panel.mode.get(), Mode::Edit);
     settle(&mut panel);
@@ -6022,6 +6081,97 @@ fn plan_mode_adds_its_instructions_and_offers_to_carry_the_plan_out() {
     let shown = panel.write_system_prompt().unwrap();
     assert_eq!(std::fs::read_to_string(shown).unwrap(), "Base prompt.");
     assert!(panel.pending.is_none(), "no card outside plan mode");
+}
+
+#[test]
+fn a_plan_carried_out_from_a_clean_context_leaves_the_exploration_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut looking = reply("");
+    looking.stop_reason = StopReason::ToolUse;
+    looking.content = vec![
+        AssistantContent::Text {
+            text: "Let me look.".into(),
+        },
+        AssistantContent::ToolCall(ToolCall {
+            id: "r1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({ "path": "src/main.rs" }),
+            extra_content: None,
+        }),
+    ];
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        plan_prompt: PlanPrompt::from_file(
+            "---\nrequest: Do it.\nclean_request: Do it afresh.\n---\nPlan first.",
+        ),
+        ..setup(vec![looking, reply("the plan"), reply("done")])
+    });
+    for _ in 0..4 {
+        panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));
+    }
+    assert_eq!(panel.mode.get(), Mode::Plan);
+    type_text(&mut panel, "add a feature");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+    assert!(panel.pending.is_some(), "plan card");
+
+    panel.handle_key(chord(KeyCode::Char('1'), KeyModifiers::NONE));
+    let _ = panel.tick();
+    assert_eq!(panel.mode.get(), Mode::Edit);
+    // The request "edits" a file, so it has a checkpoint to undo.
+    let file = dir.path().join("notes.txt");
+    std::fs::write(&file, "before").unwrap();
+    panel
+        .checkpoints
+        .as_ref()
+        .unwrap()
+        .lock()
+        .unwrap()
+        .save(&file)
+        .unwrap();
+    settle(&mut panel);
+
+    // The log keeps the exploration; the context rebuilt from it does not.
+    let reopened = Session::open(panel.session_path().unwrap()).unwrap();
+    assert!(reopened
+        .branch()
+        .iter()
+        .any(|entry| matches!(entry.kind, EntryKind::Pruned)));
+    let shape: Vec<String> = reopened
+        .context_messages()
+        .iter()
+        .map(|message| match message {
+            Message::User(user) => format!("user:{}", user.plain_text()),
+            Message::Assistant(assistant) => format!("assistant:{}", assistant.plain_text()),
+            Message::ToolResult(result) => format!("result:{}", result.tool_name),
+        })
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            "user:add a feature",
+            "assistant:the plan",
+            "user:Do it afresh.",
+            "assistant:done",
+        ]
+    );
+
+    // Undoing the request leads back to before the clearing, so the
+    // exploration comes back with it.
+    let branch = reopened.branch();
+    let cleared = branch
+        .iter()
+        .find(|entry| matches!(entry.kind, EntryKind::Pruned))
+        .unwrap();
+    let checkpoints = panel
+        .checkpoints
+        .as_ref()
+        .unwrap()
+        .lock()
+        .unwrap()
+        .checkpoints();
+    assert_eq!(checkpoints.len(), 1);
+    assert_eq!(checkpoints[0].leaf_before, cleared.parent_id);
 }
 
 /// A runner that records what reached the shell and answers from a table, so

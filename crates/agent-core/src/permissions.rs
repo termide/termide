@@ -151,25 +151,41 @@ pub enum Lasting {
 /// made only of read-only parts without substitution.
 #[must_use]
 pub fn is_read_only_call(call: &ToolCall) -> bool {
+    not_read_only(call).is_none()
+}
+
+/// Why a call could change something, or `None` when it cannot: for a shell
+/// command, what in it is not look-only, so a refusal can name it; empty for
+/// any other tool.
+fn not_read_only(call: &ToolCall) -> Option<String> {
     match call.name.as_str() {
         // The web tools read the web; nothing on this machine changes. A
         // question to the user changes nothing either, nor does `recall`,
         // which only reads the project's history and code.
-        "read" | "skill" | "fetch" | "web_search" | "question" | "recall" => true,
+        "read" | "skill" | "fetch" | "web_search" | "question" | "recall" => None,
         "bash" => {
             let parsed = split_shell(call.arguments["command"].as_str().unwrap_or(""));
-            !parsed.has_substitution
-                && !parsed.parts.is_empty()
-                && parsed.parts.iter().all(|part| is_read_only_command(part))
+            if parsed.has_substitution {
+                return Some("a command substitution".to_string());
+            }
+            if parsed.parts.is_empty() {
+                return Some("an empty command".to_string());
+            }
+            parsed
+                .parts
+                .iter()
+                .find(|part| !is_read_only_command(part))
+                .map(|part| format!("`{part}`"))
         }
-        _ => false,
+        _ => Some(String::new()),
     }
 }
 
 /// Refuses every call that could change something while the shared mode is
 /// [`Mode::Plan`]. It sits first in the hook chain, ahead of command hooks,
 /// so nothing — not even a hook's approval — lets a change through in plan
-/// mode; in every other mode it does nothing.
+/// mode; in every other mode it does nothing. A delegation to another agent
+/// goes through: the subagent runs in plan mode under a guard of its own.
 pub struct PlanGuard {
     mode: ModeHandle,
     /// What the model reads for a refusal.
@@ -198,14 +214,21 @@ impl PlanGuard {
 
 impl Hooks for PlanGuard {
     fn before_tool_call(&mut self, call: &ToolCall, _ctx: &ToolContext) -> ToolDecision {
-        if self.mode.get() == Mode::Plan && !is_read_only_call(call) {
-            self.refused = true;
-            ToolDecision::Block {
-                reason: self.reason.clone(),
-            }
-        } else {
-            ToolDecision::Allow
+        if self.mode.get() != Mode::Plan || call.name == "task" {
+            return ToolDecision::Allow;
         }
+        let Some(what) = not_read_only(call) else {
+            return ToolDecision::Allow;
+        };
+        self.refused = true;
+        // Naming the part that is not look-only lets the model take another
+        // way at once instead of guessing.
+        let reason = if what.is_empty() {
+            self.reason.clone()
+        } else {
+            format!("{} (not look-only: {what})", self.reason)
+        };
+        ToolDecision::Block { reason }
     }
 
     fn take_permission(&mut self) -> Option<PermissionNote> {
@@ -715,6 +738,8 @@ impl PermissionHooks {
             // its code, and writes nothing.
             (_, "skill" | "question" | "suggest_command" | "recall") => Decision::Allow,
             (Mode::Plan | Mode::Edit, "fetch" | "web_search") => Decision::Allow,
+            // The subagent is held to plan mode too, so it only reads.
+            (Mode::Plan, "task") => Decision::Allow,
             (Mode::Edit | Mode::Auto, "edit" | "write") if inside => Decision::Allow,
             // A query reads the web; a fetched URL can carry data out, so the
             // reviewer sees it.
@@ -1587,6 +1612,189 @@ pub fn is_read_only_command(part: &str) -> bool {
             .iter()
             .any(|action| part.contains(action)),
         "git" => is_read_only_git(args),
+        "sed" => shell_words(&part).is_some_and(|words| is_print_only_sed(&words[1..])),
+        _ => false,
+    }
+}
+
+/// The words of a simple command with their quotes taken off, or `None`
+/// where a word would expand (`$`, a backquote, a glob in double quotes is
+/// fine) or a quote is left open.
+fn shell_words(part: &str) -> Option<Vec<String>> {
+    let mut words = Vec::new();
+    let mut word: Option<String> = None;
+    let mut chars = part.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            c if c.is_whitespace() => words.extend(word.take()),
+            '\'' => {
+                let current = word.get_or_insert_with(String::new);
+                loop {
+                    match chars.next()? {
+                        '\'' => break,
+                        c => current.push(c),
+                    }
+                }
+            }
+            '"' => {
+                let current = word.get_or_insert_with(String::new);
+                loop {
+                    match chars.next()? {
+                        '"' => break,
+                        '$' | '`' => return None,
+                        '\\' => current.push(chars.next()?),
+                        c => current.push(c),
+                    }
+                }
+            }
+            '$' | '`' => return None,
+            '\\' => word.get_or_insert_with(String::new).push(chars.next()?),
+            c => word.get_or_insert_with(String::new).push(c),
+        }
+    }
+    words.extend(word);
+    Some(words)
+}
+
+/// `sed` that only prints: no in-place edit, no script file, and every
+/// script made of addresses and the commands that print, number, stop or
+/// skip lines (`p`, `l`, `=`, `q`, `Q`, `d`). Substitution, `w`, `r`, `e`
+/// and the rest are left out, so nothing is written or run.
+fn is_print_only_sed(args: &[String]) -> bool {
+    let mut scripts: Vec<&str> = Vec::new();
+    let mut operands: Vec<&str> = Vec::new();
+    let mut args = args.iter().map(String::as_str);
+    while let Some(arg) = args.next() {
+        match arg {
+            "-n" | "--quiet" | "--silent" | "-E" | "-r" | "--regexp-extended" | "-u"
+            | "--unbuffered" | "-z" | "--null-data" | "-s" | "--separate" | "--posix"
+            | "--sandbox" => {}
+            "-e" | "--expression" => match args.next() {
+                Some(script) => scripts.push(script),
+                None => return false,
+            },
+            _ if arg.starts_with("--expression=") => scripts.push(&arg["--expression=".len()..]),
+            _ if arg.starts_with("-e") => scripts.push(&arg[2..]),
+            // Bundled short flags, `-nE`; `-i` (in place) and `-f` (a script
+            // file) are not among them.
+            _ if arg.starts_with('-') && arg.len() > 1 => {
+                if arg.starts_with("--") || !arg[1..].chars().all(|c| "nEruzs".contains(c)) {
+                    return false;
+                }
+            }
+            _ => operands.push(arg),
+        }
+    }
+    if scripts.is_empty() {
+        match operands.first() {
+            Some(script) => scripts.push(script),
+            None => return false,
+        }
+    }
+    scripts.iter().all(|script| print_only_script(script))
+}
+
+/// Whether a `sed` script is only addresses with `p`, `l`, `=`, `q`, `Q` or
+/// `d`, separated by `;` or new lines.
+fn print_only_script(script: &str) -> bool {
+    let chars: Vec<char> = script.chars().collect();
+    let mut i = 0;
+    let skip_blank = |i: &mut usize| {
+        while *i < chars.len() && chars[*i].is_whitespace() {
+            *i += 1;
+        }
+    };
+    loop {
+        while i < chars.len() && (chars[i].is_whitespace() || chars[i] == ';') {
+            i += 1;
+        }
+        if i == chars.len() {
+            return true;
+        }
+        if sed_address(&chars, &mut i) {
+            skip_blank(&mut i);
+            if chars.get(i) == Some(&',') {
+                i += 1;
+                skip_blank(&mut i);
+                if !sed_address(&chars, &mut i) {
+                    return false;
+                }
+            }
+        }
+        skip_blank(&mut i);
+        if chars.get(i) == Some(&'!') {
+            i += 1;
+            skip_blank(&mut i);
+        }
+        match chars.get(i) {
+            Some('p' | 'l' | '=' | 'd') => i += 1,
+            Some('q' | 'Q') => {
+                i += 1;
+                skip_blank(&mut i);
+                while chars.get(i).is_some_and(char::is_ascii_digit) {
+                    i += 1;
+                }
+            }
+            _ => return false,
+        }
+        skip_blank(&mut i);
+        if !matches!(chars.get(i), None | Some(';')) {
+            return false;
+        }
+    }
+}
+
+/// Reads one `sed` address at `i` (a line number, `first~step`, `$`,
+/// `+N`, `~N`, or a `/regex/` with an optional `I` or `M`), moving past it;
+/// `false`, unmoved, when there is none.
+fn sed_address(chars: &[char], i: &mut usize) -> bool {
+    let start = *i;
+    match chars.get(*i) {
+        Some(c) if c.is_ascii_digit() => {
+            while chars.get(*i).is_some_and(char::is_ascii_digit) {
+                *i += 1;
+            }
+            if chars.get(*i) == Some(&'~') {
+                *i += 1;
+                while chars.get(*i).is_some_and(char::is_ascii_digit) {
+                    *i += 1;
+                }
+            }
+            true
+        }
+        Some('$') => {
+            *i += 1;
+            true
+        }
+        // GNU's `addr,+N` and `addr,~N`, as the end of a range.
+        Some('+' | '~') if chars.get(*i + 1).is_some_and(char::is_ascii_digit) => {
+            *i += 1;
+            while chars.get(*i).is_some_and(char::is_ascii_digit) {
+                *i += 1;
+            }
+            true
+        }
+        Some('/') => {
+            *i += 1;
+            loop {
+                match chars.get(*i) {
+                    None => {
+                        *i = start;
+                        return false;
+                    }
+                    Some('\\') => *i += 2,
+                    Some('/') => {
+                        *i += 1;
+                        break;
+                    }
+                    Some(_) => *i += 1,
+                }
+            }
+            if matches!(chars.get(*i), Some('I' | 'M')) {
+                *i += 1;
+            }
+            true
+        }
         _ => false,
     }
 }
@@ -1788,6 +1996,44 @@ fn is_read_only_git(args: &[&str]) -> bool {
     };
     match sub {
         "status" | "blame" | "rev-parse" | "ls-files" => true,
+        // Without `--list`, a bare name creates a tag; `-d`, `-a`, `-s`,
+        // `-f` and the rest are left out.
+        "tag" => {
+            const LISTING: [&str; 13] = [
+                "-l",
+                "--list",
+                "-n",
+                "--column",
+                "--no-column",
+                "-i",
+                "--ignore-case",
+                "--color",
+                "--no-color",
+                "--contains",
+                "--no-contains",
+                "--merged",
+                "--no-merged",
+            ];
+            const LISTING_WITH_VALUE: [&str; 9] = [
+                "--sort=",
+                "--format=",
+                "--color=",
+                "--column=",
+                "--contains=",
+                "--no-contains=",
+                "--merged=",
+                "--no-merged=",
+                "--points-at=",
+            ];
+            let list = rest.iter().any(|a| *a == "-l" || *a == "--list");
+            rest.iter().all(|a| {
+                LISTING.contains(a)
+                    || LISTING_WITH_VALUE.iter().any(|p| a.starts_with(p))
+                    || a.strip_prefix("-n")
+                        .is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()))
+                    || (list && !a.starts_with('-'))
+            })
+        }
         "diff" | "log" | "show" => !rest.iter().any(|a| a.starts_with("--output")),
         "branch" => {
             const LISTING: [&str; 19] = [
@@ -2287,6 +2533,80 @@ mod tests {
         ] {
             assert!(!is_read_only_command(write), "{write}");
         }
+    }
+
+    /// `sed` looks only while it prints: addresses with `p`, `l`, `=`, `q`,
+    /// `Q` or `d`; `git tag` only while it lists.
+    #[test]
+    fn a_printing_sed_and_a_listing_git_tag_are_look_only() {
+        for look in [
+            "sed -n '600,660p' crates/i18n/src/runtime.rs",
+            "sed -n 5p file",
+            "sed -n '1,40p;80,90p' a.rs",
+            "sed -n '/fn render/,/^}/p' src/main.rs",
+            "sed -n \"/struct Foo/,+0p\" x",
+            "sed -nE '$p'",
+            "sed '10q' notes.txt",
+            "sed -n -e 1p -e '$=' f",
+            "sed --quiet --expression=3,7p f",
+            "sed '/^#/d' config",
+            "git tag",
+            "git tag --sort=-v:refname",
+            "git tag -l 'v0.*'",
+            "git tag -n5 --list",
+            "git tag --contains=HEAD",
+        ] {
+            assert!(is_read_only_command(look), "{look}");
+        }
+        for write in [
+            "sed -i 's/a/b/' f",
+            "sed -i.bak 1d f",
+            "sed -ni 1p f",
+            "sed --in-place 1d f",
+            "sed -I '' 1d f",
+            "sed 's/a/b/' f",
+            "sed -n '1w out.txt' f",
+            "sed -n '1p;w out' f",
+            "sed -f script.sed f",
+            "sed -n '1e date' f",
+            "sed -n \"${N}p\" f",
+            "sed -n '1,5{p}' f",
+            "sed",
+            "git tag v1.0",
+            "git tag -d v1.0",
+            "git tag -a v1 -m msg",
+            "git tag -f v1",
+        ] {
+            assert!(!is_read_only_command(write), "{write}");
+        }
+    }
+
+    /// A refusal in plan mode names the part of a command that is not
+    /// look-only.
+    #[test]
+    fn a_plan_mode_refusal_names_what_is_not_look_only() {
+        let mut guard = PlanGuard::new(ModeHandle::new(Mode::Plan));
+        let reason = match guard.before_tool_call(
+            &call("bash", json!({ "command": "rg x src && sed -i 1d f" })),
+            &ctx(),
+        ) {
+            ToolDecision::Block { reason } => reason,
+            _ => panic!("refused"),
+        };
+        assert!(
+            reason.starts_with(&Refusals::default().plan_mode),
+            "{reason}"
+        );
+        assert!(
+            reason.ends_with("(not look-only: `sed -i 1d f`)"),
+            "{reason}"
+        );
+        let ToolDecision::Block { reason } =
+            guard.before_tool_call(&call("edit", json!({ "path": "f" })), &ctx())
+        else {
+            panic!("refused");
+        };
+        assert_eq!(reason, Refusals::default().plan_mode);
     }
 
     /// An inline script is one command, not the shell commands its lines
@@ -2822,6 +3142,33 @@ mod tests {
             ToolDecision::Allow
         ));
     }
+    /// A delegation passes plan mode's guard and needs no answer: the
+    /// subagent is held to plan mode in turn.
+    #[test]
+    fn plan_mode_lets_a_task_through() {
+        let task = call("task", json!({ "agent": "explore", "prompt": "find it" }));
+        let mut guard = PlanGuard::new(ModeHandle::new(Mode::Plan));
+        assert!(matches!(
+            guard.before_tool_call(&task, &ctx()),
+            ToolDecision::Allow
+        ));
+        let decide = |mode| {
+            PermissionHooks::new(
+                PermissionRules {
+                    mode,
+                    ..PermissionRules::default()
+                },
+                Box::new(Scripted {
+                    answers: vec![],
+                    asked: Arc::new(Mutex::new(Vec::new())),
+                }),
+            )
+            .decide(&task, &ctx())
+        };
+        assert_eq!(decide(Mode::Plan), Decision::Allow);
+        assert_eq!(decide(Mode::Ask), Decision::Ask);
+    }
+
     #[test]
     fn plan_mode_refuses_every_change_and_lets_reads_through() {
         let mode = ModeHandle::new(Mode::Plan);
@@ -2829,7 +3176,7 @@ mod tests {
         let blocked = |guard: &mut PlanGuard, call: &ToolCall| {
             matches!(
                 guard.before_tool_call(call, &ctx()),
-                ToolDecision::Block { reason } if reason == Refusals::default().plan_mode
+                ToolDecision::Block { reason } if reason.starts_with(&Refusals::default().plan_mode)
             )
         };
         assert!(!blocked(

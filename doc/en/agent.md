@@ -627,8 +627,12 @@ checkbox that `Space`, `Enter` or its digit toggles, and **Submit** sends them.
 or, where several can be picked, alongside them. `↑`/`↓`, digits and clicks
 work as on a permission card; **Decline and stop the run**, or `Esc`, tells the
 agent you declined and stops the run, so you can say what you want in your own
-message. Waiting for an answer counts as the call's pause (`‖`), as a
-permission question does. Asking never needs a permission, in plan mode too.
+message. With several questions, `←` goes back to the one before and `→`
+on past one already answered, as the arrows in the title show
+(`Agent asks (← 2/3 →)`): an answer given before shows picked, and
+answering again moves on to the next. The answers go back once the last
+question is answered. Waiting for an answer counts as the call's pause
+(`‖`), as a permission question does. Asking never needs a permission, in plan mode too.
 Only the panel's own agent has this tool: a subagent and a `termide --prompt`
 run have no one to ask and decide on their own. An agent whose `tools` list leaves out
 `question` does not ask either.
@@ -932,8 +936,10 @@ The look-only commands are a short list that only look at things (`ls`,
 redirection into a file disqualifies it, while pointing a stream at another
 (`2>&1`) or at `/dev/null` does not. So do the arguments with which such a
 command writes a file or runs another program: `env` counts only without a
-command to run, `git branch` and `git remote` only while they list,
-`find` only without `-delete`, `-exec`, `-ok`, `-fprint` or `-fls`, and
+command to run, `git branch`, `git tag` and `git remote` only while they
+list, `sed` only while it prints (no `-i` or `-f`, and a script of
+addresses with `p`, `l`, `=`, `q` or `d`, such as `sed -n '40,80p'`; a
+substitution asks), `find` only without `-delete`, `-exec`, `-ok`, `-fprint` or `-fls`, and
 `sort -o`, `uniq` with an output file, `tree -o`/`-R`, `rg --pre` and
 `git diff --output` ask. Loading a skill never asks.
 
@@ -945,25 +951,52 @@ For a task you want to see thought through before a line changes, switch to
 added to the system prompt, and every tool call that could change something
 is refused with a message the model reads, whatever the rules, the session
 answers or a hook's approval say: `edit`, `write`, MCP tools, and any shell
-command that is not on the look-only list. Reading inside the project, the
-web and `skill` run without asking; reading outside it asks.
+command that is not on the look-only list; for a command the message names
+the part that is not, so the agent can take another way. Reading inside the
+project, the web and `skill` run without asking; reading outside it asks.
+`task` runs too: the subagent is held to plan mode whatever its `AGENT.md`
+says, so it only reads.
+
+The default instructions have the agent work the task through with you
+before it writes the plan. It explores first and finds out the facts itself,
+handing wide searches to a subagent. Then it puts the open decisions to you in
+rounds of `question` cards, up to four questions a round, each with its
+recommended answer first. Every round builds on the answers to the last, and
+there are as many rounds as the task needs: dozens on a large one, none on a
+small, clear one. Routine choices it makes itself and names in the plan. The
+plan then gives the goal and how to tell it is done, the decisions and why,
+what is out of scope, the steps in order with the files each changes, the
+risks and the checks.
 
 When the agent answers, a card asks what to do with the plan:
 
 ```
-┌ Plan mode: carry the plan out? ────┐
-│ 1. Yes, accepting edits            │
-│ 2. Yes, under the configured rules │
-│ 3. Keep planning                   │
-└────────────────────────────────────┘
+┌ Plan mode: carry the plan out? ──────────────┐
+│ 1. Yes, accepting edits, from a clean context│
+│ 2. Yes, accepting edits                      │
+│ 3. Yes, under the configured rules           │
+│ 4. Keep planning                             │
+└──────────────────────────────────────────────┘
 ```
 
-The first two leave plan mode for edit or configured and send the request
-named in the front matter of `system/plan.md` (`request:`), so the same
-session goes on to carry the plan out with it in context; the third (or
-`Esc`) keeps plan mode, and whatever you type next refines the plan. The
-plan is the agent's answer in the session, nothing is written to a file; the
-`/undo` checkpoints cover the changes that follow.
+The first three leave plan mode for edit or configured and send the request
+named in the front matter of `system/plan.md`, so the same session goes on to
+carry the plan out; the last (or `Esc`) keeps plan mode, and whatever you
+type next refines the plan. The plan is the agent's answer in the session,
+nothing is written to a file; the `/undo` checkpoints cover the changes that
+follow.
+
+The second and third keep everything the planning read in the context and
+send `request:`. The first clears the exploration out of the context before
+it sends `clean_request:`: what stays is your messages, the questions you
+answered with your answers, the skills loaded and every answer the agent
+ended a run with, the plan among them; the files read, the commands run, the
+web pages and the subagents' reports go. Nothing is summarised, so the
+decisions stay word for word, and the agent re-reads what each step touches.
+It suits a long planning session whose exploration would crowd the work.
+The session log keeps all of it: reopening the session shows the cleared
+conversation, as after a compaction, `recall` still finds what was cleared,
+and undoing the carry-out request brings it back.
 
 ### Auto mode
 
@@ -1158,7 +1191,8 @@ Claude Code's `Task` tool and OpenCode's sub-sessions do.
 
 The delegate does not see the conversation, so the calling agent must put
 everything into the prompt. It runs in the session's current mode, unless its
-`AGENT.md` names one, with no one to prompt, so it can only do what the
+`AGENT.md` names one (plan mode overrides that: a delegate of a planning
+agent only reads), with no one to prompt, so it can only do what the
 rules and that mode already allow: anything that would otherwise ask is
 refused with a reason it reads. In `auto` the reviewer decides those calls
 instead. External agents (those with a `command`) cannot be delegates, and a
@@ -1299,7 +1333,8 @@ keep_recent_tokens = 4096   # recent messages kept verbatim (at most a quarter o
 
 [Plan mode](#plan-mode) uses `plan.md`: its body is appended to the system
 prompt while the mode is on, and `request:` in its front matter is the
-message sent when you accept the plan. Reword the body to change what a plan
+message sent when you accept the plan; `clean_request:`, the one sent when
+you accept it from a clean context (without it, `request:` serves). Reword the body to change what a plan
 must contain, or the request to change how the agent is told to go ahead.
 
 `/goal <what to achieve>` uses `goal.md`: the agent works toward the goal, and

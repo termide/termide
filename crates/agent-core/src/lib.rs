@@ -36,6 +36,7 @@ pub mod message;
 pub mod permissions;
 pub mod plan;
 pub mod provider;
+pub mod prune;
 pub mod recall;
 pub mod refusals;
 pub mod runtime;
@@ -94,6 +95,7 @@ pub use plan::{PlanPrompt, SEED_PLAN};
 pub use provider::{
     one_shot, ModelInfo, ModelSpec, Provider, Request, StreamEvent, ThinkingLevel, ToolSpec,
 };
+pub use prune::{prune_by, prune_to_decisions};
 pub use recall::{RecallPrompt, SEED_RECALL};
 pub use refusals::{Refusals, SEED_PERMISSIONS};
 pub use runtime::{AgentRuntime, Backend, BackendModel, BackendSetup, HostTools, PromptError};

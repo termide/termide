@@ -11,6 +11,11 @@
 //! pick, and a confirmation row submits them all. Options can carry a dim
 //! description after their label (`with_descriptions`).
 //!
+//! One of several questions asked in a row can step between them
+//! (`with_steps`): `←` goes back to the one before, `→` on to the next
+//! already answered, and the answer given before can be shown picked
+//! (`with_selected`, `with_checked`, `with_custom_answer`).
+//!
 //! For questions a panel raises on its own — an agent asking whether it may
 //! run a command — this beats an app-wide modal: with several panels open a
 //! modal does not say who is asking, a card sits in the panel that is.
@@ -47,6 +52,10 @@ pub enum ChoiceAction {
     /// `Esc`, or the cancel row: the question is declined and whatever asked
     /// it should stop.
     Cancelled,
+    /// `←` in a form that can step back: to the question before.
+    Back,
+    /// `→` in a form that can step on: to the next question.
+    Forward,
     /// Not a form key.
     NotHandled,
 }
@@ -78,6 +87,9 @@ pub struct ChoiceForm {
     custom: Option<String>,
     /// Label of the row that cancels, when offered.
     cancel: Option<String>,
+    /// Whether `←` and `→` step to the question before and after.
+    back: bool,
+    forward: bool,
     selected: usize,
     /// The answer being typed, once the custom row was chosen.
     typing: Option<TextInput>,
@@ -105,6 +117,8 @@ impl ChoiceForm {
             custom_answer: None,
             custom: None,
             cancel: None,
+            back: false,
+            forward: false,
             selected: 0,
             typing: None,
             drawn: None,
@@ -150,6 +164,45 @@ impl ChoiceForm {
     #[must_use]
     pub fn with_cancel(mut self, label: impl Into<String>) -> Self {
         self.cancel = Some(label.into());
+        self
+    }
+
+    /// Let `←` step back and `→` step on, reported as
+    /// [`ChoiceAction::Back`] and [`ChoiceAction::Forward`].
+    #[must_use]
+    pub fn with_steps(mut self, back: bool, forward: bool) -> Self {
+        self.back = back;
+        self.forward = forward;
+        self
+    }
+
+    /// Start with the selection on row `index`; the rows offered so far
+    /// count, so call it after the builders that add them.
+    #[must_use]
+    pub fn with_selected(mut self, index: usize) -> Self {
+        if index < self.row_count() {
+            self.selected = index;
+        }
+        self
+    }
+
+    /// Start with these options checked, in a multi-select form.
+    #[must_use]
+    pub fn with_checked(mut self, indices: &[usize]) -> Self {
+        for &index in indices {
+            if let Some(checked) = self.checked.get_mut(index) {
+                *checked = true;
+            }
+        }
+        self
+    }
+
+    /// Start with an answer of the user's own already given: shown in its
+    /// row, picked in a multi-select form, and where editing it starts.
+    #[must_use]
+    pub fn with_custom_answer(mut self, answer: impl Into<String>) -> Self {
+        let answer = answer.into();
+        self.custom_answer = (!answer.trim().is_empty()).then_some(answer);
         self
     }
 
@@ -444,6 +497,8 @@ impl ChoiceForm {
                 }
             }
             KeyCode::Esc => ChoiceAction::Cancelled,
+            KeyCode::Left if self.back => ChoiceAction::Back,
+            KeyCode::Right if self.forward => ChoiceAction::Forward,
             _ => ChoiceAction::NotHandled,
         }
     }
@@ -739,6 +794,37 @@ mod tests {
         );
         // No detail: three rows and two borders.
         assert_eq!(form.height(50), 5);
+    }
+
+    #[test]
+    fn arrows_step_only_where_offered_and_a_preset_answer_shows() {
+        let left = KeyEvent::from(KeyCode::Left);
+        let right = KeyEvent::from(KeyCode::Right);
+        let mut plain = form();
+        assert_eq!(plain.handle_key(left), ChoiceAction::NotHandled);
+        assert_eq!(plain.handle_key(right), ChoiceAction::NotHandled);
+
+        let mut stepping = form().with_steps(true, false);
+        assert_eq!(stepping.handle_key(left), ChoiceAction::Back);
+        assert_eq!(stepping.handle_key(right), ChoiceAction::NotHandled);
+        let mut stepping = form().with_steps(false, true);
+        assert_eq!(stepping.handle_key(right), ChoiceAction::Forward);
+
+        // While an answer is typed, the arrows move the cursor.
+        let mut typing = form()
+            .with_custom("Other")
+            .with_custom_answer("my words")
+            .with_steps(true, true);
+        typing = typing.with_selected(3);
+        assert_eq!(typing.selected(), 3);
+        typing.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(typing.typed(), Some("my words"));
+        assert_eq!(typing.handle_key(left), ChoiceAction::Handled);
+
+        let multi = ChoiceForm::new("Pick", vec!["a".into(), "b".into(), "c".into()])
+            .with_multi("Submit")
+            .with_checked(&[0, 2]);
+        assert!(multi.is_checked(0) && !multi.is_checked(1) && multi.is_checked(2));
     }
 
     #[test]

@@ -345,7 +345,8 @@ is already the thing the user flips mid-run, and an agent definition can
 still fix it (`mode: plan` in its `AGENT.md`, which gives OpenCode's plan
 agent for free). The guard is `PlanGuard` in `permissions.rs`, first in the
 hook chain, so it also overrides a command hook's `allow`: in plan mode only
-`read`, `skill` and a shell command made of look-only parts without
+the reading tools (`read`, `skill`, the web tools, `question`, `recall`),
+`task` (see below) and a shell command made of look-only parts without
 substitution pass; everything else is blocked with a fixed reason the model
 reads. Instructions come from `ai/system/plan.md`, appended to the system
 prompt while the mode is on (the panel updates the worker's prompt on the
@@ -358,6 +359,39 @@ same file, so the plan stays in context. The plan is the answer in the
 session, not a file: the session log is the record, and the panel's `/undo`
 checkpoints cover the changes the accepted plan then makes. Not covered: MCP tools with
 a read-only annotation are blocked too, since annotations are not plumbed.
+
+`task` passes the guard as well: the subagent runs in plan mode whatever its
+`AGENT.md` names, behind a `PlanGuard` of its own, so delegation reads and
+never changes anything. That lets the planner hand fact-finding to a
+subagent, which the instructions below rely on.
+
+The instructions follow the grilling approach of Matt Pocock's skills
+(`grill-me`, `to-spec`): misalignment is the costliest failure, so the
+planner settles the open decisions with the user before writing anything.
+The decisions form a tree; each round asks those whose prerequisites are
+settled, with a recommended answer first. Facts are the agent's to look up,
+decisions the user's. A round is capped at the `question` tool's four
+questions, but the number of rounds is not: a large task may need dozens.
+The rounds go through `question` rather than the answer text because any
+answer in plan mode raises the carry-out card. The plan names goal,
+decisions, scope, steps (each leaving the project working, preparatory
+refactoring first), risks and verification. Unlike Pocock's specs, the steps
+name files: the plan is carried out at once, in the same context.
+
+The carry-out card also offers to start "from a clean context". Pocock's
+phase-boundary rule keeps grilling and implementation in one context, since
+the implementation wants the reasoning verbatim, and warns that a summary
+flattens decisions; but dozens of rounds plus their exploration can leave
+the implementation outside the window's good part, with an automatic
+compaction due mid-work. So clearing is an option, not the default, and it is
+mechanical, not a summary: `prune_to_decisions` (`agent-core/src/prune.rs`)
+keeps the user's messages, the `question` and `skill` calls with their
+results and every answer a run closed with, and drops the rest, keeping each
+kept call paired with its result. The log records an `EntryKind::Pruned`
+with no payload and the replay applies the same function, so live and
+reopened history agree; a rewind past the entry restores the whole history,
+and `recall` counts what was cleared as out of context. Claude Code's
+plan-approval dialog has a similar "clear context" choice.
 
 ## 4b. Auto mode
 

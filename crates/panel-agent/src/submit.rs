@@ -395,7 +395,7 @@ impl AgentPanel {
                 let leaf = self
                     .session
                     .as_ref()
-                    .and_then(Session::leaf_id)
+                    .and_then(Session::undo_point)
                     .map(str::to_string);
                 store
                     .lock()

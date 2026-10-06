@@ -21,6 +21,7 @@ use crate::compaction::CompactionPrompts;
 use crate::context::file_timestamp;
 use crate::message::{now_millis, Message};
 use crate::provider::ThinkingLevel;
+use crate::prune::{prune_by, prune_to_decisions};
 
 /// Bumped when a line shape changes incompatibly.
 pub const SESSION_FORMAT_VERSION: u32 = 1;
@@ -111,6 +112,10 @@ pub enum EntryKind {
     /// The user undid a request: the branch continues from this entry's
     /// parent, the undone messages stay in the file on a dead branch.
     Rewind,
+    /// A plan was carried out from a clean context: the messages before
+    /// this entry are cut down to the decisions, see
+    /// [`crate::prune::prune_to_decisions`]. They stay in the file whole.
+    Pruned,
 }
 
 /// The model a session last recorded, see [`Session::current_model`].
@@ -525,6 +530,18 @@ impl Session {
         self.leaf.as_deref()
     }
 
+    /// Where undoing a request about to start leads back to: the leaf, or
+    /// what came before a context cleared just ahead of the request, so the
+    /// undo brings back what the clearing left out.
+    #[must_use]
+    pub fn undo_point(&self) -> Option<&str> {
+        let leaf = self.leaf.as_deref()?;
+        match self.entries.iter().rev().find(|e| e.id == leaf) {
+            Some(entry) if matches!(entry.kind, EntryKind::Pruned) => entry.parent_id.as_deref(),
+            _ => Some(leaf),
+        }
+    }
+
     /// Move the leaf. `None` restarts from the root; an unknown id is an
     /// error and leaves the leaf unchanged.
     pub fn set_leaf(&mut self, id: Option<&str>) -> Result<(), String> {
@@ -636,6 +653,7 @@ impl Session {
                     messages = vec![prompts.summary_message(summary)];
                     messages.extend(tail);
                 }
+                EntryKind::Pruned => messages = prune_to_decisions(&messages),
             }
         }
         messages
@@ -674,6 +692,15 @@ impl Session {
                         timing: None,
                     }];
                     messages.extend(tail);
+                }
+                EntryKind::Pruned => {
+                    messages = prune_by(&messages, |logged| &logged.message)
+                        .into_iter()
+                        .map(|(logged, message)| LoggedMessage {
+                            message,
+                            ..logged.clone()
+                        })
+                        .collect();
                 }
             }
         }
@@ -715,6 +742,11 @@ impl Session {
         })
     }
 
+    /// Record that a plan is carried out from a clean context.
+    pub fn append_pruned(&mut self) -> std::io::Result<String> {
+        self.append(EntryKind::Pruned)
+    }
+
     /// Model recorded last on the current branch.
     #[must_use]
     pub fn current_model(&self) -> Option<SessionModel> {
@@ -736,6 +768,7 @@ impl Session {
                 | EntryKind::SessionName { .. }
                 | EntryKind::AgentChange { .. }
                 | EntryKind::Rewind
+                | EntryKind::Pruned
                 | EntryKind::ReasoningChange { .. }
                 | EntryKind::ThinkingChange { .. }
                 | EntryKind::Toolset { .. }
@@ -887,6 +920,7 @@ impl From<&Session> for SessionSummary {
             | EntryKind::SessionName { .. }
             | EntryKind::AgentChange { .. }
             | EntryKind::Rewind
+            | EntryKind::Pruned
             | EntryKind::ReasoningChange { .. }
             | EntryKind::ThinkingChange { .. }
             | EntryKind::Toolset { .. }
@@ -1038,6 +1072,63 @@ mod tests {
         assert!(session.set_leaf(Some("nope")).is_err());
         session.set_leaf(None).unwrap();
         assert!(session.context_messages().is_empty());
+    }
+
+    #[test]
+    fn a_pruned_entry_replays_as_the_live_pruning_and_a_rewind_past_it_undoes_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/w")).unwrap();
+        let read = crate::message::ToolCall {
+            id: "r1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({}),
+            extra_content: None,
+        };
+        let mut looking = text_reply("looking");
+        looking
+            .content
+            .push(crate::message::AssistantContent::ToolCall(read.clone()));
+        session
+            .append_message(&Message::User(UserMessage::text("plan it")))
+            .unwrap();
+        session
+            .append_message(&Message::Assistant(looking))
+            .unwrap();
+        session
+            .append_message(&Message::ToolResult(
+                crate::message::ToolResultMessage::text(&read, "contents"),
+            ))
+            .unwrap();
+        let plan = session
+            .append_message(&Message::Assistant(text_reply("the plan")))
+            .unwrap();
+        let whole = session.context_messages();
+        session.append_pruned().unwrap();
+        session
+            .append_message(&Message::User(UserMessage::text("do it")))
+            .unwrap();
+
+        let mut expected = prune_to_decisions(&whole);
+        expected.push(Message::User(UserMessage::text("do it")));
+        assert_eq!(expected.len(), 3);
+        assert_eq!(session.context_messages(), expected);
+        let timed: Vec<Message> = session
+            .context_messages_with_times(&CompactionPrompts::default())
+            .into_iter()
+            .map(|logged| logged.message)
+            .collect();
+        assert_eq!(timed, expected);
+
+        session.rewind_to(Some(&plan)).unwrap();
+        assert_eq!(session.context_messages(), whole);
+
+        // A request made right after a clearing undoes to before it.
+        let cleared = session.append_pruned().unwrap();
+        assert_eq!(session.leaf_id(), Some(cleared.as_str()));
+        let point = session.undo_point().map(str::to_string);
+        assert_ne!(point.as_deref(), Some(cleared.as_str()));
+        session.rewind_to(point.as_deref()).unwrap();
+        assert_eq!(session.context_messages(), whole);
     }
 
     #[test]

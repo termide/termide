@@ -17,7 +17,7 @@ use regex::Regex;
 use serde_json::Value;
 use termide_agent_core::handoff::CONTINUATION_LEAD;
 use termide_agent_core::message::{AssistantContent, Message};
-use termide_agent_core::{CancelToken, Entry, EntryKind, Session};
+use termide_agent_core::{prune_by, CancelToken, Entry, EntryKind, Session};
 
 use crate::filter::PathFilter;
 use crate::rank::{bm25, recency, Hit, Source, TermBag, Vocabulary};
@@ -251,6 +251,47 @@ fn context_start(branch: &[Entry]) -> usize {
     }
 }
 
+/// The message entries of `branch` that a plan carried out from a clean
+/// context cut out of the context, or cut down: those before its last
+/// [`EntryKind::Pruned`] that [`prune_by`] does not keep as they were.
+/// Mirrors how the session rebuilds its context.
+fn pruned_away(branch: &[Entry]) -> Vec<&str> {
+    let Some(at) = branch
+        .iter()
+        .rposition(|entry| matches!(entry.kind, EntryKind::Pruned))
+    else {
+        return Vec::new();
+    };
+    let messages: Vec<(&str, &Message)> = branch[..at]
+        .iter()
+        .filter_map(|entry| match &entry.kind {
+            EntryKind::Message { message, .. } => Some((entry.id.as_str(), message)),
+            _ => None,
+        })
+        .collect();
+    let intact: HashSet<&str> = prune_by(&messages, |(_, message)| message)
+        .into_iter()
+        .filter(|((_, original), pruned)| same_content(original, pruned))
+        .map(|((id, _), _)| *id)
+        .collect();
+    messages
+        .iter()
+        .map(|(id, _)| *id)
+        .filter(|id| !intact.contains(id))
+        .collect()
+}
+
+/// Whether pruning left `pruned` saying what `original` said; the usage it
+/// clears is not part of what the model reads.
+fn same_content(original: &Message, pruned: &Message) -> bool {
+    match (original, pruned) {
+        (Message::Assistant(original), Message::Assistant(pruned)) => {
+            original.content == pruned.content
+        }
+        _ => original == pruned,
+    }
+}
+
 /// The documents of one log's live branch.
 fn parse(
     path: &Path,
@@ -410,10 +451,12 @@ fn parse(
             _ => {}
         }
     }
-    let forgotten: HashSet<&str> = branch[..context_start(&branch)]
+    let start = context_start(&branch);
+    let mut forgotten: HashSet<&str> = branch[..start]
         .iter()
         .map(|entry| entry.id.as_str())
         .collect();
+    forgotten.extend(pruned_away(&branch[start..]));
     for doc in &mut docs {
         doc.forgotten = forgotten.contains(doc.entry.as_str());
     }
@@ -809,6 +852,59 @@ pub(crate) mod tests {
             &CancelToken::new(),
         );
         assert!(found.iter().all(|h| !h.reference.contains(&fresh_id)));
+    }
+
+    #[test]
+    fn what_a_clean_plan_start_cleared_is_searched_and_what_it_kept_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), dir.path()).unwrap();
+        let read = ToolCall {
+            id: "r1".into(),
+            name: "read".into(),
+            arguments: serde_json::json!({ "path": "src/cache.rs" }),
+            extra_content: None,
+        };
+        session
+            .append_message(&Message::User(UserMessage::text("plan the cache")))
+            .unwrap();
+        session
+            .append_message(&reply(vec![
+                text("looking"),
+                AssistantContent::ToolCall(read.clone()),
+            ]))
+            .unwrap();
+        let output = session
+            .append_message(&Message::ToolResult(ToolResultMessage::text(
+                &read,
+                "fn evict_okapi() {}",
+            )))
+            .unwrap();
+        session
+            .append_message(&reply(vec![text("the plan: memoize the walrus")]))
+            .unwrap();
+        session.append_pruned().unwrap();
+        session
+            .append_message(&Message::User(UserMessage::text("do it")))
+            .unwrap();
+
+        let id = session.id().to_string();
+        let search_own = |words: &str| {
+            search(
+                dir.path(),
+                &query(&[query_words(words)], Some(&id)),
+                10,
+                &CancelToken::new(),
+            )
+            .0
+        };
+        let found = search_own("okapi");
+        assert!(
+            found
+                .iter()
+                .any(|hit| hit.reference == format!("session:{id}#{output}")),
+            "{found:?}"
+        );
+        assert!(search_own("walrus").is_empty(), "the plan stays in context");
     }
 
     #[test]
