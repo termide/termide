@@ -306,6 +306,15 @@ pub struct AgentEntry {
 /// The header's icon for an agent whose definition names none.
 pub const AGENT_ICON: &str = "🤖";
 
+impl AgentEntry {
+    /// The icon the header and the agent lists show: the definition's own,
+    /// else [`AGENT_ICON`].
+    #[must_use]
+    pub fn glyph(&self) -> &str {
+        self.icon.as_deref().unwrap_or(AGENT_ICON)
+    }
+}
+
 /// What an agent definition changes about the panel's agent. `None` keeps
 /// the current model or mode; the prompt and the tools always come from the
 /// definition.
@@ -1503,12 +1512,11 @@ impl Panel for AgentPanel {
     }
 
     fn icon(&self) -> Option<&str> {
-        let custom = self
+        let entry = self
             .agent_entry
             .as_ref()
-            .filter(|entry| entry.name == self.agent)
-            .and_then(|entry| entry.icon.as_deref());
-        Some(custom.unwrap_or(AGENT_ICON))
+            .filter(|entry| entry.name == self.agent);
+        Some(entry.map_or(AGENT_ICON, AgentEntry::glyph))
     }
 
     fn width_preference(&self) -> WidthPreference {

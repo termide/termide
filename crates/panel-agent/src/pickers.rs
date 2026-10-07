@@ -374,12 +374,18 @@ impl AgentPanel {
         let options = entries
             .iter()
             .map(|entry| {
-                let mark = current_mark(entry.name == self.agent);
-                if entry.description.is_empty() {
-                    format!("{mark}{}", entry.name)
-                } else {
-                    format!("{mark}{} · {}", entry.name, entry.description)
+                let mut line = current_mark(entry.name == self.agent).to_string();
+                // The icon only where the panel headers show icons.
+                if termide_core::terminal_caps::use_emoji_icons() {
+                    line.push_str(entry.glyph());
+                    line.push(' ');
                 }
+                line.push_str(&entry.name);
+                if !entry.description.is_empty() {
+                    line.push_str(" · ");
+                    line.push_str(&entry.description);
+                }
+                line
             })
             .collect();
         self.agent_choices = entries.into_iter().map(|entry| entry.name).collect();

@@ -284,6 +284,37 @@ fn unquote(value: &str) -> &str {
     value
 }
 
+/// The first visible character of an `icon` value, an emoji sequence joined
+/// by ZWJ or a variation selector counting as one, with what a copy from a
+/// web page or a chat tends to bring along dropped: control characters (an
+/// escape would reach the terminal as is) and invisible format marks such as
+/// a zero-width space, a byte order mark or a bidi mark. `None` when nothing
+/// visible is left.
+fn clean_icon(value: &str) -> Option<String> {
+    use unicode_segmentation::UnicodeSegmentation;
+    let invisible = |c: char| {
+        c.is_control()
+            || c.is_whitespace()
+            || matches!(
+                c,
+                '\u{00AD}'
+                    | '\u{200B}'
+                    | '\u{200C}'
+                    | '\u{200E}'
+                    | '\u{200F}'
+                    | '\u{202A}'..='\u{202E}'
+                    | '\u{2060}'..='\u{206F}'
+                    | '\u{FE00}'..='\u{FE0D}'
+                    | '\u{FEFF}'
+                    | '\u{FFF9}'..='\u{FFFB}'
+            )
+    };
+    let visible: String = value.chars().filter(|&c| !invisible(c)).collect();
+    // A leading joiner or selector has nothing to attach to.
+    let visible = visible.trim_start_matches(['\u{200D}', '\u{FE0E}', '\u{FE0F}']);
+    visible.graphemes(true).next().map(str::to_string)
+}
+
 /// The shipped assets written into the configuration's `ai` directory, as
 /// `(relative path, contents)`. The single source of truth for what
 /// [`ensure_global_layout`] seeds and keeps up to date.
@@ -585,7 +616,18 @@ impl AgentSpec {
         });
         let spec = Self {
             description: text("description").unwrap_or_default().to_string(),
-            icon: text("icon").map(str::to_string),
+            icon: text("icon").and_then(|value| {
+                let icon = clean_icon(value);
+                match &icon {
+                    None => warn("icon", &"it holds no visible character"),
+                    Some(kept) if kept.len() < value.len() => log::warn!(
+                        "{}: `icon` cut to {kept:?}: one character without control marks",
+                        path.display()
+                    ),
+                    Some(_) => {}
+                }
+                icon
+            }),
             model: text("model").map(str::to_string),
             mode,
             tools,
@@ -1468,6 +1510,27 @@ mod tests {
         let definition = dirs.agent("bare");
         assert_eq!(definition.name, "bare");
         assert!(definition.soul.is_none());
+    }
+
+    #[test]
+    fn an_icon_keeps_one_visible_character_and_no_control_marks() {
+        // Emoji sequences stay whole: a variation selector, a ZWJ join, a
+        // skin tone, a flag.
+        for icon in ["🔍", "☠\u{FE0F}", "👨\u{200D}💻", "👍🏽", "🇺🇦"] {
+            assert_eq!(clean_icon(icon).as_deref(), Some(icon));
+        }
+        // What a copy brings along is dropped.
+        assert_eq!(clean_icon("\u{FEFF}🔍").as_deref(), Some("🔍"));
+        assert_eq!(clean_icon("\u{200B}🔍\u{200E}").as_deref(), Some("🔍"));
+        assert_eq!(clean_icon("\u{1B}🔍\u{7}").as_deref(), Some("🔍"));
+        assert_eq!(
+            clean_icon("\u{FE0F}☠\u{FE0F}").as_deref(),
+            Some("☠\u{FE0F}")
+        );
+        // One character only: the header has room for one.
+        assert_eq!(clean_icon("🔍 🔧").as_deref(), Some("🔍"));
+        // Nothing visible, no icon: the panel keeps its robot.
+        assert_eq!(clean_icon("\u{200B}\u{FEFF}\u{FE0F}"), None);
     }
 
     #[test]

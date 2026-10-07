@@ -1374,8 +1374,12 @@ YAML list of `- name` lines under `tools:`),
 none. Skills and MCP servers' tools are not governed by
 it: they come with what you configured. `max_turns` is how many model calls
 a task delegated to the agent may take before it is cut off (fifty when
-absent; see [Subagents](#subagents)). `icon` is what the panel's header
-shows in place of 🤖 — one emoji reads best. A key termide does not read — a typo
+absent; see [Subagents](#subagents)). `icon` is what the panel's header,
+the agent picker and the agents menu show in place of 🤖 (with emoji icons
+on). Only its first character is kept, an emoji sequence counting as one, and
+invisible marks a copy may bring along — a zero-width space, a byte order
+mark, control characters — are dropped; an icon with nothing visible left
+keeps 🤖. A key termide does not read — a typo
 such as `descripton:` — is reported under the banner when a panel opens.
 
 Switching agents mid-session swaps the prompt and the tools for the next
