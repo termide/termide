@@ -1333,7 +1333,10 @@ rules and that mode already allow: anything that would otherwise ask is
 refused with a reason it reads. In `auto` the reviewer decides those calls
 instead. External agents (those with a `command`) cannot be delegates, and a
 subagent gets no `task` tool of its own, so delegation does not nest. An agent whose `tools` list leaves out `task`
-cannot delegate. A run that will not stop is cut off after fifty
+cannot delegate. Besides its own tools, a delegate gets those of the MCP
+servers connected when its task starts — like the panel's agent, whatever
+its `tools` list says; a server still connecting then is left out of that
+task. A run that will not stop is cut off after fifty
 model calls, and one that fails reports why, the endpoint's error included.
 While a delegate's request waits for a slot of its connection
 (`max_concurrent_requests`), its block says so under what it has said.

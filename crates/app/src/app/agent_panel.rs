@@ -1000,6 +1000,9 @@ struct Subagents {
     dirs: AgentDirs,
     web: Arc<Web>,
     recall: Arc<RecallTool>,
+    /// The panel's MCP servers: a subagent gets the tools of those connected
+    /// when its task starts.
+    mcp: Arc<Connections>,
     cwd: PathBuf,
     project_root: PathBuf,
     rules: PermissionRules,
@@ -1160,6 +1163,34 @@ impl SubagentReport {
 }
 
 impl Subagents {
+    /// The tools, the skills and the system prompt the agent `name` runs
+    /// with as a subagent: no `task` (delegation does not nest), and no
+    /// `question` or `suggest_command` (nobody watches it).
+    fn toolset(
+        &self,
+        name: &str,
+        definition: &termide_agent_core::AgentDefinition,
+    ) -> (ToolRegistry, Vec<termide_agent_core::SkillInfo>, String) {
+        let mut tools = base_tools(&self.dirs, Some(&self.web), Some(&self.recall));
+        restrict_tools(&mut tools, &definition.spec.tools, name);
+        let skills = self.dirs.skills();
+        if !skills.is_empty() {
+            tools.insert(Arc::new(SkillTool::new(skills.clone())));
+        }
+        apply_tool_texts(&mut tools, &self.dirs.tool_texts());
+        let context_files = discover_context_files(&self.cwd, Some(&self.project_root), None);
+        let mut options = PromptOptions::new(&self.cwd, &tools, &context_files);
+        options.skills = &skills;
+        options.soul = definition.soul.as_deref();
+        let system_prompt = build_system_prompt(&options);
+        // As for the panel's agent, the MCP servers' tools are neither listed
+        // in the prompt nor narrowed by the agent's `tools` list.
+        for tool in self.mcp.ready_tools() {
+            tools.insert(tool);
+        }
+        (tools, skills, system_prompt)
+    }
+
     fn run(
         &self,
         name: &str,
@@ -1174,18 +1205,7 @@ impl Subagents {
                 "{name} is an external agent and cannot be run as a subagent"
             ));
         }
-        let mut tools = base_tools(&self.dirs, Some(&self.web), Some(&self.recall));
-        restrict_tools(&mut tools, &definition.spec.tools, name);
-        let skills = self.dirs.skills();
-        if !skills.is_empty() {
-            tools.insert(Arc::new(SkillTool::new(skills.clone())));
-        }
-        apply_tool_texts(&mut tools, &self.dirs.tool_texts());
-        let context_files = discover_context_files(&self.cwd, Some(&self.project_root), None);
-        let mut options = PromptOptions::new(&self.cwd, &tools, &context_files);
-        options.skills = &skills;
-        options.soul = definition.soul.as_deref();
-        let system_prompt = build_system_prompt(&options);
+        let (tools, skills, system_prompt) = self.toolset(name, &definition);
 
         let active = self
             .active
@@ -1513,6 +1533,7 @@ fn agent_setup(
         dirs: catalog.dirs.clone(),
         web,
         recall,
+        mcp: Arc::clone(&catalog.mcp),
         cwd: cwd.clone(),
         project_root: project_root.to_path_buf(),
         rules: settings.permissions.clone(),
@@ -2693,6 +2714,7 @@ mod tests {
             recall: recall_tool(&settings, &dirs, tmp.path(), tmp.path()),
             web: shared_web(&settings.web, &dirs),
             dirs,
+            mcp: Connections::new(std::collections::BTreeMap::new()),
             cwd: tmp.path().to_path_buf(),
             project_root: tmp.path().to_path_buf(),
             rules: settings.permissions.clone(),
@@ -2749,6 +2771,66 @@ mod tests {
         assert_eq!(shown.last().unwrap(), "looked");
     }
 
+    /// A subagent gets the tools of the MCP servers connected when its task
+    /// starts, whatever its `tools` list says, and they stay out of its
+    /// prompt as they do of the panel's.
+    #[cfg(unix)]
+    #[test]
+    fn a_subagent_gets_the_connected_mcp_servers_tools() {
+        let script = r#"while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"sh","version":"0"}}}\n' "$id";;
+    *'"tools/list"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"lookup","description":"Look up","inputSchema":{"type":"object"}}]}}\n' "$id";;
+  esac
+done"#;
+        let tmp = tempfile::tempdir().unwrap();
+        let global = tmp.path().join("ai");
+        let dir = global.join("agents").join("search");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(AGENT_FILE), "---\ntools: read\n---\n").unwrap();
+        let catalog = FsCatalog::with_global(tmp.path(), tmp.path(), Some(global));
+        let servers = [(
+            "docs".to_string(),
+            termide_agent_core::McpServerConfig {
+                command: Some("sh".into()),
+                args: vec!["-c".into(), script.into()],
+                timeout_secs: 5,
+                ..Default::default()
+            },
+        )]
+        .into();
+        let mcp = Connections::new(servers);
+        // The panel's subscription is what connects the servers.
+        let late = mcp.subscribe();
+        assert!(matches!(
+            late.recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap(),
+            termide_agent_core::LateTools::Ready { .. }
+        ));
+        let settings = with_cloud();
+        let subagents = Subagents {
+            active: Arc::new(std::sync::RwLock::new(active_on(&settings, "local"))),
+            settings: settings.clone(),
+            dirs: catalog.dirs.clone(),
+            recall: recall_tool(&settings, &catalog.dirs, tmp.path(), tmp.path()),
+            web: shared_web(&settings.web, &catalog.dirs),
+            mcp,
+            cwd: tmp.path().to_path_buf(),
+            project_root: tmp.path().to_path_buf(),
+            rules: settings.permissions.clone(),
+            mode: termide_agent_core::ModeHandle::new(settings.permissions.mode),
+            max_tokens: settings.output_limit(),
+            reasoning: ThinkingLevel::Off,
+            compaction: settings.compaction,
+            refusals: Refusals::default(),
+        };
+        let definition = catalog.dirs.agent("search");
+        let (tools, _, prompt) = subagents.toolset("search", &definition);
+        assert_eq!(tools.names(), ["read", "docs__lookup"]);
+        assert!(!prompt.contains("docs__lookup"));
+    }
+
     #[test]
     fn an_agent_tools_list_governs_the_task_tool() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2766,6 +2848,7 @@ mod tests {
             dirs: catalog.dirs.clone(),
             recall: recall_tool(&settings, &catalog.dirs, tmp.path(), tmp.path()),
             web: shared_web(&settings.web, &catalog.dirs),
+            mcp: Arc::clone(&catalog.mcp),
             cwd: tmp.path().to_path_buf(),
             project_root: tmp.path().to_path_buf(),
             rules: settings.permissions.clone(),
