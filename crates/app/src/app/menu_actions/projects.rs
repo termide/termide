@@ -178,8 +178,8 @@ impl App {
     // =========================================================================
 
     /// Handle keyboard event in the Projects menu. Delete/F8 closes an open
-    /// project, or deletes the saved layout of one that is not open; the
-    /// current project stays.
+    /// project — the current one by switching to the one left last — or
+    /// deletes the saved layout of one that is not open.
     pub(in crate::app) fn handle_projects_submenu_key(
         &mut self,
         key: crossterm::event::KeyEvent,
@@ -190,9 +190,7 @@ impl App {
         let menu = self.state.projects_menu();
         let target = ProjectsTarget::of(menu.selected_row());
         let removable = match menu.selected_row() {
-            Some(ProjectRow::Project(project)) if project.root != self.project_root => {
-                Some(project.clone())
-            }
+            Some(ProjectRow::Project(project)) => Some(project.clone()),
             _ => None,
         };
         let mut cursor = termide_state::SubmenuState {

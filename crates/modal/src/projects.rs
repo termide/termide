@@ -34,7 +34,7 @@ pub const OPEN_MARK: &str = "○";
 pub enum ProjectAction {
     /// Switch to the selected project
     Switch(PathBuf),
-    /// Close the selected project, open in the background
+    /// Close the selected open project, the current one included
     Close(PathBuf),
     /// Request deletion of the selected project's layout
     Delete(PathBuf),
@@ -407,17 +407,15 @@ impl Modal for ProjectsModal {
                 }
             }
 
-            // Delete or F8: close a project open in the background, delete
-            // the saved layout of one that is not open. The current project
-            // stays.
-            KeyCode::Delete | KeyCode::F(8) => Ok(self.get_selected().and_then(|item| {
+            // Delete or F8: close an open project (the current one too: the
+            // app switches to another first), delete the saved layout of one
+            // that is not open.
+            KeyCode::Delete | KeyCode::F(8) => Ok(self.get_selected().map(|item| {
                 let path = item.project_path.clone();
-                if item.is_current {
-                    None
-                } else if item.is_open {
-                    Some(ModalResult::Confirmed(ProjectAction::Close(path)))
+                if item.is_current || item.is_open {
+                    ModalResult::Confirmed(ProjectAction::Close(path))
                 } else {
-                    Some(ModalResult::Confirmed(ProjectAction::Delete(path)))
+                    ModalResult::Confirmed(ProjectAction::Delete(path))
                 }
             })),
 
@@ -519,7 +517,10 @@ mod tests {
             item("/closed", false, false),
         ];
         let mut modal = ProjectsModal::new("Projects", items).with_cursor(0);
-        assert!(press(&mut modal, KeyCode::Delete).is_none());
+        assert!(matches!(
+            press(&mut modal, KeyCode::Delete),
+            Some(ModalResult::Confirmed(ProjectAction::Close(path))) if path == Path::new("/current")
+        ));
         press(&mut modal, KeyCode::Down);
         assert!(matches!(
             press(&mut modal, KeyCode::Delete),

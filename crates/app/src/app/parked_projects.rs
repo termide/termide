@@ -313,10 +313,43 @@ impl App {
         self.switch_to_open_project(next)
     }
 
-    /// Ask before closing the parked project at `root`. `menu` is where to
+    /// The open project to switch to when the current one closes: the one
+    /// left last.
+    fn successor_project(&self) -> Option<PathBuf> {
+        self.open_projects
+            .by_recent_use()
+            .get(1)
+            .map(|root| root.to_path_buf())
+    }
+
+    /// Ask before closing the open project at `root`. `menu` is where to
     /// return afterwards, see `PendingAction::CloseProject`.
+    ///
+    /// The current project closes by switching to the one left last, and
+    /// only while another is open; it is asked about only when its panels
+    /// hold running processes or unsaved changes.
     pub(super) fn confirm_close_project(&mut self, root: PathBuf, menu: Option<usize>) {
-        if root == self.project_root || !self.open_projects.is_open(&root) {
+        if !self.open_projects.is_open(&root) {
+            return;
+        }
+        if root == self.project_root {
+            if self.successor_project().is_none() {
+                return;
+            }
+            if !self.has_panels_requiring_confirmation() {
+                if let Err(e) = self.close_project(&root, menu) {
+                    log::error!("Failed to close the current project: {}", e);
+                }
+                return;
+            }
+            let t = i18n::t();
+            let message = format!("{}\n{}", display_root(&root), t.projects_close_warning());
+            let modal = termide_modal::ConfirmModal::new(t.projects_close_title(), message)
+                .defaulting_to_no();
+            self.state.set_pending_action(
+                PendingAction::CloseProject { root, menu },
+                ActiveModal::Confirm(Box::new(modal)),
+            );
             return;
         }
         // A project reopened but not entered yet has nothing running.
@@ -340,10 +373,17 @@ impl App {
         );
     }
 
-    /// Close the parked (or not yet loaded) project at `root`: save its
-    /// layout and drop its panels, which stops the processes in its
-    /// terminals.
+    /// Close the open project at `root`: save its layout and drop its
+    /// panels, which stops the processes in its terminals. The current
+    /// project is first left for the one left last, and stays when no other
+    /// is open.
     pub(super) fn close_project(&mut self, root: &Path, menu: Option<usize>) -> Result<()> {
+        if root == self.project_root {
+            let Some(successor) = self.successor_project() else {
+                return self.return_to_projects(menu);
+            };
+            self.switch_to_project(successor)?;
+        }
         if let Some(mut parked) = self.open_projects.close(root) {
             // As closing an editor panel does: the server forgets the file.
             if let Some(lsp_manager) = self.state.lsp_manager.as_ref() {
