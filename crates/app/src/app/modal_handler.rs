@@ -12,6 +12,9 @@ use termide_ui::path_utils;
 impl App {
     /// Handle keyboard event in modal window
     pub(super) fn handle_modal_key(&mut self, key: crossterm::event::KeyEvent) -> Result<()> {
+        if self.move_switcher_project(&key) {
+            return Ok(());
+        }
         // Indicator modals opened from menu: intercept Left/Right/Esc for menu navigation
         if self.state.is_menu_open() {
             let is_resource = self.state.is_resource_modal_open();

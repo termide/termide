@@ -250,6 +250,33 @@ impl App {
         }
     }
 
+    /// In the project switcher, move the open project under the cursor
+    /// when `key` is one that moves panels between groups. Returns whether
+    /// the key was taken: a filtered list or a project not open lets it
+    /// through to the switcher.
+    pub(in crate::app) fn move_switcher_project(
+        &mut self,
+        key: &crossterm::event::KeyEvent,
+    ) -> bool {
+        let root = match &self.state.active_modal {
+            Some(ActiveModal::Projects(modal)) => match modal.selected_open_project() {
+                Some(root) => root.to_path_buf(),
+                None => return false,
+            },
+            _ => return false,
+        };
+        let Some(step) = self.project_step_of(key) else {
+            return false;
+        };
+        if let Some(place) = self.move_open_project(&root, step) {
+            if let Some(ActiveModal::Projects(modal)) = &mut self.state.active_modal {
+                modal.move_selected_open_project(place);
+            }
+            self.state.needs_redraw = true;
+        }
+        true
+    }
+
     /// Open the Projects menu at row `selection`, as close as the reloaded
     /// list still allows.
     pub(in crate::app) fn reopen_projects_menu(&mut self, selection: usize) {

@@ -17,7 +17,7 @@ use ratatui::{
 };
 
 use crate::base::render_modal_block;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use termide_theme::Theme;
 use termide_ui::str_display_width;
@@ -241,6 +241,34 @@ impl ProjectsModal {
             .unwrap_or(0);
         self.scroll_offset =
             termide_ui::ensure_offset_visible(self.scroll_offset, row, MAX_VISIBLE_ROWS);
+    }
+
+    /// The open project under the cursor, while the list is not filtered:
+    /// a filtered list is ranked by match, so a place in it means nothing.
+    pub fn selected_open_project(&self) -> Option<&Path> {
+        if !self.filter.is_empty() {
+            return None;
+        }
+        self.get_selected()
+            .filter(|item| item.is_open)
+            .map(|item| item.project_path.as_path())
+    }
+
+    /// Move the open project under the cursor to place `to` among the open
+    /// ones, which lead the list, the cursor with it. Nothing moves while
+    /// the list is filtered.
+    pub fn move_selected_open_project(&mut self, to: usize) {
+        if self.selected_open_project().is_none() {
+            return;
+        }
+        // Unfiltered, the list shows the items in their order.
+        let from = self.cursor;
+        let open = self.items.iter().take_while(|item| item.is_open).count();
+        let to = to.min(open.saturating_sub(1));
+        let item = self.items.remove(from);
+        self.items.insert(to, item);
+        self.cursor = to;
+        self.adjust_scroll();
     }
 
     /// Get the selected project from filtered list
@@ -531,6 +559,40 @@ mod tests {
             press(&mut modal, KeyCode::F(8)),
             Some(ModalResult::Confirmed(ProjectAction::Delete(path))) if path == Path::new("/closed")
         ));
+    }
+
+    #[test]
+    fn an_open_project_moves_among_the_open_ones_until_filtered() {
+        let items = vec![
+            item("/a", true, true),
+            item("/b", false, true),
+            item("/c", false, true),
+            item("/d", false, false),
+        ];
+        let mut modal = ProjectsModal::new("Projects", items).with_cursor(2);
+        assert_eq!(modal.selected_open_project(), Some(Path::new("/c")));
+        modal.move_selected_open_project(0);
+        let paths: Vec<_> = modal
+            .items
+            .iter()
+            .map(|i| i.display_path.as_str())
+            .collect();
+        assert_eq!(paths, ["/c", "/a", "/b", "/d"]);
+        assert_eq!(modal.selected_open_project(), Some(Path::new("/c")));
+
+        modal.move_selected_open_project(99);
+        let paths: Vec<_> = modal
+            .items
+            .iter()
+            .map(|i| i.display_path.as_str())
+            .collect();
+        assert_eq!(paths, ["/a", "/b", "/c", "/d"], "never past the open ones");
+
+        press(&mut modal, KeyCode::Down);
+        assert_eq!(modal.selected_open_project(), None, "not open");
+        press(&mut modal, KeyCode::Up);
+        press(&mut modal, KeyCode::Char('c'));
+        assert_eq!(modal.selected_open_project(), None, "filtered");
     }
 
     #[test]

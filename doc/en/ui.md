@@ -80,7 +80,7 @@ Menu activation/deactivation and each item can be accessed by mouse click or [ke
 - `Commands` — user-defined commands, project ones (bold) first, with group submenus; `Add command...` at the top creates one. Clicking a group header expands the submenu; clicking the same header again collapses it (toggle). See [Custom Commands](actions.md).
 - `Projects` — project management submenu:
   - New project — start a project in another directory
-  - Switch project — open the project switcher modal (`Alt+\`). It lists the projects as the menu below does, one row each — the mark, when a project not open was last worked on (dimmed), its path and 🔔 — and the row under the cursor is inverted. Typing filters the list by path. The cursor starts on the project you left last: `Alt+\` then `Enter` goes back to it. `Delete`/`F8` works as in the menu
+  - Switch project — open the project switcher modal (`Alt+\`). It lists the projects as the menu below does, one row each — the mark, when a project not open was last worked on (dimmed), its path and 🔔 — and the row under the cursor is inverted. Typing filters the list by path. The cursor starts on the project you left last: `Alt+\` then `Enter` goes back to it. `Delete`/`F8` works as in the menu, and so do the keys that move an open project while nothing is typed in the filter
   - Change root path — move the current project to another directory
 
     Both pick the directory in a tree: `→`/`←` expand and collapse a branch, `Enter` enters a directory, `Backspace` goes to the parent, `.` shows or hides hidden directories, `Ctrl+Enter` confirms from anywhere
