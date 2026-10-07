@@ -1027,7 +1027,8 @@ fn subagent_mode(parent: Mode, own: Option<Mode>) -> Mode {
     }
 }
 
-/// A runaway subagent is cut off after this many model calls.
+/// A runaway subagent is cut off after this many model calls, unless its
+/// `AGENT.md` names another number (`max_turns`).
 const SUBAGENT_MAX_TURNS: usize = 50;
 
 /// Where a task delegated from a session runs.
@@ -1104,17 +1105,36 @@ fn run_error(messages: &[Message]) -> Option<String> {
 
 /// A subagent's progress as the delegating call shows it: what it has said
 /// so far, and its answer — the last text it said.
-#[derive(Default)]
 struct SubagentReport {
     progress: String,
     answer: Option<String>,
     error: Option<String>,
     turns: usize,
+    /// The model calls it may take before it is cut off.
+    max_turns: usize,
     /// What its model calls spent so far.
     spent: Usage,
 }
 
 impl SubagentReport {
+    fn new(max_turns: usize) -> Self {
+        Self {
+            progress: String::new(),
+            answer: None,
+            error: None,
+            turns: 0,
+            max_turns,
+            spent: Usage::default(),
+        }
+    }
+
+    /// Count one model call of the subagent's; `true` once it has taken
+    /// more than it may.
+    fn turn(&mut self) -> bool {
+        self.turns += 1;
+        self.turns > self.max_turns
+    }
+
     /// Note a finished message of the subagent's.
     fn said(&mut self, message: &AssistantMessage, on_update: &mut dyn FnMut(ToolUpdate)) {
         self.spent.add(&message.usage);
@@ -1154,8 +1174,9 @@ impl SubagentReport {
     fn into_outcome(self, stopped: bool) -> SubagentOutcome {
         let spent = self.spent;
         let answer = match self.answer {
-            Some(text) if self.turns > SUBAGENT_MAX_TURNS => Ok(format!(
-                "{text}\n\n(subagent stopped after {SUBAGENT_MAX_TURNS} steps)"
+            Some(text) if self.turns > self.max_turns => Ok(format!(
+                "{text}\n\n(subagent stopped after {} steps)",
+                self.max_turns
             )),
             Some(text) => Ok(text),
             None if stopped => Err("the subagent was stopped".into()),
@@ -1225,6 +1246,7 @@ impl Subagents {
             ));
         }
         let (tools, skills, system_prompt) = self.toolset(name, &definition);
+        let max_turns = definition.spec.max_turns.unwrap_or(SUBAGENT_MAX_TURNS);
 
         let active = self
             .active
@@ -1258,6 +1280,7 @@ impl Subagents {
             SubagentTarget::Cli(connection_name, connection) => {
                 let run = CliSubagent {
                     name: format!("{connection_name}:{name}"),
+                    max_turns,
                     reviewer,
                     connection,
                     system_prompt,
@@ -1309,7 +1332,7 @@ impl Subagents {
             .with_delegated_intent(parent);
 
         let mut hooks = hooks;
-        let mut report = SubagentReport::default();
+        let mut report = SubagentReport::new(max_turns);
         let finished = std::sync::atomic::AtomicBool::new(false);
         std::thread::scope(|scope| {
             // The parent's stop reaches the run at once, not at its next
@@ -1325,8 +1348,7 @@ impl Subagents {
             });
             let mut emit = |event: AgentEvent| match &event {
                 AgentEvent::MessageStart { .. } => {
-                    report.turns += 1;
-                    if report.turns > SUBAGENT_MAX_TURNS {
+                    if report.turn() {
                         budget.cancel();
                     }
                 }
@@ -1393,6 +1415,7 @@ impl Subagents {
             model: run.connection.model.trim(),
             permission_rx: &permission_rx,
             refusal: &self.refusals.unattended_subagent,
+            max_turns: run.max_turns,
             budget,
             cancel,
         };
@@ -1409,6 +1432,8 @@ struct CliDrive<'a> {
     /// The agent's own permission requests, refused: nobody watches.
     permission_rx: &'a std::sync::mpsc::Receiver<termide_agent_core::PermissionEnvelope>,
     refusal: &'a str,
+    /// The model calls it may take before it is cut off.
+    max_turns: usize,
     budget: &'a CancelToken,
     cancel: &'a CancelToken,
 }
@@ -1455,7 +1480,7 @@ impl CliDrive<'_> {
         backend
             .prompt(UserMessage::text(prompt))
             .map_err(|error| format!("the subagent did not start: {error:?}"))?;
-        let mut report = SubagentReport::default();
+        let mut report = SubagentReport::new(self.max_turns);
         let mut aborted: Option<std::time::Instant> = None;
         let mut idle = 0;
         'run: loop {
@@ -1467,9 +1492,9 @@ impl CliDrive<'_> {
             for event in backend.drain() {
                 match event {
                     AgentEvent::MessageEnd(Message::Assistant(message)) => {
-                        report.turns += 1;
+                        let over = report.turn();
                         report.said(&message, on_update);
-                        if report.turns > SUBAGENT_MAX_TURNS {
+                        if over {
                             self.budget.cancel();
                         }
                     }
@@ -1498,6 +1523,8 @@ impl CliDrive<'_> {
 struct CliSubagent {
     /// How its process is named in the logs.
     name: String,
+    /// The model calls it may take before it is cut off.
+    max_turns: usize,
     /// Reviews its requests in `auto` mode.
     reviewer: ReviewerSetup,
     connection: Connection,
@@ -2349,6 +2376,7 @@ mod tests {
             model: "haiku",
             permission_rx: &permission_rx,
             refusal: "nobody to ask",
+            max_turns: SUBAGENT_MAX_TURNS,
             budget: &budget,
             cancel: &cancel,
         };
@@ -2771,10 +2799,43 @@ mod tests {
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
     }
 
+    /// A subagent may take as many model calls as its limit says; the one
+    /// after is cut off, and its last words say so.
+    #[test]
+    fn a_subagent_is_cut_off_past_its_turn_limit() {
+        let said = |text: &str| {
+            let mut message =
+                AssistantMessage::failed("m", "m", termide_agent_core::StopReason::Stop, "");
+            message.error_message = None;
+            message.content =
+                vec![termide_agent_core::AssistantContent::Text { text: text.into() }];
+            message
+        };
+        let mut report = SubagentReport::new(2);
+        assert!(!report.turn());
+        assert!(!report.turn());
+        report.said(&said("half done"), &mut |_| {});
+        assert_eq!(
+            report.into_outcome(false).answer.as_deref(),
+            Ok("half done")
+        );
+
+        let mut report = SubagentReport::new(2);
+        for _ in 0..2 {
+            report.turn();
+        }
+        assert!(report.turn());
+        report.said(&said("half done"), &mut |_| {});
+        assert_eq!(
+            report.into_outcome(false).answer.as_deref(),
+            Ok("half done\n\n(subagent stopped after 2 steps)")
+        );
+    }
+
     #[test]
     fn a_waiting_subagent_says_so_under_what_it_said() {
         let t = termide_i18n::t();
-        let mut report = SubagentReport::default();
+        let mut report = SubagentReport::new(SUBAGENT_MAX_TURNS);
         let mut shown = Vec::new();
         report.waiting(Some(2), &mut |ToolUpdate::Output(text)| shown.push(text));
         assert_eq!(

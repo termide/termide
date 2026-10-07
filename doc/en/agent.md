@@ -1310,7 +1310,9 @@ agent keeps, separated by commas (brackets around the list are fine too, and so 
 YAML list of `- name` lines under `tools:`),
 `task` included; without it the agent has them all, and `tools: []` leaves
 none. Skills and MCP servers' tools are not governed by
-it: they come with what you configured. A key termide does not read — a typo
+it: they come with what you configured. `max_turns` is how many model calls
+a task delegated to the agent may take before it is cut off (fifty when
+absent; see [Subagents](#subagents)). A key termide does not read — a typo
 such as `descripton:` — is reported under the banner when a panel opens.
 
 Switching agents mid-session swaps the prompt and the tools for the next
@@ -1341,7 +1343,7 @@ cannot delegate. Besides its own tools, a delegate gets those of the MCP
 servers connected when its task starts — like the panel's agent, whatever
 its `tools` list says; a server still connecting then is left out of that
 task. A run that will not stop is cut off after fifty
-model calls, and one that fails reports why, the endpoint's error included.
+model calls (the delegate's `max_turns` changes that), and one that fails reports why, the endpoint's error included.
 While a delegate's request waits for a slot of its connection
 (`max_concurrent_requests`), its block says so under what it has said.
 
