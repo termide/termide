@@ -132,6 +132,18 @@ impl FileManager {
             return events;
         }
 
+        // A remote login was refused: the app supplies a password, from
+        // the vault or the user.
+        if let Some((url, attempt)) = self.vfs.take_credential_request() {
+            events.push(PanelEvent::ClearStatus);
+            events.push(PanelEvent::CredentialsRequired { url, attempt });
+            events.push(PanelEvent::NeedsRedraw);
+            return events;
+        }
+        if let Some(url) = self.vfs.take_accepted_login() {
+            events.push(PanelEvent::CredentialsAccepted { url });
+        }
+
         // A remote symlink resolved to a file — open it in the editor.
         if let Some(remote) = self.vfs.take_resolved_file_open() {
             events.push(PanelEvent::ClearStatus);

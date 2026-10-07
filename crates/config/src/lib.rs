@@ -32,7 +32,7 @@ pub use settings::{
     FileManagerSettings, FoldBlocks, GeneralSettings, GitDiffSettings, GitLogSettings,
     GitStatusSettings, HighlightSettings, IconMode, LegacyConfig, LinkOpen, LoggingSettings,
     LspServerSettings, LspSettings, ReasoningParam, RecallSettings, SideModel, TerminalSettings,
-    VfsSettings, ViewerSettings, WebSettings, DEFAULT_CONTEXT_WINDOW_FALLBACK,
+    VaultSettings, VfsSettings, ViewerSettings, WebSettings, DEFAULT_CONTEXT_WINDOW_FALLBACK,
 };
 /// The type of `[ai] reasoning`.
 pub use termide_agent_core::ThinkingLevel;

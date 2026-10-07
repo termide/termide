@@ -12,6 +12,7 @@ Welcome to the TermIDE documentation! This guide covers installation, usage, and
 - [Operations Panel](operations.md) - Background transfers: pause, resume, cancel, partial-upload cleanup
 - [Remote Filesystems (VFS)](vfs.md) - Browsing and transferring files over SFTP / FTP / FTPS
 - [Database Viewer](database.md) - Read-only browsing of SQLite / PostgreSQL / MySQL tables
+- [Password Vault](passwords.md) - Encrypted storage of connection passwords under a master password
 - [Terminal](terminal.md) - Using the integrated terminal
 - [Detached Instances](detached-instances.md) - Keeping termide alive across SSH disconnects
 - [Text Editor](editor.md) - Editing files with syntax highlighting

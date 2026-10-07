@@ -857,6 +857,20 @@ impl Panel for FileManager {
                 }
                 CommandResult::NeedsRedraw(true)
             }
+            PanelCommand::ProvideCredentials {
+                url,
+                password,
+                source,
+            } => {
+                if !self.vfs.awaiting_password() {
+                    return CommandResult::Handled(false);
+                }
+                self.navigation.prepare_for_going_down();
+                CommandResult::Handled(self.vfs.provide_password(url, password, source))
+            }
+            PanelCommand::CancelCredentials { url } => {
+                CommandResult::Handled(self.vfs.cancel_password(url))
+            }
 
             // Commands not applicable to FileManager
             PanelCommand::CheckPendingGitDiff

@@ -149,6 +149,11 @@ impl App {
                                 self.return_to_projects(menu)?;
                                 return Ok(());
                             }
+                            PendingAction::Vault => {
+                                self.state.close_modal();
+                                self.vault_prompt_cancelled();
+                                return Ok(());
+                            }
                             // A refused quit is answered by the refusal. Keeping
                             // it pending — as before — let a later modal's Enter
                             // run it: a quit dismissed with Esc came back to end
@@ -165,6 +170,7 @@ impl App {
                 {
                     self.state.stash.include_untracked = modal.is_checkbox_checked();
                 }
+                self.capture_vault_checkbox();
                 self.state.close_modal();
                 if let ModalResult::Confirmed(value) = result {
                     self.handle_modal_result(value)?;
@@ -209,6 +215,18 @@ impl App {
                 {
                     self.state.stash.include_untracked = modal.is_checkbox_checked();
                 }
+                if matches!(result, ModalResult::Cancelled)
+                    && matches!(
+                        self.state.pending_action,
+                        Some(termide_state::PendingAction::Vault)
+                    )
+                {
+                    self.state.pending_action = None;
+                    self.state.close_modal();
+                    self.vault_prompt_cancelled();
+                    return Ok(());
+                }
+                self.capture_vault_checkbox();
                 self.state.close_modal();
                 if let ModalResult::Confirmed(value) = result {
                     self.handle_modal_result(value)?;
@@ -314,11 +332,8 @@ impl App {
                 PendingAction::ViewPath { base_dir } => {
                     self.handle_view_path(base_dir, value)?;
                 }
-                PendingAction::GitSshPassphraseRetry {
-                    operation,
-                    repo_path,
-                } => {
-                    self.handle_git_ssh_passphrase_retry(operation, repo_path, value)?;
+                PendingAction::Vault => {
+                    self.vault_prompt_confirmed(value.as_ref());
                 }
                 PendingAction::CreateDirectory { directory } => {
                     self.handle_create_directory(directory, value)?;
@@ -596,6 +611,9 @@ impl App {
                     let result_is_project = value
                         .downcast_ref::<BookmarkAddResult>()
                         .is_some_and(|r| r.is_project);
+                    let result_path = value
+                        .downcast_ref::<BookmarkAddResult>()
+                        .map(|r| r.path.clone());
                     if let Some(err) = self.handle_edit_bookmark_result(
                         value,
                         &original_path,
@@ -603,6 +621,15 @@ impl App {
                         was_project,
                     )? {
                         self.show_bookmark_error(&err);
+                    } else if let Some(path) = result_path {
+                        let back = super::vault::BookmarkReturn {
+                            group: result_group.clone(),
+                            is_project: result_is_project,
+                            selected,
+                        };
+                        if self.offer_bookmark_password_move(&path, back) {
+                            return Ok(());
+                        }
                     }
                     self.reopen_bookmarks_menu(result_group, result_is_project, selected);
                 }
@@ -653,8 +680,20 @@ impl App {
                     let result_is_project = value
                         .downcast_ref::<BookmarkAddResult>()
                         .is_some_and(|r| r.is_project);
+                    let result_path = value
+                        .downcast_ref::<BookmarkAddResult>()
+                        .map(|r| r.path.clone());
                     if let Some(err) = self.handle_add_bookmark_result(value)? {
                         self.show_bookmark_error(&err);
+                    } else if let Some(path) = result_path {
+                        let back = super::vault::BookmarkReturn {
+                            group: result_group.clone(),
+                            is_project: result_is_project,
+                            selected,
+                        };
+                        if self.offer_bookmark_password_move(&path, back) {
+                            return Ok(());
+                        }
                     }
                     self.reopen_bookmarks_menu(result_group, result_is_project, selected);
                 }

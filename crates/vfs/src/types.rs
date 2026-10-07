@@ -867,7 +867,10 @@ pub enum ConnectionState {
 }
 
 /// Authentication method for remote connections.
-#[derive(Debug, Clone, Default)]
+///
+/// `Debug` is implemented by hand so passwords and passphrases never reach
+/// a log line.
+#[derive(Clone, Default)]
 pub enum AuthMethod {
     /// No authentication.
     None,
@@ -885,6 +888,25 @@ pub enum AuthMethod {
     /// Try multiple methods in order.
     #[default]
     Auto,
+}
+
+impl std::fmt::Debug for AuthMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => f.write_str("None"),
+            Self::Password(_) => f.debug_tuple("Password").field(&"***").finish(),
+            Self::SshKey {
+                private_key,
+                passphrase,
+            } => f
+                .debug_struct("SshKey")
+                .field("private_key", private_key)
+                .field("passphrase", &passphrase.as_ref().map(|_| "***"))
+                .finish(),
+            Self::SshAgent => f.write_str("SshAgent"),
+            Self::Auto => f.write_str("Auto"),
+        }
+    }
 }
 
 /// Options for connecting to a remote filesystem.
@@ -922,5 +944,23 @@ impl ConnectOptions {
     pub fn with_timeout(mut self, secs: u64) -> Self {
         self.timeout_secs = Some(secs);
         self
+    }
+}
+
+#[cfg(test)]
+mod auth_debug_tests {
+    use super::*;
+
+    #[test]
+    fn debug_hides_password_and_passphrase() {
+        let opts = ConnectOptions::with_password("hunter2");
+        let shown = format!("{opts:?}");
+        assert!(!shown.contains("hunter2"), "{shown}");
+        assert!(shown.contains("***"));
+
+        let key = ConnectOptions::with_ssh_key("/k".into(), Some("s3cret".into()));
+        let shown = format!("{key:?}");
+        assert!(!shown.contains("s3cret"), "{shown}");
+        assert!(shown.contains("/k"));
     }
 }

@@ -290,13 +290,22 @@ fn handle_detached_instance_cli(cli: &Cli) -> Result<Option<i32>> {
 }
 
 fn main() -> Result<()> {
-    // SSH_ASKPASS mode: when termide is set as ssh's askpass helper for a git
-    // network operation, ssh re-executes this binary to obtain the SSH key
-    // passphrase. We detect that purely by the presence of TERMIDE_ASKPASS_FILE
-    // (ssh passes the prompt as argv, which must NOT be treated as a file to
-    // open), hand the passphrase termide stored there back to ssh, and exit.
-    // No TUI, no clap.
+    // Askpass mode: when termide is set as ssh's or git's askpass helper for a
+    // git network operation, ssh / git re-execute this binary to obtain the
+    // SSH key passphrase or the HTTPS credentials. We detect that purely by
+    // the presence of TERMIDE_ASKPASS_FILE (the prompt comes as argv, which
+    // must NOT be treated as a file to open), hand back what termide stored —
+    // the user name for git's "Username for ..." prompt, the secret for any
+    // other — and exit. No TUI, no clap.
     if let Ok(secret_file) = std::env::var("TERMIDE_ASKPASS_FILE") {
+        let prompt = std::env::args().nth(1).unwrap_or_default();
+        if let (true, Ok(user)) = (
+            prompt.starts_with("Username"),
+            std::env::var("TERMIDE_ASKPASS_USER"),
+        ) {
+            println!("{user}");
+            return Ok(());
+        }
         if let Ok(secret) = std::fs::read(&secret_file) {
             // This is the SSH_ASKPASS contract, not logging: ssh reads the
             // passphrase from our stdout (a pipe it owns), so it never reaches

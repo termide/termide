@@ -218,6 +218,22 @@ pub enum PanelCommand<'a> {
         /// Target offset, already clamped to the reported range.
         offset: usize,
     },
+
+    // === Credentials ===
+    /// A password for the connection to `url` that this panel asked for
+    /// with `PanelEvent::CredentialsRequired`. Broadcast; only the panel
+    /// waiting for `url` acts on it.
+    /// Response: `CommandResult::Handled(bool)`
+    ProvideCredentials {
+        url: &'a str,
+        password: &'a crate::SecretText,
+        /// Where it came from, reported back if it is refused again.
+        source: crate::CredentialAttempt,
+    },
+
+    /// The user declined to give a password for `url`.
+    /// Response: `CommandResult::Handled(bool)`
+    CancelCredentials { url: &'a str },
 }
 
 /// Result of handling a panel command.

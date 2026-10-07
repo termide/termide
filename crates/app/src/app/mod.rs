@@ -51,6 +51,7 @@ mod panel_manager;
 mod panel_operations;
 mod parked_projects;
 mod project_layout;
+mod vault;
 mod watcher;
 mod workspace_edit;
 
@@ -102,6 +103,8 @@ pub struct App {
     /// each loop so the AI model field's dropdown fills in once it arrives.
     settings_model_fetch:
         Option<std::sync::mpsc::Receiver<Result<Vec<termide_agent_core::ModelInfo>, String>>>,
+    /// The password vault and the credential prompts in progress.
+    vault: vault::VaultState,
 }
 
 impl App {
@@ -182,6 +185,7 @@ impl App {
             restore_projects: false,
             last_focus_sig: None,
             settings_model_fetch: None,
+            vault: vault::VaultState::default(),
         }
     }
 
@@ -273,6 +277,7 @@ impl App {
             restore_projects: false,
             last_focus_sig: None,
             settings_model_fetch: None,
+            vault: vault::VaultState::default(),
         }
     }
 
@@ -960,6 +965,7 @@ impl App {
                 }
             }
             self.tick_parked_projects();
+            self.vault_tick();
         } else {
             // During scrolling: only check terminal output (lightweight)
             for panel in self.layout_manager.iter_all_panels_mut() {

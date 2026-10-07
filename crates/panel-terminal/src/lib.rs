@@ -1427,6 +1427,9 @@ impl Panel for Terminal {
             | PanelCommand::UpdateRepoPaths { .. }
             | PanelCommand::ShowGitLog { .. } => CommandResult::None,
 
+            PanelCommand::ProvideCredentials { .. } | PanelCommand::CancelCredentials { .. } => {
+                CommandResult::Handled(false)
+            }
             PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
             PanelCommand::SetScrollOffset { offset, .. } => {
                 // The bar counts top-down while the terminal counts rows back

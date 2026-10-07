@@ -859,6 +859,21 @@ impl Translation for RuntimeTranslation {
         modal_pack_title,
         fm_pack_local_only,
         modal_archive_password_title,
+        settings_vault_lock_after,
+        vault_password_title,
+        vault_save_checkbox,
+        vault_unlock_title,
+        vault_unlock_prompt,
+        vault_unlock_wrong,
+        vault_create_title,
+        vault_create_prompt,
+        vault_create_repeat,
+        vault_create_mismatch,
+        vault_saved,
+        vault_locked,
+        vault_target_ssh_key,
+        palette_lock_vault,
+        vault_move_bookmark_password,
         status_vfs_resolving_link,
         status_vfs_loading,
         status_vfs_connected,
@@ -1499,6 +1514,26 @@ impl Translation for RuntimeTranslation {
 
     fn fm_archive_password_wrong(&self, name: &str) -> String {
         self.format("fm_archive_password_wrong", &[("name", name)])
+    }
+
+    fn vault_password_prompt(&self, target: &str) -> String {
+        self.format("vault_password_prompt", &[("target", target)])
+    }
+
+    fn vault_stored_refused(&self, target: &str) -> String {
+        self.format("vault_stored_refused", &[("target", target)])
+    }
+
+    fn vault_password_refused(&self, target: &str) -> String {
+        self.format("vault_password_refused", &[("target", target)])
+    }
+
+    fn vault_error(&self, error: &str) -> String {
+        self.format("vault_error", &[("error", error)])
+    }
+
+    fn git_username_prompt(&self, target: &str) -> String {
+        self.format("git_username_prompt", &[("target", target)])
     }
 
     fn status_vfs_connecting(&self, host: &str) -> String {

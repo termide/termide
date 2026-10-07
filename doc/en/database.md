@@ -34,12 +34,16 @@ There are two more ways to open a database without a bookmark:
 
 ### Passwords
 
-As with SFTP/FTP bookmarks, the password is **not** treated specially: the
-bookmark stores exactly the URL you enter. You can either rely on a
-password-less authentication path (PostgreSQL `~/.pgpass`/peer/trust, a Unix
-socket, `PGPASSWORD`, …) or include the password directly in the URL
-(`postgres://user:secret@host/db`). If you embed it, note that the bookmark is
-saved verbatim to `bookmarks.toml`, so treat that file accordingly.
+Leave the password out of the URL. When the server refuses the login, the
+panel takes the password from the [password vault](passwords.md) or asks
+for it, with a checkbox to keep it in the vault. The password never becomes
+part of the panel's URL, so the saved layout does not contain it.
+
+Password-less authentication (PostgreSQL `~/.pgpass`/peer/trust, a Unix
+socket, `PGPASSWORD`, …) keeps working as before. A password written into
+the URL (`postgres://user:secret@host/db`) is still used. When you save
+such a URL as a bookmark, TermIDE offers to move the password into the
+vault.
 
 ## Layout
 
@@ -169,5 +173,3 @@ so there is no error loop.
   shown as empty/`NULL` in this version; common scalar types render fully.
 - Database selection is supported when the URL omits it; schema selection
   (PostgreSQL) still defaults to the current schema.
-- No in-app password prompt yet — use a password-less auth path or include the
-  password in the URL (see above).

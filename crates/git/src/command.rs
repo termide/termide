@@ -23,13 +23,15 @@ pub enum SshAuth<'a> {
     /// Non-interactive: agent only, ssh runs in `BatchMode`. A missing
     /// passphrase fails cleanly instead of prompting on the terminal.
     Batch,
-    /// Supply a known SSH key passphrase via an `SSH_ASKPASS` helper. `helper`
-    /// is the askpass program (the termide binary in askpass mode); it reads
-    /// the secret from `secret_file`. Used to retry after termide collected the
-    /// passphrase in a modal.
+    /// Supply a known secret via an askpass helper: the SSH key passphrase
+    /// (`SSH_ASKPASS`) or an HTTPS password (`GIT_ASKPASS`). `helper` is the
+    /// askpass program (the termide binary in askpass mode); it reads the
+    /// secret from `secret_file` and answers git's "Username for" prompt with
+    /// `username`. Used to retry after termide collected the credentials.
     Askpass {
         helper: &'a Path,
         secret_file: &'a Path,
+        username: Option<&'a str>,
     },
 }
 
@@ -58,6 +60,7 @@ pub fn network_command(repo: &Path, args: &[&str], auth: SshAuth) -> Command {
         SshAuth::Askpass {
             helper,
             secret_file,
+            username,
         } => {
             // Force ssh to use our askpass helper instead of /dev/tty, and feed
             // it the passphrase via the secret file. DISPLAY is a fallback for
@@ -67,6 +70,9 @@ pub fn network_command(repo: &Path, args: &[&str], auth: SshAuth) -> Command {
                 .env("GIT_ASKPASS", helper)
                 .env("TERMIDE_ASKPASS_FILE", secret_file)
                 .env("DISPLAY", ":0");
+            if let Some(user) = username {
+                cmd.env("TERMIDE_ASKPASS_USER", user);
+            }
         }
     }
     cmd
@@ -195,8 +201,10 @@ mod tests {
             SshAuth::Askpass {
                 helper: Path::new("/usr/bin/termide"),
                 secret_file: Path::new("/run/secret"),
+                username: Some("me"),
             },
         );
+        let mut user = None;
         let mut askpass = None;
         let mut require = None;
         let mut secret = None;
@@ -207,12 +215,14 @@ mod tests {
                 "SSH_ASKPASS_REQUIRE" => require = v.map(|s| s.to_string_lossy().into_owned()),
                 "TERMIDE_ASKPASS_FILE" => secret = v.map(|s| s.to_string_lossy().into_owned()),
                 "GIT_SSH_COMMAND" => ssh_cmd = v.map(|s| s.to_string_lossy().into_owned()),
+                "TERMIDE_ASKPASS_USER" => user = v.map(|s| s.to_string_lossy().into_owned()),
                 _ => {}
             }
         }
         assert_eq!(askpass.as_deref(), Some("/usr/bin/termide"));
         assert_eq!(require.as_deref(), Some("force"));
         assert_eq!(secret.as_deref(), Some("/run/secret"));
+        assert_eq!(user.as_deref(), Some("me"));
         // Must NOT force BatchMode in askpass mode (that would suppress the helper).
         assert!(
             ssh_cmd.is_none(),

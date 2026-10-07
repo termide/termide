@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
+use termide_core::{CredentialAttempt, SecretText};
 use termide_vfs::{
     ConnectOptions, DirCache, VfsEntry, VfsError, VfsManager, VfsMetadata, VfsOperation, VfsPath,
     VfsProtocol, VfsResult,
@@ -40,6 +41,27 @@ pub enum PendingVfsOperation {
     },
 }
 
+/// Password handling for one remote connection attempt.
+#[derive(Debug, Default)]
+struct RemoteLogin {
+    /// The password the connection in flight uses.
+    attempt: Option<CredentialAttempt>,
+    /// A refused connection waiting for a password: the path to open once
+    /// it comes. Its URL is the key the app answers with.
+    waiting: Option<VfsPath>,
+    /// Raised on refusal; taken by the FileManager on the next tick.
+    request: Option<(String, CredentialAttempt)>,
+    /// Raised when a password-authenticated connection succeeded.
+    accepted: Option<String>,
+}
+
+/// URL that identifies a remote login: the server root, password-free.
+fn login_url(path: &VfsPath) -> String {
+    let mut root = path.clone();
+    root.path = PathBuf::from("/");
+    root.to_url_string()
+}
+
 /// VFS state for FileManager.
 ///
 /// Manages the VFS manager, current path (local or remote), and pending async operations.
@@ -54,8 +76,9 @@ pub struct VfsState {
     pending_operation: Option<PendingVfsOperation>,
     /// Connection status for display.
     connection_status: Option<String>,
-    /// Whether we're waiting for a password from the user.
-    awaiting_password: bool,
+    /// Remote login state: which password the connection in flight uses,
+    /// and the path waiting for one. See `termide_core::credentials`.
+    login: RemoteLogin,
     /// When connection started (for elapsed time display).
     connection_started: Option<Instant>,
     /// A remote symlink that resolved to a file and should be opened in
@@ -89,7 +112,7 @@ impl VfsState {
             previous_path: None,
             pending_operation: None,
             connection_status: None,
-            awaiting_password: false,
+            login: RemoteLogin::default(),
             connection_started: None,
             resolved_file_open: None,
             completed_create: None,
@@ -105,7 +128,7 @@ impl VfsState {
             previous_path: None,
             pending_operation: None,
             connection_status: None,
-            awaiting_password: false,
+            login: RemoteLogin::default(),
             connection_started: None,
             resolved_file_open: None,
             completed_create: None,
@@ -182,9 +205,20 @@ impl VfsState {
         self.connection_started.map(|t| t.elapsed().as_secs())
     }
 
-    /// Check if we're waiting for a password.
+    /// Check if a refused remote connection is waiting for a password.
     pub fn awaiting_password(&self) -> bool {
-        self.awaiting_password
+        self.login.waiting.is_some()
+    }
+
+    /// Take the request for a remote password: the login URL and which
+    /// password was just refused.
+    pub fn take_credential_request(&mut self) -> Option<(String, CredentialAttempt)> {
+        self.login.request.take()
+    }
+
+    /// Take the URL of a login whose password was just accepted.
+    pub fn take_accepted_login(&mut self) -> Option<String> {
+        self.login.accepted.take()
     }
 
     /// Check if there's a pending operation.
@@ -444,6 +478,12 @@ impl VfsState {
                 match op.try_recv() {
                     Some(Ok(())) => {
                         // Connection succeeded, start listing
+                        if matches!(
+                            self.login.attempt.take(),
+                            Some(CredentialAttempt::Stored | CredentialAttempt::Typed)
+                        ) {
+                            self.login.accepted = Some(login_url(&self.current_path));
+                        }
                         self.connection_status =
                             Some(termide_i18n::t().status_vfs_connected().to_string());
                         self.clear_connection_tracking();
@@ -460,18 +500,25 @@ impl VfsState {
                         self.start_list_dir();
                         None
                     }
-                    Some(Err(VfsError::AuthenticationFailed(msg))) => {
-                        // Treat authentication failure as a regular error
-                        // Password modal not yet implemented
-                        let e = VfsError::AuthenticationFailed(msg);
-                        log::error!("VfsState: Authentication failed: {}", e);
+                    Some(Err(VfsError::AuthenticationFailed(msg)))
+                        if takes_password(self.current_path.protocol) =>
+                    {
+                        // Ask for a password instead of reporting an error;
+                        // the panel shows where it was meanwhile.
+                        log::info!("VfsState: authentication refused: {msg}");
+                        let attempt = self
+                            .login
+                            .attempt
+                            .take()
+                            .unwrap_or(CredentialAttempt::Initial);
+                        self.login.request = Some((login_url(&self.current_path), attempt));
+                        self.login.waiting = Some(self.current_path.clone());
                         self.connection_status = None;
                         self.clear_connection_tracking();
-                        // Restore previous path
                         if let Some(prev) = self.previous_path.take() {
                             self.current_path = prev;
                         }
-                        Some(Err(e))
+                        None
                     }
                     Some(Err(e @ (VfsError::PasswordRequired | VfsError::WrongPassword)))
                         if self.current_path.is_archive() =>
@@ -559,43 +606,39 @@ impl VfsState {
         }
     }
 
-    /// Provide password for pending authentication.
-    ///
-    /// Retries the connection to the current remote path using password auth.
-    pub fn provide_password(&mut self, password: String) {
-        self.awaiting_password = false;
-
-        if !self.current_path.is_remote() {
-            return;
-        }
-
-        let options = ConnectOptions::with_password(password);
-        self.connection_status = Some(connecting_status(&self.current_path));
-        self.connection_started = Some(Instant::now());
-
-        let operation = match self.current_path.protocol {
-            VfsProtocol::Sftp => self.manager.connect_sftp(&self.current_path, options),
-            VfsProtocol::Ftp | VfsProtocol::Ftps => {
-                self.manager.connect_ftp(&self.current_path, options)
-            }
-            VfsProtocol::Smb => self.manager.connect_smb(&self.current_path, options),
-            _ => {
-                self.connection_status = None;
-                return;
-            }
+    /// Retry the refused login for `url` with `password`. Returns false when
+    /// this panel is not waiting for `url`.
+    pub fn provide_password(
+        &mut self,
+        url: &str,
+        password: &SecretText,
+        source: CredentialAttempt,
+    ) -> bool {
+        let Some(path) = self.login.waiting.take_if(|p| login_url(p) == url) else {
+            return false;
         };
-
+        let options = ConnectOptions::with_password(password.expose());
+        let operation = match path.protocol {
+            VfsProtocol::Sftp => self.manager.connect_sftp(&path, options),
+            VfsProtocol::Ftp | VfsProtocol::Ftps => self.manager.connect_ftp(&path, options),
+            VfsProtocol::Smb => self.manager.connect_smb(&path, options),
+            _ => return false,
+        };
+        self.login.attempt = Some(source);
+        self.connection_status = Some(connecting_status(&path));
+        self.connection_started = Some(Instant::now());
+        self.previous_path = Some(self.current_path.clone());
+        self.current_path = path;
         self.pending_operation = Some(PendingVfsOperation::Connect(operation));
+        true
     }
 
-    /// Cancel pending authentication.
-    pub fn cancel_auth(&mut self) {
-        self.awaiting_password = false;
-        self.connection_status = None;
-        // Navigate back to local home if remote auth failed
-        if let Some(home) = dirs::home_dir() {
-            self.current_path = VfsPath::local(home);
-        }
+    /// The user declined to give a password for `url`.
+    pub fn cancel_password(&mut self, url: &str) -> bool {
+        self.login
+            .waiting
+            .take_if(|p| login_url(p) == url)
+            .is_some()
     }
 
     /// Drop the (possibly dead) provider for the current remote path and start
@@ -678,11 +721,11 @@ impl VfsState {
             } else if let Some(home) = dirs::home_dir() {
                 self.current_path = VfsPath::local(home);
             }
-            self.awaiting_password = false;
+            self.login = RemoteLogin::default();
             return Some(termide_i18n::t().status_vfs_cancelled().to_string());
         }
         // Other operations just get dropped
-        self.awaiting_password = false;
+        self.login = RemoteLogin::default();
         None
     }
 
@@ -690,6 +733,14 @@ impl VfsState {
     fn clear_connection_tracking(&mut self) {
         self.connection_started = None;
     }
+}
+
+/// Whether a refused login on `protocol` can be retried with a password.
+fn takes_password(protocol: VfsProtocol) -> bool {
+    matches!(
+        protocol,
+        VfsProtocol::Sftp | VfsProtocol::Ftp | VfsProtocol::Ftps | VfsProtocol::Smb
+    )
 }
 
 /// Status line while the provider for `path` is being set up.
@@ -937,9 +988,45 @@ mod tests {
     fn test_cancel_pending_clears_state() {
         let mut state = VfsState::new();
         // Set some state that cancel_pending would clear
-        state.awaiting_password = true;
+        state.login.waiting = Some(VfsPath::remote(VfsProtocol::Sftp, "h", "/x"));
         let _ = state.cancel_pending();
         assert!(!state.awaiting_password());
+    }
+
+    // =========================================================================
+    // Remote login (password requests)
+    // =========================================================================
+
+    #[test]
+    fn login_url_is_the_server_root() {
+        let path = VfsPath::remote(VfsProtocol::Sftp, "h", "/srv/data").with_username("bob");
+        assert_eq!(login_url(&path), "sftp://bob@h/");
+    }
+
+    #[test]
+    fn a_password_for_another_login_is_not_taken() {
+        let mut state = VfsState::new();
+        let path = VfsPath::remote(VfsProtocol::Sftp, "h", "/srv").with_username("bob");
+        state.login.waiting = Some(path);
+        let pw = SecretText::new("pw");
+        assert!(!state.provide_password("sftp://alice@h/", &pw, CredentialAttempt::Typed));
+        assert!(state.awaiting_password());
+        assert!(!state.cancel_password("sftp://alice@h/"));
+        assert!(state.cancel_password("sftp://bob@h/"));
+        assert!(!state.awaiting_password());
+    }
+
+    #[test]
+    fn a_provided_password_starts_the_connection_to_the_waiting_path() {
+        let mut state = VfsState::new();
+        let path = VfsPath::remote(VfsProtocol::Sftp, "127.0.0.1", "/srv").with_port(1);
+        state.login.waiting = Some(path.clone());
+        let pw = SecretText::new("pw");
+        assert!(state.provide_password(&login_url(&path), &pw, CredentialAttempt::Stored));
+        assert!(!state.awaiting_password());
+        assert!(state.is_connecting());
+        assert_eq!(state.current_path(), &path);
+        assert_eq!(state.login.attempt, Some(CredentialAttempt::Stored));
     }
 
     // =========================================================================

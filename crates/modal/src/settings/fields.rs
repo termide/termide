@@ -187,10 +187,16 @@ pub(super) fn fields_for_tab(tab: SettingsTab) -> Vec<FieldDescriptor> {
                 field_type: FieldType::Enum,
             },
         ],
-        SettingsTab::Vfs => vec![FieldDescriptor {
-            label: t.settings_vfs_connection_timeout(),
-            field_type: FieldType::Number,
-        }],
+        SettingsTab::Vfs => vec![
+            FieldDescriptor {
+                label: t.settings_vfs_connection_timeout(),
+                field_type: FieldType::Number,
+            },
+            FieldDescriptor {
+                label: t.settings_vault_lock_after(),
+                field_type: FieldType::Number,
+            },
+        ],
         SettingsTab::Ai => vec![
             FieldDescriptor {
                 label: t.settings_agent_max_tokens(),
@@ -302,6 +308,7 @@ pub(super) fn get_field_value(config: &Config, tab: SettingsTab, index: usize) -
         },
         SettingsTab::Vfs => match index {
             0 => config.vfs.connection_timeout_secs.to_string(),
+            1 => config.vault.lock_after_mins.to_string(),
             _ => String::new(),
         },
         SettingsTab::Ai => match index {

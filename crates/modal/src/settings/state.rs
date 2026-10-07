@@ -388,7 +388,7 @@ impl SettingsModal {
                 rows
             }
             SettingsTab::Logging => vec![Field(0), Field(1)],
-            SettingsTab::Vfs => vec![Field(0)],
+            SettingsTab::Vfs => vec![Field(0), Field(1)],
             SettingsTab::Ai => {
                 let mut rows = self.connection_list_rows();
                 rows.extend([
@@ -587,11 +587,11 @@ impl SettingsModal {
                 3 => self.config.lsp.hover_delay_ms = val,
                 _ => {}
             },
-            SettingsTab::Vfs => {
-                if index == 0 {
-                    self.config.vfs.connection_timeout_secs = val;
-                }
-            }
+            SettingsTab::Vfs => match index {
+                0 => self.config.vfs.connection_timeout_secs = val,
+                1 => self.config.vault.lock_after_mins = val,
+                _ => {}
+            },
             SettingsTab::Ai => {
                 if index == 0 {
                     self.config.ai.max_tokens_per_turn = i64::try_from(val).unwrap_or(i64::MAX);
