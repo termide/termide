@@ -1104,10 +1104,26 @@ fn run_error(messages: &[Message]) -> Option<String> {
         .flatten()
 }
 
+/// A piece of a subagent's progress as the delegating call shows it.
+enum Step {
+    /// Something it said.
+    Said(String),
+    /// A tool it called, by the call's id: `· read src/main.rs`, marked `✗`
+    /// once it fails.
+    Call {
+        id: String,
+        line: String,
+        failed: bool,
+    },
+}
+
+/// The widest a subagent's call line gets before it is cut.
+const SUBAGENT_CALL_CHARS: usize = 100;
+
 /// A subagent's progress as the delegating call shows it: what it has said
-/// so far, and its answer — the last text it said.
+/// and the tools it called so far, and its answer — the last text it said.
 struct SubagentReport {
-    progress: String,
+    steps: Vec<Step>,
     answer: Option<String>,
     error: Option<String>,
     turns: usize,
@@ -1120,7 +1136,7 @@ struct SubagentReport {
 impl SubagentReport {
     fn new(max_turns: usize) -> Self {
         Self {
-            progress: String::new(),
+            steps: Vec::new(),
             answer: None,
             error: None,
             turns: 0,
@@ -1146,12 +1162,82 @@ impl SubagentReport {
             return;
         }
         self.error = None;
-        if !self.progress.is_empty() {
-            self.progress.push_str("\n\n");
-        }
-        self.progress.push_str(text);
+        self.steps.push(Step::Said(text.to_string()));
         self.answer = Some(text.to_string());
-        on_update(ToolUpdate::Output(self.progress.clone()));
+        on_update(ToolUpdate::Output(self.progress()));
+    }
+
+    /// Note a tool the subagent calls, in the directory `cwd`.
+    fn called(&mut self, call: &ToolCall, cwd: &Path, on_update: &mut dyn FnMut(ToolUpdate)) {
+        let subject = termide_agent_core::subject_of(call, &ToolContext::new(cwd.to_path_buf()));
+        let subject = subject.lines().next().unwrap_or("").trim();
+        let mut line = if subject.is_empty() {
+            format!("· {}", call.name)
+        } else {
+            format!("· {} {subject}", call.name)
+        };
+        if line.chars().count() > SUBAGENT_CALL_CHARS {
+            line = line
+                .chars()
+                .take(SUBAGENT_CALL_CHARS - 1)
+                .collect::<String>()
+                + "…";
+        }
+        self.steps.push(Step::Call {
+            id: call.id.clone(),
+            line,
+            failed: false,
+        });
+        on_update(ToolUpdate::Output(self.progress()));
+    }
+
+    /// Note how a call of the subagent's ended: a failed one is marked.
+    fn call_ended(
+        &mut self,
+        result: &termide_agent_core::ToolResultMessage,
+        on_update: &mut dyn FnMut(ToolUpdate),
+    ) {
+        if !result.is_error {
+            return;
+        }
+        let mut marked = false;
+        for step in &mut self.steps {
+            if let Step::Call { id, failed, .. } = step {
+                if *id == result.tool_call_id {
+                    *failed = true;
+                    marked = true;
+                }
+            }
+        }
+        if marked {
+            on_update(ToolUpdate::Output(self.progress()));
+        }
+    }
+
+    /// Its progress as text: what it said apart by blank lines, its calls
+    /// one line each.
+    fn progress(&self) -> String {
+        let mut text = String::new();
+        let mut after_call = false;
+        for step in &self.steps {
+            let (piece, call) = match step {
+                Step::Said(said) => (said.clone(), false),
+                Step::Call { line, failed, .. } => (
+                    if *failed {
+                        format!("{line} ✗")
+                    } else {
+                        line.clone()
+                    },
+                    true,
+                ),
+            };
+            if !text.is_empty() {
+                text.push_str(if call && after_call { "\n" } else { "\n\n" });
+            }
+            text.push_str(&piece);
+            after_call = call;
+        }
+        text
     }
 
     /// Show, under what the subagent said, that its request waits for a
@@ -1163,10 +1249,11 @@ impl SubagentReport {
             Some(0) => Some(t.agent_queued().to_string()),
             Some(ahead) => Some(t.agent_queued_ahead_fmt(ahead)),
         };
-        let shown = match (line, self.progress.is_empty()) {
-            (None, _) => self.progress.clone(),
+        let progress = self.progress();
+        let shown = match (line, progress.is_empty()) {
+            (None, _) => progress,
             (Some(line), true) => format!("⏳ {line}"),
-            (Some(line), false) => format!("{}\n\n⏳ {line}", self.progress),
+            (Some(line), false) => format!("{progress}\n\n⏳ {line}"),
         };
         on_update(ToolUpdate::Output(shown));
     }
@@ -1371,6 +1458,12 @@ impl Subagents {
                 AgentEvent::MessageEnd(Message::Assistant(message)) => {
                     report.said(message, on_update);
                 }
+                AgentEvent::ToolExecutionStart { call } => {
+                    report.called(call, &self.cwd, on_update);
+                }
+                AgentEvent::ToolExecutionEnd { result } => {
+                    report.call_ended(result, on_update);
+                }
                 _ => {}
             };
             agent.run(UserMessage::text(prompt), &mut hooks, &budget, &mut emit);
@@ -1426,6 +1519,7 @@ impl Subagents {
             permission_rx: &permission_rx,
             refusal: &self.refusals.unattended_subagent,
             max_turns: run.max_turns,
+            cwd: &self.cwd,
             budget,
             cancel,
         };
@@ -1444,6 +1538,8 @@ struct CliDrive<'a> {
     refusal: &'a str,
     /// The model calls it may take before it is cut off.
     max_turns: usize,
+    /// Where it works: its calls' paths are shown relative to it.
+    cwd: &'a Path,
     budget: &'a CancelToken,
     cancel: &'a CancelToken,
 }
@@ -1507,6 +1603,12 @@ impl CliDrive<'_> {
                         if over {
                             self.budget.cancel();
                         }
+                    }
+                    AgentEvent::ToolExecutionStart { call } => {
+                        report.called(&call, self.cwd, on_update);
+                    }
+                    AgentEvent::ToolExecutionEnd { result } => {
+                        report.call_ended(&result, on_update);
                     }
                     AgentEvent::AgentEnd => break 'run,
                     _ => {}
@@ -2323,9 +2425,33 @@ mod tests {
                     timestamp: 0,
                 }))
             };
+            let call = |id: &str, name: &str, arguments: serde_json::Value| ToolCall {
+                id: id.into(),
+                name: name.into(),
+                arguments,
+                extra_content: None,
+            };
+            let read = call(
+                "c1",
+                "read",
+                serde_json::json!({ "path": "/proj/src/main.rs" }),
+            );
+            let test = call(
+                "c2",
+                "bash",
+                serde_json::json!({ "command": "cargo test\n--quiet" }),
+            );
             self.events.lock().unwrap().extend([
                 AgentEvent::AgentStart,
                 said("working"),
+                AgentEvent::ToolExecutionStart { call: read.clone() },
+                AgentEvent::ToolExecutionStart { call: test.clone() },
+                AgentEvent::ToolExecutionEnd {
+                    result: termide_agent_core::ToolResultMessage::text(&read, "fn main"),
+                },
+                AgentEvent::ToolExecutionEnd {
+                    result: termide_agent_core::ToolResultMessage::error(&test, "failed"),
+                },
                 said("the answer"),
                 AgentEvent::AgentEnd,
             ]);
@@ -2387,6 +2513,7 @@ mod tests {
             permission_rx: &permission_rx,
             refusal: "nobody to ask",
             max_turns: SUBAGENT_MAX_TURNS,
+            cwd: Path::new("/proj"),
             budget: &budget,
             cancel: &cancel,
         };
@@ -2405,7 +2532,12 @@ mod tests {
             Some("claude-haiku-5")
         );
         assert_eq!(*cli.prompted.lock().unwrap(), ["find it"]);
-        assert_eq!(progress.last().unwrap(), "working\n\nthe answer");
+        // Its calls show one line each among what it said, relative to its
+        // directory, a failed one marked; a command shows its first line.
+        assert_eq!(
+            progress.last().unwrap(),
+            "working\n\n· read src/main.rs\n· bash cargo test ✗\n\nthe answer"
+        );
 
         cancel.cancel();
         let stopped = FakeCli::default();
