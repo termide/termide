@@ -667,6 +667,7 @@ impl Translation for RuntimeTranslation {
         agent_tool_task,
         agent_tool_mcp,
         agent_tool_question,
+        agent_tool_suggest,
         agent_slash_kind_builtin,
         agent_slash_kind_template,
         agent_slash_kind_script,

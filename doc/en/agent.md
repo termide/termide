@@ -386,7 +386,7 @@ you have named or sent even one message to is always kept.
 
 The conversation is a stack of blocks, each opened by a mark:
 `› ` for your message and for the agent's answer, `@ ` for its reasoning, `$ `
-for a shell call, `< ` for a file read, `> ` for a write, `± ` for an edit,
+for a shell call or a command offered for you to run, `< ` for a file read, `> ` for a write, `± ` for an edit,
 `/ ` for a skill, `& ` for a subagent, `* ` for an MCP tool, `¿ ` for a
 question to you, `# ` for the system prompt. The marks are in the accent,
 except the system prompt's `#`, dim like the prompt itself. The answer is shown in full;

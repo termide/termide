@@ -1106,9 +1106,10 @@ fn fill_bg(lines: &mut [Line<'static>], width: u16, bg: ratatui::style::Color) {
 }
 
 /// The command of a shell call, whose headline wraps and folds instead of
-/// being a single clipped line.
+/// being a single clipped line. A `suggest_command` offer counts: `[Run]`
+/// sends it through the same shell, its output coming back as the call's.
 fn shell_command(call: &ToolCall) -> Option<String> {
-    matches!(call.name.as_str(), "bash" | "shell").then(|| {
+    matches!(call.name.as_str(), "bash" | "shell" | "suggest_command").then(|| {
         call.arguments
             .get("command")
             .and_then(|v| v.as_str())
@@ -1132,12 +1133,19 @@ fn tool_state_color(running: bool, ok: bool, colors: &ThemeColors) -> ratatui::s
 }
 
 /// A shell call's type glyph and its localized action, in the call's state
-/// color: `$ Running `.
-fn shell_prefix(state: ratatui::style::Color) -> Vec<Span<'static>> {
+/// color: `$ Running `, or `$ Suggesting ` for a command offered for the user
+/// to run.
+fn shell_prefix(call: &ToolCall, state: ratatui::style::Color) -> Vec<Span<'static>> {
+    let t = termide_i18n::t();
+    let verb = if call.name == "suggest_command" {
+        t.agent_tool_suggest()
+    } else {
+        t.agent_tool_bash()
+    };
     let accent = Style::default().fg(state);
     vec![
         Span::styled("$ ", accent),
-        Span::styled(format!("{} ", termide_i18n::t().agent_tool_bash()), accent),
+        Span::styled(format!("{verb} "), accent),
     ]
 }
 
@@ -1145,6 +1153,7 @@ fn shell_prefix(state: ratatui::style::Color) -> Vec<Span<'static>> {
 /// (if any) after the `$`, each command line wrapped under the command rather
 /// than clipped.
 fn command_lines(
+    call: &ToolCall,
     command: &str,
     marker: Option<Span<'static>>,
     width: u16,
@@ -1152,7 +1161,7 @@ fn command_lines(
     colors: &ThemeColors,
 ) -> Vec<Line<'static>> {
     let dim = Style::default().fg(colors.disabled);
-    let mut prefix = shell_prefix(state);
+    let mut prefix = shell_prefix(call, state);
     prefix.extend(marker);
     let indent: usize = prefix.iter().map(|s| width_of(&s.content)).sum();
     let avail = (width as usize).saturating_sub(indent);
@@ -2166,7 +2175,7 @@ fn render_body(
                 let meta = if finished { stats } else { clock };
                 return match shell_command(call) {
                     Some(command) => {
-                        let mut head = shell_prefix(state);
+                        let mut head = shell_prefix(call, state);
                         head.extend(marker);
                         let first = command.lines().next().unwrap_or("").to_string();
                         head.push(Span::styled(first, dim));
@@ -2186,7 +2195,7 @@ fn render_body(
                 };
             }
             let mut lines = match shell_command(call) {
-                Some(command) => command_lines(&command, marker, width, state, colors),
+                Some(command) => command_lines(call, &command, marker, width, state, colors),
                 None => {
                     let mut rows = Vec::new();
                     let lines = wrapped_row_with_meta(
@@ -2876,6 +2885,39 @@ mod tests {
         let indent = " ".repeat(width_of("$ Running ▾ "));
         assert!(
             lines[1].starts_with(&format!("{indent}echo 2")),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn a_suggested_command_reads_as_a_shell_call_with_its_own_action() {
+        // `[Run]` sends an offered command through the shell, so its block is
+        // a shell call's — the `$`, the command wrapped under itself — and
+        // only the action says the user, not the agent, runs it.
+        let colors = ThemeColors::default();
+        let mut transcript = Transcript::default();
+        let offer = call(
+            "suggest_command",
+            json!({ "command": "cd x\nmake install", "why": "needs sudo" }),
+        );
+        transcript.push(Item::Tool {
+            call: offer.clone(),
+            result: Some(ToolResultMessage::text(&offer, "ok")),
+            live: None,
+            at: String::new(),
+            duration_ms: None,
+            waited_ms: None,
+            waiting: false,
+        });
+        let lines = text_of(transcript.lines(40, &colors, false));
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].starts_with("$ Suggesting ▸ cd x"), "{lines:?}");
+        assert!(transcript.toggle_expanded(0));
+        let lines = text_of(transcript.lines(40, &colors, false));
+        assert!(lines[0].starts_with("$ Suggesting ▾ cd x"), "{lines:?}");
+        let indent = " ".repeat(width_of("$ Suggesting ▾ "));
+        assert!(
+            lines[1].starts_with(&format!("{indent}make install")),
             "{lines:?}"
         );
     }
