@@ -367,6 +367,13 @@ impl Editor {
         self.rerun_bar_search();
     }
 
+    /// Whether the inline find bar is open and owns the keyboard (Tab has
+    /// not moved focus to the buffer). Hosts that add plain-key shortcuts
+    /// must let such keys reach the bar.
+    pub fn find_bar_has_focus(&self) -> bool {
+        self.find_bar.is_some() && !self.find_bar_focus_buffer
+    }
+
     /// Close the inline bar and clear the search highlight.
     pub(crate) fn close_find_bar(&mut self) {
         self.find_bar = None;

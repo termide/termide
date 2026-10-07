@@ -292,10 +292,12 @@ impl Panel for JournalPanel {
     }
 
     fn handle_key(&mut self, chord: termide_core::KeyChord) -> Vec<PanelEvent> {
-        // Alt+1..5 toggles the corresponding level pill. The pills
-        // are also clickable; the shortcut is the keyboard fallback
-        // that the help panel will list.
-        if chord.raw.modifiers == KeyModifiers::ALT {
+        // Plain 1..5 toggles the corresponding level pill (the pills are
+        // also clickable). The buffer is read-only, so digits insert
+        // nothing; only the find bar takes text, and it keeps them.
+        // Not Alt+digit: Alt chords belong to app-wide actions, which
+        // are dispatched before the panel sees the key.
+        if chord.raw.modifiers == KeyModifiers::NONE && !self.editor.find_bar_has_focus() {
             if let KeyCode::Char(c) = chord.raw.code {
                 if let Some(digit) = c.to_digit(10) {
                     let idx = digit as usize;
@@ -395,5 +397,47 @@ impl Panel for JournalPanel {
 impl Default for JournalPanel {
     fn default() -> Self {
         Self::new(&termide_theme::Theme::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::KeyEvent;
+    use termide_core::KeyChord;
+
+    fn press(code: KeyCode, modifiers: KeyModifiers) -> KeyChord {
+        KeyChord::identity(KeyEvent::new(code, modifiers))
+    }
+
+    #[test]
+    fn plain_digit_toggles_its_level_pill() {
+        let mut journal = JournalPanel::default();
+        journal.handle_key(press(KeyCode::Char('3'), KeyModifiers::NONE));
+        assert_eq!(journal.level_enabled, [true, true, false, true, true]);
+        journal.handle_key(press(KeyCode::Char('3'), KeyModifiers::NONE));
+        assert_eq!(journal.level_enabled, [true; LEVELS.len()]);
+    }
+
+    #[test]
+    fn digits_outside_the_pill_range_and_alt_digits_do_nothing() {
+        let mut journal = JournalPanel::default();
+        journal.handle_key(press(KeyCode::Char('6'), KeyModifiers::NONE));
+        journal.handle_key(press(KeyCode::Char('1'), KeyModifiers::ALT));
+        assert_eq!(journal.level_enabled, [true; LEVELS.len()]);
+    }
+
+    #[test]
+    fn digits_typed_into_the_find_bar_stay_there() {
+        let mut journal = JournalPanel::default();
+        // The editor builds its hotkey table (Ctrl+F included) from the config.
+        let mut config = termide_config::Config::default();
+        config.editor.keybindings.with_defaults();
+        let config = std::sync::Arc::new(config);
+        journal.prepare_render(&Theme::default(), &config);
+        journal.handle_key(press(KeyCode::Char('f'), KeyModifiers::CONTROL));
+        assert!(journal.editor.find_bar_has_focus());
+        journal.handle_key(press(KeyCode::Char('1'), KeyModifiers::NONE));
+        assert_eq!(journal.level_enabled, [true; LEVELS.len()]);
     }
 }

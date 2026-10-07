@@ -95,7 +95,7 @@ Menu activation/deactivation and each item can be accessed by mouse click or [ke
   - Editor — text editor panel
   - Git Status — git status panel
   - Git Log — commit history panel
-  - Journal — application log panel
+  - Journal — application log panel; the `TRACE`…`ERROR` pills in its header, or the keys `1`…`5`, show and hide each level
   - Diagnostics — LSP diagnostics panel
   - [Operations](operations.md) — background operations panel
   - Outline — structural code navigation panel
