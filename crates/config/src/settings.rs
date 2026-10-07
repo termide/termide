@@ -151,6 +151,12 @@ pub struct AiSettings {
     /// sight: a permission or question card, or a long run that finished.
     #[serde(default = "agent_defaults::bell_on_attention")]
     pub bell_on_attention: bool,
+
+    /// What a run that stops on a usage or rate limit, or on an outage that
+    /// outlasted the quick retries, does: `ask` what to do, `wait` for the
+    /// limit's reset (or back off) and try again, or `stop`.
+    #[serde(default)]
+    pub on_limit: termide_agent_core::LimitPolicy,
 }
 
 /// One connection to a model: the wire protocol or CLI agent, where it
@@ -551,6 +557,7 @@ impl Default for AiSettings {
             web: WebSettings::default(),
             recall: RecallSettings::default(),
             bell_on_attention: agent_defaults::bell_on_attention(),
+            on_limit: termide_agent_core::LimitPolicy::default(),
         }
     }
 }

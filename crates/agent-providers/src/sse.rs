@@ -195,6 +195,7 @@ impl Accumulator {
             provider: provider.to_string(),
             model: model.to_string(),
             error_message: None,
+            failure: None,
             timestamp: now_millis(),
         }
     }

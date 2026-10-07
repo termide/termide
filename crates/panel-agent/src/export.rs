@@ -267,6 +267,7 @@ mod tests {
             provider: "p".into(),
             model: "m".into(),
             error_message: None,
+            failure: None,
             timestamp: 0,
         };
         let call = ToolCall {
@@ -323,6 +324,7 @@ mod tests {
                 provider: "p".into(),
                 model: "m".into(),
                 error_message: None,
+                failure: None,
                 timestamp: 0,
             })
         };

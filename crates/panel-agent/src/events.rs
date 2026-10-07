@@ -74,6 +74,7 @@ impl AgentPanel {
                     self.run_start = Some(Instant::now());
                     self.run_failed = false;
                 }
+                self.last_failure = None;
                 self.run_paused = false;
             }
             AgentEvent::Paused => {
@@ -86,6 +87,8 @@ impl AgentPanel {
             AgentEvent::AgentEnd => {
                 self.busy = false;
                 self.activity = None;
+                // A failure is acted on unless the user stopped the run.
+                let failure = self.last_failure.take().filter(|_| !self.stop_requested);
                 // A stop was the user's own doing, so they are there.
                 let long = self
                     .run_start
@@ -117,10 +120,27 @@ impl AgentPanel {
                 if self.prompt_stale {
                     self.sync_system_prompt();
                 }
+                // A failed request is tried again, waited on or asked about;
+                // one that went through ends the tries.
+                let held = match failure {
+                    Some((failure, error)) => {
+                        self.retry_ready = true;
+                        self.on_run_failed(failure, &error)
+                    }
+                    None => {
+                        if !self.run_failed {
+                            self.retry_attempts = 0;
+                            self.restarted = false;
+                            self.retry_ready = false;
+                        }
+                        false
+                    }
+                };
                 self.offer_plan();
                 // A loop schedules its next iteration once the run ends, unless
-                // it was paused (then it waits for `/continue`) or a card is up.
-                if !self.paused && self.pending.is_none() {
+                // it was paused (then it waits for `/continue`), a card is up
+                // or a failed request waits to be tried again.
+                if !self.paused && self.pending.is_none() && self.retry_wait.is_none() {
                     if let Some(task) = self.loop_task.as_mut() {
                         task.next_at =
                             Some(Instant::now() + task.interval.unwrap_or(Duration::ZERO));
@@ -128,14 +148,19 @@ impl AgentPanel {
                 }
                 // A goal judges the finished work turn next, unless it was
                 // paused or a card is up; a turn that errored stops the goal
-                // rather than looping on the failure.
-                if self.goal_task.is_some() && self.goal_errored {
+                // rather than looping on the failure — unless the failed
+                // request is still in hand, waited on or asked about.
+                if self.goal_task.is_some() && self.goal_errored && !held {
                     self.goal_task = None;
                     self.notice(
                         termide_i18n::t().agent_notice_goal_stopped_failed(),
                         NoticeKind::Warn,
                     );
-                } else if !self.paused && self.pending.is_none() {
+                } else if !self.paused
+                    && self.pending.is_none()
+                    && self.retry_wait.is_none()
+                    && !self.goal_errored
+                {
                     if let Some(task) = self.goal_task.as_mut() {
                         task.judge_at = Some(Instant::now());
                     }
@@ -259,6 +284,13 @@ impl AgentPanel {
                         {
                             self.run_failed = true;
                         }
+                        // What a failure was, for the run's end; a refusal
+                        // carries no error and is no failure to retry.
+                        self.last_failure = error.as_ref().and_then(|error| {
+                            assistant
+                                .classify_failure()
+                                .map(|failure| (failure, error.clone()))
+                        });
                         // The answer always carries the wall-clock time; a
                         // reasoning block, if any, carries the prefill/generation
                         // indicators (else the answer does). A tool-only turn
@@ -607,6 +639,8 @@ impl AgentPanel {
             events.extend(self.loop_step());
             changed = true;
         }
+        // A failed request whose wait is over is tried again.
+        changed |= self.poll_retry_wait();
         // A goal whose work turn has finished runs the judge once the panel is
         // free and no judge call is already in flight.
         let judge_due = self

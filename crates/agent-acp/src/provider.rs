@@ -141,6 +141,7 @@ impl Provider for AcpProvider {
                     provider: ACP_PROVIDER.into(),
                     model: request.model.id.clone(),
                     error_message: None,
+                    failure: None,
                     timestamp: now_millis(),
                 }
             }

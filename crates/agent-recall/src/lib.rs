@@ -1184,6 +1184,7 @@ mod tests {
                         provider: "canned".into(),
                         model: "m".into(),
                         error_message: None,
+                        failure: None,
                         timestamp: 0,
                     },
                     None => AssistantMessage::failed("canned", "m", StopReason::Error, "offline"),

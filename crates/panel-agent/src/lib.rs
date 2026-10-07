@@ -8,6 +8,7 @@
 
 mod events;
 mod export;
+mod failure;
 mod input;
 mod mcp;
 mod pending;
@@ -34,11 +35,12 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use termide_agent_core::{
     Backend, BackendModel, BackendOption, BackendSetup, CancelToken, CheckpointStore,
-    CommandScript, CompactionPolicy, CompactionPrompts, Decision, GoalPrompt, HandoffPrompt, Hooks,
-    LateTools, McpReload, McpServerState, Mode, ModeHandle, ModelInfo, ModelSpec,
-    PermissionEnvelope, PermissionRules, PersistScope, PlanPrompt, PromptError, PromptTemplate,
-    Provider, QuestionEnvelope, Refusals, ReviewerSetup, Session, SessionSummary, ShellOutput,
-    ShellRunner, SkillInfo, SuggestionEnvelope, Tool, ToolRegistry, DEFAULT_AGENT,
+    CommandScript, CompactionPolicy, CompactionPrompts, Decision, Failure, GoalPrompt,
+    HandoffPrompt, Hooks, LateTools, LimitPolicy, McpReload, McpServerState, Mode, ModeHandle,
+    ModelInfo, ModelSpec, PermissionEnvelope, PermissionRules, PersistScope, PlanPrompt,
+    PromptError, PromptTemplate, Provider, QuestionEnvelope, Refusals, ReviewerSetup, Session,
+    SessionSummary, ShellOutput, ShellRunner, SkillInfo, SuggestionEnvelope, Tool, ToolRegistry,
+    DEFAULT_AGENT,
 };
 use termide_config::Config;
 use termide_core::{
@@ -107,6 +109,9 @@ const SHOW_PROMPT_ACTION: &str = "agent_show_prompt";
 const SESSION_INFO_ACTION: &str = "agent_session_info";
 /// Status chip and context-menu action that opens the agent picker.
 const AGENT_ACTION: &str = "agent_agent";
+/// The agent picker opened from a failure's card: the failed request is
+/// tried again on the agent picked.
+const FAILOVER_ACTION: &str = "agent_failover";
 /// Banner action that picks another working directory for a fresh session.
 const CWD_ACTION: &str = "agent_cwd";
 /// Context-menu action that opens the prompt-template picker.
@@ -238,6 +243,9 @@ pub struct AgentPanelSetup {
     /// then both are refused with a notice. Built by the app over the same
     /// `bash` tool the agent uses.
     pub shell_run: Option<ShellRunner>,
+    /// What to do when a run stops on a limit or an outage (`[ai]
+    /// on_limit`); kept in step with the configuration as it changes.
+    pub on_limit: LimitPolicy,
 }
 
 /// Records an "allow always" rule outside the panel, in the project's or the
@@ -785,6 +793,23 @@ pub struct AgentPanel {
     run_start: Option<Instant>,
     /// The current run hit an error or was aborted, so its closing line is `✗`.
     run_failed: bool,
+    /// The failure the current run's last reply reported, with its text,
+    /// for what follows at the run's end.
+    last_failure: Option<(Failure, String)>,
+    /// What to do when a run stops on a limit or an outage.
+    on_limit: LimitPolicy,
+    /// A failed request waiting to be tried again.
+    retry_wait: Option<failure::RetryWait>,
+    /// The wait's line as the state strip last showed it, so the countdown
+    /// redraws only when it changes.
+    retry_wait_shown: Option<String>,
+    /// Tries of the current failed request so far; the wait grows with them.
+    retry_attempts: u32,
+    /// The last run failed and can be tried again (`/continue`).
+    retry_ready: bool,
+    /// The external agent was started anew for the current request already,
+    /// so a second death is asked about rather than restarted again.
+    restarted: bool,
     /// A run ended or a question arrived since the panel was last rendered
     /// focused; its header is highlighted while it is unfocused.
     attention: bool,
@@ -1059,6 +1084,13 @@ impl AgentPanel {
             goal_errored: false,
             run_start: None,
             run_failed: false,
+            last_failure: None,
+            on_limit: setup.on_limit,
+            retry_wait: None,
+            retry_wait_shown: None,
+            retry_attempts: 0,
+            retry_ready: false,
+            restarted: false,
             attention: false,
             rung: false,
             host_focused: true,
@@ -1464,8 +1496,9 @@ impl Panel for AgentPanel {
         WidthPreference::PreferWide
     }
 
-    fn prepare_render(&mut self, theme: &Theme, _config: &Arc<Config>) {
+    fn prepare_render(&mut self, theme: &Theme, config: &Arc<Config>) {
         self.agent_entry();
+        self.on_limit = config.ai.on_limit;
         self.colors = ThemeColors::from(theme);
         self.is_light = theme.is_light_theme();
     }
@@ -1572,6 +1605,13 @@ impl Panel for AgentPanel {
                 let choice = self.agent_choices.get(index).cloned();
                 self.agent_choices.clear();
                 CommandResult::Handled(choice.is_some_and(|name| self.switch_agent(&name)))
+            }
+            PanelCommand::SelectionMade { action, index } if action == FAILOVER_ACTION => {
+                let choice = self.agent_choices.get(index).cloned();
+                self.agent_choices.clear();
+                CommandResult::Handled(
+                    choice.is_some_and(|name| self.retry_on_switched_agent(&name)),
+                )
             }
             PanelCommand::SelectionMade { action, index }
                 if (action == REASONING_ACTION || action == OPTION_VALUE_ACTION)

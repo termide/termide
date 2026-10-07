@@ -788,6 +788,41 @@ impl Agent {
         self.run_from(initial, true, hooks, cancel, emit);
     }
 
+    /// Try the request a failed reply left unanswered again: the model is
+    /// called on the transcript as it stands, with no new user message. A
+    /// failed reply that made no calls is left out of the model's context —
+    /// its text, if any, is a fragment the next reply writes anew, and a
+    /// trailing assistant message would read as a prefill. The calls of one
+    /// that made some did not run and will not: each gets a result saying so,
+    /// as the provider requires one for every call.
+    pub fn retry(
+        &mut self,
+        hooks: &mut dyn Hooks,
+        cancel: &CancelToken,
+        emit: &mut dyn FnMut(AgentEvent),
+    ) {
+        self.seed_intent();
+        let failed = match self.messages.last() {
+            Some(Message::Assistant(reply)) if reply.stop_reason == StopReason::Error => {
+                Some(reply.tool_calls().next().is_some())
+            }
+            _ => None,
+        };
+        if failed == Some(false) {
+            self.messages.pop();
+        } else if failed == Some(true) {
+            for call in self.unanswered_calls() {
+                let result = ToolResultMessage::error(
+                    &call,
+                    "Not run: the reply failed before it finished, and the request was tried again.",
+                );
+                self.push(Message::ToolResult(result), emit);
+            }
+        }
+        let initial = self.drain_steering(emit);
+        self.run_from(initial, false, hooks, cancel, emit);
+    }
+
     /// The loop shared by [`Agent::run`] and [`Agent::resume`]: drive turns
     /// until the work is done, cancelled, or a pause stops it between steps.
     fn run_from(
@@ -1473,6 +1508,7 @@ pub(crate) mod test_support {
             provider: "scripted".into(),
             model: "test".into(),
             error_message: None,
+            failure: None,
             timestamp: 0,
         }
     }
@@ -1498,6 +1534,7 @@ pub(crate) mod test_support {
             provider: "scripted".into(),
             model: "test".into(),
             error_message: None,
+            failure: None,
             timestamp: 0,
         }
     }
@@ -2154,6 +2191,54 @@ mod tests {
             panic!("expected assistant");
         };
         assert_eq!(reply.error_message.as_deref(), Some("boom"));
+    }
+
+    #[test]
+    fn retry_asks_again_without_the_failed_reply() {
+        let (mut agent, provider) = agent(
+            ScriptedProvider::new(vec![
+                AssistantMessage::failed("scripted", "test", StopReason::Error, "limit"),
+                text_reply("done"),
+            ]),
+            ToolRegistry::new(),
+        );
+        collect(&mut agent, "go", &mut NoHooks);
+        agent.retry(&mut NoHooks, &CancelToken::new(), &mut |_| {});
+
+        // The second call saw the request alone, not the failure after it.
+        assert_eq!(roles(&provider.seen_requests()[1]), vec!["user"]);
+        assert_eq!(roles(agent.messages()), vec!["user", "assistant"]);
+        let Message::Assistant(reply) = &agent.messages()[1] else {
+            panic!("expected assistant");
+        };
+        assert_eq!(reply.plain_text(), "done");
+    }
+
+    #[test]
+    fn retry_closes_the_calls_of_a_failed_reply_unrun() {
+        let echo = Arc::new(EchoTool::default());
+        let mut failed = tool_reply(
+            vec![("c1", "echo", json!({ "text": "x" }))],
+            StopReason::Error,
+        );
+        failed.error_message = Some("stream interrupted".into());
+        let (mut agent, _) = agent(
+            ScriptedProvider::new(vec![failed, text_reply("done")]),
+            registry_with(echo.clone()),
+        );
+        collect(&mut agent, "go", &mut NoHooks);
+        agent.retry(&mut NoHooks, &CancelToken::new(), &mut |_| {});
+
+        assert!(echo.executed.lock().unwrap().is_empty());
+        assert_eq!(
+            roles(agent.messages()),
+            vec!["user", "assistant", "tool_result", "assistant"]
+        );
+        let Message::ToolResult(result) = &agent.messages()[2] else {
+            panic!("expected tool result");
+        };
+        assert!(result.is_error);
+        assert!(result.plain_text().contains("Not run"));
     }
 
     #[test]

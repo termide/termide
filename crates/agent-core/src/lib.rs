@@ -27,6 +27,7 @@ pub mod classifier;
 pub mod commands;
 pub mod compaction;
 pub mod context;
+pub mod failure;
 pub mod goal;
 pub mod handoff;
 pub mod hooks;
@@ -68,6 +69,7 @@ pub use context::{
     build_system_prompt, civil_date, discover_context_files, ContextFile, PromptOptions,
     SEED_TEMPLATE,
 };
+pub use failure::{parse_reset, Failure, FailureKind, LimitPolicy};
 pub use goal::{parse_verdict, GoalPrompt, GoalVerdict, SEED_GOAL};
 pub use handoff::{HandoffPrompt, SEED_HANDOFF};
 pub use hooks::{HookConfig, HookEvent, HOOKS_FILE};

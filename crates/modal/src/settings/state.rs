@@ -394,8 +394,9 @@ impl SettingsModal {
                 rows.extend([
                     Spacer,
                     Header(t.settings_header_model()),
-                    Field(0), // max_tokens
-                    Field(1), // reasoning
+                    Field(0),  // max_tokens
+                    Field(1),  // reasoning
+                    Field(10), // on a limit or an outage
                     Spacer,
                     Header(t.settings_header_permissions()),
                     Field(7), // permission mode for new sessions

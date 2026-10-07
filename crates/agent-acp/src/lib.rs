@@ -32,9 +32,10 @@ use termide_agent_core::{
 use termide_agent_core::{
     expand_env, now_millis, AcpConfig, AcpFlavor, Agent, AgentCommand, AgentEvent,
     AssistantContent, AssistantMessage, Backend, BackendModel, BackendOption, BackendSetup,
-    CancelToken, ExternalSessionRef, Hooks, HostTools, Message, Mode, ModeHandle, PermissionHooks,
-    PlanPrompt, PromptError, StopReason, StreamEvent, ToolCall, ToolContext, ToolDecision,
-    ToolRegistry, ToolResultMessage, Usage, UserMessage, ACP_PROVIDER, RECAP_LIMIT,
+    CancelToken, ExternalSessionRef, Failure, FailureKind, Hooks, HostTools, Message, Mode,
+    ModeHandle, PermissionHooks, PlanPrompt, PromptError, StopReason, StreamEvent, ToolCall,
+    ToolContext, ToolDecision, ToolRegistry, ToolResultMessage, Usage, UserMessage, ACP_PROVIDER,
+    RECAP_LIMIT,
 };
 use termide_agent_mcp::{McpServer, SERVER_NAME};
 
@@ -45,6 +46,18 @@ pub use provider::{match_model, AcpProvider};
 /// named after the MCP server that serves them.
 const HOST_TOOL_PREFIX: &str = "mcp__termide__";
 
+/// What a retry tells an agent whose failed turn had already called tools,
+/// in place of sending the request again.
+const RETRY_NOTE: &str = "<system-reminder>\nYour previous turn ended with an error before it finished. Carry on with the last request from where it stopped.\n</system-reminder>";
+
+/// The reset of a limit Claude Code reports rejected (`_claude/rateLimit`:
+/// `status` and `resetsAt` in Unix seconds); `None` while it allows.
+fn rejected_until(limit: &Value) -> Option<u64> {
+    (limit["status"].as_str() == Some("rejected"))
+        .then(|| limit["resetsAt"].as_u64())
+        .flatten()
+}
+
 /// The protocol version requested.
 pub const PROTOCOL_VERSION: u64 = 1;
 
@@ -53,7 +66,55 @@ pub const PROTOCOL_VERSION: u64 = 1;
 /// session starts, so tools that come later never reach them.
 const MCP_SETTLE: Duration = Duration::from_secs(10);
 
-type Pending = Arc<Mutex<HashMap<u64, Sender<Result<Value, String>>>>>;
+type Pending = Arc<Mutex<HashMap<u64, Sender<Result<Value, RpcFailure>>>>>;
+
+/// A request that failed: the error as the panel shows it, and its kind.
+#[derive(Debug, Clone)]
+struct RpcFailure {
+    text: String,
+    class: Failure,
+}
+
+impl RpcFailure {
+    fn new(text: String, kind: FailureKind) -> Self {
+        Self {
+            text,
+            class: Failure::new(kind),
+        }
+    }
+}
+
+/// Classify a JSON-RPC error of the agent. ACP has no codes of its own for
+/// limits, so the adapters' `data.errorKind` (Claude Code's: the SDK's
+/// assistant-message error) is read first, then the text — which is all
+/// Codex and Gemini CLI give.
+fn classify_rpc_error(error: &Value) -> Failure {
+    let message = error["message"].as_str().unwrap_or_default();
+    let from_text = Failure::from_text(message);
+    // `authRequired` in ACP.
+    if error["code"].as_i64() == Some(-32000) {
+        return Failure::new(FailureKind::Auth);
+    }
+    let kind = match error["data"]["errorKind"].as_str() {
+        // A subscription's usage limit is reported as a rate limit too.
+        Some("rate_limit") if from_text.kind == FailureKind::QuotaExhausted => {
+            FailureKind::QuotaExhausted
+        }
+        Some("rate_limit") => FailureKind::RateLimited,
+        Some("billing_error" | "account_on_hold") => FailureKind::QuotaExhausted,
+        Some(
+            "authentication_failed"
+            | "oauth_org_not_allowed"
+            | "verification_required"
+            | "cloud_credential_error",
+        ) => FailureKind::Auth,
+        Some("overloaded" | "server_error") => FailureKind::Transient,
+        Some("invalid_request" | "model_not_found") => FailureKind::BadRequest,
+        Some("transport_lost" | "worker_shutdown") => FailureKind::AgentDied,
+        _ => from_text.kind,
+    };
+    Failure::new(kind).with_reset_from(message)
+}
 type SharedWriter = Arc<Mutex<Option<Box<dyn Write + Send>>>>;
 
 /// Where the connection stands.
@@ -183,6 +244,18 @@ struct Shared {
     side: Mutex<HashMap<String, String>>,
     goal: GoalPrompt,
     handoff: HandoffPrompt,
+    /// The blocks of the last turn sent, kept while it failed, for a retry
+    /// to send them again.
+    last_prompt: Mutex<Option<Vec<Value>>>,
+    /// Whether the turn running (or the last one) called a tool: a failed
+    /// turn that did is not sent again as it was, it is asked to go on.
+    turn_acted: AtomicBool,
+    /// A retry waits for the session like a message; its blocks are made
+    /// when it goes, once a new agent's handshake has settled the recap.
+    retry_pending: AtomicBool,
+    /// When the account's limit resets (Unix seconds), as Claude Code last
+    /// reported it rejected.
+    limit_reset: Mutex<Option<u64>>,
 }
 
 /// The agent's tool calls as the session log keeps the built-in loop's: an
@@ -392,6 +465,10 @@ impl AcpRuntime {
             side: Mutex::new(HashMap::new()),
             goal: setup.goal,
             handoff: setup.handoff,
+            last_prompt: Mutex::new(None),
+            turn_acted: AtomicBool::new(false),
+            retry_pending: AtomicBool::new(false),
+            limit_reset: Mutex::new(None),
         });
         let for_reader = Arc::clone(&shared);
         std::thread::spawn(move || for_reader.read_loop(reader));
@@ -428,6 +505,34 @@ impl Backend for AcpRuntime {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(0, message);
+        self.shared.kick();
+        Ok(())
+    }
+
+    /// The failed turn goes again (see [`Shared::retry_blocks`]); a dead
+    /// agent cannot take it — the panel starts a new one first.
+    fn retry(&self) -> Result<(), PromptError> {
+        if matches!(
+            *self
+                .shared
+                .conn
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+            Conn::Failed(_)
+        ) {
+            return Err(PromptError::Stopped);
+        }
+        if self
+            .shared
+            .busy
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err(PromptError::Busy);
+        }
+        self.shared.retry_pending.store(true, Ordering::Release);
+        self.shared.cancel.reset();
+        let _ = self.shared.events.send(AgentEvent::AgentStart);
         self.shared.kick();
         Ok(())
     }
@@ -1157,6 +1262,7 @@ impl Shared {
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
                     .clear();
+                self.retry_pending.store(false, Ordering::Release);
                 let _ = self.events.send(AgentEvent::MessageEnd(Message::Assistant(
                     AssistantMessage::failed(
                         ACP_PROVIDER,
@@ -1170,6 +1276,12 @@ impl Shared {
                 return;
             }
         };
+        if self.retry_pending.swap(false, Ordering::AcqRel) {
+            let prompt = self.retry_blocks();
+            let this = Arc::clone(self);
+            std::thread::spawn(move || this.run_retry(&session_id, prompt));
+            return;
+        }
         // Everything queued goes as one turn: messages typed while the agent
         // works are usually one thought written in pieces.
         let message = UserMessage::merge(
@@ -1282,8 +1394,51 @@ impl Shared {
             prompt.push(json!({ "type": "text", "text": note }));
         }
         prompt.push(json!({ "type": "text", "text": text }));
+        self.send_turn(session_id, prompt);
+    }
+
+    /// A turn that tries the last failed one again: no new message is
+    /// logged, the blocks go as they are.
+    fn run_retry(self: &Arc<Self>, session_id: &str, prompt: Vec<Value>) {
+        let _ = self.events.send(AgentEvent::TurnStart);
+        self.send_turn(session_id, prompt);
+    }
+
+    /// What a retry sends: the failed turn's blocks again when it called no
+    /// tool, so nothing it did is done twice; otherwise a note asking the
+    /// agent to go on from where it stopped — after the recap of the
+    /// conversation, when a restarted agent has not been told it yet.
+    fn retry_blocks(&self) -> Vec<Value> {
+        let last = self
+            .last_prompt
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(prompt) = last.filter(|_| !self.turn_acted.load(Ordering::Acquire)) {
+            return prompt;
+        }
+        let mut blocks = Vec::new();
+        if let Some(recap) = self
+            .recap
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+        {
+            blocks.push(json!({ "type": "text", "text": recap }));
+        }
+        blocks.push(json!({ "type": "text", "text": RETRY_NOTE }));
+        blocks
+    }
+
+    /// Send a turn's blocks and close the turn when the agent answers.
+    fn send_turn(self: &Arc<Self>, session_id: &str, prompt: Vec<Value>) {
+        *self
+            .last_prompt
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(prompt.clone());
+        self.turn_acted.store(false, Ordering::Release);
         self.turn_running.store(true, Ordering::Release);
-        let result = self.request(
+        let result = self.request_classified(
             "session/prompt",
             json!({
                 "sessionId": session_id,
@@ -1292,6 +1447,12 @@ impl Shared {
             Duration::from_secs(60 * 60 * 24),
         );
         self.turn_running.store(false, Ordering::Release);
+        if result.is_ok() {
+            *self
+                .last_prompt
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = None;
+        }
         let stop = match &result {
             Ok(value) => match value["stopReason"].as_str() {
                 Some("cancelled") => StopReason::Aborted,
@@ -1303,13 +1464,31 @@ impl Shared {
         };
         // A cancelled turn reads as the built-in loop's: an aborted message.
         let error = match &result {
-            Err(error) => Some(error.clone()),
+            Err(failure) => Some(failure.text.clone()),
             Ok(_) if stop == StopReason::Aborted => Some("aborted".to_string()),
             Ok(_) => None,
         };
+        let failure = result.as_ref().err().map(|failure| {
+            let mut class = failure.class;
+            // The reset Claude Code reported is exact; one read from the
+            // text is not (a time of day without its zone).
+            if matches!(
+                class.kind,
+                FailureKind::RateLimited | FailureKind::QuotaExhausted
+            ) {
+                if let Some(at) = *self
+                    .limit_reset
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                {
+                    class.resets_at = Some(at);
+                }
+            }
+            class
+        });
         let usage = result.as_ref().map(usage_of).unwrap_or_default();
         self.close_unfinished_calls();
-        self.close_message_with(stop, error, usage);
+        self.close_message_with(stop, error, failure, usage);
         self.flush_steered();
         let _ = self.events.send(AgentEvent::TurnEnd);
         if self.cancel.is_cancelled() {
@@ -1623,12 +1802,18 @@ impl Shared {
     /// Finish the assistant message being streamed, or make one for an
     /// error, so the transcript and the log get a complete message.
     fn close_message(&self, stop: StopReason, error: Option<String>) {
-        self.close_message_with(stop, error, Usage::default());
+        self.close_message_with(stop, error, None, Usage::default());
     }
 
-    /// [`Self::close_message`], with the turn's token usage when the agent
-    /// reported it.
-    fn close_message_with(&self, stop: StopReason, error: Option<String>, usage: Usage) {
+    /// [`Self::close_message`], with the failure classified and the turn's
+    /// token usage when the agent reported it.
+    fn close_message_with(
+        &self,
+        stop: StopReason,
+        error: Option<String>,
+        failure: Option<Failure>,
+        usage: Usage,
+    ) {
         let text = self
             .open_message
             .lock()
@@ -1657,6 +1842,7 @@ impl Shared {
             provider: ACP_PROVIDER.into(),
             model: self.model_name(),
             error_message: error,
+            failure,
             timestamp: now_millis(),
         };
         let _ = self
@@ -1675,6 +1861,17 @@ impl Shared {
     }
 
     fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
+        self.request_classified(method, params, timeout)
+            .map_err(|failure| failure.text)
+    }
+
+    /// [`Self::request`], its failure classified.
+    fn request_classified(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, RpcFailure> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = mpsc::channel();
         self.pending
@@ -1687,7 +1884,7 @@ impl Shared {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .remove(&id);
-            return Err(error);
+            return Err(RpcFailure::new(error, FailureKind::AgentDied));
         }
         let deadline = Instant::now() + timeout;
         loop {
@@ -1697,13 +1894,24 @@ impl Shared {
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
                     .remove(&id);
-                return Err(format!("{method}: no reply within {} s", timeout.as_secs()));
+                return Err(RpcFailure::new(
+                    format!("{method}: no reply within {} s", timeout.as_secs()),
+                    FailureKind::Transient,
+                ));
             }
             match rx.recv_timeout(left.min(Duration::from_millis(100))) {
-                Ok(reply) => return reply.map_err(|error| format!("{method}: {error}")),
+                Ok(reply) => {
+                    return reply.map_err(|failure| RpcFailure {
+                        text: format!("{method}: {}", failure.text),
+                        ..failure
+                    })
+                }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => {
-                    return Err(format!("{method}: the agent closed the connection"))
+                    return Err(RpcFailure::new(
+                        format!("{method}: the agent closed the connection"),
+                        FailureKind::AgentDied,
+                    ))
                 }
             }
         }
@@ -1749,11 +1957,14 @@ impl Shared {
                         continue;
                     }
                     let reply = match message.get("error") {
-                        Some(error) => Err(format!(
-                            "{} (code {})",
-                            error["message"].as_str().unwrap_or("error"),
-                            error["code"]
-                        )),
+                        Some(error) => Err(RpcFailure {
+                            text: format!(
+                                "{} (code {})",
+                                error["message"].as_str().unwrap_or("error"),
+                                error["code"]
+                            ),
+                            class: classify_rpc_error(error),
+                        }),
                         None => Ok(message["result"].clone()),
                     };
                     if let Some(tx) = self
@@ -1930,6 +2141,9 @@ impl Shared {
         {
             return;
         }
+        if kind == "tool_call" {
+            self.turn_acted.store(true, Ordering::Release);
+        }
         match kind {
             "agent_message_chunk" => {
                 let text = update["content"]["text"].as_str().unwrap_or("").to_string();
@@ -2022,6 +2236,13 @@ impl Shared {
                     *self.context.lock().unwrap_or_else(PoisonError::into_inner) =
                         Some((used, size));
                 }
+                let limit = &update["_meta"]["_claude/rateLimit"];
+                if limit.is_object() {
+                    *self
+                        .limit_reset
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner) = rejected_until(limit);
+                }
             }
             "current_model_update" => {
                 if let Some(id) = update["modelId"].as_str() {
@@ -2095,6 +2316,7 @@ impl Shared {
             provider: ACP_PROVIDER.into(),
             model: self.model_name(),
             error_message: None,
+            failure: None,
             timestamp: now_millis(),
         };
         let _ = self
@@ -4086,6 +4308,7 @@ mod tests {
                 provider: "reviewer".into(),
                 model: request.model.id.clone(),
                 error_message: None,
+                failure: None,
                 timestamp: 0,
             }
         }
@@ -4471,6 +4694,99 @@ mod tests {
         );
     }
 
+    /// A usage limit is classified from the error's `errorKind` and text, its
+    /// reset taken from the `_claude/rateLimit` Claude Code reported; a retry
+    /// sends the failed turn's blocks again and logs no new message.
+    #[test]
+    fn a_limited_turn_is_classified_and_retried_as_it_was() {
+        let (to_agent_rx, to_agent_tx) = pipe().unwrap();
+        let (from_agent_rx, from_agent_tx) = pipe().unwrap();
+        let prompts = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let record = Arc::clone(&prompts);
+        std::thread::spawn(move || {
+            let mut out = from_agent_tx;
+            for line in BufReader::new(to_agent_rx).lines() {
+                let Ok(line) = line else { break };
+                let message: Value = serde_json::from_str(&line).unwrap();
+                let id = message["id"].clone();
+                let reply = match message["method"].as_str() {
+                    Some("initialize") => json!({ "result": { "protocolVersion": 1 } }),
+                    Some("session/new") => json!({ "result": { "sessionId": "s1" } }),
+                    Some("session/prompt") => {
+                        let mut seen = record.lock().unwrap();
+                        seen.push(message["params"]["prompt"].clone());
+                        if seen.len() == 1 {
+                            let update = json!({ "jsonrpc": "2.0", "method": "session/update", "params": {
+                                "sessionId": "s1",
+                                "update": { "sessionUpdate": "usage_update", "used": 10, "size": 100,
+                                    "_meta": { "_claude/rateLimit": { "status": "rejected", "resetsAt": 1_900_000_000u64 } } } } });
+                            writeln!(out, "{update}").unwrap();
+                            json!({ "error": { "code": -32603,
+                                "message": "Internal error: You've hit your session limit · resets 9:50pm (Europe/Samara)",
+                                "data": { "errorKind": "rate_limit" } } })
+                        } else {
+                            json!({ "result": { "stopReason": "end_turn" } })
+                        }
+                    }
+                    Some(_) => json!({ "result": {} }),
+                    None => continue,
+                };
+                let mut reply = reply;
+                reply["jsonrpc"] = json!("2.0");
+                reply["id"] = id;
+                writeln!(out, "{reply}").unwrap();
+            }
+        });
+        let cancel = CancelToken::new();
+        let (prompter, permissions) = permission_channel(cancel.clone());
+        let runtime = AcpRuntime::from_streams(
+            "fake",
+            from_agent_rx,
+            to_agent_tx,
+            BackendSetup {
+                cwd: PathBuf::from("/tmp"),
+                prompter,
+                cancel,
+                rules: PermissionRules::default(),
+                persist: None,
+                mode: ModeHandle::new(Mode::default()),
+                system_prompt: String::new(),
+                plan: PlanPrompt::default(),
+                goal: GoalPrompt::default(),
+                handoff: HandoffPrompt::default(),
+                reviewer: ReviewerSetup::default(),
+                host_tools: None,
+                resume: None,
+                history: Vec::new(),
+            },
+            1,
+            AcpFlavor::Generic,
+        );
+        runtime.prompt(UserMessage::text("do it")).unwrap();
+        let events = drain_until_end(&runtime, &permissions, PermissionAnswer::Deny);
+        let failure = events
+            .iter()
+            .find_map(|e| match e {
+                AgentEvent::MessageEnd(Message::Assistant(a)) => a.failure,
+                _ => None,
+            })
+            .expect("the failure is classified");
+        assert_eq!(failure.kind, FailureKind::QuotaExhausted);
+        assert_eq!(failure.resets_at, Some(1_900_000_000));
+
+        runtime.retry().unwrap();
+        let events = drain_until_end(&runtime, &permissions, PermissionAnswer::Deny);
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::MessageEnd(Message::User(_)))),
+            "a retry logs no new message: {events:?}"
+        );
+        let prompts = prompts.lock().unwrap();
+        assert_eq!(prompts.len(), 2);
+        assert_eq!(prompts[0], prompts[1]);
+    }
+
     #[test]
     fn a_failed_handshake_is_reported_on_the_first_prompt() {
         let (_keep, to_agent_tx) = pipe().unwrap();
@@ -4669,6 +4985,7 @@ mod tests {
                 provider: ACP_PROVIDER.into(),
                 model: "fake".into(),
                 error_message: None,
+                failure: None,
                 timestamp: 0,
             }),
         ]

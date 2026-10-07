@@ -27,13 +27,13 @@ const LABEL_COL: usize = 12;
 /// Queued messages the state strip shows before folding the rest into a count.
 pub(crate) const STATE_QUEUED_ROWS: usize = 3;
 
-/// The state strip's lines: a dim dashed rule, then a pause row (`pause`,
-/// when one is pending or active) and a row per queued message (its first
-/// line, cut to the width), at most [`STATE_QUEUED_ROWS`] of them before a
-/// "… N more" row. Empty when there is nothing to show.
+/// The state strip's lines: a dim dashed rule, then a pause row (`pause`:
+/// its glyph and text, when a pause is pending or a retry waits) and a row
+/// per queued message (its first line, cut to the width), at most
+/// [`STATE_QUEUED_ROWS`] of them before a "… N more" row. Empty when there is nothing to show.
 pub(crate) fn state_strip<'a>(
     queued: impl ExactSizeIterator<Item = &'a str>,
-    pause: Option<&str>,
+    pause: Option<(&str, &str)>,
     width: u16,
     colors: &ThemeColors,
 ) -> Vec<Line<'static>> {
@@ -46,10 +46,10 @@ pub(crate) fn state_strip<'a>(
     let width = width as usize;
     let cut = |text: &str, room: usize| termide_ui::path_utils::truncate_right(text, room);
     let mut lines = vec![transcript::separator(width as u16, colors)];
-    if let Some(pause) = pause {
+    if let Some((glyph, pause)) = pause {
         lines.push(Line::from(vec![
             Span::styled(
-                format!("{} ", transcript::PAUSED_GLYPH),
+                format!("{glyph} "),
                 Style::default()
                     .fg(colors.warning)
                     .add_modifier(Modifier::BOLD),
@@ -104,9 +104,16 @@ impl AgentPanel {
     /// messages. Empty when there is nothing to show. A pause that took
     /// effect is the transcript's `‖` line, not a line here.
     pub(crate) fn state_lines(&self, width: u16) -> Vec<Line<'static>> {
-        let pause = self
-            .pause_requested
-            .then(|| termide_i18n::t().agent_notice_will_pause());
+        let wait = self.retry_wait_text();
+        let pause = match &wait {
+            Some(wait) => Some((crate::failure::WAIT_GLYPH, wait.as_str())),
+            None => self.pause_requested.then(|| {
+                (
+                    transcript::PAUSED_GLYPH,
+                    termide_i18n::t().agent_notice_will_pause(),
+                )
+            }),
+        };
         state_strip(
             self.queued_texts.iter().map(String::as_str),
             pause,
@@ -534,7 +541,7 @@ impl AgentPanel {
     /// has taken effect, stop alone while a stop is under way, none while
     /// idle.
     pub(crate) fn run_buttons(&self) -> Vec<RunButton> {
-        let paused = self.paused && !self.is_busy();
+        let paused = (self.paused || self.retry_wait.is_some()) && !self.is_busy();
         if self.is_busy() && self.stop_requested {
             vec![RunButton::Stop]
         } else if paused || (self.is_busy() && self.pause_requested) {
@@ -823,7 +830,8 @@ impl AgentPanel {
         }
         // The strip's pending-pause line (after its rule) withdraws the pause
         // on a click.
-        self.pause_row = (self.pause_requested && state.len() > 1).then_some(state_y + 1);
+        self.pause_row = (self.pause_requested && self.retry_wait.is_none() && state.len() > 1)
+            .then_some(state_y + 1);
         if has_separator {
             let y = form_area.y - 1;
             let style = Style::default().fg(if ctx.is_focused {

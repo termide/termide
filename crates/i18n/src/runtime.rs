@@ -608,6 +608,24 @@ impl Translation for RuntimeTranslation {
         agent_notice_stopping,
         agent_notice_goal_stopped_failed,
         agent_notice_compacting,
+        agent_failure_transient,
+        agent_failure_rate_limited,
+        agent_failure_quota,
+        agent_failure_auth,
+        agent_failure_bad_request,
+        agent_failure_context,
+        agent_failure_agent_died,
+        agent_failure_unknown,
+        agent_failure_retry_now,
+        agent_failure_keep_trying,
+        agent_failure_restart,
+        agent_failure_compact,
+        agent_failure_switch_agent,
+        agent_failure_stop,
+        agent_failure_auth_hint,
+        agent_notice_agent_restarting,
+        agent_notice_retrying,
+        agent_notice_retry_cancelled,
         agent_notice_no_model_choices,
         agent_notice_plan_no_request,
         agent_notice_nothing_to_open,
@@ -689,6 +707,10 @@ impl Translation for RuntimeTranslation {
         settings_agent_auto_reviewer_session,
         settings_agent_auto_reviewer_model,
         settings_agent_auto_reviewer_model_default,
+        settings_agent_on_limit,
+        settings_agent_on_limit_ask,
+        settings_agent_on_limit_wait,
+        settings_agent_on_limit_stop,
         settings_ai_add_connection,
         settings_ai_delete_connection,
         settings_ai_connection_back,
@@ -1065,6 +1087,32 @@ impl Translation for RuntimeTranslation {
 
     fn agent_notice_cannot_continue_fmt(&self, error: &str) -> String {
         self.format("agent_notice_cannot_continue_fmt", &[("error", error)])
+    }
+
+    fn agent_failure_wait_until_fmt(&self, time: &str) -> String {
+        self.format("agent_failure_wait_until_fmt", &[("time", time)])
+    }
+
+    fn agent_failure_resets_fmt(&self, time: &str, left: &str) -> String {
+        self.format(
+            "agent_failure_resets_fmt",
+            &[("time", time), ("left", left)],
+        )
+    }
+
+    fn agent_notice_retry_waiting_fmt(&self, time: &str) -> String {
+        self.format("agent_notice_retry_waiting_fmt", &[("time", time)])
+    }
+
+    fn agent_notice_cannot_retry_fmt(&self, error: &str) -> String {
+        self.format("agent_notice_cannot_retry_fmt", &[("error", error)])
+    }
+
+    fn agent_state_retry_at_fmt(&self, reason: &str, time: &str, left: &str) -> String {
+        self.format(
+            "agent_state_retry_at_fmt",
+            &[("reason", reason), ("time", time), ("left", left)],
+        )
     }
 
     fn agent_notice_cannot_start_fmt(&self, error: &str) -> String {

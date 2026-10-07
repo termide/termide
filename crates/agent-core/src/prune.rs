@@ -88,6 +88,7 @@ pub fn prune_by<'a, T>(
                             content,
                             usage: Usage::default(),
                             error_message: assistant.error_message.clone(),
+                            failure: assistant.failure,
                             provider: assistant.provider.clone(),
                             model: assistant.model.clone(),
                             stop_reason: assistant.stop_reason,
@@ -139,6 +140,7 @@ mod tests {
             provider: "fake".into(),
             model: "m".into(),
             error_message: None,
+            failure: None,
             timestamp: 0,
         })
     }

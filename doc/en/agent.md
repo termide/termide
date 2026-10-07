@@ -23,6 +23,7 @@ max_tokens_per_turn = 0            # default: no limit, the model decides
 reasoning = "high"                 # default; off | minimal | low | medium | high | xhigh | max
 fold_blocks = "immediately"        # immediately (default) | on-finish | never
 bell_on_attention = true           # default; ring the bell when a panel out of sight waits for you
+on_limit = "ask"                   # default; ask | wait | stop — see "When a run fails"
 
 [ai.connections.local]
 provider = "openai_compatible"     # openai_compatible (default), anthropic_compatible, claude_code, codex, gemini_cli
@@ -379,7 +380,7 @@ you have named or sent even one message to is always kept.
 | `F6` | Switch session — open the picker of this directory's sessions |
 | `F7` | Start a new session (the used one is kept in the list) |
 | `F8` | Delete this session (after a confirmation) and start a fresh one; in the banner's list of sessions, delete the one under the cursor |
-| `/name args` + `Enter` | Send the prompt template `name` with `args` filled in, run the command script `name` or send the skill `name` (`/skill:name` when the name is taken); `/compact [focus]` summarises the session, `/undo` takes the last request back, `/new` starts a fresh session, `/fork` copies this one into a new panel, `/clear` starts one after discarding the current session, and `/rename [name]` (or `/name`) renames it; `/pause` stops the run after the current step and `/continue` resumes it (or, before the step ends, cancels the pause); `/loop [interval] <prompt>` re-runs a prompt on an interval (or back-to-back), `/loop stop` (or `Esc`) ends it; `/goal <what to achieve>` works autonomously toward a goal until a judge says it is reached, `/goal stop` (or `Esc`) ends it; `/handoff` briefs the unfinished work, then offers to save it to `HANDOFF.md` or start a new session from it; `/usage` opens the session-info modal and `/prompt` opens the assembled system prompt; `/mcp` lists the MCP servers, `/mcp reload [server]` reads their configuration again (for one server, or all), and `/mcp login <server>` and `/mcp logout <server>` sign in to one and out of it (see [MCP servers](#mcp-servers)) |
+| `/name args` + `Enter` | Send the prompt template `name` with `args` filled in, run the command script `name` or send the skill `name` (`/skill:name` when the name is taken); `/compact [focus]` summarises the session, `/undo` takes the last request back, `/new` starts a fresh session, `/fork` copies this one into a new panel, `/clear` starts one after discarding the current session, and `/rename [name]` (or `/name`) renames it; `/pause` stops the run after the current step and `/continue` resumes it (or, before the step ends, cancels the pause, and after a failed run tries its request again); `/loop [interval] <prompt>` re-runs a prompt on an interval (or back-to-back), `/loop stop` (or `Esc`) ends it; `/goal <what to achieve>` works autonomously toward a goal until a judge says it is reached, `/goal stop` (or `Esc`) ends it; `/handoff` briefs the unfinished work, then offers to save it to `HANDOFF.md` or start a new session from it; `/usage` opens the session-info modal and `/prompt` opens the assembled system prompt; `/mcp` lists the MCP servers, `/mcp reload [server]` reads their configuration again (for one server, or all), and `/mcp login <server>` and `/mcp logout <server>` sign in to one and out of it (see [MCP servers](#mcp-servers)) |
 | `↑` / `↓` | Move between the rows of the input as drawn, a wrapped line included; on the first or last row: take back the messages still queued (`↑`, while any wait), else recall an earlier request of this session, or come back to what you were typing. A recalled request opens with the cursor on the edge the arrow came in through, so repeated presses keep walking history |
 | `Tab` | Complete the highlighted `/command` or `@file` while the list is open |
 | `Ctrl+↑` / `Ctrl+↓`, `PageUp` / `PageDown` | Scroll the session |
@@ -467,6 +468,56 @@ loop, which cannot stop between steps: they show `[■]` alone, and `/pause` say
 controls take the panel border's accent color at rest; `[▶]` is green. Once `[■]` (or `Esc`) is pressed,
 a stop cannot be taken back: until the run has actually stopped, only a red
 `[■]` stays, and pressing it again does nothing.
+
+### When a run fails
+
+A failure is sorted by what can be done about it: a network error or an
+overloaded server, a rate limit, a used-up subscription or quota, a sign-in
+that is needed, a request the model refuses, a full context, an external agent
+whose process stopped. A built-in connection reads the HTTP status, the error
+body and `Retry-After`; Claude Code's adapter reports the kind of error and,
+for a subscription limit, when it resets; for Codex and Gemini CLI the kind
+and the reset time are read from the error's text ("resets 9:50pm", "try again
+in 2 hours"). A time of day is taken on the local clock.
+
+Failures that pass within moments are retried before the run gives up: a
+network error, an overloaded server, a rate limit whose reset is less than a
+minute away — three tries at most, and only while the model has not started
+answering, so nothing is written twice. A limit that resets later ends the run
+at once rather than hang it silently.
+
+Then a card asks what to do, with the error and, when known, the reset time:
+
+- **Wait until 21:50 and try again** — for a limit with a known reset.
+- **Try again now.**
+- **Keep trying until it goes through** — a network outage or a limit without
+  a stated reset: the waits grow from 15 seconds (a minute for a limit) up to
+  5 minutes (30 for a limit).
+- **Compact the context and try again** — a full context, built-in agent only.
+- **Restart the agent and try again** — an external agent that stopped.
+- **Continue with another agent…** — picks an agent and tries the request
+  there; the new agent gets the conversation as on any switch.
+- **Stop** (`Esc`) — gives the request up, and a `/loop` or `/goal` with it.
+
+Trying again sends no new message: the built-in agent asks the model again on
+the conversation as it stands, and an external agent gets the same request
+again, or, when its failed turn had already called tools, a note to carry on
+from where it stopped, so nothing it did is done twice. An external agent
+whose process died is restarted once per request without asking; a second
+death brings the card.
+
+While a request waits to be tried again, the state strip above the input shows
+`↻` with the reason and when the next try goes, counting down; `[▶]` or
+`/continue` tries at once and `[■]` gives the wait up, as does sending a new
+request. `/continue` also tries a failed request again after the card was
+dismissed.
+
+`on_limit` under `[ai]` (in the settings, **On a limit or outage**) decides
+whether the card comes up for failures that pass on their own — a limit, a
+network outage: `ask` (default) shows it, `wait` waits for the reset (or keeps
+trying) without asking — the choice for an unattended `/goal` or `/loop`,
+which carries on afterwards — and `stop` ends the run as before. A sign-in, a
+refused request and a full context always ask.
 
 The closing line is one kind of annotation — a line that marks a moment in the
 conversation rather than holding content. The others are the panel's notices:

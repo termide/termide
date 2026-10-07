@@ -53,6 +53,8 @@ enum WorkerCommand {
     Prompt(UserMessage),
     /// Continue a paused run on the existing transcript (no new message).
     Resume,
+    /// Try again the request a failed reply left unanswered.
+    Retry,
     /// Applied to the agent between runs.
     Update(Box<dyn FnOnce(&mut Agent) + Send>),
     /// Summarise the older part of the transcript now, on the user's word.
@@ -211,6 +213,11 @@ pub trait Backend: Send {
     fn resume(&self) -> Result<(), PromptError> {
         Err(PromptError::Unsupported)
     }
+    /// Try again the request the last run failed on, without a new message
+    /// from the user; the default reports it is unsupported.
+    fn retry(&self) -> Result<(), PromptError> {
+        Err(PromptError::Unsupported)
+    }
     fn is_busy(&self) -> bool;
     /// Everything that happened since the last call, without blocking.
     fn drain(&self) -> Vec<AgentEvent>;
@@ -360,6 +367,9 @@ impl Backend for AgentRuntime {
     fn resume(&self) -> Result<(), PromptError> {
         AgentRuntime::resume(self)
     }
+    fn retry(&self) -> Result<(), PromptError> {
+        AgentRuntime::retry(self)
+    }
     fn is_busy(&self) -> bool {
         AgentRuntime::is_busy(self)
     }
@@ -436,6 +446,12 @@ impl AgentRuntime {
                         }
                         WorkerCommand::Resume => {
                             agent.resume(hooks.as_mut(), &worker_cancel, &mut |event| {
+                                let _ = event_tx.send(event);
+                            });
+                            worker_busy.store(false, Ordering::Release);
+                        }
+                        WorkerCommand::Retry => {
+                            agent.retry(hooks.as_mut(), &worker_cancel, &mut |event| {
                                 let _ = event_tx.send(event);
                             });
                             worker_busy.store(false, Ordering::Release);
@@ -616,6 +632,17 @@ impl AgentRuntime {
     /// [`PromptError::Busy`] while a run is active, [`PromptError::Stopped`]
     /// once the worker is gone.
     pub fn resume(&self) -> Result<(), PromptError> {
+        self.start(WorkerCommand::Resume)
+    }
+
+    /// Try again the request the last run failed on. Fails as
+    /// [`Self::resume`] does.
+    pub fn retry(&self) -> Result<(), PromptError> {
+        self.start(WorkerCommand::Retry)
+    }
+
+    /// Hand the worker a command that starts a run.
+    fn start(&self, command: WorkerCommand) -> Result<(), PromptError> {
         if self.worker.is_none() {
             return Err(PromptError::Stopped);
         }
@@ -627,7 +654,7 @@ impl AgentRuntime {
             return Err(PromptError::Busy);
         }
         self.cancel.reset();
-        self.commands.send(WorkerCommand::Resume).map_err(|_| {
+        self.commands.send(command).map_err(|_| {
             self.busy.store(false, Ordering::Release);
             PromptError::Stopped
         })

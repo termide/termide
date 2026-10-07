@@ -206,6 +206,9 @@ impl AgentPanel {
                         termide_i18n::t().agent_notice_already_running(),
                         NoticeKind::Info,
                     );
+                } else if self.retry_wait.is_some() || self.retry_ready {
+                    // A failed request: tried again now.
+                    self.retry_now();
                 } else {
                     self.notice(
                         termide_i18n::t().agent_notice_nothing_to_continue(),
@@ -402,6 +405,17 @@ impl AgentPanel {
             self.runtime.steer(message);
             self.set_queued(self.runtime.queue_lens());
         } else {
+            // A new request takes over from a failed one, and from a wait to
+            // try it again.
+            if self.retry_wait.take().is_some() {
+                self.notice(
+                    termide_i18n::t().agent_notice_retry_cancelled(),
+                    NoticeKind::Info,
+                );
+            }
+            self.retry_attempts = 0;
+            self.retry_ready = false;
+            self.restarted = false;
             // A fresh turn starts: surface the system prompt as a folded `#`
             // block when it is new or has changed since it was last shown, so it
             // sits just above this message.

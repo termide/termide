@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Provider-agnostic coding agent core: messages, tools, agent loop and steering queues"
 
 [dependencies]
+chrono.workspace = true
 dunce.workspace = true
 log.workspace = true
 serde.workspace = true

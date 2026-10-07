@@ -9,10 +9,10 @@ use ratatui::style::Modifier;
 use ratatui::text::Line;
 use termide_agent_core::{
     permission_channel, question_channel, suggestion_channel, Agent, AgentEvent, AssistantContent,
-    AssistantMessage, CancelToken, EntryKind, Message, PermissionAnswer, PermissionPrompter,
-    QuestionAnswer, QuestionReply, Request, ShellOutput, ShellRunner, StopReason, StreamEvent,
-    Suggestion, SuggestionReply, ThinkingLevel, Timing, ToolCall, ToolContext, ToolDecision,
-    ToolResultMessage, ToolUpdate, Usage, UserMessage, MODEL_OPTION,
+    AssistantMessage, CancelToken, EntryKind, LimitPolicy, Message, PermissionAnswer,
+    PermissionPrompter, QuestionAnswer, QuestionReply, Request, ShellOutput, ShellRunner,
+    StopReason, StreamEvent, Suggestion, SuggestionReply, ThinkingLevel, Timing, ToolCall,
+    ToolContext, ToolDecision, ToolResultMessage, ToolUpdate, Usage, UserMessage, MODEL_OPTION,
 };
 use termide_core::{ConfirmAction, LinkTarget, PanelConfig, SegmentKind};
 use termide_ui::{ChoiceAction, ChoiceForm};
@@ -117,6 +117,7 @@ fn reply(text: &str) -> AssistantMessage {
         provider: "scripted".into(),
         model: "m".into(),
         error_message: None,
+        failure: None,
         timestamp: 0,
     }
 }
@@ -247,6 +248,7 @@ fn setup_with(provider: Arc<Scripted>) -> AgentPanelSetup {
         // records what reached the shell, so nothing runs for real here.
         shell_run: None,
         fold: FoldMode::OnFinish,
+        on_limit: LimitPolicy::Ask,
     }
 }
 
@@ -5925,6 +5927,7 @@ impl Backend for External {
                 provider: "acp".into(),
                 model: "outside".into(),
                 error_message: None,
+                failure: None,
                 timestamp: 0,
             },
         )));
@@ -7882,4 +7885,134 @@ fn running_a_command_leaves_shell_mode() {
     assert!(!panel.shell_mode, "each command switches the mode on anew");
     wait_for_commands(&mut panel, &seen, 1);
     wait_for_bang_idle(&mut panel);
+}
+
+/// A reply that failed on a usage limit resetting in an hour.
+fn limited() -> AssistantMessage {
+    let resets_at = crate::failure::unix_now() + 3_600;
+    AssistantMessage::failed(
+        "scripted",
+        "m",
+        StopReason::Error,
+        "You've hit your session limit",
+    )
+    .with_failure(termide_agent_core::Failure {
+        kind: termide_agent_core::FailureKind::QuotaExhausted,
+        resets_at: Some(resets_at),
+    })
+}
+
+/// The rows of the failure card that is up.
+fn failure_rows(panel: &AgentPanel) -> Vec<String> {
+    match &panel.pending {
+        Some(Pending::Failure { form, .. }) => form.options().to_vec(),
+        _ => panic!("no failure card is up"),
+    }
+}
+
+#[test]
+fn a_failed_run_offers_what_fits_and_tries_again_on_the_same_request() {
+    let mut panel = panel(vec![limited(), reply("done")]);
+    panel.send("do it".to_string());
+    settle(&mut panel);
+
+    let rows = failure_rows(&panel);
+    assert!(rows[0].starts_with("Wait until"), "{rows:?}");
+    assert!(rows.iter().any(|row| row == "Try again now"), "{rows:?}");
+    assert!(
+        rows.iter()
+            .any(|row| row.starts_with("Continue with another agent")),
+        "two agents are defined: {rows:?}"
+    );
+    let now = rows.iter().position(|row| row == "Try again now").unwrap();
+    panel.apply_form_action(ChoiceAction::Chosen(now));
+    settle(&mut panel);
+
+    let items = panel.transcript().items();
+    let users = items
+        .iter()
+        .filter(|item| matches!(item, Item::User { .. }))
+        .count();
+    assert_eq!(
+        users, 1,
+        "the request is not sent a second time as a message"
+    );
+    assert!(items
+        .iter()
+        .any(|item| matches!(item, Item::Assistant { text, error: None, .. } if text == "done")));
+    assert!(panel.pending.is_none());
+}
+
+#[test]
+fn waiting_policy_tries_again_unasked_once_the_wait_is_over() {
+    let mut panel = panel(vec![limited(), reply("done")]);
+    panel.on_limit = LimitPolicy::Wait;
+    panel.send("do it".to_string());
+    settle(&mut panel);
+
+    assert!(panel.pending.is_none(), "nothing is asked");
+    let wait = panel.retry_wait.expect("the reset is waited for");
+    assert!(wait.wall > crate::failure::unix_now() + 3_000);
+    assert!(panel
+        .retry_wait_text()
+        .is_some_and(|text| text.contains("Usage limit reached")));
+    // The reset comes.
+    panel.retry_wait.as_mut().unwrap().at = Instant::now();
+    panel.tick();
+    settle(&mut panel);
+
+    assert!(panel.retry_wait.is_none());
+    assert!(panel
+        .transcript()
+        .items()
+        .iter()
+        .any(|item| matches!(item, Item::Assistant { text, error: None, .. } if text == "done")));
+}
+
+#[test]
+fn a_new_request_takes_over_from_a_wait() {
+    let mut panel = panel(vec![limited(), reply("other")]);
+    panel.on_limit = LimitPolicy::Wait;
+    panel.send("do it".to_string());
+    settle(&mut panel);
+    assert!(panel.retry_wait.is_some());
+
+    panel.send("something else".to_string());
+    assert!(panel.retry_wait.is_none());
+    settle(&mut panel);
+    assert!(panel.transcript().items().iter().any(
+        |item| matches!(item, Item::Notice { text, .. } if text.contains("no longer waiting"))
+    ));
+}
+
+#[test]
+fn continue_tries_a_failed_request_again() {
+    let mut panel = panel(vec![limited(), reply("done")]);
+    panel.on_limit = LimitPolicy::Stop;
+    panel.send("do it".to_string());
+    settle(&mut panel);
+    assert!(panel.pending.is_none(), "the stop policy asks nothing");
+
+    type_text(&mut panel, "/continue");
+    panel.submit();
+    settle(&mut panel);
+    assert!(panel
+        .transcript()
+        .items()
+        .iter()
+        .any(|item| matches!(item, Item::Assistant { text, error: None, .. } if text == "done")));
+}
+
+#[test]
+fn dismissing_the_failure_card_ends_the_goal() {
+    let mut panel = panel(vec![limited()]);
+    type_text(&mut panel, "/goal get it done");
+    panel.submit();
+    settle(&mut panel);
+    assert!(panel.goal_task.is_some(), "the goal waits on the card");
+    assert!(matches!(panel.pending, Some(Pending::Failure { .. })));
+
+    panel.apply_form_action(ChoiceAction::Cancelled);
+    assert!(panel.goal_task.is_none());
+    assert!(panel.pending.is_none());
 }

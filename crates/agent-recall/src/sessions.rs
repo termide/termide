@@ -752,6 +752,7 @@ pub(crate) mod tests {
             provider: "p".into(),
             model: "m".into(),
             error_message: None,
+            failure: None,
             timestamp: 0,
         })
     }

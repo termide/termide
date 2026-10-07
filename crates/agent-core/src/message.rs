@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::failure::Failure;
 use crate::permissions::PermissionNote;
 
 /// Milliseconds since the Unix epoch, used to timestamp transcript entries.
@@ -265,6 +266,10 @@ pub struct AssistantMessage {
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
+    /// What kind of failure `error_message` reports, when the provider
+    /// classified it; see [`Self::classify_failure`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<Failure>,
     pub timestamp: u64,
 }
 
@@ -285,8 +290,29 @@ impl AssistantMessage {
             provider: provider.into(),
             model: model.into(),
             error_message: Some(error_message.into()),
+            failure: None,
             timestamp: now_millis(),
         }
+    }
+
+    /// The message with its failure classified as `failure`.
+    #[must_use]
+    pub fn with_failure(mut self, failure: Failure) -> Self {
+        self.failure = Some(failure);
+        self
+    }
+
+    /// The failure this message reports, classified: as the provider did,
+    /// or from its error text when it did not. `None` unless the call
+    /// failed (an abort is no failure).
+    #[must_use]
+    pub fn classify_failure(&self) -> Option<Failure> {
+        if self.stop_reason != StopReason::Error {
+            return None;
+        }
+        Some(self.failure.unwrap_or_else(|| {
+            Failure::from_text(self.error_message.as_deref().unwrap_or_default())
+        }))
     }
 
     pub fn tool_calls(&self) -> impl Iterator<Item = &ToolCall> {
@@ -477,6 +503,7 @@ mod tests {
             provider: "fake".into(),
             model: "m".into(),
             error_message: None,
+            failure: None,
             timestamp: 1,
         };
         let messages = vec![

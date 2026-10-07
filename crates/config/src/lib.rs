@@ -35,7 +35,7 @@ pub use settings::{
     VaultSettings, VfsSettings, ViewerSettings, WebSettings, DEFAULT_CONTEXT_WINDOW_FALLBACK,
 };
 /// The type of `[ai] reasoning`.
-pub use termide_agent_core::ThinkingLevel;
+pub use termide_agent_core::{LimitPolicy, ThinkingLevel};
 pub use xdg::{get_config_dir, get_data_dir};
 
 use anyhow::Result;
@@ -767,6 +767,14 @@ mod layered_load_tests {
         );
         assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
         assert_eq!(loaded.effective.general.project_retention_days, 9);
+    }
+
+    #[test]
+    fn the_limit_policy_reads_from_the_ai_table() {
+        let (loaded, _dir) = layered("[ai]\non_limit = \"wait\"\n", None);
+        assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+        assert_eq!(loaded.effective.ai.on_limit, LimitPolicy::Wait);
+        assert_eq!(Config::default().ai.on_limit, LimitPolicy::Ask);
     }
 
     #[test]

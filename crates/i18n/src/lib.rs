@@ -775,6 +775,25 @@ pub trait Translation: Send + Sync {
     fn agent_notice_stopping(&self) -> &str;
     fn agent_notice_goal_stopped_failed(&self) -> &str;
     fn agent_notice_compacting(&self) -> &str;
+    /// Agent panel: the title of the card after a failed run, by kind.
+    fn agent_failure_transient(&self) -> &str;
+    fn agent_failure_rate_limited(&self) -> &str;
+    fn agent_failure_quota(&self) -> &str;
+    fn agent_failure_auth(&self) -> &str;
+    fn agent_failure_bad_request(&self) -> &str;
+    fn agent_failure_context(&self) -> &str;
+    fn agent_failure_agent_died(&self) -> &str;
+    fn agent_failure_unknown(&self) -> &str;
+    fn agent_failure_retry_now(&self) -> &str;
+    fn agent_failure_keep_trying(&self) -> &str;
+    fn agent_failure_restart(&self) -> &str;
+    fn agent_failure_compact(&self) -> &str;
+    fn agent_failure_switch_agent(&self) -> &str;
+    fn agent_failure_stop(&self) -> &str;
+    fn agent_failure_auth_hint(&self) -> &str;
+    fn agent_notice_agent_restarting(&self) -> &str;
+    fn agent_notice_retrying(&self) -> &str;
+    fn agent_notice_retry_cancelled(&self) -> &str;
     fn agent_notice_no_model_choices(&self) -> &str;
     fn agent_notice_plan_no_request(&self) -> &str;
     fn agent_notice_nothing_to_open(&self) -> &str;
@@ -808,6 +827,12 @@ pub trait Translation: Send + Sync {
     fn agent_suggest_denied_plan(&self) -> &str;
     fn agent_suggest_denied_rule(&self) -> &str;
     fn agent_notice_cannot_continue_fmt(&self, error: &str) -> String;
+    fn agent_failure_wait_until_fmt(&self, time: &str) -> String;
+    fn agent_failure_resets_fmt(&self, time: &str, left: &str) -> String;
+    fn agent_notice_retry_waiting_fmt(&self, time: &str) -> String;
+    fn agent_notice_cannot_retry_fmt(&self, error: &str) -> String;
+    /// Agent panel state strip: a failed request waiting to be tried again.
+    fn agent_state_retry_at_fmt(&self, reason: &str, time: &str, left: &str) -> String;
     fn agent_notice_cannot_start_fmt(&self, error: &str) -> String;
     fn agent_notice_cannot_check_goal_fmt(&self, error: &str) -> String;
     fn agent_notice_cannot_handoff_fmt(&self, error: &str) -> String;
@@ -1025,6 +1050,11 @@ pub trait Translation: Send + Sync {
     fn settings_agent_auto_reviewer_session(&self) -> &str;
     fn settings_agent_auto_reviewer_model(&self) -> &str;
     fn settings_agent_auto_reviewer_model_default(&self) -> &str;
+    /// AI settings: what a run stopped by a limit or an outage does.
+    fn settings_agent_on_limit(&self) -> &str;
+    fn settings_agent_on_limit_ask(&self) -> &str;
+    fn settings_agent_on_limit_wait(&self) -> &str;
+    fn settings_agent_on_limit_stop(&self) -> &str;
     /// Settings modal: AI tab, web tools field labels.
     fn settings_web_backend(&self) -> &str;
     /// AI menu: the row that shows or hides the agents' web browser window.

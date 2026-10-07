@@ -155,17 +155,17 @@ impl AnthropicProvider {
         let response = match http.send_string(body) {
             Ok(response) => response,
             Err(ureq::Error::Status(code, response)) => {
+                let retry_after = response.header("retry-after").map(str::to_string);
                 let text = response.into_string().unwrap_or_default();
-                return Err(Failure {
-                    message: format!("HTTP {code}: {}", error_text(&text)),
-                    retryable: matches!(code, 408 | 409 | 425 | 429 | 500..=599),
-                });
+                return Err(Failure::http(
+                    code,
+                    &text,
+                    retry_after.as_deref(),
+                    error_text(&text),
+                ));
             }
             Err(ureq::Error::Transport(transport)) => {
-                return Err(Failure {
-                    message: format!("transport error: {transport}"),
-                    retryable: true,
-                });
+                return Err(Failure::transport(format!("transport error: {transport}")));
             }
         };
 
@@ -190,10 +190,7 @@ impl AnthropicProvider {
                         partial.error_message = Some(format!("stream interrupted: {error}"));
                         return Ok(partial);
                     }
-                    return Err(Failure {
-                        message: format!("stream error: {error}"),
-                        retryable: true,
-                    });
+                    return Err(Failure::transport(format!("stream error: {error}")));
                 }
             }
             let Some(data) = sse_data(line.trim_end()) else {
@@ -209,10 +206,7 @@ impl AnthropicProvider {
                             partial.error_message = Some(message);
                             return Ok(partial);
                         }
-                        return Err(Failure {
-                            message,
-                            retryable: false,
-                        });
+                        return Err(Failure::in_stream(&event.to_string(), message));
                     }
                     acc.feed(&event, on_event);
                 }
@@ -725,6 +719,7 @@ impl Accumulator {
             provider: provider.to_string(),
             model: model.to_string(),
             error_message: None,
+            failure: None,
             timestamp: now_millis(),
         }
     }
@@ -815,6 +810,7 @@ mod tests {
             provider: "anthropic".into(),
             model: model.into(),
             error_message: None,
+            failure: None,
             timestamp: 0,
         })
     }
@@ -882,6 +878,7 @@ mod tests {
                 provider: "anthropic".into(),
                 model: "claude-sonnet-4-5".into(),
                 error_message: None,
+                failure: None,
                 timestamp: 0,
             }),
             Message::ToolResult(ToolResultMessage::text(&call, "contents")),

@@ -110,6 +110,7 @@ mod tests {
             provider: "fake".into(),
             model: "m".into(),
             error_message: None,
+            failure: None,
             timestamp: 0,
         })
     }

@@ -608,7 +608,10 @@ impl AgentPanel {
                     .with_description(termide_i18n::t().agent_cmd_desc_pause()),
             );
         }
-        if (self.paused || self.pause_requested) && CONTINUE_COMMAND.starts_with(prefix) {
+        let can_continue = self.paused
+            || self.pause_requested
+            || (!self.is_busy() && (self.retry_wait.is_some() || self.retry_ready));
+        if can_continue && CONTINUE_COMMAND.starts_with(prefix) {
             items.push(
                 CompletionItem::new(CONTINUE_COMMAND)
                     .with_label(format!("/{CONTINUE_COMMAND}"))
@@ -1224,8 +1227,14 @@ impl AgentPanel {
                         self.request_pause();
                     }
                     RunButton::Continue if self.paused && !self.is_busy() => self.resume(),
+                    RunButton::Continue if self.retry_wait.is_some() && !self.is_busy() => {
+                        self.retry_now();
+                    }
                     RunButton::Continue => self.cancel_pause(),
                     RunButton::Stop if self.paused && !self.is_busy() => self.stop_paused(),
+                    RunButton::Stop if self.retry_wait.is_some() && !self.is_busy() => {
+                        self.cancel_retry_wait()
+                    }
                     RunButton::Stop => self.abort(),
                 }
                 return vec![PanelEvent::NeedsRedraw];

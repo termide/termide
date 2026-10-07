@@ -1793,6 +1793,7 @@ fn agent_setup(
         session_dir,
         session,
         shell_run: Some(shell_run),
+        on_limit: settings.on_limit,
     }
 }
 
@@ -2427,6 +2428,7 @@ mod tests {
                     provider: "acp".into(),
                     model: "m".into(),
                     error_message: None,
+                    failure: None,
                     timestamp: 0,
                 }))
             };

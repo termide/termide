@@ -4,7 +4,7 @@
 //! each tab, how to read/write them on a `Config`, and the type markers used
 //! by the renderer. It deliberately contains no UI state or rendering logic.
 
-use termide_config::Config;
+use termide_config::{Config, LimitPolicy};
 use termide_i18n as i18n;
 use termide_theme::Theme;
 
@@ -238,6 +238,10 @@ pub(super) fn fields_for_tab(tab: SettingsTab) -> Vec<FieldDescriptor> {
                 label: t.settings_agent_auto_reviewer_model(),
                 field_type: FieldType::OptionalText,
             },
+            FieldDescriptor {
+                label: t.settings_agent_on_limit(),
+                field_type: FieldType::Enum,
+            },
         ],
         SettingsTab::Connection => super::connection::connection_fields(),
         SettingsTab::Keybindings => vec![],
@@ -330,6 +334,7 @@ pub(super) fn get_field_value(config: &Config, tab: SettingsTab, index: usize) -
             }
             AI_PERMISSION_MODE_FIELD => permission_mode_label(config.ai.permission_mode()),
             AI_AUTO_REVIEWER_FIELD => auto_reviewer_label(&config.ai.auto_reviewer.connection),
+            AI_ON_LIMIT_FIELD => on_limit_label(config.ai.on_limit),
             AI_AUTO_REVIEWER_MODEL_FIELD => {
                 if config.ai.auto_reviewer.model.is_empty() {
                     i18n::t()
@@ -516,6 +521,17 @@ pub(super) fn enum_options(config: &Config, tab: SettingsTab, index: usize) -> O
             let labels = values.iter().map(|v| permission_mode_label(v)).collect();
             (values, labels, config.ai.permission_mode().to_string())
         }
+        (SettingsTab::Ai, AI_ON_LIMIT_FIELD) => {
+            let values: Vec<String> = LimitPolicy::ALL
+                .iter()
+                .map(|p| p.label().to_string())
+                .collect();
+            let labels = LimitPolicy::ALL
+                .iter()
+                .map(|p| on_limit_label(*p))
+                .collect();
+            (values, labels, config.ai.on_limit.label().to_string())
+        }
         (SettingsTab::Ai, AI_AUTO_REVIEWER_FIELD) => {
             let values = auto_reviewer_choices(config);
             let labels = values.iter().map(|v| auto_reviewer_label(v)).collect();
@@ -562,6 +578,11 @@ pub(super) fn apply_enum_value(config: &mut Config, tab: SettingsTab, index: usi
         (SettingsTab::Ai, 4) => config.ai.web.engine = value.to_string(),
         (SettingsTab::Ai, 5) => config.ai.web.display = value.to_string(),
         (SettingsTab::Ai, AI_PERMISSION_MODE_FIELD) => config.ai.set_permission_mode(value),
+        (SettingsTab::Ai, AI_ON_LIMIT_FIELD) => {
+            if let Some(policy) = LimitPolicy::ALL.into_iter().find(|p| p.label() == value) {
+                config.ai.on_limit = policy;
+            }
+        }
         (SettingsTab::Ai, AI_AUTO_REVIEWER_FIELD) => {
             config.ai.auto_reviewer.connection = value.to_string();
         }
@@ -589,6 +610,35 @@ fn cycle_fold_blocks(config: &mut Config, forward: bool) {
         .unwrap_or(0);
     let len = all.len();
     config.ai.fold_blocks = all[if forward {
+        (pos + 1) % len
+    } else {
+        (pos + len - 1) % len
+    }];
+}
+
+/// The AI tab's field for what a run stopped by a limit or an outage does.
+pub(super) const AI_ON_LIMIT_FIELD: usize = 10;
+
+/// A limit policy's localized name.
+fn on_limit_label(policy: LimitPolicy) -> String {
+    let t = i18n::t();
+    match policy {
+        LimitPolicy::Ask => t.settings_agent_on_limit_ask(),
+        LimitPolicy::Wait => t.settings_agent_on_limit_wait(),
+        LimitPolicy::Stop => t.settings_agent_on_limit_stop(),
+    }
+    .to_string()
+}
+
+/// Step the limit policy to the next (or previous) one, wrapping.
+fn cycle_on_limit(config: &mut Config, forward: bool) {
+    let all = LimitPolicy::ALL;
+    let pos = all
+        .iter()
+        .position(|p| *p == config.ai.on_limit)
+        .unwrap_or(0);
+    let len = all.len();
+    config.ai.on_limit = all[if forward {
         (pos + 1) % len
     } else {
         (pos + len - 1) % len
@@ -746,6 +796,7 @@ pub(super) fn cycle_enum_forward(config: &mut Config, tab: SettingsTab, index: u
             3..=5 => cycle_web_field(config, index, true),
             AI_PERMISSION_MODE_FIELD => cycle_permission_mode(config, true),
             AI_AUTO_REVIEWER_FIELD => cycle_auto_reviewer(config, true),
+            AI_ON_LIMIT_FIELD => cycle_on_limit(config, true),
             _ => {}
         },
         _ => {}
@@ -798,6 +849,7 @@ pub(super) fn cycle_enum_backward(config: &mut Config, tab: SettingsTab, index: 
             3..=5 => cycle_web_field(config, index, false),
             AI_PERMISSION_MODE_FIELD => cycle_permission_mode(config, false),
             AI_AUTO_REVIEWER_FIELD => cycle_auto_reviewer(config, false),
+            AI_ON_LIMIT_FIELD => cycle_on_limit(config, false),
             _ => {}
         },
         _ => {}
@@ -854,8 +906,8 @@ mod field_index_tests {
         let fields = fields_for_tab(SettingsTab::Ai);
         assert_eq!(
             fields.len(),
-            10,
-            "the permission mode and its reviewer and model follow the web fields"
+            11,
+            "the permission mode, its reviewer and model, then the limit policy follow the web fields"
         );
         assert!(matches!(fields[6].field_type, FieldType::OptionalText));
         assert!(matches!(fields[7].field_type, FieldType::Enum));
@@ -973,6 +1025,24 @@ mod enum_option_tests {
     }
 
     #[test]
+    fn the_limit_policy_cycles_and_reads_back() {
+        let mut config = Config::default();
+        let field = AI_ON_LIMIT_FIELD;
+        assert_eq!(fields_for_tab(SettingsTab::Ai).len(), field + 1);
+        assert_eq!(config.ai.on_limit, LimitPolicy::Ask);
+        cycle_enum_forward(&mut config, SettingsTab::Ai, field);
+        assert_eq!(config.ai.on_limit, LimitPolicy::Wait);
+        cycle_enum_backward(&mut config, SettingsTab::Ai, field);
+        cycle_enum_backward(&mut config, SettingsTab::Ai, field);
+        assert_eq!(config.ai.on_limit, LimitPolicy::Stop);
+        apply_enum_value(&mut config, SettingsTab::Ai, field, "wait");
+        assert_eq!(config.ai.on_limit, LimitPolicy::Wait);
+        let options = enum_options(&config, SettingsTab::Ai, field).unwrap();
+        assert_eq!(options.values, ["ask", "wait", "stop"]);
+        assert_eq!(options.current, Some(1));
+    }
+
+    #[test]
     fn the_auto_reviewer_is_the_session_model_or_a_model_connection() {
         let mut config = Config::default();
         for (name, provider) in [("cloud", "anthropic_compatible"), ("cli", "claude_code")] {
@@ -985,7 +1055,7 @@ mod enum_option_tests {
             );
         }
         let field = AI_AUTO_REVIEWER_FIELD;
-        assert_eq!(fields_for_tab(SettingsTab::Ai).len(), field + 2);
+        assert_eq!(AI_AUTO_REVIEWER_MODEL_FIELD, field + 1);
         let options = enum_options(&config, SettingsTab::Ai, field).unwrap();
         // A CLI agent reviews through its subscription.
         assert_eq!(options.values, ["", "cli", "cloud"]);

@@ -5,12 +5,14 @@
 use std::time::Instant;
 
 use termide_agent_core::{
-    shell_parts, CommandScript, Decision, Mode, PermissionAnswer, PermissionEnvelope, PersistScope,
-    QuestionAnswer, QuestionEnvelope, QuestionReply, SuggestionEnvelope, SuggestionReply,
+    shell_parts, CommandScript, Decision, Failure, Mode, PermissionAnswer, PermissionEnvelope,
+    PersistScope, QuestionAnswer, QuestionEnvelope, QuestionReply, SuggestionEnvelope,
+    SuggestionReply,
 };
 use termide_core::PanelEvent;
 use termide_ui::{ChoiceAction, ChoiceForm};
 
+use crate::failure::FailureChoice;
 use crate::rewind::{RewindPoint, RewindScope};
 use crate::{millis, AgentPanel, Item, NoticeKind};
 
@@ -69,6 +71,14 @@ pub(crate) enum Pending {
         /// What each row of the form answers, in their order.
         answers: Vec<SuggestionReply>,
     },
+    /// A run stopped on a failure: try again, wait, restart the agent, go
+    /// on with another — or stop.
+    Failure {
+        form: ChoiceForm,
+        /// What each row does, in their order.
+        choices: Vec<FailureChoice>,
+        failure: Failure,
+    },
 }
 
 impl Pending {
@@ -81,7 +91,8 @@ impl Pending {
             | Pending::Rewind { form, .. }
             | Pending::Plan { form, .. }
             | Pending::Handoff { form, .. }
-            | Pending::Suggestion { form, .. } => form,
+            | Pending::Suggestion { form, .. }
+            | Pending::Failure { form, .. } => form,
         }
     }
 
@@ -94,7 +105,8 @@ impl Pending {
             | Pending::Rewind { form, .. }
             | Pending::Plan { form, .. }
             | Pending::Handoff { form, .. }
-            | Pending::Suggestion { form, .. } => form,
+            | Pending::Suggestion { form, .. }
+            | Pending::Failure { form, .. } => form,
         }
     }
 }
@@ -797,6 +809,25 @@ impl AgentPanel {
                     self.end_permission_wait();
                     let _ = envelope.reply.send(SuggestionReply::Declined);
                 }
+            }
+            (Some(Pending::Failure { .. }), ChoiceAction::Chosen(index)) => {
+                let Some(Pending::Failure {
+                    choices, failure, ..
+                }) = self.pending.take()
+                else {
+                    return true;
+                };
+                match choices.get(index) {
+                    Some(&choice) => {
+                        let events = self.choose_after_failure(choice, failure);
+                        self.pending_events.extend(events);
+                    }
+                    None => self.give_up_after_failure(),
+                }
+            }
+            (Some(Pending::Failure { .. }), ChoiceAction::Cancelled | ChoiceAction::Custom(_)) => {
+                self.pending = None;
+                self.give_up_after_failure();
             }
             (None, _) => {}
         }

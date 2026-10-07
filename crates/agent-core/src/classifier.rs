@@ -608,6 +608,7 @@ mod tests {
                     provider: "canned".into(),
                     model: "m".into(),
                     error_message: None,
+                    failure: None,
                     timestamp: 0,
                 },
                 seen: Mutex::new(Vec::new()),
