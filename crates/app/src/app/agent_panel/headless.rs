@@ -127,7 +127,7 @@ pub fn run_agent_headless(
         Box::new(AutoDenyPrompter::new(refusals.unattended_headless.clone())),
     )
     .with_classifier(Box::new(
-        reviewer_setup(settings, &dirs).classifier(cancel.clone()),
+        reviewer_setup(settings, &dirs, name).classifier(cancel.clone()),
     ))
     .with_refusals(refusals);
     let stdout = std::io::stdout();

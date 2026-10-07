@@ -24,6 +24,7 @@ pub(super) const REASONING_PARAM: usize = 7;
 pub(super) const DEFAULT: usize = 8;
 pub(super) const SUBAGENTS: usize = 9;
 pub(super) const MAX_REQUESTS: usize = 10;
+pub(super) const REVIEWER: usize = 11;
 
 /// The connection page, while one is open.
 #[derive(Debug, Clone)]
@@ -112,6 +113,10 @@ pub(super) fn connection_fields() -> Vec<FieldDescriptor> {
         FieldDescriptor {
             label: t.settings_ai_connection_max_requests(),
             field_type: FieldType::Number,
+        },
+        FieldDescriptor {
+            label: t.settings_agent_auto_reviewer(),
+            field_type: FieldType::Enum,
         },
     ]
 }
@@ -225,7 +230,13 @@ impl SettingsModal {
         if !cli {
             rows.push(Field(MAX_REQUESTS));
         }
-        rows.extend([Field(SUBAGENTS), Field(DEFAULT), Spacer, ConnectionButtons]);
+        rows.extend([
+            Field(SUBAGENTS),
+            Field(REVIEWER),
+            Field(DEFAULT),
+            Spacer,
+            ConnectionButtons,
+        ]);
         rows
     }
 
@@ -317,6 +328,7 @@ impl SettingsModal {
             return;
         }
         self.retarget_subagents(name, "");
+        self.retarget_reviewers(name, "");
         // The default moves to the first left, named, so it stays put.
         if self.config.ai.connection == name {
             self.config.ai.connection = self
@@ -398,8 +410,25 @@ impl SettingsModal {
                 i18n::t().settings_value_no_limit().to_string()
             }
             MAX_REQUESTS => connection.max_concurrent_requests.to_string(),
+            REVIEWER => self.reviewer_label(&connection.reviewer),
             _ => String::new(),
         }
+    }
+
+    /// How the reviewer `value` of a connection reads: a connection's name,
+    /// or for an empty one the default, `[ai.auto_reviewer]`, it falls to.
+    fn reviewer_label(&self, value: &str) -> String {
+        if !value.is_empty() {
+            return value.to_string();
+        }
+        let t = i18n::t();
+        let default = &self.config.ai.auto_reviewer.connection;
+        let default = if default.is_empty() {
+            t.settings_agent_auto_reviewer_session()
+        } else {
+            default
+        };
+        t.settings_value_default_fmt(default)
     }
 
     /// A text field's value as it is edited: the stored text, without the
@@ -481,6 +510,19 @@ impl SettingsModal {
                     .iter()
                     .position(|param| *param == connection.reasoning_param),
             }),
+            REVIEWER => {
+                // Any connection reviews: a CLI agent through its subscription.
+                let values: Vec<String> = std::iter::once(String::new())
+                    .chain(self.config.ai.connections.keys().cloned())
+                    .collect();
+                let labels = values.iter().map(|v| self.reviewer_label(v)).collect();
+                let current = values.iter().position(|v| *v == connection.reviewer);
+                Some(EnumOptions {
+                    values,
+                    labels,
+                    current,
+                })
+            }
             SUBAGENTS => {
                 let values = self.subagents_choices();
                 let labels = values
@@ -518,6 +560,11 @@ impl SettingsModal {
                     connection.subagents = value.to_string();
                 }
             }
+            REVIEWER => {
+                if let Some(connection) = self.edited_mut() {
+                    connection.reviewer = value.to_string();
+                }
+            }
             _ => {}
         }
     }
@@ -529,6 +576,15 @@ impl SettingsModal {
             let choices = self.subagents_choices();
             if let Some(connection) = self.edited_mut() {
                 step_value(&mut connection.subagents, &choices, forward);
+            }
+            return;
+        }
+        if index == REVIEWER {
+            let choices: Vec<String> = std::iter::once(String::new())
+                .chain(self.config.ai.connections.keys().cloned())
+                .collect();
+            if let Some(connection) = self.edited_mut() {
+                step_value(&mut connection.reviewer, &choices, forward);
             }
             return;
         }
@@ -632,6 +688,7 @@ impl SettingsModal {
             self.config.ai.connection = new.to_string();
         }
         self.retarget_subagents(old, new);
+        self.retarget_reviewers(old, new);
         if let Some(edit) = self.connection_edit.as_mut() {
             edit.name = new.to_string();
         }
@@ -643,6 +700,24 @@ impl SettingsModal {
         for connection in self.config.ai.connections.values_mut() {
             if connection.subagents == old {
                 connection.subagents = new.to_string();
+            }
+        }
+    }
+
+    /// Point the reviewers on `old` — the connections' and `[ai.auto_reviewer]`
+    /// — at `new`; an empty `new` hands them to the default.
+    fn retarget_reviewers(&mut self, old: &str, new: &str) {
+        for connection in self.config.ai.connections.values_mut() {
+            if connection.reviewer == old {
+                connection.reviewer = new.to_string();
+            }
+        }
+        let default = &mut self.config.ai.auto_reviewer;
+        if default.connection == old {
+            default.connection = new.to_string();
+            if new.is_empty() {
+                // Its model was one of the connection gone.
+                default.model.clear();
             }
         }
     }
@@ -1248,6 +1323,51 @@ mod tests {
         modal.apply_connection_enum(SUBAGENTS, "local");
         modal.delete_connection("local");
         assert!(modal.config.ai.connections["codex"].subagents.is_empty());
+    }
+
+    #[test]
+    fn a_connection_names_its_reviewer_or_leaves_it_to_the_default() {
+        let mut config = with_local();
+        config.ai.connections.insert(
+            "claude".into(),
+            Connection {
+                provider: "claude_code".into(),
+                ..Connection::default()
+            },
+        );
+        config.ai.auto_reviewer.connection = "claude".into();
+        config.ai.auto_reviewer.model = "haiku".into();
+        let mut modal = ai_modal(config);
+        modal.open_connection("local".into());
+        let t = i18n::t();
+        // Left empty, it says what the default is.
+        assert_eq!(
+            modal.connection_value(REVIEWER),
+            t.settings_value_default_fmt("claude")
+        );
+        let options = modal.connection_enum_options(REVIEWER).unwrap();
+        assert_eq!(options.values, ["", "claude", "local"]);
+        modal.apply_connection_enum(REVIEWER, "local");
+        assert_eq!(modal.config.ai.connections["local"].reviewer, "local");
+        modal.cycle_connection_field(REVIEWER, false);
+        assert_eq!(modal.config.ai.connections["local"].reviewer, "claude");
+        // A CLI agent's page has it too: termide reviews its calls in `auto`.
+        modal.open_connection("claude".into());
+        assert!(modal.content_rows().contains(&ContentRow::Field(REVIEWER)));
+        // Renamed, the reviewer is followed, the default's too; deleted, the
+        // connections' fall to the default, and the default to the session.
+        edit(&mut modal, NAME, "cc");
+        assert_eq!(modal.config.ai.connections["local"].reviewer, "cc");
+        assert_eq!(modal.config.ai.auto_reviewer.connection, "cc");
+        modal.delete_connection("cc");
+        assert!(modal.config.ai.connections["local"].reviewer.is_empty());
+        assert!(modal.config.ai.auto_reviewer.connection.is_empty());
+        assert!(modal.config.ai.auto_reviewer.model.is_empty());
+        modal.open_connection("local".into());
+        assert_eq!(
+            modal.connection_value(REVIEWER),
+            t.settings_value_default_fmt(t.settings_agent_auto_reviewer_session())
+        );
     }
 
     #[test]
