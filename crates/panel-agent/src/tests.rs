@@ -1714,13 +1714,39 @@ fn the_clipboard_commands_answer_to_the_input_not_the_chat() {
 }
 
 #[test]
+fn typing_on_a_chat_block_hands_focus_back_to_the_prompt() {
+    let mut panel = panel(vec![reply("Hello from the model")]);
+    type_text(&mut panel, "hi");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+    panel.handle_key(chord(KeyCode::Tab, KeyModifiers::NONE));
+    assert!(panel.chat_focus);
+    // A non-Latin key types its own character, not the canonical one the
+    // chat's shortcuts match on.
+    let event = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+    panel.handle_key(KeyChord {
+        raw: event('р'),
+        canonical: event('h'),
+    });
+    assert!(!panel.chat_focus);
+    type_text(&mut panel, "ow");
+    assert_eq!(panel.input_text(), "рow");
+    // A chat shortcut stays a shortcut, and a Ctrl chord does not type.
+    panel.handle_key(chord(KeyCode::Tab, KeyModifiers::NONE));
+    panel.handle_key(chord(KeyCode::Char(' '), KeyModifiers::NONE));
+    panel.handle_key(chord(KeyCode::Char('o'), KeyModifiers::CONTROL));
+    assert!(panel.chat_focus);
+    assert_eq!(panel.input_text(), "рow");
+}
+
+#[test]
 fn dragging_in_the_prompt_selects_and_hands_focus_back_from_the_chat() {
     let mut panel = panel(vec![reply("Hello from the model")]);
     panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
     settle(&mut panel);
     let _ = render_text(&mut panel, 40, 12);
     // A draft in the prompt to drag a selection through, typed before the
-    // chat takes focus (which swallows plain characters).
+    // chat takes focus.
     type_text(&mut panel, "one two three");
     let _ = render_text(&mut panel, 40, 12);
     panel.chat_focus = true;
@@ -3141,9 +3167,13 @@ fn tab_walks_the_banner_sessions_and_enter_opens_one() {
         all.contains("first task") && !all.contains("third task"),
         "{all}"
     );
-    // Typing goes nowhere while the list has the keyboard; Esc hands it back.
+    // Typing while the list has the keyboard hands it back to the prompt,
+    // and the character lands there; Esc hands it back too.
     type_text(&mut panel, "x");
-    assert!(panel.input_text().is_empty());
+    assert!(!panel.chat_focus);
+    assert_eq!(panel.input_text(), "x");
+    panel.clear_input();
+    panel.handle_key(chord(KeyCode::Tab, KeyModifiers::NONE));
     panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
     assert!(!panel.chat_focus);
 
@@ -4826,11 +4856,9 @@ fn tab_moves_focus_to_the_chat_and_arrows_fold_blocks() {
     assert!(!panel.transcript.is_expanded(1));
     assert!(panel.input_text().is_empty(), "the arrows stay in the chat");
 
-    // Up walks to the user block; a printable key does not type.
+    // Up walks to the user block.
     panel.handle_key(chord(KeyCode::Up, KeyModifiers::NONE));
     assert_eq!(panel.selected, 0);
-    panel.handle_key(chord(KeyCode::Char('x'), KeyModifiers::NONE));
-    assert!(panel.input_text().is_empty());
 
     // Tab returns focus to the input.
     panel.handle_key(chord(KeyCode::Tab, KeyModifiers::NONE));

@@ -343,7 +343,7 @@ you have named or sent even one message to is always kept.
 | `Shift+Enter`, `Alt+Enter`, `Ctrl+J` | New line in the input |
 | `Esc` | Stop the running task; with nothing running, clear the input; with the input empty too, pick a message to rewind to (see [Rewinding to a message](#rewinding-to-a-message)). `Esc` never closes the agent panel |
 | `Ctrl+O` | Expand or collapse every block, and new blocks after them |
-| `Tab` | Move focus between the input and the chat; in the chat, `↑`/`↓` pick a block, `Space`/`Enter` fold or unfold it, `→`/`←` unfold or fold it as in the file manager's tree, `o` opens it in its own panel; on a fresh session's banner, `↑`/`↓` pick a recent session and `Enter` opens it |
+| `Tab` | Move focus between the input and the chat; in the chat, `↑`/`↓` pick a block, `Space`/`Enter` fold or unfold it, `→`/`←` unfold or fold it as in the file manager's tree, `o` opens it in its own panel, and any other character goes back to the input and is typed there; on a fresh session's banner, `↑`/`↓` pick a recent session and `Enter` opens it |
 | Click a block | Focus the chat and select that block (the selected block is shown inverted, success and error colours keeping their hue); click it again to fold or unfold it |
 | Ctrl+Click on a link | Follow it, as a link opens from the terminal (see [HTML preview](html.md)): a link in an answer, the file or page a tool call's headline names, or a web address or existing path written out in the text. Holding `Ctrl` over one lights it whole |
 | `Ctrl+C` | Copy: the selected prompt text, or — with a block selected in the chat — the block's text |

@@ -956,6 +956,11 @@ impl AgentPanel {
         // On the welcome banner the chat focus walks its recent sessions
         // instead: the arrows, the page keys and Home/End move the cursor,
         // Enter opens the session under it and Delete (like F8) deletes it.
+        // A printable character the chat has no use for means the user meant
+        // to type: focus goes back to the prompt and the key lands there, so a
+        // forgotten Tab costs nothing. The raw key is replayed, keeping the
+        // layout's character rather than its Latin canonical form.
+        let typed = |code: KeyCode| matches!(code, KeyCode::Char(_)) && !ctrl && !alt;
         if self.chat_focus && self.recent_list_shown() {
             let page = self.recent_rows.max(1) as isize;
             match key.code {
@@ -969,6 +974,10 @@ impl AgentPanel {
                 KeyCode::End => self.move_recent_selection(isize::MAX),
                 KeyCode::Enter => {
                     self.open_recent_session(self.recent_selected);
+                }
+                code if typed(code) => {
+                    self.chat_focus = false;
+                    return self.on_key(chord);
                 }
                 _ => return vec![],
             }
@@ -1028,7 +1037,11 @@ impl AgentPanel {
                     self.scroll_by(page);
                     return vec![PanelEvent::NeedsRedraw];
                 }
-                // Everything else is swallowed so it does not type into the
+                code if typed(code) => {
+                    self.chat_focus = false;
+                    return self.on_key(chord);
+                }
+                // Everything else is swallowed so it does not reach the
                 // (unfocused) input.
                 _ => return vec![],
             }
