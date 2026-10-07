@@ -536,6 +536,7 @@ impl AgentPanel {
         self.model = model;
         self.model_choices.clear();
         self.provider_backend = choice.backend.clone();
+        self.reviewer = choice.reviewer.clone();
         self.backend = self.provider_backend.clone().or_else(|| {
             self.catalog
                 .resolve(&self.agent)

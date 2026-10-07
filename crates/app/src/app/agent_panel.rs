@@ -686,6 +686,8 @@ fn applied_ai_settings(built_with: &AiSettings) -> AiSettings {
 struct AiConnections {
     /// The settings the panel was built with, until others are applied.
     settings: AiSettings,
+    /// Where the reviewer's texts come from.
+    dirs: AgentDirs,
     /// Shared with the subagent runner, so a switch reaches delegated tasks.
     active: ActiveSlot,
 }
@@ -720,6 +722,7 @@ impl ConnectionCatalog for AiConnections {
             model: connection.model.clone(),
             context_window: connection.effective_context_window(),
             backend: cli_provider_backend(&connection.provider, agent),
+            reviewer: reviewer_setup(&settings, &self.dirs, name),
         })
     }
 
@@ -931,10 +934,14 @@ fn side_model(
 
 /// The `auto` mode reviewer: the texts of `system/classify.md`, and the
 /// model `[ai.auto_reviewer]` names, see [`side_model`].
-fn reviewer_setup(settings: &AiSettings, dirs: &AgentDirs) -> ReviewerSetup {
+fn reviewer_setup(settings: &AiSettings, dirs: &AgentDirs, session: &str) -> ReviewerSetup {
     ReviewerSetup {
         prompt: dirs.classify_prompt(),
-        model: side_model(settings, &settings.auto_reviewer, "[ai.auto_reviewer]"),
+        model: side_model(
+            settings,
+            &settings.reviewer_of(session),
+            &format!("the reviewer of connection {session}"),
+        ),
     }
 }
 
@@ -1002,8 +1009,6 @@ struct Subagents {
     max_tokens: Option<u64>,
     reasoning: ThinkingLevel,
     compaction: CompactionPolicy,
-    /// Reviews the subagent's calls in `auto` mode.
-    reviewer: ReviewerSetup,
     /// What the subagent's model reads when a call is refused.
     refusals: Refusals,
 }
@@ -1170,7 +1175,10 @@ impl Subagents {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
-        let target = subagent_target(&applied_ai_settings(&self.settings), &active)?;
+        let settings = applied_ai_settings(&self.settings);
+        let target = subagent_target(&settings, &active)?;
+        // The session's connection says who reviews, wherever the task runs.
+        let reviewer = reviewer_setup(&settings, &self.dirs, &active.connection);
 
         let mut rules = self.rules.clone();
         rules.mode = subagent_mode(self.mode.get(), definition.spec.mode);
@@ -1184,7 +1192,7 @@ impl Subagents {
                 self.refusals.unattended_subagent.clone(),
             )),
         )
-        .with_classifier(Box::new(self.reviewer.classifier(budget.clone())))
+        .with_classifier(Box::new(reviewer.classifier(budget.clone())))
         .with_refusals(self.refusals.clone());
         // The guard goes first, as in the panel's own chain: in plan mode a
         // session answer must not let a change through.
@@ -1194,6 +1202,7 @@ impl Subagents {
             SubagentTarget::Cli(connection_name, connection) => {
                 let run = CliSubagent {
                     name: format!("{connection_name}:{name}"),
+                    reviewer,
                     connection,
                     system_prompt,
                     tools,
@@ -1299,7 +1308,7 @@ impl Subagents {
             plan: self.dirs.plan_prompt(),
             goal: self.dirs.goal_prompt(),
             handoff: self.dirs.handoff_prompt(),
-            reviewer: self.reviewer.clone(),
+            reviewer: run.reviewer,
             host_tools: Some(HostTools {
                 tools: run.tools,
                 hooks: Box::new(run.hooks),
@@ -1420,6 +1429,8 @@ impl CliDrive<'_> {
 struct CliSubagent {
     /// How its process is named in the logs.
     name: String,
+    /// Reviews its requests in `auto` mode.
+    reviewer: ReviewerSetup,
     connection: Connection,
     system_prompt: String,
     tools: ToolRegistry,
@@ -1465,7 +1476,7 @@ fn agent_setup(
         model: connection.model.clone(),
         context_window: connection.effective_context_window(),
     }));
-    let reviewer = reviewer_setup(settings, &catalog.dirs);
+    let reviewer = reviewer_setup(settings, &catalog.dirs, &connection_name);
     catalog.subagents = Some(Arc::new(Subagents {
         active: Arc::clone(&active),
         settings: settings.clone(),
@@ -1479,7 +1490,6 @@ fn agent_setup(
         max_tokens: settings.output_limit(),
         reasoning: settings.reasoning,
         compaction: settings.compaction,
-        reviewer: reviewer.clone(),
         refusals: catalog.dirs.refusals(),
     }));
     let compaction_prompts = catalog.dirs.compaction_prompts();
@@ -1530,6 +1540,8 @@ fn agent_setup(
     // Built before `cwd` moves into the setup: a hand-run command runs where
     // the panel works.
     let shell_run = user_shell_runner(&catalog.dirs, &cwd);
+    // The reviewer of a connection switched to reads its texts from here.
+    let connection_dirs = catalog.dirs.clone();
 
     AgentPanelSetup {
         cwd,
@@ -1541,6 +1553,7 @@ fn agent_setup(
         provider_backend,
         connections: Some(Arc::new(AiConnections {
             settings: settings.clone(),
+            dirs: connection_dirs,
             active,
         })),
         connection: connection_name,
@@ -2077,10 +2090,14 @@ mod tests {
 
     #[test]
     fn connections_build_and_hand_their_provider_to_delegated_tasks() {
-        let settings = with_cloud();
+        let mut settings = with_cloud();
+        // `cloud`'s calls are reviewed by `local`'s model; `local` leaves it
+        // to `[ai.auto_reviewer]`, which says the session's model.
+        settings.connections.get_mut("cloud").unwrap().reviewer = "local".into();
         let active: ActiveSlot = Arc::new(std::sync::RwLock::new(active_on(&settings, "local")));
         let connections = AiConnections {
             settings,
+            dirs: AgentDirs::new(Path::new("/tmp"), None, None),
             active: Arc::clone(&active),
         };
         let names: Vec<String> = connections.list().into_iter().map(|e| e.name).collect();
@@ -2092,6 +2109,17 @@ mod tests {
             ("claude-x", 200_000)
         );
         assert!(cloud.backend.is_none(), "an endpoint, not a CLI agent");
+        let reviewer = |choice: &ConnectionChoice| {
+            choice
+                .reviewer
+                .model
+                .own
+                .as_ref()
+                .map(|(_, model)| model.id.clone())
+        };
+        assert_eq!(reviewer(&cloud).as_deref(), Some("local-model"));
+        let local = connections.build("local", DEFAULT_AGENT).unwrap();
+        assert_eq!(reviewer(&local), None);
         assert!(connections.build("missing", DEFAULT_AGENT).is_none());
         // Switching to it moves what a delegated task runs on.
         connections.activate(&cloud);
@@ -2296,6 +2324,7 @@ mod tests {
         let connections = AiConnections {
             active: Arc::new(std::sync::RwLock::new(active_on(&built_with, "local"))),
             settings: built_with,
+            dirs: AgentDirs::new(Path::new("/tmp"), None, None),
         };
         // Applying the settings modal adds `cloud`; the panel offers it at
         // once. (The same settings the other tests build with, since the
@@ -2617,7 +2646,6 @@ mod tests {
             max_tokens: settings.output_limit(),
             reasoning: ThinkingLevel::Off,
             compaction: settings.compaction,
-            reviewer: ReviewerSetup::default(),
             refusals: Refusals::default(),
         }));
 

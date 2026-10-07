@@ -4049,6 +4049,14 @@ impl ConnectionCatalog for Connections {
             model: entry.model,
             context_window: 200_000,
             backend,
+            // Each connection's reviewer reviews under a model of its name.
+            reviewer: ReviewerSetup {
+                model: termide_agent_core::ModelChoice {
+                    own: None,
+                    session_model: Some(format!("{name}-reviewer")),
+                },
+                ..ReviewerSetup::default()
+            },
         })
     }
 }
@@ -4120,6 +4128,11 @@ fn a_cli_agent_connection_is_taken_on_mid_conversation_and_left_again() {
     // And the built-in loop takes it back.
     assert!(panel.switch_connection("local"));
     assert!(!panel.external);
+    // The connection's reviewer came along each time.
+    assert_eq!(
+        panel.reviewer.model.session_model.as_deref(),
+        Some("local-reviewer")
+    );
 }
 
 #[test]

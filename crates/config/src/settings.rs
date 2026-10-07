@@ -206,6 +206,10 @@ pub struct Connection {
     /// one at a time (or llama.cpp's `--parallel` many).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub max_concurrent_requests: u32,
+    /// The connection, by name, whose model reviews the calls of this one's
+    /// sessions in `auto` mode; empty leaves it to `[ai.auto_reviewer]`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reviewer: String,
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -285,6 +289,7 @@ impl Default for Connection {
             reasoning_param: ReasoningParam::Auto,
             subagents: String::new(),
             max_concurrent_requests: 0,
+            reviewer: String::new(),
         }
     }
 }
@@ -470,6 +475,20 @@ impl AiSettings {
             return Some(self.connection.as_str());
         }
         self.connections.keys().next().map(String::as_str)
+    }
+
+    /// The model that reviews `auto` mode calls of a session on connection
+    /// `session`: the connection its `reviewer` names, on that connection's
+    /// model, else `[ai.auto_reviewer]`.
+    #[must_use]
+    pub fn reviewer_of(&self, session: &str) -> SideModel {
+        match self.connections.get(session) {
+            Some(connection) if !connection.reviewer.trim().is_empty() => SideModel {
+                connection: connection.reviewer.trim().to_string(),
+                model: String::new(),
+            },
+            _ => self.auto_reviewer.clone(),
+        }
     }
 
     /// The per-turn output bound to request, `None` when the setting is zero
@@ -1479,6 +1498,32 @@ mod ai_settings_tests {
         let text = toml::to_string(&local).unwrap();
         assert!(text.contains("max_concurrent_requests = 1"), "{text}");
         assert_eq!(toml::from_str::<Connection>(&text).unwrap(), local);
+    }
+
+    #[test]
+    fn a_connection_names_its_reviewer_over_the_default_one() {
+        let mut settings = AiSettings {
+            auto_reviewer: SideModel {
+                connection: "cloud".into(),
+                model: "small".into(),
+            },
+            ..AiSettings::default()
+        };
+        settings
+            .connections
+            .insert("local".into(), Connection::default());
+        assert_eq!(settings.reviewer_of("local"), settings.auto_reviewer);
+        assert_eq!(settings.reviewer_of("gone"), settings.auto_reviewer);
+        settings.connections.get_mut("local").unwrap().reviewer = "claude".into();
+        assert_eq!(
+            settings.reviewer_of("local"),
+            SideModel {
+                connection: "claude".into(),
+                model: String::new(),
+            }
+        );
+        let text = toml::to_string(&settings.connections["local"]).unwrap();
+        assert!(text.contains("reviewer = \"claude\""), "{text}");
     }
 
     #[test]

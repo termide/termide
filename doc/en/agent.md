@@ -33,6 +33,7 @@ model = "Qwen3.8-Flash-Next-oQ4e-mtp"  # left out: the provider's first model
 # prefill_progress = true          # ask a llama.cpp server for its prompt-processing progress
 # reasoning_param = "enable_thinking"  # auto (default) | reasoning_effort | enable_thinking | none
 # max_concurrent_requests = 1      # requests served at once across termide; default 0: no limit
+# reviewer = "small"               # the connection whose model reviews in `auto`; default: [ai.auto_reviewer]
 
 [ai.connections.cloud]
 provider = "anthropic_compatible"
@@ -46,7 +47,7 @@ provider = "codex"                 # a CLI agent needs nothing else
 
 A connection carries `provider`, `base_url`, `model`, `api_key_env`,
 `context_window_fallback`, `subagents` (see [Subagents](#subagents)),
-`max_concurrent_requests` and, for `openai_compatible`, `prefill_progress` and
+`reviewer` (see [Auto mode](#auto-mode)), `max_concurrent_requests` and, for `openai_compatible`, `prefill_progress` and
 `reasoning_param`; what it leaves out takes that field's default.
 `max_concurrent_requests` caps how many requests the connection serves at
 once across the whole termide process — the agents of every panel, their
@@ -92,7 +93,7 @@ The settings modal (the gear, or the command palette) has all of it under
 provider and model, the one new sessions start on marked `●`. `Enter` or a
 click opens a connection on a page of its own — name, provider, base URL, API
 key variable, model, context window, **Prefill progress (llama.cpp)** and
-**Reasoning parameter** (for an OpenAI-compatible one), **Requests at once** (not for a CLI agent), **Subagents** and **Use by default** (new sessions start
+**Reasoning parameter** (for an OpenAI-compatible one), **Requests at once** (not for a CLI agent), **Subagents**, **Auto mode reviewer** and **Use by default** (new sessions start
 on it) — and **[ Back to list ]**, `Esc` or `Backspace` returns to the list;
 **+ Add connection** adds an OpenAI-compatible one, and
 **[ Delete connection ]** on the page, or `Del` on its row, removes one.
@@ -1161,6 +1162,14 @@ never reach it and cost nothing.
 connection = "claude"   # a connection's name; empty: the session's own
 model = "haiku"         # a model of it; empty: the connection's model
 ```
+
+A connection can name its own reviewer: `reviewer` in its table (**Auto mode
+reviewer** on its settings page) is a connection whose model reviews the calls
+of sessions on it, wherever its subagents run; left empty, `[ai.auto_reviewer]`
+does. So a local connection can be reviewed by a small local model and a
+Claude Code one by Haiku through the subscription, and switching the session's
+connection switches its reviewer with it. The choice follows a renamed
+connection, and a deleted one hands the review back to the default.
 
 `model` alone reviews on the session's connection with that model. A CLI
 connection (`claude_code`, `codex`, `gemini_cli`) reviews through its

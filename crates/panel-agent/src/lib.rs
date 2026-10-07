@@ -271,6 +271,8 @@ pub struct ConnectionChoice {
     pub context_window: u64,
     /// The CLI agent it drives over ACP instead of the built-in loop.
     pub backend: Option<BackendFactory>,
+    /// Who reviews its sessions' calls in `auto` mode.
+    pub reviewer: ReviewerSetup,
 }
 
 /// The app's connections (`[ai.connections.<name>]`); the
