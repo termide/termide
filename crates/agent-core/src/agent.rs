@@ -276,6 +276,20 @@ pub fn run_judged_call(
     result
 }
 
+/// Whether a call may run side by side with its neighbours of the same
+/// kind: it changes nothing on this machine — a read, a search, a web page,
+/// a look-only shell command — or hands work to a subagent, and it asks the
+/// user nothing. A call that may change something runs alone, so the model's
+/// order holds between a change and what reads it.
+#[must_use]
+pub fn runs_alongside(call: &ToolCall) -> bool {
+    match call.name.as_str() {
+        "task" => true,
+        "question" | "suggest_command" => false,
+        _ => crate::permissions::is_read_only_call(call),
+    }
+}
+
 /// Extension points of the loop. All methods have permissive defaults.
 ///
 /// Hooks run on the agent thread, so a permission prompt may block here
@@ -904,10 +918,14 @@ impl Agent {
         }
     }
 
-    /// Run `calls` in order, pushing each result. Stops before a call once a
-    /// pause has been asked for, leaving it and the rest unanswered for a
-    /// resume to run; returns whether it stopped so. `truncated` calls come
-    /// from a reply cut off by the output limit and are refused, not run.
+    /// Run `calls`, pushing each result in their order. Calls that change
+    /// nothing or hand work to a subagent run side by side with their
+    /// neighbours of the same kind (see [`runs_alongside`]); any other runs
+    /// alone, after those before it and before those after it. Stops before
+    /// a call or such a group once a pause has been asked for, leaving the
+    /// rest unanswered for a resume to run; returns whether it stopped so.
+    /// `truncated` calls come from a reply cut off by the output limit and
+    /// are refused, not run.
     fn run_calls(
         &mut self,
         calls: &[ToolCall],
@@ -916,25 +934,119 @@ impl Agent {
         cancel: &CancelToken,
         emit: &mut dyn FnMut(AgentEvent),
     ) -> bool {
-        for call in calls {
-            if !truncated && !cancel.is_cancelled() && self.queues.is_paused() {
-                return true;
-            }
-            let result = if truncated {
-                ToolResultMessage::error(
+        if truncated {
+            for call in calls {
+                let result = ToolResultMessage::error(
                     call,
                     "The response was cut off by the output limit, so the tool call arguments may be incomplete. The call was not executed.",
-                )
+                );
+                let result = hooks.after_tool_call(call, result);
+                emit(AgentEvent::ToolExecutionEnd {
+                    result: result.clone(),
+                });
+                self.push(Message::ToolResult(result), emit);
+            }
+            return false;
+        }
+        let mut start = 0;
+        while start < calls.len() {
+            if !cancel.is_cancelled() && self.queues.is_paused() {
+                return true;
+            }
+            let together = calls[start..]
+                .iter()
+                .take_while(|call| runs_alongside(call))
+                .count();
+            let end = start + together.max(1);
+            let results = if together > 1 {
+                self.run_together(&calls[start..end], hooks, cancel, emit)
             } else {
-                self.execute_call(call, hooks, cancel, emit)
+                let call = &calls[start];
+                let result = self.execute_call(call, hooks, cancel, emit);
+                let result = hooks.after_tool_call(call, result);
+                emit(AgentEvent::ToolExecutionEnd {
+                    result: result.clone(),
+                });
+                vec![result]
             };
-            let result = hooks.after_tool_call(call, result);
-            emit(AgentEvent::ToolExecutionEnd {
-                result: result.clone(),
-            });
-            self.push(Message::ToolResult(result), emit);
+            for result in results {
+                self.push(Message::ToolResult(result), emit);
+            }
+            start = end;
         }
         false
+    }
+
+    /// Run `calls` side by side and return their results in their order.
+    /// The hooks judge them one after another first — a permission prompt
+    /// or the reviewer takes them in turn — then the ones let through run
+    /// each on a thread of its own, their progress and ends reported as
+    /// they come.
+    fn run_together(
+        &self,
+        calls: &[ToolCall],
+        hooks: &mut dyn Hooks,
+        cancel: &CancelToken,
+        emit: &mut dyn FnMut(AgentEvent),
+    ) -> Vec<ToolResultMessage> {
+        enum Report {
+            Update(String, ToolUpdate),
+            Done(usize, ToolResultMessage),
+        }
+        let ctx = self.tool_context();
+        let judgments: Vec<Judgment> = calls
+            .iter()
+            .map(|call| {
+                emit(AgentEvent::ToolExecutionStart { call: call.clone() });
+                judge_tool_call(&self.tools, call, hooks, &ctx, cancel)
+            })
+            .collect();
+        let mut results: Vec<Option<ToolResultMessage>> = vec![None; calls.len()];
+        let tools = &self.tools;
+        std::thread::scope(|scope| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            for (index, judgment) in judgments.into_iter().enumerate() {
+                match judgment {
+                    Judgment::Done(result) => {
+                        let _ = tx.send(Report::Done(index, result));
+                    }
+                    Judgment::Run(judged) => {
+                        let (tx, ctx) = (tx.clone(), ctx.clone());
+                        let id = calls[index].id.clone();
+                        scope.spawn(move || {
+                            let mut on_update = |update| {
+                                let _ = tx.send(Report::Update(id.clone(), update));
+                            };
+                            let result =
+                                run_judged_call(tools, judged, &ctx, cancel, &mut on_update);
+                            let _ = tx.send(Report::Done(index, result));
+                        });
+                    }
+                }
+            }
+            drop(tx);
+            for report in rx {
+                match report {
+                    Report::Update(tool_call_id, update) => {
+                        emit(AgentEvent::ToolExecutionUpdate {
+                            tool_call_id,
+                            update,
+                        });
+                    }
+                    Report::Done(index, result) => {
+                        let result = hooks.after_tool_call(&calls[index], result);
+                        emit(AgentEvent::ToolExecutionEnd {
+                            result: result.clone(),
+                        });
+                        results[index] = Some(result);
+                    }
+                }
+            }
+        });
+        results
+            .into_iter()
+            .map(|result| result.expect("every call of the group reports its end"))
+            .collect()
     }
 
     /// The tool calls of the last assistant message that have no result yet:
@@ -980,7 +1092,13 @@ impl Agent {
                 update,
             });
         };
-        let ctx = ToolContext {
+        let ctx = self.tool_context();
+        execute_tool(&self.tools, call, hooks, &ctx, cancel, &mut on_update)
+    }
+
+    /// What the loop's tools run in.
+    fn tool_context(&self) -> ToolContext {
+        ToolContext {
             cwd: self.cwd.clone(),
             asker: self.asker.clone(),
             suggester: self.suggester.clone(),
@@ -992,8 +1110,7 @@ impl Agent {
                 model: self.model.clone(),
             }),
             withdrawn: None,
-        };
-        execute_tool(&self.tools, call, hooks, &ctx, cancel, &mut on_update)
+        }
     }
 
     fn call_model(
@@ -2139,6 +2256,196 @@ mod tests {
             roles(agent.messages()),
             vec!["user", "assistant", "tool_result", "assistant"]
         );
+    }
+
+    /// A tool under a given name that logs its start and end; with a
+    /// meeting, it waits until that many calls have started, so calls run one
+    /// after another would never all meet.
+    struct ProbeTool {
+        name: &'static str,
+        log: Arc<std::sync::Mutex<Vec<String>>>,
+        /// The calls started so far, and how many must start to meet.
+        meeting: Option<(Arc<Meeting>, usize)>,
+    }
+
+    type Meeting = (std::sync::Mutex<usize>, std::sync::Condvar);
+
+    impl crate::Tool for ProbeTool {
+        fn name(&self) -> &str {
+            self.name
+        }
+        fn description(&self) -> &str {
+            "probe"
+        }
+        fn parameters(&self) -> serde_json::Value {
+            json!({ "type": "object" })
+        }
+        fn execute(
+            &self,
+            call: &ToolCall,
+            _ctx: &ToolContext,
+            on_update: &mut dyn FnMut(ToolUpdate),
+            _cancel: &CancelToken,
+        ) -> ToolResultMessage {
+            self.log.lock().unwrap().push(format!("start {}", call.id));
+            let mut met = true;
+            if let Some((meeting, expected)) = &self.meeting {
+                let (started, changed) = &**meeting;
+                let mut count = started.lock().unwrap();
+                *count += 1;
+                changed.notify_all();
+                let (count, timeout) = changed
+                    .wait_timeout_while(count, std::time::Duration::from_secs(5), |n| {
+                        *n < *expected
+                    })
+                    .unwrap();
+                met = !timeout.timed_out();
+                drop(count);
+            }
+            // The first call finishes last, so ends come out of order.
+            if call.id == "r1" {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            on_update(ToolUpdate::Output(format!("{} working", call.id)));
+            self.log.lock().unwrap().push(format!("end {}", call.id));
+            ToolResultMessage::text(call, if met { "met" } else { "alone" })
+        }
+    }
+
+    fn probes(meeting: usize) -> (ToolRegistry, Arc<std::sync::Mutex<Vec<String>>>) {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let meet = Arc::new((std::sync::Mutex::new(0), std::sync::Condvar::new()));
+        let mut registry = ToolRegistry::new();
+        registry.insert(Arc::new(ProbeTool {
+            name: "read",
+            log: Arc::clone(&log),
+            meeting: Some((meet, meeting)),
+        }));
+        registry.insert(Arc::new(ProbeTool {
+            name: "edit",
+            log: Arc::clone(&log),
+            meeting: None,
+        }));
+        (registry, log)
+    }
+
+    fn results(agent: &Agent) -> Vec<(String, String)> {
+        agent
+            .messages()
+            .iter()
+            .filter_map(|m| match m {
+                Message::ToolResult(r) => Some((r.tool_call_id.clone(), r.plain_text())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Reads of one step run side by side: they all start before any
+    /// ends, each ends as it finishes, and their results keep the model's
+    /// order. A blocked one among them is answered in its place.
+    #[test]
+    fn calls_that_change_nothing_run_side_by_side() {
+        struct DenyR3;
+        impl Hooks for DenyR3 {
+            fn before_tool_call(&mut self, call: &ToolCall, _ctx: &ToolContext) -> ToolDecision {
+                if call.id == "r3" {
+                    ToolDecision::Block {
+                        reason: "denied".into(),
+                    }
+                } else {
+                    ToolDecision::Allow
+                }
+            }
+        }
+        let (registry, _) = probes(2);
+        let (mut agent, _) = agent(
+            ScriptedProvider::new(vec![
+                tool_reply(
+                    vec![
+                        ("r1", "read", json!({ "path": "a" })),
+                        ("r2", "read", json!({ "path": "b" })),
+                        ("r3", "read", json!({ "path": "c" })),
+                    ],
+                    StopReason::ToolUse,
+                ),
+                text_reply("done"),
+            ]),
+            registry,
+        );
+        let events = collect(&mut agent, "go", &mut DenyR3);
+        let results = results(&agent);
+        let ids: Vec<&str> = results.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, ["r1", "r2", "r3"]);
+        assert_eq!(results[0].1, "met");
+        assert_eq!(results[1].1, "met");
+        assert!(results[2].1.contains("denied"));
+        // Ends come as calls finish: the slow first one last; its progress
+        // still reaches the panel.
+        let ends: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::ToolExecutionEnd { result } => Some(result.tool_call_id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ends.last(), Some(&"r1"), "{ends:?}");
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::ToolExecutionUpdate { tool_call_id, .. } if tool_call_id == "r1"
+        )));
+    }
+
+    /// A call that may change something runs alone: what comes before it
+    /// has ended when it starts, and what comes after starts once it ended.
+    #[test]
+    fn a_change_runs_alone_between_the_reads_around_it() {
+        let (registry, log) = probes(1);
+        let (mut agent, _) = agent(
+            ScriptedProvider::new(vec![
+                tool_reply(
+                    vec![
+                        ("r1", "read", json!({ "path": "a" })),
+                        ("e1", "edit", json!({ "path": "a" })),
+                        ("r2", "read", json!({ "path": "a" })),
+                    ],
+                    StopReason::ToolUse,
+                ),
+                text_reply("done"),
+            ]),
+            registry,
+        );
+        collect(&mut agent, "go", &mut NoHooks);
+        assert_eq!(
+            *log.lock().unwrap(),
+            ["start r1", "end r1", "start e1", "end e1", "start r2", "end r2"]
+        );
+    }
+
+    #[test]
+    fn what_runs_alongside_is_what_changes_nothing_and_asks_nothing() {
+        let call = |name: &str, arguments| ToolCall {
+            id: "c".into(),
+            name: name.into(),
+            arguments,
+            extra_content: None,
+        };
+        for together in [
+            call("read", json!({ "path": "a" })),
+            call("fetch", json!({ "url": "https://x" })),
+            call("task", json!({ "agent": "a", "prompt": "p" })),
+            call("bash", json!({ "command": "rg foo src" })),
+        ] {
+            assert!(runs_alongside(&together), "{}", together.name);
+        }
+        for alone in [
+            call("edit", json!({})),
+            call("write", json!({})),
+            call("question", json!({})),
+            call("bash", json!({ "command": "cargo build" })),
+            call("mcp_tool", json!({})),
+        ] {
+            assert!(!runs_alongside(&alone), "{}", alone.name);
+        }
     }
 
     /// Two calls in one step, the first asking to pause: the pause stops
