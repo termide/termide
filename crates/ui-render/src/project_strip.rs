@@ -1,7 +1,9 @@
 //! The open projects as buttons in the menu bar, between the menu titles and
 //! the indicators.
 //!
-//! Every button is `[name]`, one space apart, pressed to the left. When the
+//! Every button is a bare `name`, kept apart by a dim `" | "` that belongs
+//! to no button of its own. The strip starts two columns after the menu
+//! titles, so it reads as a block of its own. When the
 //! names do not fit, they lose their start, and the room is shared fairly:
 //! a short name keeps what it needs and the long ones split what is left.
 //! When even cut names do not fit, buttons drop out — the one the user acts
@@ -32,7 +34,7 @@ pub struct PlacedButton {
     pub index: usize,
     /// First column of the button.
     pub x: u16,
-    /// The text drawn, brackets included.
+    /// The text drawn: the name, with its attention mark when it waits.
     pub label: String,
 }
 
@@ -82,15 +84,18 @@ fn cut_start(name: &str, width: usize) -> String {
     std::iter::once('…').chain(tail.into_iter().rev()).collect()
 }
 
+/// What keeps two buttons apart: a dim separator, not part of either.
+pub const SEPARATOR: &str = " | ";
+
 /// Name widths for `buttons` (indices into `all`) to fit `avail` columns,
 /// or `None` when they do not fit even cut to the minimum.
 fn share(all: &[ProjectButton], buttons: &[usize], avail: usize) -> Option<Vec<usize>> {
     let needs: Vec<usize> = buttons.iter().map(|&i| all[i].name.width()).collect();
     let fixed: usize = buttons
         .iter()
-        .map(|&i| 2 + mark(all[i].attention).width())
+        .map(|&i| mark(all[i].attention).width())
         .sum::<usize>()
-        + buttons.len().saturating_sub(1);
+        + buttons.len().saturating_sub(1) * SEPARATOR.width();
     let budget = avail.checked_sub(fixed)?;
     if needs.iter().sum::<usize>() <= budget {
         return Some(needs);
@@ -152,20 +157,26 @@ pub fn fit_project_strip(buttons: &[ProjectButton], start: u16, width: usize) ->
         if let Some(names) = fitted {
             let mut x = start;
             let mut placed = Vec::with_capacity(kept.len());
-            for (&index, name_width) in kept.iter().zip(names) {
+            for (step, (&index, name_width)) in kept.iter().zip(names).enumerate() {
                 let button = &buttons[index];
+                // The separator stands between two buttons: it belongs to
+                // neither, so neither its columns nor its colour are theirs.
+                if step > 0 {
+                    x += SEPARATOR.width() as u16;
+                }
                 let label = format!(
-                    "[{}{}]",
+                    "{}{}",
                     cut_start(&button.name, name_width),
                     mark(button.attention)
                 );
-                let next = x + label.width() as u16 + 1;
+                let label_width = label.width() as u16;
                 placed.push(PlacedButton { index, x, label });
-                x = next;
+                x += label_width;
             }
+            let overflow_x = if overflow.is_some() { x + 1 } else { x };
             return ProjectStrip {
                 buttons: placed,
-                overflow: overflow.map(|text| (x, text)),
+                overflow: overflow.map(|text| (overflow_x, text)),
             };
         }
         if kept.len() == 1 {
@@ -207,9 +218,9 @@ mod tests {
     }
 
     #[test]
-    fn buttons_that_fit_stand_one_space_apart_from_the_start() {
+    fn buttons_that_fit_stand_separator_apart_from_the_start() {
         let strip = fit_project_strip(&[button("one"), button("two")], 10, 80);
-        assert_eq!(labels(&strip), ["[one]", "[two]"]);
+        assert_eq!(labels(&strip), ["one", "two"]);
         assert_eq!(strip.buttons[0].x, 10);
         assert_eq!(strip.buttons[1].x, 16);
         assert_eq!(strip.overflow, None);
@@ -217,8 +228,8 @@ mod tests {
 
     #[test]
     fn long_names_lose_their_start_and_short_ones_stay_whole() {
-        // 3 buttons: 6 for brackets, 2 for spaces, 17 left for names: "web"
-        // keeps 3, the long ones share 14.
+        // 3 buttons: 2 separators of 3, 19 left for names: "web" keeps 3,
+        // the long ones share 16.
         let strip = fit_project_strip(
             &[
                 button("termide-agent"),
@@ -228,16 +239,17 @@ mod tests {
             0,
             25,
         );
-        assert_eq!(labels(&strip), ["[…-agent]", "[web]", "[…-links]"]);
-        let used: usize = strip.buttons.iter().map(|b| b.label.width()).sum::<usize>() + 2;
+        assert_eq!(labels(&strip), ["…e-agent", "web", "…e-links"]);
+        let used: usize =
+            strip.buttons.iter().map(|b| b.label.width()).sum::<usize>() + 2 * SEPARATOR.width();
         assert_eq!(used, 25);
     }
 
     #[test]
     fn spare_columns_go_to_the_first_cut_names() {
         let strip = fit_project_strip(&[button("abcdef"), button("ghijkl")], 0, 12);
-        // 4 for brackets, 1 space, 7 for names: 4 + 3.
-        assert_eq!(labels(&strip), ["[…def]", "[…kl]"]);
+        // 3 for the separator, 9 for names: 5 + 4.
+        assert_eq!(labels(&strip), ["…cdef", "…jkl"]);
     }
 
     #[test]
@@ -246,8 +258,8 @@ mod tests {
         waiting.attention = true;
         let strip = fit_project_strip(&[waiting, button("other")], 0, 20);
         let mark = mark(true);
-        assert!(strip.buttons[0].label.ends_with(&format!("{mark}]")));
-        assert!(strip.buttons[0].label.starts_with("[…"));
+        assert!(strip.buttons[0].label.ends_with(&mark));
+        assert!(strip.buttons[0].label.starts_with('…'));
     }
 
     #[test]
@@ -281,7 +293,20 @@ mod tests {
     fn no_room_even_for_the_current_project_shows_nothing() {
         let mut current = button("cur");
         current.current = true;
-        let strip = fit_project_strip(&[current, button("other")], 0, 5);
+        // "+1" leaves no column for a name cut to the minimum.
+        let strip = fit_project_strip(&[current, button("other")], 0, 3);
         assert_eq!(strip, ProjectStrip::default());
+    }
+
+    #[test]
+    fn the_separator_belongs_to_no_button() {
+        let strip = fit_project_strip(&[button("one"), button("two"), button("three")], 0, 80);
+        assert_eq!(strip.buttons[0].x, 0);
+        assert_eq!(strip.buttons[1].x, SEPARATOR.width() as u16 + 3);
+        assert_eq!(strip.buttons[2].x, (SEPARATOR.width() * 2 + 6) as u16);
+        // Nothing of a button covers the separator between it and the next.
+        for pair in strip.buttons.windows(2) {
+            assert_eq!(pair[0].range().end + SEPARATOR.width() as u16, pair[1].x);
+        }
     }
 }

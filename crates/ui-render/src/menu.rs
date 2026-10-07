@@ -17,7 +17,7 @@ use termide_system_monitor::{format_net_speed, BatteryInfo, RamUnit};
 use termide_theme::Theme;
 use termide_ui::str_display_width;
 
-use crate::project_strip::{fit_project_strip, ProjectButton, ProjectStrip};
+use crate::project_strip::{fit_project_strip, ProjectButton, ProjectStrip, SEPARATOR};
 
 /// Parameters for rendering the menu bar.
 pub struct MenuRenderParams<'a> {
@@ -336,8 +336,9 @@ pub fn menu_bar_layout(area_width: u16, params: &MenuRenderParams) -> MenuBarLay
         let indicators_start = (area_width as usize)
             .saturating_sub(indicators.width())
             .max(titles_end);
-        // The titles end with a two-column gap: the strip starts one in.
-        let start = titles_end - 1;
+        // The titles end with a two-column gap: the strip starts there, so
+        // two blank columns separate it from the last title.
+        let start = titles_end;
         let width = indicators_start.saturating_sub(1).saturating_sub(start);
         (
             fit_project_strip(params.projects, start as u16, width),
@@ -407,7 +408,8 @@ pub fn render_menu(frame: &mut Frame, area: Rect, params: &MenuRenderParams) {
             spans.push(Span::styled(projects_mark(), style));
         }
         // The gap after the last title is left to the padding below: the
-        // project buttons start one column after it, not two.
+        // project buttons start two columns after it, so that the strip of
+        // projects reads as a block of its own.
         if i + 1 < items.len() {
             spans.push(Span::raw("  "));
         }
@@ -415,8 +417,15 @@ pub fn render_menu(frame: &mut Frame, area: Rect, params: &MenuRenderParams) {
     let mut column: usize = spans.iter().map(|s| s.width()).sum();
 
     // Project buttons: the current one in the menu titles' colour, the
-    // others dimmed.
-    for button in &bar.projects.buttons {
+    // others dimmed; a dim separator keeps them apart.
+    let separator = Style::default().fg(params.theme.disabled);
+    for (step, button) in bar.projects.buttons.iter().enumerate() {
+        if step > 0 {
+            let sep_x = button.x as usize - SEPARATOR.width();
+            pad(&mut spans, column, sep_x);
+            spans.push(Span::styled(SEPARATOR, separator));
+            column = button.x as usize;
+        }
         pad(&mut spans, column, button.x as usize);
         let project = &params.projects[button.index];
         let style = if is_selected(PROJECT_BUTTON_BASE + button.index) {
@@ -579,11 +588,7 @@ mod tests {
         let bar = menu_bar_layout(200, &params(&theme, &projects));
         let titles_end = 1 + MenuLayout::with_mark(false).total_width;
         let first = &bar.projects.buttons[0];
-        assert_eq!(
-            first.x as usize,
-            titles_end - 1,
-            "one column after the titles"
-        );
+        assert_eq!(first.x as usize, titles_end, "two columns after the titles");
         let last = bar.projects.buttons.last().unwrap();
         assert!(last.range().end < bar.net.start, "clear of the indicators");
         assert_eq!(bar.project_at(first.x), Some(0));
@@ -637,12 +642,35 @@ mod tests {
                 .collect();
             assert_eq!(at, button.label);
         }
-        assert!(row.contains("[nvn] [zarab]"), "{row}");
-        let titles_end = row.find(" [nvn]").unwrap();
-        assert_ne!(
-            &row[titles_end - 1..titles_end],
-            " ",
-            "one column after the titles: {row}"
+        assert!(row.contains("nvn | zarab"), "{row}");
+        let strip_start = row.find("nvn").unwrap();
+        assert_eq!(
+            &row[strip_start - 2..strip_start],
+            "  ",
+            "two columns after the titles: {row}"
         );
+    }
+
+    #[test]
+    fn the_separator_is_dim_and_the_current_project_is_not() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let theme = Theme::default();
+        let projects = [project("nvn", true, false), project("zarab", false, false)];
+        let params = params(&theme, &projects);
+        let mut terminal = Terminal::new(TestBackend::new(160, 1)).unwrap();
+        terminal
+            .draw(|frame| render_menu(frame, frame.area(), &params))
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let bar = menu_bar_layout(160, &params);
+        let (first, second) = (&bar.projects.buttons[0], &bar.projects.buttons[1]);
+        // The columns between two buttons are the separator, not a button.
+        assert_eq!(buffer[(first.range().end, 0)].symbol(), " ");
+        assert_eq!(buffer[(first.range().end + 1, 0)].symbol(), "|");
+        assert_eq!(buffer[(second.x - 1, 0)].symbol(), " ");
+        for x in first.range().end..second.x {
+            assert_eq!(buffer[(x, 0)].style().fg, Some(theme.disabled));
+        }
+        assert_ne!(buffer[(first.x, 0)].style().fg, Some(theme.disabled));
     }
 }
