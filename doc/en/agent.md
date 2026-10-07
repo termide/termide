@@ -681,6 +681,17 @@ provide (see [MCP servers](#mcp-servers)). The panel's own agent, and Claude
 Code on termide's tools, also have **question** and **suggest_command**,
 described after the list.
 
+Calls the model asks for in one reply that change nothing — `read`, `recall`,
+`fetch`, `web_search`, `skill`, a look-only `bash` command such as `rg` or
+`git log` — and `task` delegations run side by side; each ends in the
+transcript as it finishes, and the model gets their results in the order it
+asked. Their permission decisions still take turns, before any of them runs.
+Any other call runs alone: those before it have ended when it starts, and
+those after it wait for it, so a change and what reads it keep the model's
+order. MCP tools run alone too, as termide cannot tell which of them change
+something. How many delegated tasks think at once is the
+`max_concurrent_requests` of the connection they run on.
+
 - **read** returns a file with line numbers, paged with an offset when a file
   is long.
 - **edit** replaces a unique piece of text in a file and reports a diff of
@@ -1413,6 +1424,7 @@ You are a coding agent working inside termide, an all-in-one terminal workspace 
 - Read a file before you change it, and keep edits small and targeted.
 - Name file paths clearly when you talk about files.
 - Be concise.
+- Ask for reads, searches, look-only commands and delegated tasks that do not depend on each other in one reply: they run side by side.
 - Check the facts of the moment with a tool rather than guess them: run `date` for today's date, read a file for its contents, `git log` for history. State plainly when you did not check.
 {{guidelines}}
 

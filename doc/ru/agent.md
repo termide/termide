@@ -692,6 +692,18 @@ MCP-серверы (см. [MCP-серверы](#mcp-серверы)). У соб�
 а также у Claude Code на инструментах termide, есть ещё **question** и
 **suggest_command**, описанные после списка.
 
+Вызовы из одного ответа модели, которые ничего не меняют, — `read`, `recall`,
+`fetch`, `web_search`, `skill`, команда `bash` только для чтения вроде `rg` или
+`git log` — и делегирование через `task` выполняются одновременно; каждый
+завершается в транскрипте, как только готов, а модель получает результаты в том
+порядке, в каком просила. Решения о разрешениях для них по-прежнему принимаются
+по очереди, до запуска любого из них. Любой другой вызов выполняется отдельно:
+предыдущие к его началу завершены, следующие ждут его, так что изменение и то,
+что его читает, сохраняют порядок модели. Инструменты MCP тоже выполняются
+отдельно: termide не знает, какие из них что-то меняют. Сколько делегированных
+задач думают одновременно, определяет `max_concurrent_requests` подключения, на
+котором они работают.
+
 - **read** возвращает файл с номерами строк, длинные файлы читаются по частям.
 - **edit** заменяет уникальный фрагмент текста в файле и показывает diff.
 - **write** создаёт файл или полностью заменяет его содержимое.
@@ -1436,6 +1448,7 @@ You are a coding agent working inside termide, an all-in-one terminal workspace 
 - Read a file before you change it, and keep edits small and targeted.
 - Name file paths clearly when you talk about files.
 - Be concise.
+- Ask for reads, searches, look-only commands and delegated tasks that do not depend on each other in one reply: they run side by side.
 - Check the facts of the moment with a tool rather than guess them: run `date` for today's date, read a file for its contents, `git log` for history. State plainly when you did not check.
 {{guidelines}}
 
