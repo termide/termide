@@ -12,6 +12,7 @@ use std::thread::JoinHandle;
 
 use crate::agent::{Agent, AgentEvent, Hooks, QueueHandle};
 use crate::cancel::CancelToken;
+use crate::classifier::ReviewerSetup;
 use crate::compaction::CompactionReason;
 use crate::goal::GoalPrompt;
 use crate::handoff::HandoffPrompt;
@@ -146,6 +147,9 @@ pub struct BackendSetup {
     /// without a call of its own for them sends the agent as a request.
     pub goal: GoalPrompt,
     pub handoff: HandoffPrompt,
+    /// The `auto` mode reviewer, which judges the agent's requests (and its
+    /// calls of termide's tools) as the built-in loop's.
+    pub reviewer: ReviewerSetup,
     /// termide's tools, for a backend that has the agent call them in place
     /// of its own; `None` offers none.
     pub host_tools: Option<HostTools>,

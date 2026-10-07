@@ -121,10 +121,10 @@ pub struct AiSettings {
     #[serde(default)]
     pub permissions: termide_agent_core::PermissionRules,
 
-    /// The connection whose model reviews calls in `auto` mode. Empty
-    /// reviews with the model the session runs on.
+    /// `[ai.auto_reviewer]`: the model that reviews calls in `auto` mode.
+    /// Left empty, the model the session runs on reviews.
     #[serde(default)]
-    pub auto_reviewer: String,
+    pub auto_reviewer: SideModel,
 
     /// Context compaction policy.
     #[serde(default)]
@@ -315,6 +315,18 @@ impl FoldBlocks {
     }
 }
 
+/// A model for a side call — the `auto` reviewer, the recall solver: a
+/// connection, a model or a CLI agent's subscription, and the model of it to
+/// use. An empty connection means the model the session runs on; an empty
+/// model, the connection's own.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SideModel {
+    #[serde(default)]
+    pub connection: String,
+    #[serde(default)]
+    pub model: String,
+}
+
 /// `[ai.recall]`: how long each source of a `recall` search may take, and whether it
 /// answers from its results with one model call before handing them back,
 /// and with which model.
@@ -336,6 +348,10 @@ pub struct RecallSettings {
     /// session runs on.
     #[serde(default)]
     pub connection: String,
+    /// The model of that connection to answer with; empty takes the
+    /// connection's own.
+    #[serde(default)]
+    pub model: String,
 }
 
 impl Default for RecallSettings {
@@ -346,6 +362,7 @@ impl Default for RecallSettings {
             files_timeout_secs: recall_defaults::timeout_secs(),
             solver: false,
             connection: String::new(),
+            model: String::new(),
         }
     }
 }
@@ -479,7 +496,7 @@ impl Default for AiSettings {
             max_tokens_per_turn: agent_defaults::max_tokens(),
             reasoning: agent_defaults::reasoning(),
             permissions: termide_agent_core::PermissionRules::default(),
-            auto_reviewer: String::new(),
+            auto_reviewer: SideModel::default(),
             compaction: termide_agent_core::CompactionPolicy::default(),
             fold_blocks: FoldBlocks::default(),
             web: WebSettings::default(),
@@ -1354,8 +1371,19 @@ mod ai_settings_tests {
         let parsed: AiSettings =
             toml::from_str("prefer_reasoning = false\n[permissions]\nmode = \"auto\"\n").unwrap();
         assert_eq!(parsed.permissions.mode, termide_agent_core::Mode::Auto);
-        assert!(parsed.auto_reviewer.is_empty());
+        assert_eq!(parsed.auto_reviewer, SideModel::default());
+
         assert_eq!(parsed.reasoning, termide_agent_core::ThinkingLevel::Off);
+        let reviewer: AiSettings =
+            toml::from_str("[auto_reviewer]\nconnection = \"claude\"\nmodel = \"haiku\"\n")
+                .unwrap();
+        assert_eq!(
+            reviewer.auto_reviewer,
+            SideModel {
+                connection: "claude".into(),
+                model: "haiku".into()
+            }
+        );
         let parsed: AiSettings = toml::from_str("prefer_reasoning = true\n").unwrap();
         assert_eq!(parsed.reasoning, termide_agent_core::ThinkingLevel::High);
         let parsed: AiSettings = toml::from_str("reasoning = \"xhigh\"\n").unwrap();

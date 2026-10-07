@@ -31,8 +31,8 @@ pub use settings::{
     AiSettings, Config, Connection, CustomLanguage, DatabaseSettings, EditorSettings,
     FileManagerSettings, FoldBlocks, GeneralSettings, GitDiffSettings, GitLogSettings,
     GitStatusSettings, HighlightSettings, IconMode, LegacyConfig, LinkOpen, LoggingSettings,
-    LspServerSettings, LspSettings, ReasoningParam, RecallSettings, TerminalSettings, VfsSettings,
-    ViewerSettings, WebSettings, DEFAULT_CONTEXT_WINDOW_FALLBACK,
+    LspServerSettings, LspSettings, ReasoningParam, RecallSettings, SideModel, TerminalSettings,
+    VfsSettings, ViewerSettings, WebSettings, DEFAULT_CONTEXT_WINDOW_FALLBACK,
 };
 /// The type of `[ai] reasoning`.
 pub use termide_agent_core::ThinkingLevel;
@@ -767,6 +767,20 @@ mod layered_load_tests {
         );
         assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
         assert_eq!(loaded.effective.general.project_retention_days, 9);
+    }
+
+    #[test]
+    fn the_old_auto_reviewer_string_is_left_out_with_a_warning() {
+        let text = "[ai]\nauto_reviewer = \"cloud\"\nbell_on_attention = false\n";
+        let (loaded, _dir) = layered(text, None);
+        assert_eq!(loaded.effective.ai.auto_reviewer, SideModel::default());
+        assert!(!loaded.effective.ai.bell_on_attention);
+        assert_eq!(loaded.warnings.len(), 1);
+        assert!(
+            loaded.warnings[0].contains("ai.auto_reviewer"),
+            "{:?}",
+            loaded.warnings
+        );
     }
 
     #[test]

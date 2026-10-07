@@ -400,6 +400,7 @@ impl SettingsModal {
                     Header(t.settings_header_permissions()),
                     Field(7), // permission mode for new sessions
                     Field(8), // auto mode reviewer
+                    Field(9), // its model
                     Spacer,
                     Header(t.settings_header_transcript()),
                     Field(2), // autofold
@@ -630,6 +631,8 @@ impl SettingsModal {
             SettingsTab::Ai => {
                 if index == 6 {
                     self.config.ai.web.chrome_path = text.to_string();
+                } else if index == super::fields::AI_AUTO_REVIEWER_MODEL_FIELD {
+                    self.config.ai.auto_reviewer.model = text.trim().to_string();
                 }
             }
             SettingsTab::Connection => self.apply_connection_text(index, text),

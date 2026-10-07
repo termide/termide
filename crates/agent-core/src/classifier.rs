@@ -84,6 +84,16 @@ impl IntentLog {
         }
     }
 
+    /// Record a message of the user's: a command they ran by hand as the
+    /// command alone (what it printed came from outside and is not intent),
+    /// anything else as their words.
+    pub fn record_user(&self, message: &UserMessage) {
+        match &message.ran {
+            Some(command) => self.push(IntentEntry::Ran(command.clone())),
+            None => self.push(IntentEntry::User(message.plain_text())),
+        }
+    }
+
     /// Record the calls of an assistant message.
     pub fn push_calls<'a>(&self, calls: impl Iterator<Item = &'a ToolCall>) {
         for call in calls {
@@ -289,39 +299,71 @@ pub fn parse_classification(reply: &str) -> Verdict {
     }
 }
 
-/// What a host needs to build the reviewer of each run it spawns: the texts,
-/// and the model to review with when it is not the session's.
+/// The model a side call (the reviewer, the recall solver) runs on: one of
+/// its own, or the session's — under another model id of the session's
+/// endpoint when `session_model` names one.
 #[derive(Clone, Default)]
-pub struct ReviewerSetup {
-    pub prompt: ClassifyPrompt,
-    pub model: Option<(Arc<dyn Provider>, ModelSpec)>,
+pub struct ModelChoice {
+    pub own: Option<(Arc<dyn Provider>, ModelSpec)>,
+    pub session_model: Option<String>,
 }
 
-impl std::fmt::Debug for ReviewerSetup {
+impl std::fmt::Debug for ModelChoice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ReviewerSetup")
-            .field("model", &self.model.as_ref().map(|(_, model)| &model.id))
-            .finish_non_exhaustive()
+        f.debug_struct("ModelChoice")
+            .field("own", &self.own.as_ref().map(|(_, model)| &model.id))
+            .field("session_model", &self.session_model)
+            .finish()
     }
+}
+
+impl ModelChoice {
+    /// A model of its own.
+    #[must_use]
+    pub fn own(provider: Arc<dyn Provider>, model: ModelSpec) -> Self {
+        Self {
+            own: Some((provider, model)),
+            session_model: None,
+        }
+    }
+
+    /// The provider and model to call: its own, else `session`'s with the
+    /// model id replaced when one is named; `None` without either.
+    #[must_use]
+    pub fn resolve(&self, session: Option<&SessionView>) -> Option<(Arc<dyn Provider>, ModelSpec)> {
+        if let Some((provider, model)) = &self.own {
+            return Some((Arc::clone(provider), model.clone()));
+        }
+        let session = session?;
+        let mut model = session.model.clone();
+        if let Some(id) = self.session_model.as_ref().filter(|id| !id.is_empty()) {
+            model.id = id.clone();
+        }
+        Some((Arc::clone(&session.provider), model))
+    }
+}
+
+/// What a host needs to build the reviewer of each run it spawns: the texts,
+/// and the model to review with.
+#[derive(Clone, Default, Debug)]
+pub struct ReviewerSetup {
+    pub prompt: ClassifyPrompt,
+    pub model: ModelChoice,
 }
 
 impl ReviewerSetup {
     /// The reviewer of a run that `cancel` stops.
     #[must_use]
     pub fn classifier(&self, cancel: CancelToken) -> ModelClassifier {
-        let classifier = ModelClassifier::new(self.prompt.clone(), cancel);
-        match &self.model {
-            Some((provider, model)) => classifier.with_model(Arc::clone(provider), model.clone()),
-            None => classifier,
-        }
+        ModelClassifier::new(self.prompt.clone(), cancel).with_choice(self.model.clone())
     }
 }
 
 /// A reviewer that asks a model: its own, or the session's.
 pub struct ModelClassifier {
     prompt: ClassifyPrompt,
-    /// A model configured for reviewing; `None` reviews with the session's.
-    own: Option<(Arc<dyn Provider>, ModelSpec)>,
+    /// The model configured for reviewing.
+    model: ModelChoice,
     cancel: CancelToken,
 }
 
@@ -330,15 +372,21 @@ impl ModelClassifier {
     pub fn new(prompt: ClassifyPrompt, cancel: CancelToken) -> Self {
         Self {
             prompt,
-            own: None,
+            model: ModelChoice::default(),
             cancel,
         }
     }
 
     /// Review with `model` on `provider` instead of the session's model.
     #[must_use]
-    pub fn with_model(mut self, provider: Arc<dyn Provider>, model: ModelSpec) -> Self {
-        self.own = Some((provider, model));
+    pub fn with_model(self, provider: Arc<dyn Provider>, model: ModelSpec) -> Self {
+        self.with_choice(ModelChoice::own(provider, model))
+    }
+
+    /// Review with the model `choice` names.
+    #[must_use]
+    pub fn with_choice(mut self, choice: ModelChoice) -> Self {
+        self.model = choice;
         self
     }
 }
@@ -361,11 +409,11 @@ impl Classifier for ModelClassifier {
                 reason: "there is no request to judge the call against".into(),
             };
         }
-        let (provider, model) = match &self.own {
-            Some((provider, model)) => (provider, model),
-            None => (&session.provider, &session.model),
+        let Some((provider, mut model)) = self.model.resolve(Some(session)) else {
+            return Verdict::Unavailable {
+                reason: "there is no model to review with".into(),
+            };
         };
-        let mut model = model.clone();
         model.thinking = ThinkingLevel::Off;
         model.max_tokens = Some(VERDICT_TOKENS);
         let system_prompt = self.prompt.system_prompt(&ctx.cwd);
@@ -565,6 +613,24 @@ mod tests {
             model: spec("session-model"),
         });
         ctx
+    }
+
+    #[test]
+    fn a_choice_is_its_own_model_or_the_sessions_under_another_id() {
+        let session_provider = Canned::new("ALLOW");
+        let ctx = session_ctx(session_provider, IntentLog::new());
+        let session = ctx.session.as_ref();
+        assert!(ModelChoice::default().resolve(None).is_none());
+        let (_, model) = ModelChoice::default().resolve(session).unwrap();
+        assert_eq!(model.id, "session-model");
+        let cheaper = ModelChoice {
+            own: None,
+            session_model: Some("haiku".into()),
+        };
+        let (_, model) = cheaper.resolve(session).unwrap();
+        assert_eq!(model.id, "haiku");
+        let own = ModelChoice::own(Canned::new("ALLOW"), spec("reviewer"));
+        assert_eq!(own.resolve(None).unwrap().1.id, "reviewer");
     }
 
     #[test]

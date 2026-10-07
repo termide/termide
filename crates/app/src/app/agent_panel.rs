@@ -6,15 +6,16 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError};
 
 use anyhow::Result;
-use termide_agent_acp::AcpRuntime;
+use termide_agent_acp::{AcpProvider, AcpRuntime};
 use termide_agent_core::Mode;
 use termide_agent_core::{
     apply_tool_texts, build_system_prompt, discover_context_files, ensure_global_layout, AcpConfig,
     AcpFlavor, Agent, AgentDirs, AgentEvent, AutoDenyPrompter, CancelToken, ChainedHooks,
-    CompactionPolicy, Decision, IntentLog, Message, ModeHandle, ModelSpec, PermissionHooks,
-    PermissionRules, PersistScope, PlanGuard, PromptOptions, Provider, Refusals, ReviewerSetup,
-    Session, SessionSummary, ShellOutput, ShellRunner, ThinkingLevel, Tool, ToolCall, ToolContext,
-    ToolRegistry, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
+    CompactionPolicy, Decision, IntentLog, Message, ModeHandle, ModelChoice, ModelSpec,
+    PermissionHooks, PermissionRules, PersistScope, PlanGuard, PromptOptions, Provider, Refusals,
+    ReviewerSetup, Session, SessionSummary, ShellOutput, ShellRunner, ThinkingLevel, Tool,
+    ToolCall, ToolContext, ToolRegistry, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR,
+    SESSIONS_DIR,
 };
 use termide_agent_hooks::CommandHooks;
 use termide_agent_mcp::{Connections, TokenStore};
@@ -836,49 +837,82 @@ impl Provider for FirstListedModel {
     }
 }
 
-/// The model of the connection `name` for a side call (`purpose` names it in
-/// the warning): `None` when the name is empty, or matches no connection or
-/// one that drives a CLI agent — the session's model then serves.
+/// The model a side call (`purpose` names it in warnings) runs on: the
+/// connection `connection` names with `model` in place of its own when one is
+/// given — a CLI agent's through its subscription, see [`AcpProvider`]; or,
+/// with no connection named, the session's under `model`. A name that matches
+/// no connection falls back to the session's model.
 fn side_model(
     settings: &AiSettings,
-    name: &str,
+    choice: &termide_config::SideModel,
     purpose: &str,
-) -> Option<(Arc<dyn Provider>, ModelSpec)> {
-    let name = name.trim();
+) -> ModelChoice {
+    let name = choice.connection.trim();
+    let model = choice.model.trim();
+    let session = || ModelChoice {
+        own: None,
+        session_model: (!model.is_empty()).then(|| model.to_string()),
+    };
     match settings.connections.get(name) {
-        _ if name.is_empty() => None,
+        _ if name.is_empty() => session(),
         Some(connection) if !termide_config::is_cli_provider(&connection.provider) => {
+            let id = if model.is_empty() {
+                connection.model.clone()
+            } else {
+                model.to_string()
+            };
             let spec = ModelSpec {
                 provider: "agent".to_string(),
-                id: connection.model.clone(),
+                id: id.clone(),
                 context_window: connection.effective_context_window(),
                 max_tokens: None,
                 thinking: ThinkingLevel::Off,
             };
             let mut provider = build_provider(connection, api_key_of(connection));
-            if connection.model.trim().is_empty() {
+            if id.trim().is_empty() {
                 provider = Arc::new(FirstListedModel {
                     inner: provider,
                     model: std::sync::OnceLock::new(),
                 });
             }
-            Some((provider, spec))
+            ModelChoice::own(provider, spec)
         }
-        _ => {
+        Some(connection) => match cli_acp_config(&connection.provider) {
+            Some(config) => {
+                let id = if model.is_empty() {
+                    connection.model.trim().to_string()
+                } else {
+                    model.to_string()
+                };
+                let spec = ModelSpec {
+                    provider: "agent".to_string(),
+                    id,
+                    context_window: 0,
+                    max_tokens: None,
+                    thinking: ThinkingLevel::Off,
+                };
+                let cwd = std::env::current_dir().unwrap_or_default();
+                let provider = AcpProvider::new(name, config, cwd);
+                ModelChoice::own(Arc::new(provider), spec)
+            }
+            None => {
+                log::warn!("{purpose} names {name:?}, which no side call can use");
+                ModelChoice::default()
+            }
+        },
+        None => {
             log::warn!("{purpose} names no model connection {name:?}; the session's model serves");
-            None
+            ModelChoice::default()
         }
     }
 }
 
 /// The `auto` mode reviewer: the texts of `system/classify.md`, and the
-/// model of the `auto_reviewer` connection when one is named. A name that
-/// matches no connection, or one that drives a CLI agent, reviews with the
-/// session's model.
+/// model `[ai.auto_reviewer]` names, see [`side_model`].
 fn reviewer_setup(settings: &AiSettings, dirs: &AgentDirs) -> ReviewerSetup {
     ReviewerSetup {
         prompt: dirs.classify_prompt(),
-        model: side_model(settings, &settings.auto_reviewer, "auto_reviewer"),
+        model: side_model(settings, &settings.auto_reviewer, "[ai.auto_reviewer]"),
     }
 }
 
@@ -904,8 +938,11 @@ fn recall_tool(
         prompt: dirs.recall_prompt(),
         model: side_model(
             settings,
-            &settings.recall.connection,
-            "[ai.recall] connection",
+            &termide_config::SideModel {
+                connection: settings.recall.connection.clone(),
+                model: settings.recall.model.clone(),
+            },
+            "[ai.recall]",
         ),
     });
     // 0 is no limit.
@@ -1274,6 +1311,17 @@ fn user_shell_runner(dirs: &AgentDirs, cwd: &Path) -> ShellRunner {
 /// login (a subscription or an API key — the adapter's concern, not ours).
 /// `None` for any other provider, so the built-in loop is used.
 fn cli_provider_backend(provider: &str, agent: &str) -> Option<BackendFactory> {
+    let config = cli_acp_config(provider)?;
+    let agent = agent.to_string();
+    Some(Arc::new(move |setup: termide_agent_core::BackendSetup| {
+        AcpRuntime::start(&agent, &config, setup)
+            .map(|runtime| Box::new(runtime) as Box<dyn termide_agent_core::Backend>)
+    }) as BackendFactory)
+}
+
+/// How a CLI-adapter provider's ACP adapter runs; `None` for any other
+/// provider.
+fn cli_acp_config(provider: &str) -> Option<AcpConfig> {
     // Claude Code takes termide's prompt and tools in place of its own; Codex
     // and Gemini CLI keep their own and have termide's permission mode mapped
     // onto their modes.
@@ -1300,7 +1348,7 @@ fn cli_provider_backend(provider: &str, agent: &str) -> Option<BackendFactory> {
     // old adapter lists old models (and none at all, for Codex). A power
     // user who wants a pinned binary can point an agent's own `command` at it
     // and pick a compatible provider instead.
-    let config = AcpConfig {
+    Some(AcpConfig {
         command: "npx".to_string(),
         args: ["-y", package]
             .into_iter()
@@ -1310,12 +1358,7 @@ fn cli_provider_backend(provider: &str, agent: &str) -> Option<BackendFactory> {
         env: std::collections::BTreeMap::new(),
         timeout_secs: 120,
         flavor,
-    };
-    let agent = agent.to_string();
-    Some(Arc::new(move |setup: termide_agent_core::BackendSetup| {
-        AcpRuntime::start(&agent, &config, setup)
-            .map(|runtime| Box::new(runtime) as Box<dyn termide_agent_core::Backend>)
-    }) as BackendFactory)
+    })
 }
 
 /// Start an off-thread `list_models` for the settings modal's model dropdown
@@ -1531,6 +1574,50 @@ fn merge_permission_rule(path: &Path, tool: &str, pattern: &str, decision: Decis
 mod tests {
     use super::*;
     use termide_agent_core::{AGENT_FILE, DEFAULT_AGENT_FILE, SEED_TOOLS};
+
+    #[test]
+    fn a_side_call_runs_on_a_connection_a_subscription_or_the_sessions_model() {
+        let mut settings = AiSettings::default();
+        for (name, provider, model) in [
+            ("local", "openai_compatible", "qwen"),
+            ("claude", "claude_code", ""),
+        ] {
+            settings.connections.insert(
+                name.to_string(),
+                termide_config::Connection {
+                    provider: provider.to_string(),
+                    model: model.to_string(),
+                    ..termide_config::Connection::default()
+                },
+            );
+        }
+        let pick = |connection: &str, model: &str| {
+            side_model(
+                &settings,
+                &termide_config::SideModel {
+                    connection: connection.into(),
+                    model: model.into(),
+                },
+                "test",
+            )
+        };
+        // An endpoint's model, or another of it.
+        let own = |choice: ModelChoice| {
+            let (provider, model) = choice.own.expect("a model of its own");
+            (provider.name().to_string(), model.id)
+        };
+        assert_eq!(own(pick("local", "")).1, "qwen");
+        assert_eq!(own(pick("local", "big")).1, "big");
+        // A CLI agent through its subscription.
+        assert_eq!(own(pick("claude", "haiku")), ("acp".into(), "haiku".into()));
+        // None named: the session's, under another model when one is.
+        let session = pick("", "haiku");
+        assert!(session.own.is_none());
+        assert_eq!(session.session_model.as_deref(), Some("haiku"));
+        assert!(pick("", "").session_model.is_none());
+        // A name that matches nothing: the session's.
+        assert!(pick("gone", "").own.is_none());
+    }
 
     /// Every built-in tool a panel can offer has a shipped text, and every
     /// shipped text a tool: a tool whose `ToolText::seed` name is wrong, or

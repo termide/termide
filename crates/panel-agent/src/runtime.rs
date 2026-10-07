@@ -270,6 +270,7 @@ pub(crate) fn spawn_runtime(
         let mut host_permissions =
             PermissionHooks::new(backend_rules.clone(), Box::new(external_prompter.clone()))
                 .with_mode_handle(mode.clone())
+                .with_classifier(Box::new(reviewer.classifier(cancel.clone())))
                 .with_refusals(refusals.clone());
         if let Some(persist) = persist_rule {
             host_permissions = host_permissions.with_persist(Box::new(persist) as PersistRule);
@@ -287,6 +288,7 @@ pub(crate) fn spawn_runtime(
             plan: plan_prompt.clone(),
             goal: goal_prompt.clone(),
             handoff: handoff_prompt.clone(),
+            reviewer: reviewer.clone(),
             host_tools: Some(HostTools {
                 tools: tools.clone(),
                 hooks: Box::new(ChainedHooks::new(host_chain)),

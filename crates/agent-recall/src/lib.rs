@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use termide_agent_core::message::now_millis;
 use termide_agent_core::{
-    civil_date, one_shot, CancelToken, ModelSpec, Provider, RecallPrompt, SessionView, Tool,
-    ToolCall, ToolContext, ToolResultMessage, ToolText, ToolUpdate,
+    civil_date, one_shot, CancelToken, ModelChoice, RecallPrompt, SessionView, Tool, ToolCall,
+    ToolContext, ToolResultMessage, ToolText, ToolUpdate,
 };
 
 mod files;
@@ -79,14 +79,14 @@ const OPEN_BLOCK_BYTES: usize = 2 * 1024;
 #[derive(Clone)]
 pub struct Solver {
     pub prompt: RecallPrompt,
-    /// The model that answers; `None` uses the model the session runs on.
-    pub model: Option<(Arc<dyn Provider>, ModelSpec)>,
+    /// The model that answers.
+    pub model: ModelChoice,
 }
 
 impl std::fmt::Debug for Solver {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Solver")
-            .field("model", &self.model.as_ref().map(|(_, m)| &m.id))
+            .field("model", &self.model)
             .finish_non_exhaustive()
     }
 }
@@ -623,10 +623,8 @@ impl RecallTool {
         if request.raw || hits.is_empty() {
             return None;
         }
-        let (provider, model) = match (&solver.model, session) {
-            (Some((provider, model)), _) => (Arc::clone(provider), model.clone()),
-            (None, Some(session)) => (Arc::clone(&session.provider), session.model.clone()),
-            (None, None) => return Some(Err("no model to answer with".into())),
+        let Some((provider, model)) = solver.model.resolve(session) else {
+            return Some(Err("no model to answer with".into()));
         };
         let question = request.queries.join(" / ");
         let user = solver.prompt.user_turn(&question, &render_hits(hits));
@@ -831,7 +829,7 @@ impl Tool for RecallTool {
 mod tests {
     use super::*;
     use termide_agent_core::message::{Message, UserMessage};
-    use termide_agent_core::Session;
+    use termide_agent_core::{ModelSpec, Provider, Session};
 
     fn setup(project: &std::path::Path, sessions: &std::path::Path) -> RecallSetup {
         RecallSetup {
@@ -1218,7 +1216,7 @@ mod tests {
             let mut setup = setup(tmp.path(), &sessions_dir);
             setup.solver = Some(Solver {
                 prompt: RecallPrompt::default(),
-                model: Some((Arc::new(Canned(reply)), model.clone())),
+                model: ModelChoice::own(Arc::new(Canned(reply)), model.clone()),
             });
             let outcome = RecallTool::new(setup).search(request.clone(), None, &CancelToken::new());
             assert_eq!(matches!(outcome.answer, Some(Ok(_))), expect_answer);
@@ -1235,7 +1233,7 @@ mod tests {
         let mut setup = setup(tmp.path(), &sessions_dir);
         setup.solver = Some(Solver {
             prompt: RecallPrompt::default(),
-            model: Some((Arc::new(Canned(None)), model)),
+            model: ModelChoice::own(Arc::new(Canned(None)), model),
         });
         let mut raw = request;
         raw.raw = true;

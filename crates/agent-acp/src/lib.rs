@@ -20,12 +20,15 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use termide_agent_core::recap;
-use termide_agent_core::{companion_tools, parse_verdict, GoalPrompt, HandoffPrompt};
+use termide_agent_core::{
+    companion_tools, parse_verdict, GoalPrompt, HandoffPrompt, IntentLog, ModelSpec, Provider,
+    ReviewerSetup, SessionView, ThinkingLevel,
+};
 use termide_agent_core::{
     expand_env, now_millis, AcpConfig, AcpFlavor, Agent, AgentCommand, AgentEvent,
     AssistantContent, AssistantMessage, Backend, BackendModel, BackendOption, BackendSetup,
@@ -34,6 +37,9 @@ use termide_agent_core::{
     ToolRegistry, ToolResultMessage, Usage, UserMessage, ACP_PROVIDER, RECAP_LIMIT,
 };
 use termide_agent_mcp::{McpServer, SERVER_NAME};
+
+mod provider;
+pub use provider::AcpProvider;
 
 /// How the calls of termide's tools reach the transcript from Claude Code:
 /// named after the MCP server that serves them.
@@ -135,6 +141,12 @@ struct Shared {
     served_tools: Mutex<BTreeSet<String>>,
     /// The agent's own session to resume, when the log names one.
     resume: Option<ExternalSessionRef>,
+    /// What the reviewer judges the agent's requests against: the user's
+    /// messages and the agent's calls, as the built-in loop records them.
+    intent: IntentLog,
+    /// The agent's own subscription for the reviewer that runs on "the
+    /// session's model", when the agent was started from a command.
+    session_provider: OnceLock<Arc<dyn Provider>>,
     /// The conversation so far, until the handshake knows whether the
     /// agent resumed it or is to be told a recap of it.
     history: Mutex<Vec<Message>>,
@@ -158,6 +170,9 @@ struct Shared {
     /// reply is taken in the reader, in order with the updates, so the
     /// message is logged before the text that answers it.
     steering_out: Mutex<HashMap<u64, UserMessage>>,
+    /// A connection for side requests alone ([`AcpProvider`]): the
+    /// handshake opens no session, each request opens its own.
+    service: bool,
     /// Whether the agent forks a session (`session/fork`) and closes one
     /// (`session/close`), which a side request (the `/goal` judge, the
     /// `/handoff` brief) is sent in, so the conversation is left as it was.
@@ -165,15 +180,9 @@ struct Shared {
     can_close: AtomicBool,
     /// The side request in flight: the session it runs in and the answer
     /// so far, which reaches neither the panel nor the log.
-    side: Mutex<Option<SideQuery>>,
+    side: Mutex<HashMap<String, String>>,
     goal: GoalPrompt,
     handoff: HandoffPrompt,
-}
-
-/// A side request's session and the text it has answered so far.
-struct SideQuery {
-    session_id: String,
-    text: String,
 }
 
 /// The agent's tool calls as the session log keeps the built-in loop's: an
@@ -200,6 +209,21 @@ impl AcpRuntime {
     /// handshake runs on a thread and its failure reaches the panel as a
     /// failed assistant message when the first prompt goes out.
     pub fn start(name: &str, config: &AcpConfig, setup: BackendSetup) -> Result<Self, String> {
+        Self::launch(name, config, setup, false)
+    }
+
+    /// Start the agent named `name` as a service for side requests only
+    /// ([`AcpProvider`]): the handshake opens no session of its own.
+    fn start_service(name: &str, config: &AcpConfig, setup: BackendSetup) -> Result<Self, String> {
+        Self::launch(name, config, setup, true)
+    }
+
+    fn launch(
+        name: &str,
+        config: &AcpConfig,
+        setup: BackendSetup,
+        service: bool,
+    ) -> Result<Self, String> {
         let mut command = Command::new(&config.command);
         command
             .args(&config.args)
@@ -223,14 +247,24 @@ impl AcpRuntime {
                 }
             });
         }
-        let runtime = Self::from_streams(
+        let cwd = setup.cwd.clone();
+        let runtime = Self::connect(
             name,
             stdout,
             stdin,
             setup,
             config.timeout_secs,
             config.flavor,
+            service,
         );
+        // The reviewer on "the session's model" asks the agent's own
+        // subscription, in a process of its own.
+        if !service {
+            let _ = runtime.shared.session_provider.set(Arc::new(CurrentModel {
+                inner: AcpProvider::new(name, config.clone(), cwd),
+                shared: Arc::downgrade(&runtime.shared),
+            }));
+        }
         *runtime
             .shared
             .child
@@ -248,6 +282,19 @@ impl AcpRuntime {
         timeout_secs: u64,
         flavor: AcpFlavor,
     ) -> Self {
+        Self::connect(name, reader, writer, setup, timeout_secs, flavor, false)
+    }
+
+    /// [`Self::from_streams`], as a service when `service` says so.
+    fn connect(
+        name: &str,
+        reader: impl Read + Send + 'static,
+        writer: impl Write + Send + 'static,
+        setup: BackendSetup,
+        timeout_secs: u64,
+        flavor: AcpFlavor,
+        service: bool,
+    ) -> Self {
         let (events_tx, events) = mpsc::channel();
         let shared = Arc::new(Shared {
             writer: Arc::new(Mutex::new(Some(Box::new(writer)))),
@@ -257,10 +304,11 @@ impl AcpRuntime {
             conn: Mutex::new(Conn::Starting),
             queue: Mutex::new(Vec::new()),
             busy: AtomicBool::new(false),
-            cancel: setup.cancel,
+            cancel: setup.cancel.clone(),
             hooks: Mutex::new({
                 let mut hooks = PermissionHooks::new(setup.rules, Box::new(setup.prompter))
-                    .with_mode_handle(setup.mode.clone());
+                    .with_mode_handle(setup.mode.clone())
+                    .with_classifier(Box::new(setup.reviewer.classifier(setup.cancel.clone())));
                 if let Some(persist) = setup.persist {
                     hooks = hooks.with_persist(persist);
                 }
@@ -305,6 +353,18 @@ impl AcpRuntime {
             mode: setup.mode,
             plan: setup.plan,
             resume: setup.resume,
+            intent: {
+                let intent = IntentLog::new();
+                for message in &setup.history {
+                    match message {
+                        Message::User(user) => intent.record_user(user),
+                        Message::Assistant(assistant) => intent.push_calls(assistant.tool_calls()),
+                        Message::ToolResult(_) => {}
+                    }
+                }
+                intent
+            },
+            session_provider: OnceLock::new(),
             history: Mutex::new(setup.history),
             recap: Mutex::new(None),
             replaying: AtomicBool::new(false),
@@ -312,9 +372,10 @@ impl AcpRuntime {
             turn_running: AtomicBool::new(false),
             steered: Mutex::new(Vec::new()),
             steering_out: Mutex::new(HashMap::new()),
+            service,
             can_fork: AtomicBool::new(false),
             can_close: AtomicBool::new(false),
-            side: Mutex::new(None),
+            side: Mutex::new(HashMap::new()),
             goal: setup.goal,
             handoff: setup.handoff,
         });
@@ -708,6 +769,15 @@ impl Shared {
             self.can_close
                 .store(sessions["close"].is_object(), Ordering::Release);
         }
+        if self.service {
+            *self.conn.lock().unwrap_or_else(PoisonError::into_inner) = match outcome {
+                Ok(_) => Conn::Ready {
+                    session_id: String::new(),
+                },
+                Err(error) => Conn::Failed(error),
+            };
+            return;
+        }
         // Claude Code's adapter takes HTTP servers, which the others say.
         let http = self.flavor == AcpFlavor::ClaudeCode
             || outcome
@@ -861,6 +931,7 @@ impl Shared {
         let server = host.and_then(|host| {
             let context = ToolContext {
                 cwd: self.cwd.clone(),
+                session: Some(self.session_view()),
                 ..host.context
             };
             McpServer::start(host.tools, host.hooks, context)
@@ -1152,6 +1223,7 @@ impl Shared {
 
     fn run_turn(self: &Arc<Self>, session_id: &str, message: UserMessage) {
         let _ = self.events.send(AgentEvent::TurnStart);
+        self.intent.record_user(&message);
         let _ = self
             .events
             .send(AgentEvent::MessageEnd(Message::User(message.clone())));
@@ -1233,15 +1305,40 @@ impl Shared {
         self.kick();
     }
 
+    /// The session as the reviewer sees it: the log of what the user asked
+    /// and the agent did, and the agent's own subscription as "the session's
+    /// model" (its current model), or none when it was not started from a
+    /// command — a reviewer on the session's model then cannot answer, and
+    /// the user is asked.
+    fn session_view(&self) -> SessionView {
+        let provider = self
+            .session_provider
+            .get()
+            .cloned()
+            .unwrap_or_else(|| Arc::new(NoModel) as Arc<dyn Provider>);
+        SessionView {
+            id: None,
+            intent: self.intent.clone(),
+            provider,
+            model: ModelSpec {
+                provider: ACP_PROVIDER.into(),
+                id: String::new(),
+                context_window: 0,
+                max_tokens: None,
+                thinking: ThinkingLevel::Off,
+            },
+        }
+    }
+
     /// Whether a side request can go now: the session is open and no turn
     /// or side request runs in it.
     fn side_ready(&self) -> Result<(), PromptError> {
         if self.busy.load(Ordering::Acquire)
-            || self
+            || !self
                 .side
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .is_some()
+                .is_empty()
         {
             return Err(PromptError::Busy);
         }
@@ -1284,22 +1381,7 @@ impl Shared {
             return Err("the agent is busy".to_string());
         }
         let session_id = forked.clone().unwrap_or(main);
-        *self.side.lock().unwrap_or_else(PoisonError::into_inner) = Some(SideQuery {
-            session_id: session_id.clone(),
-            text: String::new(),
-        });
-        let result = self.request(
-            "session/prompt",
-            json!({ "sessionId": session_id, "prompt": [{ "type": "text", "text": text }] }),
-            Duration::from_secs(60 * 60),
-        );
-        let answer = self
-            .side
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-            .map(|query| query.text)
-            .unwrap_or_default();
+        let answer = self.side_prompt(&session_id, text, Duration::from_secs(60 * 60));
         match &forked {
             Some(fork) if self.can_close.load(Ordering::Acquire) => {
                 if let Err(error) = self.request(
@@ -1317,6 +1399,33 @@ impl Shared {
                 self.run_queued();
             }
         }
+        answer
+    }
+
+    /// Send `text` as a side request in session `session_id` and return the
+    /// answer's text, which reaches neither the panel nor the log; several
+    /// may run at once, each in its own session.
+    fn side_prompt(
+        &self,
+        session_id: &str,
+        text: &str,
+        timeout: Duration,
+    ) -> Result<String, String> {
+        self.side
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(session_id.to_string(), String::new());
+        let result = self.request(
+            "session/prompt",
+            json!({ "sessionId": session_id, "prompt": [{ "type": "text", "text": text }] }),
+            timeout,
+        );
+        let answer = self
+            .side
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(session_id)
+            .unwrap_or_default();
         let reply = result?;
         match reply["stopReason"].as_str() {
             Some(stop @ ("cancelled" | "refusal")) => Err(format!("the agent stopped: {stop}")),
@@ -1324,29 +1433,27 @@ impl Shared {
         }
     }
 
-    /// Take `update` of `session` for the side request in flight, when it is
-    /// that request's: its text is kept, the rest dropped.
+    /// Take `update` of `session` for a side request in flight, when it is
+    /// one's: its text is kept, the rest dropped.
     fn side_update(&self, session: Option<&str>, update: &Value) -> bool {
         let mut side = self.side.lock().unwrap_or_else(PoisonError::into_inner);
-        let Some(query) = side.as_mut() else {
+        let Some(text) = session.and_then(|session| side.get_mut(session)) else {
             return false;
         };
-        if session != Some(query.session_id.as_str()) {
-            return false;
-        }
         if update["sessionUpdate"] == "agent_message_chunk" {
-            query
-                .text
-                .push_str(update["content"]["text"].as_str().unwrap_or_default());
+            text.push_str(update["content"]["text"].as_str().unwrap_or_default());
         }
         true
     }
 
-    /// Whether `params` come from the side request's session.
+    /// Whether `params` come from a side request's session.
     fn is_side_request(&self, params: &Value) -> bool {
-        let side = self.side.lock().unwrap_or_else(PoisonError::into_inner);
-        side.as_ref()
-            .is_some_and(|query| params["sessionId"].as_str() == Some(query.session_id.as_str()))
+        params["sessionId"].as_str().is_some_and(|session| {
+            self.side
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains_key(session)
+        })
     }
 
     /// Hand `message`, which waits in the queue, to the turn the agent is
@@ -1435,6 +1542,7 @@ impl Shared {
         }
         self.close_message(StopReason::Stop, None);
         for message in steered {
+            self.intent.record_user(&message);
             let _ = self
                 .events
                 .send(AgentEvent::MessageEnd(Message::User(message)));
@@ -1755,7 +1863,10 @@ impl Shared {
             return selected(pick(&["allow_once", "allow_always"]));
         }
         let call = permission_call(&params["toolCall"]);
-        let ctx = ToolContext::new(self.cwd.clone());
+        let ctx = ToolContext {
+            session: Some(self.session_view()),
+            ..ToolContext::new(self.cwd.clone())
+        };
         // The hooks decide the request as they would for the built-in agent:
         // a read-only command or a matching rule passes without a prompt, an
         // unknown one reaches the user, and a session or always grant is
@@ -1931,6 +2042,7 @@ impl Shared {
 
     /// Show a call that starts, and hold it for the log.
     fn start_tool_call(&self, call: ToolCall) {
+        self.intent.push_calls(std::iter::once(&call));
         let _ = self
             .events
             .send(AgentEvent::ToolExecutionStart { call: call.clone() });
@@ -2123,6 +2235,75 @@ fn host_tool_of(update: &Value) -> Option<(String, Value)> {
     Some((tool.to_string(), object(&input["arguments"])))
 }
 
+/// The agent's subscription for a side call on "the session's model": a
+/// request that names no model runs on the model the agent is on now.
+struct CurrentModel {
+    inner: AcpProvider,
+    shared: std::sync::Weak<Shared>,
+}
+
+impl Provider for CurrentModel {
+    fn name(&self) -> &str {
+        ACP_PROVIDER
+    }
+
+    fn stream(
+        &self,
+        request: &termide_agent_core::Request<'_>,
+        on_event: &mut dyn FnMut(StreamEvent),
+        cancel: &CancelToken,
+    ) -> AssistantMessage {
+        let current = self
+            .shared
+            .upgrade()
+            .and_then(|shared| {
+                shared
+                    .current_model
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone()
+            })
+            .filter(|_| request.model.id.is_empty());
+        match current {
+            Some(id) => {
+                let model = ModelSpec {
+                    id,
+                    ..request.model.clone()
+                };
+                let request = termide_agent_core::Request {
+                    model: &model,
+                    ..*request
+                };
+                self.inner.stream(&request, on_event, cancel)
+            }
+            None => self.inner.stream(request, on_event, cancel),
+        }
+    }
+}
+
+/// "The session's model" of an agent that has no subscription to ask.
+struct NoModel;
+
+impl Provider for NoModel {
+    fn name(&self) -> &str {
+        ACP_PROVIDER
+    }
+
+    fn stream(
+        &self,
+        request: &termide_agent_core::Request<'_>,
+        _on_event: &mut dyn FnMut(StreamEvent),
+        _cancel: &CancelToken,
+    ) -> AssistantMessage {
+        AssistantMessage::failed(
+            ACP_PROVIDER,
+            &request.model.id,
+            StopReason::Error,
+            "the agent has no model to review with",
+        )
+    }
+}
+
 /// The names of `tools`.
 fn tool_names(tools: &ToolRegistry) -> BTreeSet<String> {
     tools.names().into_iter().map(str::to_string).collect()
@@ -2200,14 +2381,15 @@ fn is_finished(update: &Value) -> bool {
 }
 
 /// Codex's approval preset and collaboration mode for the panel's `mode`.
-/// `auto` asks like `configured`: termide's reviewer judges a call against
-/// the session, which an external agent keeps to itself, so its requests go
-/// to termide's rules and the user.
+/// `auto` has it ask like `configured`, so every request reaches termide's
+/// rules and, in `auto`, termide's reviewer rather than Codex's own.
 fn codex_modes(mode: Mode) -> (&'static str, &'static str) {
     match mode {
         Mode::Ask | Mode::Configured | Mode::Auto => ("read-only", "default"),
         Mode::Plan => ("read-only", "plan"),
-        Mode::Edit => ("agent", "default"),
+        // Its `agent` preset is its own reviewer ("Auto review"), which
+        // termide's stands in for: edits in the workspace pass, the rest asks.
+        Mode::Edit => ("workspace-write", "default"),
         Mode::All => ("agent-full-access", "default"),
     }
 }
@@ -2500,6 +2682,7 @@ mod tests {
                 plan: PlanPrompt::default(),
                 goal: GoalPrompt::default(),
                 handoff: HandoffPrompt::default(),
+                reviewer: ReviewerSetup::default(),
                 host_tools: None,
                 resume: None,
                 history: Vec::new(),
@@ -2634,6 +2817,7 @@ mod tests {
                 plan: PlanPrompt::default(),
                 goal: GoalPrompt::default(),
                 handoff: HandoffPrompt::default(),
+                reviewer: ReviewerSetup::default(),
                 host_tools,
                 resume: None,
                 history: Vec::new(),
@@ -3087,6 +3271,8 @@ mod tests {
             new["params"].get("_meta").is_none(),
             "Codex keeps its prompt"
         );
+        runtime.set_mode(Mode::Edit);
+        seen_where(&seen, option("mode", "workspace-write"));
         runtime.set_mode(Mode::All);
         seen_where(&seen, option("mode", "agent-full-access"));
         runtime.set_mode(Mode::Plan);
@@ -3366,6 +3552,7 @@ mod tests {
                 plan: PlanPrompt::default(),
                 goal: GoalPrompt::default(),
                 handoff: HandoffPrompt::default(),
+                reviewer: ReviewerSetup::default(),
                 host_tools: None,
                 resume: None,
                 history: Vec::new(),
@@ -3461,6 +3648,7 @@ mod tests {
                 plan: PlanPrompt::default(),
                 goal: GoalPrompt::default(),
                 handoff: HandoffPrompt::default(),
+                reviewer: ReviewerSetup::default(),
                 host_tools: None,
                 resume: None,
                 history: Vec::new(),
@@ -3588,6 +3776,7 @@ mod tests {
                 plan: PlanPrompt::default(),
                 goal: GoalPrompt::default(),
                 handoff: HandoffPrompt::default(),
+                reviewer: ReviewerSetup::default(),
                 host_tools: None,
                 resume: None,
                 history: Vec::new(),
@@ -3760,6 +3949,7 @@ mod tests {
                 plan: PlanPrompt::default(),
                 goal: GoalPrompt::default(),
                 handoff: HandoffPrompt::default(),
+                reviewer: ReviewerSetup::default(),
                 host_tools: None,
                 resume: None,
                 history: Vec::new(),
@@ -3839,6 +4029,195 @@ mod tests {
             assert!(Instant::now() < deadline, "still busy");
             std::thread::sleep(Duration::from_millis(5));
         }
+    }
+
+    /// A reviewer that answers `verdict` and keeps what it was shown.
+    struct Reviewer {
+        verdict: &'static str,
+        shown: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Provider for Reviewer {
+        fn name(&self) -> &str {
+            "reviewer"
+        }
+        fn stream(
+            &self,
+            request: &termide_agent_core::Request<'_>,
+            _on_event: &mut dyn FnMut(StreamEvent),
+            _cancel: &CancelToken,
+        ) -> AssistantMessage {
+            for message in request.messages {
+                if let Message::User(user) = message {
+                    self.shown.lock().unwrap().push(user.plain_text());
+                }
+            }
+            AssistantMessage {
+                content: vec![AssistantContent::Text {
+                    text: self.verdict.into(),
+                }],
+                stop_reason: StopReason::Stop,
+                usage: Usage::default(),
+                provider: "reviewer".into(),
+                model: request.model.id.clone(),
+                error_message: None,
+                timestamp: 0,
+            }
+        }
+    }
+
+    /// An agent whose turn asks to run `cargo build` and reports the option
+    /// it was answered with.
+    fn asking_agent(
+        dir: PathBuf,
+        mode: Mode,
+        reviewer: ReviewerSetup,
+    ) -> (AcpRuntime, Receiver<PermissionEnvelope>) {
+        let (to_agent_rx, to_agent_tx) = pipe().unwrap();
+        let (from_agent_rx, from_agent_tx) = pipe().unwrap();
+        std::thread::spawn(move || {
+            let mut out = from_agent_tx;
+            let mut send = |value: Value| writeln!(out, "{value}").unwrap();
+            let mut reader = BufReader::new(to_agent_rx).lines();
+            while let Some(Ok(line)) = reader.next() {
+                let message: Value = serde_json::from_str(&line).unwrap();
+                let id = message["id"].clone();
+                match message["method"].as_str() {
+                    Some("initialize") => send(json!({ "jsonrpc": "2.0", "id": id,
+                        "result": { "protocolVersion": 1, "agentCapabilities": {} } })),
+                    Some("session/new") => send(json!({ "jsonrpc": "2.0", "id": id,
+                        "result": { "sessionId": "s1" } })),
+                    Some("session/prompt") => {
+                        send(
+                            json!({ "jsonrpc": "2.0", "id": 900, "method": "session/request_permission",
+                            "params": { "sessionId": "s1",
+                                "toolCall": { "toolCallId": "t1", "title": "cargo build", "kind": "execute",
+                                    "rawInput": { "command": "cargo build" } },
+                                "options": [
+                                    { "optionId": "yes", "name": "Allow", "kind": "allow_once" },
+                                    { "optionId": "no", "name": "Reject", "kind": "reject_once" } ] } }),
+                        );
+                        let answer: Value = loop {
+                            let Some(Ok(line)) = reader.next() else {
+                                return;
+                            };
+                            let m: Value = serde_json::from_str(&line).unwrap();
+                            if m["id"] == 900 {
+                                break m;
+                            }
+                        };
+                        let chosen = answer["result"]["outcome"]["optionId"]
+                            .as_str()
+                            .unwrap_or("cancelled")
+                            .to_string();
+                        send(
+                            json!({ "jsonrpc": "2.0", "method": "session/update", "params": {
+                            "sessionId": "s1", "update": { "sessionUpdate": "agent_message_chunk",
+                                "content": { "type": "text", "text": chosen } } } }),
+                        );
+                        send(
+                            json!({ "jsonrpc": "2.0", "id": id, "result": { "stopReason": "end_turn" } }),
+                        );
+                    }
+                    Some(_) if !id.is_null() => {
+                        send(json!({ "jsonrpc": "2.0", "id": id, "result": {} }));
+                    }
+                    _ => {}
+                }
+            }
+        });
+        let cancel = CancelToken::new();
+        let (prompter, permissions) = permission_channel(cancel.clone());
+        let runtime = AcpRuntime::from_streams(
+            "fake",
+            from_agent_rx,
+            to_agent_tx,
+            BackendSetup {
+                cwd: dir,
+                prompter,
+                cancel,
+                rules: PermissionRules::default(),
+                persist: None,
+                mode: ModeHandle::new(mode),
+                system_prompt: String::new(),
+                plan: PlanPrompt::default(),
+                goal: GoalPrompt::default(),
+                handoff: HandoffPrompt::default(),
+                reviewer,
+                host_tools: None,
+                resume: None,
+                history: vec![Message::User(UserMessage::text("set the project up"))],
+            },
+            5,
+            AcpFlavor::Codex,
+        );
+        (runtime, permissions)
+    }
+
+    #[test]
+    fn in_auto_mode_the_reviewer_answers_an_external_agents_request() {
+        for (verdict, chosen) in [
+            ("ALLOW it builds the project", "yes"),
+            ("BLOCK not asked for", "no"),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let shown = Arc::new(Mutex::new(Vec::new()));
+            let reviewer = ReviewerSetup {
+                model: termide_agent_core::ModelChoice::own(
+                    Arc::new(Reviewer {
+                        verdict,
+                        shown: Arc::clone(&shown),
+                    }),
+                    ModelSpec {
+                        provider: "reviewer".into(),
+                        id: "small".into(),
+                        context_window: 0,
+                        max_tokens: None,
+                        thinking: ThinkingLevel::Off,
+                    },
+                ),
+                ..ReviewerSetup::default()
+            };
+            let (runtime, permissions) =
+                asking_agent(dir.path().to_path_buf(), Mode::Auto, reviewer);
+            runtime.prompt(UserMessage::text("build it")).unwrap();
+            let events = events_until(&runtime, |e| matches!(e, AgentEvent::AgentEnd));
+            // Nobody was asked; the reviewer decided.
+            assert!(permissions.try_recv().is_err());
+            assert!(
+                logged(&events).contains(&format!("assistant:{chosen}")),
+                "{events:?}"
+            );
+            // It judged against what the user asked, earlier and now.
+            let shown = shown.lock().unwrap().join("\n");
+            assert!(
+                shown.contains("set the project up") && shown.contains("build it"),
+                "{shown}"
+            );
+        }
+    }
+
+    #[test]
+    fn without_a_model_to_review_with_the_user_is_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        // Started from streams: no subscription is "the session's model".
+        let (runtime, permissions) = asking_agent(
+            dir.path().to_path_buf(),
+            Mode::Auto,
+            ReviewerSetup::default(),
+        );
+        runtime.prompt(UserMessage::text("build it")).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let envelope = loop {
+            if let Ok(envelope) = permissions.try_recv() {
+                break envelope;
+            }
+            assert!(Instant::now() < deadline, "nobody was asked");
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        envelope.reply.send(PermissionAnswer::AllowOnce).unwrap();
+        let events = events_until(&runtime, |e| matches!(e, AgentEvent::AgentEnd));
+        assert!(logged(&events).contains(&"assistant:yes".to_string()));
     }
 
     fn switches_between_fast_and_slow(runtime: &AcpRuntime) {
@@ -4033,6 +4412,7 @@ mod tests {
                 plan: PlanPrompt::default(),
                 goal: GoalPrompt::default(),
                 handoff: HandoffPrompt::default(),
+                reviewer: ReviewerSetup::default(),
                 host_tools: None,
                 resume: None,
                 history: Vec::new(),
@@ -4088,6 +4468,7 @@ mod tests {
                 plan: PlanPrompt::default(),
                 goal: GoalPrompt::default(),
                 handoff: HandoffPrompt::default(),
+                reviewer: ReviewerSetup::default(),
                 host_tools: None,
                 resume: None,
                 history: Vec::new(),
@@ -4233,6 +4614,7 @@ mod tests {
                 plan: PlanPrompt::default(),
                 goal: GoalPrompt::default(),
                 handoff: HandoffPrompt::default(),
+                reviewer: ReviewerSetup::default(),
                 host_tools: None,
                 resume,
                 history,

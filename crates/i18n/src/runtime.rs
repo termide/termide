@@ -685,6 +685,8 @@ impl Translation for RuntimeTranslation {
         settings_agent_permission_mode,
         settings_agent_auto_reviewer,
         settings_agent_auto_reviewer_session,
+        settings_agent_auto_reviewer_model,
+        settings_agent_auto_reviewer_model_default,
         settings_ai_add_connection,
         settings_ai_delete_connection,
         settings_ai_connection_back,

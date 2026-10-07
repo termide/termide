@@ -442,7 +442,30 @@ model's words are never taken for the user's. Calls from outside the loop
 about. The reviewer's text is `ai/system/classify.md`, one editable file at
 the configuration level only, like every service prompt — a checked-out
 repository must not be able to tell the reviewer to allow everything; it
-reviews with the session's model unless `auto_reviewer` names a connection.
+reviews with the session's model unless `[ai.auto_reviewer]` names a
+connection or a model (`ModelChoice`: its own provider and model, or the
+session's under another id).
+
+Who reviews for a subscription user. Someone on Claude Code or Codex seldom
+has an API key or a local model to name, and the agents' own reviewers
+(Claude Code's auto classifier, Codex's "Auto review" preset) do not see the
+calls of termide's tools nor follow its rules, so termide's reviewer is kept
+for them too. A CLI connection serves as the reviewer's model through
+`AcpProvider` (agent-acp): the adapter is started once and kept; each review
+opens a session of its own (`session/new` with, for Claude Code, the
+reviewer's text as `_meta.systemPrompt`, no tools and no settings; for Codex
+and Gemini CLI the text leads the request and Codex is put in read-only),
+picks the model asked for among those offered (id, name, or a unique part:
+`haiku`), runs as a side request — its updates kept from any panel, its
+permission requests refused — and closes. A fresh session rather than a fork
+of the agent's keeps the agent from judging itself. With no reviewer
+configured, an external session's "session's model" is the agent's own
+subscription (`CurrentModel` takes the agent's current model). The external
+agent's `SessionView` carries an `IntentLog` agent-acp keeps from the history,
+each request (steering included) and each call it shows, and goes with its
+permission requests and with the calls of termide's tools on the MCP server,
+so both are judged as the built-in loop's are. Codex's `edit` maps to
+`workspace-write`, not its `agent` preset, which is its own reviewer.
 The reviewer answers with its reason first and the verdict last: a small
 model that names the verdict first decides before it thinks, and on a local
 Qwen it once called an upload of `.env` to a paste site `ALLOW` while
@@ -1086,7 +1109,8 @@ changed); Codex and Gemini CLI their own, plus `COMPANION_TOOLS` (`recall`,
 `suggest_command`) and the MCP servers' tools. An `AGENT.md` with a `command`
 names its flavor in `adapter:` or has it told by the command line
 (`AcpFlavor::detect`), so the documented `claude-agent-acp` example is not
-generic; auto mode stays without a reviewer for every external agent. The agent's session id goes
+generic. Auto mode reviews external agents with termide's reviewer, see
+§4b. The agent's session id goes
 into that log as an `external_session` entry (with the log's header id and
 `cwd`); `Session::external_session` hands it back while the branch is still
 what that session holds — no rewind, compaction, pruning, agent or connection

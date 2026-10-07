@@ -1003,6 +1003,8 @@ pub trait Translation: Send + Sync {
     fn settings_agent_auto_reviewer(&self) -> &str;
     /// AI settings: the `auto` mode reviewer left to the session's model
     fn settings_agent_auto_reviewer_session(&self) -> &str;
+    fn settings_agent_auto_reviewer_model(&self) -> &str;
+    fn settings_agent_auto_reviewer_model_default(&self) -> &str;
     /// Settings modal: AI tab, web tools field labels.
     fn settings_web_backend(&self) -> &str;
     /// AI menu: the row that shows or hides the agents' web browser window.

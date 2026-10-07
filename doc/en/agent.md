@@ -167,9 +167,10 @@ whichever connection it is on:
   a call up, the call stops and its permission card comes down, so the calls
   after it go on.
 - **Codex** keeps its own system prompt and tools; termide puts it in the
-  modes that match the panel's (`ask`, `configured` and `auto`: ask for approval,
-  `plan`: that plus its plan collaboration mode, `edit`: approve for me,
-  `all`: full access) and decides what it asks.
+  modes that match the panel's (`ask`, `configured` and `auto`: read-only, which
+  asks for approval, `plan`: that plus its plan collaboration mode, `edit`:
+  workspace access, `all`: full access) and decides what it asks — its own
+  "Auto review" is not used, termide's reviewer judges in `auto`.
 - **Gemini CLI** keeps its own system prompt and tools too; termide sets its
   approval mode to match the panel's (`ask`, `configured` and `auto`: `default`, which
   asks before edits and commands, `plan`: `plan`, or `default` where Gemini's
@@ -189,8 +190,8 @@ later, or is reloaded, reaches them in the next session.
 All three keep their own conversation loop: they compact their context themselves,
 a run cannot pause between steps, and there is no prefill or generation
 timing (token totals show when the agent reports them, as Claude Code does).
-The **Permissions** chip works for all three; `auto` has no reviewer for them
-and asks as `configured` does. The settings modal says the same under a
+The **Permissions** chip works for all three, `auto` with termide's
+[reviewer](#auto-mode), by default on the agent's own subscription. The settings modal says the same under a
 connection's page.
 
 The rest of the panel works with them as with the built-in loop:
@@ -863,6 +864,7 @@ git_timeout_secs = 60
 files_timeout_secs = 60
 solver = false               # answer from the results with one model call
 connection = ""              # the connection whose model answers; empty uses the session's
+model = ""                   # a model of it; empty: the connection's (a CLI one answers by its subscription)
 ```
 
 The solver's instructions are `system/recall.md` (see
@@ -1088,7 +1090,8 @@ separate call to a model that decides whether the action is a reasonable
 step toward what you asked for or goes beyond it. An allowed call runs; a
 blocked one does not, and the model reads why, with the advice to take a
 safer way or tell you what it needs. Claude Code's auto mode and Codex's
-auto-review work the same way.
+auto-review work the same way; on Claude Code, Codex and Gemini CLI it is
+termide's reviewer that judges, not theirs.
 
 The reviewer sees what you wrote in the session and the calls the agent made,
 and never the results of those calls nor the agent's own text. The results
@@ -1118,22 +1121,37 @@ reviewer; narrow ones such as `"cargo test*"` still pass without it.
 What the reviewer is told is `system/classify.md` in the configuration's
 agent directory: what to allow, what to block, and the shape of the verdict.
 Edit it to tell the reviewer about your infrastructure or your habits. By
-default the session's own model reviews; `auto_reviewer` under `[ai]` (in
-the settings modal, **Auto mode reviewer** under Permissions) names another
-connection to review with, a small fast one being the usual choice. A review
-is one more model call before each action it decides; reads, edits inside
-the project and look-only commands never reach it and cost nothing.
+default the session's own model reviews. `[ai.auto_reviewer]` (in the
+settings modal, **Auto mode reviewer** and **Reviewer model** under
+Permissions) names another connection, another model, or both, a small fast
+model being the usual choice. A review is one more model call before each
+action it decides; reads, edits inside the project and look-only commands
+never reach it and cost nothing.
 
 ```toml
-[ai]
-auto_reviewer = "haiku"   # a connection's name; empty reviews with the session's model
+[ai.auto_reviewer]
+connection = "claude"   # a connection's name; empty: the session's own
+model = "haiku"         # a model of it; empty: the connection's model
 ```
+
+`model` alone reviews on the session's connection with that model. A CLI
+connection (`claude_code`, `codex`, `gemini_cli`) reviews through its
+subscription, with no API key: termide keeps the CLI's adapter running and
+asks each review in a short session of its own, without tools and without
+the agent's conversation, so the agent never judges itself. The model is
+picked among those the CLI offers, by its id or name or a part of either
+(`haiku`). Claude Code takes the reviewer's instructions as its system prompt;
+Codex and Gemini CLI keep their own and get them in the request, which makes
+them slower and less predictable reviewers. A review through a CLI costs a
+second or more and counts against the subscription's limits.
 
 The reviewer judges delegated work too: a subagent's calls are reviewed
 against your words and the task it was given, marked as another agent's.
 Headless runs use it the same way, falling back to a refusal where the panel
-would ask. An external agent's conversation is its own, and no reviewer
-judges its requests: in `auto` they are asked about as in `configured`.
+would ask. An external agent's requests, and its calls of termide's tools,
+are reviewed the same way, against your words and the calls it made; with
+no reviewer configured, "the session's model" is the agent's own
+subscription, on the model it runs on.
 
 ## The AI menu
 
