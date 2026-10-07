@@ -347,6 +347,9 @@ pub struct UiState {
     pub operation_action_menu: OperationActionMenuState,
     /// Panel drag-and-drop state (grab a panel by its top border)
     pub panel_drag: PanelDragState,
+    /// A press that only focused its panel is held until its release, so
+    /// neither its drag nor its release reaches the panel.
+    pub focus_click_held: bool,
 }
 
 impl UiState {

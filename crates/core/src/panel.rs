@@ -421,6 +421,15 @@ pub trait Panel: Any {
         false
     }
 
+    /// Whether the click that focuses this panel also acts inside it.
+    ///
+    /// When false, a left press on the panel while it is not the active one
+    /// only activates it: the press, its drag and its release never reach
+    /// [`Panel::handle_mouse`], so the user clicks again where they meant to.
+    fn focus_click_acts(&self) -> bool {
+        true
+    }
+
     /// Reload panel content from source.
     ///
     /// Used when file is modified externally.

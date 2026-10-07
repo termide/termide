@@ -260,6 +260,20 @@ impl App {
             return Ok(());
         }
 
+        // A press that only focused its panel keeps its drag and release.
+        if self.state.ui.focus_click_held {
+            match mouse.kind {
+                MouseEventKind::Drag(MouseButton::Left) => return Ok(()),
+                MouseEventKind::Up(MouseButton::Left) => {
+                    self.state.ui.focus_click_held = false;
+                    return Ok(());
+                }
+                // The release was lost (outside the window): let go.
+                MouseEventKind::Down(_) => self.state.ui.focus_click_held = false,
+                _ => {}
+            }
+        }
+
         // Check click on panel [X] button
         if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
             if self.handle_panel_close_click(mouse.column, mouse.row)? {
@@ -267,7 +281,11 @@ impl App {
             }
 
             // Check click on panel to switch focus
-            self.handle_panel_focus_click(mouse.column, mouse.row)?;
+            if self.handle_panel_focus_click(mouse.column, mouse.row)? {
+                self.state.ui.focus_click_held = true;
+                self.state.needs_redraw = true;
+                return Ok(());
+            }
         }
 
         // Scroll events handled at the top of this function (before modal check)
@@ -461,8 +479,11 @@ impl App {
         Ok(false)
     }
 
-    /// Handle click on panel to switch focus
-    fn handle_panel_focus_click(&mut self, click_x: u16, click_y: u16) -> Result<()> {
+    /// Handle click on panel to switch focus.
+    ///
+    /// Returns true when the click only activated its panel and must not
+    /// reach it (see [`termide_core::Panel::focus_click_acts`]).
+    fn handle_panel_focus_click(&mut self, click_x: u16, click_y: u16) -> Result<bool> {
         let panel_rects = self.calculate_panel_rects();
 
         for (group_idx, panel_idx, rect, _is_expanded) in panel_rects {
@@ -482,16 +503,28 @@ impl App {
                     }
                 }
 
+                let was_active = !focus_changing
+                    && self
+                        .layout_manager
+                        .panel_groups
+                        .get(group_idx)
+                        .is_some_and(|g| g.expanded_index() == panel_idx);
+
                 // Click on a panel group - make it active
                 self.layout_manager.focus = group_idx;
-                if let Some(group) = self.layout_manager.panel_groups.get_mut(group_idx) {
-                    group.set_expanded(panel_idx);
-                }
-                return Ok(());
+                let Some(group) = self.layout_manager.panel_groups.get_mut(group_idx) else {
+                    return Ok(false);
+                };
+                group.set_expanded(panel_idx);
+                let acts = group
+                    .panels()
+                    .get(panel_idx)
+                    .is_none_or(|p| p.focus_click_acts());
+                return Ok(!was_active && !acts);
             }
         }
 
-        Ok(())
+        Ok(false)
     }
 
     /// Handle click on menu bar

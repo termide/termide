@@ -1473,6 +1473,12 @@ impl Panel for AgentPanel {
         true
     }
 
+    fn focus_click_acts(&self) -> bool {
+        // A click that brings the panel into focus would otherwise select a
+        // block or open a recent session from the banner by accident.
+        false
+    }
+
     fn handle_scroll(&mut self, delta: i32, _panel_area: Rect) -> Vec<PanelEvent> {
         if self.recent_list_shown() {
             self.scroll_recent(delta);
