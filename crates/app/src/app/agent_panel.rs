@@ -9,12 +9,13 @@ use anyhow::Result;
 use termide_agent_acp::{AcpProvider, AcpRuntime};
 use termide_agent_core::Mode;
 use termide_agent_core::{
-    apply_tool_texts, build_system_prompt, discover_context_files, ensure_global_layout, AcpConfig,
-    AcpFlavor, Agent, AgentDirs, AgentEvent, AutoDenyPrompter, CancelToken, ChainedHooks,
-    CompactionPolicy, Decision, IntentLog, Message, ModeHandle, ModelChoice, ModelSpec,
+    apply_tool_texts, build_system_prompt, discover_context_files, ensure_global_layout,
+    permission_channel, AcpConfig, AcpFlavor, Agent, AgentDirs, AgentEvent, AssistantMessage,
+    AutoDenyPrompter, Backend, BackendSetup, CancelToken, ChainedHooks, CompactionPolicy, Decision,
+    HostTools, IntentLog, Message, ModeHandle, ModelChoice, ModelSpec, PermissionAnswer,
     PermissionHooks, PermissionRules, PersistScope, PlanGuard, PromptOptions, Provider, Refusals,
     ReviewerSetup, Session, SessionSummary, ShellOutput, ShellRunner, ThinkingLevel, Tool,
-    ToolCall, ToolContext, ToolRegistry, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR,
+    ToolCall, ToolContext, ToolRegistry, ToolUpdate, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR,
     SESSIONS_DIR,
 };
 use termide_agent_hooks::CommandHooks;
@@ -1020,15 +1021,25 @@ fn subagent_mode(parent: Mode, own: Option<Mode>) -> Mode {
 /// A runaway subagent is cut off after this many model calls.
 const SUBAGENT_MAX_TURNS: usize = 50;
 
-/// The connection a task delegated from a session on `active` runs on: the
-/// one its connection's `subagents` field names, `None` for the session's
-/// own. A subagent runs the built-in loop, so a CLI agent cannot run it: one
-/// named there is passed over, and a session on one with no model connection
-/// named has nowhere to run it, which the error says.
-fn subagent_connection(
-    settings: &AiSettings,
-    active: &Active,
-) -> Result<Option<(String, Connection)>, String> {
+/// Where a task delegated from a session runs.
+#[derive(Debug, PartialEq)]
+enum SubagentTarget {
+    /// termide's loop on the session's own model connection.
+    Session,
+    /// termide's loop on another model connection, by name.
+    Model(String, Connection),
+    /// A session of its own of Claude Code on this connection, by name,
+    /// calling termide's tools.
+    Cli(String, Connection),
+}
+
+/// Where a task delegated from a session on `active` runs: on the connection
+/// its connection's `subagents` field names, else on the session's own — for
+/// a Claude Code session a copy of Claude Code. Codex and Gemini CLI keep
+/// tools of their own and run none: one named there is passed over, and a
+/// session on one with nothing usable named has nowhere to run them, which
+/// the error says.
+fn subagent_target(settings: &AiSettings, active: &Active) -> Result<SubagentTarget, String> {
     let session = active.connection.as_str();
     let named = settings
         .connections
@@ -1038,7 +1049,10 @@ fn subagent_connection(
     if !named.is_empty() && named != session {
         match settings.connections.get(named) {
             Some(connection) if !connection.is_cli() => {
-                return Ok(Some((named.to_string(), connection.clone())));
+                return Ok(SubagentTarget::Model(named.to_string(), connection.clone()));
+            }
+            Some(connection) if connection.runs_subagents() => {
+                return Ok(SubagentTarget::Cli(named.to_string(), connection.clone()));
             }
             Some(_) => log::warn!(
                 "connection {session}: subagents names {named}, a CLI agent, which cannot run them"
@@ -1046,13 +1060,25 @@ fn subagent_connection(
             None => log::warn!("connection {session}: subagents names no connection {named:?}"),
         }
     }
-    if termide_config::is_cli_provider(&active.kind) {
-        return Err(format!(
-            "the connection {session} is a CLI agent, which cannot run subagents; \
-             a model connection chosen under Subagents on its settings page runs them"
-        ));
+    if !termide_config::is_cli_provider(&active.kind) {
+        return Ok(SubagentTarget::Session);
     }
-    Ok(None)
+    let own = settings
+        .connections
+        .get(session)
+        .cloned()
+        .unwrap_or_else(|| Connection {
+            provider: active.kind.clone(),
+            ..Connection::default()
+        });
+    if own.runs_subagents() {
+        return Ok(SubagentTarget::Cli(session.to_string(), own));
+    }
+    Err(format!(
+        "the connection {session} is a CLI agent on tools of its own, which cannot run \
+         subagents; a model connection or a Claude Code one chosen under Subagents on its \
+         settings page runs them"
+    ))
 }
 
 /// Why a run ended without an answer, when its last reply says.
@@ -1067,6 +1093,50 @@ fn run_error(messages: &[Message]) -> Option<String> {
         .flatten()
 }
 
+/// A subagent's progress as the delegating call shows it: what it has said
+/// so far, and its answer — the last text it said.
+#[derive(Default)]
+struct SubagentReport {
+    progress: String,
+    answer: Option<String>,
+    error: Option<String>,
+    turns: usize,
+}
+
+impl SubagentReport {
+    /// Note a finished message of the subagent's.
+    fn said(&mut self, message: &AssistantMessage, on_update: &mut dyn FnMut(ToolUpdate)) {
+        let text = message.plain_text();
+        let text = text.trim();
+        if text.is_empty() {
+            self.error = message.error_message.clone();
+            return;
+        }
+        self.error = None;
+        if !self.progress.is_empty() {
+            self.progress.push_str("\n\n");
+        }
+        self.progress.push_str(text);
+        self.answer = Some(text.to_string());
+        on_update(ToolUpdate::Output(self.progress.clone()));
+    }
+
+    /// The delegating call's result.
+    fn into_result(self, stopped: bool) -> Result<String, String> {
+        match self.answer {
+            Some(text) if self.turns > SUBAGENT_MAX_TURNS => Ok(format!(
+                "{text}\n\n(subagent stopped after {SUBAGENT_MAX_TURNS} steps)"
+            )),
+            Some(text) => Ok(text),
+            None if stopped => Err("the subagent was stopped".into()),
+            None => Err(self.error.map_or_else(
+                || "the subagent produced no answer".to_string(),
+                |error| format!("the subagent failed: {error}"),
+            )),
+        }
+    }
+}
+
 impl Subagents {
     fn run(
         &self,
@@ -1074,7 +1144,7 @@ impl Subagents {
         prompt: &str,
         ctx: &ToolContext,
         cancel: &CancelToken,
-        on_update: &mut dyn FnMut(termide_agent_core::ToolUpdate),
+        on_update: &mut dyn FnMut(ToolUpdate),
     ) -> Result<String, String> {
         let definition = self.dirs.agent(name);
         if definition.spec.acp.is_some() {
@@ -1100,25 +1170,57 @@ impl Subagents {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
-        // On a connection of its own the subagent runs that connection's
-        // model: the id its `AGENT.md` names is one of the session's endpoint.
-        let (provider, requested, context_window) =
-            match subagent_connection(&applied_ai_settings(&self.settings), &active)? {
-                Some((name, connection)) => (
-                    connection_provider(&name, &connection),
-                    connection.model.clone(),
-                    connection.effective_context_window(),
-                ),
-                None => (
-                    Arc::clone(&active.provider),
-                    definition
-                        .spec
-                        .model
-                        .clone()
-                        .unwrap_or_else(|| active.model.clone()),
-                    active.context_window,
-                ),
-            };
+        let target = subagent_target(&applied_ai_settings(&self.settings), &active)?;
+
+        let mut rules = self.rules.clone();
+        rules.mode = subagent_mode(self.mode.get(), definition.spec.mode);
+        let plan_guard = PlanGuard::new(ModeHandle::new(rules.mode)).with_refusals(&self.refusals);
+        // Stops a run that will not stop itself; the parent's cancel stops
+        // it too.
+        let budget = CancelToken::new();
+        let permissions = PermissionHooks::new(
+            rules.clone(),
+            Box::new(AutoDenyPrompter::new(
+                self.refusals.unattended_subagent.clone(),
+            )),
+        )
+        .with_classifier(Box::new(self.reviewer.classifier(budget.clone())))
+        .with_refusals(self.refusals.clone());
+        // The guard goes first, as in the panel's own chain: in plan mode a
+        // session answer must not let a change through.
+        let hooks = ChainedHooks::new(vec![Box::new(plan_guard), Box::new(permissions)]);
+
+        let (provider, requested, context_window) = match target {
+            SubagentTarget::Cli(connection_name, connection) => {
+                let run = CliSubagent {
+                    name: format!("{connection_name}:{name}"),
+                    connection,
+                    system_prompt,
+                    tools,
+                    skills,
+                    hooks,
+                    rules,
+                };
+                return self.run_cli(run, prompt, &budget, cancel, on_update);
+            }
+            // On a connection of its own the subagent runs that connection's
+            // model: the id its `AGENT.md` names is one of the session's
+            // endpoint.
+            SubagentTarget::Model(name, connection) => (
+                connection_provider(&name, &connection),
+                connection.model.clone(),
+                connection.effective_context_window(),
+            ),
+            SubagentTarget::Session => (
+                Arc::clone(&active.provider),
+                definition
+                    .spec
+                    .model
+                    .clone()
+                    .unwrap_or_else(|| active.model.clone()),
+                active.context_window,
+            ),
+        };
         let Some(id) = resolve_model(provider.as_ref(), &requested) else {
             return Err("the provider lists no model to run the subagent on".into());
         };
@@ -1129,9 +1231,6 @@ impl Subagents {
             max_tokens: self.max_tokens,
             thinking: self.reasoning,
         };
-        let mut rules = self.rules.clone();
-        rules.mode = subagent_mode(self.mode.get(), definition.spec.mode);
-        let plan_guard = PlanGuard::new(ModeHandle::new(rules.mode)).with_refusals(&self.refusals);
         // The reviewer judges the subagent's calls against what the user asked
         // the delegating agent; the task itself counts as that agent's words.
         let parent = ctx
@@ -1144,45 +1243,20 @@ impl Subagents {
             .with_compaction(self.compaction)
             .with_delegated_intent(parent);
 
-        // Mirror the sub-run's own progress up as it goes, and stop a run
-        // that will not stop itself. The parent's cancel aborts it too.
-        let budget = CancelToken::new();
-        let permissions = PermissionHooks::new(
-            rules,
-            Box::new(AutoDenyPrompter::new(
-                self.refusals.unattended_subagent.clone(),
-            )),
-        )
-        .with_classifier(Box::new(self.reviewer.classifier(budget.clone())))
-        .with_refusals(self.refusals.clone());
-        // The guard goes first, as in the panel's own chain: in plan mode a
-        // session answer must not let a change through.
-        let mut hooks = ChainedHooks::new(vec![Box::new(plan_guard), Box::new(permissions)]);
-        let mut turns = 0usize;
-        let mut progress = String::new();
+        let mut hooks = hooks;
+        let mut report = SubagentReport::default();
         {
             let budget = budget.clone();
             let mut emit = |event: AgentEvent| {
                 match &event {
                     AgentEvent::MessageStart { .. } => {
-                        turns += 1;
-                        if turns > SUBAGENT_MAX_TURNS {
+                        report.turns += 1;
+                        if report.turns > SUBAGENT_MAX_TURNS {
                             budget.cancel();
                         }
                     }
                     AgentEvent::MessageEnd(Message::Assistant(message)) => {
-                        let text = message.plain_text();
-                        if !text.trim().is_empty() {
-                            if !progress.is_empty() {
-                                progress.push_str(
-                                    "
-
-",
-                                );
-                            }
-                            progress.push_str(text.trim());
-                            on_update(termide_agent_core::ToolUpdate::Output(progress.clone()));
-                        }
+                        report.said(message, on_update);
                     }
                     _ => {}
                 }
@@ -1192,33 +1266,173 @@ impl Subagents {
             };
             agent.run(UserMessage::text(prompt), &mut hooks, &budget, &mut emit);
         }
-
-        let answer = agent
-            .messages()
-            .iter()
-            .rev()
-            .find_map(|message| match message {
-                Message::Assistant(assistant) => {
-                    let text = assistant.plain_text();
-                    (!text.trim().is_empty()).then(|| text.trim().to_string())
-                }
-                _ => None,
-            });
-        match answer {
-            Some(text) if turns > SUBAGENT_MAX_TURNS => Ok(format!(
-                "{text}
-
-(subagent stopped after {SUBAGENT_MAX_TURNS} steps)"
-            )),
-            Some(text) => Ok(text),
-            None if cancel.is_cancelled() => Err("the subagent was stopped".into()),
-            None => Err(run_error(agent.messages()).map_or_else(
-                || "the subagent produced no answer".to_string(),
-                |error| format!("the subagent failed: {error}"),
-            )),
+        if report.answer.is_none() && report.error.is_none() {
+            report.error = run_error(agent.messages());
         }
+        report.into_result(cancel.is_cancelled())
+    }
+
+    /// Run `run` as a session of its own of its CLI agent, which calls the
+    /// subagent's tools through its hooks: the agent's model when the
+    /// connection names one, nobody to ask — the agent's own permission
+    /// requests are refused with the reason a subagent's calls get — and the
+    /// process gone once the task is.
+    fn run_cli(
+        &self,
+        run: CliSubagent,
+        prompt: &str,
+        budget: &CancelToken,
+        cancel: &CancelToken,
+        on_update: &mut dyn FnMut(ToolUpdate),
+    ) -> Result<String, String> {
+        let config = cli_acp_config(&run.connection.provider)
+            .ok_or_else(|| format!("{} is not a CLI agent", run.connection.provider))?;
+        let (prompter, permission_rx) = permission_channel(budget.clone());
+        let setup = BackendSetup {
+            cwd: self.cwd.clone(),
+            prompter,
+            cancel: budget.clone(),
+            mode: ModeHandle::new(run.rules.mode),
+            rules: run.rules,
+            persist: None,
+            system_prompt: run.system_prompt,
+            plan: self.dirs.plan_prompt(),
+            goal: self.dirs.goal_prompt(),
+            handoff: self.dirs.handoff_prompt(),
+            reviewer: self.reviewer.clone(),
+            host_tools: Some(HostTools {
+                tools: run.tools,
+                hooks: Box::new(run.hooks),
+                context: ToolContext::new(self.cwd.clone()),
+                skills: run.skills,
+            }),
+            resume: None,
+            history: Vec::new(),
+        };
+        let runtime = AcpRuntime::start(&run.name, &config, setup)?;
+        let drive = CliDrive {
+            name: &run.name,
+            model: run.connection.model.trim(),
+            permission_rx: &permission_rx,
+            refusal: &self.refusals.unattended_subagent,
+            budget,
+            cancel,
+        };
+        // The process goes with the runtime, once the task is over.
+        drive.run(&runtime, &|| runtime.is_starting(), prompt, on_update)
     }
 }
+
+/// The run of a subagent on a CLI agent once its process is up.
+struct CliDrive<'a> {
+    name: &'a str,
+    /// The model to pick for the task, empty for the agent's own.
+    model: &'a str,
+    /// The agent's own permission requests, refused: nobody watches.
+    permission_rx: &'a std::sync::mpsc::Receiver<termide_agent_core::PermissionEnvelope>,
+    refusal: &'a str,
+    budget: &'a CancelToken,
+    cancel: &'a CancelToken,
+}
+
+impl CliDrive<'_> {
+    /// Pick the model, hand `backend` the task and follow it to its end,
+    /// reporting what it says; `starting` says whether its handshake is
+    /// still under way.
+    fn run(
+        &self,
+        backend: &dyn Backend,
+        starting: &dyn Fn() -> bool,
+        prompt: &str,
+        on_update: &mut dyn FnMut(ToolUpdate),
+    ) -> Result<String, String> {
+        let stopped = || self.cancel.is_cancelled() || self.budget.is_cancelled();
+        // The model goes before the task does, so the whole task runs on it.
+        if !self.model.is_empty() {
+            while starting() && !stopped() {
+                std::thread::sleep(CLI_SUBAGENT_POLL);
+            }
+            let models = backend.available_models();
+            match termide_agent_acp::match_model(self.model, &models) {
+                Some(id) => {
+                    if let Err(error) = backend.select_model(id) {
+                        log::warn!(
+                            "subagent {}: cannot pick {}: {error}",
+                            self.name,
+                            self.model
+                        );
+                    }
+                }
+                None if !models.is_empty() => log::warn!(
+                    "subagent {}: no model {}; its default runs",
+                    self.name,
+                    self.model
+                ),
+                None => {}
+            }
+        }
+        if stopped() {
+            return Err("the subagent was stopped".into());
+        }
+        backend
+            .prompt(UserMessage::text(prompt))
+            .map_err(|error| format!("the subagent did not start: {error:?}"))?;
+        let mut report = SubagentReport::default();
+        let mut aborted: Option<std::time::Instant> = None;
+        let mut idle = 0;
+        'run: loop {
+            for envelope in self.permission_rx.try_iter() {
+                let _ = envelope
+                    .reply
+                    .send(PermissionAnswer::DenyWithReason(self.refusal.to_string()));
+            }
+            for event in backend.drain() {
+                match event {
+                    AgentEvent::MessageEnd(Message::Assistant(message)) => {
+                        report.turns += 1;
+                        report.said(&message, on_update);
+                        if report.turns > SUBAGENT_MAX_TURNS {
+                            self.budget.cancel();
+                        }
+                    }
+                    AgentEvent::AgentEnd => break 'run,
+                    _ => {}
+                }
+            }
+            // An agent that went away without saying it ended is over too,
+            // as is one that does not end within a while of being stopped.
+            idle = if backend.is_busy() { 0 } else { idle + 1 };
+            if idle > 1 || aborted.is_some_and(|at| at.elapsed() > CLI_SUBAGENT_ABORT_WAIT) {
+                break;
+            }
+            if aborted.is_none() && stopped() {
+                aborted = Some(std::time::Instant::now());
+                self.budget.cancel();
+                backend.abort();
+            }
+            std::thread::sleep(CLI_SUBAGENT_POLL);
+        }
+        report.into_result(self.cancel.is_cancelled())
+    }
+}
+
+/// What a subagent on a CLI agent runs with, built as for termide's loop.
+struct CliSubagent {
+    /// How its process is named in the logs.
+    name: String,
+    connection: Connection,
+    system_prompt: String,
+    tools: ToolRegistry,
+    skills: Vec<termide_agent_core::SkillInfo>,
+    hooks: ChainedHooks,
+    rules: PermissionRules,
+}
+
+/// How often a subagent on a CLI agent is looked at while it runs.
+const CLI_SUBAGENT_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// How long a stopped subagent on a CLI agent may take to end its turn.
+const CLI_SUBAGENT_ABORT_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Everything the panel needs, resolved from `settings` for a panel working
 /// in `cwd` inside the termide project at `project_root` as the agent named
@@ -1892,39 +2106,169 @@ mod tests {
         );
     }
 
-    /// A delegated task runs on the session's connection, or on the model
-    /// connection its `subagents` field names; a CLI agent runs none.
+    /// A delegated task runs on the session's connection, or on the one its
+    /// `subagents` field names: termide's loop on a model connection, a copy
+    /// of Claude Code on its; Codex and Gemini CLI run none.
     #[test]
-    fn subagents_run_on_the_connection_the_session_connection_names() {
+    fn subagents_run_where_the_session_connection_says() {
         let mut settings = with_cloud();
-        settings.connections.insert(
-            "claude".into(),
-            Connection {
-                provider: "claude_code".into(),
-                ..Connection::default()
-            },
-        );
+        for (name, provider) in [("claude", "claude_code"), ("codex", "codex")] {
+            settings.connections.insert(
+                name.into(),
+                Connection {
+                    provider: provider.into(),
+                    ..Connection::default()
+                },
+            );
+        }
         let target = |settings: &AiSettings, session: &str| {
-            subagent_connection(settings, &active_on(settings, session))
-                .map(|target| target.map(|(name, _)| name))
+            subagent_target(settings, &active_on(settings, session)).map(|target| match target {
+                SubagentTarget::Session => "session".to_string(),
+                SubagentTarget::Model(name, _) => format!("model {name}"),
+                SubagentTarget::Cli(name, _) => format!("cli {name}"),
+            })
         };
-        // Nothing named: the session's own.
-        assert_eq!(target(&settings, "local"), Ok(None));
-        // A CLI agent has nowhere to run them, and says where to choose one.
-        let error = target(&settings, "claude").unwrap_err();
+        // Nothing named: the session's own — termide's loop, or a copy of
+        // Claude Code.
+        assert_eq!(target(&settings, "local").as_deref(), Ok("session"));
+        assert_eq!(target(&settings, "claude").as_deref(), Ok("cli claude"));
+        // Codex has nowhere to run them, and says where to choose one.
+        let error = target(&settings, "codex").unwrap_err();
         assert!(error.contains("Subagents"), "{error}");
 
-        settings.connections.get_mut("claude").unwrap().subagents = "local".into();
-        assert_eq!(target(&settings, "claude"), Ok(Some("local".into())));
-        settings.connections.get_mut("local").unwrap().subagents = "cloud".into();
-        assert_eq!(target(&settings, "local"), Ok(Some("cloud".into())));
-        // Itself, a CLI agent or a name of no connection: the session's own.
-        for named in ["local", "claude", "gone"] {
-            settings.connections.get_mut("local").unwrap().subagents = named.into();
-            assert_eq!(target(&settings, "local"), Ok(None), "{named}");
+        let set = |settings: &mut AiSettings, on: &str, to: &str| {
+            settings.connections.get_mut(on).unwrap().subagents = to.into();
+        };
+        set(&mut settings, "codex", "local");
+        assert_eq!(target(&settings, "codex").as_deref(), Ok("model local"));
+        set(&mut settings, "local", "claude");
+        assert_eq!(target(&settings, "local").as_deref(), Ok("cli claude"));
+        set(&mut settings, "claude", "cloud");
+        assert_eq!(target(&settings, "claude").as_deref(), Ok("model cloud"));
+        // Itself, Codex or a name of no connection: the session's own.
+        for named in ["local", "codex", "gone"] {
+            set(&mut settings, "local", named);
+            assert_eq!(
+                target(&settings, "local").as_deref(),
+                Ok("session"),
+                "{named}"
+            );
         }
-        settings.connections.get_mut("claude").unwrap().subagents = "gone".into();
-        assert!(target(&settings, "claude").is_err());
+        set(&mut settings, "codex", "gone");
+        assert!(target(&settings, "codex").is_err());
+    }
+
+    /// A CLI agent standing in for Claude Code: it offers models, answers a
+    /// task with two messages and ends, or ends when stopped.
+    #[derive(Default)]
+    struct FakeCli {
+        picked: std::sync::Mutex<Option<String>>,
+        prompted: std::sync::Mutex<Vec<String>>,
+        events: std::sync::Mutex<std::collections::VecDeque<AgentEvent>>,
+        busy: std::sync::atomic::AtomicBool,
+    }
+
+    impl Backend for FakeCli {
+        fn prompt(&self, message: UserMessage) -> Result<(), termide_agent_core::PromptError> {
+            use termide_agent_core::{StopReason, Usage};
+            self.prompted.lock().unwrap().push(message.model_text());
+            self.busy.store(true, std::sync::atomic::Ordering::SeqCst);
+            let said = |text: &str| {
+                AgentEvent::MessageEnd(Message::Assistant(AssistantMessage {
+                    content: vec![termide_agent_core::AssistantContent::Text { text: text.into() }],
+                    stop_reason: StopReason::Stop,
+                    usage: Usage::default(),
+                    provider: "acp".into(),
+                    model: "m".into(),
+                    error_message: None,
+                    timestamp: 0,
+                }))
+            };
+            self.events.lock().unwrap().extend([
+                AgentEvent::AgentStart,
+                said("working"),
+                said("the answer"),
+                AgentEvent::AgentEnd,
+            ]);
+            Ok(())
+        }
+        fn steer(&self, _message: UserMessage) {}
+        fn queue_lens(&self) -> (usize, usize) {
+            (0, 0)
+        }
+        fn abort(&self) {
+            self.events.lock().unwrap().push_back(AgentEvent::AgentEnd);
+        }
+        fn is_busy(&self) -> bool {
+            self.busy.load(std::sync::atomic::Ordering::SeqCst)
+        }
+        fn drain(&self) -> Vec<AgentEvent> {
+            let events: Vec<_> = self.events.lock().unwrap().drain(..).collect();
+            if events.iter().any(|e| matches!(e, AgentEvent::AgentEnd)) {
+                self.busy.store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+            events
+        }
+        fn update(
+            &self,
+            _update: Box<dyn FnOnce(&mut Agent) + Send>,
+        ) -> Result<(), termide_agent_core::PromptError> {
+            Err(termide_agent_core::PromptError::Unsupported)
+        }
+        fn compact(&self, _focus: Option<String>) -> Result<(), termide_agent_core::PromptError> {
+            Err(termide_agent_core::PromptError::Unsupported)
+        }
+        fn available_models(&self) -> Vec<termide_agent_core::BackendModel> {
+            ["claude-opus-5", "claude-haiku-5"]
+                .map(|id| termide_agent_core::BackendModel {
+                    id: id.into(),
+                    name: id.into(),
+                })
+                .to_vec()
+        }
+        fn select_model(&self, model_id: String) -> Result<(), String> {
+            *self.picked.lock().unwrap() = Some(model_id);
+            Ok(())
+        }
+        fn into_agent(self: Box<Self>) -> Option<Agent> {
+            None
+        }
+    }
+
+    /// A subagent on Claude Code runs on the connection's model, reports
+    /// what it says as it goes and answers with its last words; stopped
+    /// before it starts, it is not handed the task.
+    #[test]
+    fn a_subagent_on_a_cli_agent_runs_its_task_to_the_end() {
+        let (_prompter, permission_rx) = permission_channel(CancelToken::new());
+        let (budget, cancel) = (CancelToken::new(), CancelToken::new());
+        let drive = CliDrive {
+            name: "claude:search",
+            model: "haiku",
+            permission_rx: &permission_rx,
+            refusal: "nobody to ask",
+            budget: &budget,
+            cancel: &cancel,
+        };
+        let cli = FakeCli::default();
+        let mut progress = Vec::new();
+        let answer = drive.run(&cli, &|| false, "find it", &mut |update| {
+            let ToolUpdate::Output(text) = update;
+            progress.push(text);
+        });
+        assert_eq!(answer.as_deref(), Ok("the answer"));
+        assert_eq!(
+            cli.picked.lock().unwrap().as_deref(),
+            Some("claude-haiku-5")
+        );
+        assert_eq!(*cli.prompted.lock().unwrap(), ["find it"]);
+        assert_eq!(progress.last().unwrap(), "working\n\nthe answer");
+
+        cancel.cancel();
+        let stopped = FakeCli::default();
+        let answer = drive.run(&stopped, &|| false, "find it", &mut |_| {});
+        assert!(answer.is_err());
+        assert!(stopped.prompted.lock().unwrap().is_empty());
     }
 
     #[test]

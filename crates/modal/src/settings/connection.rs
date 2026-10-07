@@ -138,12 +138,12 @@ fn reasoning_param_label(param: ReasoningParam) -> String {
 }
 
 /// How the subagents' connection `value` of `connection` reads: a name, or
-/// for an empty one the connection itself — none, for a CLI agent, which
-/// cannot run them.
+/// for an empty one the connection itself — none, for a CLI agent on tools
+/// of its own, which cannot run them.
 fn subagents_label(connection: &Connection, value: &str) -> String {
     let t = i18n::t();
     match value {
-        "" if connection.is_cli() => t.settings_value_none().to_string(),
+        "" if !connection.runs_subagents() => t.settings_value_none().to_string(),
         "" => t.settings_ai_connection_subagents_own().to_string(),
         name => name.to_string(),
     }
@@ -648,8 +648,8 @@ impl SettingsModal {
     }
 
     /// What the open connection's subagents can run on: itself (empty), or
-    /// another connection termide runs whole — a subagent runs the built-in
-    /// loop, which a CLI agent does not.
+    /// another connection that runs them — termide's loop on a model, or a
+    /// copy of Claude Code; Codex and Gemini CLI keep tools of their own.
     fn subagents_choices(&self) -> Vec<String> {
         let own = self.open_connection_name();
         std::iter::once(String::new())
@@ -658,7 +658,9 @@ impl SettingsModal {
                     .ai
                     .connections
                     .iter()
-                    .filter(|(name, connection)| Some(name.as_str()) != own && !connection.is_cli())
+                    .filter(|(name, connection)| {
+                        Some(name.as_str()) != own && connection.runs_subagents()
+                    })
                     .map(|(name, _)| name.clone()),
             )
             .collect()
@@ -689,8 +691,12 @@ impl SettingsModal {
             let new = self.unused_name(provider_slug(provider), Some(&old));
             self.move_connection(&old, &new);
         }
-        // A CLI agent cannot run the subagents others sent to it.
-        if let (true, Some(name)) = (cli, self.open_connection_name().map(str::to_string)) {
+        // Codex and Gemini CLI cannot run the subagents others sent to it.
+        let runs_subagents = self.edited().is_some_and(Connection::runs_subagents);
+        if let (false, Some(name)) = (
+            runs_subagents,
+            self.open_connection_name().map(str::to_string),
+        ) {
             self.retarget_subagents(&name, "");
         }
         self.model_options.clear();
@@ -1187,54 +1193,61 @@ mod tests {
     }
 
     #[test]
-    fn subagents_run_on_a_model_connection_chosen_on_the_page() {
+    fn subagents_run_on_a_connection_chosen_on_the_page() {
         let mut config = with_local();
-        config.ai.connections.insert(
-            "claude".into(),
-            Connection {
-                provider: "claude_code".into(),
-                ..Connection::default()
-            },
-        );
-        config
-            .ai
-            .connections
-            .insert("cloud".into(), Connection::default());
+        for (name, provider) in [
+            ("claude", "claude_code"),
+            ("codex", "codex"),
+            ("cloud", "openai_compatible"),
+        ] {
+            config.ai.connections.insert(
+                name.into(),
+                Connection {
+                    provider: provider.into(),
+                    ..Connection::default()
+                },
+            );
+        }
         let mut modal = ai_modal(config);
-        modal.open_connection("claude".into());
-        // A CLI agent's page shows the field too; left empty it runs none.
+        modal.open_connection("codex".into());
+        // Codex keeps tools of its own: left empty it runs none, and its
+        // choices are the connections that run them — no Codex, Claude Code
+        // too.
         assert!(modal.content_rows().contains(&ContentRow::Field(SUBAGENTS)));
         assert_eq!(
             modal.connection_value(SUBAGENTS),
             i18n::t().settings_value_none()
         );
-        // The choices: itself, then the model connections — no CLI agent.
         let options = modal.connection_enum_options(SUBAGENTS).unwrap();
-        assert_eq!(options.values, ["", "cloud", "local"]);
+        assert_eq!(options.values, ["", "claude", "cloud", "local"]);
         assert_eq!(options.current, Some(0));
         modal.apply_connection_enum(SUBAGENTS, "local");
-        assert_eq!(modal.config.ai.connections["claude"].subagents, "local");
+        assert_eq!(modal.config.ai.connections["codex"].subagents, "local");
         modal.cycle_connection_field(SUBAGENTS, false);
-        assert_eq!(modal.config.ai.connections["claude"].subagents, "cloud");
+        assert_eq!(modal.config.ai.connections["codex"].subagents, "cloud");
 
-        // A model connection's empty choice is itself.
-        modal.open_connection("local".into());
-        assert_eq!(
-            modal.connection_value(SUBAGENTS),
-            i18n::t().settings_ai_connection_subagents_own()
-        );
+        // Claude Code and a model connection run their own when left empty.
+        for own in ["claude", "local"] {
+            modal.open_connection(own.into());
+            assert_eq!(
+                modal.connection_value(SUBAGENTS),
+                i18n::t().settings_ai_connection_subagents_own(),
+                "{own}"
+            );
+        }
         // The choice follows a rename, and goes with a deletion or a switch
-        // to a CLI agent.
+        // to Codex; a switch to Claude Code keeps it.
         modal.open_connection("cloud".into());
         edit(&mut modal, NAME, "hosted");
-        assert_eq!(modal.config.ai.connections["claude"].subagents, "hosted");
-        modal.apply_connection_enum(PROVIDER, "codex");
-        assert!(modal.config.ai.connections["claude"].subagents.is_empty());
-        modal.apply_connection_enum(PROVIDER, "openai_compatible");
-        modal.open_connection("claude".into());
+        assert_eq!(modal.config.ai.connections["codex"].subagents, "hosted");
+        modal.apply_connection_enum(PROVIDER, "claude_code");
+        assert_eq!(modal.config.ai.connections["codex"].subagents, "hosted");
+        modal.apply_connection_enum(PROVIDER, "gemini_cli");
+        assert!(modal.config.ai.connections["codex"].subagents.is_empty());
+        modal.open_connection("codex".into());
         modal.apply_connection_enum(SUBAGENTS, "local");
         modal.delete_connection("local");
-        assert!(modal.config.ai.connections["claude"].subagents.is_empty());
+        assert!(modal.config.ai.connections["codex"].subagents.is_empty());
     }
 
     #[test]

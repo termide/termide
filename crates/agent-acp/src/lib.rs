@@ -39,7 +39,7 @@ use termide_agent_core::{
 use termide_agent_mcp::{McpServer, SERVER_NAME};
 
 mod provider;
-pub use provider::AcpProvider;
+pub use provider::{match_model, AcpProvider};
 
 /// How the calls of termide's tools reach the transcript from Claude Code:
 /// named after the MCP server that serves them.
@@ -210,6 +210,20 @@ impl AcpRuntime {
     /// failed assistant message when the first prompt goes out.
     pub fn start(name: &str, config: &AcpConfig, setup: BackendSetup) -> Result<Self, String> {
         Self::launch(name, config, setup, false)
+    }
+
+    /// Whether the handshake is still under way: neither a session nor a
+    /// failure yet. The agent's models are known once it is over.
+    #[must_use]
+    pub fn is_starting(&self) -> bool {
+        matches!(
+            *self
+                .shared
+                .conn
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+            Conn::Starting
+        )
     }
 
     /// Start the agent named `name` as a service for side requests only
