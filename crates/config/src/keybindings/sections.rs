@@ -386,6 +386,21 @@ impl GlobalKeybindings {
         ]
     }
 
+    /// The `goto_panel_1..9` bindings, by number.
+    pub fn goto_panel(&self) -> [&Option<KeyBinding>; 9] {
+        [
+            &self.goto_panel_1,
+            &self.goto_panel_2,
+            &self.goto_panel_3,
+            &self.goto_panel_4,
+            &self.goto_panel_5,
+            &self.goto_panel_6,
+            &self.goto_panel_7,
+            &self.goto_panel_8,
+            &self.goto_panel_9,
+        ]
+    }
+
     /// Drop bindings that are verbatim copies of defaults this version no
     /// longer ships, so the new default can take their place.
     ///
@@ -416,6 +431,41 @@ impl GlobalKeybindings {
         drop_if_exactly(&mut self.prev_panel, &["Alt+Up", "Alt+W"]);
         drop_if_exactly(&mut self.next_panel, &["Alt+Down", "Alt+S"]);
         drop_if_exactly(&mut self.close_panel, &["Alt+X", "F10"]);
+
+        // `Alt+<digit>` moved from panels to projects. A frozen
+        // `goto_panel_N = "Alt+N"` gives way only while `goto_project_N` is
+        // absent from the file: old tables never hold it (it shipped
+        // unbound), while a user who takes the digits back for panels has to
+        // put projects somewhere else, and so keeps both choices.
+        let panels = [
+            &mut self.goto_panel_1,
+            &mut self.goto_panel_2,
+            &mut self.goto_panel_3,
+            &mut self.goto_panel_4,
+            &mut self.goto_panel_5,
+            &mut self.goto_panel_6,
+            &mut self.goto_panel_7,
+            &mut self.goto_panel_8,
+            &mut self.goto_panel_9,
+        ];
+        let projects = [
+            &self.goto_project_1,
+            &self.goto_project_2,
+            &self.goto_project_3,
+            &self.goto_project_4,
+            &self.goto_project_5,
+            &self.goto_project_6,
+            &self.goto_project_7,
+            &self.goto_project_8,
+            &self.goto_project_9,
+        ];
+        for (n, (panel, project)) in panels.into_iter().zip(projects).enumerate() {
+            let old_default = format!("Alt+{}", n + 1);
+            let frozen = matches!(panel, Some(KeyBinding::Single(key)) if *key == old_default);
+            if frozen && project.is_none() {
+                *panel = None;
+            }
+        }
     }
 
     /// Fill None values with default keybindings
@@ -503,15 +553,17 @@ impl GlobalKeybindings {
         set_default!(next_group, "Alt+Right");
         set_default!(prev_panel, "Alt+Up");
         set_default!(next_panel, "Alt+Down");
-        set_default!(goto_panel_1, "Alt+1");
-        set_default!(goto_panel_2, "Alt+2");
-        set_default!(goto_panel_3, "Alt+3");
-        set_default!(goto_panel_4, "Alt+4");
-        set_default!(goto_panel_5, "Alt+5");
-        set_default!(goto_panel_6, "Alt+6");
-        set_default!(goto_panel_7, "Alt+7");
-        set_default!(goto_panel_8, "Alt+8");
-        set_default!(goto_panel_9, "Alt+9");
+        // `Alt+<digit>` switches projects, like tabs elsewhere; jumping to a
+        // panel by number (`goto_panel_N`) ships unbound.
+        set_default!(goto_project_1, "Alt+1");
+        set_default!(goto_project_2, "Alt+2");
+        set_default!(goto_project_3, "Alt+3");
+        set_default!(goto_project_4, "Alt+4");
+        set_default!(goto_project_5, "Alt+5");
+        set_default!(goto_project_6, "Alt+6");
+        set_default!(goto_project_7, "Alt+7");
+        set_default!(goto_project_8, "Alt+8");
+        set_default!(goto_project_9, "Alt+9");
 
         // Application
         set_default!(quit, "Alt+Q");

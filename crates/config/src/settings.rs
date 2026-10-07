@@ -1616,6 +1616,66 @@ prev_panel = "Alt+W"
         assert_eq!(kb.prev_panel, Some(KeyBinding::Single("Alt+W".to_string())));
     }
 
+    fn single(key: &str) -> Option<KeyBinding> {
+        Some(KeyBinding::Single(key.to_string()))
+    }
+
+    #[test]
+    fn alt_digits_switch_projects_and_panels_ship_unbound() {
+        let mut config = Config::default();
+        config.normalize();
+
+        let kb = &config.general.keybindings;
+        for (n, (panel, project)) in kb
+            .goto_panel()
+            .into_iter()
+            .zip(kb.goto_project())
+            .enumerate()
+        {
+            assert_eq!(*project, single(&format!("Alt+{}", n + 1)));
+            assert_eq!(*panel, None);
+        }
+    }
+
+    /// An older full table holds `goto_panel_N = "Alt+N"` and no
+    /// `goto_project_N`; the digits go to projects as on a fresh install.
+    #[test]
+    fn frozen_alt_digits_for_panels_give_way_to_projects() {
+        let toml = r#"
+[general.keybindings]
+goto_panel_1 = "Alt+1"
+goto_panel_2 = "Alt+2"
+goto_panel_3 = "Ctrl+3"
+"#;
+        let mut config: Config = toml::from_str(toml).expect("config parses");
+        config.normalize();
+
+        let kb = &config.general.keybindings;
+        assert_eq!(kb.goto_panel_1, None);
+        assert_eq!(kb.goto_project_1, single("Alt+1"));
+        assert_eq!(kb.goto_panel_2, None);
+        assert_eq!(kb.goto_project_2, single("Alt+2"));
+        assert_eq!(kb.goto_panel_3, single("Ctrl+3"), "not the old default");
+        assert_eq!(kb.goto_project_3, single("Alt+3"));
+    }
+
+    /// Taking the digits back for panels means moving projects elsewhere;
+    /// with `goto_project_N` in the file, both choices stand.
+    #[test]
+    fn alt_digits_taken_back_for_panels_stay_there() {
+        let toml = r#"
+[general.keybindings]
+goto_panel_1 = "Alt+1"
+goto_project_1 = "Ctrl+Alt+1"
+"#;
+        let mut config: Config = toml::from_str(toml).expect("config parses");
+        config.normalize();
+
+        let kb = &config.general.keybindings;
+        assert_eq!(kb.goto_panel_1, single("Alt+1"));
+        assert_eq!(kb.goto_project_1, single("Ctrl+Alt+1"));
+    }
+
     #[test]
     fn a_binding_added_later_is_filled_into_an_older_saved_config() {
         let toml = r#"

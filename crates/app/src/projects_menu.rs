@@ -492,7 +492,11 @@ mod tests {
 
         let menu = state.projects_menu();
         let first = PROJECTS_SUBMENU_ITEM_COUNT + 1;
-        assert_eq!(menu.items[first].shortcut, None);
+        assert_eq!(
+            menu.items[first].shortcut.as_deref(),
+            Some("Alt+1"),
+            "the default"
+        );
         assert_eq!(menu.items[first + 1].shortcut.as_deref(), Some("Alt+F2"));
         assert_eq!(
             menu.items[first + 3].shortcut,

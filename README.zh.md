@@ -391,7 +391,8 @@ export EDITOR=termide   # git commit, crontab -e, visudo, ...
 所有快捷键均可在 `config.toml` 中自定义（参见[配置](#配置)）。核心快捷键：
 
 - **导航：** `Alt+M` 菜单 · `Alt+H` 帮助 · `Alt+Q` 退出 · `Ctrl+P` 命令面板
-- **面板：** `Alt+←/→` 与 `Alt+↑/↓` 在组之间/组内移动 · `Alt+1-9` 跳转面板 · `Alt+K` 面板操作菜单
+- **面板：** `Alt+←/→` 与 `Alt+↑/↓` 在组之间/组内移动 · `Alt+K` 面板操作菜单
+- **项目：** `Alt+1-9` 切换到已打开的项目 · `Alt+\` 项目切换器 · `Alt+N` 新建项目
 - **打开：** `Alt+F` 文件 · `Alt+T` 终端 · `Alt+E` 编辑器 · `Alt+G` Git · `Alt+P` 设置
 - **文件与查看器：** `F3` 预览（Markdown / 图表 / 十六进制 / 图片）· `Ctrl+E` 预览↔源码切换 · `Ctrl+F` 查找 · `Ctrl+R` 从磁盘重载 · `Ctrl+S` 保存
 

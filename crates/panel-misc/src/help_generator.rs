@@ -73,33 +73,22 @@ impl HelpGenerator {
         }
     }
 
-    /// Format goto_panel_1..9 bindings as a compact display string.
-    fn format_goto_panel_keys(kb: &GlobalKeybindings) -> String {
-        let bindings: Vec<_> = [
-            &kb.goto_panel_1,
-            &kb.goto_panel_2,
-            &kb.goto_panel_3,
-            &kb.goto_panel_4,
-            &kb.goto_panel_5,
-            &kb.goto_panel_6,
-            &kb.goto_panel_7,
-            &kb.goto_panel_8,
-            &kb.goto_panel_9,
-        ]
-        .iter()
-        .map(|b| Self::format_keys(b))
-        .collect();
-
-        // Check if all follow "Alt+N" pattern
-        let all_default = bindings
+    /// Format a `goto_*_1..9` family as one display string: `Alt+1..9` when
+    /// it follows that pattern, otherwise the bound keys in order. Empty when
+    /// none is bound.
+    fn format_numbered_keys(bindings: [&Option<KeyBinding>; 9]) -> String {
+        let keys: Vec<String> = bindings.into_iter().map(Self::format_keys).collect();
+        let alt_digits = keys
             .iter()
             .enumerate()
-            .all(|(i, b)| *b == format!("Alt{}", i + 1));
-
-        if all_default {
+            .all(|(i, k)| *k == format!("Alt+{}", i + 1));
+        if alt_digits {
             "Alt+1..9".to_string()
         } else {
-            bindings.join(" / ")
+            keys.into_iter()
+                .filter(|k| !k.is_empty())
+                .collect::<Vec<_>>()
+                .join(" / ")
         }
     }
 
@@ -279,10 +268,6 @@ impl HelpGenerator {
                 keys: Self::format_keys(&kb.next_panel),
                 description: t.help_desc_next_panel().to_string(),
             },
-            HelpEntry {
-                keys: Self::format_goto_panel_keys(kb),
-                description: t.help_desc_goto_panel().to_string(),
-            },
         ];
         // Switching projects ships unbound: listed once the user binds it.
         let cycle = [&kb.prev_project, &kb.next_project]
@@ -297,18 +282,24 @@ impl HelpGenerator {
                 description: t.help_desc_cycle_project().to_string(),
             });
         }
-        let goto = kb
-            .goto_project()
-            .into_iter()
-            .map(Self::format_keys)
-            .filter(|keys| !keys.is_empty())
-            .collect::<Vec<_>>()
-            .join(" / ");
-        if !goto.is_empty() {
-            entries.push(HelpEntry {
-                keys: goto,
-                description: t.help_desc_goto_project().to_string(),
-            });
+        // Jumping by number: projects ship on `Alt+1..9`, panels unbound.
+        let numbered = [
+            (
+                Self::format_numbered_keys(kb.goto_project()),
+                t.help_desc_goto_project(),
+            ),
+            (
+                Self::format_numbered_keys(kb.goto_panel()),
+                t.help_desc_goto_panel(),
+            ),
+        ];
+        for (keys, description) in numbered {
+            if !keys.is_empty() {
+                entries.push(HelpEntry {
+                    keys,
+                    description: description.to_string(),
+                });
+            }
         }
 
         HelpSection {
@@ -1044,5 +1035,30 @@ impl HelpGenerator {
             }
             result
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numbered_keys_collapse_alt_digits_and_skip_unbound() {
+        let mut config = termide_config::Config::default();
+        config.normalize();
+        let kb = &config.general.keybindings;
+        assert_eq!(
+            HelpGenerator::format_numbered_keys(kb.goto_project()),
+            "Alt+1..9"
+        );
+        assert_eq!(HelpGenerator::format_numbered_keys(kb.goto_panel()), "");
+
+        let mut kb = kb.clone();
+        kb.goto_panel_2 = Some(KeyBinding::Single("Ctrl+2".into()));
+        kb.goto_panel_5 = Some(KeyBinding::Single("Ctrl+5".into()));
+        assert_eq!(
+            HelpGenerator::format_numbered_keys(kb.goto_panel()),
+            "Ctrl+2 / Ctrl+5"
+        );
     }
 }

@@ -320,22 +320,34 @@ new alternative. See [ui.md](ui.md#settings-modal).
 
 ### Unbound actions
 
-Some actions ship without a binding, because every chord still free collides
-with a desktop or shell shortcut somewhere: `Ctrl+Alt+Left` / `Ctrl+Alt+Right`
-switch workspaces in several Linux desktops, `Ctrl+Alt+<digit>` reaches a
-legacy terminal as `Alt+<digit>`, and `Alt+.` inserts the last argument in
-bash. Bind them to what is free on your system:
+Some actions ship without a binding. For `prev_project` / `next_project`
+every chord still free collides with a desktop or shell shortcut somewhere:
+`Ctrl+Alt+Left` / `Ctrl+Alt+Right` switch workspaces in several Linux
+desktops, and `Alt+.` inserts the last argument in bash. `goto_panel_1` …
+`goto_panel_9` gave `Alt+1` … `Alt+9` to `goto_project_1` …
+`goto_project_9`, which switch to the open project with that number. Bind them
+to what is free on your system:
 
 | Action | Does |
 |--------|------|
 | `prev_project` / `next_project` | Switch to the previous / next open project, in the order the `Projects` menu lists them |
-| `goto_project_1` … `goto_project_9` | Switch to the open project with that number |
+| `goto_panel_1` … `goto_panel_9` | Move the focus to the panel group (column) with that number |
 
 ```toml
 [general.keybindings]
 prev_project = "Shift+F5"
 next_project = "Shift+F6"
+goto_panel_1 = "Shift+F1"
+```
+
+To give the digits back to panels, move the projects off them in the same
+file. A `goto_panel_N` bound to `Alt+N` while `goto_project_N` is not set is
+taken for a copy of the old default saved by an older version, and gives way:
+
+```toml
+[general.keybindings]
+goto_panel_1 = "Alt+1"
 goto_project_1 = "Shift+F1"
 ```
 
-Once bound, the key is shown beside the project in the `Projects` menu.
+The `goto_project_N` key is shown beside the project in the `Projects` menu.

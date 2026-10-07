@@ -396,7 +396,8 @@ For detailed documentation, see:
 All shortcuts are customizable in `config.toml` (see [Configuration](#configuration)). The essentials:
 
 - **Navigate:** `Alt+M` menu · `Alt+H` help · `Alt+Q` quit · `Ctrl+P` command palette
-- **Panels:** `Alt+←/→` and `Alt+↑/↓` move between/within groups · `Alt+1-9` jump to a panel · `Alt+K` panel action menu
+- **Panels:** `Alt+←/→` and `Alt+↑/↓` move between/within groups · `Alt+K` panel action menu
+- **Projects:** `Alt+1-9` switch to an open project · `Alt+\` project switcher · `Alt+N` new project
 - **Open:** `Alt+F` Files · `Alt+T` Terminal · `Alt+E` Editor · `Alt+G` Git · `Alt+P` Settings
 - **Files & viewers:** `F3` preview (markdown / diagram / hex / image) · `Ctrl+E` toggle preview ↔ source · `Ctrl+F` find · `Ctrl+R` reload from disk · `Ctrl+S` save
 

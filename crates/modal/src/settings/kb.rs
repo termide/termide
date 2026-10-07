@@ -662,7 +662,7 @@ mod tests {
     /// take a new one.
     #[test]
     fn every_listed_binding_is_wired_to_a_field() {
-        // Some actions ship unbound (`prev_project`, `goto_project_N`), so an
+        // Some actions ship unbound (`prev_project`, `goto_panel_N`), so an
         // empty read proves nothing; writing a binding and reading it back
         // does.
         let mut config = Config::default();

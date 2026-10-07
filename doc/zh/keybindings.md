@@ -281,21 +281,33 @@ crossterm 解析为 `Ctrl+7` / `Ctrl+4`,规范化器将其重写回斜杠 / 反�
 
 ### 未绑定的操作
 
-有些操作默认不带绑定，因为每个仍然空闲的组合键在某处都会与桌面或 shell
-的快捷键冲突：`Ctrl+Alt+Left` / `Ctrl+Alt+Right` 在多个 Linux 桌面中用于切换
-工作区，`Ctrl+Alt+<数字>` 在传统终端中会被当作 `Alt+<数字>`，而 `Alt+.` 在
-bash 中插入上一条命令的最后一个参数。请将它们绑定到您系统上空闲的组合键：
+有些操作默认不带绑定。对 `prev_project` / `next_project` 而言，每个仍然空闲
+的组合键在某处都会与桌面或 shell 的快捷键冲突：`Ctrl+Alt+Left` /
+`Ctrl+Alt+Right` 在多个 Linux 桌面中用于切换工作区，而 `Alt+.` 在 bash 中插入
+上一条命令的最后一个参数。`goto_panel_1` … `goto_panel_9` 已将 `Alt+1` …
+`Alt+9` 让给 `goto_project_1` … `goto_project_9`，后者切换到对应编号的已打开
+项目。请将它们绑定到您系统上空闲的组合键：
 
 | 操作 | 作用 |
 |------|------|
 | `prev_project` / `next_project` | 按 `项目` 菜单中的排列顺序切换到上一个 / 下一个已打开的项目 |
-| `goto_project_1` … `goto_project_9` | 切换到对应编号的已打开项目 |
+| `goto_panel_1` … `goto_panel_9` | 将焦点移到对应编号的面板组（列） |
 
 ```toml
 [general.keybindings]
 prev_project = "Shift+F5"
 next_project = "Shift+F6"
+goto_panel_1 = "Shift+F1"
+```
+
+若要把数字键还给面板，请在同一文件中为项目另行绑定。当 `goto_project_N`
+未设置时，绑定到 `Alt+N` 的 `goto_panel_N` 会被视为旧版本保存的旧默认值副本，
+并让位于新的默认值：
+
+```toml
+[general.keybindings]
+goto_panel_1 = "Alt+1"
 goto_project_1 = "Shift+F1"
 ```
 
-绑定后，按键会显示在 `项目` 菜单中对应项目的旁边。
+`goto_project_N` 的按键会显示在 `项目` 菜单中对应项目的旁边。
