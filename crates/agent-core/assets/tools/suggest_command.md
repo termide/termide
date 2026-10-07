@@ -1,5 +1,6 @@
 ---
 snippet: offer the user a command to run by hand, and wait for them to confirm it
 guideline.1: Use `suggest_command` when a call was blocked or the user should run it themselves; put the exact command in `command` and the reason in `why`. Never run what you suggest, and never suggest a command to reach the same outcome a denial already refused by another route.
+guideline.2: Offer a command for the user to run through `suggest_command` rather than in your reply; when you do write one out, give it bare: their prompt runs a shell command typed after `$`, and a leading `!` is sent to you as text.
 ---
 Offer the user a shell command to run by hand, and wait for them to confirm it. Use it when a call was blocked or you should not run something yourself but the user plausibly will: publishing, anything that needs their credentials or their judgement, a destructive step you were told to leave to them. The command is shown on a card in full, exactly as it would run, with `[Run]`, `[Edit first]`, `[Copy]` and `[Dismiss]`; nothing runs unless they pick `[Run]`. Do not use it to ask permission for a call you could make with the tools you have, and do not offer a command the permission rules deny — the card then withholds `[Run]` and only offers the text.
