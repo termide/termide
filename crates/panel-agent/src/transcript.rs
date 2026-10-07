@@ -990,6 +990,11 @@ fn push_time_meta(
 /// A duration in whole seconds with localized units, as its two largest
 /// parts: `2s` under a minute, `1m13s` under an hour, `2h5m` under a day,
 /// `3d4h` beyond. Tenths add no useful information here.
+/// What a subagent spent, as the session's totals show tokens.
+fn spent_label(spent: &termide_agent_core::Usage) -> String {
+    crate::token_label(spent.uncached(), spent.cache_read, spent.output)
+}
+
 pub(crate) fn fmt_dur(ms: u32) -> String {
     let t = termide_i18n::t();
     let total = (u64::from(ms) + 500) / 1000;
@@ -2133,6 +2138,14 @@ fn render_body(
                     format!("{PAUSED_GLYPH} {}", fmt_dur(*ms)),
                     style,
                 ));
+            }
+            // What a subagent's model calls spent, as the session's totals
+            // show tokens.
+            if let Some(spent) = result.as_ref().and_then(|r| r.spent()) {
+                if !clock.is_empty() {
+                    clock.push(Span::raw(" "));
+                }
+                clock.push(Span::styled(spent_label(&spent), dim));
             }
             if let Some(ms) = duration_ms {
                 if !clock.is_empty() {
@@ -3887,6 +3900,36 @@ mod tests {
         assert_eq!(
             summarize_call(&call("mcp", json!({ "q": 1 })), 40),
             "{\"q\":1}"
+        );
+    }
+
+    /// A finished `task` shows under its fold what the subagent spent, as
+    /// the session's totals show tokens, beside how long it took.
+    #[test]
+    fn a_subagents_block_shows_what_it_spent() {
+        let colors = ThemeColors::default();
+        let mut transcript = Transcript::default();
+        let task = call("task", json!({ "agent": "search", "prompt": "find it" }));
+        let spent = termide_agent_core::Usage {
+            input: 1200,
+            output: 300,
+            cache_read: 2000,
+            cache_write: 0,
+        };
+        transcript.push(Item::Tool {
+            call: task.clone(),
+            result: Some(ToolResultMessage::text(&task, "found").with_spent(spent)),
+            live: None,
+            at: "21:03:20".into(),
+            duration_ms: Some(4000),
+            waited_ms: None,
+            waiting: false,
+        });
+        assert!(transcript.toggle_expanded(0));
+        let lines = text_of(transcript.lines(80, &colors, false));
+        assert!(
+            lines.iter().any(|l| l.contains("↑1k ↻2k ↓300 🕒 4s")),
+            "{lines:?}"
         );
     }
 }

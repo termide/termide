@@ -34,7 +34,7 @@ pub use question::QuestionTool;
 pub use read::ReadTool;
 pub use skill::SkillTool;
 pub use suggest::SuggestCommandTool;
-pub use task::{SubagentRun, TaskTool};
+pub use task::{SubagentOutcome, SubagentRun, TaskTool};
 pub use write::WriteTool;
 
 /// The default registry: `read`, `edit`, `write`, `bash`, in prompt order.

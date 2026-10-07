@@ -2924,6 +2924,39 @@ fn ctrl_s_saves_the_chat_and_the_menu_offers_it() {
     assert!(!content.contains("they greet") && !content.contains("Nothing to save"));
 }
 
+/// A subagent's tokens join the session's totals when its `task` ends; its
+/// context was its own, so the context fill stays.
+#[test]
+fn a_subagents_tokens_join_the_session_totals() {
+    use termide_agent_core::{ToolCall, Usage};
+    let mut panel = panel(vec![]);
+    panel.context_tokens = 500;
+    let call = ToolCall {
+        id: "t1".into(),
+        name: "task".into(),
+        arguments: serde_json::json!({ "agent": "search", "prompt": "find it" }),
+        extra_content: None,
+    };
+    panel.apply(AgentEvent::ToolExecutionStart { call: call.clone() });
+    panel.apply(AgentEvent::ToolExecutionEnd {
+        result: ToolResultMessage::text(&call, "found").with_spent(Usage {
+            input: 40,
+            output: 7,
+            cache_read: 900,
+            cache_write: 2,
+        }),
+    });
+    assert_eq!(
+        (
+            panel.session_input,
+            panel.session_cached,
+            panel.session_output
+        ),
+        (42, 900, 7)
+    );
+    assert_eq!(panel.context_tokens, 500);
+}
+
 #[test]
 fn the_summary_reports_output_cleaning_savings() {
     use termide_agent_core::ToolCall;

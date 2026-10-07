@@ -316,6 +316,13 @@ impl AgentPanel {
                 });
             }
             AgentEvent::ToolExecutionEnd { result } => {
+                // A subagent's tokens join the session's totals; its context
+                // was its own, so the context fill stays as it is.
+                if let Some(spent) = result.spent() {
+                    self.session_input += spent.uncached();
+                    self.session_cached += spent.cache_read;
+                    self.session_output += spent.output;
+                }
                 if let Some(path) = changed_file(&result) {
                     self.pending_events
                         .push(PanelEvent::FileChangedOnDisk(path));
