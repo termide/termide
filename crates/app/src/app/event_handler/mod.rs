@@ -324,6 +324,14 @@ impl App {
                 self.event_git_operation(operation, repo_path, None)?;
             }
 
+            PanelEvent::CredentialsRequired { url, attempt } => {
+                self.event_credentials_required(url, attempt);
+            }
+
+            PanelEvent::CredentialsAccepted { url } => {
+                self.event_credentials_accepted(&url);
+            }
+
             PanelEvent::CancelGitOperation => {
                 self.event_cancel_git_operation();
             }

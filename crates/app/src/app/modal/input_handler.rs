@@ -101,31 +101,6 @@ impl App {
         self.create_entry_in_file_manager(value, false)
     }
 
-    /// Apply an SSH key passphrase the user typed and retry the git network
-    /// operation that prompted for it (via the askpass helper).
-    pub(in crate::app) fn handle_git_ssh_passphrase_retry(
-        &mut self,
-        operation: String,
-        repo_path: PathBuf,
-        value: Box<dyn std::any::Any>,
-    ) -> Result<()> {
-        use termide_core::GitOperationType;
-        let Some(passphrase) = value.downcast_ref::<String>() else {
-            return Ok(());
-        };
-        if passphrase.is_empty() {
-            return Ok(());
-        }
-        // Cache for the session so subsequent ops reuse it without re-prompting.
-        self.state.git_ssh_passphrase = Some(passphrase.clone());
-        let op = match operation.as_str() {
-            "push" => GitOperationType::Push,
-            "pull" => GitOperationType::Pull,
-            _ => GitOperationType::Fetch,
-        };
-        self.event_git_operation(op, repo_path, Some(passphrase.clone()))
-    }
-
     /// Handle directory creation
     pub(in crate::app) fn handle_create_directory(
         &mut self,

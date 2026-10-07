@@ -1,5 +1,6 @@
 //! Background git network operations (push/pull/fetch): result polling with a
-//! timeout watchdog, spinner animation, and SSH-passphrase retry prompting.
+//! timeout watchdog, spinner animation, and retrying with credentials
+//! (see `vault`).
 
 use std::sync::mpsc::TryRecvError;
 
@@ -11,45 +12,6 @@ use crate::state::ActiveModal;
 use super::App;
 
 impl App {
-    /// If `stderr` from a failed git network op looks like an SSH key
-    /// authentication failure, handle it: either prompt for the key passphrase
-    /// (first failure) and let the retry run, or — if a cached passphrase was
-    /// already tried — clear it and report a clean error (no prompt loop).
-    /// Returns `true` when the failure was handled here.
-    pub(super) fn maybe_prompt_ssh_passphrase(
-        &mut self,
-        operation: &str,
-        repo_path: std::path::PathBuf,
-        stderr: &str,
-    ) -> bool {
-        let s = stderr.to_ascii_lowercase();
-        let is_auth_failure = (s.contains("permission denied") && s.contains("publickey"))
-            || s.contains("authentication failed")
-            || s.contains("passphrase");
-        if !is_auth_failure {
-            return false;
-        }
-
-        if self.state.git_ssh_passphrase.is_some() {
-            // A cached passphrase was already tried and still failed — it's
-            // wrong, or the key isn't authorized. Don't loop: clear and report.
-            self.state.git_ssh_passphrase = None;
-            self.state
-                .set_error(format!("git {operation}: SSH authentication failed"));
-            return true;
-        }
-
-        self.event_show_input(
-            "Enter passphrase for your SSH key:".to_string(),
-            String::new(),
-            termide_core::InputAction::GitSshPassphrase {
-                operation: operation.to_string(),
-                repo_path,
-            },
-        );
-        true
-    }
-
     /// Check for background git operation result (push/pull/fetch)
     pub(super) fn check_git_operation_result(&mut self) {
         let handle = match self.state.git_operation_handle.take() {
@@ -63,6 +25,9 @@ impl App {
                 self.state.clear_status();
                 // Notify all panels about git operation completed (shows Push/Pull buttons)
                 self.notify_git_operation_state(false, None, 0);
+                if result.success {
+                    self.vault_git_finished(true);
+                }
 
                 // Fetch is silent - no modal, just refresh. On failure (e.g. an
                 // SSH key not loaded in the agent) surface a status-line message
@@ -70,7 +35,7 @@ impl App {
                 if result.operation == "fetch" {
                     if !result.success {
                         let repo = handle.repo_path;
-                        if !self.maybe_prompt_ssh_passphrase("fetch", repo, &result.stderr) {
+                        if !self.vault_git_auth_failed("fetch", repo, &result.stderr) {
                             let msg = format!(
                                 "git fetch failed: {}",
                                 result.stderr.lines().next().unwrap_or("unknown error")
@@ -86,11 +51,11 @@ impl App {
                     return;
                 }
 
-                // On an SSH auth failure, prompt for the key passphrase and
-                // retry instead of showing a failure modal.
+                // On an authentication failure, retry with credentials (from
+                // the vault or the user) instead of showing a failure modal.
                 if !result.success {
                     let repo = handle.repo_path;
-                    if self.maybe_prompt_ssh_passphrase(&result.operation, repo, &result.stderr) {
+                    if self.vault_git_auth_failed(&result.operation, repo, &result.stderr) {
                         for panel in self.layout_manager.iter_all_panels_mut() {
                             panel.handle_command(PanelCommand::Reload);
                         }
@@ -178,6 +143,7 @@ impl App {
                     self.state.ui.git_operation_in_progress = false;
                     self.state.clear_status();
                     self.notify_git_operation_state(false, None, 0);
+                    self.vault_git_finished(false);
 
                     let t = termide_i18n::t();
                     self.show_error_modal(format!(
@@ -226,6 +192,7 @@ impl App {
                 self.state.clear_status();
                 // Notify all panels about git operation completed (shows Push/Pull buttons)
                 self.notify_git_operation_state(false, None, 0);
+                self.vault_git_finished(false);
             }
         }
     }

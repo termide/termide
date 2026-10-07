@@ -9,6 +9,7 @@
 pub const VERSION: &str = env!("TERMIDE_VERSION");
 
 pub mod command;
+pub mod credentials;
 pub mod event;
 pub mod graphics_cells;
 pub mod hotkey_table;
@@ -22,6 +23,7 @@ pub mod util;
 pub mod wide_cells;
 
 pub use command::{CommandResult, PanelCommand};
+pub use credentials::{CredentialAttempt, SecretText};
 pub use event::{
     ChecklistButton, ChecklistGroup, ChecklistItem, ChecklistOutcome, ChecklistRefresh,
     ConfirmAction, ConflictResolution, Event, EventHandler, GitOperationType, InputAction,

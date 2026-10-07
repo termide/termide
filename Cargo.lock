@@ -147,14 +147,15 @@ dependencies = [
 
 [[package]]
 name = "argon2"
-version = "0.6.0-rc.8"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7af50940b73bf4e16c15c448a2b121c63f2d68e3e54b6a8731673cb4aa0cdff5"
+checksum = "134c52ddac6d63c576bef8168db10c83c49c26444ecbc68060fef078925a901c"
 dependencies = [
  "base64ct",
  "blake2",
  "cpufeatures 0.3.0",
  "password-hash",
+ "zeroize",
 ]
 
 [[package]]
@@ -293,9 +294,9 @@ dependencies = [
 
 [[package]]
 name = "blake2"
-version = "0.11.0-rc.6"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "061f1a09225e328e1ffbb378d2d49923c0ca5fee19fb5ac1cc9c1e9d52b93690"
+checksum = "5b5d4d889834ee8ecfc0f8426ad30faf7cdcb10f741a8e6d7224d95325479f6f"
 dependencies = [
  "digest 0.11.3",
 ]
@@ -469,6 +470,18 @@ dependencies = [
  "cpufeatures 0.3.0",
  "rand_core 0.10.1",
  "zeroize",
+]
+
+[[package]]
+name = "chacha20poly1305"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b89e1c441e926b9c82a8d023f6e1b7ae0adcfaa7d621814e4d60789bac751cb"
+dependencies = [
+ "aead",
+ "chacha20",
+ "cipher",
+ "poly1305",
 ]
 
 [[package]]
@@ -5073,6 +5086,7 @@ dependencies = [
  "termide-panel-outline",
  "termide-panel-terminal",
  "termide-project",
+ "termide-secrets",
  "termide-state",
  "termide-system-monitor",
  "termide-theme",
@@ -5083,6 +5097,7 @@ dependencies = [
  "termide-watcher",
  "toml_edit",
  "unicode-width",
+ "zeroize",
 ]
 
 [[package]]
@@ -5152,6 +5167,7 @@ dependencies = [
  "termide-project",
  "termide-theme",
  "unicode-width",
+ "zeroize",
 ]
 
 [[package]]
@@ -5387,6 +5403,7 @@ dependencies = [
  "termide-ui-render",
  "tokio",
  "unicode-width",
+ "url",
 ]
 
 [[package]]
@@ -5715,6 +5732,27 @@ dependencies = [
  "termide-highlight",
  "termide-mermaid",
  "unicode-width",
+]
+
+[[package]]
+name = "termide-secrets"
+version = "0.39.0"
+dependencies = [
+ "argon2",
+ "base64",
+ "chacha20poly1305",
+ "dirs",
+ "getrandom 0.2.17",
+ "hkdf 0.13.0",
+ "percent-encoding",
+ "serde",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.18",
+ "toml",
+ "url",
+ "x25519-dalek",
+ "zeroize",
 ]
 
 [[package]]
@@ -7487,6 +7525,17 @@ name = "x11rb-protocol"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
+
+[[package]]
+name = "x25519-dalek"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7e8131a03190127fb2263afc72b322ecadae46b6ff8c6f399ff5d02f5559af6"
+dependencies = [
+ "curve25519-dalek",
+ "rand_core 0.10.1",
+ "zeroize",
+]
 
 [[package]]
 name = "yoke"

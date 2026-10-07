@@ -15,6 +15,7 @@ unicode-width.workspace = true
 termide-clipboard = { path = "../clipboard" }
 termide-config = { path = "../config" }
 termide-core = { path = "../core" }
+url.workspace = true
 termide-db = { path = "../db" }
 termide-i18n = { path = "../i18n" }
 termide-modal = { path = "../modal" }

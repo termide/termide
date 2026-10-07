@@ -20,6 +20,7 @@ lsp-types.workspace = true
 open = "5"
 unicode-width.workspace = true
 libc.workspace = true
+zeroize = "1"
 
 # All app-* foundation crates
 termide-app-core = { path = "../app-core" }
@@ -39,6 +40,7 @@ termide-project = { path = "../project" }
 termide-git = { path = "../git" }
 termide-lsp = { path = "../lsp" }
 termide-vfs = { path = "../vfs" }
+termide-secrets = { path = "../secrets" }
 termide-file-ops = { path = "../file-ops" }
 termide-watcher = { path = "../watcher" }
 termide-logger = { path = "../logger" }

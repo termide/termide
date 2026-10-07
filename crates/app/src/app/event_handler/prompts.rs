@@ -125,25 +125,9 @@ impl App {
                 line: *line,
                 column: *column,
             },
-            termide_core::InputAction::GitSshPassphrase {
-                operation,
-                repo_path,
-            } => PendingAction::GitSshPassphraseRetry {
-                operation: operation.clone(),
-                repo_path: repo_path.clone(),
-            },
         };
 
-        // Create input modal — mask the field for passphrase entry.
-        let is_password = matches!(
-            on_submit,
-            termide_core::InputAction::GitSshPassphrase { .. }
-        );
-        let mut modal = if is_password {
-            InputModal::new("SSH Passphrase", prompt).password()
-        } else {
-            InputModal::with_default("Input", prompt, &initial_value)
-        };
+        let mut modal = InputModal::with_default("Input", prompt, &initial_value);
         if let PendingAction::ViewPath { base_dir } = &pending_action {
             modal.set_suggestions(Box::new(crate::app::modal::PathSuggestions::new(
                 base_dir.clone(),

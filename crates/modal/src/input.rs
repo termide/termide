@@ -234,6 +234,14 @@ impl InputModal {
         self
     }
 
+    /// Start with the first checkbox checked.
+    pub fn checkbox_checked(mut self, checked: bool) -> Self {
+        if let Some(c) = self.checkboxes.first_mut() {
+            c.checked = checked;
+        }
+        self
+    }
+
     /// Add a checkbox that only appears when the primary checkbox is checked.
     pub fn with_conditional_checkbox(mut self, label: String) -> Self {
         self.checkboxes.push(ModalCheckbox {

@@ -45,8 +45,10 @@ Notes:
 - Omitting the user makes the SFTP provider fall back to your SSH
   config (see Authentication).
 - Omitting the port uses the protocol default (22 / 21 / 990).
-- Embedding a password in the URL is supported but not recommended —
-  prefer key-based authentication for SFTP.
+- A password in the URL is not used. When a server asks for one, TermIDE
+  prompts for it and can keep it in the
+  [password vault](passwords.md); for SFTP, key-based authentication
+  remains the better choice.
 
 ## Opening a remote location
 
@@ -76,7 +78,12 @@ SFTP supports four authentication modes:
 - **SSH agent** — uses an SSH agent if `SSH_AUTH_SOCK` points at one.
 - **SSH key** — explicit private-key file, optionally with a
   passphrase.
-- **Password** — interactive prompt or pre-stored value.
+- **Password** — when the methods above are refused, TermIDE takes the
+  password from the [password vault](passwords.md) or asks for it.
+
+FTP and FTPS log in with the user from the URL; a refused login asks for
+the password the same way. Without a user in the URL the login is
+anonymous.
 
 Because `Auto` reads `~/.ssh/config`, you can keep the bookmark URL
 plain (`sftp://my-build-host/path`) and let SSH config supply the
@@ -215,6 +222,5 @@ is never overwritten. Only local files can be packed.
 - No `smb://` / `nfs://` provider yet — only URL parsing.
 - No resume-from-byte-offset for interrupted transfers: cancelled
   uploads start over from the beginning if re-issued.
-- The interactive password prompt cannot be saved persistently
-  inside TermIDE; for repeated use, configure SSH keys or rely on
-  your SSH agent.
+- The passphrase of an encrypted SSH key is not asked for in remote
+  panels; load the key into your SSH agent.

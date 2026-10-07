@@ -13,14 +13,15 @@ impl App {
         &mut self,
         operation: GitOperationType,
         repo_path: PathBuf,
-        passphrase: Option<String>,
+        auth: Option<crate::app::vault::GitAuth>,
     ) -> Result<()> {
+        use crate::app::vault::GitAuth;
         use crate::state::{GitOperationHandle, GitOperationResult};
         use std::sync::mpsc;
         use std::thread;
 
-        // Write an SSH key passphrase to a private, short-lived file the askpass
-        // helper reads. Owner-only perms; removed once git finishes.
+        // Write a passphrase or password to a private, short-lived file the
+        // askpass helper reads. Owner-only perms; removed once git finishes.
         fn write_askpass_secret(secret: &str) -> std::io::Result<PathBuf> {
             use std::io::Write;
             use std::sync::atomic::{AtomicU64, Ordering};
@@ -55,8 +56,15 @@ impl App {
         }
 
         // Reuse a passphrase entered earlier this session so repeated ops don't
-        // re-prompt; an explicit retry value takes precedence.
-        let passphrase = passphrase.or_else(|| self.state.git_ssh_passphrase.clone());
+        // re-prompt; explicit retry credentials take precedence.
+        let (secret, username) = match &auth {
+            Some(GitAuth::SshPassphrase(pp)) => (Some(pp.expose().to_string()), None),
+            Some(GitAuth::Https { user, password }) => {
+                (Some(password.expose().to_string()), Some(user.as_str()))
+            }
+            None => (self.state.git_ssh_passphrase.clone(), None),
+        };
+        let secret = secret.map(zeroize::Zeroizing::new);
 
         let cmd = match operation {
             GitOperationType::Push => "push",
@@ -65,11 +73,11 @@ impl App {
         };
         let cmd_str = cmd.to_string();
 
-        // With a passphrase, write it to a private (0600) temp file and run ssh
-        // through our askpass helper so the passphrase is supplied without a
-        // terminal prompt. Without one, run non-interactively (BatchMode) so a
-        // missing passphrase fails cleanly instead of corrupting the TUI.
-        let secret_file = match &passphrase {
+        // With a secret, write it to a private (0600) temp file and run ssh /
+        // git through our askpass helper so it is supplied without a terminal
+        // prompt. Without one, run non-interactively (BatchMode) so a missing
+        // passphrase fails cleanly instead of corrupting the TUI.
+        let secret_file = match &secret {
             Some(pp) => match write_askpass_secret(pp) {
                 Ok(path) => Some(path),
                 Err(e) => {
@@ -84,6 +92,7 @@ impl App {
             Some(sf) => termide_git::SshAuth::Askpass {
                 helper: &helper,
                 secret_file: sf,
+                username,
             },
             None => termide_git::SshAuth::Batch,
         };
@@ -179,6 +188,7 @@ impl App {
 
         self.state.ui.git_operation_in_progress = false;
         self.notify_git_operation_state(false, None, 0);
+        self.vault_git_finished(false);
 
         // Show cancellation message
         let t = i18n::t();

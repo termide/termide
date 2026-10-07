@@ -45,6 +45,10 @@ pub enum PendingAction {
     /// Open the encrypted archive at `archive` (its root) with the password
     /// the modal answers with.
     ArchivePassword { archive: termide_vfs::VfsPath },
+    /// A password-vault prompt (master password, a login password, a git
+    /// user name). The app's vault controller holds what it is for, so no
+    /// secret travels in a pending action.
+    Vault,
     /// Move files/directories (one or multiple)
     MovePath {
         sources: Vec<PathBuf>,
@@ -313,14 +317,6 @@ pub enum PendingAction {
         is_project: bool,
         /// Selected index to restore on return
         selected: usize,
-    },
-    /// Retry a git network operation with an SSH key passphrase the user just
-    /// entered in the (masked) password modal.
-    GitSshPassphraseRetry {
-        /// "fetch" | "pull" | "push"
-        operation: String,
-        /// Repository root path
-        repo_path: PathBuf,
     },
     /// Apply settings from the Settings modal
     Settings,

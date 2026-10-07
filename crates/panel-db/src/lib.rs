@@ -25,8 +25,8 @@ use ratatui::layout::Rect;
 
 use termide_config::Config;
 use termide_core::{
-    CommandResult, HotkeyTable, KeyChord, Panel, PanelCommand, PanelEvent, RenderContext,
-    ScrollAxis, ScrollBars, ThemeColors, WidthPreference,
+    CommandResult, CredentialAttempt, HotkeyTable, KeyChord, Panel, PanelCommand, PanelEvent,
+    RenderContext, ScrollAxis, ScrollBars, SecretText, ThemeColors, WidthPreference,
 };
 use termide_db::{
     ColumnInfo, Condition, DbBackend, DbConnection, DbError, Page, PageRequest, SortDir,
@@ -56,10 +56,26 @@ enum ConnState {
     Failed(String),
 }
 
+/// Password handling for the panel's login; see `termide_core::credentials`.
+#[derive(Debug, Default)]
+struct DbLogin {
+    /// A password from the vault or the user. Kept apart from `url` so it
+    /// never reaches the saved layout.
+    password: Option<SecretText>,
+    /// Which password the connection in flight uses.
+    attempt: Option<CredentialAttempt>,
+    /// The refusal message while waiting for a password; shown if the user
+    /// declines to give one.
+    waiting: Option<String>,
+    /// Credential events for the next tick.
+    events: Vec<PanelEvent>,
+}
+
 /// The database viewer panel.
 pub struct DbPanel {
     /// Full connection URL (may carry a password — never rendered verbatim).
     url: String,
+    login: DbLogin,
     /// Display label (bookmark description or sanitized URL).
     label: String,
     backend: DbBackend,
@@ -213,6 +229,7 @@ impl DbPanel {
         let conn = spawn_connect(url.clone());
         Self {
             url,
+            login: DbLogin::default(),
             label,
             backend,
             conn: ConnState::Connecting(conn),
@@ -303,13 +320,56 @@ impl DbPanel {
     /// Re-establish the connection to the current URL with a fresh handle,
     /// dropping any stale async receivers. Driven by the recovery dialog.
     pub fn reconnect(&mut self) {
-        self.conn = ConnState::Connecting(spawn_connect(self.url.clone()));
+        self.conn = ConnState::Connecting(spawn_connect(self.connect_url(&self.url)));
         self.query_error = None;
         self.databases_rx = None;
         self.tables_rx = None;
         self.columns_rx = None;
         self.count_rx = None;
         self.page_rx = None;
+    }
+
+    /// The URL a login is known by: the panel's URL without a password.
+    fn login_url(&self) -> String {
+        strip_password(&self.url)
+    }
+
+    /// `url` with the password from the vault or the user, if any.
+    fn connect_url(&self, url: &str) -> String {
+        match &self.login.password {
+            Some(pw) => url_with_password(url, pw.expose()),
+            None => url.to_string(),
+        }
+    }
+
+    /// Retry the refused login with `password`; false when this panel is not
+    /// waiting for `url`.
+    fn provide_password(
+        &mut self,
+        url: &str,
+        password: &SecretText,
+        source: CredentialAttempt,
+    ) -> bool {
+        if self.login.waiting.is_none() || url != self.login_url() {
+            return false;
+        }
+        self.login.waiting = None;
+        self.login.password = Some(password.clone());
+        self.login.attempt = Some(source);
+        self.loading = true;
+        self.reconnect();
+        true
+    }
+
+    /// The user declined to give a password: report the refusal.
+    fn cancel_password(&mut self, url: &str) -> bool {
+        if self.login.waiting.is_none() || url != self.login_url() {
+            return false;
+        }
+        if let Some(msg) = self.login.waiting.take() {
+            self.fail(msg);
+        }
+        true
     }
 
     /// Take a pending modal request (polled by the app each frame).
@@ -391,7 +451,7 @@ impl DbPanel {
         }
         let new_url = url_with_database(&self.url, &db);
         self.selected_db = Some(db);
-        self.conn = ConnState::Connecting(spawn_connect(new_url));
+        self.conn = ConnState::Connecting(spawn_connect(self.connect_url(&new_url)));
         // Reset catalog/grid state for the new database.
         self.tables.clear();
         self.selected_table = None;
@@ -656,6 +716,14 @@ impl DbPanel {
             if let Ok(result) = rx.try_recv() {
                 match result {
                     Ok(conn) => {
+                        if matches!(
+                            self.login.attempt.take(),
+                            Some(CredentialAttempt::Stored | CredentialAttempt::Typed)
+                        ) {
+                            self.login.events.push(PanelEvent::CredentialsAccepted {
+                                url: self.login_url(),
+                            });
+                        }
                         self.conn = ConnState::Connected(conn);
                         if let ConnState::Connected(c) = &self.conn {
                             if self.needs_db_pick && self.selected_db.is_none() {
@@ -668,13 +736,25 @@ impl DbPanel {
                             }
                         }
                     }
+                    Err(e) if e.is_auth() => {
+                        // Ask for a password (the vault's or the user's)
+                        // instead of reporting the refusal.
+                        let msg = termide_i18n::t().db_auth_failed_fmt(&e.to_string());
+                        let attempt = self
+                            .login
+                            .attempt
+                            .take()
+                            .unwrap_or(CredentialAttempt::Initial);
+                        self.conn = ConnState::Failed(msg.clone());
+                        self.login.waiting = Some(msg);
+                        self.login.events.push(PanelEvent::CredentialsRequired {
+                            url: self.login_url(),
+                            attempt,
+                        });
+                        self.loading = false;
+                    }
                     Err(e) => {
-                        let msg = if e.is_auth() {
-                            termide_i18n::t().db_auth_failed_fmt(&e.to_string())
-                        } else {
-                            e.to_string()
-                        };
-                        self.fail(msg);
+                        self.fail(e.to_string());
                         self.loading = false;
                     }
                 }
@@ -855,6 +935,26 @@ fn spawn_connect(url: String) -> Receiver<Result<DbConnection, DbError>> {
     rx
 }
 
+/// `url` without its password; unchanged when it has none or cannot carry one.
+fn strip_password(url: &str) -> String {
+    if let Ok(mut u) = url::Url::parse(url) {
+        if u.password().is_some() && u.set_password(None).is_ok() {
+            return u.into();
+        }
+    }
+    url.to_string()
+}
+
+/// `url` with `password` (percent-encoded); unchanged when it cannot carry one.
+fn url_with_password(url: &str, password: &str) -> String {
+    if let Ok(mut u) = url::Url::parse(url) {
+        if u.has_host() && u.set_password(Some(password)).is_ok() {
+            return u.into();
+        }
+    }
+    url.to_string()
+}
+
 /// Strip a password from a URL for display (`scheme://user:***@host/…`).
 fn sanitize_url(url: &str) -> String {
     // Find "://", then the authority up to the next '/'.
@@ -957,7 +1057,7 @@ impl Panel for DbPanel {
 
     fn tick(&mut self) -> Vec<PanelEvent> {
         let changed = self.poll_async();
-        let mut events = Vec::new();
+        let mut events = std::mem::take(&mut self.login.events);
         if let Some((message, is_error)) = self.edit_status.take() {
             events.push(PanelEvent::SetStatusMessage { message, is_error });
         }
@@ -970,6 +1070,14 @@ impl Panel for DbPanel {
 
     fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
         match cmd {
+            PanelCommand::ProvideCredentials {
+                url,
+                password,
+                source,
+            } => CommandResult::Handled(self.provide_password(url, password, source)),
+            PanelCommand::CancelCredentials { url } => {
+                CommandResult::Handled(self.cancel_password(url))
+            }
             // Global clipboard: copy the current cell value (previously the
             // per-panel `copy_cell` keybinding). The whole-row copy stays a
             // panel keybinding (`copy_row`).
@@ -1065,6 +1173,46 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         panic!("panel did not reach the expected state");
+    }
+
+    #[test]
+    fn a_provided_password_is_used_but_never_kept_in_the_url() {
+        let url = "postgres://u@127.0.0.1:1/app";
+        let mut panel = DbPanel::new(url, "");
+        panel.login.waiting = Some("refused".into());
+        let pw = SecretText::new("p@ss");
+        let typed = CredentialAttempt::Typed;
+        assert!(!panel.provide_password("postgres://x@127.0.0.1:1/app", &pw, typed));
+        assert!(panel.provide_password(url, &pw, typed));
+        assert_eq!(panel.url, url);
+        assert_eq!(
+            panel.connect_url(&panel.url),
+            "postgres://u:p%40ss@127.0.0.1:1/app"
+        );
+        let state = panel.to_state(std::path::Path::new("/")).unwrap();
+        assert!(!format!("{state:?}").contains("p@ss"));
+    }
+
+    #[test]
+    fn declining_the_password_reports_the_refusal() {
+        let url = "postgres://u@127.0.0.1:1/app";
+        let mut panel = DbPanel::new(url, "");
+        panel.login.waiting = Some("refused".into());
+        assert!(!panel.cancel_password("postgres://other@h/x"));
+        assert!(panel.cancel_password(url));
+        assert!(matches!(&panel.conn, ConnState::Failed(m) if m == "refused"));
+        assert!(panel.take_modal_request().is_some());
+    }
+
+    #[test]
+    fn login_url_drops_an_embedded_password() {
+        let panel = DbPanel::new("postgres://u:secret@127.0.0.1:1/app", "");
+        assert_eq!(panel.login_url(), "postgres://u@127.0.0.1:1/app");
+        assert_eq!(strip_password("sqlite:///tmp/a.db"), "sqlite:///tmp/a.db");
+        assert_eq!(
+            url_with_password("sqlite:///tmp/a.db", "x"),
+            "sqlite:///tmp/a.db"
+        );
     }
 
     #[test]

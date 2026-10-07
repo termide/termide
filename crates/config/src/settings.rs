@@ -77,6 +77,10 @@ pub struct Config {
     #[serde(default)]
     pub vfs: VfsSettings,
 
+    /// Password vault settings
+    #[serde(default)]
+    pub vault: VaultSettings,
+
     /// Syntax-highlighting settings (custom keyword languages)
     #[serde(default)]
     pub highlight: HighlightSettings,
@@ -811,6 +815,27 @@ fn default_vfs_connection_timeout() -> u64 {
     60
 }
 
+/// Password vault settings (`[vault]`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaultSettings {
+    /// Minutes without use after which the unlocked vault locks itself;
+    /// 0 keeps it unlocked until termide exits (default: 15).
+    #[serde(default = "default_vault_lock_after_mins")]
+    pub lock_after_mins: u64,
+}
+
+impl Default for VaultSettings {
+    fn default() -> Self {
+        Self {
+            lock_after_mins: default_vault_lock_after_mins(),
+        }
+    }
+}
+
+fn default_vault_lock_after_mins() -> u64 {
+    15
+}
+
 /// LSP (Language Server Protocol) settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LspSettings {
@@ -1179,6 +1204,7 @@ impl From<LegacyConfig> for Config {
                 min_level: legacy.min_log_level,
             },
             vfs: VfsSettings::default(),
+            vault: VaultSettings::default(),
             highlight: HighlightSettings::default(),
             ai: AiSettings::default(),
         }

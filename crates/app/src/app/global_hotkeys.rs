@@ -384,6 +384,7 @@ impl App {
             "panel_shrink_vertical" => self.handle_panel_resize_vertical(false),
             "quit" => self.handle_quit_request()?,
             "detach_instance" => self.handle_detach_instance(),
+            "lock_vault" => self.vault_lock_now(),
             other => {
                 if let Some(key) = other.strip_prefix("run_command:") {
                     self.run_command_by_menu_key(key)?;

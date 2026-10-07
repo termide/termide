@@ -691,6 +691,33 @@ stranded bytes. Same-connection renames stay server-side
 (no download-then-upload). See `doc/en/vfs.md` for the user view
 and `doc/en/operations.md` for the cancel flow.
 
+### 10. Password Vault
+
+**Location:** `crates/secrets/` (storage), `crates/app/src/app/vault.rs`
+(prompts and routing), `crates/core/src/credentials.rs` (contract).
+
+`termide-secrets` is a UI-free vault: one TOML file whose secrets are
+sealed to an X25519 public key, with the private key encrypted under an
+Argon2id-derived master key. Storing needs only the public key; reading
+needs the unlocked private key. Writes are read-modify-write under a lock
+file, then an atomic rename.
+
+Panels never see the vault. A panel whose login was refused emits
+`PanelEvent::CredentialsRequired { url, attempt }` with a password-free
+URL. The app answers in one of two ways:
+
+- from the vault, after asking for the master password if it is locked;
+- by asking the user.
+
+It then broadcasts `PanelCommand::ProvideCredentials` (or
+`CancelCredentials`), and the panel waiting for that URL takes it. On
+success the panel emits `CredentialsAccepted`, and only then is a password
+the user asked to keep written. Git network operations take the same path
+from the app side, recognised from git's stderr and retried through the
+askpass helper. The pending action of every vault prompt is a bare
+`PendingAction::Vault`; what the prompt is for, secrets included, stays in
+the app's `VaultState`. See `doc/en/passwords.md` for the user view.
+
 ## Future Architecture Considerations
 
 **Potential Improvements:**

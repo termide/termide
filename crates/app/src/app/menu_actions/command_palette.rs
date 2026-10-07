@@ -201,6 +201,14 @@ impl App {
                 },
             ),
             (
+                "lock_vault",
+                CommandEntry {
+                    label: t.palette_lock_vault().into(),
+                    category: t.palette_category_application(),
+                    keybinding: String::new(),
+                },
+            ),
+            (
                 "quit",
                 CommandEntry {
                     label: t.help_desc_quit().into(),

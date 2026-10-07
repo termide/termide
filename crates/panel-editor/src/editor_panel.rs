@@ -760,6 +760,9 @@ impl Panel for Editor {
                 }
                 CommandResult::None
             }
+            PanelCommand::ProvideCredentials { .. } | PanelCommand::CancelCredentials { .. } => {
+                CommandResult::Handled(false)
+            }
             PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
             PanelCommand::SetScrollOffset { offset, .. } => {
                 // The bar reports `viewport.top_line`, so a drag maps back to

@@ -787,6 +787,16 @@ pub enum PanelEvent {
         session: Option<PathBuf>,
         cwd: PathBuf,
     },
+
+    /// The connection to `url` (password-free) was refused; `attempt` says
+    /// which password it used. See [`crate::credentials`].
+    CredentialsRequired {
+        url: String,
+        attempt: crate::CredentialAttempt,
+    },
+
+    /// The connection to `url` succeeded with the password last provided.
+    CredentialsAccepted { url: String },
 }
 
 /// A single file location from LSP find-references.
@@ -886,15 +896,6 @@ pub enum InputAction {
         file_path: PathBuf,
         line: usize,
         column: usize,
-    },
-
-    /// Retry a git network operation (fetch/pull/push) with an SSH key
-    /// passphrase the user types into a masked modal.
-    GitSshPassphrase {
-        /// "fetch" | "pull" | "push"
-        operation: String,
-        /// Repository root path
-        repo_path: PathBuf,
     },
 }
 
