@@ -4,6 +4,7 @@ use anyhow::Result;
 use crossterm::event::{MouseButton, MouseEventKind};
 use ratatui::layout::Rect;
 
+use super::mouse::project_drag::ProjectDragSurface;
 use super::App;
 use crate::PanelExt;
 use termide_i18n as i18n;
@@ -73,6 +74,22 @@ impl App {
                     self.handle_panel_drag_end(mouse.column, mouse.row)?;
                     return Ok(());
                 }
+                _ => {}
+            }
+        }
+
+        // An open project held to reorder owns the mouse until release.
+        if self.is_dragging_project() {
+            match mouse.kind {
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    self.handle_project_drag_move(mouse.column, mouse.row);
+                    return Ok(());
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    return self.handle_project_drag_end(mouse.column, mouse.row);
+                }
+                // The release was lost (outside the window): let go.
+                MouseEventKind::Down(_) => self.release_project_drag(),
                 _ => {}
             }
         }
@@ -503,14 +520,14 @@ impl App {
 
         let bar = self.menu_bar();
 
-        // A project button switches to its project
+        // A project button is held: released where it was pressed it
+        // switches to its project, dragged along the bar it moves.
         if let Some(index) = bar.project_at(x) {
             if let Some(original_name) = self.state.ui.theme_preview_original.take() {
                 self.state.theme = Theme::get_by_name(&original_name);
             }
-            self.state.close_indicator_modal();
-            self.state.close_menu();
-            return self.switch_to_open_project(index);
+            self.begin_project_drag(ProjectDragSurface::Bar, index, x, 0);
+            return Ok(());
         }
 
         // Check network/CPU/RAM/clock indicator clicks (right side of menu bar)

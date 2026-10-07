@@ -7,8 +7,9 @@ use anyhow::Result;
 use ratatui::layout::Rect;
 use std::sync::Arc;
 
+use super::project_drag::ProjectDragSurface;
 use crate::app::App;
-use crate::projects_menu::ProjectsTarget;
+use crate::projects_menu::{ProjectRow, ProjectsTarget};
 use termide_i18n as i18n;
 use termide_theme::Theme;
 use termide_ui_render::{
@@ -187,10 +188,23 @@ impl App {
         if menu.items.get(index).is_none_or(|item| item.is_separator) {
             return Ok(true);
         }
+        // An open project is held: released where it was pressed it is
+        // switched to, dragged over the others it moves.
+        let open_place = match menu.rows.get(index) {
+            Some(ProjectRow::Project(project)) if project.open => menu
+                .rows
+                .iter()
+                .position(|row| matches!(row, ProjectRow::Project(_)))
+                .map(|first| index - first),
+            _ => None,
+        };
         let target = ProjectsTarget::of(menu.rows.get(index));
         drop(menu);
         self.state.ui.projects_submenu.selected = index;
-        self.activate_projects_target(target)?;
+        match open_place {
+            Some(place) => self.begin_project_drag(ProjectDragSurface::Menu, place, x, y),
+            None => self.activate_projects_target(target)?,
+        }
         Ok(true)
     }
 

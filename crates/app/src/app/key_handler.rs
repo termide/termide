@@ -49,6 +49,17 @@ impl App {
             return Ok(());
         }
 
+        // Esc puts back an open project held by the mouse. Any other key
+        // lets it go where it is: a release lost outside the window must
+        // not leave the mouse held.
+        if self.is_dragging_project() {
+            if key.code == crossterm::event::KeyCode::Esc {
+                self.cancel_project_drag();
+                return Ok(());
+            }
+            self.release_project_drag();
+        }
+
         // If modal window is open, handle it
         if self.state.has_modal() {
             return self.handle_modal_key(key);

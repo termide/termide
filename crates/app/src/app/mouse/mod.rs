@@ -8,5 +8,6 @@
 mod drag;
 mod indicators;
 mod layout;
+pub(in crate::app) mod project_drag;
 mod scrollbar;
 pub(in crate::app) mod submenu;

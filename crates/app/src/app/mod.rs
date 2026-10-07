@@ -105,6 +105,8 @@ pub struct App {
         Option<std::sync::mpsc::Receiver<Result<Vec<termide_agent_core::ModelInfo>, String>>>,
     /// The password vault and the credential prompts in progress.
     vault: vault::VaultState,
+    /// An open project held by the mouse to reorder.
+    project_drag: Option<mouse::project_drag::ProjectDrag>,
 }
 
 impl App {
@@ -182,6 +184,7 @@ impl App {
             keyboard_caps: termide_keyboard::KeyboardCaps::default(),
             persist_layout: true,
             saved_open_projects: None,
+            project_drag: None,
             restore_projects: false,
             last_focus_sig: None,
             settings_model_fetch: None,
@@ -274,6 +277,7 @@ impl App {
             keyboard_caps: caps,
             persist_layout: true,
             saved_open_projects: None,
+            project_drag: None,
             restore_projects: false,
             last_focus_sig: None,
             settings_model_fetch: None,
