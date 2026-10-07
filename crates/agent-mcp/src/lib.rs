@@ -200,6 +200,21 @@ impl Connections {
         rx
     }
 
+    /// The tools of every server connected right now, by server name; a
+    /// server still connecting, failed or waiting for a sign-in has none.
+    /// Starts no connection: a subscriber did that.
+    #[must_use]
+    pub fn ready_tools(&self) -> Vec<Arc<dyn Tool>> {
+        self.lock()
+            .values()
+            .filter_map(|entry| match &entry.state {
+                State::Ready(tools) => Some(tools.clone()),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    }
+
     fn broadcast(&self, event: &LateTools) {
         self.subscribers
             .lock()
@@ -673,5 +688,60 @@ mod tests {
             LateTools::Failed { .. }
         ));
         assert!(Connections::new(BTreeMap::new()).is_empty());
+    }
+
+    struct Silent;
+
+    impl McpTransport for Silent {
+        fn request(
+            &self,
+            _method: &str,
+            _params: serde_json::Value,
+            _cancel: Option<&termide_agent_core::CancelToken>,
+        ) -> Result<serde_json::Value, String> {
+            Err("silent".into())
+        }
+
+        fn notify(&self, _method: &str, _params: serde_json::Value) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn listen(&self, _on_message: OnMessage) {}
+    }
+
+    #[test]
+    fn ready_tools_are_those_of_the_connected_servers_only() {
+        let servers = ["docs", "ghost", "github"]
+            .into_iter()
+            .map(|name| (name.to_string(), McpServerConfig::default()))
+            .collect();
+        let connections = Connections::new(servers);
+        assert!(connections.ready_tools().is_empty());
+        let tool = |server: &str, name: &str| -> Arc<dyn Tool> {
+            let info = McpToolInfo {
+                name: name.to_string(),
+                description: String::new(),
+                input_schema: serde_json::json!({ "type": "object" }),
+            };
+            Arc::new(McpTool::new(server, info, Arc::new(Silent)))
+        };
+        {
+            let mut entries = connections.lock();
+            entries.get_mut("github").unwrap().state = State::Ready(vec![
+                tool("github", "get_issue"),
+                tool("github", "create_issue"),
+            ]);
+            entries.get_mut("docs").unwrap().state = State::Ready(vec![tool("docs", "search")]);
+            entries.get_mut("ghost").unwrap().state = State::Failed("gone".into());
+        }
+        let names: Vec<String> = connections
+            .ready_tools()
+            .iter()
+            .map(|tool| tool.name().to_string())
+            .collect();
+        assert_eq!(
+            names,
+            ["docs__search", "github__get_issue", "github__create_issue"]
+        );
     }
 }
