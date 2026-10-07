@@ -907,6 +907,13 @@ The solver's instructions are `system/recall.md` (see
 
 ## Permissions
 
+Permissions are a control, not isolation: termide has no sandbox. The agent's
+tools, the commands they run and an external agent's process all run with your
+rights, and nothing confines them to the project. A command you allow can run
+any code — a build script, a test, a git hook — and that code can read, change
+or send anything you can; `auto` and `all` do not ask at all. An external agent
+that runs its own tools may sandbox them itself; termide does not.
+
 Nothing that changes your project happens without your say-so. When the agent
 wants to do something that is not already allowed, a card appears in the
 panel above the input. Its title is the intent — "Agent wants to run bash:" —

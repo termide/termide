@@ -47,9 +47,19 @@ head and tail *(unverified)*.
 
 Decision: `bash` with a timeout, cooperative cancel that kills the process
 group, **head-and-tail truncation** (the command echo and the final error both
-survive) and the full output saved to a file whose path is returned. No sandbox
-in the first version; the tool takes its environment from `ToolContext`, so a
-sandbox can be added later as a separate module without changing the contract.
+survive) and the full output saved to a file whose path is returned.
+
+No sandbox, by decision: the agent is an unsafe tool that runs with the user's
+rights, and the docs say so. Path checks in termide's own tools would not be a
+boundary — any script the shell runs bypasses them — so only kernel or VM
+enforcement (Seatbelt, bwrap with Landlock, a container) would count, and it
+would have to cover the shell, the file tools and ACP `fs/*` alike, guard against
+deferred host execution (`.git/hooks`, `build.rs`, `.envrc` written for later)
+and contain brokers (XPC, D-Bus, agent sockets). Windows has no native
+equivalent of that strength. Partial isolation would promise more than it
+gives, so none is offered; the tool takes its environment from `ToolContext`,
+so a sandbox could still be added as a separate module without changing the
+contract.
 
 ## 3a. Subagents
 
