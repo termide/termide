@@ -227,9 +227,13 @@ impl App {
         }
         let settings = self.state.config.ai.clone();
         let cwd = self.project_root.clone();
-        if let Some(panel) =
-            crate::app::agent_panel::restore_agent_panel(&settings, cwd, Some(path), None)
-        {
+        if let Some(panel) = crate::app::agent_panel::restore_agent_panel(
+            &settings,
+            cwd,
+            Some(path),
+            None,
+            termide_core::AgentSetupState::default(),
+        ) {
             self.add_panel(Box::new(panel));
             self.auto_save_layout();
         }

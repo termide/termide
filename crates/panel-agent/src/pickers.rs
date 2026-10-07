@@ -427,8 +427,7 @@ impl AgentPanel {
             if let Some(id) = profile.model {
                 self.model.id = id;
             }
-            let session = self.session.take();
-            self.switch_session(session);
+            self.rebuild_keeping_prompt();
             if !self.is_fresh() {
                 self.notice(
                     termide_i18n::t().agent_notice_agent_fmt(name),
@@ -566,8 +565,7 @@ impl AgentPanel {
             }
         }
         let fresh = self.is_fresh();
-        let session = self.session.take();
-        self.switch_session(session);
+        self.rebuild_keeping_prompt();
         // The silent window probe asks the new endpoint.
         self.context_probe = (!self.external).then(|| spawn_model_list(Arc::clone(&self.provider)));
         if !fresh {

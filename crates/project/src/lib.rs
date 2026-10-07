@@ -164,8 +164,38 @@ pub enum PanelState {
         /// Agent definition in use; the default one when absent
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent: Option<String>,
+        /// What was set up on a session nothing was sent in yet. Its log is
+        /// deleted as the panel closes, so a restore starts the fresh
+        /// session on these instead
+        #[serde(default, skip_serializing_if = "AgentSetupState::is_empty")]
+        setup: AgentSetupState,
     },
     // Note: Welcome panels are NOT saved (they auto-close)
+}
+
+/// The settings picked on an agent panel before its first request: the
+/// connection, the model, the reasoning level and the external agent's own
+/// options, each absent when left as configured.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentSetupState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<String>,
+    /// The external agent's options as `[option, value]` pairs, in the
+    /// order they were picked
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<(String, String)>,
+}
+
+impl AgentSetupState {
+    /// Whether nothing was picked, so there is nothing to save.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// The relative path a project's data is filed under: its canonical path
@@ -413,17 +443,25 @@ mod tests {
                     cwd: PathBuf::from("/work"),
                     session: Some(PathBuf::from("/data/agent/s.jsonl")),
                     agent: Some("review".into()),
+                    setup: AgentSetupState::default(),
                 },
                 PanelState::Agent {
                     cwd: PathBuf::from("/work"),
                     session: None,
                     agent: None,
+                    setup: AgentSetupState {
+                        connection: Some("local".into()),
+                        model: Some("qwen".into()),
+                        thinking: Some("high".into()),
+                        options: vec![("model".into(), "opus".into())],
+                    },
                 },
             ],
         };
         let text = toml::to_string(&panels).unwrap();
         assert!(text.contains("type = \"agent\""), "{text}");
         assert_eq!(text.matches("session").count(), 1, "{text}");
+        assert_eq!(text.matches("[panels.setup]").count(), 1, "{text}");
         let back: Panels = toml::from_str(&text).unwrap();
         assert_eq!(back.panels, panels.panels);
     }

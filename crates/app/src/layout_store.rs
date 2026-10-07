@@ -343,8 +343,11 @@ fn construct_panel(
             cwd,
             session,
             agent,
-        } => crate::app::agent_panel::restore_agent_panel(agent_settings, cwd, session, agent)
-            .map(|p| Box::new(p) as Box<dyn Panel + Send>),
+            setup,
+        } => {
+            crate::app::agent_panel::restore_agent_panel(agent_settings, cwd, session, agent, setup)
+                .map(|p| Box::new(p) as Box<dyn Panel + Send>)
+        }
     }
 }
 

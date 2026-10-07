@@ -20,7 +20,7 @@ use termide_theme::Theme;
 use crate::{CommandResult, KeyChord, PanelCommand, PanelEvent};
 
 // Re-export PanelState from termide-project for unified type
-pub use termide_project::PanelState;
+pub use termide_project::{AgentSetupState, PanelState};
 
 /// Configuration settings relevant to panels.
 ///

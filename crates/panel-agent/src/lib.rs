@@ -1149,6 +1149,25 @@ impl AgentPanel {
         self.session.as_ref().map(Session::path)
     }
 
+    /// What was set up on a session nothing was sent in yet: the
+    /// connection, the model when it is not the one the panel was configured
+    /// with (a model left to the provider stays so), and what the log
+    /// records as picked. Nothing once the log is worth keeping.
+    fn unsent_setup(&self) -> termide_core::AgentSetupState {
+        let Some(session) = self.session.as_ref().filter(|s| s.is_empty()) else {
+            return termide_core::AgentSetupState::default();
+        };
+        termide_core::AgentSetupState {
+            connection: (!self.connection.is_empty()).then(|| self.connection.clone()),
+            model: (!self.model.id.is_empty() && self.model.id != self.configured_model.id)
+                .then(|| self.model.id.clone()),
+            thinking: session
+                .current_thinking()
+                .map(|level| level.label().to_string()),
+            options: session.agent_options(),
+        }
+    }
+
     fn notice(&mut self, text: impl Into<String>, kind: NoticeKind) {
         self.transcript.push(Item::Notice {
             text: text.into(),
@@ -1729,11 +1748,14 @@ impl Panel for AgentPanel {
 
     /// The working directory and the session log, which is all a restore
     /// needs: the model is in the log and the rest comes from the config.
+    /// A log nothing was sent in is deleted as the panel closes, so what was
+    /// set up on it is saved beside it.
     fn to_state(&self, _session_dir: &std::path::Path) -> Option<termide_core::PanelState> {
         Some(termide_core::PanelState::Agent {
             cwd: self.cwd.clone(),
             session: self.session_path().map(std::path::Path::to_path_buf),
             agent: (self.agent != DEFAULT_AGENT).then(|| self.agent.clone()),
+            setup: self.unsent_setup(),
         })
     }
 

@@ -4176,6 +4176,46 @@ fn the_connection_picker_switches_the_endpoint_and_its_model() {
 }
 
 #[test]
+fn a_connection_switch_keeps_the_typed_prompt() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = connected_panel(dir.path());
+    type_text(&mut panel, "fix the bug");
+    assert!(panel.switch_connection("cloud"));
+    assert_eq!(panel.input.field_value(0), "fix the bug");
+    // As does a switch onto a CLI agent.
+    assert!(panel.switch_connection("cli"));
+    assert_eq!(panel.input.field_value(0), "fix the bug");
+}
+
+#[test]
+fn an_unsent_session_saves_its_setup_and_a_used_one_does_not() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = connected_panel(dir.path());
+    assert!(panel.switch_connection("cloud"));
+    assert!(panel.switch_model("claude-y", None));
+    let state = |panel: &AgentPanel| match panel.to_state(Path::new("/unused")) {
+        Some(termide_core::PanelState::Agent { setup, .. }) => setup,
+        other => panic!("agent state expected, got {other:?}"),
+    };
+    let saved = state(&panel);
+    assert_eq!(saved.connection.as_deref(), Some("cloud"));
+    assert_eq!(saved.model.as_deref(), Some("claude-y"));
+    // The connection's own model is not pinned.
+    assert!(panel.switch_model("claude-x", None));
+    assert_eq!(state(&panel).model, None);
+
+    // Once the log holds a conversation, it is what a restore reads.
+    let mut used = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![reply("done")])
+    });
+    type_text(&mut used, "task");
+    used.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut used);
+    assert!(state(&used).is_empty());
+}
+
+#[test]
 fn a_cli_agent_connection_is_taken_on_mid_conversation_and_left_again() {
     let dir = tempfile::tempdir().unwrap();
     let mut panel = connected_panel(dir.path());
@@ -4691,6 +4731,7 @@ fn saved_state_names_the_directory_and_the_session_log() {
             cwd: PathBuf::from("/tmp"),
             session: None,
             agent: None,
+            setup: termide_core::AgentSetupState::default(),
         })
     );
 

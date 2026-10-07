@@ -189,6 +189,23 @@ impl AgentPanel {
         true
     }
 
+    /// Rebuild the agent on the session it runs — after a connection or
+    /// agent switch — keeping what is typed in the prompt box, its large
+    /// pastes and its cursor: the switch changes who answers, not the request.
+    pub(crate) fn rebuild_keeping_prompt(&mut self) -> bool {
+        let prompt = self.input.multiline(0).cloned();
+        let pastes = std::mem::take(&mut self.pastes);
+        let paste_seq = self.paste_seq;
+        let session = self.session.take();
+        let rebuilt = self.switch_session(session);
+        if let (Some(prompt), Some(area)) = (prompt, self.input.multiline_mut(0)) {
+            *area = prompt;
+        }
+        self.pastes = pastes;
+        self.paste_seq = paste_seq;
+        rebuilt
+    }
+
     /// Re-read the sessions the welcome banner offers, the cursor back on the
     /// newest: while the session is fresh, this directory's others that hold
     /// a conversation (or a name) and no panel has open, newest first;

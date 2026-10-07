@@ -30,6 +30,7 @@ use termide_agent_tools::{
 };
 use termide_agent_web::{web_tools, Web, WebConfig};
 use termide_config::{AiSettings, Connection, WebSettings};
+use termide_core::AgentSetupState;
 use termide_panel_agent::{
     AgentCatalog, AgentEntry, AgentPanel, AgentPanelSetup, AgentProfile, BackendFactory,
     ConnectionCatalog, ConnectionChoice, ConnectionEntry, FoldMode, HooksFactory,
@@ -104,9 +105,13 @@ impl App {
             }
         };
         let settings = self.state.config.ai.clone();
-        if let Some(panel) =
-            restore_agent_panel(&settings, cwd.to_path_buf(), Some(copy.clone()), None)
-        {
+        if let Some(panel) = restore_agent_panel(
+            &settings,
+            cwd.to_path_buf(),
+            Some(copy.clone()),
+            None,
+            AgentSetupState::default(),
+        ) {
             self.add_panel(Box::new(panel));
             self.auto_save_layout();
             return Ok(());
@@ -158,7 +163,7 @@ impl App {
         }
         // A modal moves no focus, so the panel that asked is the focused one;
         // checked all the same, as nothing else may be replaced.
-        let agent = match self
+        let (agent, setup) = match self
             .layout_manager
             .active_panel_mut()
             .and_then(|panel| panel.to_state(Path::new("")))
@@ -167,7 +172,8 @@ impl App {
                 cwd: active_cwd,
                 session: active_session,
                 agent,
-            }) if active_cwd == cwd && active_session.as_deref() == session => agent,
+                setup,
+            }) if active_cwd == cwd && active_session.as_deref() == session => (agent, setup),
             _ => return Ok(()),
         };
         let settings = self.state.config.ai.clone();
@@ -188,7 +194,8 @@ impl App {
                     })
                     .ok()
             });
-        let Some(panel) = restore_agent_panel(&settings, new_cwd.clone(), moved, agent) else {
+        let Some(panel) = restore_agent_panel(&settings, new_cwd.clone(), moved, agent, setup)
+        else {
             return Ok(());
         };
         // The old panel lets its log go; it finds the file moved, and an
@@ -262,13 +269,15 @@ fn strip_fork_suffix(name: &str) -> &str {
 
 /// Rebuild an agent panel saved in a project layout. `None` when there is
 /// no connection to run on any more; a session log that has gone missing starts a
-/// fresh session in the same project, an agent definition that has gone
-/// missing falls back to the default one.
+/// fresh session in the same project — on the `setup` saved for it when
+/// nothing was sent in it —, an agent definition that has gone missing falls
+/// back to the default one.
 pub(crate) fn restore_agent_panel(
     settings: &AiSettings,
     cwd: PathBuf,
     session: Option<PathBuf>,
     agent: Option<String>,
+    setup: AgentSetupState,
 ) -> Option<AgentPanel> {
     if usable_connection(settings).is_none() {
         log::warn!("agent panel not restored: no [ai.connections] entry to run on");
@@ -283,6 +292,16 @@ pub(crate) fn restore_agent_panel(
             None
         }
     });
+    let agent = agent.as_deref().unwrap_or(DEFAULT_AGENT);
+    let session = session.or_else(|| {
+        seeded_session(
+            settings,
+            session_dir_of(&cwd).as_deref(),
+            &cwd,
+            agent,
+            &setup,
+        )
+    });
     // termide's project root is its working directory, which follows the
     // current project; the layout restore runs off the App, so read it from
     // the same source.
@@ -291,9 +310,66 @@ pub(crate) fn restore_agent_panel(
         settings,
         cwd,
         &project_root,
-        agent.as_deref().unwrap_or(DEFAULT_AGENT),
+        agent,
         session,
     )))
+}
+
+/// A fresh session log for `cwd` in `dir` that starts on `setup`: the saved
+/// connection while it is still configured, with the model, reasoning level
+/// and agent options picked on it. `None` when nothing was saved, so the
+/// panel starts its session as a new one does.
+fn seeded_session(
+    settings: &AiSettings,
+    dir: Option<&Path>,
+    cwd: &Path,
+    agent: &str,
+    setup: &AgentSetupState,
+) -> Option<Session> {
+    if setup.is_empty() {
+        return None;
+    }
+    // The model was picked on the saved connection: one that is gone takes
+    // the default connection with its own model.
+    let saved = setup
+        .connection
+        .as_ref()
+        .and_then(|name| Some((name.clone(), settings.connections.get(name)?.clone())));
+    let kept_model = saved.is_some();
+    let (name, connection) = saved.or_else(|| session_connection(settings, None))?;
+    let mut session = match Session::create_exclusive(dir?, cwd) {
+        Ok(session) => session,
+        Err(error) => {
+            log::warn!("cannot start an agent session log: {error}");
+            return None;
+        }
+    };
+    // The order a new session records its setup in: the connection first,
+    // the model after it is that connection's.
+    let model = setup
+        .model
+        .as_deref()
+        .filter(|_| kept_model)
+        .unwrap_or(&connection.model);
+    let written = session
+        .append_connection_change(&name)
+        .and_then(|_| session.append_model_change(&connection.provider, model, None))
+        .and_then(|_| session.append_agent_change(agent))
+        .and_then(
+            |_| match setup.thinking.as_deref().and_then(ThinkingLevel::parse) {
+                Some(level) => session.append_thinking_change(level).map(drop),
+                None => Ok(()),
+            },
+        )
+        .and_then(|_| {
+            setup.options.iter().try_for_each(|(option, value)| {
+                session.append_agent_option(option, value).map(drop)
+            })
+        });
+    if let Err(error) = written {
+        log::warn!("agent session write failed: {error}");
+    }
+    Some(session)
 }
 
 /// The OAuth sign-ins of MCP servers, under the configuration's agent
@@ -2757,12 +2833,67 @@ mod tests {
     #[test]
     fn restore_is_skipped_without_a_connection_to_run_on() {
         let mut settings = AiSettings::default();
-        assert!(restore_agent_panel(&settings, PathBuf::from("/tmp"), None, None).is_none());
+        assert!(restore_agent_panel(
+            &settings,
+            PathBuf::from("/tmp"),
+            None,
+            None,
+            AgentSetupState::default()
+        )
+        .is_none());
         // A connection with no model named leaves the model to the provider.
         settings
             .connections
             .insert("local".into(), Connection::default());
         assert!(usable_connection(&settings).is_some());
+    }
+
+    #[test]
+    fn a_saved_setup_seeds_the_fresh_session_of_a_restore() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = Path::new("/work");
+        let mut settings = AiSettings::default();
+        for (name, provider) in [("local", "openai_compatible"), ("cloud", "anthropic")] {
+            let connection = Connection {
+                provider: provider.into(),
+                model: format!("{name}-model"),
+                ..Connection::default()
+            };
+            settings.connections.insert(name.into(), connection);
+        }
+        let seed = |setup: &AgentSetupState| {
+            seeded_session(&settings, Some(dir.path()), cwd, DEFAULT_AGENT, setup)
+        };
+        assert!(seed(&AgentSetupState::default()).is_none());
+
+        let session = seed(&AgentSetupState {
+            connection: Some("cloud".into()),
+            model: Some("picked".into()),
+            thinking: Some("high".into()),
+            options: vec![("mode".into(), "plan".into())],
+        })
+        .unwrap();
+        assert_eq!(session.current_connection().as_deref(), Some("cloud"));
+        let model = session.current_model().unwrap();
+        assert_eq!(
+            (model.provider.as_str(), model.id.as_str()),
+            ("anthropic", "picked")
+        );
+        assert_eq!(session.current_thinking(), Some(ThinkingLevel::High));
+        assert_eq!(session.agent_options(), [("mode".into(), "plan".into())]);
+        // Still empty: discarded like any unused session once it closes.
+        assert!(session.is_empty());
+
+        // A connection gone from the config leaves its model behind too.
+        let session = seed(&AgentSetupState {
+            connection: Some("gone".into()),
+            model: Some("picked".into()),
+            ..AgentSetupState::default()
+        })
+        .unwrap();
+        let fallback = session.current_connection().unwrap();
+        let model = session.current_model().unwrap().id;
+        assert_eq!(model, format!("{fallback}-model"));
     }
 
     /// A provider listing `ids`.
