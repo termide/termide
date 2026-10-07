@@ -1335,6 +1335,8 @@ instead. External agents (those with a `command`) cannot be delegates, and a
 subagent gets no `task` tool of its own, so delegation does not nest. An agent whose `tools` list leaves out `task`
 cannot delegate. A run that will not stop is cut off after fifty
 model calls, and one that fails reports why, the endpoint's error included.
+While a delegate's request waits for a slot of its connection
+(`max_concurrent_requests`), its block says so under what it has said.
 
 A delegate runs on the connection the session's connection names under
 **Subagents** on its settings page (`subagents` in the file), or on the

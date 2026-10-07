@@ -14,9 +14,9 @@ use termide_agent_core::{
     AutoDenyPrompter, Backend, BackendSetup, CancelToken, ChainedHooks, CompactionPolicy, Decision,
     HostTools, IntentLog, Message, ModeHandle, ModelChoice, ModelSpec, PermissionAnswer,
     PermissionHooks, PermissionRules, PersistScope, PlanGuard, PromptOptions, Provider, Refusals,
-    ReviewerSetup, Session, SessionSummary, ShellOutput, ShellRunner, ThinkingLevel, Tool,
-    ToolCall, ToolContext, ToolRegistry, ToolUpdate, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR,
-    SESSIONS_DIR,
+    ReviewerSetup, Session, SessionSummary, ShellOutput, ShellRunner, StreamEvent, ThinkingLevel,
+    Tool, ToolCall, ToolContext, ToolRegistry, ToolUpdate, UserMessage, DEFAULT_AGENT,
+    GLOBAL_AGENT_DIR, SESSIONS_DIR,
 };
 use termide_agent_hooks::CommandHooks;
 use termide_agent_mcp::{Connections, TokenStore};
@@ -1126,6 +1126,23 @@ impl SubagentReport {
         on_update(ToolUpdate::Output(self.progress.clone()));
     }
 
+    /// Show, under what the subagent said, that its request waits for a
+    /// free slot of its connection (`ahead` others before it), or no longer.
+    fn waiting(&self, ahead: Option<usize>, on_update: &mut dyn FnMut(ToolUpdate)) {
+        let t = termide_i18n::t();
+        let line = match ahead {
+            None => None,
+            Some(0) => Some(t.agent_queued().to_string()),
+            Some(ahead) => Some(t.agent_queued_ahead_fmt(ahead)),
+        };
+        let shown = match (line, self.progress.is_empty()) {
+            (None, _) => self.progress.clone(),
+            (Some(line), true) => format!("⏳ {line}"),
+            (Some(line), false) => format!("{}\n\n⏳ {line}", self.progress),
+        };
+        on_update(ToolUpdate::Output(shown));
+    }
+
     /// The delegating call's result.
     fn into_result(self, stopped: bool) -> Result<String, String> {
         match self.answer {
@@ -1254,27 +1271,40 @@ impl Subagents {
 
         let mut hooks = hooks;
         let mut report = SubagentReport::default();
-        {
-            let budget = budget.clone();
-            let mut emit = |event: AgentEvent| {
-                match &event {
-                    AgentEvent::MessageStart { .. } => {
-                        report.turns += 1;
-                        if report.turns > SUBAGENT_MAX_TURNS {
-                            budget.cancel();
-                        }
+        let finished = std::sync::atomic::AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            // The parent's stop reaches the run at once, not at its next
+            // event: a long prefill or tool sends none.
+            scope.spawn(|| {
+                while !finished.load(std::sync::atomic::Ordering::Acquire) {
+                    if cancel.is_cancelled() {
+                        budget.cancel();
+                        return;
                     }
-                    AgentEvent::MessageEnd(Message::Assistant(message)) => {
-                        report.said(message, on_update);
+                    std::thread::sleep(CLI_SUBAGENT_POLL);
+                }
+            });
+            let mut emit = |event: AgentEvent| match &event {
+                AgentEvent::MessageStart { .. } => {
+                    report.turns += 1;
+                    if report.turns > SUBAGENT_MAX_TURNS {
+                        budget.cancel();
                     }
-                    _ => {}
                 }
-                if cancel.is_cancelled() {
-                    budget.cancel();
+                AgentEvent::MessageUpdate(StreamEvent::Queued { ahead }) => {
+                    report.waiting(Some(*ahead), on_update);
                 }
+                AgentEvent::MessageUpdate(StreamEvent::Admitted) => {
+                    report.waiting(None, on_update);
+                }
+                AgentEvent::MessageEnd(Message::Assistant(message)) => {
+                    report.said(message, on_update);
+                }
+                _ => {}
             };
             agent.run(UserMessage::text(prompt), &mut hooks, &budget, &mut emit);
-        }
+            finished.store(true, std::sync::atomic::Ordering::Release);
+        });
         if report.answer.is_none() && report.error.is_none() {
             report.error = run_error(agent.messages());
         }
@@ -2622,6 +2652,103 @@ mod tests {
 
     /// With subagents wired, every agent gets `task`, unless its `tools`
     /// list leaves it out.
+    /// A provider that says nothing until its request is stopped, as a long
+    /// prefill does.
+    struct Silent;
+
+    impl Provider for Silent {
+        fn name(&self) -> &str {
+            "silent"
+        }
+        fn stream(
+            &self,
+            request: &termide_agent_core::Request<'_>,
+            _on_event: &mut dyn FnMut(StreamEvent),
+            cancel: &CancelToken,
+        ) -> AssistantMessage {
+            while !cancel.is_cancelled() {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            AssistantMessage::failed(
+                "silent",
+                &request.model.id,
+                termide_agent_core::StopReason::Aborted,
+                "aborted",
+            )
+        }
+    }
+
+    /// The parent's stop ends a subagent at once, even while its model says
+    /// nothing.
+    #[test]
+    fn a_stopped_parent_stops_its_subagent_at_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dirs = AgentDirs::new(tmp.path(), Some(tmp.path()), None);
+        let settings = with_cloud();
+        let mut active = active_on(&settings, "local");
+        active.provider = Arc::new(Silent);
+        let subagents = Subagents {
+            active: Arc::new(std::sync::RwLock::new(active)),
+            settings: settings.clone(),
+            recall: recall_tool(&settings, &dirs, tmp.path(), tmp.path()),
+            web: shared_web(&settings.web, &dirs),
+            dirs,
+            cwd: tmp.path().to_path_buf(),
+            project_root: tmp.path().to_path_buf(),
+            rules: settings.permissions.clone(),
+            mode: termide_agent_core::ModeHandle::new(settings.permissions.mode),
+            max_tokens: settings.output_limit(),
+            reasoning: ThinkingLevel::Off,
+            compaction: settings.compaction,
+            refusals: Refusals::default(),
+        };
+        let cancel = CancelToken::new();
+        let stopper = {
+            let cancel = cancel.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                cancel.cancel();
+            })
+        };
+        let started = std::time::Instant::now();
+        let result = subagents.run(
+            DEFAULT_AGENT,
+            "look around",
+            &ToolContext::new(tmp.path().to_path_buf()),
+            &cancel,
+            &mut |_| {},
+        );
+        stopper.join().unwrap();
+        assert_eq!(result, Err("the subagent was stopped".to_string()));
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
+
+    #[test]
+    fn a_waiting_subagent_says_so_under_what_it_said() {
+        let t = termide_i18n::t();
+        let mut report = SubagentReport::default();
+        let mut shown = Vec::new();
+        report.waiting(Some(2), &mut |ToolUpdate::Output(text)| shown.push(text));
+        assert_eq!(
+            shown.last().unwrap(),
+            &format!("⏳ {}", t.agent_queued_ahead_fmt(2))
+        );
+        let said = AssistantMessage::failed("m", "m", termide_agent_core::StopReason::Stop, "");
+        let mut said = said;
+        said.error_message = None;
+        said.content = vec![termide_agent_core::AssistantContent::Text {
+            text: "looked".into(),
+        }];
+        report.said(&said, &mut |ToolUpdate::Output(text)| shown.push(text));
+        report.waiting(Some(0), &mut |ToolUpdate::Output(text)| shown.push(text));
+        assert_eq!(
+            shown.last().unwrap(),
+            &format!("looked\n\n⏳ {}", t.agent_queued())
+        );
+        report.waiting(None, &mut |ToolUpdate::Output(text)| shown.push(text));
+        assert_eq!(shown.last().unwrap(), "looked");
+    }
+
     #[test]
     fn an_agent_tools_list_governs_the_task_tool() {
         let tmp = tempfile::tempdir().unwrap();
