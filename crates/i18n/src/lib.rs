@@ -1171,7 +1171,6 @@ pub trait Translation: Send + Sync {
     // Sessions
     fn projects_title(&self) -> &str;
     fn projects_new(&self) -> &str;
-    fn projects_switch(&self) -> &str;
     fn projects_change_root(&self) -> &str;
     fn projects_delete_title(&self) -> &str;
     fn projects_delete_fmt(&self, path: &str) -> String;

@@ -753,7 +753,6 @@ impl Translation for RuntimeTranslation {
         settings_logging_min_level,
         settings_vfs_connection_timeout,
         projects_new,
-        projects_switch,
         projects_change_root,
         projects_delete_title,
         project_created,

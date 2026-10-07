@@ -478,19 +478,16 @@ pub fn get_projects_items(kb: Option<&termide_config::GlobalKeybindings>) -> Vec
     let shortcut = |key: &str| kb.and_then(|kb| menu_shortcut(kb, key));
     vec![
         DropdownItem::new(t.projects_new(), "new_project").with_shortcut(shortcut("new_project")),
-        DropdownItem::new(t.projects_switch(), "switch_project")
-            .with_shortcut(shortcut("switch_project")),
         DropdownItem::new(t.projects_change_root(), "change_root"),
     ]
 }
 
 /// Number of items in Projects submenu
-pub const PROJECTS_SUBMENU_ITEM_COUNT: usize = 3;
+pub const PROJECTS_SUBMENU_ITEM_COUNT: usize = 2;
 
 /// Index of Projects submenu items
 pub const PROJECTS_SUBMENU_NEW: usize = 0;
-pub const PROJECTS_SUBMENU_SWITCH: usize = 1;
-pub const PROJECTS_SUBMENU_CHANGE_ROOT: usize = 2;
+pub const PROJECTS_SUBMENU_CHANGE_ROOT: usize = 1;
 
 /// The AI submenu: four fixed sections, each opening a nested list. The item
 /// keys (`agents`/`sessions`/`skills`/`prompts`) are the contract the app's AI
@@ -614,7 +611,6 @@ pub fn menu_shortcut(kb: &termide_config::GlobalKeybindings, key: &str) -> Optio
         "quit" => &kb.quit,
         // Projects
         "new_project" => &kb.new_project,
-        "switch_project" => &kb.open_projects,
         // Tools / Windows
         "terminal" => &kb.new_terminal,
         "files" => &kb.new_file_manager,
