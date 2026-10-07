@@ -215,7 +215,9 @@ The rest of the panel works with them as with the built-in loop:
   steering message joins the built-in loop's, when the agent takes one
   (Claude Code's and Codex's adapters do); otherwise it waits in the state
   strip and goes as the next request.
-- The **Model** chip lists and switches the agent's models, the
+- The **Model** chip shows the model by the name the agent gives it, with a
+  spinner while the agent is still starting. It lists and switches the
+  agent's models, the
   **Reasoning** chip its reasoning effort, and an **Options** chip the rest of
   the settings it offers (fast mode, for one) — at any time, during a run too,
   where the agent applies the change as soon as it can. The choices are

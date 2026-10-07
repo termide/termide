@@ -583,6 +583,17 @@ impl Backend for AcpRuntime {
             .clone()
     }
 
+    fn is_starting(&self) -> bool {
+        matches!(
+            *self
+                .shared
+                .conn
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+            Conn::Starting
+        )
+    }
+
     fn context_usage(&self) -> Option<(u64, u64)> {
         *self
             .shared

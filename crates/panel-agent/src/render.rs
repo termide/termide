@@ -226,14 +226,31 @@ impl AgentPanel {
         crate::token_label(self.session_input, self.session_cached, self.session_output)
     }
 
-    /// The model as the banner and the chip show it: `auto` while it is left
-    /// to the provider and not known yet.
+    /// The model as the banner and the chip show it: a spinner while an
+    /// external agent is still starting, `auto` while the model is left to
+    /// the provider and not known yet, else the name an external agent gives
+    /// it (its id when it gives none).
     pub(crate) fn model_display(&self) -> String {
-        if self.model.id.is_empty() {
+        if self.external && self.runtime.is_starting() {
+            termide_config::constants::spinner_frame().to_string()
+        } else if self.model.id.is_empty() {
             "auto".to_string()
         } else {
-            self.model.id.clone()
+            self.model_name(&self.model.id)
         }
+    }
+
+    /// The human name of model `id`: the one an external agent advertised
+    /// for it, else the id itself.
+    pub(crate) fn model_name(&self, id: &str) -> String {
+        if !self.external {
+            return id.to_string();
+        }
+        self.runtime
+            .available_models()
+            .into_iter()
+            .find(|model| model.id == id)
+            .map_or_else(|| id.to_string(), |model| model.name)
     }
 
     /// The connection as the banner and the chip show it: its name beside
@@ -983,8 +1000,9 @@ impl AgentPanel {
             ]);
         }
         // The agent's model over ACP, when it advertised any: clickable to
-        // switch, like the built-in loop's Model chip.
-        if !self.external || self.acp_has_models {
+        // switch, like the built-in loop's Model chip. While the agent starts
+        // the chip holds a spinner, its models not known yet.
+        if !self.external || self.acp_has_models || self.runtime.is_starting() {
             segments.extend([
                 sep(),
                 StatusSegment::clickable(t.agent_chip_model(), SegmentKind::Label, MODEL_ACTION),

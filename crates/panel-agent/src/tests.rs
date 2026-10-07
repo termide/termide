@@ -6205,6 +6205,8 @@ fn an_agent_that_lists_its_tools_once_is_told_when_the_mcp_servers_answered() {
 /// An external agent that advertises two models and records the one picked.
 struct ModelBackend {
     picked: Arc<Mutex<Option<String>>>,
+    /// Whether the agent's handshake is still running.
+    starting: Arc<AtomicBool>,
 }
 
 impl Backend for ModelBackend {
@@ -6248,6 +6250,9 @@ impl Backend for ModelBackend {
                 .clone()
                 .unwrap_or_else(|| "m-fast".into()),
         )
+    }
+    fn is_starting(&self) -> bool {
+        self.starting.load(Ordering::SeqCst)
     }
     fn select_model(&self, model_id: String) -> Result<(), String> {
         *self.picked.lock().unwrap() = Some(model_id);
@@ -6396,6 +6401,7 @@ fn an_external_agent_lists_and_switches_models() {
         backend: Some(Arc::new(move |_setup: BackendSetup| {
             Ok(Box::new(ModelBackend {
                 picked: Arc::clone(&for_factory),
+                starting: Arc::default(),
             }) as Box<dyn Backend>)
         })),
         ..setup(vec![])
@@ -6409,7 +6415,8 @@ fn an_external_agent_lists_and_switches_models() {
         .into_iter()
         .map(|s| s.text)
         .collect();
-    assert!(texts.iter().any(|t| t == "m-fast"), "{texts:?}");
+    // The chip shows the name the agent gives the model, not its id.
+    assert!(texts.iter().any(|t| t == "Fast"), "{texts:?}");
 
     // The Model chip opens the agent's model list.
     let events = panel.handle_status_action(MODEL_ACTION);
@@ -6426,6 +6433,33 @@ fn an_external_agent_lists_and_switches_models() {
     });
     assert_eq!(*picked.lock().unwrap(), Some("m-slow".to_string()));
     assert_eq!(panel.model.id, "m-slow");
+}
+
+#[test]
+fn an_external_agent_spins_in_place_of_its_model_while_starting() {
+    let starting = Arc::new(AtomicBool::new(true));
+    let for_factory = Arc::clone(&starting);
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        backend: Some(Arc::new(move |_setup: BackendSetup| {
+            Ok(Box::new(ModelBackend {
+                picked: Arc::default(),
+                starting: Arc::clone(&for_factory),
+            }) as Box<dyn Backend>)
+        })),
+        ..setup(vec![])
+    });
+    assert!(panel.external);
+    // Starting: the chip is there, holding a spinner, and opens nothing.
+    let spinner = termide_config::constants::SPINNER_FRAMES;
+    let display = panel.model_display();
+    assert!(spinner.contains(&display.as_str()), "{display}");
+    let label = termide_i18n::t().agent_chip_model();
+    assert!(panel.status_segments().iter().any(|s| s.text == label));
+    assert!(panel.handle_status_action(MODEL_ACTION).is_empty());
+    // Started: the model's name.
+    starting.store(false, Ordering::SeqCst);
+    panel.tick();
+    assert_eq!(panel.model_display(), "Fast");
 }
 
 /// An external agent with a model, a reasoning effort and a fast mode among
@@ -6661,6 +6695,7 @@ fn a_cli_provider_pre_selects_its_configured_model_on_start() {
         backend: Some(Arc::new(move |_setup: BackendSetup| {
             Ok(Box::new(ModelBackend {
                 picked: Arc::clone(&for_factory),
+                starting: Arc::default(),
             }) as Box<dyn Backend>)
         })),
         ..base

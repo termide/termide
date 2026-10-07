@@ -79,6 +79,10 @@ impl AgentPanel {
     /// current marked, switched over ACP rather than through the built-in loop.
     pub(crate) fn acp_model_picker(&mut self) -> Vec<PanelEvent> {
         let t = termide_i18n::t();
+        // Its models are not known until the agent has started.
+        if self.runtime.is_starting() {
+            return Vec::new();
+        }
         let models = self.runtime.available_models();
         if models.is_empty() {
             self.notice(
@@ -116,7 +120,7 @@ impl AgentPanel {
                 self.record_agent_option(MODEL_OPTION, id);
                 if !self.is_fresh() {
                     self.notice(
-                        termide_i18n::t().agent_notice_model_fmt(id),
+                        termide_i18n::t().agent_notice_model_fmt(&self.model_name(id)),
                         NoticeKind::Info,
                     );
                 }

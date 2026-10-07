@@ -619,8 +619,10 @@ impl AgentPanel {
         }
         // While the agent works, keep the ticking timer and the block's
         // spinner moving without waiting for an event (throttled to ~10 fps).
-        // A `/compact` between runs leaves the runtime idle but still works.
-        if (self.is_busy() || self.activity.is_some())
+        // A `/compact` between runs leaves the runtime idle but still works;
+        // an external agent still starting spins in place of its model.
+        let starting = self.external && self.runtime.is_starting();
+        if (self.is_busy() || self.activity.is_some() || starting)
             && self.last_anim.elapsed() >= Duration::from_millis(100)
         {
             self.last_anim = Instant::now();

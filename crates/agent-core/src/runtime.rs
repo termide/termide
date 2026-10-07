@@ -246,6 +246,12 @@ pub trait Backend: Send {
     fn current_model(&self) -> Option<String> {
         None
     }
+    /// Whether an external agent is still starting: its handshake has not
+    /// finished, so its models and settings are not known yet. The built-in
+    /// loop is ready at once.
+    fn is_starting(&self) -> bool {
+        false
+    }
     /// How full the context is and how large it is, `(used, size)` in tokens,
     /// when the backend reports it (an ACP agent's `usage_update`). The
     /// built-in loop's figures come from its own messages instead.
