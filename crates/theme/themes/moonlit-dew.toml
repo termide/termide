@@ -1,0 +1,17 @@
+# Moonlit Dew theme for TermIDE
+# A night path under the moon: wet humus, cool grey veins and blue-green
+# grass silvered with dew.
+name = "moonlit-dew"
+is_light = false
+
+[colors]
+bg = { rgb = [22, 23, 20] }
+fg = { rgb = [191, 196, 186] }
+accented_bg = { rgb = [42, 44, 41] }
+accented_fg = { rgb = [111, 165, 138] }
+selected_bg = { rgb = [47, 74, 62] }
+selected_fg = { rgb = [216, 230, 220] }
+disabled = { rgb = [94, 98, 92] }
+success = { rgb = [125, 179, 143] }
+warning = { rgb = [210, 184, 113] }
+error = { rgb = [192, 115, 106] }

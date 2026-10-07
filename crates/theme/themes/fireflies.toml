@@ -1,0 +1,17 @@
+# Fireflies theme for TermIDE
+# A night path lit by fireflies: deep black soil, grey gravel veins and
+# bright grass caught in their glow.
+name = "fireflies"
+is_light = false
+
+[colors]
+bg = { rgb = [18, 15, 12] }
+fg = { rgb = [211, 205, 191] }
+accented_bg = { rgb = [38, 35, 32] }
+accented_fg = { rgb = [156, 194, 106] }
+selected_bg = { rgb = [76, 107, 46] }
+selected_fg = { rgb = [240, 242, 224] }
+disabled = { rgb = [90, 85, 78] }
+success = { rgb = [127, 176, 105] }
+warning = { rgb = [227, 194, 91] }
+error = { rgb = [194, 96, 76] }

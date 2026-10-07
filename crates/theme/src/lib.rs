@@ -100,6 +100,12 @@ const THEME_BILLIARD_TOML: &str = include_str!("../themes/billiard.toml");
 const THEME_GREEN_BACKS_TOML: &str = include_str!("../themes/green-backs.toml");
 const THEME_PINKY_PIE_TOML: &str = include_str!("../themes/pinky-pie.toml");
 const THEME_BLUE_SKY_TOML: &str = include_str!("../themes/blue-sky.toml");
+const THEME_BLACK_EARTH_TOML: &str = include_str!("../themes/black-earth.toml");
+const THEME_MOONLIT_DEW_TOML: &str = include_str!("../themes/moonlit-dew.toml");
+const THEME_FIREFLIES_TOML: &str = include_str!("../themes/fireflies.toml");
+const THEME_DRY_PATH_TOML: &str = include_str!("../themes/dry-path.toml");
+const THEME_MORNING_MIST_TOML: &str = include_str!("../themes/morning-mist.toml");
+const THEME_SUMMER_MEADOW_TOML: &str = include_str!("../themes/summer-meadow.toml");
 
 // Static theme instances
 static THEME_ATOM_ONE_LIGHT: OnceLock<Theme> = OnceLock::new();
@@ -140,6 +146,12 @@ static THEME_BILLIARD: OnceLock<Theme> = OnceLock::new();
 static THEME_GREEN_BACKS: OnceLock<Theme> = OnceLock::new();
 static THEME_PINKY_PIE: OnceLock<Theme> = OnceLock::new();
 static THEME_BLUE_SKY: OnceLock<Theme> = OnceLock::new();
+static THEME_BLACK_EARTH: OnceLock<Theme> = OnceLock::new();
+static THEME_MOONLIT_DEW: OnceLock<Theme> = OnceLock::new();
+static THEME_FIREFLIES: OnceLock<Theme> = OnceLock::new();
+static THEME_DRY_PATH: OnceLock<Theme> = OnceLock::new();
+static THEME_MORNING_MIST: OnceLock<Theme> = OnceLock::new();
+static THEME_SUMMER_MEADOW: OnceLock<Theme> = OnceLock::new();
 
 /// Entry in the built-in themes registry.
 /// Single source of truth for all built-in theme configurations.
@@ -174,6 +186,11 @@ static BUILTIN_THEMES: &[BuiltinThemeEntry] = &[
         storage: &THEME_BILLIARD,
     },
     BuiltinThemeEntry {
+        name: "black-earth",
+        content: THEME_BLACK_EARTH_TOML,
+        storage: &THEME_BLACK_EARTH,
+    },
+    BuiltinThemeEntry {
         name: "blue-sky",
         content: THEME_BLUE_SKY_TOML,
         storage: &THEME_BLUE_SKY,
@@ -189,6 +206,11 @@ static BUILTIN_THEMES: &[BuiltinThemeEntry] = &[
         storage: &THEME_DOS_NAVIGATOR,
     },
     BuiltinThemeEntry {
+        name: "dry-path",
+        content: THEME_DRY_PATH_TOML,
+        storage: &THEME_DRY_PATH,
+    },
+    BuiltinThemeEntry {
         name: "everforest",
         content: THEME_EVERFOREST_TOML,
         storage: &THEME_EVERFOREST,
@@ -202,6 +224,11 @@ static BUILTIN_THEMES: &[BuiltinThemeEntry] = &[
         name: "far-manager",
         content: THEME_FAR_MANAGER_TOML,
         storage: &THEME_FAR_MANAGER,
+    },
+    BuiltinThemeEntry {
+        name: "fireflies",
+        content: THEME_FIREFLIES_TOML,
+        storage: &THEME_FIREFLIES,
     },
     BuiltinThemeEntry {
         name: "github-dark",
@@ -269,6 +296,16 @@ static BUILTIN_THEMES: &[BuiltinThemeEntry] = &[
         storage: &THEME_MONOKAI,
     },
     BuiltinThemeEntry {
+        name: "moonlit-dew",
+        content: THEME_MOONLIT_DEW_TOML,
+        storage: &THEME_MOONLIT_DEW,
+    },
+    BuiltinThemeEntry {
+        name: "morning-mist",
+        content: THEME_MORNING_MIST_TOML,
+        storage: &THEME_MORNING_MIST,
+    },
+    BuiltinThemeEntry {
         name: "nord",
         content: THEME_NORD_TOML,
         storage: &THEME_NORD,
@@ -307,6 +344,11 @@ static BUILTIN_THEMES: &[BuiltinThemeEntry] = &[
         name: "solarized-light",
         content: THEME_SOLARIZED_LIGHT_TOML,
         storage: &THEME_SOLARIZED_LIGHT,
+    },
+    BuiltinThemeEntry {
+        name: "summer-meadow",
+        content: THEME_SUMMER_MEADOW_TOML,
+        storage: &THEME_SUMMER_MEADOW,
     },
     BuiltinThemeEntry {
         name: "terminal",
@@ -512,6 +554,18 @@ mod tests {
         // Test fallback for unknown theme (should return windows-xp as default)
         let unknown = Theme::get_by_name("nonexistent");
         assert_eq!(unknown.name, "windows-xp");
+    }
+
+    /// A broken built-in TOML would silently fall back to the default theme,
+    /// so every registry entry must parse and carry its own name.
+    #[test]
+    fn test_all_builtin_themes_parse() {
+        for entry in BUILTIN_THEMES {
+            loader::load_theme_from_str(entry.content, entry.name)
+                .unwrap_or_else(|e| panic!("built-in theme {} fails to parse: {e}", entry.name));
+            let table: toml::Table = toml::from_str(entry.content).unwrap();
+            assert_eq!(table["name"].as_str(), Some(entry.name));
+        }
     }
 
     #[test]

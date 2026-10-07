@@ -1,0 +1,17 @@
+# Black Earth theme for TermIDE
+# A night walk down a path through the grass: damp black soil with grey
+# veins, moonlit path stones and night-grass accents.
+name = "black-earth"
+is_light = false
+
+[colors]
+bg = { rgb = [28, 24, 20] }
+fg = { rgb = [201, 195, 180] }
+accented_bg = { rgb = [46, 43, 39] }
+accented_fg = { rgb = [127, 163, 107] }
+selected_bg = { rgb = [63, 90, 54] }
+selected_fg = { rgb = [228, 232, 214] }
+disabled = { rgb = [107, 101, 92] }
+success = { rgb = [141, 184, 106] }
+warning = { rgb = [201, 166, 90] }
+error = { rgb = [184, 100, 90] }

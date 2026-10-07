@@ -1,0 +1,17 @@
+# Morning Mist theme for TermIDE
+# The path at dawn: cool misty air and blue-green grass still wet
+# with dew. Light counterpart of moonlit-dew.
+name = "morning-mist"
+is_light = true
+
+[colors]
+bg = { rgb = [233, 236, 230] }
+fg = { rgb = [38, 42, 39] }
+accented_bg = { rgb = [213, 218, 211] }
+accented_fg = { rgb = [61, 122, 98] }
+selected_bg = { rgb = [75, 127, 106] }
+selected_fg = { rgb = [242, 247, 243] }
+disabled = { rgb = [142, 148, 142] }
+success = { rgb = [63, 132, 96] }
+warning = { rgb = [156, 122, 34] }
+error = { rgb = [167, 81, 74] }

@@ -1,6 +1,6 @@
 # Themes
 
-TermIDE comes with 38 built-in themes and supports custom user themes. You can switch themes by editing the configuration file.
+TermIDE comes with 44 built-in themes and supports custom user themes. You can switch themes by editing the configuration file.
 
 ## Built-in Themes
 
@@ -26,6 +26,9 @@ TermIDE comes with 38 built-in themes and supports custom user themes. You can s
 | `material-ocean` | Material Ocean — deep blue Material Design variant |
 | `rosepine` | Rosé Pine — soho vibes with dusty rose accents |
 | `tokyonight` | Tokyo Night — neon-lit dark city palette |
+| `black-earth` | Night path through the grass — black soil with grey veins, night-grass accents |
+| `moonlit-dew` | Night path under the moon — cool humus, dew-silvered blue-green grass |
+| `fireflies` | Night path lit by fireflies — deep black soil, bright grass glow |
 
 ### Light Themes
 
@@ -38,6 +41,9 @@ TermIDE comes with 38 built-in themes and supports custom user themes. You can s
 | `green-backs` | Green dollar bill aesthetic |
 | `manuscript` | Medieval manuscript with aged parchment, iron gall ink, vermillion accents |
 | `material-lighter` | Material Lighter theme |
+| `dry-path` | The night path by day — pale dry clay, dark grass (light counterpart of `black-earth`) |
+| `morning-mist` | The path at dawn — cool mist, dewy blue-green grass (light counterpart of `moonlit-dew`) |
+| `summer-meadow` | The path at noon — warm sand, bright summer grass (light counterpart of `fireflies`) |
 | `pinky-pie` | Pink unicorn and rainbow tones |
 | `solarized-light` | Light variant of the Solarized color scheme |
 | `macos-light` | macOS light style theme |

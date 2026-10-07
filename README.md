@@ -60,7 +60,7 @@ Terminal editors cover the code; everything around it — files on remote hosts,
 - **Markdown Preview** - Rendered read-only view for `.md` / `.markdown` (headings, lists, tables, syntax-highlighted code blocks, clickable links and image pictograms) with cursor navigation, selection and clipboard copy; `Ctrl+E` toggles to the editable source; embedded ```mermaid``` blocks render as diagrams
 - **Mermaid Diagram Viewer** - Render `.mmd` / `.mermaid` files as text pseudographics — flowchart, sequence, state, class, ER, gantt, pie, journey, mindmap, timeline, gitGraph, quadrant; 2D scroll, copy to clipboard, and `Ctrl+E` to edit the source
 - **External Apps** - Open files with system default applications (Shift+Enter)
-- **38 Built-in Themes** - Dark, light, retro, and cinematic themes (Dracula, Nord, Monokai, Solarized, Matrix, Pip-Boy, Norton Commander, Windows 95, etc.)
+- **44 Built-in Themes** - Dark, light, retro, and cinematic themes (Dracula, Nord, Monokai, Solarized, Matrix, Pip-Boy, Norton Commander, Windows 95, etc.)
 - **Custom Themes** - Create your own themes in TOML format
 - **15 UI Languages** - Bengali, Chinese, English, French, German, Hindi, Indonesian, Japanese, Korean, Portuguese, Russian, Spanish, Thai, Turkish, Vietnamese (missing keys transparently fall back to English)
 - **Project Management** - Auto-save and restore panel layouts per project; projects you switch away from stay open in the background (terminals keep running, unsaved edits are kept), and the Projects menu and the `Alt+\` switcher list open and recent projects
@@ -484,6 +484,9 @@ min_level = "info"
 - `material-ocean` - Material Ocean theme
 - `rosepine` - Rosé Pine theme
 - `tokyonight` - Tokyo Night theme
+- `black-earth` - Night path: black soil and night grass
+- `moonlit-dew` - Night path under the moon
+- `fireflies` - Night path lit by fireflies
 
 **Light Themes:**
 - `atom-one-light` - Atom One Light theme
@@ -496,6 +499,9 @@ min_level = "info"
 - `blue-sky` - Blue Sky theme
 - `green-backs` - Green dollar bills theme
 - `pinky-pie` - Pinky Pie theme
+- `dry-path` - The night path by day: dry clay and dark grass
+- `morning-mist` - The path at dawn, misty and dewy
+- `summer-meadow` - The path at noon: warm sand and bright grass
 
 **Retro Themes:**
 - `far-manager` - FAR Manager style

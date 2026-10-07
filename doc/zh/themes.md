@@ -1,6 +1,6 @@
 # 主题
 
-TermIDE 自带 38 款内置主题，并支持自定义用户主题。您可以通过编辑配置文件来切换主题。
+TermIDE 自带 44 款内置主题，并支持自定义用户主题。您可以通过编辑配置文件来切换主题。
 
 ## 内置主题
 
@@ -26,6 +26,9 @@ TermIDE 自带 38 款内置主题，并支持自定义用户主题。您可以�
 | `material-ocean` | Material Ocean — 深蓝色 Material Design 变体 |
 | `rosepine` | Rosé Pine — 尘玫瑰色调的 soho 风格 |
 | `tokyonight` | Tokyo Night — 霓虹夜都市配色 |
+| `black-earth` | 草间夜路 — 带灰色纹理的黑土，夜草绿点缀 |
+| `moonlit-dew` | 月下夜路 — 清冷腐殖土，沾露的蓝绿色草 |
+| `fireflies` | 萤火夜路 — 深黑土壤，明亮的草色微光 |
 
 ### 亮色主题
 
@@ -38,6 +41,9 @@ TermIDE 自带 38 款内置主题，并支持自定义用户主题。您可以�
 | `green-backs` | 美元钞票绿色主题 |
 | `manuscript` | 中世纪手稿风格，陈旧羊皮纸、铁胆墨水、朱砂色调 |
 | `material-lighter` | Material Lighter 主题 |
+| `dry-path` | 白日小径 — 浅色干黏土，深色青草（`black-earth` 的亮色版） |
+| `morning-mist` | 清晨小径 — 清凉薄雾，带露的蓝绿色草（`moonlit-dew` 的亮色版） |
+| `summer-meadow` | 正午小径 — 温暖沙土，明亮的夏草（`fireflies` 的亮色版） |
 | `pinky-pie` | 粉色少女系亮色主题 |
 | `solarized-light` | Solarized 配色方案的亮色变体 |
 | `macos-light` | macOS 亮色风格主题 |

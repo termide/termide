@@ -1,0 +1,17 @@
+# Dry Path theme for TermIDE
+# The night path by day: pale dry clay with grey-beige veins and
+# dark grass along the edges. Light counterpart of black-earth.
+name = "dry-path"
+is_light = true
+
+[colors]
+bg = { rgb = [237, 231, 220] }
+fg = { rgb = [43, 37, 32] }
+accented_bg = { rgb = [218, 211, 199] }
+accented_fg = { rgb = [78, 122, 58] }
+selected_bg = { rgb = [94, 128, 72] }
+selected_fg = { rgb = [246, 243, 234] }
+disabled = { rgb = [154, 146, 134] }
+success = { rgb = [79, 138, 58] }
+warning = { rgb = [165, 122, 30] }
+error = { rgb = [168, 70, 59] }

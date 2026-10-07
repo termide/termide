@@ -1,0 +1,17 @@
+# Summer Meadow theme for TermIDE
+# The path at noon: warm sand and bright, juicy summer grass.
+# Light counterpart of fireflies.
+name = "summer-meadow"
+is_light = true
+
+[colors]
+bg = { rgb = [243, 238, 227] }
+fg = { rgb = [31, 26, 21] }
+accented_bg = { rgb = [224, 217, 203] }
+accented_fg = { rgb = [85, 127, 31] }
+selected_bg = { rgb = [106, 143, 46] }
+selected_fg = { rgb = [251, 250, 240] }
+disabled = { rgb = [155, 148, 138] }
+success = { rgb = [78, 139, 42] }
+warning = { rgb = [181, 138, 18] }
+error = { rgb = [176, 74, 53] }
