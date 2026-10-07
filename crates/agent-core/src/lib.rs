@@ -60,7 +60,7 @@ pub use cancel::CancelToken;
 pub use checkpoints::{Checkpoint, CheckpointHooks, CheckpointStore, SavedFile, Undone};
 pub use classifier::{
     parse_classification, Classifier, ClassifyPrompt, IntentEntry, IntentLog, ModelChoice,
-    ModelClassifier, ReviewerSetup, SessionView, Verdict, SEED_CLASSIFY,
+    ModelClassifier, ReviewerSetup, SessionView, SpentMeter, Verdict, SEED_CLASSIFY,
 };
 pub use commands::{CommandScript, COMMANDS_DIR};
 pub use compaction::{CompactionPolicy, CompactionPrompts, CompactionReason};

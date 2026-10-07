@@ -2924,6 +2924,31 @@ fn ctrl_s_saves_the_chat_and_the_menu_offers_it() {
     assert!(!content.contains("they greet") && !content.contains("Nothing to save"));
 }
 
+/// What the `auto` mode reviewers spend joins the session's totals at the
+/// next look, once; the context fill stays.
+#[test]
+fn the_reviewers_tokens_join_the_session_totals() {
+    let mut panel = panel(vec![]);
+    panel.context_tokens = 500;
+    panel.reviewer.spent.add(&termide_agent_core::Usage {
+        input: 300,
+        output: 4,
+        cache_read: 1000,
+        cache_write: 0,
+    });
+    panel.tick();
+    assert_eq!(
+        (
+            panel.session_input,
+            panel.session_cached,
+            panel.session_output
+        ),
+        (300, 1000, 4)
+    );
+    assert_eq!(panel.context_tokens, 500);
+    assert!(!panel.take_reviewer_spent());
+}
+
 /// A subagent's tokens join the session's totals when its `task` ends; its
 /// context was its own, so the context fill stays.
 #[test]
@@ -4149,6 +4174,7 @@ fn the_connection_picker_switches_the_endpoint_and_its_model() {
 fn a_cli_agent_connection_is_taken_on_mid_conversation_and_left_again() {
     let dir = tempfile::tempdir().unwrap();
     let mut panel = connected_panel(dir.path());
+    let meter = panel.reviewer.spent.clone();
     panel.transcript.push(Item::User {
         text: "go".into(),
         at: String::new(),
@@ -4166,6 +4192,12 @@ fn a_cli_agent_connection_is_taken_on_mid_conversation_and_left_again() {
         panel.reviewer.model.session_model.as_deref(),
         Some("local-reviewer")
     );
+    // What its reviews spend still reaches the panel's totals.
+    meter.add(&termide_agent_core::Usage {
+        input: 9,
+        ..Default::default()
+    });
+    assert_eq!(panel.reviewer.spent.take().input, 9);
 }
 
 #[test]

@@ -943,6 +943,7 @@ fn reviewer_setup(settings: &AiSettings, dirs: &AgentDirs, session: &str) -> Rev
             &settings.reviewer_of(session),
             &format!("the reviewer of connection {session}"),
         ),
+        spent: termide_agent_core::SpentMeter::default(),
     }
 }
 
@@ -1257,6 +1258,13 @@ impl Subagents {
         let target = subagent_target(&settings, &active)?;
         // The session's connection says who reviews, wherever the task runs.
         let reviewer = reviewer_setup(&settings, &self.dirs, &active.connection);
+        // A meter of its own: what its reviewer spends counts in the task,
+        // not in the panel's own reviews.
+        let reviews = reviewer.spent.clone();
+        let with_reviews = |mut outcome: SubagentOutcome| {
+            outcome.spent.add(&reviews.take());
+            outcome
+        };
 
         let mut rules = self.rules.clone();
         rules.mode = subagent_mode(self.mode.get(), definition.spec.mode);
@@ -1289,7 +1297,9 @@ impl Subagents {
                     hooks,
                     rules,
                 };
-                return self.run_cli(run, prompt, &budget, cancel, on_update);
+                return self
+                    .run_cli(run, prompt, &budget, cancel, on_update)
+                    .map(with_reviews);
             }
             // On a connection of its own the subagent runs that connection's
             // model: the id its `AGENT.md` names is one of the session's
@@ -1369,7 +1379,7 @@ impl Subagents {
         if report.answer.is_none() && report.error.is_none() {
             report.error = run_error(agent.messages());
         }
-        Ok(report.into_outcome(cancel.is_cancelled()))
+        Ok(with_reviews(report.into_outcome(cancel.is_cancelled())))
     }
 
     /// Run `run` as a session of its own of its CLI agent, which calls the

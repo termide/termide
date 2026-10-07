@@ -497,8 +497,8 @@ work figures, no wall-clock, and show them only unfolded. A tool call shows
 how long it took (`🕒 6s`) and its status. A call that waited on a permission question shows that
 wait apart, first, as the pause it was: `‖ 12s 🕒 2s`, the `‖` marked and
 ticking while the question is up; the `🕒` counts only the call's own run. A
-`task` call shows before it what the subagent's model calls spent, in the
-form of the session's totals: `↑3k ↻40k ↓800 🕒 1m2s`. When a turn reasons, the reasoning block carries the turn's cost —
+`task` call shows before it what the subagent's model calls spent, its
+reviewer's included, in the form of the session's totals: `↑3k ↻40k ↓800 🕒 1m2s`. When a turn reasons, the reasoning block carries the turn's cost —
 the prefill phase (`⏫ 6s (↑42k, 7k tok/s)`) and the generation phase
 (`✍️ 12s (↓5k, 420 tok/s)`), each with its duration (whole seconds), token count
 and average speed; large counts are abbreviated (`40k`, `1.2M`). A turn with no
@@ -566,8 +566,8 @@ the context window sit flush right; on a narrow terminal the chips on the left
 are cut, never these. The totals are `↑` the prompt tokens billed in full (the
 uncached input and what was written to the prompt cache), `↻` those the cache
 served, shown once there are any, and `↓` the output: `↑2.1k ↻48k ↓900`. They
-include what subagents spent, added when their task ends; the window counts
-only the session's own context. The
+include what subagents spent, added when their task ends, and what the `auto`
+mode reviewer spent; the window counts only the session's own context. The
 window is the tokens used of it with a fill bar, `66k/262k ▰▰▱▱▱▱▱▱`; for
 Claude Code, Codex and Gemini CLI both come from what the agent reports, and the window
 shows once it has.

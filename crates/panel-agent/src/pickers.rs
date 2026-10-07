@@ -3,7 +3,9 @@
 
 use std::sync::Arc;
 
-use termide_agent_core::{BackendOption, Mode, ModelInfo, ModelSpec, ThinkingLevel, MODEL_OPTION};
+use termide_agent_core::{
+    BackendOption, Mode, ModelInfo, ModelSpec, ReviewerSetup, ThinkingLevel, MODEL_OPTION,
+};
 use termide_core::{InputAction, PanelEvent, SelectAction};
 
 use crate::runtime::spawn_model_list;
@@ -536,7 +538,12 @@ impl AgentPanel {
         self.model = model;
         self.model_choices.clear();
         self.provider_backend = choice.backend.clone();
-        self.reviewer = choice.reviewer.clone();
+        // The meter stays the panel's: a reviewer still at work on the old
+        // connection adds to the same totals.
+        self.reviewer = ReviewerSetup {
+            spent: self.reviewer.spent.clone(),
+            ..choice.reviewer.clone()
+        };
         self.backend = self.provider_backend.clone().or_else(|| {
             self.catalog
                 .resolve(&self.agent)
