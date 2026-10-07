@@ -456,11 +456,12 @@ fn move_legacy_default_template(
 }
 
 /// The front-matter keys an `AGENT.md` is read for, besides `env.<NAME>`.
-const AGENT_KEYS: [&str; 7] = [
+const AGENT_KEYS: [&str; 8] = [
     "description",
     "model",
     "mode",
     "tools",
+    "max_turns",
     "prompt",
     "command",
     "timeout",
@@ -494,6 +495,9 @@ pub struct AgentSpec {
     /// Tools the agent may use, by name: `tools: read, bash` (or in
     /// brackets); all built-in tools when absent, none for `tools: []`.
     pub tools: Option<Vec<String>>,
+    /// How many model calls a task delegated to the agent may take before
+    /// it is cut off: `max_turns`, at least one; the default when absent.
+    pub max_turns: Option<usize>,
     /// An external agent spoken to over ACP instead of the built-in loop:
     /// `command` with `timeout`, `env.<NAME>` and `adapter` (else told by
     /// the command); `model` is then the agent's model to pick, `mode` the
@@ -531,6 +535,17 @@ impl AgentSpec {
                 .map(|tool| unquote(tool.trim()).to_string())
                 .filter(|tool| !tool.is_empty())
                 .collect()
+        });
+        let max_turns = text("max_turns").and_then(|value| match value.parse::<usize>() {
+            Ok(0) => {
+                warn("max_turns", &"it must be at least 1");
+                None
+            }
+            Ok(turns) => Some(turns),
+            Err(error) => {
+                warn("max_turns", &error);
+                None
+            }
         });
         let acp = text("command").and_then(|line| {
             let mut words = split_command_line(line)
@@ -570,15 +585,16 @@ impl AgentSpec {
             model: text("model").map(str::to_string),
             mode,
             tools,
+            max_turns,
             acp,
         };
         if let Some(acp) = &spec.acp {
             // An adapter termide knows has the panel's mode mapped onto its
             // own; any other agent answers to its own configuration.
             let unused: &[&str] = if acp.flavor == AcpFlavor::Generic {
-                &["mode", "tools"]
+                &["mode", "tools", "max_turns"]
             } else {
-                &["tools"]
+                &["tools", "max_turns"]
             };
             for field in unused {
                 if fields.contains_key(*field) {
@@ -1352,12 +1368,15 @@ mod tests {
         write(
             "review",
             "---\ndescription: Reviews diffs: risks first\nmodel: big\nmode: accept-edits\n\
-             tools: read, bash\n---\nYou review.\n\n{{tools}}\n",
+             tools: read, bash\nmax_turns: 120\n---\nYou review.\n\n{{tools}}\n",
         );
         write("bracketed", "---\ntools: [\"read\", 'bash']\n---\n");
         write("toolless", "---\ntools: []\n---\n");
         // A field that does not parse is dropped; the others still count.
-        write("broken", "---\ndescription: still read\nmode: 42\n---\n");
+        write(
+            "broken",
+            "---\ndescription: still read\nmode: 42\nmax_turns: 0\n---\n",
+        );
         write(
             "claude",
             "---\ndescription: Claude Code\n\
@@ -1386,6 +1405,7 @@ mod tests {
         assert_eq!(spec.mode, Some(Mode::Edit));
         let read_bash = Some(vec!["read".to_string(), "bash".to_string()]);
         assert_eq!(spec.tools, read_bash);
+        assert_eq!(spec.max_turns, Some(120));
         assert!(spec.acp.is_none());
         assert_eq!(
             dirs.soul("review").as_deref(),
@@ -1396,6 +1416,7 @@ mod tests {
         let broken = dirs.spec("broken");
         assert_eq!(broken.description, "still read");
         assert_eq!(broken.mode, None);
+        assert_eq!(broken.max_turns, None);
 
         let acp = dirs.spec("claude").acp.unwrap();
         assert_eq!(acp.command, "/opt/my agent/acp");
