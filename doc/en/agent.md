@@ -1344,8 +1344,11 @@ servers connected when its task starts — like the panel's agent, whatever
 its `tools` list says; a server still connecting then is left out of that
 task. A run that will not stop is cut off after fifty
 model calls (the delegate's `max_turns` changes that), and one that fails reports why, the endpoint's error included.
-While a delegate's request waits for a slot of its connection
-(`max_concurrent_requests`), its block says so under what it has said.
+While the delegate works, its block shows what it has said and, among it,
+a line for each tool it calls (`· read src/main.rs`, marked `✗` when the call
+fails); once it is done, the block holds its answer. While a delegate's
+request waits for a slot of its connection (`max_concurrent_requests`), its
+block says so under what it has said.
 
 A delegate runs on the connection the session's connection names under
 **Subagents** on its settings page (`subagents` in the file), or on the
