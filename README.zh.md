@@ -337,7 +337,7 @@ termide [OPTIONS] [FILE]...
 选项:
   --log-level <LEVEL>  设置日志级别（trace、debug、info、warn、error）
   --no-lsp             禁用 LSP 语言服务器
-  -r, --restore        在后台重新打开上次运行的项目
+  -r, --restore        在上次运行所在的项目中重新打开上次运行的项目
   --config <PATH>      使用自定义配置文件路径
   --diagnostics        运行启动前诊断并退出（无 UI）
   --detached           启动一个在终端关闭后仍继续运行的可分离实例，并打印其 ID

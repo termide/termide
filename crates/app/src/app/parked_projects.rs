@@ -206,24 +206,29 @@ impl App {
         }
     }
 
-    /// Save the roots of the open projects for the next run to reopen, once
-    /// more than one has been open and whenever they change since.
+    /// Save the open projects and the current one for the next run to
+    /// reopen, once more than one has been open and whenever either changes
+    /// since. The current project goes along, so that `termide --restore`
+    /// reopens the run in the project it was in.
     fn save_open_projects(&mut self) {
         if !self.persist_layout {
             return;
         }
-        let roots: Vec<PathBuf> = self.open_projects.roots().map(Path::to_path_buf).collect();
+        let projects = termide_project::SavedOpenProjects {
+            roots: self.open_projects.roots().map(Path::to_path_buf).collect(),
+            current: Some(self.project_root.clone()),
+        };
         let unchanged = match &self.saved_open_projects {
-            Some(saved) => *saved == roots,
-            None => roots.len() < 2,
+            Some(saved) => *saved == projects,
+            None => projects.roots.len() < 2,
         };
         if unchanged {
             return;
         }
-        if let Err(e) = termide_project::save_open_projects(&roots) {
+        if let Err(e) = termide_project::save_open_projects(&projects) {
             log::error!("Failed to save the open projects: {}", e);
         }
-        self.saved_open_projects = Some(roots);
+        self.saved_open_projects = Some(projects);
     }
 
     /// Read the projects open together in the last run, those that still
@@ -233,7 +238,7 @@ impl App {
             return;
         }
         let mut roots: Vec<PathBuf> = Vec::new();
-        for root in termide_project::load_open_projects() {
+        for root in termide_project::load_open_projects().roots {
             let root = project_root_of(root);
             if root.is_dir() && !self.open_projects.is_open(&root) && !roots.contains(&root) {
                 roots.push(root);
@@ -254,6 +259,7 @@ impl App {
         }
         // In the order they were kept, the current project among them.
         let order: Vec<PathBuf> = termide_project::load_open_projects()
+            .roots
             .into_iter()
             .map(project_root_of)
             .collect();

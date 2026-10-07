@@ -84,11 +84,11 @@ pub struct App {
     /// with explicit file arguments ($EDITOR mode), so editing a commit
     /// message or crontab never restores or overwrites the project layout.
     persist_layout: bool,
-    /// The open projects as last saved for reopening, `None` until saved.
-    /// Nothing is saved while only the project started in is open: a
-    /// launch for a single directory must not replace the list of the run
-    /// before.
-    saved_open_projects: Option<Vec<std::path::PathBuf>>,
+    /// The open projects and the current one as last saved for reopening,
+    /// `None` until saved. Nothing is saved while only the project started in
+    /// is open: a launch for a single directory must not replace the list of
+    /// the run before.
+    saved_open_projects: Option<termide_project::SavedOpenProjects>,
     /// Reopen the projects of the last run as soon as the loop starts
     /// (`termide --restore`), as the Projects menu item does.
     restore_projects: bool,

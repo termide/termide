@@ -120,9 +120,10 @@ struct Cli {
     #[arg(long, value_name = "FORMAT", requires = "headless", value_parser = ["text", "json", "stream-json"], default_value = "text")]
     output: String,
 
-    /// Reopen the projects of the last run. The current project is the one
-    /// for the working directory; the others open in the background and load
-    /// when first entered. Without a saved set, an ordinary launch.
+    /// Reopen the projects of the last run, in the project that run was in;
+    /// the others open in the background and load when first entered. From a
+    /// directory of that set, stays in it. Without a saved set, an ordinary
+    /// launch.
     #[arg(short, long, conflicts_with_all = ["files", "headless"])]
     restore: bool,
 
@@ -227,6 +228,18 @@ fn run_diagnostics(custom_config: Option<&std::path::Path>) -> bool {
 /// Called both on normal exit and from the panic handler.
 fn restore_terminal() {
     termide_core::leave_terminal_modes();
+}
+
+/// Move to the project `--restore` starts in, when the saved set names one
+/// other than the working directory. Returns where it moved from and to, so
+/// the move reaches the journal once the logger is up; `None` when the launch
+/// stays put.
+fn restore_start_dir() -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    let cwd = std::env::current_dir().ok()?;
+    let start = termide_project::load_open_projects().start_dir(&cwd)?;
+    std::env::set_current_dir(&start)
+        .map(|()| (cwd, start))
+        .ok()
 }
 
 /// The arguments a detached instance's own termide starts with: the files
@@ -338,6 +351,18 @@ fn main() -> Result<()> {
             }
         }
         return Ok(());
+    }
+
+    // `--restore` reopens the projects of the last run, and starts in the one
+    // that run was in. Done before anything else reads the working directory —
+    // the diagnostics' project root, the detached instance's project, the
+    // layered config, the logger and the terminal title — so that a launch
+    // from an unrelated directory restores that run instead of adding this
+    // directory to it. Idempotent: once moved, the working directory is the
+    // saved one, and a hosted instance restoring again stays put.
+    let mut restored_start = None;
+    if cli.restore {
+        restored_start = restore_start_dir();
     }
 
     // --diagnostics short-circuits before terminal init so output
@@ -577,6 +602,10 @@ fn main() -> Result<()> {
     }
     for (level, msg) in migration_notes {
         log::log!(level, "{}", msg);
+    }
+    // The move happened before the logger existed; say here where it came from.
+    if let Some((from, to)) = &restored_start {
+        log::info!("--restore: starting in {to:?} rather than {from:?}");
     }
 
     // Log git availability to journal (not to stderr)
