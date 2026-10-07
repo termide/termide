@@ -154,10 +154,18 @@ impl App {
         }
         match drag.surface {
             ProjectDragSurface::Bar => {
+                let button = place.map(|place| PROJECT_BUTTON_BASE + place);
+                let was_selected =
+                    self.state.is_menu_open() && self.state.ui.selected_menu_item == button;
                 self.state.close_indicator_modal();
                 self.state.close_menu();
                 if drag.root != self.project_root {
                     self.switch_to_project(drag.root)?;
+                } else if let (Some(place), false) = (place, was_selected) {
+                    // The current project's button takes the menu bar
+                    // cursor, for the keys to close it or step to another;
+                    // a second click lets it go, as on a menu title.
+                    self.reopen_menu_bar_at_button(place);
                 }
                 Ok(())
             }
