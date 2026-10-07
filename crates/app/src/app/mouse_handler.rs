@@ -501,21 +501,31 @@ impl App {
             }
         }
 
-        // Check network/CPU/RAM/clock indicator clicks (right side of menu bar)
-        let (net_range, cpu_range, ram_range, clock_range) = self.get_indicator_ranges();
+        let bar = self.menu_bar();
 
+        // A project button switches to its project
+        if let Some(index) = bar.project_at(x) {
+            if let Some(original_name) = self.state.ui.theme_preview_original.take() {
+                self.state.theme = Theme::get_by_name(&original_name);
+            }
+            self.state.close_indicator_modal();
+            self.state.close_menu();
+            return self.switch_to_open_project(index);
+        }
+
+        // Check network/CPU/RAM/clock indicator clicks (right side of menu bar)
         use termide_ui_render::{
             INDICATOR_CLOCK_INDEX, INDICATOR_CPU_INDEX, INDICATOR_NET_INDEX, INDICATOR_RAM_INDEX,
         };
 
-        let indicator = if net_range.contains(&x) {
-            Some((INDICATOR_NET_INDEX, net_range.start))
-        } else if cpu_range.contains(&x) {
-            Some((INDICATOR_CPU_INDEX, cpu_range.start))
-        } else if ram_range.contains(&x) {
-            Some((INDICATOR_RAM_INDEX, ram_range.start))
-        } else if clock_range.contains(&x) {
-            Some((INDICATOR_CLOCK_INDEX, clock_range.start))
+        let indicator = if bar.net.contains(&x) {
+            Some((INDICATOR_NET_INDEX, bar.net.start))
+        } else if bar.cpu.contains(&x) {
+            Some((INDICATOR_CPU_INDEX, bar.cpu.start))
+        } else if bar.ram.contains(&x) {
+            Some((INDICATOR_RAM_INDEX, bar.ram.start))
+        } else if bar.clock.contains(&x) {
+            Some((INDICATOR_CLOCK_INDEX, bar.clock.start))
         } else {
             None
         };

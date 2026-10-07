@@ -17,6 +17,8 @@ use termide_system_monitor::{format_net_speed, BatteryInfo, RamUnit};
 use termide_theme::Theme;
 use termide_ui::str_display_width;
 
+use crate::project_strip::{fit_project_strip, ProjectButton, ProjectStrip};
+
 /// Parameters for rendering the menu bar.
 pub struct MenuRenderParams<'a> {
     pub theme: &'a Theme,
@@ -32,9 +34,9 @@ pub struct MenuRenderParams<'a> {
     pub net_up_rate: u64,
     /// Battery info, if available on this system
     pub battery: Option<BatteryInfo>,
-    /// A project open in the background waits for the user: the Projects
-    /// title is followed by the attention mark.
-    pub projects_attention: bool,
+    /// The open projects, in the order the menus list them. A waiting one
+    /// that has no button on screen marks the Projects title instead.
+    pub projects: &'a [ProjectButton],
 }
 
 /// Menu labels cached per UI language. Recomputed (and leaked) when the
@@ -102,6 +104,17 @@ pub const INDICATOR_RAM_INDEX: usize = MENU_ITEM_COUNT + 2;
 pub const INDICATOR_CLOCK_INDEX: usize = MENU_ITEM_COUNT + 3;
 /// Virtual navigation index for the disk indicator (status bar)
 pub const INDICATOR_DISK_INDEX: usize = MENU_ITEM_COUNT + 4;
+
+/// Navigation index of the first project button; project button `i` (in
+/// the order of [`MenuRenderParams::projects`]) is `PROJECT_BUTTON_BASE + i`.
+/// Placed after the fixed positions so their indices never move; the order
+/// they are walked in is [`MenuBarLayout::nav_order`].
+pub const PROJECT_BUTTON_BASE: usize = MENU_TOTAL_COUNT;
+
+/// The project button a navigation index stands for.
+pub fn project_button_of(menu_index: usize) -> Option<usize> {
+    menu_index.checked_sub(PROJECT_BUTTON_BASE)
+}
 
 /// Index of Bookmarks menu item
 pub const BOOKMARKS_MENU_INDEX: usize = 0;
@@ -176,7 +189,12 @@ impl MenuLayout {
 
     /// The layout of the menu bar as last drawn.
     pub fn compute() -> &'static Self {
-        let marked = usize::from(PROJECTS_MARKED.load(std::sync::atomic::Ordering::Relaxed));
+        Self::with_mark(PROJECTS_MARKED.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
+    /// The layout with or without the Projects attention mark.
+    fn with_mark(marked: bool) -> &'static Self {
+        let marked = usize::from(marked);
         let generation = i18n::language_generation();
         if let Ok(guard) = CACHED_LAYOUT.read() {
             if let Some((cached_gen, layouts)) = *guard {
@@ -229,213 +247,242 @@ pub fn resource_color(usage: u8, theme: &Theme) -> Color {
     }
 }
 
-/// Compute x-ranges of the network, CPU, RAM and clock indicators in the menu bar.
-///
-/// Returns `(net_range, cpu_range, ram_range, clock_range)` as `Range<u16>` values.
-/// These ranges correspond to the positions computed in `render_menu()`.
-pub fn get_resource_indicator_ranges(
-    area_width: u16,
-    params: &MenuRenderParams,
-) -> (
-    std::ops::Range<u16>,
-    std::ops::Range<u16>,
-    std::ops::Range<u16>,
-    std::ops::Range<u16>,
-) {
-    let t = i18n::t();
-    let layout = MenuLayout::compute();
+/// The texts of the indicators on the right of the menu bar.
+struct IndicatorTexts {
+    net_down: String,
+    net_up: String,
+    cpu: String,
+    ram: String,
+    battery: Option<String>,
+    clock: String,
+}
 
-    // Replicate the layout math from render_menu
-    let used_width = 1 + layout.total_width;
+impl IndicatorTexts {
+    fn of(params: &MenuRenderParams) -> Self {
+        let t = i18n::t();
+        let ram_unit = match params.ram_unit {
+            RamUnit::Gigabytes => t.size_gigabytes(),
+            RamUnit::Megabytes => t.size_megabytes(),
+        };
+        Self {
+            net_down: format!("↓{} ", format_net_speed(params.net_down_rate)),
+            net_up: format!("↑{} ", format_net_speed(params.net_up_rate)),
+            cpu: format!("CPU {}% ", params.cpu_usage),
+            ram: format!("RAM {}{} ", params.ram_value, ram_unit),
+            battery: params
+                .battery
+                .map(|b| format!("{}{}% ", battery_icon(b), b.percent)),
+            clock: format!(" {} ", Local::now().format("%H:%M")),
+        }
+    }
 
-    let ram_unit_str = match params.ram_unit {
-        RamUnit::Gigabytes => t.size_gigabytes(),
-        RamUnit::Megabytes => t.size_megabytes(),
+    fn width(&self) -> usize {
+        self.net_down.width()
+            + self.net_up.width()
+            + self.cpu.width()
+            + self.ram.width()
+            + self.battery.as_deref().map_or(0, |s| s.width())
+            + self.clock.width()
+    }
+}
+
+/// Where everything in the menu bar goes. Drawing, clicks and keyboard
+/// navigation all read this one layout.
+#[derive(Debug, Clone)]
+pub struct MenuBarLayout {
+    /// The Projects title carries the attention mark: a waiting project has
+    /// no button on screen.
+    pub projects_marked: bool,
+    /// The project buttons that fit.
+    pub projects: ProjectStrip,
+    pub net: std::ops::Range<u16>,
+    pub cpu: std::ops::Range<u16>,
+    pub ram: std::ops::Range<u16>,
+    pub clock: std::ops::Range<u16>,
+}
+
+impl MenuBarLayout {
+    /// The navigation indices in the order Left/Right walk them: the menu
+    /// titles, the project buttons on screen, then the indicators.
+    pub fn nav_order(&self) -> Vec<usize> {
+        (0..MENU_ITEM_COUNT)
+            .chain(
+                self.projects
+                    .buttons
+                    .iter()
+                    .map(|button| PROJECT_BUTTON_BASE + button.index),
+            )
+            .chain(MENU_ITEM_COUNT..MENU_TOTAL_COUNT)
+            .collect()
+    }
+
+    /// The project button at column `x`, as an index into the projects.
+    pub fn project_at(&self, x: u16) -> Option<usize> {
+        self.projects
+            .buttons
+            .iter()
+            .find(|button| button.range().contains(&x))
+            .map(|button| button.index)
+    }
+}
+
+/// Lay the menu bar out in `area_width` columns.
+pub fn menu_bar_layout(area_width: u16, params: &MenuRenderParams) -> MenuBarLayout {
+    let indicators = IndicatorTexts::of(params);
+    // The indicators keep their place; the project buttons get what is left
+    // between them and the titles, one column clear of each.
+    let fit = |marked: bool| {
+        let titles_end = 1 + MenuLayout::with_mark(marked).total_width;
+        let indicators_start = (area_width as usize)
+            .saturating_sub(indicators.width())
+            .max(titles_end);
+        // The titles end with a two-column gap: the strip starts one in.
+        let start = titles_end - 1;
+        let width = indicators_start.saturating_sub(1).saturating_sub(start);
+        (
+            fit_project_strip(params.projects, start as u16, width),
+            indicators_start as u16,
+        )
     };
+    let unseen_waiting = |strip: &ProjectStrip| {
+        params.projects.iter().enumerate().any(|(index, project)| {
+            project.attention && !strip.buttons.iter().any(|button| button.index == index)
+        })
+    };
+    let (mut projects, mut net_start) = fit(false);
+    let projects_marked = unseen_waiting(&projects);
+    if projects_marked {
+        (projects, net_start) = fit(true);
+    }
 
-    let net_down_text = format!("↓{} ", format_net_speed(params.net_down_rate));
-    let net_up_text = format!("↑{} ", format_net_speed(params.net_up_rate));
-    let cpu_text = format!("CPU {}% ", params.cpu_usage);
-    let ram_text = format!("RAM {}{} ", params.ram_value, ram_unit_str);
-    let battery_text = params
-        .battery
-        .map(|b| format!("{}{}% ", battery_icon(b), b.percent));
-    let battery_width = battery_text.as_deref().map(|s| s.width()).unwrap_or(0);
-    let current_time = chrono::Local::now().format("%H:%M").to_string();
-    let clock_text = format!(" {} ", current_time);
+    let net_end = net_start + (indicators.net_down.width() + indicators.net_up.width()) as u16;
+    let cpu_end = net_end + indicators.cpu.width() as u16;
+    let ram_end = cpu_end + indicators.ram.width() as u16;
+    let clock_start = ram_end + indicators.battery.as_deref().map_or(0, |s| s.width()) as u16;
+    let clock_end = clock_start + indicators.clock.width() as u16;
+    MenuBarLayout {
+        projects_marked,
+        projects,
+        net: net_start..net_end,
+        cpu: net_end..cpu_end,
+        ram: cpu_end..ram_end,
+        clock: clock_start..clock_end,
+    }
+}
 
-    // Calculate positions from the right side
-    // Layout order: ... [padding] [net_down] [net_up] [cpu] [ram] [battery?] [clock]
-    let remaining = (area_width as usize).saturating_sub(
-        used_width
-            + net_down_text.width()
-            + net_up_text.width()
-            + cpu_text.width()
-            + ram_text.width()
-            + battery_width
-            + clock_text.width(),
-    );
-
-    let net_start = (used_width + remaining) as u16;
-    let net_end = net_start + (net_down_text.width() + net_up_text.width()) as u16;
-
-    let cpu_start = net_end;
-    let cpu_end = cpu_start + cpu_text.width() as u16;
-
-    let ram_start = cpu_end;
-    let ram_end = ram_start + ram_text.width() as u16;
-
-    let clock_start = ram_end + battery_width as u16;
-    let clock_end = clock_start + clock_text.width() as u16;
-
-    (
-        net_start..net_end,
-        cpu_start..cpu_end,
-        ram_start..ram_end,
-        clock_start..clock_end,
-    )
+/// Spans filling the bar from column `from` up to column `to`.
+fn pad(spans: &mut Vec<Span<'_>>, from: usize, to: usize) {
+    if to > from {
+        spans.push(Span::raw(" ".repeat(to - from)));
+    }
 }
 
 /// Render top menu in Midnight Commander style
 pub fn render_menu(frame: &mut Frame, area: Rect, params: &MenuRenderParams) {
-    PROJECTS_MARKED.store(
-        params.projects_attention,
-        std::sync::atomic::Ordering::Relaxed,
-    );
-    let mut spans = vec![Span::raw(" ")];
-    let menu_items = get_menu_items();
-    let t = i18n::t();
+    let bar = menu_bar_layout(area.width, params);
+    PROJECTS_MARKED.store(bar.projects_marked, std::sync::atomic::Ordering::Relaxed);
+    let indicators = IndicatorTexts::of(params);
 
-    for (i, item) in menu_items.iter().enumerate() {
-        // Determine menu item style
-        let is_selected = params.selected_menu_item == Some(i);
-        let style = if is_selected && params.menu_open {
-            Style::default()
-                .fg(params.theme.selected_fg)
-                .bg(params.theme.selected_bg)
-                .add_modifier(Modifier::BOLD)
+    // Keyboard-selected style, shared by titles, buttons and indicators
+    let selected_style = Style::default()
+        .fg(params.theme.selected_fg)
+        .bg(params.theme.selected_bg)
+        .add_modifier(Modifier::BOLD);
+    let is_selected = |index: usize| params.menu_open && params.selected_menu_item == Some(index);
+
+    let mut spans = vec![Span::raw(" ")];
+    let items = get_menu_items();
+    for (i, item) in items.iter().enumerate() {
+        let style = if is_selected(i) {
+            selected_style
         } else {
             Style::default().fg(params.theme.accented_fg)
         };
 
         spans.push(Span::styled(item.as_str(), style));
-        if i == PROJECTS_MENU_INDEX && params.projects_attention {
+        if i == PROJECTS_MENU_INDEX && bar.projects_marked {
             // A mark, not a colour: several themes (the default included)
             // give menu titles the warning colour already, and a badge
             // reads as the selected item.
             spans.push(Span::styled(projects_mark(), style));
         }
-        spans.push(Span::raw("  "));
+        // The gap after the last title is left to the padding below: the
+        // project buttons start one column after it, not two.
+        if i + 1 < items.len() {
+            spans.push(Span::raw("  "));
+        }
     }
+    let mut column: usize = spans.iter().map(|s| s.width()).sum();
 
-    // System resource info
-    let ram_unit_str = match params.ram_unit {
-        RamUnit::Gigabytes => t.size_gigabytes(),
-        RamUnit::Megabytes => t.size_megabytes(),
-    };
+    // Project buttons: the current one in the menu titles' colour, the
+    // others dimmed.
+    for button in &bar.projects.buttons {
+        pad(&mut spans, column, button.x as usize);
+        let project = &params.projects[button.index];
+        let style = if is_selected(PROJECT_BUTTON_BASE + button.index) {
+            selected_style
+        } else if project.current {
+            Style::default().fg(params.theme.accented_fg)
+        } else {
+            Style::default().fg(params.theme.disabled)
+        };
+        spans.push(Span::styled(button.label.clone(), style));
+        column = column.max(button.x as usize) + button.label.width();
+    }
+    if let Some((x, text)) = &bar.projects.overflow {
+        pad(&mut spans, column, *x as usize);
+        spans.push(Span::styled(
+            text.clone(),
+            Style::default().fg(params.theme.disabled),
+        ));
+        column = column.max(*x as usize) + text.width();
+    }
+    pad(&mut spans, column, bar.net.start as usize);
 
-    // Network indicators
-    let net_down_text = format!("↓{} ", format_net_speed(params.net_down_rate));
-    let net_up_text = format!("↑{} ", format_net_speed(params.net_up_rate));
+    let net_kbd = is_selected(INDICATOR_NET_INDEX);
+    let pick = |selected: bool, style: Style| if selected { selected_style } else { style };
+    spans.push(Span::styled(
+        indicators.net_down,
+        pick(net_kbd, Style::default().fg(params.theme.success)),
+    ));
+    spans.push(Span::styled(
+        indicators.net_up,
+        pick(net_kbd, Style::default().fg(params.theme.warning)),
+    ));
+    spans.push(Span::styled(
+        indicators.cpu,
+        pick(
+            is_selected(INDICATOR_CPU_INDEX),
+            Style::default().fg(resource_color(params.cpu_usage, params.theme)),
+        ),
+    ));
+    spans.push(Span::styled(
+        indicators.ram,
+        pick(
+            is_selected(INDICATOR_RAM_INDEX),
+            Style::default().fg(resource_color(params.ram_percent, params.theme)),
+        ),
+    ));
 
-    // CPU indicator
-    let cpu_text = format!("CPU {}% ", params.cpu_usage);
-    let cpu_color = resource_color(params.cpu_usage, params.theme);
-
-    // RAM indicator
-    let ram_text = format!("RAM {}{} ", params.ram_value, ram_unit_str);
-    let ram_color = resource_color(params.ram_percent, params.theme);
-
-    // Battery indicator (only if a battery is present)
-    let battery_text = params
-        .battery
-        .map(|b| format!("{}{}% ", battery_icon(b), b.percent));
-    let battery_color = params.battery.map(|b| {
-        if b.charging {
+    // Battery indicator (between RAM and clock) when available
+    if let (Some(text), Some(b)) = (indicators.battery, params.battery) {
+        let color = if b.charging {
             params.theme.success
         } else {
             resource_color(100u8.saturating_sub(b.percent), params.theme)
-        }
-    });
-    let battery_width = battery_text.as_deref().map(|s| s.width()).unwrap_or(0);
-
-    // Current time
-    let current_time = Local::now().format("%H:%M").to_string();
-    let clock_text = format!(" {} ", current_time);
-
-    // Calculate spacing
-    let used_width: usize = spans.iter().map(|s| s.width()).sum();
-    let remaining = (area.width as usize).saturating_sub(
-        used_width
-            + net_down_text.width()
-            + net_up_text.width()
-            + cpu_text.width()
-            + ram_text.width()
-            + battery_width
-            + clock_text.width(),
-    );
-
-    if remaining > 0 {
-        spans.push(Span::raw(" ".repeat(remaining)));
-    }
-
-    // Keyboard-selected indicator style (same as selected menu item)
-    let indicator_selected_style = Style::default()
-        .fg(params.theme.selected_fg)
-        .bg(params.theme.selected_bg)
-        .add_modifier(Modifier::BOLD);
-
-    let net_kbd = params.menu_open && params.selected_menu_item == Some(INDICATOR_NET_INDEX);
-    let cpu_kbd = params.menu_open && params.selected_menu_item == Some(INDICATOR_CPU_INDEX);
-    let ram_kbd = params.menu_open && params.selected_menu_item == Some(INDICATOR_RAM_INDEX);
-    let clock_kbd = params.menu_open && params.selected_menu_item == Some(INDICATOR_CLOCK_INDEX);
-
-    // Pre-compute styles to avoid repeated Style::default() calls
-    let cpu_style = if cpu_kbd {
-        indicator_selected_style
-    } else {
-        Style::default().fg(cpu_color)
-    };
-    let ram_style = if ram_kbd {
-        indicator_selected_style
-    } else {
-        Style::default().fg(ram_color)
-    };
-    let clock_style = if clock_kbd {
-        indicator_selected_style
-    } else {
-        Style::default()
-            .fg(params.theme.fg)
-            .add_modifier(Modifier::BOLD)
-    };
-
-    // Add network indicators
-    let net_down_style = if net_kbd {
-        indicator_selected_style
-    } else {
-        Style::default().fg(params.theme.success)
-    };
-    let net_up_style = if net_kbd {
-        indicator_selected_style
-    } else {
-        Style::default().fg(params.theme.warning)
-    };
-    spans.push(Span::styled(net_down_text, net_down_style));
-    spans.push(Span::styled(net_up_text, net_up_style));
-
-    // Add CPU indicator
-    spans.push(Span::styled(cpu_text, cpu_style));
-
-    // Add RAM indicator
-    spans.push(Span::styled(ram_text, ram_style));
-
-    // Add battery indicator (between RAM and clock) when available
-    if let (Some(text), Some(color)) = (battery_text, battery_color) {
+        };
         spans.push(Span::styled(text, Style::default().fg(color)));
     }
 
-    // Add clock
-    spans.push(Span::styled(clock_text, clock_style));
+    spans.push(Span::styled(
+        indicators.clock,
+        pick(
+            is_selected(INDICATOR_CLOCK_INDEX),
+            Style::default()
+                .fg(params.theme.fg)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ));
 
     let menu =
         Paragraph::new(Line::from(spans)).style(Style::default().bg(params.theme.accented_bg));
@@ -498,5 +545,103 @@ mod tests {
             assert_eq!(marked.x_positions[i], plain.x_positions[i] + shift);
         }
         assert_eq!(marked.total_width, plain.total_width + extra as usize);
+    }
+
+    fn params<'a>(theme: &'a Theme, projects: &'a [ProjectButton]) -> MenuRenderParams<'a> {
+        MenuRenderParams {
+            theme,
+            selected_menu_item: None,
+            menu_open: false,
+            cpu_usage: 0,
+            ram_percent: 0,
+            ram_value: "1".to_string(),
+            ram_unit: RamUnit::Gigabytes,
+            net_down_rate: 0,
+            net_up_rate: 0,
+            battery: None,
+            projects,
+        }
+    }
+
+    fn project(name: &str, current: bool, attention: bool) -> ProjectButton {
+        ProjectButton {
+            name: name.to_string(),
+            current,
+            attention,
+        }
+    }
+
+    #[test]
+    fn project_buttons_sit_between_the_titles_and_the_indicators() {
+        let theme = Theme::default();
+        let projects = [project("one", true, false), project("two", false, false)];
+        let bar = menu_bar_layout(200, &params(&theme, &projects));
+        let titles_end = 1 + MenuLayout::with_mark(false).total_width;
+        let first = &bar.projects.buttons[0];
+        assert_eq!(
+            first.x as usize,
+            titles_end - 1,
+            "one column after the titles"
+        );
+        let last = bar.projects.buttons.last().unwrap();
+        assert!(last.range().end < bar.net.start, "clear of the indicators");
+        assert_eq!(bar.project_at(first.x), Some(0));
+        assert_eq!(bar.project_at(last.x), Some(1));
+        assert!(!bar.projects_marked);
+
+        let order = bar.nav_order();
+        let projects_at = MENU_ITEM_COUNT;
+        assert_eq!(order[projects_at - 1], OPTIONS_MENU_INDEX);
+        assert_eq!(
+            order[projects_at..projects_at + 2],
+            [PROJECT_BUTTON_BASE, PROJECT_BUTTON_BASE + 1]
+        );
+        assert_eq!(order[projects_at + 2], INDICATOR_NET_INDEX);
+    }
+
+    #[test]
+    fn a_waiting_project_without_a_button_marks_the_projects_title() {
+        let theme = Theme::default();
+        let projects = [project("one", true, false), project("two", false, true)];
+        let wide = menu_bar_layout(200, &params(&theme, &projects));
+        assert!(!wide.projects_marked, "its button shows the bell");
+
+        // No room for buttons: the title carries the bell.
+        let narrow_width = (1 + MenuLayout::with_mark(true).total_width) as u16 + 30;
+        let narrow = menu_bar_layout(narrow_width, &params(&theme, &projects));
+        assert!(narrow.projects.buttons.is_empty());
+        assert!(narrow.projects_marked);
+        assert_eq!(narrow.nav_order().len(), MENU_TOTAL_COUNT);
+    }
+
+    #[test]
+    fn project_buttons_are_drawn_where_the_layout_puts_them() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let theme = Theme::default();
+        let projects = [project("nvn", true, false), project("zarab", false, false)];
+        let params = params(&theme, &projects);
+        let mut terminal = Terminal::new(TestBackend::new(160, 1)).unwrap();
+        terminal
+            .draw(|frame| render_menu(frame, frame.area(), &params))
+            .unwrap();
+        let row: String = (0..160)
+            .map(|x| terminal.backend().buffer()[(x, 0)].symbol().to_string())
+            .collect();
+        let bar = menu_bar_layout(160, &params);
+        for button in &bar.projects.buttons {
+            let at: String = row
+                .chars()
+                .skip(button.x as usize)
+                .take(button.label.chars().count())
+                .collect();
+            assert_eq!(at, button.label);
+        }
+        assert!(row.contains("[nvn] [zarab]"), "{row}");
+        let titles_end = row.find(" [nvn]").unwrap();
+        assert_ne!(
+            &row[titles_end - 1..titles_end],
+            " ",
+            "one column after the titles: {row}"
+        );
     }
 }

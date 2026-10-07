@@ -571,24 +571,23 @@ impl AppState {
         }
     }
 
-    /// Move to next menu item
-    pub fn next_menu_item(&mut self, menu_count: usize) {
-        if let Some(current) = self.ui.selected_menu_item {
-            self.ui.selected_menu_item = Some((current + 1) % menu_count);
-            self.ui.selected_dropdown_item = 0;
+    /// Move the menu bar selection one step along `order` (the positions
+    /// as the bar shows them), wrapping around. A selection no longer in
+    /// `order` — a project button that went away — restarts at its start.
+    pub fn step_menu_item(&mut self, order: &[usize], forward: bool) {
+        let Some(current) = self.ui.selected_menu_item else {
+            return;
+        };
+        if order.is_empty() {
+            return;
         }
-    }
-
-    /// Move to previous menu item
-    pub fn prev_menu_item(&mut self, menu_count: usize) {
-        if let Some(current) = self.ui.selected_menu_item {
-            self.ui.selected_menu_item = Some(if current == 0 {
-                menu_count - 1
-            } else {
-                current - 1
-            });
-            self.ui.selected_dropdown_item = 0;
-        }
+        let next = match order.iter().position(|&index| index == current) {
+            Some(at) if forward => (at + 1) % order.len(),
+            Some(at) => (at + order.len() - 1) % order.len(),
+            None => 0,
+        };
+        self.ui.selected_menu_item = Some(order[next]);
+        self.ui.selected_dropdown_item = 0;
     }
 
     /// Update terminal dimensions

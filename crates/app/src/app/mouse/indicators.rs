@@ -8,7 +8,7 @@ use crate::app::App;
 use crate::state::ActiveModal;
 use termide_i18n as i18n;
 use termide_modal as modal;
-use termide_ui_render::{get_resource_indicator_ranges, MenuRenderParams};
+use termide_ui_render::{menu_bar_layout, MenuBarLayout, MenuRenderParams};
 
 /// Pad or truncate `s` to exactly `width` display columns.
 fn fit_name(s: &str, width: usize) -> String {
@@ -52,15 +52,10 @@ fn pct_to_style(pct: u8, theme: &termide_theme::Theme) -> termide_modal::info::S
 }
 
 impl App {
-    pub(in crate::app) fn get_indicator_ranges(
-        &self,
-    ) -> (
-        std::ops::Range<u16>,
-        std::ops::Range<u16>,
-        std::ops::Range<u16>,
-        std::ops::Range<u16>,
-    ) {
+    /// The menu bar's layout as it is drawn now.
+    pub(in crate::app) fn menu_bar(&self) -> MenuBarLayout {
         let (ram_value, ram_unit) = self.state.system_monitor.format_ram();
+        let project_buttons = self.state.project_buttons();
         let params = MenuRenderParams {
             theme: self.state.theme,
             selected_menu_item: self.state.ui.selected_menu_item,
@@ -72,9 +67,9 @@ impl App {
             net_down_rate: self.state.system_monitor.net_download_rate(),
             net_up_rate: self.state.system_monitor.net_upload_rate(),
             battery: self.state.system_monitor.battery_cached(),
-            projects_attention: self.state.open_projects.iter().any(|p| p.attention),
+            projects: &project_buttons,
         };
-        get_resource_indicator_ranges(self.state.terminal.width, &params)
+        menu_bar_layout(self.state.terminal.width, &params)
     }
 
     /// Get disk space info from the active panel (if available).

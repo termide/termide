@@ -9,7 +9,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
 use termide_ui_render::{
-    get_menu_item_x_position, get_projects_items, DropdownItem, PROJECTS_MENU_INDEX,
+    get_menu_item_x_position, get_projects_items, DropdownItem, ProjectButton, PROJECTS_MENU_INDEX,
     PROJECTS_SUBMENU_ITEM_COUNT,
 };
 
@@ -265,6 +265,35 @@ impl AppState {
         self.ui.projects_submenu.selected = index;
     }
 
+    /// The open projects as the menu bar's buttons, in the order the menus
+    /// list them (so button `i` is `switch_to_open_project(i)`).
+    pub fn project_buttons(&self) -> Vec<ProjectButton> {
+        let mut open: Vec<&OpenProjectView> = self.open_projects.iter().collect();
+        open.sort_by(|a, b| path_order(&a.root, &b.root));
+        let name = |root: &Path| {
+            root.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| root.display().to_string())
+        };
+        open.iter()
+            .map(|view| {
+                let own = name(&view.root);
+                let shared = open
+                    .iter()
+                    .any(|other| other.root != view.root && name(&other.root) == own);
+                let label = match view.root.parent().and_then(Path::file_name) {
+                    Some(parent) if shared => format!("{}/{own}", parent.to_string_lossy()),
+                    _ => own,
+                };
+                ProjectButton {
+                    name: label,
+                    current: view.root == self.project_root,
+                    attention: view.attention,
+                }
+            })
+            .collect()
+    }
+
     /// Load the projects worked on.
     pub(crate) fn load_known_projects(&mut self) {
         self.cache.projects = known_projects();
@@ -317,6 +346,23 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    #[test]
+    fn project_buttons_follow_the_menu_order_and_tell_twins_apart() {
+        let mut state = test_state();
+        state.project_root = PathBuf::from("/w/b/app");
+        state.open_projects = vec![
+            open("/w/b/app", false),
+            open("/w/termide", true),
+            open("/w/a/app", false),
+        ];
+        let buttons = state.project_buttons();
+        let names: Vec<_> = buttons.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names, ["a/app", "b/app", "termide"]);
+        let current: Vec<_> = buttons.iter().map(|b| b.current).collect();
+        assert_eq!(current, [false, true, false]);
+        assert!(buttons[2].attention);
     }
 
     #[test]

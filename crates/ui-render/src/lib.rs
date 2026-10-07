@@ -7,6 +7,7 @@ pub mod inline_selector;
 pub mod language_dropdown;
 pub mod menu;
 pub mod panel_rendering;
+pub mod project_strip;
 pub mod simple_dropdown;
 pub mod status_bar;
 pub mod theme_dropdown;
@@ -33,16 +34,18 @@ pub use language_dropdown::{
     find_current_language_index, language_dropdown_geometry, LanguageDropdown,
 };
 pub use menu::{
-    get_menu_item_x_position, get_menu_items, get_resource_indicator_ranges, render_menu,
-    resource_color, MenuLayout, MenuRenderParams, AI_MENU_INDEX, BOOKMARKS_MENU_INDEX,
-    COMMANDS_MENU_INDEX, INDICATOR_CLOCK_INDEX, INDICATOR_CPU_INDEX, INDICATOR_DISK_INDEX,
-    INDICATOR_NET_INDEX, INDICATOR_RAM_INDEX, MENU_INDICATOR_COUNT, MENU_ITEM_COUNT,
-    MENU_TOTAL_COUNT, OPTIONS_MENU_INDEX, PROJECTS_MENU_INDEX, WINDOWS_MENU_INDEX,
+    get_menu_item_x_position, get_menu_items, menu_bar_layout, project_button_of, render_menu,
+    resource_color, MenuBarLayout, MenuLayout, MenuRenderParams, AI_MENU_INDEX,
+    BOOKMARKS_MENU_INDEX, COMMANDS_MENU_INDEX, INDICATOR_CLOCK_INDEX, INDICATOR_CPU_INDEX,
+    INDICATOR_DISK_INDEX, INDICATOR_NET_INDEX, INDICATOR_RAM_INDEX, MENU_INDICATOR_COUNT,
+    MENU_ITEM_COUNT, MENU_TOTAL_COUNT, OPTIONS_MENU_INDEX, PROJECTS_MENU_INDEX,
+    PROJECT_BUTTON_BASE, WINDOWS_MENU_INDEX,
 };
 pub use panel_rendering::{
     panel_icon, render_collapsed_panel, render_dividers, render_expanded_panel,
     render_v_divider_ghost, ExpandedPanelParams,
 };
+pub use project_strip::ProjectButton;
 pub use simple_dropdown::render_simple_dropdown;
 pub use status_bar::{
     segment_hit_areas, status_trailing_width, BackgroundOpsSummary, SegmentHit, StatusBar,
