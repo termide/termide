@@ -406,11 +406,16 @@ impl AgentCatalog for FsCatalog {
             .map(|name| {
                 // The default agent needs no definition, so unless one gives
                 // it a description it is described by the panel's own label.
-                let mut description = self.dirs.spec(&name).description;
+                let spec = self.dirs.spec(&name);
+                let mut description = spec.description;
                 if description.is_empty() && name == DEFAULT_AGENT {
                     description = termide_i18n::t().panel_agent().to_string();
                 }
-                AgentEntry { name, description }
+                AgentEntry {
+                    name,
+                    description,
+                    icon: spec.icon,
+                }
             })
             .collect()
     }

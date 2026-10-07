@@ -291,7 +291,12 @@ pub trait ConnectionCatalog: Send + Sync {
 pub struct AgentEntry {
     pub name: String,
     pub description: String,
+    /// The header's icon from the definition; `None` keeps [`AGENT_ICON`].
+    pub icon: Option<String>,
 }
+
+/// The header's icon for an agent whose definition names none.
+pub const AGENT_ICON: &str = "🤖";
 
 /// What an agent definition changes about the panel's agent. `None` keeps
 /// the current model or mode; the prompt and the tools always come from the
@@ -596,10 +601,10 @@ pub struct AgentPanel {
     recent_to_rename: Option<PathBuf>,
     cwd: PathBuf,
     agent: String,
-    /// The agent's description and the agent it was looked up for: the catalog
-    /// reads the definitions from disk, so it is asked once per agent, not
-    /// every frame.
-    agent_description: Option<(String, String)>,
+    /// The agent's catalog entry (description and icon): the catalog reads
+    /// the definitions from disk, so it is asked once per agent, not every
+    /// frame.
+    agent_entry: Option<AgentEntry>,
     catalog: Arc<dyn AgentCatalog>,
     /// Agents offered by the last picker, in the order they were shown.
     agent_choices: Vec<String>,
@@ -974,7 +979,7 @@ impl AgentPanel {
             model,
             configured_model: setup.model,
             agent,
-            agent_description: None,
+            agent_entry: None,
             catalog: setup.catalog,
             agent_choices: Vec::new(),
             prompt_choices: Vec::new(),
@@ -1446,8 +1451,13 @@ impl Panel for AgentPanel {
         }
     }
 
-    fn icon(&self) -> Option<&'static str> {
-        Some("🤖")
+    fn icon(&self) -> Option<&str> {
+        let custom = self
+            .agent_entry
+            .as_ref()
+            .filter(|entry| entry.name == self.agent)
+            .and_then(|entry| entry.icon.as_deref());
+        Some(custom.unwrap_or(AGENT_ICON))
     }
 
     fn width_preference(&self) -> WidthPreference {
@@ -1455,6 +1465,7 @@ impl Panel for AgentPanel {
     }
 
     fn prepare_render(&mut self, theme: &Theme, _config: &Arc<Config>) {
+        self.agent_entry();
         self.colors = ThemeColors::from(theme);
         self.is_light = theme.is_light_theme();
     }

@@ -1303,6 +1303,7 @@ checklists its prompt refers to.
 ```markdown
 ---
 description: Reviews diffs and points at risks
+icon: 🔍
 model: Qwen3.8-27B-MTPLX-Optimized-Quality
 mode: edit
 tools: read, bash
@@ -1322,7 +1323,8 @@ YAML list of `- name` lines under `tools:`),
 none. Skills and MCP servers' tools are not governed by
 it: they come with what you configured. `max_turns` is how many model calls
 a task delegated to the agent may take before it is cut off (fifty when
-absent; see [Subagents](#subagents)). A key termide does not read — a typo
+absent; see [Subagents](#subagents)). `icon` is what the panel's header
+shows in place of 🤖 — one emoji reads best. A key termide does not read — a typo
 such as `descripton:` — is reported under the banner when a panel opens.
 
 Switching agents mid-session swaps the prompt and the tools for the next

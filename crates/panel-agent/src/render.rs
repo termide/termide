@@ -11,9 +11,9 @@ use termide_ui::ScrollBar;
 
 use crate::toolset::TOOLSET_ACTION;
 use crate::{
-    format_tokens, provider_label, shorten_path, transcript, truncate_title, AgentPanel, BannerHit,
-    Phase, RunButton, AGENT_ACTION, CONNECTION_ACTION, CWD_ACTION, MODEL_ACTION, MODE_ACTION,
-    OPTIONS_ACTION, REASONING_ACTION,
+    format_tokens, provider_label, shorten_path, transcript, truncate_title, AgentEntry,
+    AgentPanel, BannerHit, Phase, RunButton, AGENT_ACTION, CONNECTION_ACTION, CWD_ACTION,
+    MODEL_ACTION, MODE_ACTION, OPTIONS_ACTION, REASONING_ACTION,
 };
 
 /// Rows of the welcome banner's logo.
@@ -276,23 +276,33 @@ impl AgentPanel {
             .min(available.saturating_sub(2).max(1))
     }
 
+    /// The current agent's catalog entry, looked up again only when the
+    /// agent changed; an agent the catalog does not list has an empty one.
+    pub(crate) fn agent_entry(&mut self) -> &AgentEntry {
+        if self
+            .agent_entry
+            .as_ref()
+            .is_none_or(|entry| entry.name != self.agent)
+        {
+            let entry = self
+                .catalog
+                .list()
+                .into_iter()
+                .find(|entry| entry.name == self.agent)
+                .unwrap_or_else(|| AgentEntry {
+                    name: self.agent.clone(),
+                    description: String::new(),
+                    icon: None,
+                });
+            self.agent_entry = Some(entry);
+        }
+        self.agent_entry.as_ref().expect("filled above")
+    }
+
     /// The agent's description from its definition, empty when it has
     /// none; the banner shows it under the agent's name.
     pub(crate) fn agent_description(&mut self) -> String {
-        match &self.agent_description {
-            Some((agent, description)) if *agent == self.agent => description.clone(),
-            _ => {
-                let description = self
-                    .catalog
-                    .list()
-                    .into_iter()
-                    .find(|entry| entry.name == self.agent)
-                    .map(|entry| entry.description)
-                    .unwrap_or_default();
-                self.agent_description = Some((self.agent.clone(), description.clone()));
-                description
-            }
-        }
+        self.agent_entry().description.clone()
     }
 
     /// Rows the banner's fields take, before its list of sessions: the

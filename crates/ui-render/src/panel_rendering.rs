@@ -448,7 +448,7 @@ fn border_style(is_focused: bool, theme: &Theme) -> Style {
 /// panel waits for the user, else the panel's own icon (emoji mode only).
 /// The mark takes the icon's place, so the header keeps its width when an
 /// emoji icon is shown; colour alone would read as focus.
-fn header_icon(panel: &dyn Panel, is_focused: bool) -> Option<(&'static str, bool)> {
+fn header_icon(panel: &dyn Panel, is_focused: bool) -> Option<(&str, bool)> {
     if !is_focused && panel.needs_attention() {
         Some((attention_mark(), true))
     } else if use_emoji_icons() {
@@ -482,7 +482,7 @@ fn header_buttons(
                 style
             };
             spans.push(Span::styled(" ", style));
-            spans.push(Span::styled(icon, icon_style));
+            spans.push(Span::styled(icon.to_string(), icon_style));
             spans.push(Span::styled(trailing, style));
         }
         // Without emoji the header has no icon; keep the space before the

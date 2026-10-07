@@ -254,7 +254,7 @@ impl Panel for MarkdownPanel {
             .unwrap_or_else(|| self.title.clone())
     }
 
-    fn icon(&self) -> Option<&'static str> {
+    fn icon(&self) -> Option<&str> {
         // A globe for a fetched web page (matching the bookmark icon).
         self.source_url.as_ref().map(|_| "🌐")
     }

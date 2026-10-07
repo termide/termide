@@ -456,8 +456,9 @@ fn move_legacy_default_template(
 }
 
 /// The front-matter keys an `AGENT.md` is read for, besides `env.<NAME>`.
-const AGENT_KEYS: [&str; 8] = [
+const AGENT_KEYS: [&str; 9] = [
     "description",
+    "icon",
     "model",
     "mode",
     "tools",
@@ -488,6 +489,8 @@ pub enum DefinitionProblem {
 pub struct AgentSpec {
     /// One line for the agent picker and the `task` tool: `description`.
     pub description: String,
+    /// What the panel's header shows in place of `🤖`: `icon`.
+    pub icon: Option<String>,
     /// Model id at the configured endpoint: `model`.
     pub model: Option<String>,
     /// Permission mode the agent starts in: `mode`.
@@ -582,6 +585,7 @@ impl AgentSpec {
         });
         let spec = Self {
             description: text("description").unwrap_or_default().to_string(),
+            icon: text("icon").map(str::to_string),
             model: text("model").map(str::to_string),
             mode,
             tools,
@@ -1367,8 +1371,8 @@ mod tests {
         };
         write(
             "review",
-            "---\ndescription: Reviews diffs: risks first\nmodel: big\nmode: accept-edits\n\
-             tools: read, bash\nmax_turns: 120\n---\nYou review.\n\n{{tools}}\n",
+            "---\ndescription: Reviews diffs: risks first\nicon: \"🔍\"\nmodel: big\n\
+             mode: accept-edits\ntools: read, bash\nmax_turns: 120\n---\nYou review.\n\n{{tools}}\n",
         );
         write("bracketed", "---\ntools: [\"read\", 'bash']\n---\n");
         write("toolless", "---\ntools: []\n---\n");
@@ -1401,6 +1405,7 @@ mod tests {
         let dirs = AgentDirs::new(tmp.path(), None, Some(&global));
         let spec = dirs.spec("review");
         assert_eq!(spec.description, "Reviews diffs: risks first");
+        assert_eq!(spec.icon.as_deref(), Some("🔍"));
         assert_eq!(spec.model.as_deref(), Some("big"));
         assert_eq!(spec.mode, Some(Mode::Edit));
         let read_bash = Some(vec!["read".to_string(), "bash".to_string()]);
@@ -1415,6 +1420,7 @@ mod tests {
         assert_eq!(dirs.spec("toolless").tools, Some(Vec::new()));
         let broken = dirs.spec("broken");
         assert_eq!(broken.description, "still read");
+        assert_eq!(broken.icon, None);
         assert_eq!(broken.mode, None);
         assert_eq!(broken.max_turns, None);
 

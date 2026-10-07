@@ -141,14 +141,17 @@ impl AgentCatalog for Agents {
             AgentEntry {
                 name: "default".into(),
                 description: String::new(),
+                icon: None,
             },
             AgentEntry {
                 name: "review".into(),
                 description: "Reviews diffs".into(),
+                icon: Some("🔍".into()),
             },
             AgentEntry {
                 name: "outside".into(),
                 description: "An external agent".into(),
+                icon: None,
             },
         ]
     }
@@ -4811,6 +4814,23 @@ fn a_system_prompt_block_shows_once_and_on_change() {
     panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
     settle(&mut panel);
     assert_eq!(count(&panel), 2, "shown again after it changed");
+}
+
+#[test]
+fn the_header_shows_the_agents_own_icon_or_the_robot() {
+    let mut panel = panel(vec![]);
+    let (theme, config) = (Theme::default(), Arc::new(Config::default()));
+    panel.prepare_render(&theme, &config);
+    assert_eq!(panel.icon(), Some(AGENT_ICON));
+
+    let events = panel.handle_status_action(AGENT_ACTION);
+    let picker = events.first().expect("picker");
+    select(&mut panel, picker, 1);
+    // Until the next frame looks the agent up, the header keeps the robot
+    // rather than another agent's icon.
+    assert_eq!(panel.icon(), Some(AGENT_ICON));
+    panel.prepare_render(&theme, &config);
+    assert_eq!(panel.icon(), Some("🔍"));
 }
 
 #[test]

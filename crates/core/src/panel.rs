@@ -290,7 +290,7 @@ pub trait Panel: Any {
     /// Optional per-instance header icon, overriding the by-name default
     /// (e.g. a globe for a viewer showing a fetched web page). `None` uses the
     /// panel-type icon.
-    fn icon(&self) -> Option<&'static str> {
+    fn icon(&self) -> Option<&str> {
         None
     }
 
