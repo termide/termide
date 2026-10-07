@@ -342,6 +342,7 @@ Arguments:
 Options:
   --log-level <LEVEL>  Set log level (trace, debug, info, warn, error)
   --no-lsp             Disable LSP language servers
+  -r, --restore        Reopen the projects of the last run in the background
   --config <PATH>      Use custom config file path
   --diagnostics        Run pre-flight diagnostics and exit (no UI)
   --detached           Start a detached instance that survives the terminal

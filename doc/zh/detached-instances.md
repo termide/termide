@@ -98,6 +98,7 @@ termide --attach my-project
 |---------|--------------|
 | `termide --detached` | 启动可分离实例并打印其 ID |
 | `termide --detached file.rs` | 同上，并照常打开文件 |
+| `termide --detached --restore`（`-r`） | 同上，并重新打开上次运行的项目 |
 | `termide --attach` | 接入最近的实例 |
 | `termide --attach <ID>` | 接入指定名称的实例 |
 | `termide --attach <ID> --force`（`-f`） | 接入，并从已接入的客户端手中接管实例 |

@@ -88,6 +88,9 @@ pub struct App {
     /// launch for a single directory must not replace the list of the run
     /// before.
     saved_open_projects: Option<Vec<std::path::PathBuf>>,
+    /// Reopen the projects of the last run as soon as the loop starts
+    /// (`termide --restore`), as the Projects menu item does.
+    restore_projects: bool,
     /// Terminal capabilities this process was started with. Kept so that a
     /// reattach can re-enter exactly the modes startup entered.
     keyboard_caps: termide_keyboard::KeyboardCaps,
@@ -176,6 +179,7 @@ impl App {
             keyboard_caps: termide_keyboard::KeyboardCaps::default(),
             persist_layout: true,
             saved_open_projects: None,
+            restore_projects: false,
             last_focus_sig: None,
             settings_model_fetch: None,
         }
@@ -266,6 +270,7 @@ impl App {
             keyboard_caps: caps,
             persist_layout: true,
             saved_open_projects: None,
+            restore_projects: false,
             last_focus_sig: None,
             settings_model_fetch: None,
         }
@@ -376,6 +381,13 @@ impl App {
     /// restored nor overwritten.
     pub fn set_layout_persistence(&mut self, enabled: bool) {
         self.persist_layout = enabled;
+    }
+
+    /// Reopen the projects of the last run in the background once the
+    /// application starts (`termide --restore`). Without a saved set the
+    /// launch is an ordinary one.
+    pub fn restore_projects_on_start(&mut self) {
+        self.restore_projects = true;
     }
 
     /// Open a file path in a new editor panel, creating the file (and parent
@@ -720,6 +732,14 @@ impl App {
         let size = terminal.size()?;
         self.state.update_terminal_size(size.width, size.height);
         self.load_reopenable_projects();
+        if self.restore_projects {
+            self.restore_projects = false;
+            if self.state.reopenable_projects.is_empty() {
+                log::info!("No projects of the last run to restore");
+            } else {
+                self.reopen_previous_projects();
+            }
+        }
         self.sync_open_projects();
 
         while !self.state.should_quit {

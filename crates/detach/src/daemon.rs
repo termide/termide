@@ -9,10 +9,11 @@
 
 use anyhow::{Context, Result};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError};
 use std::time::{Duration, Instant};
@@ -57,7 +58,10 @@ pub const KILL_GRACE: Duration = Duration::from_secs(3);
 /// be called before any thread is spawned — `fork` only carries the calling
 /// thread into the child, and a lock held by a thread that no longer exists
 /// would deadlock the daemon.
-pub fn spawn_detached(project_root: &Path, files: &[PathBuf]) -> Result<String> {
+///
+/// `args` are the command-line arguments the hosted termide starts with:
+/// files to open, `--restore`.
+pub fn spawn_detached(project_root: &Path, args: &[OsString]) -> Result<String> {
     registry::prune_dead()?;
 
     let id = paths::allocate_id(project_root)?;
@@ -87,7 +91,7 @@ pub fn spawn_detached(project_root: &Path, files: &[PathBuf]) -> Result<String> 
         Ok(nix::unistd::ForkResult::Child) => {
             // Never unwind past fork: the child shares the parent's atexit
             // handlers and buffered stdio, so it leaves by _exit only.
-            let code = match run_daemon(&id, listener, project_root, files) {
+            let code = match run_daemon(&id, listener, project_root, args) {
                 Ok(()) => 0,
                 Err(e) => {
                     log::error!("Detached instance '{id}' failed: {e:#}");
@@ -332,7 +336,7 @@ fn run_daemon(
     id: &str,
     listener: UnixListener,
     project_root: &Path,
-    files: &[PathBuf],
+    args: &[OsString],
 ) -> Result<()> {
     detach_from_terminal()?;
 
@@ -348,8 +352,8 @@ fn run_daemon(
 
     let exe = std::env::current_exe().context("Failed to locate the termide binary")?;
     let mut cmd = CommandBuilder::new(exe);
-    for file in files {
-        cmd.arg(file);
+    for arg in args {
+        cmd.arg(arg);
     }
     cmd.cwd(project_root);
     cmd.env(SOCKET_ENV, paths::socket_path(id)?);

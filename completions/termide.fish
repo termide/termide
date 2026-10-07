@@ -15,6 +15,7 @@ end
 
 complete -c termide -l log-level -d 'Minimum log level' -x -a 'trace debug info warn error'
 complete -c termide -l no-lsp -d 'Disable LSP support'
+complete -c termide -s r -l restore -d 'Reopen the projects of the last run'
 complete -c termide -l config -d 'Path to config file' -r -F
 complete -c termide -l diagnostics -d 'Run pre-flight diagnostics and exit'
 complete -c termide -l detached -d 'Start a detached instance and print its id'

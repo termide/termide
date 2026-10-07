@@ -111,6 +111,7 @@ the way it does in a local instance.
 |---------|--------------|
 | `termide --detached` | Start a detached instance and print its id |
 | `termide --detached file.rs` | Same, opening files as usual |
+| `termide --detached --restore` (`-r`) | Same, reopening the projects of the last run |
 | `termide --attach` | Attach to the most recent instance |
 | `termide --attach <ID>` | Attach to a named instance |
 | `termide --attach <ID> --force` (`-f`) | Attach, taking over from a client that is already attached |

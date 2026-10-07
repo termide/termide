@@ -46,7 +46,13 @@ struct Cli {
 
     /// Attach to a detached instance. Without an id, the most recent one.
     #[cfg(unix)]
-    #[arg(long, value_name = "ID", num_args = 0..=1, default_missing_value = "")]
+    #[arg(
+        long,
+        value_name = "ID",
+        num_args = 0..=1,
+        default_missing_value = "",
+        conflicts_with = "restore"
+    )]
     attach: Option<String>,
 
     /// With `--attach`: take the instance over from a client that is already
@@ -113,6 +119,12 @@ struct Cli {
     /// it happens). A `--recall` run takes `text` or `json`.
     #[arg(long, value_name = "FORMAT", requires = "headless", value_parser = ["text", "json", "stream-json"], default_value = "text")]
     output: String,
+
+    /// Reopen the projects of the last run. The current project is the one
+    /// for the working directory; the others open in the background and load
+    /// when first entered. Without a saved set, an ordinary launch.
+    #[arg(short, long, conflicts_with_all = ["files", "headless"])]
+    restore: bool,
 
     /// File(s) or directories to open. Given a path, termide starts in a
     /// clean view (no project layout is restored or saved). Text opens in the
@@ -217,6 +229,18 @@ fn restore_terminal() {
     termide_core::leave_terminal_modes();
 }
 
+/// The arguments a detached instance's own termide starts with: the files
+/// to open and `--restore`, which the hosted process acts on itself.
+#[cfg(unix)]
+fn hosted_args(cli: &Cli) -> Vec<std::ffi::OsString> {
+    let mut args: Vec<std::ffi::OsString> = Vec::new();
+    if cli.restore {
+        args.push("--restore".into());
+    }
+    args.extend(cli.files.iter().map(|f| f.clone().into_os_string()));
+    args
+}
+
 /// Handle `--list-instances`, `--kill`, `--attach` and `--detached`.
 ///
 /// Returns `Some(exit_code)` when one of them ran and the process should stop,
@@ -256,7 +280,7 @@ fn handle_detached_instance_cli(cli: &Cli) -> Result<Option<i32>> {
 
     if cli.detached {
         let project_root = std::env::current_dir()?;
-        let id = termide_detach::spawn_detached(&project_root, &cli.files)?;
+        let id = termide_detach::spawn_detached(&project_root, &hosted_args(cli))?;
         println!("Detached instance '{id}' started.");
         println!("Attach with: termide --attach {id}");
         return Ok(Some(0));
@@ -401,7 +425,7 @@ fn main() -> Result<()> {
         && cli.files.is_empty()
         && std::env::var_os(termide_detach::SOCKET_ENV).is_none()
     {
-        let id = termide_detach::spawn_detached(&project_root, &[])?;
+        let id = termide_detach::spawn_detached(&project_root, &hosted_args(&cli))?;
         let code = termide_detach::client::attach(Some(id), false)?;
         std::process::exit(code);
     }
@@ -564,6 +588,9 @@ fn main() -> Result<()> {
             );
             app.setup_default_layout();
         }
+        if cli.restore {
+            app.restore_projects_on_start();
+        }
     } else {
         app.set_layout_persistence(false);
         for path in cli.files {
@@ -597,6 +624,34 @@ mod cli_tests {
     use super::Cli;
     use clap::Parser;
     use std::path::PathBuf;
+
+    #[test]
+    fn restore_parses_alone_and_with_detached() {
+        assert!(!Cli::try_parse_from(["termide"]).unwrap().restore);
+        assert!(Cli::try_parse_from(["termide", "-r"]).unwrap().restore);
+        assert!(
+            Cli::try_parse_from(["termide", "--restore"])
+                .unwrap()
+                .restore
+        );
+        #[cfg(unix)]
+        {
+            let cli = Cli::try_parse_from(["termide", "--detached", "-r"]).unwrap();
+            assert!(cli.detached && cli.restore);
+            assert_eq!(super::hosted_args(&cli), vec!["--restore"]);
+        }
+    }
+
+    /// `--restore` sets up the full workspace, which the clean file view,
+    /// the headless runs and attaching to a running instance all exclude.
+    #[test]
+    fn restore_conflicts_with_files_headless_and_attach() {
+        assert!(Cli::try_parse_from(["termide", "-r", "notes.md"]).is_err());
+        assert!(Cli::try_parse_from(["termide", "-r", "--prompt", "x"]).is_err());
+        assert!(Cli::try_parse_from(["termide", "-r", "--recall", "x"]).is_err());
+        #[cfg(unix)]
+        assert!(Cli::try_parse_from(["termide", "-r", "--attach"]).is_err());
+    }
 
     // Regression for #24: a bare file path must parse as a positional argument
     // (clap previously rejected it as "unexpected argument"), so termide can be
