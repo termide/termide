@@ -7,6 +7,7 @@ use std::path::Path;
 
 use ratatui::text::Line;
 use termide_core::LinkTarget;
+use termide_richtext::{Join, RowCopy};
 
 /// A cell of the rendered transcript: the flattened line and the display
 /// column on it.
@@ -56,22 +57,33 @@ impl TextSelection {
         (start < end).then_some((start, end))
     }
 
-    /// The selected text of `lines`: each row's selected cells, trimmed of the
-    /// padding a row ends with, joined by newlines.
+    /// The selected text of `lines`: each row's selected cells past its
+    /// decoration, as `copy` describes the rows (a row it does not cover is
+    /// a line of its own). A row ends in a line break, trimmed of the padding
+    /// it ends with, unless the row after it carries it on — after a space
+    /// when it wrapped at one, at once when it was cut between characters.
     #[must_use]
-    pub fn text(&self, lines: &[Line<'_>], width: usize) -> String {
+    pub fn text(&self, lines: &[Line<'_>], copy: &[RowCopy], width: usize) -> String {
         let (first, last) = self.bounds();
-        let mut rows = Vec::new();
+        let row_copy = |index: usize| copy.get(index).copied().unwrap_or_default();
+        let mut text = String::new();
         for (index, line) in lines
             .iter()
             .enumerate()
             .take(last.line + 1)
             .skip(first.line)
         {
+            if index > first.line {
+                match row_copy(index).join {
+                    Join::Break => text.push('\n'),
+                    Join::Space => text.push(' '),
+                    Join::Glued => {}
+                }
+            }
             let Some((start, end)) = self.columns_on(index, width) else {
-                rows.push(String::new());
                 continue;
             };
+            let start = start.max(usize::from(row_copy(index).lead));
             let mut row = String::new();
             let mut col = 0;
             for ch in line.spans.iter().flat_map(|span| span.content.chars()) {
@@ -84,9 +96,11 @@ impl TextSelection {
                     break;
                 }
             }
-            rows.push(row.trim_end().to_string());
+            // A space the row was cut after belongs to the text.
+            let glued = index < last.line && row_copy(index + 1).join == Join::Glued;
+            text.push_str(if glued { &row } else { row.trim_end() });
         }
-        rows.join("\n")
+        text
     }
 }
 
@@ -140,7 +154,38 @@ mod tests {
         assert_eq!(selection.columns_on(1, 20), Some((0, 20)));
         assert_eq!(selection.columns_on(2, 20), Some((0, 5)));
         assert_eq!(selection.columns_on(3, 20), None);
-        assert_eq!(selection.text(&lines, 20), "row\nsecond row\nthird");
+        assert_eq!(selection.text(&lines, &[], 20), "row\nsecond row\nthird");
+    }
+
+    #[test]
+    fn a_copy_skips_decoration_and_rejoins_wrapped_rows() {
+        let lines = vec![
+            Line::from("› the answer"),
+            Line::from("  wraps here"),
+            Line::from("  ┊ git push "),
+            Line::from("  ┊ origin"),
+        ];
+        let row = |lead, join| RowCopy { lead, join };
+        let copy = [
+            row(2, Join::Break),
+            row(2, Join::Space),
+            row(4, Join::Break),
+            row(4, Join::Glued),
+        ];
+        let selection = TextSelection {
+            anchor: cell(0, 0),
+            head: cell(3, 19),
+        };
+        assert_eq!(
+            selection.text(&lines, &copy, 20),
+            "the answer wraps here\ngit push origin"
+        );
+        // Started inside the text, a row keeps what lies after the start.
+        let selection = TextSelection {
+            anchor: cell(2, 8),
+            head: cell(3, 19),
+        };
+        assert_eq!(selection.text(&lines, &copy, 20), "push origin");
     }
 
     #[test]
@@ -150,7 +195,7 @@ mod tests {
             anchor: cell(0, 3),
             head: cell(0, 4),
         };
-        assert_eq!(selection.text(&lines, 20), "3s");
+        assert_eq!(selection.text(&lines, &[], 20), "3s");
         assert!(!selection.is_empty());
     }
 

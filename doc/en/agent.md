@@ -490,7 +490,10 @@ Mouse selection works inside the prompt box: press to place the cursor, drag to
 select (across wrapped rows), release, then copy or cut. In the transcript a
 drag selects text the way a terminal does, from the cell it started on to the
 one under the pointer, scrolling when dragged past an edge; `Ctrl+C` copies it,
-each row trimmed of its trailing padding. A click without a drag (acting on
+each row trimmed of its trailing padding. A copy of an answer reads as the text
+it shows: without the `›` mark, the indent and the bars of code blocks and
+quotes, and with a line the panel wrapped joined back into one, so a command
+copied from a code block runs as written. A click without a drag (acting on
 release) selects the block under it instead and clears the text selection.
 
 What the agent runs is captured cleanly for the model: colour and cursor

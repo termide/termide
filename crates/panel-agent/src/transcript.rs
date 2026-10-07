@@ -10,7 +10,7 @@ use termide_agent_core::{
 };
 use termide_core::ThemeColors;
 use termide_panel_markdown::render_markdown;
-use termide_richtext::Builder;
+use termide_richtext::{Builder, RowCopy};
 
 /// Lines of tool output shown when a call is expanded.
 const EXPANDED_OUTPUT_LINES: usize = 60;
@@ -257,6 +257,8 @@ struct Cached {
     lines: Vec<Line<'static>>,
     /// The links the item marks up, on its own lines.
     links: Vec<RowLink>,
+    /// How each of `lines` reads when copied.
+    copy: Vec<RowCopy>,
 }
 
 /// A lit stretch of a link: `(line, start, end)`, a `[start, end)` column
@@ -296,6 +298,8 @@ pub struct Transcript {
     flat: Vec<Line<'static>>,
     /// Item index per flattened line, for click-to-expand.
     line_item: Vec<usize>,
+    /// How each flattened line reads when copied.
+    flat_copy: Vec<RowCopy>,
     /// The marked-up links on the flattened lines, with their item.
     flat_links: Vec<(usize, RowLink)>,
     flat_dirty: bool,
@@ -342,6 +346,7 @@ impl Transcript {
         self.cache.clear();
         self.flat.clear();
         self.line_item.clear();
+        self.flat_copy.clear();
         self.flat_links.clear();
         self.flat_dirty = true;
     }
@@ -791,7 +796,7 @@ impl Transcript {
                 None => true,
             };
             if stale {
-                let (lines, foldable, links) = render_item(
+                let (lines, foldable, links, copy) = render_item(
                     &self.items[index],
                     self.collapsed[index],
                     self.fold,
@@ -805,6 +810,7 @@ impl Transcript {
                     foldable,
                     lines,
                     links,
+                    copy,
                 });
                 self.flat_dirty = true;
             }
@@ -812,6 +818,7 @@ impl Transcript {
         if self.flat_dirty {
             self.flat.clear();
             self.line_item.clear();
+            self.flat_copy.clear();
             self.flat_links.clear();
             for (index, cached) in self.cache.iter().enumerate() {
                 if let Some(cached) = cached {
@@ -827,16 +834,19 @@ impl Transcript {
                         )
                     }));
                     self.flat.extend(cached.lines.iter().cloned());
+                    self.flat_copy.extend(cached.copy.iter().copied());
                     self.line_item
                         .extend(std::iter::repeat_n(index, cached.lines.len()));
                     if !cached.lines.is_empty() && self.gap_after(index) {
                         self.flat.push(Line::default());
+                        self.flat_copy.push(RowCopy::default());
                         self.line_item.push(index);
                     }
                 }
             }
             for line in &self.live_footer {
                 self.flat.push(line.clone());
+                self.flat_copy.push(RowCopy::default());
                 self.line_item.push(self.items.len().saturating_sub(1));
             }
             self.flat_dirty = false;
@@ -877,6 +887,12 @@ impl Transcript {
     #[must_use]
     pub fn rendered(&self) -> &[Line<'static>] {
         &self.flat
+    }
+
+    /// How each of [`Transcript::rendered`]'s lines reads when copied.
+    #[must_use]
+    pub(crate) fn rendered_copy(&self) -> &[RowCopy] {
+        &self.flat_copy
     }
 
     #[must_use]
@@ -1670,15 +1686,24 @@ fn render_item(
     width: u16,
     colors: &ThemeColors,
     is_light: bool,
-) -> (Vec<Line<'static>>, bool, Vec<RowLink>) {
+) -> (Vec<Line<'static>>, bool, Vec<RowLink>, Vec<RowCopy>) {
     let mut foldable = is_foldable(item, fold);
     // Only reasoning can be foldable yet fit one row unfolded: a foldable tool
     // call has output or a second command line below its headline.
     if foldable && matches!(item, Item::Thinking { .. }) {
-        foldable =
-            render_body(item, false, false, width, colors, is_light, &mut Vec::new()).len() > 1;
+        foldable = render_body(
+            item,
+            false,
+            false,
+            width,
+            colors,
+            is_light,
+            &mut Marks::default(),
+        )
+        .len()
+            > 1;
     }
-    let mut links = Vec::new();
+    let mut marks = Marks::default();
     let mut lines = render_body(
         item,
         collapsed && foldable,
@@ -1686,22 +1711,41 @@ fn render_item(
         width,
         colors,
         is_light,
-        &mut links,
+        &mut marks,
     );
+    let Marks {
+        mut links,
+        copy: copy_marks,
+    } = marks;
+    let mut copy = vec![RowCopy::default(); lines.len()];
+    for (line, row) in copy_marks {
+        if let Some(slot) = copy.get_mut(line) {
+            *slot = row;
+        }
+    }
     // The answer draws no dividing rule; a blank line above sets it apart
     // from the steps before it. Reasoning and tool calls stack with no gap.
     if matches!(item, Item::Assistant { .. }) && !lines.is_empty() {
         lines.insert(0, Line::default());
+        copy.insert(0, RowCopy::default());
         for link in &mut links {
             link.line += 1;
         }
     }
-    (lines, foldable, links)
+    (lines, foldable, links, copy)
+}
+
+/// What [`render_body`] marks on the lines it returns: the links, and how
+/// rows read when copied (a row not listed is a line of its own).
+#[derive(Default)]
+struct Marks {
+    links: Vec<RowLink>,
+    copy: Vec<(usize, RowCopy)>,
 }
 
 /// The lines of `item` itself, without the gap [`render_item`] puts above it;
-/// `foldable` decides whether it carries a fold marker. The links it marks up
-/// go to `links`.
+/// `foldable` decides whether it carries a fold marker. What it marks up goes
+/// to `marks`.
 fn render_body(
     item: &Item,
     collapsed: bool,
@@ -1709,7 +1753,7 @@ fn render_body(
     width: u16,
     colors: &ThemeColors,
     is_light: bool,
-    links: &mut Vec<RowLink>,
+    marks: &mut Marks,
 ) -> Vec<Line<'static>> {
     let t = termide_i18n::t();
     let dim = Style::default().fg(colors.disabled);
@@ -1937,13 +1981,27 @@ fn render_body(
                 // so the accent `›` never pushes the first line over the edge.
                 let body = render_markdown(answer, width.saturating_sub(2), colors, is_light);
                 // Past the `› ` mark the answer's links sit two columns in.
-                links.extend(body.links.into_iter().map(|link| RowLink {
-                    line: lines.len() + link.line,
-                    start: link.start as usize + 2,
-                    end: link.end as usize + 2,
-                    href: link.url,
-                    id: link.id,
-                }));
+                // Copied, the mark and the indent under it are decoration.
+                marks
+                    .copy
+                    .extend(body.copy.iter().enumerate().map(|(i, row)| {
+                        (
+                            lines.len() + i,
+                            RowCopy {
+                                lead: row.lead + 2,
+                                ..*row
+                            },
+                        )
+                    }));
+                marks
+                    .links
+                    .extend(body.links.into_iter().map(|link| RowLink {
+                        line: lines.len() + link.line,
+                        start: link.start as usize + 2,
+                        end: link.end as usize + 2,
+                        href: link.url,
+                        id: link.id,
+                    }));
                 for (i, mut line) in body.lines.into_iter().enumerate() {
                     line.spans.insert(
                         0,
@@ -2109,7 +2167,7 @@ fn render_body(
                             width,
                             &mut rows,
                         );
-                        links.extend(headline_links(call, rows));
+                        marks.links.extend(headline_links(call, rows));
                         lines
                     }
                 };
@@ -2124,7 +2182,7 @@ fn render_body(
                         width,
                         &mut rows,
                     );
-                    links.extend(headline_links(call, rows));
+                    marks.links.extend(headline_links(call, rows));
                     lines
                 }
             };

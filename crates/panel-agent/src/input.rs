@@ -220,7 +220,11 @@ impl AgentPanel {
             return false;
         };
         let width = self.transcript_area.width.saturating_sub(1).max(1) as usize;
-        let text = selection.text(self.transcript.rendered(), width);
+        let text = selection.text(
+            self.transcript.rendered(),
+            self.transcript.rendered_copy(),
+            width,
+        );
         if text.trim().is_empty() {
             return false;
         }

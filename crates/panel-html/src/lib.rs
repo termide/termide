@@ -113,6 +113,7 @@ impl HtmlPanel {
             error: None,
             doc: Rendered {
                 lines: Vec::new(),
+                copy: Vec::new(),
                 links: Vec::new(),
                 anchors: Vec::new(),
             },
@@ -769,6 +770,7 @@ mod tests {
             error: None,
             doc: Rendered {
                 lines: Vec::new(),
+                copy: Vec::new(),
                 links: Vec::new(),
                 anchors: Vec::new(),
             },

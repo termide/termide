@@ -642,7 +642,11 @@ fn a_drag_selects_transcript_text_for_copy() {
     let width = panel.transcript_area.width.saturating_sub(1) as usize;
     let selection = panel.text_selection.expect("a selection");
     assert_eq!(
-        selection.text(panel.transcript.rendered(), width),
+        selection.text(
+            panel.transcript.rendered(),
+            panel.transcript.rendered_copy(),
+            width,
+        ),
         "Hello from"
     );
     // It shows in the selection colours.
@@ -652,6 +656,61 @@ fn a_drag_selects_transcript_text_for_copy() {
     panel.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y), area);
     panel.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x, y), area);
     assert!(panel.text_selection.is_none());
+}
+
+#[test]
+fn a_copied_command_comes_out_whole_without_the_chat_decoration() {
+    let command = "git push origin main --tags --force-with-lease";
+    let mut panel = panel(vec![reply(&format!(
+        "Run it yourself, as it needs your login:\n\n```sh\n{command}\nls\n```"
+    ))]);
+    type_text(&mut panel, "push");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+    let rows = render_text(&mut panel, 30, 30);
+    let first = rows
+        .iter()
+        .position(|r| r.contains("┊ git"))
+        .expect("the command is on screen");
+    let last = rows
+        .iter()
+        .position(|r| r.contains("┊ ls"))
+        .expect("the code block ends on screen");
+    assert!(last > first + 1, "the command wraps: {rows:#?}");
+    // Dragged from the left edge of the first row to the end of `ls` (the
+    // block's byline sits right of it on the same row).
+    let area = panel.transcript_area;
+    let ls = &rows[last];
+    let ls_end = ls[..ls.find("ls").unwrap()].chars().count() as u16 + 1;
+    let mouse = |kind, column, row: usize| MouseEvent {
+        kind,
+        column,
+        row: row as u16,
+        modifiers: KeyModifiers::NONE,
+    };
+    let (left, right) = (area.x, ls_end);
+    panel.handle_mouse(
+        mouse(MouseEventKind::Down(MouseButton::Left), left, first),
+        area,
+    );
+    panel.handle_mouse(
+        mouse(MouseEventKind::Drag(MouseButton::Left), right, last),
+        area,
+    );
+    panel.handle_mouse(
+        mouse(MouseEventKind::Up(MouseButton::Left), right, last),
+        area,
+    );
+    let selection = panel.text_selection.expect("a selection");
+    let width = panel.transcript_area.width.saturating_sub(1) as usize;
+    assert_eq!(
+        selection.text(
+            panel.transcript.rendered(),
+            panel.transcript.rendered_copy(),
+            width,
+        ),
+        format!("{command}\nls")
+    );
 }
 
 #[test]

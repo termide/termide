@@ -36,9 +36,32 @@ pub struct LinkSpan {
     pub id: usize,
 }
 
+/// How a rendered row reads when copied: the columns of decoration it opens
+/// with (a code block's bar, a quote's bars, the indent of a wrapped line),
+/// and how it attaches to the row above it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RowCopy {
+    pub lead: u16,
+    pub join: Join,
+}
+
+/// How a copied row attaches to the row above it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Join {
+    /// A line of its own: a line break before it.
+    #[default]
+    Break,
+    /// The rest of a line wrapped at a space: one space before it.
+    Space,
+    /// The rest of a line cut between characters: nothing before it.
+    Glued,
+}
+
 /// Rendered document: wrapped lines plus link hit-areas.
 pub struct Rendered {
     pub lines: Vec<Line<'static>>,
+    /// How each of `lines` reads when copied, one per line.
+    pub copy: Vec<RowCopy>,
     pub links: Vec<LinkSpan>,
     /// Named anchors (`id`/`name` / heading slug) → target line index, for
     /// fragment navigation (`#section`).
@@ -122,6 +145,9 @@ pub struct Builder<'c> {
     pending_links: Vec<PendingLink>,
     /// Named anchors → target line index.
     anchors: Vec<(String, usize)>,
+    /// How rows read when copied, by line index; a row not listed is a line
+    /// of its own with no decoration.
+    copy_marks: Vec<(usize, RowCopy)>,
 }
 
 impl<'c> Builder<'c> {
@@ -146,6 +172,7 @@ impl<'c> Builder<'c> {
             cur_link: None,
             pending_links: Vec::new(),
             anchors: Vec::new(),
+            copy_marks: Vec::new(),
         }
     }
 
@@ -569,6 +596,7 @@ impl<'c> Builder<'c> {
                         Span::styled("┊ ", bar),
                         Span::styled(line, self.base_style()),
                     ];
+                    self.mark_copy(2, Join::Break);
                     self.lines.push(Line::from(spans));
                 }
                 return;
@@ -599,9 +627,11 @@ impl<'c> Builder<'c> {
             } else {
                 vec![Span::styled(line.to_string(), self.base_style())]
             };
-            for row in wrap_code_row(segments, budget) {
+            // Copied, a wrapped line is whole again and the bar is gone.
+            for (k, row) in wrap_code_row(segments, budget).into_iter().enumerate() {
                 let mut spans = vec![Span::styled("┊ ", bar)];
                 spans.extend(row);
+                self.mark_copy(2, if k == 0 { Join::Break } else { Join::Glued });
                 self.lines.push(Line::from(spans));
             }
         }
@@ -817,6 +847,8 @@ impl<'c> Builder<'c> {
 
         let first_w = prefix_width(&first_prefix);
         let cont_w = prefix_width(&cont_prefix);
+        // Copied, a quote loses its bars; a list keeps its indent and marker.
+        let first_lead = (2 * self.quote_depth).min(first_w);
 
         let base = self.lines.len();
         let mut out: Vec<Line<'static>> = Vec::new();
@@ -854,7 +886,30 @@ impl<'c> Builder<'c> {
             }
         }
         out.push(Line::from(cur));
+        // Copied, the rows a paragraph wrapped onto are one line again.
+        for k in 0..out.len() {
+            let (lead, join) = if k == 0 {
+                (first_lead, Join::Break)
+            } else {
+                (cont_w, Join::Space)
+            };
+            if lead > 0 || join != Join::Break {
+                self.copy_marks.push((
+                    base + k,
+                    RowCopy {
+                        lead: lead as u16,
+                        join,
+                    },
+                ));
+            }
+        }
         self.lines.extend(out);
+    }
+
+    /// Record how the next row to be emitted reads when copied.
+    fn mark_copy(&mut self, lead: u16, join: Join) {
+        self.copy_marks
+            .push((self.lines.len(), RowCopy { lead, join }));
     }
 
     #[must_use]
@@ -882,8 +937,15 @@ impl<'c> Builder<'c> {
             .into_iter()
             .map(|(id, line)| (id, line.min(last)))
             .collect();
+        let mut copy = vec![RowCopy::default(); line_count];
+        for (line, row) in self.copy_marks {
+            if let Some(slot) = copy.get_mut(line) {
+                *slot = row;
+            }
+        }
         Rendered {
             lines: self.lines,
+            copy,
             links,
             anchors,
         }
@@ -1061,6 +1123,61 @@ mod tests {
         for row in &rows {
             assert!(row.width() <= 12, "{row:?} is wider than the block");
         }
+    }
+
+    #[test]
+    fn copied_code_drops_the_bar_and_rejoins_wrapped_rows() {
+        let colors = ThemeColors::default();
+        let mut b = Builder::new(12, &colors, false);
+        b.start_code_block("");
+        b.text("git push origin 0.39.0\nok\n");
+        b.end_code_block();
+        let doc = b.finish();
+        assert_eq!(doc.copy.len(), doc.lines.len());
+        let code: Vec<RowCopy> = doc
+            .lines
+            .iter()
+            .zip(&doc.copy)
+            .filter(|(line, _)| !line.spans.is_empty())
+            .map(|(_, copy)| *copy)
+            .collect();
+        let row = |join| RowCopy { lead: 2, join };
+        assert_eq!(
+            code,
+            [
+                row(Join::Break),
+                row(Join::Glued),
+                row(Join::Glued),
+                row(Join::Break)
+            ]
+        );
+    }
+
+    #[test]
+    fn copied_prose_rejoins_wrapped_rows_with_a_space() {
+        let colors = ThemeColors::default();
+        let mut b = Builder::new(10, &colors, false);
+        b.start_quote();
+        b.text("one two three");
+        b.end_paragraph();
+        b.end_quote();
+        b.text("four");
+        b.end_paragraph();
+        let doc = b.finish();
+        let rows: Vec<(String, RowCopy)> = text_of(&doc)
+            .into_iter()
+            .zip(doc.copy.iter().copied())
+            .filter(|(text, _)| !text.is_empty())
+            .collect();
+        let row = |text: &str, lead, join| (text.to_string(), RowCopy { lead, join });
+        assert_eq!(
+            rows,
+            [
+                row("│ one two", 2, Join::Break),
+                row("│ three", 2, Join::Space),
+                row("four", 0, Join::Break),
+            ]
+        );
     }
 
     #[test]
