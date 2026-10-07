@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::cancel::CancelToken;
 use crate::layers::split_front_matter;
-use crate::message::{Message, StopReason, ToolCall, UserMessage};
+use crate::message::{Message, StopReason, ToolCall, Usage, UserMessage};
 use crate::provider::{ModelSpec, Provider, Request, ThinkingLevel};
 use crate::tool::ToolContext;
 
@@ -343,19 +343,48 @@ impl ModelChoice {
     }
 }
 
+/// The tokens model calls spent, added up across the threads that make
+/// them; clones share the count. The reviewers a host builds from one
+/// [`ReviewerSetup`] add to its meter, and the host takes what they spent.
+#[derive(Clone, Default, Debug)]
+pub struct SpentMeter(Arc<Mutex<Usage>>);
+
+impl SpentMeter {
+    pub fn add(&self, usage: &Usage) {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .add(usage);
+    }
+
+    /// What was spent since the last take, leaving the meter at nothing.
+    #[must_use]
+    pub fn take(&self) -> Usage {
+        std::mem::take(
+            &mut *self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+    }
+}
+
 /// What a host needs to build the reviewer of each run it spawns: the texts,
-/// and the model to review with.
+/// the model to review with, and the meter its calls add to.
 #[derive(Clone, Default, Debug)]
 pub struct ReviewerSetup {
     pub prompt: ClassifyPrompt,
     pub model: ModelChoice,
+    pub spent: SpentMeter,
 }
 
 impl ReviewerSetup {
     /// The reviewer of a run that `cancel` stops.
     #[must_use]
     pub fn classifier(&self, cancel: CancelToken) -> ModelClassifier {
-        ModelClassifier::new(self.prompt.clone(), cancel).with_choice(self.model.clone())
+        ModelClassifier::new(self.prompt.clone(), cancel)
+            .with_choice(self.model.clone())
+            .with_spent(self.spent.clone())
     }
 }
 
@@ -365,6 +394,8 @@ pub struct ModelClassifier {
     /// The model configured for reviewing.
     model: ModelChoice,
     cancel: CancelToken,
+    /// What its calls spent, for the host's totals.
+    spent: SpentMeter,
 }
 
 impl ModelClassifier {
@@ -374,7 +405,15 @@ impl ModelClassifier {
             prompt,
             model: ModelChoice::default(),
             cancel,
+            spent: SpentMeter::default(),
         }
+    }
+
+    /// Add what its calls spend to `meter`.
+    #[must_use]
+    pub fn with_spent(mut self, meter: SpentMeter) -> Self {
+        self.spent = meter;
+        self
     }
 
     /// Review with `model` on `provider` instead of the session's model.
@@ -428,6 +467,8 @@ impl Classifier for ModelClassifier {
             thinking: ThinkingLevel::Off,
         };
         let reply = provider.stream(&request, &mut |_| {}, &self.cancel);
+        // Spent whatever the verdict, a failed call's prompt included.
+        self.spent.add(&reply.usage);
         if matches!(reply.stop_reason, StopReason::Error | StopReason::Aborted) {
             return Verdict::Unavailable {
                 reason: reply
@@ -559,7 +600,11 @@ mod tests {
                 reply: AssistantMessage {
                     content: vec![AssistantContent::Text { text: text.into() }],
                     stop_reason: StopReason::Stop,
-                    usage: Usage::default(),
+                    usage: Usage {
+                        input: 300,
+                        output: 4,
+                        ..Usage::default()
+                    },
                     provider: "canned".into(),
                     model: "m".into(),
                     error_message: None,
@@ -667,12 +712,16 @@ mod tests {
         assert_eq!(*max_tokens, Some(VERDICT_TOKENS));
 
         let own = Canned::new("BLOCK\nnot asked for");
+        let meter = SpentMeter::default();
         let mut reviewer = ModelClassifier::new(ClassifyPrompt::default(), CancelToken::new())
-            .with_model(own.clone(), spec("reviewer-model"));
+            .with_model(own.clone(), spec("reviewer-model"))
+            .with_spent(meter.clone());
         assert!(matches!(
             reviewer.classify(&pending, &ctx),
             Verdict::Block { .. }
         ));
+        // What the review spent is the host's to take, once.
+        assert_eq!((meter.take().input, meter.take().input), (300, 0));
         assert_eq!(own.seen.lock().unwrap()[0].0, "reviewer-model");
         assert_eq!(session.seen.lock().unwrap().len(), 1);
     }

@@ -516,6 +516,7 @@ impl AgentPanel {
             self.apply(event);
             changed = true;
         }
+        changed |= self.take_reviewer_spent();
         let mut events = self.poll_permissions();
         events.append(&mut self.poll_questions());
         events.append(&mut self.poll_suggestions());
@@ -644,4 +645,22 @@ pub(crate) fn changed_file(result: &ToolResultMessage) -> Option<PathBuf> {
         .get("path")?
         .as_str()
         .map(PathBuf::from)
+}
+
+impl AgentPanel {
+    /// Add to the session's totals what the `auto` mode reviewers spent
+    /// since the last look — the panel's own, its external agent's and the
+    /// one of the tools it serves; a subagent's counts in its task instead.
+    /// The context fill stays: a review is a call of its own. `true` when
+    /// there was anything.
+    pub(crate) fn take_reviewer_spent(&mut self) -> bool {
+        let spent = self.reviewer.spent.take();
+        if spent.total() == 0 {
+            return false;
+        }
+        self.session_input += spent.uncached();
+        self.session_cached += spent.cache_read;
+        self.session_output += spent.output;
+        true
+    }
 }
