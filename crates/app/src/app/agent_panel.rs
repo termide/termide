@@ -637,6 +637,12 @@ fn restrict_tools(tools: &mut ToolRegistry, allowed: &Option<Vec<String>>, agent
 /// window: what a delegated task inherits. A profile switch updates it.
 #[derive(Clone)]
 struct Active {
+    /// The connection's name, whose `subagents` field picks where a
+    /// delegated task runs.
+    connection: String,
+    /// The connection's provider kind: a CLI agent's `provider` is only a
+    /// placeholder, which no subagent can run on.
+    kind: String,
     provider: Arc<dyn Provider>,
     model: String,
     context_window: u64,
@@ -658,6 +664,15 @@ pub(crate) fn publish_ai_settings(settings: &AiSettings) {
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(settings.clone());
 }
 
+/// The settings applied last, else `built_with`, those a panel was built with.
+fn applied_ai_settings(built_with: &AiSettings) -> AiSettings {
+    APPLIED_AI
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+        .unwrap_or_else(|| built_with.clone())
+}
+
 /// The connections of `[ai]` for the panel's picker, built on demand.
 struct AiConnections {
     /// The settings the panel was built with, until others are applied.
@@ -669,11 +684,7 @@ struct AiConnections {
 impl AiConnections {
     /// The settings applied last, else those the panel was built with.
     fn settings(&self) -> AiSettings {
-        APPLIED_AI
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-            .unwrap_or_else(|| self.settings.clone())
+        applied_ai_settings(&self.settings)
     }
 }
 
@@ -708,6 +719,8 @@ impl ConnectionCatalog for AiConnections {
             .active
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Active {
+            connection: choice.name.clone(),
+            kind: choice.kind.clone(),
             provider: Arc::clone(&choice.provider),
             model: choice.model.clone(),
             context_window: choice.context_window,
@@ -965,6 +978,9 @@ fn recall_tool(
 
 struct Subagents {
     active: ActiveSlot,
+    /// The `[ai]` settings the panel was built with, until others are
+    /// applied: where the session's connection sends its subagents.
+    settings: AiSettings,
     dirs: AgentDirs,
     web: Arc<Web>,
     recall: Arc<RecallTool>,
@@ -995,6 +1011,53 @@ fn subagent_mode(parent: Mode, own: Option<Mode>) -> Mode {
 
 /// A runaway subagent is cut off after this many model calls.
 const SUBAGENT_MAX_TURNS: usize = 50;
+
+/// The connection a task delegated from a session on `active` runs on: the
+/// one its connection's `subagents` field names, `None` for the session's
+/// own. A subagent runs the built-in loop, so a CLI agent cannot run it: one
+/// named there is passed over, and a session on one with no model connection
+/// named has nowhere to run it, which the error says.
+fn subagent_connection(
+    settings: &AiSettings,
+    active: &Active,
+) -> Result<Option<(String, Connection)>, String> {
+    let session = active.connection.as_str();
+    let named = settings
+        .connections
+        .get(session)
+        .map(|connection| connection.subagents.trim())
+        .unwrap_or_default();
+    if !named.is_empty() && named != session {
+        match settings.connections.get(named) {
+            Some(connection) if !connection.is_cli() => {
+                return Ok(Some((named.to_string(), connection.clone())));
+            }
+            Some(_) => log::warn!(
+                "connection {session}: subagents names {named}, a CLI agent, which cannot run them"
+            ),
+            None => log::warn!("connection {session}: subagents names no connection {named:?}"),
+        }
+    }
+    if termide_config::is_cli_provider(&active.kind) {
+        return Err(format!(
+            "the connection {session} is a CLI agent, which cannot run subagents; \
+             a model connection chosen under Subagents on its settings page runs them"
+        ));
+    }
+    Ok(None)
+}
+
+/// Why a run ended without an answer, when its last reply says.
+fn run_error(messages: &[Message]) -> Option<String> {
+    messages
+        .iter()
+        .rev()
+        .find_map(|message| match message {
+            Message::Assistant(assistant) => Some(assistant.error_message.clone()),
+            _ => None,
+        })
+        .flatten()
+}
 
 impl Subagents {
     fn run(
@@ -1029,18 +1092,32 @@ impl Subagents {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
-        let requested = definition
-            .spec
-            .model
-            .clone()
-            .unwrap_or_else(|| active.model.clone());
-        let Some(id) = resolve_model(active.provider.as_ref(), &requested) else {
+        // On a connection of its own the subagent runs that connection's
+        // model: the id its `AGENT.md` names is one of the session's endpoint.
+        let (provider, requested, context_window) =
+            match subagent_connection(&applied_ai_settings(&self.settings), &active)? {
+                Some((_, connection)) => (
+                    build_provider(&connection, api_key_of(&connection)),
+                    connection.model.clone(),
+                    connection.effective_context_window(),
+                ),
+                None => (
+                    Arc::clone(&active.provider),
+                    definition
+                        .spec
+                        .model
+                        .clone()
+                        .unwrap_or_else(|| active.model.clone()),
+                    active.context_window,
+                ),
+            };
+        let Some(id) = resolve_model(provider.as_ref(), &requested) else {
             return Err("the provider lists no model to run the subagent on".into());
         };
         let model = ModelSpec {
             provider: "agent".to_string(),
             id,
-            context_window: active.context_window,
+            context_window,
             max_tokens: self.max_tokens,
             thinking: self.reasoning,
         };
@@ -1054,7 +1131,7 @@ impl Subagents {
             .as_ref()
             .map(|session| IntentLog::delegated(&session.intent))
             .unwrap_or_default();
-        let mut agent = Agent::new(Arc::clone(&active.provider), tools, model, self.cwd.clone())
+        let mut agent = Agent::new(provider, tools, model, self.cwd.clone())
             .with_system_prompt(system_prompt)
             .with_compaction(self.compaction)
             .with_delegated_intent(parent);
@@ -1127,7 +1204,10 @@ impl Subagents {
             )),
             Some(text) => Ok(text),
             None if cancel.is_cancelled() => Err("the subagent was stopped".into()),
-            None => Err("the subagent produced no answer".into()),
+            None => Err(run_error(agent.messages()).map_or_else(
+                || "the subagent produced no answer".to_string(),
+                |error| format!("the subagent failed: {error}"),
+            )),
         }
     }
 }
@@ -1157,6 +1237,8 @@ fn agent_setup(
     // The subagent runner shares the provider, the rules and the model
     // defaults, so a delegated agent runs like the panel would run it.
     let active: ActiveSlot = Arc::new(std::sync::RwLock::new(Active {
+        connection: connection_name.clone(),
+        kind: provider_kind.clone(),
         provider: Arc::clone(&provider),
         model: connection.model.clone(),
         context_window: connection.effective_context_window(),
@@ -1164,6 +1246,7 @@ fn agent_setup(
     let reviewer = reviewer_setup(settings, &catalog.dirs);
     catalog.subagents = Some(Arc::new(Subagents {
         active: Arc::clone(&active),
+        settings: settings.clone(),
         dirs: catalog.dirs.clone(),
         web,
         recall,
@@ -1687,6 +1770,18 @@ mod tests {
         settings
     }
 
+    /// What a panel on connection `name` of `settings` runs on.
+    fn active_on(settings: &AiSettings, name: &str) -> Active {
+        let connection = &settings.connections[name];
+        Active {
+            connection: name.to_string(),
+            kind: connection.provider.clone(),
+            provider: build_provider(connection, None),
+            model: connection.model.clone(),
+            context_window: connection.effective_context_window(),
+        }
+    }
+
     #[test]
     fn hosted_apis_take_reasoning_effort_local_servers_the_switch_and_others_nothing() {
         let at = |base_url: &str, param| {
@@ -1748,12 +1843,7 @@ mod tests {
     #[test]
     fn connections_build_and_hand_their_provider_to_delegated_tasks() {
         let settings = with_cloud();
-        let local = &settings.connections["local"];
-        let active: ActiveSlot = Arc::new(std::sync::RwLock::new(Active {
-            provider: build_provider(local, None),
-            model: local.model.clone(),
-            context_window: local.effective_context_window(),
-        }));
+        let active: ActiveSlot = Arc::new(std::sync::RwLock::new(active_on(&settings, "local")));
         let connections = AiConnections {
             settings,
             active: Arc::clone(&active),
@@ -1775,19 +1865,71 @@ mod tests {
             (now.model.as_str(), now.context_window),
             ("claude-x", 200_000)
         );
+        assert_eq!(
+            (now.connection.as_str(), now.kind.as_str()),
+            ("cloud", "anthropic_compatible")
+        );
+    }
+
+    /// A delegated task runs on the session's connection, or on the model
+    /// connection its `subagents` field names; a CLI agent runs none.
+    #[test]
+    fn subagents_run_on_the_connection_the_session_connection_names() {
+        let mut settings = with_cloud();
+        settings.connections.insert(
+            "claude".into(),
+            Connection {
+                provider: "claude_code".into(),
+                ..Connection::default()
+            },
+        );
+        let target = |settings: &AiSettings, session: &str| {
+            subagent_connection(settings, &active_on(settings, session))
+                .map(|target| target.map(|(name, _)| name))
+        };
+        // Nothing named: the session's own.
+        assert_eq!(target(&settings, "local"), Ok(None));
+        // A CLI agent has nowhere to run them, and says where to choose one.
+        let error = target(&settings, "claude").unwrap_err();
+        assert!(error.contains("Subagents"), "{error}");
+
+        settings.connections.get_mut("claude").unwrap().subagents = "local".into();
+        assert_eq!(target(&settings, "claude"), Ok(Some("local".into())));
+        settings.connections.get_mut("local").unwrap().subagents = "cloud".into();
+        assert_eq!(target(&settings, "local"), Ok(Some("cloud".into())));
+        // Itself, a CLI agent or a name of no connection: the session's own.
+        for named in ["local", "claude", "gone"] {
+            settings.connections.get_mut("local").unwrap().subagents = named.into();
+            assert_eq!(target(&settings, "local"), Ok(None), "{named}");
+        }
+        settings.connections.get_mut("claude").unwrap().subagents = "gone".into();
+        assert!(target(&settings, "claude").is_err());
+    }
+
+    #[test]
+    fn a_failed_subagent_run_says_why() {
+        use termide_agent_core::{AssistantMessage, StopReason};
+        let failed = |error: Option<&str>| {
+            let mut reply = AssistantMessage::failed("agent", "m", StopReason::Error, "");
+            reply.error_message = error.map(str::to_string);
+            Message::Assistant(reply)
+        };
+        let refused = failed(Some("connection refused"));
+        assert_eq!(
+            run_error(std::slice::from_ref(&refused)).as_deref(),
+            Some("connection refused")
+        );
+        // Only the last reply counts: a later one without an error has none.
+        assert_eq!(run_error(&[refused, failed(None)]), None);
+        assert_eq!(run_error(&[]), None);
     }
 
     #[test]
     fn an_open_panel_offers_the_connections_applied_since() {
         let mut built_with = with_cloud();
         built_with.connections.remove("cloud");
-        let local = &built_with.connections["local"];
         let connections = AiConnections {
-            active: Arc::new(std::sync::RwLock::new(Active {
-                provider: build_provider(local, None),
-                model: local.model.clone(),
-                context_window: local.effective_context_window(),
-            })),
+            active: Arc::new(std::sync::RwLock::new(active_on(&built_with, "local"))),
             settings: built_with,
         };
         // Applying the settings modal adds `cloud`; the panel offers it at
@@ -2097,13 +2239,9 @@ mod tests {
         }
         let mut catalog = FsCatalog::with_global(tmp.path(), tmp.path(), Some(global));
         let settings = with_cloud();
-        let local = &settings.connections["local"];
         catalog.subagents = Some(Arc::new(Subagents {
-            active: Arc::new(std::sync::RwLock::new(Active {
-                provider: build_provider(local, None),
-                model: local.model.clone(),
-                context_window: local.effective_context_window(),
-            })),
+            active: Arc::new(std::sync::RwLock::new(active_on(&settings, "local"))),
+            settings: settings.clone(),
             dirs: catalog.dirs.clone(),
             recall: recall_tool(&settings, &catalog.dirs, tmp.path(), tmp.path()),
             web: shared_web(&settings.web, &catalog.dirs),

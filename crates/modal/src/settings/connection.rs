@@ -22,6 +22,7 @@ pub(super) const CONTEXT_WINDOW: usize = 5;
 pub(super) const PREFILL_PROGRESS: usize = 6;
 pub(super) const REASONING_PARAM: usize = 7;
 pub(super) const DEFAULT: usize = 8;
+pub(super) const SUBAGENTS: usize = 9;
 
 /// The connection page, while one is open.
 #[derive(Debug, Clone)]
@@ -103,6 +104,10 @@ pub(super) fn connection_fields() -> Vec<FieldDescriptor> {
             label: t.settings_ai_connection_default(),
             field_type: FieldType::Bool,
         },
+        FieldDescriptor {
+            label: t.settings_ai_connection_subagents(),
+            field_type: FieldType::Enum,
+        },
     ]
 }
 
@@ -124,6 +129,18 @@ fn reasoning_param_label(param: ReasoningParam) -> String {
         ReasoningParam::Auto => t.settings_value_auto().to_string(),
         ReasoningParam::None => t.settings_value_none().to_string(),
         param => param.label().to_string(),
+    }
+}
+
+/// How the subagents' connection `value` of `connection` reads: a name, or
+/// for an empty one the connection itself — none, for a CLI agent, which
+/// cannot run them.
+fn subagents_label(connection: &Connection, value: &str) -> String {
+    let t = i18n::t();
+    match value {
+        "" if connection.is_cli() => t.settings_value_none().to_string(),
+        "" => t.settings_ai_connection_subagents_own().to_string(),
+        name => name.to_string(),
     }
 }
 
@@ -199,7 +216,7 @@ impl SettingsModal {
         if openai {
             rows.extend([Field(PREFILL_PROGRESS), Field(REASONING_PARAM)]);
         }
-        rows.extend([Field(DEFAULT), Spacer, ConnectionButtons]);
+        rows.extend([Field(SUBAGENTS), Field(DEFAULT), Spacer, ConnectionButtons]);
         rows
     }
 
@@ -290,6 +307,7 @@ impl SettingsModal {
         if self.config.ai.connections.remove(name).is_none() {
             return;
         }
+        self.retarget_subagents(name, "");
         // The default moves to the first left, named, so it stays put.
         if self.config.ai.connection == name {
             self.config.ai.connection = self
@@ -366,6 +384,7 @@ impl SettingsModal {
             PREFILL_PROGRESS => bool_str(connection.prefill_progress),
             REASONING_PARAM => reasoning_param_label(connection.reasoning_param),
             DEFAULT => bool_str(self.config.ai.default_connection() == self.open_connection_name()),
+            SUBAGENTS => subagents_label(connection, &connection.subagents),
             _ => String::new(),
         }
     }
@@ -448,6 +467,19 @@ impl SettingsModal {
                     .iter()
                     .position(|param| *param == connection.reasoning_param),
             }),
+            SUBAGENTS => {
+                let values = self.subagents_choices();
+                let labels = values
+                    .iter()
+                    .map(|value| subagents_label(connection, value))
+                    .collect();
+                let current = values.iter().position(|v| *v == connection.subagents);
+                Some(EnumOptions {
+                    values,
+                    labels,
+                    current,
+                })
+            }
             _ => None,
         }
     }
@@ -467,12 +499,25 @@ impl SettingsModal {
                     connection.reasoning_param = param;
                 }
             }
+            SUBAGENTS => {
+                if let Some(connection) = self.edited_mut() {
+                    connection.subagents = value.to_string();
+                }
+            }
             _ => {}
         }
     }
 
-    /// Step the provider or the reasoning parameter with Left/Right, wrapping.
+    /// Step the provider, the reasoning parameter or the subagents'
+    /// connection with Left/Right, wrapping.
     pub(super) fn cycle_connection_field(&mut self, index: usize, forward: bool) {
+        if index == SUBAGENTS {
+            let choices = self.subagents_choices();
+            if let Some(connection) = self.edited_mut() {
+                step_value(&mut connection.subagents, &choices, forward);
+            }
+            return;
+        }
         if index == REASONING_PARAM {
             if let Some(connection) = self.edited_mut() {
                 let mut value = connection.reasoning_param.label().to_string();
@@ -561,9 +606,37 @@ impl SettingsModal {
         if self.config.ai.connection == old {
             self.config.ai.connection = new.to_string();
         }
+        self.retarget_subagents(old, new);
         if let Some(edit) = self.connection_edit.as_mut() {
             edit.name = new.to_string();
         }
+    }
+
+    /// Point the connections whose subagents ran on `old` at `new`; an empty
+    /// `new` hands them back to their own connection.
+    fn retarget_subagents(&mut self, old: &str, new: &str) {
+        for connection in self.config.ai.connections.values_mut() {
+            if connection.subagents == old {
+                connection.subagents = new.to_string();
+            }
+        }
+    }
+
+    /// What the open connection's subagents can run on: itself (empty), or
+    /// another connection termide runs whole — a subagent runs the built-in
+    /// loop, which a CLI agent does not.
+    fn subagents_choices(&self) -> Vec<String> {
+        let own = self.open_connection_name();
+        std::iter::once(String::new())
+            .chain(
+                self.config
+                    .ai
+                    .connections
+                    .iter()
+                    .filter(|(name, connection)| Some(name.as_str()) != own && !connection.is_cli())
+                    .map(|(name, _)| name.clone()),
+            )
+            .collect()
     }
 
     /// Switch the open connection's provider. A CLI agent brings its own
@@ -574,7 +647,8 @@ impl SettingsModal {
             return;
         };
         connection.provider = provider.to_string();
-        if connection.is_cli() {
+        let cli = connection.is_cli();
+        if cli {
             let defaults = Connection::default();
             connection.base_url = defaults.base_url;
             connection.api_key_env = defaults.api_key_env;
@@ -588,6 +662,10 @@ impl SettingsModal {
         if let (true, Some(old)) = (auto, self.open_connection_name().map(str::to_string)) {
             let new = self.unused_name(provider_slug(provider), Some(&old));
             self.move_connection(&old, &new);
+        }
+        // A CLI agent cannot run the subagents others sent to it.
+        if let (true, Some(name)) = (cli, self.open_connection_name().map(str::to_string)) {
+            self.retarget_subagents(&name, "");
         }
         self.model_options.clear();
         self.request_models();
@@ -1080,6 +1158,57 @@ mod tests {
         assert!(!modal
             .content_rows()
             .contains(&ContentRow::Field(REASONING_PARAM)));
+    }
+
+    #[test]
+    fn subagents_run_on_a_model_connection_chosen_on_the_page() {
+        let mut config = with_local();
+        config.ai.connections.insert(
+            "claude".into(),
+            Connection {
+                provider: "claude_code".into(),
+                ..Connection::default()
+            },
+        );
+        config
+            .ai
+            .connections
+            .insert("cloud".into(), Connection::default());
+        let mut modal = ai_modal(config);
+        modal.open_connection("claude".into());
+        // A CLI agent's page shows the field too; left empty it runs none.
+        assert!(modal.content_rows().contains(&ContentRow::Field(SUBAGENTS)));
+        assert_eq!(
+            modal.connection_value(SUBAGENTS),
+            i18n::t().settings_value_none()
+        );
+        // The choices: itself, then the model connections — no CLI agent.
+        let options = modal.connection_enum_options(SUBAGENTS).unwrap();
+        assert_eq!(options.values, ["", "cloud", "local"]);
+        assert_eq!(options.current, Some(0));
+        modal.apply_connection_enum(SUBAGENTS, "local");
+        assert_eq!(modal.config.ai.connections["claude"].subagents, "local");
+        modal.cycle_connection_field(SUBAGENTS, false);
+        assert_eq!(modal.config.ai.connections["claude"].subagents, "cloud");
+
+        // A model connection's empty choice is itself.
+        modal.open_connection("local".into());
+        assert_eq!(
+            modal.connection_value(SUBAGENTS),
+            i18n::t().settings_ai_connection_subagents_own()
+        );
+        // The choice follows a rename, and goes with a deletion or a switch
+        // to a CLI agent.
+        modal.open_connection("cloud".into());
+        edit(&mut modal, NAME, "hosted");
+        assert_eq!(modal.config.ai.connections["claude"].subagents, "hosted");
+        modal.apply_connection_enum(PROVIDER, "codex");
+        assert!(modal.config.ai.connections["claude"].subagents.is_empty());
+        modal.apply_connection_enum(PROVIDER, "openai_compatible");
+        modal.open_connection("claude".into());
+        modal.apply_connection_enum(SUBAGENTS, "local");
+        modal.delete_connection("local");
+        assert!(modal.config.ai.connections["claude"].subagents.is_empty());
     }
 
     #[test]

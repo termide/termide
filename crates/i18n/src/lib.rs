@@ -995,6 +995,11 @@ pub trait Translation: Send + Sync {
     /// its prompt-processing progress.
     fn settings_ai_connection_prefill_progress(&self) -> &str;
     fn settings_ai_connection_reasoning_param(&self) -> &str;
+    /// Settings modal: the connection the agents a connection's sessions
+    /// delegate to with `task` run on.
+    fn settings_ai_connection_subagents(&self) -> &str;
+    /// Settings modal: subagents left on the connection itself.
+    fn settings_ai_connection_subagents_own(&self) -> &str;
     /// Settings modal: a connection left without a name, or with another's.
     fn settings_ai_connection_name_taken(&self) -> &str;
     /// Settings modal: the permission mode new agent sessions start in.

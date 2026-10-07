@@ -40,11 +40,13 @@ api_key_env = "ANTHROPIC_API_KEY"
 
 [ai.connections.codex]
 provider = "codex"                 # a CLI agent needs nothing else
+# subagents = "local"              # the connection delegated tasks run on; default: this one
 ```
 
 A connection carries `provider`, `base_url`, `model`, `api_key_env`,
-`context_window_fallback` and, for `openai_compatible`, `prefill_progress`
-and `reasoning_param`; what it leaves out takes that field's default.
+`context_window_fallback`, `subagents` (see [Subagents](#subagents)) and, for
+`openai_compatible`, `prefill_progress` and `reasoning_param`; what it leaves
+out takes that field's default.
 `prefill_progress` sends `return_progress` with each request, which llama.cpp
 answers with its prompt-processing progress; it is off by default because
 servers that do not know the field (OpenAI's own API among them) may reject
@@ -78,7 +80,7 @@ The settings modal (the gear, or the command palette) has all of it under
 provider and model, the one new sessions start on marked `●`. `Enter` or a
 click opens a connection on a page of its own — name, provider, base URL, API
 key variable, model, context window, **Prefill progress (llama.cpp)** and
-**Reasoning parameter** (for an OpenAI-compatible one) and **Use by default** (new sessions start
+**Reasoning parameter** (for an OpenAI-compatible one), **Subagents** and **Use by default** (new sessions start
 on it) — and **[ Back to list ]**, `Esc` or `Backspace` returns to the list;
 **+ Add connection** adds an OpenAI-compatible one, and
 **[ Delete connection ]** on the page, or `Del` on its row, removes one.
@@ -1297,7 +1299,21 @@ refused with a reason it reads. In `auto` the reviewer decides those calls
 instead. External agents (those with a `command`) cannot be delegates, and a
 subagent gets no `task` tool of its own, so delegation does not nest. An agent whose `tools` list leaves out `task`
 cannot delegate. A run that will not stop is cut off after fifty
-model calls.
+model calls, and one that fails reports why, the endpoint's error included.
+
+A delegate runs on the connection the session's connection names under
+**Subagents** on its settings page (`subagents` in the file), or on the
+session's own when it names none. The choices are the connection itself and
+every connection termide talks to a model on: a delegate runs the built-in
+loop, which a CLI agent does not. So the tasks of a session on Claude Code
+(which calls termide's `task`; Codex and Gemini CLI delegate on their own) run
+only once its connection names one — `task` then hands them to, say, a local
+server or a hosted API — and fail with a reason that says where to choose one
+until it does. On a connection of its own a delegate runs
+that connection's model; the `model` its `AGENT.md` names applies on the
+session's connection, whose endpoint the id is for. The choice follows a
+renamed connection, and a deleted one, or one turned into a CLI agent, hands
+its delegates back to their own connection.
 
 ### External agents
 

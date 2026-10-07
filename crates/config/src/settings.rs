@@ -191,6 +191,11 @@ pub struct Connection {
     /// The field an `openai_compatible` server takes the reasoning level in.
     #[serde(default, skip_serializing_if = "ReasoningParam::is_auto")]
     pub reasoning_param: ReasoningParam,
+    /// The connection, by name, the agents this one delegates to with
+    /// `task` run on; empty runs them on this one. A subagent runs the
+    /// built-in loop, so it needs a model connection, not a CLI agent.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub subagents: String,
 }
 
 /// `reasoning_param` of an `openai_compatible` connection.
@@ -264,6 +269,7 @@ impl Default for Connection {
             context_window_fallback: None,
             prefill_progress: false,
             reasoning_param: ReasoningParam::Auto,
+            subagents: String::new(),
         }
     }
 }
@@ -1402,6 +1408,19 @@ mod ai_settings_tests {
             "{text}"
         );
         assert_eq!(toml::from_str::<Connection>(&text).unwrap(), local);
+    }
+
+    #[test]
+    fn a_connection_names_its_subagents_connection_only_when_set() {
+        let mut claude = Connection {
+            provider: "claude_code".into(),
+            ..Connection::default()
+        };
+        assert!(!toml::to_string(&claude).unwrap().contains("subagents"));
+        claude.subagents = "local".into();
+        let text = toml::to_string(&claude).unwrap();
+        assert!(text.contains("subagents = \"local\""), "{text}");
+        assert_eq!(toml::from_str::<Connection>(&text).unwrap(), claude);
     }
 
     #[test]
