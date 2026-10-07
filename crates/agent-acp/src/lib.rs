@@ -980,11 +980,9 @@ impl Shared {
                 }
                 // Gone from the agent's own store, most likely: the
                 // conversation goes on in a new session, told the recap.
-                Err(error) => log::warn!(
-                    "acp {}: cannot resume session {}: {error}",
-                    self.name,
-                    resume.session_id
-                ),
+                Err(error) => {
+                    log::warn!("acp {}: cannot resume the session: {error}", self.name)
+                }
             }
         }
         let value = self.request("session/new", params, timeout)?;
