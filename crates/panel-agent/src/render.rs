@@ -223,16 +223,7 @@ impl AgentPanel {
     /// (uncached input and cache writes), `↻` those the cache served (when
     /// any), `↓` the output.
     pub(crate) fn token_totals(&self) -> String {
-        let cached = if self.session_cached > 0 {
-            format!(" ↻{}", format_tokens(self.session_cached))
-        } else {
-            String::new()
-        };
-        format!(
-            "↑{}{cached} ↓{}",
-            format_tokens(self.session_input),
-            format_tokens(self.session_output)
-        )
+        crate::token_label(self.session_input, self.session_cached, self.session_output)
     }
 
     /// The model as the banner and the chip show it: `auto` while it is left

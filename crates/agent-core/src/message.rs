@@ -65,7 +65,19 @@ impl Usage {
             .saturating_add(self.cache_read)
             .saturating_add(self.cache_write)
     }
+
+    /// Add `other`'s counts to these.
+    pub fn add(&mut self, other: &Self) {
+        self.input = self.input.saturating_add(other.input);
+        self.output = self.output.saturating_add(other.output);
+        self.cache_read = self.cache_read.saturating_add(other.cache_read);
+        self.cache_write = self.cache_write.saturating_add(other.cache_write);
+    }
 }
+
+/// The key of a tool result's details under which the tool reports the
+/// tokens its own model calls spent: a subagent's run.
+const SPENT_KEY: &str = "usage";
 
 /// A block inside a user message.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -356,6 +368,36 @@ impl ToolResultMessage {
         self
     }
 
+    /// Note in the details the tokens the tool's own model calls spent —
+    /// a subagent's run — beside any details already there. Nothing spent
+    /// is noted as nothing.
+    #[must_use]
+    pub fn with_spent(mut self, usage: Usage) -> Self {
+        if usage.total() == 0 {
+            return self;
+        }
+        let Ok(value) = serde_json::to_value(usage) else {
+            return self;
+        };
+        match &mut self.details {
+            Some(Value::Object(details)) => {
+                details.insert(SPENT_KEY.to_string(), value);
+            }
+            Some(_) => {}
+            None => self.details = Some(serde_json::json!({ SPENT_KEY: value })),
+        }
+        self
+    }
+
+    /// The tokens the tool's own model calls spent, when it noted any.
+    #[must_use]
+    pub fn spent(&self) -> Option<Usage> {
+        let value = self.details.as_ref()?.get(SPENT_KEY)?;
+        serde_json::from_value(value.clone())
+            .ok()
+            .filter(|usage: &Usage| usage.total() > 0)
+    }
+
     /// Concatenated text blocks.
     #[must_use]
     pub fn plain_text(&self) -> String {
@@ -381,6 +423,34 @@ pub enum Message {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn what_a_tool_spent_rides_in_its_details_beside_the_rest() {
+        let call = ToolCall {
+            id: "c".into(),
+            name: "task".into(),
+            arguments: json!({}),
+            extra_content: None,
+        };
+        let spent = Usage {
+            input: 10,
+            output: 5,
+            cache_read: 100,
+            cache_write: 0,
+        };
+        assert_eq!(ToolResultMessage::text(&call, "ok").spent(), None);
+        let nothing = ToolResultMessage::text(&call, "ok").with_spent(Usage::default());
+        assert_eq!(nothing.details, None);
+        let result = ToolResultMessage::error(&call, "failed")
+            .with_details(json!({ "other": 1 }))
+            .with_spent(spent);
+        assert_eq!(result.spent(), Some(spent));
+        assert_eq!(result.details.as_ref().unwrap()["other"], 1);
+        let mut total = spent;
+        total.add(&spent);
+        assert_eq!(total.input, 20);
+        assert_eq!(total.cache_read, 200);
+    }
 
     #[test]
     fn message_round_trips_through_json_with_role_tag() {

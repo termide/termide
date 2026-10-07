@@ -1250,6 +1250,22 @@ pub(crate) fn format_tokens(tokens: u64) -> String {
     }
 }
 
+/// Tokens as the status line and a subagent's block show them: `↑` the
+/// prompt tokens billed in full (uncached input and cache writes), `↻` those
+/// the cache served (when any), `↓` the output.
+pub(crate) fn token_label(billed: u64, cached: u64, output: u64) -> String {
+    let cached = if cached > 0 {
+        format!(" ↻{}", format_tokens(cached))
+    } else {
+        String::new()
+    };
+    format!(
+        "↑{}{cached} ↓{}",
+        format_tokens(billed),
+        format_tokens(output)
+    )
+}
+
 impl Panel for AgentPanel {
     fn name(&self) -> &'static str {
         "agent"

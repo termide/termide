@@ -15,7 +15,7 @@ use termide_agent_core::{
     HostTools, IntentLog, Message, ModeHandle, ModelChoice, ModelSpec, PermissionAnswer,
     PermissionHooks, PermissionRules, PersistScope, PlanGuard, PromptOptions, Provider, Refusals,
     ReviewerSetup, Session, SessionSummary, ShellOutput, ShellRunner, StreamEvent, ThinkingLevel,
-    Tool, ToolCall, ToolContext, ToolRegistry, ToolUpdate, UserMessage, DEFAULT_AGENT,
+    Tool, ToolCall, ToolContext, ToolRegistry, ToolUpdate, Usage, UserMessage, DEFAULT_AGENT,
     GLOBAL_AGENT_DIR, SESSIONS_DIR,
 };
 use termide_agent_hooks::CommandHooks;
@@ -25,7 +25,8 @@ use termide_agent_providers::{
 };
 use termide_agent_recall::{PanelDir, RecallSetup, RecallTool, RepoFinder, Solver, TimeLimits};
 use termide_agent_tools::{
-    builtin_tools, BashTool, QuestionTool, SkillTool, SubagentRun, SuggestCommandTool, TaskTool,
+    builtin_tools, BashTool, QuestionTool, SkillTool, SubagentOutcome, SubagentRun,
+    SuggestCommandTool, TaskTool,
 };
 use termide_agent_web::{web_tools, Web, WebConfig};
 use termide_config::{AiSettings, Connection, WebSettings};
@@ -1109,11 +1110,14 @@ struct SubagentReport {
     answer: Option<String>,
     error: Option<String>,
     turns: usize,
+    /// What its model calls spent so far.
+    spent: Usage,
 }
 
 impl SubagentReport {
     /// Note a finished message of the subagent's.
     fn said(&mut self, message: &AssistantMessage, on_update: &mut dyn FnMut(ToolUpdate)) {
+        self.spent.add(&message.usage);
         let text = message.plain_text();
         let text = text.trim();
         if text.is_empty() {
@@ -1147,8 +1151,9 @@ impl SubagentReport {
     }
 
     /// The delegating call's result.
-    fn into_result(self, stopped: bool) -> Result<String, String> {
-        match self.answer {
+    fn into_outcome(self, stopped: bool) -> SubagentOutcome {
+        let spent = self.spent;
+        let answer = match self.answer {
             Some(text) if self.turns > SUBAGENT_MAX_TURNS => Ok(format!(
                 "{text}\n\n(subagent stopped after {SUBAGENT_MAX_TURNS} steps)"
             )),
@@ -1158,7 +1163,8 @@ impl SubagentReport {
                 || "the subagent produced no answer".to_string(),
                 |error| format!("the subagent failed: {error}"),
             )),
-        }
+        };
+        SubagentOutcome { answer, spent }
     }
 }
 
@@ -1198,7 +1204,20 @@ impl Subagents {
         ctx: &ToolContext,
         cancel: &CancelToken,
         on_update: &mut dyn FnMut(ToolUpdate),
-    ) -> Result<String, String> {
+    ) -> SubagentOutcome {
+        self.delegate(name, prompt, ctx, cancel, on_update)
+            .unwrap_or_else(|error| Err(error).into())
+    }
+
+    /// Run the task; an error is one that came before anything was spent.
+    fn delegate(
+        &self,
+        name: &str,
+        prompt: &str,
+        ctx: &ToolContext,
+        cancel: &CancelToken,
+        on_update: &mut dyn FnMut(ToolUpdate),
+    ) -> Result<SubagentOutcome, String> {
         let definition = self.dirs.agent(name);
         if definition.spec.acp.is_some() {
             return Err(format!(
@@ -1328,7 +1347,7 @@ impl Subagents {
         if report.answer.is_none() && report.error.is_none() {
             report.error = run_error(agent.messages());
         }
-        report.into_result(cancel.is_cancelled())
+        Ok(report.into_outcome(cancel.is_cancelled()))
     }
 
     /// Run `run` as a session of its own of its CLI agent, which calls the
@@ -1343,7 +1362,7 @@ impl Subagents {
         budget: &CancelToken,
         cancel: &CancelToken,
         on_update: &mut dyn FnMut(ToolUpdate),
-    ) -> Result<String, String> {
+    ) -> Result<SubagentOutcome, String> {
         let config = cli_acp_config(&run.connection.provider)
             .ok_or_else(|| format!("{} is not a CLI agent", run.connection.provider))?;
         let (prompter, permission_rx) = permission_channel(budget.clone());
@@ -1404,7 +1423,7 @@ impl CliDrive<'_> {
         starting: &dyn Fn() -> bool,
         prompt: &str,
         on_update: &mut dyn FnMut(ToolUpdate),
-    ) -> Result<String, String> {
+    ) -> Result<SubagentOutcome, String> {
         let stopped = || self.cancel.is_cancelled() || self.budget.is_cancelled();
         // The model goes before the task does, so the whole task runs on it.
         if !self.model.is_empty() {
@@ -1471,7 +1490,7 @@ impl CliDrive<'_> {
             }
             std::thread::sleep(CLI_SUBAGENT_POLL);
         }
-        report.into_result(self.cancel.is_cancelled())
+        Ok(report.into_outcome(self.cancel.is_cancelled()))
     }
 }
 
@@ -2249,14 +2268,18 @@ mod tests {
 
     impl Backend for FakeCli {
         fn prompt(&self, message: UserMessage) -> Result<(), termide_agent_core::PromptError> {
-            use termide_agent_core::{StopReason, Usage};
+            use termide_agent_core::StopReason;
             self.prompted.lock().unwrap().push(message.model_text());
             self.busy.store(true, std::sync::atomic::Ordering::SeqCst);
             let said = |text: &str| {
                 AgentEvent::MessageEnd(Message::Assistant(AssistantMessage {
                     content: vec![termide_agent_core::AssistantContent::Text { text: text.into() }],
                     stop_reason: StopReason::Stop,
-                    usage: Usage::default(),
+                    usage: Usage {
+                        input: 100,
+                        output: 10,
+                        ..Usage::default()
+                    },
                     provider: "acp".into(),
                     model: "m".into(),
                     error_message: None,
@@ -2335,7 +2358,10 @@ mod tests {
             let ToolUpdate::Output(text) = update;
             progress.push(text);
         });
-        assert_eq!(answer.as_deref(), Ok("the answer"));
+        let outcome = answer.unwrap();
+        assert_eq!(outcome.answer.as_deref(), Ok("the answer"));
+        // Every reply's tokens count, not the last one's alone.
+        assert_eq!((outcome.spent.input, outcome.spent.output), (200, 20));
         assert_eq!(
             cli.picked.lock().unwrap().as_deref(),
             Some("claude-haiku-5")
@@ -2741,7 +2767,7 @@ mod tests {
             &mut |_| {},
         );
         stopper.join().unwrap();
-        assert_eq!(result, Err("the subagent was stopped".to_string()));
+        assert_eq!(result.answer, Err("the subagent was stopped".to_string()));
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
     }
 
