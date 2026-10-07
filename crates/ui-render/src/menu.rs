@@ -568,6 +568,7 @@ mod tests {
             name: name.to_string(),
             current,
             attention,
+            selected: false,
         }
     }
 

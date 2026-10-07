@@ -9,8 +9,8 @@ use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
 use termide_ui_render::{
-    get_menu_item_x_position, get_projects_items, DropdownItem, ProjectButton, PROJECTS_MENU_INDEX,
-    PROJECTS_SUBMENU_ITEM_COUNT,
+    get_menu_item_x_position, get_projects_items, project_button_of, DropdownItem, ProjectButton,
+    PROJECTS_MENU_INDEX, PROJECTS_SUBMENU_ITEM_COUNT,
 };
 
 use crate::open_projects::OpenProjectView;
@@ -260,13 +260,20 @@ impl AppState {
     /// list them (so button `i` is `switch_to_open_project(i)`).
     pub fn project_buttons(&self) -> Vec<ProjectButton> {
         let open: Vec<&OpenProjectView> = self.open_projects.iter().collect();
+        let selected = self
+            .ui
+            .selected_menu_item
+            .filter(|_| self.ui.menu_open)
+            .and_then(project_button_of)
+            .or(self.held_project_button);
         let name = |root: &Path| {
             root.file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| root.display().to_string())
         };
         open.iter()
-            .map(|view| {
+            .enumerate()
+            .map(|(index, view)| {
                 let own = name(&view.root);
                 let shared = open
                     .iter()
@@ -279,6 +286,7 @@ impl AppState {
                     name: label,
                     current: view.root == self.project_root,
                     attention: view.attention,
+                    selected: selected == Some(index),
                 }
             })
             .collect()
@@ -353,6 +361,19 @@ mod tests {
         let current: Vec<_> = buttons.iter().map(|b| b.current).collect();
         assert_eq!(current, [true, false, false]);
         assert!(buttons[1].attention);
+        assert!(buttons.iter().all(|b| !b.selected));
+
+        // Selected in the open menu, or held by the mouse.
+        let selected = |state: &AppState| -> Vec<bool> {
+            state.project_buttons().iter().map(|b| b.selected).collect()
+        };
+        state.ui.selected_menu_item = Some(termide_ui_render::menu::PROJECT_BUTTON_BASE + 2);
+        assert_eq!(selected(&state), [false; 3], "the menu is closed");
+        state.ui.menu_open = true;
+        assert_eq!(selected(&state), [false, false, true]);
+        state.ui.menu_open = false;
+        state.held_project_button = Some(1);
+        assert_eq!(selected(&state), [false, true, false]);
     }
 
     #[test]

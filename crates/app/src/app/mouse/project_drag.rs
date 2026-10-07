@@ -49,6 +49,9 @@ impl App {
         let Some(root) = self.listed_open_roots().get(index).cloned() else {
             return;
         };
+        if surface == ProjectDragSurface::Bar {
+            self.state.held_project_button = Some(index);
+        }
         self.project_drag = Some(ProjectDrag {
             surface,
             root,
@@ -120,6 +123,7 @@ impl App {
     fn follow_moved_project(&mut self, surface: ProjectDragSurface, place: usize) {
         match surface {
             ProjectDragSurface::Bar => {
+                self.state.held_project_button = Some(place);
                 let selected = self.state.ui.selected_menu_item;
                 if selected.is_some_and(|item| item >= PROJECT_BUTTON_BASE) {
                     self.state.ui.selected_menu_item = Some(PROJECT_BUTTON_BASE + place);
@@ -137,6 +141,7 @@ impl App {
     /// Let go on `Up(Left)`. A press that moved nothing and ends on its own
     /// project is a click on it: the project is switched to.
     pub(in crate::app) fn handle_project_drag_end(&mut self, x: u16, y: u16) -> Result<()> {
+        self.state.held_project_button = None;
         let Some(drag) = self.project_drag.take() else {
             return Ok(());
         };
@@ -165,6 +170,7 @@ impl App {
     /// Let go of a held project where it is, without a click.
     pub(in crate::app) fn release_project_drag(&mut self) {
         self.project_drag = None;
+        self.state.held_project_button = None;
     }
 
     /// `Esc` while holding a project: put it back where it was.
@@ -176,6 +182,8 @@ impl App {
             self.sync_open_projects();
             self.follow_moved_project(drag.surface, drag.original);
         }
+        self.state.held_project_button = None;
+        self.state.needs_redraw = true;
     }
 }
 

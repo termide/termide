@@ -4,8 +4,9 @@
 //! Every button is `[name]`, one space apart, pressed to the left. When the
 //! names do not fit, they lose their start, and the room is shared fairly:
 //! a short name keeps what it needs and the long ones split what is left.
-//! When even cut names do not fit, buttons drop out — the current project
-//! and the ones that wait stay longest — and `+N` counts the hidden ones.
+//! When even cut names do not fit, buttons drop out — the one the user acts
+//! on, the current project and the ones that wait stay longest — and `+N`
+//! counts the hidden ones.
 
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -19,6 +20,9 @@ pub struct ProjectButton {
     pub current: bool,
     /// A panel of this project, open in the background, waits for the user.
     pub attention: bool,
+    /// Selected in the open menu or held by the mouse: the user acts on it,
+    /// so it never drops out while another can.
+    pub selected: bool,
 }
 
 /// A button placed in the bar.
@@ -125,10 +129,17 @@ pub fn fit_project_strip(buttons: &[ProjectButton], start: u16, width: usize) ->
     if buttons.len() < 2 {
         return ProjectStrip::default();
     }
-    let rank = |i: usize| match (&buttons[i].current, &buttons[i].attention) {
-        (true, _) => 0,
-        (false, true) => 1,
-        _ => 2,
+    let rank = |i: usize| {
+        let button = &buttons[i];
+        if button.selected {
+            0
+        } else if button.current {
+            1
+        } else if button.attention {
+            2
+        } else {
+            3
+        }
     };
     let mut kept: Vec<usize> = (0..buttons.len()).collect();
     loop {
@@ -160,8 +171,9 @@ pub fn fit_project_strip(buttons: &[ProjectButton], start: u16, width: usize) ->
         if kept.len() == 1 {
             return ProjectStrip::default();
         }
-        // Drop the least needed: others before the ones that wait, the
-        // current project last; the later in the list first.
+        // Drop the least needed: others before the ones that wait, then the
+        // current project, the selected one last; the later in the list
+        // first.
         let drop = (0..kept.len())
             .max_by_key(|&k| (rank(kept[k]), kept[k]))
             .expect("kept is never empty");
@@ -178,6 +190,7 @@ mod tests {
             name: name.to_string(),
             current: false,
             attention: false,
+            selected: false,
         }
     }
 
@@ -249,6 +262,19 @@ mod tests {
         let shown: Vec<usize> = strip.buttons.iter().map(|b| b.index).collect();
         assert_eq!(shown, [1, 3]);
         assert_eq!(strip.overflow.as_ref().map(|(_, t)| t.as_str()), Some("+2"));
+    }
+
+    #[test]
+    fn the_selected_button_outlasts_the_current_one() {
+        let mut current = button("cur");
+        current.current = true;
+        let mut selected = button("sel");
+        selected.selected = true;
+        let buttons = [current, button("aaaa"), selected];
+        // Room for one short button and "+2" only.
+        let strip = fit_project_strip(&buttons, 0, 8);
+        let shown: Vec<usize> = strip.buttons.iter().map(|b| b.index).collect();
+        assert_eq!(shown, [2]);
     }
 
     #[test]
