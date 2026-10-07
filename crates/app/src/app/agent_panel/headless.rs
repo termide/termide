@@ -14,8 +14,8 @@ use termide_agent_tools::SkillTool;
 use termide_config::AiSettings;
 
 use super::{
-    api_key_of, base_tools, build_provider, recall_tool, resolve_model, restrict_tools,
-    reviewer_setup, shared_web, usable_connection,
+    base_tools, connection_provider, recall_tool, resolve_model, restrict_tools, reviewer_setup,
+    shared_web, usable_connection,
 };
 
 /// How a headless run reports its result.
@@ -50,11 +50,11 @@ pub fn run_agent_headless(
     let quiet = output != HeadlessOutput::Text;
     let stream = output == HeadlessOutput::StreamJson;
 
-    let Some((_, connection)) = usable_connection(settings) else {
+    let Some((name, connection)) = usable_connection(settings) else {
         eprintln!("termide: AI is not configured (add an [ai.connections] entry)");
         return 1;
     };
-    let provider = build_provider(connection, api_key_of(connection));
+    let provider = connection_provider(name, connection);
 
     let global = termide_config::get_config_dir()
         .ok()
@@ -284,8 +284,8 @@ pub fn run_recall(settings: &AiSettings, project_root: &Path, query: &str, json:
     let session = usable_connection(settings)
         .filter(|_| settings.recall.solver)
         .filter(|(_, connection)| !termide_config::is_cli_provider(&connection.provider))
-        .and_then(|(_, connection)| {
-            let provider = build_provider(connection, api_key_of(connection));
+        .and_then(|(name, connection)| {
+            let provider = connection_provider(name, connection);
             let model = resolve_model(provider.as_ref(), &connection.model)?;
             Some(SessionView {
                 id: None,

@@ -32,6 +32,7 @@ model = "Qwen3.8-Flash-Next-oQ4e-mtp"  # left out: the provider's first model
 # context_window_fallback = 32000  # used only when the server does not report a window
 # prefill_progress = true          # ask a llama.cpp server for its prompt-processing progress
 # reasoning_param = "enable_thinking"  # auto (default) | reasoning_effort | enable_thinking | none
+# max_concurrent_requests = 1      # requests served at once across termide; default 0: no limit
 
 [ai.connections.cloud]
 provider = "anthropic_compatible"
@@ -44,9 +45,20 @@ provider = "codex"                 # a CLI agent needs nothing else
 ```
 
 A connection carries `provider`, `base_url`, `model`, `api_key_env`,
-`context_window_fallback`, `subagents` (see [Subagents](#subagents)) and, for
-`openai_compatible`, `prefill_progress` and `reasoning_param`; what it leaves
-out takes that field's default.
+`context_window_fallback`, `subagents` (see [Subagents](#subagents)),
+`max_concurrent_requests` and, for `openai_compatible`, `prefill_progress` and
+`reasoning_param`; what it leaves out takes that field's default.
+`max_concurrent_requests` caps how many requests the connection serves at
+once across the whole termide process — the agents of every panel, their
+subagents, the `auto` reviewer and the other side calls on it; the rest wait
+their turn, first come first served, and `Esc` stops a waiting one before it is
+sent. A local server usually runs one request at a time (llama.cpp as many as
+its `--parallel` slots), and a request beyond that either waits on the server
+or takes over a slot whose prompt cache another conversation needed; set it to
+what the server runs. The default, 0, sets no limit. It counts per connection
+name, so two connections to one server keep separate counts, and two termide
+processes do not share it. A CLI agent sends its requests itself, so it has
+none.
 `prefill_progress` sends `return_progress` with each request, which llama.cpp
 answers with its prompt-processing progress; it is off by default because
 servers that do not know the field (OpenAI's own API among them) may reject
@@ -80,7 +92,7 @@ The settings modal (the gear, or the command palette) has all of it under
 provider and model, the one new sessions start on marked `●`. `Enter` or a
 click opens a connection on a page of its own — name, provider, base URL, API
 key variable, model, context window, **Prefill progress (llama.cpp)** and
-**Reasoning parameter** (for an OpenAI-compatible one), **Subagents** and **Use by default** (new sessions start
+**Reasoning parameter** (for an OpenAI-compatible one), **Requests at once** (not for a CLI agent), **Subagents** and **Use by default** (new sessions start
 on it) — and **[ Back to list ]**, `Esc` or `Backspace` returns to the list;
 **+ Add connection** adds an OpenAI-compatible one, and
 **[ Delete connection ]** on the page, or `Del` on its row, removes one.
@@ -493,7 +505,10 @@ figures: until the first token, a `⏫` prefill line with how long the model has
 been reading the prompt and an estimate of its size (`⏫ 14s (↑~48k)`), or, from
 a server that reports its progress (`prefill_progress`), a bar with the tokens
 read so far and the speed over those not served from its cache
-(`⏫ 14s ▰▰▰▰▱▱▱▱ (↑24k/48k, 1k tok/s)`); once
+(`⏫ 14s ▰▰▰▰▱▱▱▱ (↑24k/48k, 1k tok/s)`), and before that, while the request
+waits for a slot of its connection (`max_concurrent_requests`), a `⏳` line
+with how long it has waited and how many wait before it (the prefill is timed
+from when it is sent); once
 tokens stream, a `✍️` generation line with the running duration, estimated
 tokens and speed; and below either the run clock. The exact input count and
 prefill speed come with the finished block. A compaction, `/compact` between
