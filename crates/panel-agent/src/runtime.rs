@@ -11,7 +11,8 @@ use termide_agent_core::{
     CompactionPrompts, GoalPrompt, HandoffPrompt, Hooks, HostTools, LoggedMessage, Message, Mode,
     ModeHandle, ModelInfo, ModelSpec, PermissionEnvelope, PermissionHooks, PermissionRules,
     PersistRule, PlanGuard, PlanPrompt, Provider, QuestionEnvelope, Refusals, ReviewerSetup,
-    Session, ShellRunner, SuggestionEnvelope, Timing, ToolContext, ToolRegistry,
+    Session, ShellRunner, SkillInfo, SuggestionEnvelope, Timing, ToolContext, ToolRegistry,
+    MODEL_OPTION,
 };
 
 use crate::toolset::{Blocked, ToolsetGuard};
@@ -130,6 +131,34 @@ pub(crate) fn session_model(configured: &ModelSpec, session: Option<&Session>) -
     model
 }
 
+/// The model to pre-select on an external agent when the session picked
+/// none: the one the configuration names — `[ai].model` of a CLI provider,
+/// or `model` in the agent's `AGENT.md`. An id the agent does not offer (a
+/// wire-protocol endpoint's model) is left alone when the choices apply.
+pub(crate) fn preferred_acp_model(model: &ModelSpec) -> Option<String> {
+    (!model.id.is_empty()).then(|| model.id.clone())
+}
+
+/// The settings to ask an external agent for once it states its own: those
+/// the session picked for it, the `preferred` model first when the session
+/// picked none. Nothing for the built-in loop.
+pub(crate) fn acp_choices(
+    external: bool,
+    preferred: Option<String>,
+    session: Option<&Session>,
+) -> Vec<(String, String)> {
+    if !external {
+        return Vec::new();
+    }
+    let mut choices = session.map(Session::agent_options).unwrap_or_default();
+    if let Some(model) = preferred {
+        if !choices.iter().any(|(id, _)| id == MODEL_OPTION) {
+            choices.insert(0, (MODEL_OPTION.to_string(), model));
+        }
+    }
+    choices
+}
+
 /// What [`spawn_runtime`] hands back.
 pub(crate) struct Spawned {
     pub(crate) runtime: Box<dyn Backend>,
@@ -170,6 +199,7 @@ pub(crate) fn spawn_runtime(
     session: Option<&Session>,
     blocked: &Blocked,
     shell_run: Option<ShellRunner>,
+    skills: Vec<SkillInfo>,
 ) -> Spawned {
     let cancel = CancelToken::new();
     let (prompter, permission_rx) = permission_channel(cancel.clone());
@@ -255,6 +285,8 @@ pub(crate) fn spawn_runtime(
             mode: mode.clone(),
             system_prompt: system_prompt.to_string(),
             plan: plan_prompt.clone(),
+            goal: goal_prompt.clone(),
+            handoff: handoff_prompt.clone(),
             host_tools: Some(HostTools {
                 tools: tools.clone(),
                 hooks: Box::new(ChainedHooks::new(host_chain)),
@@ -264,6 +296,7 @@ pub(crate) fn spawn_runtime(
                     shell_run: shell_run.clone(),
                     ..ToolContext::new(cwd)
                 },
+                skills,
             }),
             // The conversation goes on in the agent's own session when it
             // still holds it, else the agent is told a recap of it.

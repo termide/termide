@@ -14,7 +14,7 @@
 //! prompt sent before the session exists waits in the queue and goes out as
 //! soon as it does.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -25,12 +25,13 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use termide_agent_core::recap;
+use termide_agent_core::{companion_tools, parse_verdict, GoalPrompt, HandoffPrompt};
 use termide_agent_core::{
-    expand_env, now_millis, AcpConfig, AcpFlavor, Agent, AgentEvent, AssistantContent,
-    AssistantMessage, Backend, BackendModel, BackendSetup, CancelToken, ExternalSessionRef, Hooks,
-    HostTools, Message, Mode, ModeHandle, PermissionHooks, PlanPrompt, PromptError, StopReason,
-    StreamEvent, ToolCall, ToolContext, ToolDecision, ToolRegistry, ToolResultMessage, Usage,
-    UserMessage, ACP_PROVIDER, RECAP_LIMIT,
+    expand_env, now_millis, AcpConfig, AcpFlavor, Agent, AgentCommand, AgentEvent,
+    AssistantContent, AssistantMessage, Backend, BackendModel, BackendOption, BackendSetup,
+    CancelToken, ExternalSessionRef, Hooks, HostTools, Message, Mode, ModeHandle, PermissionHooks,
+    PlanPrompt, PromptError, StopReason, StreamEvent, ToolCall, ToolContext, ToolDecision,
+    ToolRegistry, ToolResultMessage, Usage, UserMessage, ACP_PROVIDER, RECAP_LIMIT,
 };
 use termide_agent_mcp::{McpServer, SERVER_NAME};
 
@@ -74,6 +75,9 @@ struct Shared {
     name: String,
     /// The assistant message being streamed, if any: text and thought count.
     open_message: Mutex<Option<String>>,
+    /// The reasoning streamed into that message, kept with it in the log as
+    /// the built-in loop keeps its own.
+    open_thought: Mutex<String>,
     child: Mutex<Option<Child>>,
     /// Models the agent advertised at `session/new`, for the picker; empty when
     /// it advertises none.
@@ -85,6 +89,12 @@ struct Shared {
     /// agent offers its models that way (`configOptions`) rather than as
     /// `models`; a switch then goes through `session/set_config_option`.
     model_option: Mutex<Option<String>>,
+    /// The session's config options of the `select` type, the model's among
+    /// them, as the agent last stated them all: in the session's result, in a
+    /// `session/set_config_option` reply or a `config_option_update`.
+    options: Mutex<Vec<BackendOption>>,
+    /// The commands the agent offers, as it last listed them.
+    commands: Mutex<Vec<AgentCommand>>,
     /// Which adapter this is.
     flavor: AcpFlavor,
     /// termide's system prompt, for an adapter that takes it.
@@ -117,6 +127,12 @@ struct Shared {
     /// notes since — has plan mode on. The prompt is fixed for the session,
     /// so a later switch reaches it as a note before the next turn.
     told_plan: AtomicBool,
+    /// termide's tools Claude Code was last told it has — those its session
+    /// started with, then those a note named — and those served now, which
+    /// change as the session switches tools or MCP servers come and go; a
+    /// difference reaches it as a note before the next turn.
+    told_tools: Mutex<Option<BTreeSet<String>>>,
+    served_tools: Mutex<BTreeSet<String>>,
     /// The agent's own session to resume, when the log names one.
     resume: Option<ExternalSessionRef>,
     /// The conversation so far, until the handshake knows whether the
@@ -127,6 +143,37 @@ struct Shared {
     /// Set while `session/load` replays the conversation, which the panel
     /// already shows and the log already holds.
     replaying: AtomicBool,
+    /// Whether the agent takes a message into the turn it is running
+    /// (`_session/steering`, which its `initialize` result announces under
+    /// `_meta.steering.supported`), as the built-in loop does at a step.
+    steering: AtomicBool,
+    /// Set while a `session/prompt` is out: the window in which a message
+    /// can steer the turn.
+    turn_running: AtomicBool,
+    /// Messages the running turn took, waiting to be logged until the calls
+    /// it has open are answered, so the log never puts a message between a
+    /// call and its result.
+    steered: Mutex<Vec<UserMessage>>,
+    /// The `_session/steering` requests out, by id, with their message: the
+    /// reply is taken in the reader, in order with the updates, so the
+    /// message is logged before the text that answers it.
+    steering_out: Mutex<HashMap<u64, UserMessage>>,
+    /// Whether the agent forks a session (`session/fork`) and closes one
+    /// (`session/close`), which a side request (the `/goal` judge, the
+    /// `/handoff` brief) is sent in, so the conversation is left as it was.
+    can_fork: AtomicBool,
+    can_close: AtomicBool,
+    /// The side request in flight: the session it runs in and the answer
+    /// so far, which reaches neither the panel nor the log.
+    side: Mutex<Option<SideQuery>>,
+    goal: GoalPrompt,
+    handoff: HandoffPrompt,
+}
+
+/// A side request's session and the text it has answered so far.
+struct SideQuery {
+    session_id: String,
+    text: String,
 }
 
 /// The agent's tool calls as the session log keeps the built-in loop's: an
@@ -222,19 +269,23 @@ impl AcpRuntime {
             cwd: setup.cwd,
             name: name.to_string(),
             open_message: Mutex::new(None),
+            open_thought: Mutex::new(String::new()),
             child: Mutex::new(None),
             models: Mutex::new(Vec::new()),
             current_model: Mutex::new(None),
             model_option: Mutex::new(None),
+            options: Mutex::new(Vec::new()),
+            commands: Mutex::new(Vec::new()),
             flavor,
             system_prompt: setup.system_prompt,
             // Codex and Gemini CLI keep their own tools: of termide's they
-            // are served those of its MCP servers only, which the panel hands
-            // over as they connect.
+            // are served those they have no counterpart of (the project's
+            // memory and skills, the panel's cards), and those of its MCP
+            // servers, which the panel hands over as they connect.
             host_tools: Mutex::new(setup.host_tools.map(|host| {
                 if matches!(flavor, AcpFlavor::Codex | AcpFlavor::GeminiCli) {
                     HostTools {
-                        tools: ToolRegistry::new(),
+                        tools: companion_tools(&host.tools, &host.skills),
                         ..host
                     }
                 } else {
@@ -249,12 +300,23 @@ impl AcpRuntime {
             calls: Mutex::new(CallLog::default()),
             context: Mutex::new(None),
             told_plan: AtomicBool::new(setup.mode.get() == Mode::Plan),
+            told_tools: Mutex::new(None),
+            served_tools: Mutex::new(BTreeSet::new()),
             mode: setup.mode,
             plan: setup.plan,
             resume: setup.resume,
             history: Mutex::new(setup.history),
             recap: Mutex::new(None),
             replaying: AtomicBool::new(false),
+            steering: AtomicBool::new(false),
+            turn_running: AtomicBool::new(false),
+            steered: Mutex::new(Vec::new()),
+            steering_out: Mutex::new(HashMap::new()),
+            can_fork: AtomicBool::new(false),
+            can_close: AtomicBool::new(false),
+            side: Mutex::new(None),
+            goal: setup.goal,
+            handoff: setup.handoff,
         });
         let for_reader = Arc::clone(&shared);
         std::thread::spawn(move || for_reader.read_loop(reader));
@@ -295,17 +357,21 @@ impl Backend for AcpRuntime {
         Ok(())
     }
 
+    /// The message waits in the queue, shown as queued; an agent that takes
+    /// a message into its running turn is handed it at once, else it goes
+    /// as the next turn.
     fn steer(&self, message: UserMessage) {
         self.shared
             .queue
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .push(message);
-        let lens = self.queue_lens();
-        let _ = self.shared.events.send(AgentEvent::QueueUpdate {
-            steering: lens.0,
-            follow_up: lens.1,
-        });
+            .push(message.clone());
+        self.shared.report_queue();
+        if self.shared.steering.load(Ordering::Acquire)
+            && self.shared.turn_running.load(Ordering::Acquire)
+        {
+            self.shared.steer_now(message);
+        }
     }
 
     fn take_queued(&self) -> Vec<UserMessage> {
@@ -377,6 +443,55 @@ impl Backend for AcpRuntime {
         Err(PromptError::Unsupported)
     }
 
+    /// The judge's instructions and request go to the agent as one side
+    /// request; its answer is read as the built-in judge's is.
+    fn judge(&self, goal: String) -> Result<(), PromptError> {
+        self.shared.side_ready()?;
+        let shared = Arc::clone(&self.shared);
+        std::thread::spawn(move || {
+            let text = format!(
+                "{}\n\n{}",
+                shared.goal.system_prompt(&goal),
+                shared.goal.request
+            );
+            let event = match shared.side_query(&text) {
+                Ok(reply) if !reply.trim().is_empty() => {
+                    let verdict = parse_verdict(&reply);
+                    AgentEvent::GoalJudged {
+                        done: verdict.done,
+                        reason: verdict.reason,
+                    }
+                }
+                Ok(_) => AgentEvent::GoalJudgeFailed {
+                    error: "the judge call did not complete".to_string(),
+                },
+                Err(error) => AgentEvent::GoalJudgeFailed { error },
+            };
+            let _ = shared.events.send(event);
+        });
+        Ok(())
+    }
+
+    /// The brief's instructions and request go to the agent as one side
+    /// request; its answer is the brief.
+    fn handoff(&self) -> Result<(), PromptError> {
+        self.shared.side_ready()?;
+        let shared = Arc::clone(&self.shared);
+        std::thread::spawn(move || {
+            let text = format!(
+                "{}\n\n{}",
+                shared.handoff.instructions, shared.handoff.request
+            );
+            let brief = match shared.side_query(&text) {
+                Ok(reply) if !reply.trim().is_empty() => Ok(reply.trim().to_string()),
+                Ok(_) => Err("the handoff call did not produce a brief".to_string()),
+                Err(error) => Err(error),
+            };
+            let _ = shared.events.send(AgentEvent::Handoff { brief });
+        });
+        Ok(())
+    }
+
     fn available_models(&self) -> Vec<BackendModel> {
         self.shared
             .models
@@ -436,6 +551,10 @@ impl Backend for AcpRuntime {
     /// first while it starts the server, so no change falls between the two.
     fn update_host_tools(&self, tools: ToolRegistry) -> Result<(), PromptError> {
         let shared = &self.shared;
+        *shared
+            .served_tools
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = tool_names(&tools);
         let mut pending = shared
             .host_tools
             .lock()
@@ -466,22 +585,9 @@ impl Backend for AcpRuntime {
         }
     }
 
+    /// Taken during a turn too: ACP lets a session's configuration change
+    /// at any time, and the agent applies it as soon as it can.
     fn select_model(&self, model_id: String) -> Result<(), String> {
-        let session_id = match &*self
-            .shared
-            .conn
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-        {
-            Conn::Ready { session_id } => session_id.clone(),
-            Conn::Starting => return Err("the agent is still starting".to_string()),
-            Conn::Failed(error) => return Err(error.clone()),
-        };
-        // Refused while a turn runs: the switch applies to the runs that follow,
-        // like the built-in loop's model change between turns.
-        if self.is_busy() {
-            return Err("finish or stop the current task first".to_string());
-        }
         let option = self
             .shared
             .model_option
@@ -489,23 +595,51 @@ impl Backend for AcpRuntime {
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
         match option {
-            Some(config_id) => self.shared.request(
-                "session/set_config_option",
-                json!({ "sessionId": session_id, "configId": config_id, "value": model_id }),
-                Duration::from_secs(30),
-            )?,
-            None => self.shared.request(
-                "session/set_model",
-                json!({ "sessionId": session_id, "modelId": model_id }),
-                Duration::from_secs(30),
-            )?,
-        };
+            Some(config_id) => self.shared.set_config_option(&config_id, &model_id)?,
+            None => {
+                let session_id = self.shared.session_id()?;
+                self.shared.request(
+                    "session/set_model",
+                    json!({ "sessionId": session_id, "modelId": model_id }),
+                    Duration::from_secs(30),
+                )?;
+            }
+        }
         *self
             .shared
             .current_model
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(model_id);
         Ok(())
+    }
+
+    fn config_options(&self) -> Vec<BackendOption> {
+        let model = self
+            .shared
+            .model_option
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        self.shared
+            .options
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|option| Some(&option.id) != model.as_ref())
+            .cloned()
+            .collect()
+    }
+
+    fn set_option(&self, id: String, value: String) -> Result<(), String> {
+        self.shared.set_config_option(&id, &value)
+    }
+
+    fn agent_commands(&self) -> Vec<AgentCommand> {
+        self.shared
+            .commands
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     fn into_agent(self: Box<Self>) -> Option<Agent> {
@@ -563,6 +697,17 @@ impl Shared {
             }),
             timeout,
         );
+        let steers = outcome
+            .as_ref()
+            .is_ok_and(|result| result["_meta"]["steering"]["supported"] == true);
+        self.steering.store(steers, Ordering::Release);
+        if let Ok(init) = &outcome {
+            let sessions = &init["agentCapabilities"]["sessionCapabilities"];
+            self.can_fork
+                .store(sessions["fork"].is_object(), Ordering::Release);
+            self.can_close
+                .store(sessions["close"].is_object(), Ordering::Release);
+        }
         // Claude Code's adapter takes HTTP servers, which the others say.
         let http = self.flavor == AcpFlavor::ClaudeCode
             || outcome
@@ -700,6 +845,19 @@ impl Shared {
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         let host = pending.take().filter(|_| serves);
+        if let Some(host) = &host {
+            let names = tool_names(&host.tools);
+            *self
+                .served_tools
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = names.clone();
+            if self.flavor == AcpFlavor::ClaudeCode {
+                *self
+                    .told_tools
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = Some(names);
+            }
+        }
         let server = host.and_then(|host| {
             let context = ToolContext {
                 cwd: self.cwd.clone(),
@@ -757,12 +915,7 @@ impl Shared {
         }
         let (approval, collaboration) = codex_modes(mode);
         for (config_id, value) in [("mode", approval), ("collaboration_mode", collaboration)] {
-            let set = self.request(
-                "session/set_config_option",
-                json!({ "sessionId": session_id, "configId": config_id, "value": value }),
-                Duration::from_secs(30),
-            );
-            if let Err(error) = set {
+            if let Err(error) = self.set_config_option(config_id, value) {
                 log::warn!(
                     "acp {}: cannot set {config_id} to {value}: {error}",
                     self.name
@@ -793,60 +946,81 @@ impl Shared {
         }
     }
 
-    /// Record the models an agent advertises in a `session/new`/`load` result,
-    /// so the panel can list and switch them: `models` (`availableModels`,
-    /// `currentModelId`) when it has them, else the `model` entry of its
-    /// `configOptions`. Missing or malformed data leaves the lists empty.
+    /// Record the settings an agent states in a `session/new`/`load`/`resume`
+    /// result, so the panel can list and switch them: its `configOptions`,
+    /// whose `model` entry, when there is one, lists the models — the way
+    /// ACP prefers — else its `models` (`availableModels`, `currentModelId`).
+    /// Missing or malformed data leaves the lists empty.
     fn adopt_models(&self, result: &Value) {
-        if result["models"].is_object() {
-            *self
-                .model_option
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner) = None;
+        if let Some(options) = result["configOptions"].as_array() {
+            self.adopt_options(options);
+        }
+        let by_option = self
+            .model_option
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some();
+        if !by_option && result["models"].is_object() {
             self.adopt_model_list(&result["models"]);
-        } else {
-            self.adopt_model_option(&result["configOptions"]);
         }
     }
 
-    /// The `model` config option: a select whose options are the models,
-    /// flat or in groups, and whose current value is the model in use.
-    fn adopt_model_option(&self, options: &Value) {
-        let Some(option) = options.as_array().and_then(|options| {
-            options
-                .iter()
-                .find(|o| o["category"] == "model" || o["id"] == "model")
-        }) else {
-            return;
-        };
-        let Some(config_id) = option["id"].as_str() else {
-            return;
-        };
-        let entry = |o: &Value| {
-            let id = o["value"].as_str()?.to_string();
-            let name = o["name"].as_str().unwrap_or(&id).to_string();
-            Some(BackendModel { id, name })
-        };
-        let list: Vec<BackendModel> = option["options"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .flat_map(|o| match o["options"].as_array() {
-                Some(group) => group.iter().filter_map(entry).collect::<Vec<_>>(),
-                None => entry(o).into_iter().collect(),
-            })
-            .collect();
-        *self
-            .model_option
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(config_id.to_string());
-        *self.models.lock().unwrap_or_else(PoisonError::into_inner) = list;
-        if let Some(current) = option["currentValue"].as_str() {
+    /// The whole set of config options, as the agent states it each time:
+    /// the `select` ones are kept, the model's among them read as the list of
+    /// models and the model in use.
+    fn adopt_options(&self, options: &[Value]) {
+        let options: Vec<BackendOption> = options.iter().filter_map(option_of).collect();
+        let model = options
+            .iter()
+            .find(|option| option.is("model") || option.id == "model");
+        if let Some(model) = model {
+            *self
+                .model_option
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(model.id.clone());
+            *self.models.lock().unwrap_or_else(PoisonError::into_inner) = model.values.clone();
             *self
                 .current_model
                 .lock()
-                .unwrap_or_else(PoisonError::into_inner) = Some(current.to_string());
+                .unwrap_or_else(PoisonError::into_inner) = Some(model.current.clone());
         }
+        *self.options.lock().unwrap_or_else(PoisonError::into_inner) = options;
+    }
+
+    /// The session's id, once it is open.
+    fn session_id(&self) -> Result<String, String> {
+        match &*self.conn.lock().unwrap_or_else(PoisonError::into_inner) {
+            Conn::Ready { session_id } => Ok(session_id.clone()),
+            Conn::Starting => Err("the agent is still starting".to_string()),
+            Conn::Failed(error) => Err(error.clone()),
+        }
+    }
+
+    /// Set config option `id` to `value` and take the options the agent
+    /// replies with, which may change with it (the efforts a model offers);
+    /// an agent that replies with none has the one value changed.
+    fn set_config_option(&self, id: &str, value: &str) -> Result<(), String> {
+        let session_id = self.session_id()?;
+        let reply = self.request(
+            "session/set_config_option",
+            json!({ "sessionId": session_id, "configId": id, "value": value }),
+            Duration::from_secs(30),
+        )?;
+        match reply["configOptions"].as_array() {
+            Some(options) => self.adopt_options(options),
+            None => {
+                if let Some(option) = self
+                    .options
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .iter_mut()
+                    .find(|option| option.id == id)
+                {
+                    option.current = value.to_string();
+                }
+            }
+        }
+        Ok(())
     }
 
     fn adopt_model_list(&self, models: &Value) {
@@ -912,6 +1086,9 @@ impl Shared {
         let Some(message) = message else {
             let _ = self.events.send(AgentEvent::AgentEnd);
             self.busy.store(false, Ordering::Release);
+            // A message a turn did not take back after all (see
+            // [`Self::requeue`]) may have arrived meanwhile: it runs now.
+            self.run_queued();
             return;
         };
         let this = Arc::clone(self);
@@ -930,6 +1107,46 @@ impl Shared {
         let on = self.mode.get() == Mode::Plan;
         let told = self.told_plan.swap(on, Ordering::AcqRel);
         let note = self.plan.switch_note(told, on)?;
+        Some(format!("<system-reminder>\n{note}\n</system-reminder>"))
+    }
+
+    /// Claude Code's prompt speaks of the tools its session started with: a
+    /// change of termide's tools since — one switched off or on, an MCP
+    /// server's that came or went — opens the next turn with a note of it,
+    /// kept out of the session log like the plan note.
+    fn tools_note(&self) -> Option<String> {
+        let served = self
+            .served_tools
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let mut told = self
+            .told_tools
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let before = told.as_mut()?;
+        let named = |names: Vec<&String>| {
+            names
+                .iter()
+                .map(|name| format!("{HOST_TOOL_PREFIX}{name}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let added = named(served.difference(before).collect());
+        let removed = named(before.difference(&served).collect());
+        if added.is_empty() && removed.is_empty() {
+            return None;
+        }
+        *before = served;
+        let mut note = String::from("Your tools changed since your instructions were written.");
+        if !added.is_empty() {
+            note.push_str(&format!(" Now available: {added}."));
+        }
+        if !removed.is_empty() {
+            note.push_str(&format!(
+                " No longer available, do not call them: {removed}."
+            ));
+        }
         Some(format!("<system-reminder>\n{note}\n</system-reminder>"))
     }
 
@@ -961,10 +1178,14 @@ impl Shared {
         {
             prompt.push(json!({ "type": "text", "text": recap }));
         }
-        if let Some(note) = self.plan_switch_note() {
+        for note in [self.plan_switch_note(), self.tools_note()]
+            .into_iter()
+            .flatten()
+        {
             prompt.push(json!({ "type": "text", "text": note }));
         }
         prompt.push(json!({ "type": "text", "text": text }));
+        self.turn_running.store(true, Ordering::Release);
         let result = self.request(
             "session/prompt",
             json!({
@@ -973,6 +1194,7 @@ impl Shared {
             }),
             Duration::from_secs(60 * 60 * 24),
         );
+        self.turn_running.store(false, Ordering::Release);
         let stop = match &result {
             Ok(value) => match value["stopReason"].as_str() {
                 Some("cancelled") => StopReason::Aborted,
@@ -991,6 +1213,7 @@ impl Shared {
         let usage = result.as_ref().map(usage_of).unwrap_or_default();
         self.close_unfinished_calls();
         self.close_message_with(stop, error, usage);
+        self.flush_steered();
         let _ = self.events.send(AgentEvent::TurnEnd);
         if self.cancel.is_cancelled() {
             self.queue
@@ -1010,6 +1233,260 @@ impl Shared {
         self.kick();
     }
 
+    /// Whether a side request can go now: the session is open and no turn
+    /// or side request runs in it.
+    fn side_ready(&self) -> Result<(), PromptError> {
+        if self.busy.load(Ordering::Acquire)
+            || self
+                .side
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_some()
+        {
+            return Err(PromptError::Busy);
+        }
+        self.session_id()
+            .map(|_| ())
+            .map_err(|_| PromptError::Stopped)
+    }
+
+    /// Ask the agent `text` aside from the conversation and return its
+    /// answer's text: in a fork of the session when the agent forks one,
+    /// closed afterwards when it closes one; else in the session itself, as
+    /// a turn kept from the panel and the log (the agent's own session still
+    /// holds it). Its tools are not asked for: a permission request from it
+    /// is refused.
+    fn side_query(self: &Arc<Self>, text: &str) -> Result<String, String> {
+        let main = self.session_id()?;
+        let forked = if self.can_fork.load(Ordering::Acquire) {
+            let reply = self.request(
+                "session/fork",
+                json!({ "sessionId": main, "cwd": self.cwd, "mcpServers": [] }),
+                Duration::from_secs(60),
+            );
+            match reply {
+                Ok(reply) => reply["sessionId"].as_str().map(str::to_string),
+                Err(error) => {
+                    log::warn!("acp {}: cannot fork the session: {error}", self.name);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        // In the session itself, no turn may start meanwhile.
+        if forked.is_none()
+            && self
+                .busy
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
+        {
+            return Err("the agent is busy".to_string());
+        }
+        let session_id = forked.clone().unwrap_or(main);
+        *self.side.lock().unwrap_or_else(PoisonError::into_inner) = Some(SideQuery {
+            session_id: session_id.clone(),
+            text: String::new(),
+        });
+        let result = self.request(
+            "session/prompt",
+            json!({ "sessionId": session_id, "prompt": [{ "type": "text", "text": text }] }),
+            Duration::from_secs(60 * 60),
+        );
+        let answer = self
+            .side
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+            .map(|query| query.text)
+            .unwrap_or_default();
+        match &forked {
+            Some(fork) if self.can_close.load(Ordering::Acquire) => {
+                if let Err(error) = self.request(
+                    "session/close",
+                    json!({ "sessionId": fork }),
+                    Duration::from_secs(10),
+                ) {
+                    log::debug!("acp {}: cannot close the fork: {error}", self.name);
+                }
+            }
+            Some(_) => {}
+            None => {
+                self.busy.store(false, Ordering::Release);
+                // A request typed meanwhile waited for this.
+                self.run_queued();
+            }
+        }
+        let reply = result?;
+        match reply["stopReason"].as_str() {
+            Some(stop @ ("cancelled" | "refusal")) => Err(format!("the agent stopped: {stop}")),
+            _ => Ok(answer),
+        }
+    }
+
+    /// Take `update` of `session` for the side request in flight, when it is
+    /// that request's: its text is kept, the rest dropped.
+    fn side_update(&self, session: Option<&str>, update: &Value) -> bool {
+        let mut side = self.side.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(query) = side.as_mut() else {
+            return false;
+        };
+        if session != Some(query.session_id.as_str()) {
+            return false;
+        }
+        if update["sessionUpdate"] == "agent_message_chunk" {
+            query
+                .text
+                .push_str(update["content"]["text"].as_str().unwrap_or_default());
+        }
+        true
+    }
+
+    /// Whether `params` come from the side request's session.
+    fn is_side_request(&self, params: &Value) -> bool {
+        let side = self.side.lock().unwrap_or_else(PoisonError::into_inner);
+        side.as_ref()
+            .is_some_and(|query| params["sessionId"].as_str() == Some(query.session_id.as_str()))
+    }
+
+    /// Hand `message`, which waits in the queue, to the turn the agent is
+    /// running. Taken, it is logged as the built-in loop logs a steering
+    /// message; refused — the turn ended meanwhile, or the agent asks for a
+    /// prompt — it waits for the next turn as before. A message the user or
+    /// the turn's end took from the queue first is left alone.
+    fn steer_now(self: &Arc<Self>, message: UserMessage) {
+        {
+            let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
+            let Some(index) = queue.iter().position(|queued| *queued == message) else {
+                return;
+            };
+            if !self.turn_running.load(Ordering::Acquire) {
+                return;
+            }
+            queue.remove(index);
+        }
+        let Ok(session_id) = self.session_id() else {
+            self.requeue(message);
+            return;
+        };
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let text = message.plain_text();
+        self.steering_out
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(id, message);
+        let request = json!({
+            "jsonrpc": "2.0", "id": id, "method": "_session/steering",
+            "params": {
+                "sessionId": session_id,
+                "prompt": [{ "type": "text", "text": text }],
+                "_meta": { "steering": { "idleBehavior": "promptRequired" } },
+            },
+        });
+        if self.write(&request).is_err() {
+            let message = self
+                .steering_out
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(&id);
+            if let Some(message) = message {
+                self.requeue(message);
+            }
+        }
+    }
+
+    /// The agent's answer to a `_session/steering` request, `reply` being
+    /// its result or error.
+    fn steering_answered(self: &Arc<Self>, message: UserMessage, reply: &Value) {
+        match reply["result"]["outcome"].as_str() {
+            // `startedNewTurn`: an agent that ignores the idle behaviour
+            // asked for began a turn of its own with it.
+            Some("injected" | "startedNewTurn") => {
+                self.steered
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(message);
+                self.report_queue();
+                self.flush_steered();
+            }
+            _ => {
+                log::debug!("acp {}: steering refused: {reply}", self.name);
+                self.requeue(message);
+            }
+        }
+    }
+
+    /// Log the messages the running turn took, once it has no call open:
+    /// the text streamed before them closes first.
+    fn flush_steered(&self) {
+        let open = !self
+            .calls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .open
+            .is_empty();
+        if open {
+            return;
+        }
+        let steered =
+            std::mem::take(&mut *self.steered.lock().unwrap_or_else(PoisonError::into_inner));
+        if steered.is_empty() {
+            return;
+        }
+        self.close_message(StopReason::Stop, None);
+        for message in steered {
+            let _ = self
+                .events
+                .send(AgentEvent::MessageEnd(Message::User(message)));
+        }
+    }
+
+    /// Put back a message the running turn did not take, first in line, and
+    /// start a turn for it when none is running.
+    fn requeue(self: &Arc<Self>, message: UserMessage) {
+        self.queue
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(0, message);
+        self.report_queue();
+        self.run_queued();
+    }
+
+    /// Start a turn for what waits in the queue, when no run is on.
+    fn run_queued(self: &Arc<Self>) {
+        let waiting = !self
+            .queue
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_empty();
+        if waiting
+            && self
+                .busy
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+        {
+            self.cancel.reset();
+            let _ = self.events.send(AgentEvent::AgentStart);
+            self.kick();
+        }
+    }
+
+    /// Tell the panel how many messages wait.
+    fn report_queue(&self) {
+        let queued = self
+            .queue
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len();
+        let running = self.busy.load(Ordering::Acquire);
+        // While the session is starting, the first message is the run's own.
+        let steering = queued.saturating_sub(usize::from(!running && queued > 0));
+        let _ = self.events.send(AgentEvent::QueueUpdate {
+            steering,
+            follow_up: 0,
+        });
+    }
+
     /// Finish the assistant message being streamed, or make one for an
     /// error, so the transcript and the log get a complete message.
     fn close_message(&self, stop: StopReason, error: Option<String>) {
@@ -1024,13 +1501,24 @@ impl Shared {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
+        let thought = std::mem::take(
+            &mut *self
+                .open_thought
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+        );
         if text.is_none() && error.is_none() {
             return;
         }
+        let mut content = Vec::new();
+        if !thought.is_empty() {
+            content.push(AssistantContent::thinking(thought));
+        }
+        if let Some(text) = text.filter(|text| !text.is_empty()) {
+            content.push(AssistantContent::Text { text });
+        }
         let message = AssistantMessage {
-            content: text
-                .map(|text| vec![AssistantContent::Text { text }])
-                .unwrap_or_default(),
+            content,
             stop_reason: stop,
             usage,
             provider: ACP_PROVIDER.into(),
@@ -1118,6 +1606,15 @@ impl Shared {
             };
             match (message["id"].as_u64(), message.get("method")) {
                 (Some(id), None) => {
+                    let steered = self
+                        .steering_out
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .remove(&id);
+                    if let Some(steered) = steered {
+                        self.steering_answered(steered, &message);
+                        continue;
+                    }
                     let reply = match message.get("error") {
                         Some(error) => Err(format!(
                             "{} (code {})",
@@ -1141,7 +1638,11 @@ impl Shared {
                 }
                 (None, Some(method)) => {
                     if method == "session/update" {
-                        self.on_update(&message["params"]["update"]);
+                        let params = &message["params"];
+                        if self.side_update(params["sessionId"].as_str(), &params["update"]) {
+                            continue;
+                        }
+                        self.on_update(&params["update"]);
                     } else {
                         log::debug!("acp {}: notification {method}", self.name);
                     }
@@ -1164,6 +1665,23 @@ impl Shared {
     /// from the working directory, nothing else.
     fn serve_request(self: &Arc<Self>, id: u64, method: &str, params: &Value) {
         match method {
+            // A side request is answered from what the agent knows.
+            "session/request_permission" if self.is_side_request(params) => {
+                let options = params["options"].as_array().cloned().unwrap_or_default();
+                let reject = ["reject_once", "reject_always"].iter().find_map(|kind| {
+                    options
+                        .iter()
+                        .find(|o| o["kind"].as_str() == Some(kind))
+                        .and_then(|o| o["optionId"].as_str())
+                });
+                let outcome = match reject {
+                    Some(option) => json!({ "outcome": "selected", "optionId": option }),
+                    None => json!({ "outcome": "cancelled" }),
+                };
+                let _ = self.write(
+                    &json!({ "jsonrpc": "2.0", "id": id, "result": { "outcome": outcome } }),
+                );
+            }
             "session/request_permission" => {
                 let this = Arc::clone(self);
                 let params = params.clone();
@@ -1312,6 +1830,10 @@ impl Shared {
                         prompt_tokens: None,
                     });
                 }
+                self.open_thought
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push_str(&text);
                 let _ = self
                     .events
                     .send(AgentEvent::MessageUpdate(StreamEvent::ThinkingDelta(text)));
@@ -1373,15 +1895,35 @@ impl Shared {
                         .unwrap_or_else(PoisonError::into_inner) = Some(id.to_string());
                 }
             }
+            "available_commands_update" => {
+                let commands = update["availableCommands"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|command| {
+                        Some(AgentCommand {
+                            name: command["name"]
+                                .as_str()?
+                                .trim_start_matches('/')
+                                .to_string(),
+                            description: command["description"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .to_string(),
+                            hint: command["input"]["hint"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .to_string(),
+                        })
+                    })
+                    .collect();
+                *self.commands.lock().unwrap_or_else(PoisonError::into_inner) = commands;
+            }
             // The agent changed its options itself: the model among them.
-            "config_option_update"
-                if self
-                    .model_option
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .is_some() =>
-            {
-                self.adopt_model_option(&update["configOptions"]);
+            "config_option_update" => {
+                if let Some(options) = update["configOptions"].as_array() {
+                    self.adopt_options(options);
+                }
             }
             other => log::debug!("acp {}: update {other} ignored", self.name),
         }
@@ -1441,6 +1983,7 @@ impl Shared {
         let _ = self
             .events
             .send(AgentEvent::MessageEnd(Message::ToolResult(result)));
+        self.flush_steered();
     }
 
     /// At the turn's end, give each call still without a result one saying
@@ -1578,6 +2121,44 @@ fn host_tool_of(update: &Value) -> Option<(String, Value)> {
         .as_str()
         .filter(|_| input["server"] == SERVER_NAME)?;
     Some((tool.to_string(), object(&input["arguments"])))
+}
+
+/// The names of `tools`.
+fn tool_names(tools: &ToolRegistry) -> BTreeSet<String> {
+    tools.names().into_iter().map(str::to_string).collect()
+}
+
+/// An ACP config option of the `select` type, its values flat or in groups;
+/// `None` for another type, which a client that does not know it ignores.
+fn option_of(option: &Value) -> Option<BackendOption> {
+    if option["type"].as_str().is_some_and(|kind| kind != "select") {
+        return None;
+    }
+    let id = option["id"].as_str()?.to_string();
+    let entry = |o: &Value| {
+        let id = o["value"].as_str()?.to_string();
+        let name = o["name"].as_str().unwrap_or(&id).to_string();
+        Some(BackendModel { id, name })
+    };
+    let values = option["options"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|o| match o["options"].as_array() {
+            Some(group) => group.iter().filter_map(entry).collect::<Vec<_>>(),
+            None => entry(o).into_iter().collect(),
+        })
+        .collect();
+    Some(BackendOption {
+        name: option["name"].as_str().unwrap_or(&id).to_string(),
+        category: option["category"].as_str().map(str::to_string),
+        current: option["currentValue"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        values,
+        id,
+    })
 }
 
 /// The text of an MCP `tools/call` result's content.
@@ -1917,6 +2498,8 @@ mod tests {
                 mode: ModeHandle::new(Mode::default()),
                 system_prompt: String::new(),
                 plan: PlanPrompt::default(),
+                goal: GoalPrompt::default(),
+                handoff: HandoffPrompt::default(),
                 host_tools: None,
                 resume: None,
                 history: Vec::new(),
@@ -2049,6 +2632,8 @@ mod tests {
                 mode,
                 system_prompt: "termide's prompt".into(),
                 plan: PlanPrompt::default(),
+                goal: GoalPrompt::default(),
+                handoff: HandoffPrompt::default(),
                 host_tools,
                 resume: None,
                 history: Vec::new(),
@@ -2192,6 +2777,7 @@ mod tests {
             tools,
             hooks: Box::new(termide_agent_core::NoHooks),
             context: ToolContext::new(PathBuf::new()),
+            skills: Vec::new(),
         };
         let (runtime, seen) = recording_agent(
             dir.path().to_path_buf(),
@@ -2304,6 +2890,33 @@ mod tests {
         );
         mode.set(Mode::Edit);
         assert_eq!(prompt_blocks(&codex, &seen, "go"), ["go"]);
+    }
+
+    #[test]
+    fn claude_code_is_told_of_a_change_of_its_tools_before_the_next_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, seen) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::ClaudeCode,
+            Some(echo_host()),
+            ModeHandle::new(Mode::Configured),
+        );
+        assert_eq!(prompt_blocks(&runtime, &seen, "one"), ["one"]);
+        // `recall` switched off, an MCP server's tool come.
+        let mut tools = termide_agent_core::ToolRegistry::new();
+        tools.insert(Arc::new(Echo));
+        tools.insert(Arc::new(Named("skill")));
+        tools.insert(Arc::new(Named("db__query")));
+        runtime.update_host_tools(tools).unwrap();
+        let two = prompt_blocks(&runtime, &seen, "two");
+        assert_eq!(two.len(), 2, "{two:?}");
+        assert!(
+            two[0].contains("Now available: mcp__termide__db__query.")
+                && two[0].contains("do not call them: mcp__termide__recall."),
+            "{two:?}"
+        );
+        // Told once.
+        assert_eq!(prompt_blocks(&runtime, &seen, "three"), ["three"]);
     }
 
     #[test]
@@ -2480,14 +3093,46 @@ mod tests {
         seen_where(&seen, option("collaboration_mode", "plan"));
     }
 
+    /// A tool of termide's under `0`'s name, which does nothing.
+    struct Named(&'static str);
+
+    impl termide_agent_core::Tool for Named {
+        fn name(&self) -> &str {
+            self.0
+        }
+        fn description(&self) -> &str {
+            "Do it"
+        }
+        fn parameters(&self) -> Value {
+            json!({ "type": "object" })
+        }
+        fn execute(
+            &self,
+            call: &ToolCall,
+            _ctx: &ToolContext,
+            _on_update: &mut dyn FnMut(termide_agent_core::ToolUpdate),
+            _cancel: &CancelToken,
+        ) -> ToolResultMessage {
+            ToolResultMessage::text(call, "done")
+        }
+    }
+
     /// termide's tools, as the panel offers them to every agent.
     fn echo_host() -> HostTools {
         let mut tools = termide_agent_core::ToolRegistry::new();
         tools.insert(Arc::new(Echo));
+        tools.insert(Arc::new(Named("recall")));
+        tools.insert(Arc::new(Named("skill")));
         HostTools {
             tools,
             hooks: Box::new(termide_agent_core::NoHooks),
             context: ToolContext::new(PathBuf::new()),
+            skills: vec![termide_agent_core::SkillInfo {
+                name: "review".into(),
+                description: "Review a change".into(),
+                argument_hint: "<path>".into(),
+                path: PathBuf::new(),
+            }],
         }
     }
 
@@ -2517,10 +3162,31 @@ mod tests {
             assert_eq!(server["name"], "termide");
             assert!(!runtime.runs_host_tools());
             assert!(runtime.takes_mcp_tools());
-            // None of termide's own tools: they would stand beside its own.
+            // Of termide's own tools, only those it has no counterpart of:
+            // `echo` would stand beside its own.
             let url = server["url"].as_str().unwrap();
             let auth = server["headers"][0]["value"].as_str().unwrap();
-            assert!(served_tools(url, auth).is_empty());
+            assert_eq!(served_tools(url, auth), ["recall", "skill"]);
+            // The skills are listed where its own prompt does not.
+            let listed = post_mcp(
+                url,
+                auth,
+                &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+            );
+            let skill = listed["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|tool| tool["name"] == "skill")
+                .unwrap()
+                .clone();
+            assert!(
+                skill["description"]
+                    .as_str()
+                    .unwrap()
+                    .ends_with("- review <path>: Review a change"),
+                "{skill}"
+            );
             // An MCP server of termide's connected: its tools are served.
             let mut mcp = termide_agent_core::ToolRegistry::new();
             mcp.insert(Arc::new(Echo));
@@ -2698,6 +3364,8 @@ mod tests {
                 mode: ModeHandle::new(Mode::default()),
                 system_prompt: String::new(),
                 plan: PlanPrompt::default(),
+                goal: GoalPrompt::default(),
+                handoff: HandoffPrompt::default(),
                 host_tools: None,
                 resume: None,
                 history: Vec::new(),
@@ -2713,6 +3381,463 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let runtime = agent(dir.path().to_path_buf());
             switches_between_fast_and_slow(&runtime);
+        }
+    }
+
+    /// The config options as an agent states them, effort at `effort`.
+    fn stated_options(effort: &str) -> Value {
+        json!([
+            { "id": "model", "category": "model", "type": "select", "currentValue": "m-fast",
+              "options": [{ "value": "m-fast", "name": "Fast" }] },
+            { "id": "effort", "name": "Effort", "category": "thought_level", "type": "select",
+              "currentValue": effort,
+              "options": [{ "value": "low", "name": "Low" }, { "value": "high", "name": "High" }] },
+            { "id": "brave", "name": "Brave", "type": "boolean", "currentValue": true }
+        ])
+    }
+
+    #[test]
+    fn options_are_listed_and_set_while_a_turn_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let (to_agent_rx, to_agent_tx) = pipe().unwrap();
+        let (from_agent_rx, from_agent_tx) = pipe().unwrap();
+        std::thread::spawn(move || {
+            let mut out = from_agent_tx;
+            let mut send = |value: Value| writeln!(out, "{value}").unwrap();
+            let mut reader = BufReader::new(to_agent_rx).lines();
+            let mut prompt_id = None;
+            while let Some(Ok(line)) = reader.next() {
+                let message: Value = serde_json::from_str(&line).unwrap();
+                let id = message["id"].clone();
+                let result = match message["method"].as_str() {
+                    Some("initialize") => json!({ "protocolVersion": 1, "agentCapabilities": {} }),
+                    Some("session/new") => {
+                        send(
+                            json!({ "jsonrpc": "2.0", "method": "session/update", "params": {
+                            "sessionId": "s1", "update": {
+                                "sessionUpdate": "available_commands_update",
+                                "availableCommands": [
+                                    { "name": "compact", "description": "Compact the context" },
+                                    { "name": "review", "description": "Review", "input": { "hint": "<path>" } }
+                                ] } } }),
+                        );
+                        json!({ "sessionId": "s1", "configOptions": stated_options("low") })
+                    }
+                    // The turn stays open until the option is set.
+                    Some("session/prompt") => {
+                        prompt_id = Some(id);
+                        continue;
+                    }
+                    Some("session/set_config_option") => {
+                        assert_eq!(message["params"]["configId"], "effort");
+                        let value = message["params"]["value"].as_str().unwrap();
+                        send(json!({ "jsonrpc": "2.0", "id": id,
+                            "result": { "configOptions": stated_options(value) } }));
+                        if let Some(prompt) = prompt_id.take() {
+                            send(json!({ "jsonrpc": "2.0", "id": prompt,
+                                "result": { "stopReason": "end_turn" } }));
+                        }
+                        continue;
+                    }
+                    _ => continue,
+                };
+                send(json!({ "jsonrpc": "2.0", "id": id, "result": result }));
+            }
+        });
+        let cancel = CancelToken::new();
+        let (prompter, _permissions) = permission_channel(cancel.clone());
+        let runtime = AcpRuntime::from_streams(
+            "fake",
+            from_agent_rx,
+            to_agent_tx,
+            BackendSetup {
+                cwd: dir.path().to_path_buf(),
+                prompter,
+                cancel,
+                rules: PermissionRules::default(),
+                persist: None,
+                mode: ModeHandle::new(Mode::default()),
+                system_prompt: String::new(),
+                plan: PlanPrompt::default(),
+                goal: GoalPrompt::default(),
+                handoff: HandoffPrompt::default(),
+                host_tools: None,
+                resume: None,
+                history: Vec::new(),
+            },
+            5,
+            AcpFlavor::Generic,
+        );
+        runtime.prompt(UserMessage::text("go")).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while runtime.config_options().is_empty() {
+            assert!(Instant::now() < deadline, "options never arrived");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // The model is listed as models, a boolean is not understood: the
+        // effort alone remains.
+        let options = runtime.config_options();
+        assert_eq!(options.len(), 1, "{options:?}");
+        assert!(options[0].is("thought_level"));
+        assert_eq!(options[0].current_name(), "Low");
+        assert_eq!(runtime.current_model(), Some("m-fast".to_string()));
+        // Its own commands are listed.
+        let commands = runtime.agent_commands();
+        assert_eq!(
+            commands.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            ["compact", "review"]
+        );
+        assert_eq!(commands[1].hint, "<path>");
+
+        assert!(runtime.is_busy());
+        runtime
+            .set_option("effort".to_string(), "high".to_string())
+            .unwrap();
+        assert_eq!(runtime.config_options()[0].current, "high");
+    }
+
+    /// An agent that steers: its turn for "first" streams a word, then waits
+    /// for a `_session/steering` request, answers it `outcome`, streams
+    /// another word and ends. Every prompt's text is recorded.
+    fn steering_agent(dir: PathBuf, outcome: &'static str) -> (AcpRuntime, Arc<Mutex<Vec<Value>>>) {
+        let (to_agent_rx, to_agent_tx) = pipe().unwrap();
+        let (from_agent_rx, from_agent_tx) = pipe().unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let record = Arc::clone(&seen);
+        std::thread::spawn(move || {
+            let mut out = from_agent_tx;
+            let mut send = |value: Value| writeln!(out, "{value}").unwrap();
+            let update = |u: Value| json!({ "jsonrpc": "2.0", "method": "session/update", "params": { "sessionId": "s1", "update": u } });
+            let chunk = |text: &str| {
+                update(
+                    json!({ "sessionUpdate": "agent_message_chunk", "content": { "type": "text", "text": text } }),
+                )
+            };
+            let mut reader = BufReader::new(to_agent_rx).lines();
+            while let Some(Ok(line)) = reader.next() {
+                let message: Value = serde_json::from_str(&line).unwrap();
+                record.lock().unwrap().push(message.clone());
+                let id = message["id"].clone();
+                match message["method"].as_str() {
+                    Some("initialize") => send(json!({ "jsonrpc": "2.0", "id": id, "result": {
+                        "protocolVersion": 1, "agentCapabilities": {},
+                        "_meta": { "steering": { "supported": true } } } })),
+                    Some("session/new") => {
+                        send(
+                            json!({ "jsonrpc": "2.0", "id": id, "result": { "sessionId": "s1" } }),
+                        );
+                    }
+                    Some("session/prompt") => {
+                        let text = message["params"]["prompt"][0]["text"]
+                            .as_str()
+                            .unwrap_or("");
+                        if text != "first" {
+                            send(chunk("later"));
+                            send(
+                                json!({ "jsonrpc": "2.0", "id": id, "result": { "stopReason": "end_turn" } }),
+                            );
+                            continue;
+                        }
+                        send(chunk("working"));
+                        let steer = loop {
+                            let Some(Ok(line)) = reader.next() else {
+                                return;
+                            };
+                            let m: Value = serde_json::from_str(&line).unwrap();
+                            record.lock().unwrap().push(m.clone());
+                            if m["method"] == "_session/steering" {
+                                break m;
+                            }
+                        };
+                        if outcome == "injected" {
+                            send(
+                                json!({ "jsonrpc": "2.0", "id": steer["id"], "result": { "outcome": "injected" } }),
+                            );
+                            send(chunk("noted"));
+                            send(
+                                json!({ "jsonrpc": "2.0", "id": id, "result": { "stopReason": "end_turn" } }),
+                            );
+                        } else {
+                            // The turn is over before the message could join it.
+                            send(
+                                json!({ "jsonrpc": "2.0", "id": id, "result": { "stopReason": "end_turn" } }),
+                            );
+                            send(
+                                json!({ "jsonrpc": "2.0", "id": steer["id"], "result": { "outcome": outcome, "reason": "noRunningTurn" } }),
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        });
+        let cancel = CancelToken::new();
+        let (prompter, _permissions) = permission_channel(cancel.clone());
+        let runtime = AcpRuntime::from_streams(
+            "fake",
+            from_agent_rx,
+            to_agent_tx,
+            BackendSetup {
+                cwd: dir,
+                prompter,
+                cancel,
+                rules: PermissionRules::default(),
+                persist: None,
+                mode: ModeHandle::new(Mode::default()),
+                system_prompt: String::new(),
+                plan: PlanPrompt::default(),
+                goal: GoalPrompt::default(),
+                handoff: HandoffPrompt::default(),
+                host_tools: None,
+                resume: None,
+                history: Vec::new(),
+            },
+            5,
+            AcpFlavor::Generic,
+        );
+        (runtime, seen)
+    }
+
+    /// Run "first", steer "more" once the turn streams, and collect the
+    /// events until the run ends.
+    fn steer_into_first(runtime: &AcpRuntime) -> Vec<AgentEvent> {
+        runtime.prompt(UserMessage::text("first")).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut events = Vec::new();
+        let mut steered = false;
+        loop {
+            events.extend(runtime.drain());
+            let streaming = events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::MessageUpdate(StreamEvent::TextDelta(t)) if t == "working"));
+            if streaming && !steered {
+                runtime.steer(UserMessage::text("more"));
+                steered = true;
+            }
+            if steered
+                && events
+                    .iter()
+                    .filter(|e| matches!(e, AgentEvent::AgentEnd))
+                    .count()
+                    >= 1
+            {
+                return events;
+            }
+            assert!(Instant::now() < deadline, "no end: {events:?}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// The messages logged, in order: `user:` or `assistant:` and the text.
+    fn logged(events: &[AgentEvent]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::MessageEnd(Message::User(u)) => {
+                    Some(format!("user:{}", u.plain_text()))
+                }
+                AgentEvent::MessageEnd(Message::Assistant(a)) => {
+                    Some(format!("assistant:{}", a.plain_text()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_message_typed_during_a_turn_joins_it_when_the_agent_steers() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, seen) = steering_agent(dir.path().to_path_buf(), "injected");
+        let events = steer_into_first(&runtime);
+        assert_eq!(
+            logged(&events),
+            [
+                "user:first",
+                "assistant:working",
+                "user:more",
+                "assistant:noted"
+            ]
+        );
+        let steering = seen_where(&seen, |m| m["method"] == "_session/steering");
+        assert_eq!(steering[0]["params"]["prompt"][0]["text"], "more");
+        assert_eq!(
+            steering[0]["params"]["_meta"]["steering"]["idleBehavior"],
+            "promptRequired"
+        );
+        // It went into the turn, not as a turn of its own.
+        let prompts = seen_where(&seen, |m| m["method"] == "session/prompt");
+        assert_eq!(prompts.len(), 1);
+        assert_eq!(runtime.queue_lens(), (0, 0));
+    }
+
+    #[test]
+    fn a_message_the_turn_could_not_take_goes_as_the_next_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, seen) = steering_agent(dir.path().to_path_buf(), "promptRequired");
+        let mut events = steer_into_first(&runtime);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !logged(&events).contains(&"assistant:later".to_string()) {
+            assert!(Instant::now() < deadline, "no second turn: {events:?}");
+            std::thread::sleep(Duration::from_millis(5));
+            events.extend(runtime.drain());
+        }
+        assert_eq!(
+            logged(&events),
+            [
+                "user:first",
+                "assistant:working",
+                "user:more",
+                "assistant:later"
+            ]
+        );
+        let prompts = seen_where(&seen, |m| {
+            m["method"] == "session/prompt" && m["params"]["prompt"][0]["text"] == "more"
+        });
+        assert_eq!(prompts.len(), 1);
+    }
+
+    /// An agent that forks and closes sessions when `forks` says so, and
+    /// answers every prompt with `answer`, streamed in the prompt's session.
+    fn side_agent(
+        dir: PathBuf,
+        forks: bool,
+        answer: &'static str,
+    ) -> (AcpRuntime, Arc<Mutex<Vec<Value>>>) {
+        let (to_agent_rx, to_agent_tx) = pipe().unwrap();
+        let (from_agent_rx, from_agent_tx) = pipe().unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let record = Arc::clone(&seen);
+        std::thread::spawn(move || {
+            let mut out = from_agent_tx;
+            let mut send = |value: Value| writeln!(out, "{value}").unwrap();
+            let mut reader = BufReader::new(to_agent_rx).lines();
+            while let Some(Ok(line)) = reader.next() {
+                let message: Value = serde_json::from_str(&line).unwrap();
+                record.lock().unwrap().push(message.clone());
+                let id = message["id"].clone();
+                let result = match message["method"].as_str() {
+                    Some("initialize") => {
+                        let sessions = if forks {
+                            json!({ "fork": {}, "close": {} })
+                        } else {
+                            json!({})
+                        };
+                        json!({ "protocolVersion": 1,
+                            "agentCapabilities": { "sessionCapabilities": sessions } })
+                    }
+                    Some("session/new") => json!({ "sessionId": "s1" }),
+                    Some("session/fork") => json!({ "sessionId": "f1" }),
+                    Some("session/prompt") => {
+                        let session = message["params"]["sessionId"].clone();
+                        send(
+                            json!({ "jsonrpc": "2.0", "method": "session/update", "params": {
+                            "sessionId": session, "update": {
+                                "sessionUpdate": "agent_message_chunk",
+                                "content": { "type": "text", "text": answer } } } }),
+                        );
+                        json!({ "stopReason": "end_turn" })
+                    }
+                    Some(_) => json!({}),
+                    None => continue,
+                };
+                send(json!({ "jsonrpc": "2.0", "id": id, "result": result }));
+            }
+        });
+        let cancel = CancelToken::new();
+        let (prompter, _permissions) = permission_channel(cancel.clone());
+        let runtime = AcpRuntime::from_streams(
+            "fake",
+            from_agent_rx,
+            to_agent_tx,
+            BackendSetup {
+                cwd: dir,
+                prompter,
+                cancel,
+                rules: PermissionRules::default(),
+                persist: None,
+                mode: ModeHandle::new(Mode::default()),
+                system_prompt: String::new(),
+                plan: PlanPrompt::default(),
+                goal: GoalPrompt::default(),
+                handoff: HandoffPrompt::default(),
+                host_tools: None,
+                resume: None,
+                history: Vec::new(),
+            },
+            5,
+            AcpFlavor::Generic,
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while runtime.shared.session_id().is_err() {
+            assert!(Instant::now() < deadline, "the session never opened");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        (runtime, seen)
+    }
+
+    /// The events until one `wanted` arrives.
+    fn events_until(runtime: &AcpRuntime, wanted: impl Fn(&AgentEvent) -> bool) -> Vec<AgentEvent> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut events = Vec::new();
+        while !events.iter().any(&wanted) {
+            assert!(Instant::now() < deadline, "never came: {events:?}");
+            std::thread::sleep(Duration::from_millis(5));
+            events.extend(runtime.drain());
+        }
+        events
+    }
+
+    #[test]
+    fn the_goal_judge_asks_a_fork_of_the_session_and_closes_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, seen) = side_agent(dir.path().to_path_buf(), true, "DONE\nthe tests pass");
+        runtime.judge("make the tests pass".into()).unwrap();
+        let events = events_until(&runtime, |e| matches!(e, AgentEvent::GoalJudged { .. }));
+        assert!(events.contains(&AgentEvent::GoalJudged {
+            done: true,
+            reason: "the tests pass".into()
+        }));
+        // Nothing of it reached the transcript.
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::MessageEnd(_))));
+        let prompt = seen_where(&seen, |m| m["method"] == "session/prompt").remove(0);
+        assert_eq!(prompt["params"]["sessionId"], "f1");
+        let text = prompt["params"]["prompt"][0]["text"].as_str().unwrap();
+        assert!(text.contains("make the tests pass"), "{text}");
+        let close = seen_where(&seen, |m| m["method"] == "session/close").remove(0);
+        assert_eq!(close["params"]["sessionId"], "f1");
+        assert!(!runtime.is_busy());
+    }
+
+    #[test]
+    fn a_handoff_without_a_fork_is_a_turn_kept_from_the_panel() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, seen) = side_agent(dir.path().to_path_buf(), false, "The brief.");
+        runtime.handoff().unwrap();
+        let events = events_until(&runtime, |e| matches!(e, AgentEvent::Handoff { .. }));
+        assert!(events.contains(&AgentEvent::Handoff {
+            brief: Ok("The brief.".into())
+        }));
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::MessageEnd(_))));
+        let prompt = seen_where(&seen, |m| m["method"] == "session/prompt").remove(0);
+        assert_eq!(prompt["params"]["sessionId"], "s1");
+        assert!(prompt["params"]["prompt"][0]["text"]
+            .as_str()
+            .unwrap()
+            .ends_with(&HandoffPrompt::default().request));
+        assert!(!seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|m| m["method"] == "session/fork"));
+        // The session is free again for the next request.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while runtime.is_busy() {
+            assert!(Instant::now() < deadline, "still busy");
+            std::thread::sleep(Duration::from_millis(5));
         }
     }
 
@@ -2755,6 +3880,15 @@ mod tests {
         );
         let events = drain_until_end(&runtime, &permissions, PermissionAnswer::AllowSession);
         assert!(!runtime.is_busy());
+        // The reasoning is kept with the text it led to, for the log.
+        let first = events.iter().find_map(|e| match e {
+            AgentEvent::MessageEnd(Message::Assistant(a)) => Some(a),
+            _ => None,
+        });
+        assert_eq!(
+            first.map(AssistantMessage::thinking_text).as_deref(),
+            Some("hmm")
+        );
 
         let mut kinds: Vec<String> = events
             .iter()
@@ -2897,6 +4031,8 @@ mod tests {
                 mode: ModeHandle::new(Mode::default()),
                 system_prompt: String::new(),
                 plan: PlanPrompt::default(),
+                goal: GoalPrompt::default(),
+                handoff: HandoffPrompt::default(),
                 host_tools: None,
                 resume: None,
                 history: Vec::new(),
@@ -2950,6 +4086,8 @@ mod tests {
                 mode: ModeHandle::new(Mode::default()),
                 system_prompt: String::new(),
                 plan: PlanPrompt::default(),
+                goal: GoalPrompt::default(),
+                handoff: HandoffPrompt::default(),
                 host_tools: None,
                 resume: None,
                 history: Vec::new(),
@@ -3093,6 +4231,8 @@ mod tests {
                 mode: ModeHandle::new(Mode::default()),
                 system_prompt: String::new(),
                 plan: PlanPrompt::default(),
+                goal: GoalPrompt::default(),
+                handoff: HandoffPrompt::default(),
                 host_tools: None,
                 resume,
                 history,

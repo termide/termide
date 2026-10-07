@@ -3,13 +3,13 @@
 
 use std::sync::Arc;
 
-use termide_agent_core::{Mode, ModelInfo, ModelSpec, ThinkingLevel};
+use termide_agent_core::{BackendOption, Mode, ModelInfo, ModelSpec, ThinkingLevel, MODEL_OPTION};
 use termide_core::{InputAction, PanelEvent, SelectAction};
 
 use crate::runtime::spawn_model_list;
 use crate::{
     AgentPanel, NoticeKind, AGENT_ACTION, MODEL_ACTION, MODEL_INPUT_ACTION, MODE_ACTION,
-    PROMPTS_ACTION, REASONING_ACTION,
+    OPTIONS_ACTION, OPTION_VALUE_ACTION, PROMPTS_ACTION, REASONING_ACTION,
 };
 
 /// Picker prefix: `●` on the current entry, blank otherwise.
@@ -26,10 +26,6 @@ impl AgentPanel {
     /// and the picker opens from `tick()` when it arrives; an endpoint that
     /// cannot list models falls back to a typed id.
     pub(crate) fn request_model_list(&mut self) -> Vec<PanelEvent> {
-        if self.is_busy() {
-            self.notice(termide_i18n::t().agent_notice_busy(), NoticeKind::Warn);
-            return vec![PanelEvent::NeedsRedraw];
-        }
         if self.model_fetch.is_some() {
             return vec![];
         }
@@ -107,6 +103,176 @@ impl AgentPanel {
             options,
             on_select: SelectAction::Custom(MODEL_ACTION.to_string()),
         }]
+    }
+
+    /// Switch the external agent's model — during a run too, which the
+    /// agent applies as soon as it can — and remember it in the session.
+    pub(crate) fn select_acp_model(&mut self, id: &str) {
+        match self.runtime.select_model(id.to_string()) {
+            Ok(()) => {
+                self.model.id = id.to_string();
+                self.record_agent_option(MODEL_OPTION, id);
+                if !self.is_fresh() {
+                    self.notice(
+                        termide_i18n::t().agent_notice_model_fmt(id),
+                        NoticeKind::Info,
+                    );
+                }
+            }
+            Err(error) => self.notice(
+                termide_i18n::t().agent_notice_cannot_switch_model_fmt(&error),
+                NoticeKind::Warn,
+            ),
+        }
+    }
+
+    /// The external agent's reasoning setting (ACP's `thought_level`), shown
+    /// on the Reasoning chip.
+    pub(crate) fn acp_thought_option(&self) -> Option<&BackendOption> {
+        if !self.external {
+            return None;
+        }
+        self.acp_options
+            .iter()
+            .find(|option| option.is("thought_level"))
+    }
+
+    /// The external agent's other settings, for the Options chip: all but
+    /// its reasoning, and but its own modes when termide's mode is mapped
+    /// onto them or judges its calls.
+    pub(crate) fn acp_extra_options(&self) -> Vec<&BackendOption> {
+        if !self.external {
+            return Vec::new();
+        }
+        let mapped = self.runtime.follows_mode();
+        self.acp_options
+            .iter()
+            .filter(|option| !option.is("thought_level"))
+            .filter(|option| {
+                !(mapped
+                    && (option.is("mode")
+                        || option.id == "mode"
+                        || option.id == "collaboration_mode"
+                        || option.is("collaboration_mode")))
+            })
+            .collect()
+    }
+
+    /// The values of one of the external agent's settings, current marked.
+    pub(crate) fn acp_option_picker(&mut self, option: BackendOption) -> Vec<PanelEvent> {
+        let options = option
+            .values
+            .iter()
+            .map(|value| format!("{}{}", current_mark(value.id == option.current), value.name))
+            .collect();
+        let title = if option.is("thought_level") {
+            termide_i18n::t().agent_change_reasoning().to_string()
+        } else {
+            option.name.clone()
+        };
+        let action = if option.is("thought_level") {
+            REASONING_ACTION
+        } else {
+            OPTION_VALUE_ACTION
+        };
+        self.acp_option_choice = Some(option);
+        vec![PanelEvent::ShowSelect {
+            title,
+            options,
+            on_select: SelectAction::Custom(action.to_string()),
+        }]
+    }
+
+    /// The Options chip: the one setting's values straight away, or the
+    /// settings to pick one from.
+    pub(crate) fn acp_options_action(&mut self) -> Vec<PanelEvent> {
+        let mut extra: Vec<BackendOption> = self.acp_extra_options().into_iter().cloned().collect();
+        if extra.len() <= 1 {
+            return extra
+                .pop()
+                .map(|option| self.acp_option_picker(option))
+                .unwrap_or_default();
+        }
+        let options = extra
+            .iter()
+            .map(|option| format!("  {}: {}", option.name, option.current_name()))
+            .collect();
+        self.acp_option_list = extra;
+        vec![PanelEvent::ShowSelect {
+            title: termide_i18n::t().agent_change_option().to_string(),
+            options,
+            on_select: SelectAction::Custom(OPTIONS_ACTION.to_string()),
+        }]
+    }
+
+    /// Set the external agent's setting `id` to `value` — during a run too —
+    /// and remember it in the session.
+    pub(crate) fn set_acp_option(&mut self, option: &BackendOption, value: &str) {
+        match self
+            .runtime
+            .set_option(option.id.clone(), value.to_string())
+        {
+            Ok(()) => {
+                self.acp_options = self.runtime.config_options();
+                self.record_agent_option(&option.id, value);
+                let name = option
+                    .values
+                    .iter()
+                    .find(|v| v.id == value)
+                    .map_or(value, |v| v.name.as_str());
+                self.notice(
+                    termide_i18n::t().agent_notice_option_fmt(&option.name, name),
+                    NoticeKind::Info,
+                );
+            }
+            Err(error) => self.notice(
+                termide_i18n::t().agent_notice_cannot_set_option_fmt(&error),
+                NoticeKind::Warn,
+            ),
+        }
+    }
+
+    fn record_agent_option(&mut self, option: &str, value: &str) {
+        if let Some(session) = &mut self.session {
+            if let Err(error) = session.append_agent_option(option, value) {
+                log::warn!("agent session write failed: {error}");
+            }
+        }
+    }
+
+    /// Ask the external agent, once it stated its models and settings, for
+    /// those the session picked (or the configuration pre-selects); a value
+    /// it no longer offers is left as the agent has it.
+    pub(crate) fn apply_acp_choices(&mut self) {
+        let models = self.runtime.available_models();
+        let options = self.runtime.config_options();
+        for (id, value) in std::mem::take(&mut self.pending_acp_choices) {
+            let outcome = if id == MODEL_OPTION {
+                if !models.iter().any(|m| m.id == value)
+                    || self.runtime.current_model().as_deref() == Some(value.as_str())
+                {
+                    continue;
+                }
+                let outcome = self.runtime.select_model(value.clone());
+                if outcome.is_ok() {
+                    self.model.id = value.clone();
+                }
+                outcome
+            } else {
+                let offered = options
+                    .iter()
+                    .find(|o| o.id == id)
+                    .is_some_and(|o| o.current != value && o.values.iter().any(|v| v.id == value));
+                if !offered {
+                    continue;
+                }
+                self.runtime.set_option(id.clone(), value.clone())
+            };
+            if let Err(error) = outcome {
+                log::warn!("cannot ask the agent for {id} = {value}: {error}");
+            }
+        }
+        self.acp_options = self.runtime.config_options();
     }
 
     pub(crate) fn model_input(&self) -> PanelEvent {
@@ -337,8 +503,8 @@ impl AgentPanel {
 
     /// Run the session on connection `name`: its endpoint and its
     /// model, the rest of the session kept. The agent restarts on the same
-    /// log, so a built-in loop carries the conversation over; a CLI agent
-    /// does not, so switching to or from one is refused once it has begun.
+    /// log, so a built-in loop carries the conversation over, and a CLI
+    /// agent is told a recap of it, as on an agent switch.
     pub(crate) fn switch_connection(&mut self, name: &str) -> bool {
         if name == self.connection {
             return true;
@@ -355,10 +521,6 @@ impl AgentPanel {
             self.notice(t.agent_notice_no_connection_fmt(name), NoticeKind::Warn);
             return false;
         };
-        if (choice.backend.is_some() || self.external) && !self.is_fresh() {
-            self.notice(t.agent_notice_connection_before_first(), NoticeKind::Warn);
-            return false;
-        }
         connections.activate(&choice);
         self.provider = Arc::clone(&choice.provider);
         self.provider_kind = choice.kind.clone();
@@ -405,7 +567,7 @@ impl AgentPanel {
     /// Continue the session on another model of the same endpoint. The
     /// context window follows the endpoint's figure when it gave one and
     /// stays as configured otherwise; the token limit is always the
-    /// configured one. Refused while a run is in flight.
+    /// configured one. During a run it applies from the run's next step.
     pub(crate) fn switch_model(&mut self, id: &str, context_window: Option<u64>) -> bool {
         let id = id.trim();
         if id.is_empty() {
@@ -423,11 +585,8 @@ impl AgentPanel {
             context_window: new_window,
             ..self.model.clone()
         };
-        let worker_model = model.clone();
-        if let Err(error) = self
-            .runtime
-            .update(Box::new(move |agent| agent.set_model(worker_model)))
-        {
+        // During a run the switch applies from its next step.
+        if let Err(error) = self.runtime.set_model(model.clone()) {
             self.notice(
                 termide_i18n::t().agent_notice_cannot_switch_model_fmt(&error.to_string()),
                 NoticeKind::Warn,
@@ -527,6 +686,9 @@ impl AgentPanel {
     /// The chip's action: an on/off model flips, a graded one opens the
     /// level picker.
     pub(crate) fn reasoning_action(&mut self) -> Vec<PanelEvent> {
+        if let Some(option) = self.acp_thought_option().cloned() {
+            return self.acp_option_picker(option);
+        }
         let levels = self.thinking_levels();
         if levels.is_empty() {
             return Vec::new();
@@ -550,24 +712,17 @@ impl AgentPanel {
         }]
     }
 
-    /// Ask the model for `level` of reasoning. Applies to the next request
-    /// and is remembered in the session log so a resume comes back with the
+    /// Ask the model for `level` of reasoning. Applies to the next request —
+    /// the next step of a run in flight — and is remembered in the session log so a resume comes back with the
     /// same choice.
     pub(crate) fn set_thinking(&mut self, level: ThinkingLevel) -> bool {
         if self.external {
             return false;
         }
-        if self.is_busy() {
-            self.notice(termide_i18n::t().agent_notice_busy(), NoticeKind::Warn);
-            return false;
-        }
         let mut model = self.model.clone();
         model.thinking = level;
-        let worker_model = model.clone();
-        if let Err(error) = self
-            .runtime
-            .update(Box::new(move |agent| agent.set_model(worker_model)))
-        {
+        // During a run the level applies from its next step.
+        if let Err(error) = self.runtime.set_model(model.clone()) {
             self.notice(
                 termide_i18n::t().agent_notice_cannot_change_reasoning_fmt(&error.to_string()),
                 NoticeKind::Warn,

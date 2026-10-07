@@ -51,6 +51,9 @@ struct Queues {
     /// call or model call, leaving the run resumable, unlike an abrupt
     /// cancel.
     paused: bool,
+    /// The model (with its reasoning level) the next step runs on, set while
+    /// a run is in flight; the loop takes it at the step boundary.
+    next_model: Option<ModelSpec>,
 }
 
 /// Thread-safe handle to the steering and follow-up queues.
@@ -114,6 +117,17 @@ impl QueueHandle {
     /// Clear any pause request before a run or resume starts.
     pub fn clear_pause(&self) {
         self.lock().paused = false;
+    }
+
+    /// Have the next step run on `model`: the loop takes it at the step
+    /// boundary, as it takes steering, so a run in flight switches model or
+    /// reasoning level without stopping.
+    pub fn set_next_model(&self, model: ModelSpec) {
+        self.lock().next_model = Some(model);
+    }
+
+    fn take_next_model(&self) -> Option<ModelSpec> {
+        self.lock().next_model.take()
     }
 
     fn take_steering(&self, mode: QueueMode) -> Vec<UserMessage> {
@@ -656,6 +670,14 @@ impl Agent {
         self.model = model;
     }
 
+    /// Take up the model a run in flight was switched to
+    /// ([`QueueHandle::set_next_model`]), if any.
+    pub fn adopt_next_model(&mut self) {
+        if let Some(model) = self.queues.take_next_model() {
+            self.model = model;
+        }
+    }
+
     pub fn set_cwd(&mut self, cwd: PathBuf) {
         self.cwd = cwd;
     }
@@ -821,6 +843,8 @@ impl Agent {
         for message in pending {
             self.push(Message::User(message), emit);
         }
+        // A model or reasoning level picked during the run applies from here.
+        self.adopt_next_model();
 
         if should_compact(&self.messages, self.model.context_window, &self.compaction) {
             // A failed compaction is reported through events; the turn still

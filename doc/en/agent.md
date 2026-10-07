@@ -115,9 +115,9 @@ save from the settings modal writes it in the new shape.
 The banner's connection line and the status bar's **Connection** chip switch
 the session to another connection: its endpoint and its model replace the ones
 in use, the agent restarts on the same log and carries the conversation over,
-and delegated tasks follow. A CLI agent (`claude_code`, `codex`, `gemini_cli`) does
-not take over a conversation, so a switch to or from one works only before the first
-request. The session log records the connection, so a reopened session
+and delegated tasks follow. A switch to a CLI agent (`claude_code`, `codex`,
+`gemini_cli`) mid-conversation tells it a recap of the conversation before its
+first request, as a switch of [agent](#external-agents) does. The session log records the connection, so a reopened session
 reconnects to it while it is still in the config, and to the one new sessions
 start on otherwise.
 
@@ -178,7 +178,10 @@ whichever connection it is on:
 
 Codex and Gemini CLI also get the tools of termide's MCP servers, served over
 the same local MCP server beside their own and checked as Claude Code's calls
-are; their own MCP configuration still applies. They read the list of an MCP
+are; their own MCP configuration still applies. Of termide's own tools they get
+those they have no counterpart of: `recall`, `skill` (whose description lists
+the skills, since their own prompt does not), `question` and
+`suggest_command`, each present when the agent definition has it. They read the list of an MCP
 server's tools only once, when their session starts, so the session waits up
 to ten seconds for termide's MCP servers to answer. A server that connects
 later, or is reloaded, reaches them in the next session.
@@ -186,8 +189,35 @@ later, or is reloaded, reaches them in the next session.
 All three keep their own conversation loop: they compact their context themselves,
 a run cannot pause between steps, and there is no prefill or generation
 timing (token totals show when the agent reports them, as Claude Code does).
-The **Permissions** chip works for all three. The settings modal says the same under a
+The **Permissions** chip works for all three; `auto` has no reviewer for them
+and asks as `configured` does. The settings modal says the same under a
 connection's page.
+
+The rest of the panel works with them as with the built-in loop:
+
+- A message typed while the agent works joins the turn it is running, as a
+  steering message joins the built-in loop's, when the agent takes one
+  (Claude Code's and Codex's adapters do); otherwise it waits in the state
+  strip and goes as the next request.
+- The **Model** chip lists and switches the agent's models, the
+  **Reasoning** chip its reasoning effort, and an **Options** chip the rest of
+  the settings it offers (fast mode, for one) — at any time, during a run too,
+  where the agent applies the change as soon as it can. The choices are
+  written to the session log, so a reopened session asks the agent for them
+  again.
+- Its own commands join the `/` list (termide's templates, scripts and skills
+  of the same name come first) and go to it as typed; its `/compact` stands in
+  for termide's.
+- `/goal` and `/handoff` work: the judge's and the brief's request goes to the
+  agent in a fork of its session, closed afterwards, when the agent forks one
+  (Claude Code and Codex do), so the conversation is left as it was;
+  otherwise as a turn of the session that the panel and the log leave out,
+  though the agent's own session keeps it.
+- Its reasoning is kept in the session log with its answers, so a reopened
+  conversation shows it.
+- Claude Code, which takes its system prompt once, is told before your next
+  message when termide's tools it has change — an MCP server's that came or
+  went.
 
 ## Using the panel
 
@@ -508,7 +538,9 @@ stream live in the panel.
 
 The status chips run, left to right: the agent, the permission mode, the
 **Reasoning** level (none for a model that cannot be asked), the connection with its protocol
-(`local · OpenAI Compatible`) and the model. The session's token totals and
+(`local · OpenAI Compatible`) and the model; an external agent shows its own
+reasoning setting and an **Options** chip for its other settings instead (see
+[CLI agents](#configuring-a-model)). The session's token totals and
 the context window sit flush right; on a narrow terminal the chips on the left
 are cut, never these. The totals are `↑` the prompt tokens billed in full (the
 uncached input and what was written to the prompt cache), `↻` those the cache
@@ -518,12 +550,13 @@ Claude Code, Codex and Gemini CLI both come from what the agent reports, and the
 shows once it has.
 Agent, mode, reasoning, connection and model are buttons. Clicking **Reasoning** lists
 the levels the model offers (an on/off model just flips) and applies the one
-picked from the next request; the choice is remembered in the session, so a
+picked from the next request — during a run, from its next step; the choice is remembered in the session, so a
 resume comes back with it, and stays when the model changes, falling to the
 nearest level the new one has. What the agent is doing right now is
 not repeated in the status bar: each chat block carries it in its byline.
 
-Typing `/` opens a list of the matching prompt templates above the input;
+Typing `/` opens a list of the matching prompt templates above the input (and
+an external agent's own commands);
 `↑`/`↓` move in it, `Tab` or `Enter` complete the highlighted one, and `Enter`
 on a name typed in full sends it.
 
@@ -548,7 +581,9 @@ also what you get when the endpoint cannot list its models. The switch takes
 effect on your next request and stays with the session: it is written to the
 session log — with the provider it runs on — so reopening that session brings
 its model and provider back, and a new session starts on whatever model the
-panel is on. Switching waits for the current task, like switching sessions.
+panel is on. During a run the switch applies from the run's next step: the
+model call in progress finishes on the old model. Switching the connection
+waits for the current task, like switching sessions.
 
 **Context window.** When the endpoint reports a model's window (vLLM and omlx
 report `max_model_len`), the panel always adopts it — at startup and on every
@@ -1097,8 +1132,8 @@ auto_reviewer = "haiku"   # a connection's name; empty reviews with the session'
 The reviewer judges delegated work too: a subagent's calls are reviewed
 against your words and the task it was given, marked as another agent's.
 Headless runs use it the same way, falling back to a refusal where the panel
-would ask. An external (`command`) agent keeps its conversation to itself, so
-in `auto` its requests are asked about as in `configured`.
+would ask. An external agent's conversation is its own, and no reviewer
+judges its requests: in `auto` they are asked about as in `configured`.
 
 ## The AI menu
 
@@ -1269,6 +1304,16 @@ in it is expanded. The program inherits TermIDE's environment; an
 (`env.ANTHROPIC_BASE_URL: http://localhost:8080`). `timeout` is how many
 seconds to wait for it to start, 120 by default.
 
+`adapter` says which agent it is, for termide to take it as far as the
+matching [CLI connection](#configuring-a-model) does: `claude_code`, `codex`,
+`gemini_cli`, or `generic` for one termide knows nothing more of. Without it the
+command tells: Claude Code's and Codex's ACP adapters and Gemini CLI with
+`--acp` are recognised, so the example above runs Claude Code on termide's
+prompt and tools; name the adapter when it is behind a wrapper of your own.
+`model` is the model to pick on the agent once it lists its models, as a CLI
+connection's `model` is; `mode` sets the panel's permission mode, which an
+adapter termide knows has mapped onto its own; `tools` does not apply.
+
 The program starts in the background when you switch to the agent; the first
 request waits for it. Its answers, thoughts and tool calls appear in the
 session like the built-in agent's, and it reads and writes files through
@@ -1276,12 +1321,15 @@ TermIDE, so an open editor follows its edits. Its permission requests are
 judged by the same rules as the built-in agent's: a read-only command or a
 request a `[ai.permissions]` rule or a session grant already covers passes
 without a card, and only what is left reaches you — so a granted or read-only
-command is never asked twice. The **Permissions** chip disappears while an external
-agent is active: it has its own, and TermIDE's mode is not cycled for it. The **Model** chip stays when the agent advertises
-its models over ACP — it then lists them and switches with `session/set_model`,
-so you pick the agent's model in TermIDE; agents that advertise none show no
-chip. Skills, prompt templates and MCP servers are the agent's own affair too;
-`model`, `mode`, `tools` and the body of its `AGENT.md` do not apply.
+command is never asked twice. The **Permissions** chip shows for an adapter
+termide knows and disappears for a generic agent, which has its own. The
+**Model**, **Reasoning** and **Options** chips show what the agent offers over
+ACP (its models, its reasoning effort and its other settings) and switch them
+at any time, as for a [CLI connection](#configuring-a-model); an agent that
+offers none shows none of them, and a generic agent's own modes sit under
+**Options**. Messages typed while it works, its own `/` commands, `/goal` and
+`/handoff` work as described there too. A generic agent's skills, prompt
+templates and MCP servers are its own affair.
 
 The session log records the agent's own session, so a reopened session, or a
 switch back to the agent, continues that session through ACP's
@@ -1519,7 +1567,7 @@ message is headed by what you typed, `/review src/parser.rs`, with the text
 the model actually received folded under it; `↑` recalls the command, not the
 text. Typing `/` lists the templates, and picking one puts `/name ` into the
 input. A message starting with `/` that names no
-template is not sent; a path such as `/usr/bin/ls` is plain text.
+template (nor a command of an external agent's own) is not sent; a path such as `/usr/bin/ls` is plain text.
 
 ### Command scripts
 

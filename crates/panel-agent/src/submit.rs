@@ -7,8 +7,8 @@ use std::sync::PoisonError;
 use std::time::Duration;
 
 use termide_agent_core::{
-    CancelToken, CommandScript, Decision, DefinitionProblem, Message, PromptError, Session,
-    SkillInfo, Timing, UserMessage,
+    AgentCommand, CancelToken, CommandScript, Decision, DefinitionProblem, Message, PromptError,
+    Session, SkillInfo, Timing, UserMessage,
 };
 use termide_core::{Panel, PanelEvent};
 use termide_ui::ChoiceForm;
@@ -121,11 +121,15 @@ impl AgentPanel {
         }
         // What reaches `send` through a slash arm was expanded from this.
         let command = slash_command(&text).map(|_| text.clone());
+        // An external agent's own `/compact` replaces termide's, which it
+        // cannot run.
+        let agent_compacts = self.external && self.agent_command(COMPACT_COMMAND).is_some();
         let text = match slash_command(&text) {
             Some((UNDO_COMMAND, _)) => {
                 self.clear_input();
                 return self.ask_undo();
             }
+            Some((COMPACT_COMMAND, _)) if agent_compacts => text.clone(),
             Some((COMPACT_COMMAND, focus)) => {
                 // Built in: summarise the older part of the session now.
                 let focus = (!focus.is_empty()).then(|| focus.to_string());
@@ -314,9 +318,12 @@ impl AgentPanel {
                         return vec![PanelEvent::NeedsRedraw];
                     }
                 },
+                // The agent's own command goes to it as typed.
+                None if self.agent_command(name).is_some() => text.clone(),
                 None => {
                     let mut names: Vec<String> =
                         self.catalog.prompts().into_iter().map(|p| p.name).collect();
+                    names.extend(self.agent_commands().into_iter().map(|c| c.name));
                     names.extend(self.catalog.commands().into_iter().map(|c| c.name));
                     names.extend(self.slash_skills().into_iter().map(|(name, _)| name));
                     names.push(COMPACT_COMMAND.to_string());
@@ -359,6 +366,22 @@ impl AgentPanel {
         }
         self.clear_input();
         self.send_as(text, command)
+    }
+
+    /// The commands the external agent offers of its own.
+    pub(crate) fn agent_commands(&self) -> Vec<AgentCommand> {
+        if self.external {
+            self.runtime.agent_commands()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// The external agent's own command `name`, when it offers one.
+    pub(crate) fn agent_command(&self, name: &str) -> Option<AgentCommand> {
+        self.agent_commands()
+            .into_iter()
+            .find(|command| command.name == name)
     }
 
     /// Send `text` as the next request: a new run when idle, a steering

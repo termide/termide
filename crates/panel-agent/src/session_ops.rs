@@ -11,8 +11,10 @@ use termide_ui::ChoiceForm;
 
 use crate::pending::Pending;
 use crate::runtime::{
-    checkpoint_store, session_agent, session_model, spawn_runtime, start_session, Spawned,
+    acp_choices, checkpoint_store, preferred_acp_model, session_agent, session_model,
+    spawn_runtime, start_session, Spawned,
 };
+use crate::toolset::served_skills;
 use crate::{
     format_tokens, shorten_path, truncate_title, AgentPanel, Item, NoticeKind,
     DELETE_RECENT_ACTION, DELETE_SESSION_ACTION, FORK_SESSION_ACTION, RENAME_RECENT_ACTION,
@@ -66,7 +68,11 @@ impl AgentPanel {
             &self.context_off,
             session.as_ref(),
         );
+        // The model the agent's definition names, which an external agent is
+        // asked for.
+        let mut agent_model = None;
         if let Some((name, profile)) = resolved {
+            agent_model = profile.model.clone();
             agent = name;
             system_prompt = profile.system_prompt;
             tools = profile.tools;
@@ -115,6 +121,11 @@ impl AgentPanel {
             session.as_ref(),
             &blocked,
             self.shell_run.clone(),
+            served_skills(
+                self.catalog.as_ref(),
+                &self.offered_skills,
+                &self.context_off,
+            ),
         );
         // Dropping the old runtime cancels it and asks its worker to stop.
         self.runtime = runtime;
@@ -163,6 +174,17 @@ impl AgentPanel {
         self.pause_requested = false;
         self.stop_requested = false;
         self.context_tokens = 0;
+        // What the previous agent stated is not this one's.
+        self.acp_has_models = false;
+        self.acp_options.clear();
+        self.acp_models.clear();
+        self.acp_option_list.clear();
+        self.acp_option_choice = None;
+        self.pending_acp_choices = acp_choices(
+            self.external,
+            agent_model.or_else(|| preferred_acp_model(&self.model)),
+            self.session.as_ref(),
+        );
         self.refresh_recent_sessions();
         true
     }

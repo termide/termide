@@ -13,7 +13,7 @@ use crate::toolset::TOOLSET_ACTION;
 use crate::{
     format_tokens, provider_label, shorten_path, transcript, truncate_title, AgentPanel, BannerHit,
     Phase, RunButton, AGENT_ACTION, CONNECTION_ACTION, CWD_ACTION, MODEL_ACTION, MODE_ACTION,
-    REASONING_ACTION,
+    OPTIONS_ACTION, REASONING_ACTION,
 };
 
 /// Rows of the welcome banner's logo.
@@ -860,6 +860,40 @@ impl AgentPanel {
                         self.mode.get().label(),
                         SegmentKind::Active,
                         MODE_ACTION,
+                    ),
+                ]);
+            }
+            // The agent's own reasoning setting and the rest of its settings,
+            // when it offers them.
+            if let Some(option) = self.acp_thought_option() {
+                segments.extend([
+                    sep(),
+                    StatusSegment::clickable(
+                        t.agent_chip_reasoning(),
+                        SegmentKind::Label,
+                        REASONING_ACTION,
+                    ),
+                    StatusSegment::clickable(
+                        option.current_name().to_string(),
+                        SegmentKind::Active,
+                        REASONING_ACTION,
+                    ),
+                ]);
+            }
+            let extra = self.acp_extra_options();
+            if !extra.is_empty() {
+                let values: Vec<&str> = extra.iter().map(|option| option.current_name()).collect();
+                segments.extend([
+                    sep(),
+                    StatusSegment::clickable(
+                        t.agent_chip_options(),
+                        SegmentKind::Label,
+                        OPTIONS_ACTION,
+                    ),
+                    StatusSegment::clickable(
+                        values.join(" · "),
+                        SegmentKind::Active,
+                        OPTIONS_ACTION,
                     ),
                 ]);
             }

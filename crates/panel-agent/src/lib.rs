@@ -33,12 +33,12 @@ use crossterm::event::MouseEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use termide_agent_core::{
-    Backend, BackendModel, BackendSetup, CancelToken, CheckpointStore, CommandScript,
-    CompactionPolicy, CompactionPrompts, Decision, GoalPrompt, HandoffPrompt, Hooks, LateTools,
-    McpReload, McpServerState, Mode, ModeHandle, ModelInfo, ModelSpec, PermissionEnvelope,
-    PermissionRules, PersistScope, PlanPrompt, PromptError, PromptTemplate, Provider,
-    QuestionEnvelope, Refusals, ReviewerSetup, Session, SessionSummary, ShellOutput, ShellRunner,
-    SkillInfo, SuggestionEnvelope, Tool, ToolRegistry, DEFAULT_AGENT,
+    Backend, BackendModel, BackendOption, BackendSetup, CancelToken, CheckpointStore,
+    CommandScript, CompactionPolicy, CompactionPrompts, Decision, GoalPrompt, HandoffPrompt, Hooks,
+    LateTools, McpReload, McpServerState, Mode, ModeHandle, ModelInfo, ModelSpec,
+    PermissionEnvelope, PermissionRules, PersistScope, PlanPrompt, PromptError, PromptTemplate,
+    Provider, QuestionEnvelope, Refusals, ReviewerSetup, Session, SessionSummary, ShellOutput,
+    ShellRunner, SkillInfo, SuggestionEnvelope, Tool, ToolRegistry, DEFAULT_AGENT,
 };
 use termide_config::Config;
 use termide_core::{
@@ -52,11 +52,11 @@ use crate::input::MentionSpan;
 use crate::pending::Pending;
 use crate::pickers::current_mark;
 use crate::runtime::{
-    checkpoint_store, session_agent, session_model, spawn_model_list, spawn_runtime, start_session,
-    Spawned,
+    acp_choices, checkpoint_store, preferred_acp_model, session_agent, session_model,
+    spawn_model_list, spawn_runtime, start_session, Spawned,
 };
 use crate::session_ops::discard_if_empty;
-use crate::toolset::{Blocked, TOOLSET_ACTION};
+use crate::toolset::{served_skills, Blocked, TOOLSET_ACTION};
 
 pub use transcript::{FoldMode, Item, NoticeKind, Transcript};
 
@@ -97,6 +97,10 @@ const MODEL_INPUT_ACTION: &str = "agent_model_input";
 const MODE_ACTION: &str = "agent_mode";
 /// Status chip and picker that set how much the model is asked to reason.
 const REASONING_ACTION: &str = "agent_reasoning";
+/// Status chip and picker of an external agent's other settings.
+const OPTIONS_ACTION: &str = "agent_options";
+/// Picker of the values of one external agent's setting.
+const OPTION_VALUE_ACTION: &str = "agent_option_value";
 /// Context-menu action that opens the assembled system prompt in a viewer.
 const SHOW_PROMPT_ACTION: &str = "agent_show_prompt";
 /// Context-menu action that opens the session-info modal (also F3, `/usage`).
@@ -634,10 +638,17 @@ pub struct AgentPanel {
     /// Whether the external agent advertised any models (so a Model chip and
     /// picker are worth showing); latched once known.
     acp_has_models: bool,
-    /// A model to pre-select on an external CLI agent (from `[ai].model` for a
-    /// `claude_code`/`codex`/`gemini_cli` provider), applied once its models are known.
-    /// Taken (set to `None`) after the one-shot attempt.
-    pending_preferred_model: Option<String>,
+    /// The external agent's settings to ask for once its own are known: the
+    /// session's picks ([`Session::agent_options`]), else the model the
+    /// configuration pre-selects for it. Taken after the one-shot attempt.
+    pending_acp_choices: Vec<(String, String)>,
+    /// The external agent's settings as it last stated them, its model left
+    /// out: what the Reasoning and Options chips show.
+    acp_options: Vec<BackendOption>,
+    /// The external agent's settings offered by the open Options picker.
+    acp_option_list: Vec<BackendOption>,
+    /// The external agent's setting whose values the open picker offers.
+    acp_option_choice: Option<BackendOption>,
     /// Background `list_models` call, polled from `tick()`.
     model_fetch: Option<Receiver<Result<Vec<ModelInfo>, String>>>,
     /// A silent `list_models` call started at construction to adopt the active
@@ -906,17 +917,14 @@ impl AgentPanel {
             session.as_ref(),
             &blocked,
             setup.shell_run.clone(),
+            served_skills(setup.catalog.as_ref(), &offered_skills, &context_off),
         );
         // Learn the context window from the provider in the background and
         // adopt the active model's real `max_model_len`; the configured window
         // is only a fallback (an external agent has no such endpoint).
         let context_probe = (!external).then(|| spawn_model_list(Arc::clone(&setup.provider)));
-        // A CLI provider carries the model to pre-select on its agent in
-        // `[ai].model`; a wire-protocol or generic external agent does not.
-        let pending_preferred_model = (external
-            && termide_config::is_cli_provider(&setup.provider_kind)
-            && !model.id.is_empty())
-        .then(|| model.id.clone());
+        let pending_acp_choices =
+            acp_choices(external, preferred_acp_model(&model), session.as_ref());
         setup.catalog.set_mode(mode.get());
         let mut panel = Self {
             runtime,
@@ -969,7 +977,10 @@ impl AgentPanel {
             model_choices: Vec::new(),
             acp_models: Vec::new(),
             acp_has_models: false,
-            pending_preferred_model,
+            pending_acp_choices,
+            acp_options: Vec::new(),
+            acp_option_list: Vec::new(),
+            acp_option_choice: None,
             model_fetch: None,
             context_probe,
             pending_events: Vec::new(),
@@ -1383,6 +1394,7 @@ impl Panel for AgentPanel {
             MODEL_ACTION => self.request_model_list(),
             MODE_ACTION => vec![self.mode_picker()],
             REASONING_ACTION => self.reasoning_action(),
+            OPTIONS_ACTION => self.acp_options_action(),
             SHOW_PROMPT_ACTION => match self.write_system_prompt() {
                 Ok(path) => vec![PanelEvent::ViewFile(path)],
                 Err(error) => {
@@ -1508,6 +1520,27 @@ impl Panel for AgentPanel {
                 self.agent_choices.clear();
                 CommandResult::Handled(choice.is_some_and(|name| self.switch_agent(&name)))
             }
+            PanelCommand::SelectionMade { action, index }
+                if (action == REASONING_ACTION || action == OPTION_VALUE_ACTION)
+                    && self.acp_option_choice.is_some() =>
+            {
+                if let Some(option) = self.acp_option_choice.take() {
+                    if let Some(value) = option.values.get(index).map(|v| v.id.clone()) {
+                        self.set_acp_option(&option, &value);
+                    }
+                }
+                CommandResult::Handled(true)
+            }
+            PanelCommand::SelectionMade { action, index } if action == OPTIONS_ACTION => {
+                let choice = std::mem::take(&mut self.acp_option_list)
+                    .into_iter()
+                    .nth(index);
+                if let Some(option) = choice {
+                    let events = self.acp_option_picker(option);
+                    self.pending_events.extend(events);
+                }
+                CommandResult::Handled(true)
+            }
             PanelCommand::SelectionMade { action, index } if action == REASONING_ACTION => {
                 let level = self.thinking_levels().get(index).copied();
                 CommandResult::Handled(level.is_some_and(|level| self.set_thinking(level)))
@@ -1525,22 +1558,7 @@ impl Panel for AgentPanel {
                 let choice = self.acp_models.get(index).cloned();
                 self.acp_models.clear();
                 if let Some(model) = choice {
-                    match self.runtime.select_model(model.id.clone()) {
-                        Ok(()) => {
-                            self.model.id = model.id.clone();
-                            if !self.is_fresh() {
-                                self.notice(
-                                    termide_i18n::t().agent_notice_model_fmt(&model.id),
-                                    NoticeKind::Info,
-                                );
-                            }
-                        }
-                        Err(error) => self.notice(
-                            termide_i18n::t()
-                                .agent_notice_cannot_switch_model_fmt(&error.to_string()),
-                            NoticeKind::Warn,
-                        ),
-                    }
+                    self.select_acp_model(&model.id);
                 }
                 CommandResult::Handled(true)
             }

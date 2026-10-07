@@ -169,6 +169,7 @@ impl Translation for RuntimeTranslation {
         agent_chip_agent,
         agent_chip_mode,
         agent_chip_reasoning,
+        agent_chip_options,
         agent_chip_tools,
         agent_chip_connection,
         agent_chip_model,
@@ -512,6 +513,7 @@ impl Translation for RuntimeTranslation {
         agent_change_model,
         agent_change_mode,
         agent_change_reasoning,
+        agent_change_option,
         agent_model_prompt,
         agent_model_other,
         agent_models_loading,
@@ -646,7 +648,6 @@ impl Translation for RuntimeTranslation {
         agent_pick_connection,
         agent_delete_this_session,
         agent_fork_this_session,
-        agent_notice_connection_before_first,
         agent_notice_model_pending,
         agent_toolset_title,
         agent_toolset_prompt,
@@ -1211,6 +1212,17 @@ impl Translation for RuntimeTranslation {
 
     fn agent_notice_reasoning_fmt(&self, level: &str) -> String {
         self.format("agent_notice_reasoning_fmt", &[("level", level)])
+    }
+
+    fn agent_notice_option_fmt(&self, name: &str, value: &str) -> String {
+        self.format(
+            "agent_notice_option_fmt",
+            &[("name", name), ("value", value)],
+        )
+    }
+
+    fn agent_notice_cannot_set_option_fmt(&self, error: &str) -> String {
+        self.format("agent_notice_cannot_set_option_fmt", &[("error", error)])
     }
 
     fn agent_notice_model_fmt(&self, id: &str) -> String {

@@ -496,6 +496,7 @@ pub trait Translation: Send + Sync {
     /// Agent panel: open the permission-mode picker
     fn agent_change_mode(&self) -> &str;
     fn agent_change_reasoning(&self) -> &str;
+    fn agent_change_option(&self) -> &str;
     /// Prompt asking for a model id by hand
     fn agent_model_prompt(&self) -> &str;
     /// Model picker: last entry, type an id instead
@@ -707,6 +708,7 @@ pub trait Translation: Send + Sync {
     fn agent_chip_agent(&self) -> &str;
     fn agent_chip_mode(&self) -> &str;
     fn agent_chip_reasoning(&self) -> &str;
+    fn agent_chip_options(&self) -> &str;
     fn agent_chip_tools(&self) -> &str;
     fn agent_chip_connection(&self) -> &str;
     fn agent_chip_model(&self) -> &str;
@@ -827,7 +829,6 @@ pub trait Translation: Send + Sync {
     /// Agent connection picker: its title.
     fn agent_pick_connection(&self) -> &str;
     /// Agent notice: switching to or from a CLI agent is refused mid-session.
-    fn agent_notice_connection_before_first(&self) -> &str;
     /// Agent notice: a request waits for the provider's model list, the
     /// model being left to it.
     fn agent_notice_model_pending(&self) -> &str;
@@ -857,6 +858,8 @@ pub trait Translation: Send + Sync {
     fn agent_notice_cannot_switch_model_fmt(&self, error: &str) -> String;
     fn agent_notice_cannot_change_reasoning_fmt(&self, error: &str) -> String;
     fn agent_notice_reasoning_fmt(&self, level: &str) -> String;
+    fn agent_notice_option_fmt(&self, name: &str, value: &str) -> String;
+    fn agent_notice_cannot_set_option_fmt(&self, error: &str) -> String;
     fn agent_notice_model_fmt(&self, id: &str) -> String;
     fn agent_notice_cannot_open_session_fmt(&self, error: &str) -> String;
     fn agent_notice_cannot_open_block_fmt(&self, error: &str) -> String;

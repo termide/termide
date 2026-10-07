@@ -495,8 +495,10 @@ pub struct AgentSpec {
     /// brackets); all built-in tools when absent, none for `tools: []`.
     pub tools: Option<Vec<String>>,
     /// An external agent spoken to over ACP instead of the built-in loop:
-    /// `command` with `timeout` and `env.<NAME>`; `model`, `mode`, `tools`
-    /// and the body then do not apply.
+    /// `command` with `timeout`, `env.<NAME>` and `adapter` (else told by
+    /// the command); `model` is then the agent's model to pick, `mode` the
+    /// panel's mode an adapter termide knows maps, and `tools` does not
+    /// apply.
     pub acp: Option<AcpConfig>,
 }
 
@@ -548,12 +550,19 @@ impl AgentSpec {
                     (!name.is_empty()).then(|| (name.to_string(), value.clone()))
                 })
                 .collect();
+            let flavor = text("adapter")
+                .and_then(|name| {
+                    AcpFlavor::parse(name)
+                        .map_err(|error| warn("adapter", &error))
+                        .ok()
+                })
+                .unwrap_or_else(|| AcpFlavor::detect(&command, &words));
             Some(AcpConfig {
                 command,
                 args: words,
                 env,
                 timeout_secs,
-                flavor: AcpFlavor::Generic,
+                flavor,
             })
         });
         let spec = Self {
@@ -563,9 +572,16 @@ impl AgentSpec {
             tools,
             acp,
         };
-        if spec.acp.is_some() {
-            for field in ["model", "mode", "tools"] {
-                if fields.contains_key(field) {
+        if let Some(acp) = &spec.acp {
+            // An adapter termide knows has the panel's mode mapped onto its
+            // own; any other agent answers to its own configuration.
+            let unused: &[&str] = if acp.flavor == AcpFlavor::Generic {
+                &["mode", "tools"]
+            } else {
+                &["tools"]
+            };
+            for field in unused {
+                if fields.contains_key(*field) {
                     warn(field, &"an external agent (`command`) does not use it");
                 }
             }
@@ -1349,6 +1365,14 @@ mod tests {
              timeout: 30\nenv.API_KEY: $MY_KEY\nenv.BASE_URL: http://localhost:8080\n---\n",
         );
         write("unclosed", "---\ncommand: run 'open\n---\n");
+        write(
+            "codex",
+            "---\ncommand: npx -y @agentclientprotocol/codex-acp\nmodel: gpt-5\n---\n",
+        );
+        write(
+            "pinned",
+            "---\ncommand: /opt/bin/claude-wrapper\nadapter: claude_code\n---\n",
+        );
         write("bare", "");
         // No AGENT.md, no agent: not one that would run with every tool.
         let old = global.join("agents/old");
@@ -1385,6 +1409,16 @@ mod tests {
             ]
         );
         assert_eq!(dirs.spec("unclosed").acp, None);
+        // The adapter is told by the command, or named; an unknown program
+        // is generic.
+        assert_eq!(acp.flavor, AcpFlavor::Generic);
+        let codex = dirs.spec("codex");
+        assert_eq!(codex.acp.map(|acp| acp.flavor), Some(AcpFlavor::Codex));
+        assert_eq!(codex.model.as_deref(), Some("gpt-5"));
+        assert_eq!(
+            dirs.spec("pinned").acp.map(|acp| acp.flavor),
+            Some(AcpFlavor::ClaudeCode)
+        );
 
         // An empty AGENT.md is an agent with the defaults.
         assert_eq!(dirs.spec("bare"), AgentSpec::default());
@@ -1397,6 +1431,8 @@ mod tests {
                 "bracketed",
                 "broken",
                 "claude",
+                "codex",
+                "pinned",
                 "review",
                 "toolless",
                 "unclosed"

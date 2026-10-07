@@ -7,12 +7,12 @@ use std::path::PathBuf;
 use std::sync::{mpsc, Arc, PoisonError, RwLock};
 
 use termide_agent_core::{
-    Hooks, LateTools, McpStatus, Mode, PromptError, ToolCall, ToolContext, ToolDecision,
-    ToolRegistry,
+    companion_tools, Hooks, LateTools, McpStatus, Mode, PromptError, SkillInfo, ToolCall,
+    ToolContext, ToolDecision,
 };
 use termide_core::{ChecklistGroup, ChecklistItem, ChecklistRefresh, PanelEvent};
 
-use crate::{AgentPanel, NoticeKind};
+use crate::{AgentCatalog, AgentPanel, NoticeKind};
 
 /// What the session switched off but the model still has in its context,
 /// shared with the guard that refuses it.
@@ -20,6 +20,22 @@ pub(crate) type Blocked = Arc<RwLock<BTreeSet<String>>>;
 
 /// The checklist of the session's tools, skills and MCP tools.
 pub(crate) const TOOLSET_ACTION: &str = "agent_toolset";
+
+/// The skills of `offered` the context holds (`off` names those it was built
+/// without), as the catalog describes them: what an external agent on its
+/// own prompt is told the `skill` tool loads.
+pub(crate) fn served_skills(
+    catalog: &dyn AgentCatalog,
+    offered: &[String],
+    off: &BTreeSet<String>,
+) -> Vec<SkillInfo> {
+    catalog
+        .skills()
+        .into_iter()
+        .filter(|skill| offered.contains(&skill.name))
+        .filter(|skill| !off.contains(&format!("skill:{}", skill.name)))
+        .collect()
+}
 
 /// Refuses what the session switched off while it is still in the model's
 /// context: a tool by its name, a skill by the name the `skill` tool loads.
@@ -486,9 +502,18 @@ impl AgentPanel {
                 }
                 self.runtime.update_host_tools(served)
             } else if self.external && self.runtime.takes_mcp_tools() {
-                // One on its own tools is served the MCP servers' beside them,
-                // save those its context was built without.
-                let mut served = ToolRegistry::new();
+                // One on its own tools is served termide's it has no
+                // counterpart of and the MCP servers' beside them, save those
+                // its context was built without.
+                let skills = served_skills(
+                    self.catalog.as_ref(),
+                    &self.offered_skills,
+                    &self.context_off,
+                );
+                let mut served = companion_tools(&self.tools, &skills);
+                for name in &self.context_off {
+                    served.remove(name);
+                }
                 for (_, tool) in &self.mcp_arrived {
                     if !self.context_off.contains(tool.name()) {
                         served.insert(Arc::clone(tool));

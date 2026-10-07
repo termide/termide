@@ -1045,9 +1045,48 @@ through the same `ChannelPrompter` as the built-in prompt (answers mapped
 onto the offered `allow_once`/`allow_always`/`reject_once` options),
 `fs/read_text_file` and `fs/write_text_file` from the working directory (a
 write surfaces as a `write` tool call for the editor reload), terminals not
-advertised. Model and mode chips are hidden for an external agent —
-`Backend::update` answers `Unsupported` — and switching between engines
-rebuilds the runtime on the same session log. The agent's session id goes
+advertised. Switching between engines rebuilds the runtime on the same
+session log.
+
+Settings: ACP's session config options are the client-facing knobs, changeable
+"at any point, whether the agent is idle or generating". The backend keeps the
+agent's whole `select` set (from the session result, each
+`set_config_option` reply and `config_option_update`); the `model` option, or
+the older `models`, feeds the Model chip, `thought_level` the Reasoning chip,
+and the rest an Options chip (the agent's own modes left out when termide maps
+its mode onto them). A pick is logged as an `agent_option` entry (the model
+under the key `model`) and asked for again once a reopened agent states its
+options; an `agent_option` does not void the agent's own session. The built-in
+loop matches it: a model or reasoning level picked during a run goes through
+`QueueHandle::set_next_model` and is taken at the next step boundary, as
+steering is, and before any later worker command, so a switch made between
+runs wins.
+
+Steering: Claude Code's and Codex's adapters announce `_meta.steering.supported`
+and take `_session/steering` (`{sessionId, prompt}`, answered `injected`,
+`promptRequired` or — Codex, which ignores the `idleBehavior: promptRequired`
+asked for — `startedNewTurn`); ACP's own `session/inject` is still an RFD. A
+message typed during a turn waits in the queue (so the strip shows it) and is
+offered to the turn; its reply is taken in the reader thread, in order with
+the updates, so the message is logged before the text that answers it, and
+only once no call is open, so the log never puts a user message between a call
+and its result. Refused, it stays queued for the next turn.
+
+Side requests (`/goal`'s judge, `/handoff`): an external agent has no call
+without its loop, so the judge's or brief's instructions and request go as one
+prompt — into `session/fork` (closed after with `session/close`) when the agent
+offers it, else into the session itself with the panel's busy flag held;
+either way the updates of that session go to a buffer, never to the panel or
+the log, and a permission request from it is refused.
+
+What an adapter gets of termide: Claude Code its prompt and tools (and a
+`<system-reminder>` before a turn when plan mode or the served tool set
+changed); Codex and Gemini CLI their own, plus `COMPANION_TOOLS` (`recall`,
+`skill` with the skills listed in its description, `question`,
+`suggest_command`) and the MCP servers' tools. An `AGENT.md` with a `command`
+names its flavor in `adapter:` or has it told by the command line
+(`AcpFlavor::detect`), so the documented `claude-agent-acp` example is not
+generic; auto mode stays without a reviewer for every external agent. The agent's session id goes
 into that log as an `external_session` entry (with the log's header id and
 `cwd`); `Session::external_session` hands it back while the branch is still
 what that session holds — no rewind, compaction, pruning, agent or connection

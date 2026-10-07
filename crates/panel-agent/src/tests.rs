@@ -1,5 +1,6 @@
 use super::*;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -11,7 +12,7 @@ use termide_agent_core::{
     AssistantMessage, CancelToken, EntryKind, Message, PermissionAnswer, PermissionPrompter,
     QuestionAnswer, QuestionReply, Request, ShellOutput, ShellRunner, StopReason, StreamEvent,
     Suggestion, SuggestionReply, ThinkingLevel, Timing, ToolCall, ToolContext, ToolDecision,
-    ToolResultMessage, ToolUpdate, Usage, UserMessage,
+    ToolResultMessage, ToolUpdate, Usage, UserMessage, MODEL_OPTION,
 };
 use termide_core::{ConfirmAction, LinkTarget, PanelConfig, SegmentKind};
 use termide_ui::{ChoiceAction, ChoiceForm};
@@ -4035,7 +4036,7 @@ fn the_connection_picker_switches_the_endpoint_and_its_model() {
 }
 
 #[test]
-fn a_cli_agent_connection_is_taken_on_only_before_the_first_request() {
+fn a_cli_agent_connection_is_taken_on_mid_conversation_and_left_again() {
     let dir = tempfile::tempdir().unwrap();
     let mut panel = connected_panel(dir.path());
     panel.transcript.push(Item::User {
@@ -4043,19 +4044,13 @@ fn a_cli_agent_connection_is_taken_on_only_before_the_first_request() {
         at: String::new(),
         command: None,
     });
-    // Mid-conversation the CLI agent would not see it: refused.
-    assert!(!panel.switch_connection("cli"));
-    assert_eq!(panel.connection, "local");
-    assert!(panel.transcript.items().iter().any(|item| matches!(
-            item,
-            Item::Notice { text, .. } if text == termide_i18n::t().agent_notice_connection_before_first()
-        )));
-    // In a fresh session it drives the CLI agent over ACP.
-    let dir = tempfile::tempdir().unwrap();
-    let mut fresh = connected_panel(dir.path());
-    assert!(fresh.switch_connection("cli"));
-    assert!(fresh.external);
-    assert_eq!(fresh.provider_kind, "codex");
+    // The CLI agent takes the conversation over (told a recap of it).
+    assert!(panel.switch_connection("cli"));
+    assert!(panel.external);
+    assert_eq!(panel.provider_kind, "codex");
+    // And the built-in loop takes it back.
+    assert!(panel.switch_connection("local"));
+    assert!(!panel.external);
 }
 
 #[test]
@@ -6286,6 +6281,222 @@ fn an_external_agent_lists_and_switches_models() {
     });
     assert_eq!(*picked.lock().unwrap(), Some("m-slow".to_string()));
     assert_eq!(panel.model.id, "m-slow");
+}
+
+/// An external agent with a model, a reasoning effort and a fast mode among
+/// its settings, which records every change asked of it.
+struct OptionsBackend {
+    asked: Arc<Mutex<Vec<(String, String)>>>,
+    state: Mutex<(String, String, String)>,
+    busy: Arc<AtomicBool>,
+}
+
+impl OptionsBackend {
+    fn new(asked: &Arc<Mutex<Vec<(String, String)>>>, busy: &Arc<AtomicBool>) -> Self {
+        Self {
+            asked: Arc::clone(asked),
+            state: Mutex::new(("m-fast".into(), "low".into(), "off".into())),
+            busy: Arc::clone(busy),
+        }
+    }
+}
+
+fn values(pairs: &[(&str, &str)]) -> Vec<BackendModel> {
+    pairs
+        .iter()
+        .map(|(id, name)| BackendModel {
+            id: (*id).into(),
+            name: (*name).into(),
+        })
+        .collect()
+}
+
+impl Backend for OptionsBackend {
+    fn prompt(&self, message: UserMessage) -> Result<(), PromptError> {
+        self.asked
+            .lock()
+            .unwrap()
+            .push(("prompt".into(), message.plain_text()));
+        Ok(())
+    }
+    fn agent_commands(&self) -> Vec<termide_agent_core::AgentCommand> {
+        ["compact", "deploy"]
+            .into_iter()
+            .map(|name| termide_agent_core::AgentCommand {
+                name: name.into(),
+                description: format!("{name} it"),
+                hint: String::new(),
+            })
+            .collect()
+    }
+    fn steer(&self, message: UserMessage) {
+        self.asked
+            .lock()
+            .unwrap()
+            .push(("prompt".into(), message.plain_text()));
+    }
+    fn queue_lens(&self) -> (usize, usize) {
+        (0, 0)
+    }
+    fn abort(&self) {}
+    fn is_busy(&self) -> bool {
+        self.busy.load(Ordering::SeqCst)
+    }
+    fn drain(&self) -> Vec<AgentEvent> {
+        Vec::new()
+    }
+    fn update(&self, _update: Box<dyn FnOnce(&mut Agent) + Send>) -> Result<(), PromptError> {
+        Err(PromptError::Unsupported)
+    }
+    fn compact(&self, _focus: Option<String>) -> Result<(), PromptError> {
+        Err(PromptError::Unsupported)
+    }
+    fn available_models(&self) -> Vec<BackendModel> {
+        values(&[("m-fast", "Fast"), ("m-slow", "Slow")])
+    }
+    fn current_model(&self) -> Option<String> {
+        Some(self.state.lock().unwrap().0.clone())
+    }
+    fn select_model(&self, model_id: String) -> Result<(), String> {
+        self.asked
+            .lock()
+            .unwrap()
+            .push((MODEL_OPTION.into(), model_id.clone()));
+        self.state.lock().unwrap().0 = model_id;
+        Ok(())
+    }
+    fn config_options(&self) -> Vec<BackendOption> {
+        let state = self.state.lock().unwrap();
+        vec![
+            BackendOption {
+                id: "effort".into(),
+                name: "Effort".into(),
+                category: Some("thought_level".into()),
+                current: state.1.clone(),
+                values: values(&[("low", "Low"), ("high", "High")]),
+            },
+            BackendOption {
+                id: "fast".into(),
+                name: "Fast mode".into(),
+                category: Some("model_config".into()),
+                current: state.2.clone(),
+                values: values(&[("off", "Off"), ("on", "On")]),
+            },
+        ]
+    }
+    fn set_option(&self, id: String, value: String) -> Result<(), String> {
+        self.asked.lock().unwrap().push((id.clone(), value.clone()));
+        let mut state = self.state.lock().unwrap();
+        match id.as_str() {
+            "effort" => state.1 = value,
+            "fast" => state.2 = value,
+            _ => return Err(format!("no {id}")),
+        }
+        Ok(())
+    }
+    fn into_agent(self: Box<Self>) -> Option<Agent> {
+        None
+    }
+}
+
+#[test]
+fn an_external_agents_settings_change_during_a_run_and_outlive_a_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let busy = Arc::new(AtomicBool::new(true));
+    let (for_factory, busy_for_factory) = (Arc::clone(&asked), Arc::clone(&busy));
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        backend: Some(Arc::new(move |_setup: BackendSetup| {
+            Ok(Box::new(OptionsBackend::new(&for_factory, &busy_for_factory)) as Box<dyn Backend>)
+        })),
+        ..setup(vec![])
+    });
+    panel.tick();
+    // The effort is on the Reasoning chip, the fast mode on Options.
+    assert_eq!(chip(&panel, REASONING_ACTION), "Low");
+    assert_eq!(chip(&panel, OPTIONS_ACTION), "Off");
+    // A run is in flight: the effort changes all the same.
+    assert!(panel.runtime.is_busy());
+    let events = panel.handle_status_action(REASONING_ACTION);
+    let Some(PanelEvent::ShowSelect { options, .. }) = events.first() else {
+        panic!("expected the efforts, got {events:?}");
+    };
+    assert_eq!(options.len(), 2);
+    panel.handle_command(PanelCommand::SelectionMade {
+        action: REASONING_ACTION.to_string(),
+        index: 1,
+    });
+    assert_eq!(chip(&panel, REASONING_ACTION), "High");
+    // The one other setting opens its values at once.
+    panel.handle_status_action(OPTIONS_ACTION);
+    panel.handle_command(PanelCommand::SelectionMade {
+        action: OPTION_VALUE_ACTION.to_string(),
+        index: 1,
+    });
+    panel.handle_status_action(MODEL_ACTION);
+    panel.handle_command(PanelCommand::SelectionMade {
+        action: MODEL_ACTION.to_string(),
+        index: 1,
+    });
+    let picked = vec![
+        ("effort".to_string(), "high".to_string()),
+        ("fast".to_string(), "on".to_string()),
+        (MODEL_OPTION.to_string(), "m-slow".to_string()),
+    ];
+    assert_eq!(*asked.lock().unwrap(), picked);
+    assert_eq!(panel.session.as_ref().unwrap().agent_options(), picked);
+
+    // Reopened, the agent starts on its defaults and is asked for the same.
+    asked.lock().unwrap().clear();
+    busy.store(false, Ordering::SeqCst);
+    let path = panel.session.as_ref().unwrap().path().to_path_buf();
+    panel.session = None;
+    assert!(panel.switch_session(Some(Session::open(&path).unwrap())));
+    panel.tick();
+    let mut again = asked.lock().unwrap().clone();
+    again.sort();
+    let mut expected = picked;
+    expected.sort();
+    assert_eq!(again, expected);
+    assert_eq!(chip(&panel, REASONING_ACTION), "High");
+    assert_eq!(panel.model.id, "m-slow");
+}
+
+#[test]
+fn an_external_agents_own_commands_are_offered_and_sent_as_typed() {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let busy = Arc::new(AtomicBool::new(false));
+    let (for_factory, busy_for_factory) = (Arc::clone(&asked), Arc::clone(&busy));
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        backend: Some(Arc::new(move |_setup: BackendSetup| {
+            Ok(Box::new(OptionsBackend::new(&for_factory, &busy_for_factory)) as Box<dyn Backend>)
+        })),
+        ..setup(vec![])
+    });
+    type_text(&mut panel, "/dep");
+    let offered: Vec<String> = panel
+        .completion
+        .as_ref()
+        .map(|list| list.items().iter().map(|i| i.value.clone()).collect())
+        .unwrap_or_default();
+    assert_eq!(offered, ["deploy"]);
+    panel.clear_input();
+    // The agent's `/compact` stands for termide's, and both go as typed (a
+    // template of the same name would win, as over a skill).
+    for typed in ["/deploy staging", "/compact the tests"] {
+        type_text(&mut panel, typed);
+        panel.submit();
+        panel.tick();
+    }
+    let prompts: Vec<String> = asked
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(kind, _)| kind == "prompt")
+        .map(|(_, text)| text.clone())
+        .collect();
+    assert_eq!(prompts, ["/deploy staging", "/compact the tests"]);
 }
 
 #[test]

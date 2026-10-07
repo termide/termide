@@ -128,6 +128,11 @@ pub enum EntryKind {
         log: String,
         cwd: PathBuf,
     },
+    /// A setting of the external agent's own picked in the panel from here
+    /// (its model, reasoning effort, …, under the id it offers it by), so a
+    /// reopened session asks the agent for the same again, see
+    /// [`Session::agent_options`].
+    AgentOption { option: String, value: String },
 }
 
 /// An external agent's own session that still holds this branch's
@@ -665,7 +670,8 @@ impl Session {
                 | EntryKind::ThinkingChange { .. }
                 | EntryKind::Toolset { .. }
                 | EntryKind::ConnectionChange { .. }
-                | EntryKind::ExternalSession { .. } => {}
+                | EntryKind::ExternalSession { .. }
+                | EntryKind::AgentOption { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
                 } => {
@@ -702,7 +708,8 @@ impl Session {
                 | EntryKind::ThinkingChange { .. }
                 | EntryKind::Toolset { .. }
                 | EntryKind::ConnectionChange { .. }
-                | EntryKind::ExternalSession { .. } => {}
+                | EntryKind::ExternalSession { .. }
+                | EntryKind::AgentOption { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
                 } => {
@@ -795,7 +802,8 @@ impl Session {
                 | EntryKind::ThinkingChange { .. }
                 | EntryKind::Toolset { .. }
                 | EntryKind::ConnectionChange { .. }
-                | EntryKind::ExternalSession { .. } => None,
+                | EntryKind::ExternalSession { .. }
+                | EntryKind::AgentOption { .. } => None,
             })
     }
 
@@ -904,10 +912,40 @@ impl Session {
                 | EntryKind::SessionName { .. }
                 | EntryKind::ReasoningChange { .. }
                 | EntryKind::ThinkingChange { .. }
-                | EntryKind::Toolset { .. } => {}
+                | EntryKind::Toolset { .. }
+                | EntryKind::AgentOption { .. } => {}
             }
         }
         None
+    }
+
+    /// Record that the external agent's setting `option` was set to `value`.
+    pub fn append_agent_option(&mut self, option: &str, value: &str) -> std::io::Result<String> {
+        self.append(EntryKind::AgentOption {
+            option: option.to_string(),
+            value: value.to_string(),
+        })
+    }
+
+    /// The external agent's settings picked on the current branch, the last
+    /// value of each, oldest pick first. Those picked before the agent or
+    /// the connection last changed belong to another agent and are left out.
+    #[must_use]
+    pub fn agent_options(&self) -> Vec<(String, String)> {
+        let mut picked: Vec<(String, String)> = Vec::new();
+        for entry in self.branch() {
+            match &entry.kind {
+                EntryKind::AgentChange { .. } | EntryKind::ConnectionChange { .. } => {
+                    picked.clear();
+                }
+                EntryKind::AgentOption { option, value } => {
+                    picked.retain(|(id, _)| id != option);
+                    picked.push((option.clone(), value.clone()));
+                }
+                _ => {}
+            }
+        }
+        picked
     }
 
     pub fn append_toolset(&mut self, disabled: &[String]) -> std::io::Result<String> {
@@ -1010,7 +1048,8 @@ impl From<&Session> for SessionSummary {
             | EntryKind::ThinkingChange { .. }
             | EntryKind::Toolset { .. }
             | EntryKind::ConnectionChange { .. }
-            | EntryKind::ExternalSession { .. } => None,
+            | EntryKind::ExternalSession { .. }
+            | EntryKind::AgentOption { .. } => None,
         });
         let first_prompt = messages.clone().find_map(|m| match m {
             Message::User(user) => Some(user.plain_text()),
@@ -1141,6 +1180,31 @@ mod tests {
             .append_message(&Message::Assistant(text_reply("built-in")))
             .unwrap();
         assert_eq!(session.external_session(), None);
+    }
+
+    #[test]
+    fn an_external_agents_settings_are_kept_until_another_agent_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
+        session.append_agent_change("claude").unwrap();
+        session.append_external_session("claude", "s1").unwrap();
+        session.append_agent_option("effort", "low").unwrap();
+        session.append_agent_option("model", "opus").unwrap();
+        session.append_agent_option("effort", "high").unwrap();
+        let expected = vec![
+            ("model".to_string(), "opus".to_string()),
+            ("effort".to_string(), "high".to_string()),
+        ];
+        assert_eq!(session.agent_options(), expected);
+        // They change nothing the agent's own session holds.
+        assert!(session.external_session().is_some());
+        let path = session.path().to_path_buf();
+        drop(session);
+        let mut session = Session::open(&path).unwrap();
+        assert_eq!(session.agent_options(), expected);
+        // Another agent's settings are its own.
+        session.append_agent_change("codex").unwrap();
+        assert!(session.agent_options().is_empty());
     }
 
     #[test]

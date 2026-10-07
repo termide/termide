@@ -542,21 +542,25 @@ impl AgentPanel {
         // (its adapter starts asynchronously): adopt the current model for the
         // banner and the Model chip, and note whether it offers a choice.
         if self.external {
-            if !self.acp_has_models && !self.runtime.available_models().is_empty() {
+            let models_known = !self.runtime.available_models().is_empty();
+            if !self.acp_has_models && models_known {
                 self.acp_has_models = true;
                 changed = true;
-                // Apply the configured pre-selected model once, now that the
-                // agent's models are known.
-                if let Some(pref) = self.pending_preferred_model.take() {
-                    if self.runtime.current_model().as_deref() != Some(pref.as_str()) {
-                        match self.runtime.select_model(pref.clone()) {
-                            Ok(()) => self.model.id = pref,
-                            Err(error) => {
-                                log::warn!("cannot pre-select the model: {error}");
-                            }
-                        }
-                    }
-                }
+            }
+            // The agent's settings may change on their own (a model it falls
+            // back to, the efforts a new model offers).
+            let options = self.runtime.config_options();
+            if options != self.acp_options {
+                self.acp_options = options;
+                changed = true;
+            }
+            // Ask once for the session's settings, now the agent has stated
+            // its own.
+            if !self.pending_acp_choices.is_empty()
+                && (models_known || !self.acp_options.is_empty())
+            {
+                self.apply_acp_choices();
+                changed = true;
             }
             if let Some(id) = self.runtime.current_model() {
                 if id != self.model.id {

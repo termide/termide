@@ -631,7 +631,7 @@ impl AgentPanel {
                     .with_description(termide_i18n::t().agent_cmd_desc_goal()),
             );
         }
-        if HANDOFF_COMMAND.starts_with(prefix) && !self.external {
+        if HANDOFF_COMMAND.starts_with(prefix) {
             items.push(
                 CompletionItem::new(HANDOFF_COMMAND)
                     .with_label(format!("/{HANDOFF_COMMAND}"))
@@ -659,6 +659,17 @@ impl AgentPanel {
                     .with_hint(termide_i18n::t().agent_hint_mcp())
                     .with_description(termide_i18n::t().agent_cmd_desc_mcp()),
             );
+        }
+        // The external agent's own commands, but those termide's take.
+        for command in self.agent_commands() {
+            if command.name.starts_with(prefix) && !items.iter().any(|i| i.value == command.name) {
+                items.push(
+                    CompletionItem::new(command.name.clone())
+                        .with_label(format!("/{}", command.name))
+                        .with_hint(command.hint)
+                        .with_description(command.description),
+                );
+            }
         }
         if items.is_empty() {
             self.completion = None;

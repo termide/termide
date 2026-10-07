@@ -47,7 +47,7 @@ pub mod suggest;
 pub mod tool;
 pub mod tool_text;
 
-pub use acp::{AcpConfig, AcpFlavor, ACP_PROVIDER};
+pub use acp::{companion_tools, AcpConfig, AcpFlavor, ACP_PROVIDER, COMPANION_TOOLS, MODEL_OPTION};
 pub use agent::{
     execute_tool, judge_tool_call, run_judged_call, Agent, AgentConfig, AgentEvent, ChainedHooks,
     Hooks, JudgedCall, Judgment, NoHooks, QueueHandle, QueueMode, ToolDecision,
@@ -100,7 +100,10 @@ pub use prune::{prune_by, prune_to_decisions};
 pub use recall::{RecallPrompt, SEED_RECALL};
 pub use recap::{recap, RECAP_LIMIT};
 pub use refusals::{Refusals, SEED_PERMISSIONS};
-pub use runtime::{AgentRuntime, Backend, BackendModel, BackendSetup, HostTools, PromptError};
+pub use runtime::{
+    AgentCommand, AgentRuntime, Backend, BackendModel, BackendOption, BackendSetup, HostTools,
+    PromptError,
+};
 pub use session::{
     Entry, EntryKind, ExternalSessionRef, LoggedMessage, Session, SessionHeader, SessionModel,
     SessionSummary, Timing,

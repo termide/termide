@@ -13,6 +13,9 @@ use std::thread::JoinHandle;
 use crate::agent::{Agent, AgentEvent, Hooks, QueueHandle};
 use crate::cancel::CancelToken;
 use crate::compaction::CompactionReason;
+use crate::goal::GoalPrompt;
+use crate::handoff::HandoffPrompt;
+use crate::layers::SkillInfo;
 use crate::message::{Message, UserMessage};
 use crate::permissions::{ChannelPrompter, Mode, ModeHandle, PermissionRules, PersistRule};
 use crate::plan::PlanPrompt;
@@ -71,6 +74,51 @@ pub struct BackendModel {
     pub name: String,
 }
 
+/// A setting an external agent offers for its session: an ACP config option
+/// of the `select` type (reasoning effort, fast mode, the agent's own mode,
+/// …), with the value in use and the values it takes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendOption {
+    /// Id the backend expects back in [`Backend::set_option`].
+    pub id: String,
+    /// Human label; falls back to the id.
+    pub name: String,
+    /// ACP's semantic category (`mode`, `model`, `thought_level`,
+    /// `model_config`, or the agent's own), when it gave one.
+    pub category: Option<String>,
+    /// The value in use.
+    pub current: String,
+    /// The values it takes, in the agent's order; `id` is the value.
+    pub values: Vec<BackendModel>,
+}
+
+impl BackendOption {
+    /// Whether the option belongs to `category`.
+    #[must_use]
+    pub fn is(&self, category: &str) -> bool {
+        self.category.as_deref() == Some(category)
+    }
+
+    /// The label of the value in use.
+    #[must_use]
+    pub fn current_name(&self) -> &str {
+        self.values
+            .iter()
+            .find(|value| value.id == self.current)
+            .map_or(self.current.as_str(), |value| value.name.as_str())
+    }
+}
+
+/// A command an external agent offers (ACP's `available_commands_update`),
+/// run by sending `/<name> <input>` as a request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentCommand {
+    pub name: String,
+    pub description: String,
+    /// What to type after the name, empty when it takes nothing.
+    pub hint: String,
+}
+
 /// What the panel hands an external backend when it starts it.
 pub struct BackendSetup {
     pub cwd: PathBuf,
@@ -94,6 +142,10 @@ pub struct BackendSetup {
     /// session starts in plan mode; a backend whose prompt cannot change
     /// later tells the agent of a switch with them.
     pub plan: PlanPrompt,
+    /// The `/goal` judge's and the `/handoff` brief's texts, which a backend
+    /// without a call of its own for them sends the agent as a request.
+    pub goal: GoalPrompt,
+    pub handoff: HandoffPrompt,
     /// termide's tools, for a backend that has the agent call them in place
     /// of its own; `None` offers none.
     pub host_tools: Option<HostTools>,
@@ -116,6 +168,10 @@ pub struct HostTools {
     /// `question` and `suggest_command` reach the user as they do from the
     /// built-in loop.
     pub context: ToolContext,
+    /// The skills the `skill` tool loads, for an agent served it beside its
+    /// own tools and prompt, which does not list them (see
+    /// [`crate::companion_tools`]).
+    pub skills: Vec<SkillInfo>,
 }
 
 /// What the panel drives: the built-in agent on its worker thread, or an
@@ -154,6 +210,12 @@ pub trait Backend: Send {
     fn is_busy(&self) -> bool;
     /// Everything that happened since the last call, without blocking.
     fn drain(&self) -> Vec<AgentEvent>;
+    /// Run on `model` (an id or a reasoning level changed): between runs at
+    /// once, during one from its next step. [`PromptError::Unsupported`] for
+    /// an external agent, whose model goes through [`Self::select_model`].
+    fn set_model(&self, _model: ModelSpec) -> Result<(), PromptError> {
+        Err(PromptError::Unsupported)
+    }
     /// Change the built-in agent between runs; [`PromptError::Unsupported`]
     /// for an external one.
     fn update(&self, update: Box<dyn FnOnce(&mut Agent) + Send>) -> Result<(), PromptError>;
@@ -228,6 +290,22 @@ pub trait Backend: Send {
     fn select_model(&self, _model_id: String) -> Result<(), String> {
         Err("model selection is not supported".to_string())
     }
+    /// The settings the backend offers beside its model (an ACP agent's
+    /// config options), in its order. The model is not among them: it goes
+    /// through [`Self::available_models`]. Empty for the built-in loop.
+    fn config_options(&self) -> Vec<BackendOption> {
+        Vec::new()
+    }
+    /// The commands the backend offers of its own, run by sending
+    /// `/<name> <input>` as a request; none for the built-in loop.
+    fn agent_commands(&self) -> Vec<AgentCommand> {
+        Vec::new()
+    }
+    /// Set option `id` to `value`, at any time — during a run too, where the
+    /// agent applies it as soon as it can; reports the agent's own error.
+    fn set_option(&self, _id: String, _value: String) -> Result<(), String> {
+        Err("options are not supported".to_string())
+    }
     /// Stop and hand the built-in agent back, when there is one.
     fn into_agent(self: Box<Self>) -> Option<Agent>;
 }
@@ -281,6 +359,9 @@ impl Backend for AgentRuntime {
     fn update(&self, update: Box<dyn FnOnce(&mut Agent) + Send>) -> Result<(), PromptError> {
         AgentRuntime::update(self, update)
     }
+    fn set_model(&self, model: ModelSpec) -> Result<(), PromptError> {
+        AgentRuntime::set_model(self, model)
+    }
     fn compact(&self, focus: Option<String>) -> Result<(), PromptError> {
         AgentRuntime::compact(self, focus)
     }
@@ -331,6 +412,9 @@ impl AgentRuntime {
             .name("termide-agent".into())
             .spawn(move || {
                 while let Ok(command) = command_rx.recv() {
+                    // A switch the last run did not reach applies before
+                    // anything else, so a later one between runs wins.
+                    agent.adopt_next_model();
                     match command {
                         WorkerCommand::Prompt(prompt) => {
                             agent.run(prompt, hooks.as_mut(), &worker_cancel, &mut |event| {
@@ -425,6 +509,19 @@ impl AgentRuntime {
             .map_err(|_| PromptError::Stopped)
     }
 
+    /// Run on `model` from now: between runs through [`Self::update`], during
+    /// one from its next step, which takes it at the boundary.
+    pub fn set_model(&self, model: ModelSpec) -> Result<(), PromptError> {
+        if self.worker.is_none() {
+            return Err(PromptError::Stopped);
+        }
+        if self.is_busy() {
+            self.queues.set_next_model(model);
+            return Ok(());
+        }
+        self.update(move |agent| agent.set_model(model))
+    }
+
     /// Compact the transcript between runs; refused while a run is active,
     /// like [`AgentRuntime::update`]. Progress arrives as `CompactionStart`,
     /// `Compacted` or `CompactionFailed` events.
@@ -467,11 +564,6 @@ impl AgentRuntime {
         self.commands
             .send(WorkerCommand::Handoff)
             .map_err(|_| PromptError::Stopped)
-    }
-
-    /// Switch the model for the runs that follow; see [`AgentRuntime::update`].
-    pub fn set_model(&self, model: ModelSpec) -> Result<(), PromptError> {
-        self.update(move |agent| agent.set_model(model))
     }
 
     /// Queue a message for the next turn boundary of the active run.
@@ -760,13 +852,50 @@ mod tests {
             AgentEvent::MessageEnd(crate::Message::Assistant(a)) if a.stop_reason == StopReason::Stop
         )));
     }
+    /// Holds its first call until released, answers it with a call of an
+    /// unknown tool so the run takes another step, and records the model and
+    /// reasoning level each call ran on.
+    struct TwoStepProvider {
+        gate: Mutex<Option<mpsc::Receiver<()>>>,
+        entered: Arc<AtomicBool>,
+        seen: Arc<Mutex<Vec<(String, crate::provider::ThinkingLevel)>>>,
+    }
+
+    impl Provider for TwoStepProvider {
+        fn name(&self) -> &str {
+            "two-step"
+        }
+        fn stream(
+            &self,
+            request: &Request<'_>,
+            _on_event: &mut dyn FnMut(StreamEvent),
+            _cancel: &CancelToken,
+        ) -> AssistantMessage {
+            self.seen
+                .lock()
+                .unwrap()
+                .push((request.model.id.clone(), request.thinking));
+            self.entered.store(true, Ordering::Release);
+            if let Some(gate) = self.gate.lock().unwrap().take() {
+                let _ = gate.recv();
+                return tool_reply(
+                    vec![("c1", "missing", serde_json::json!({}))],
+                    StopReason::ToolUse,
+                );
+            }
+            text_reply("done")
+        }
+    }
+
     #[test]
-    fn set_model_applies_between_runs_and_is_refused_during_one() {
+    fn set_model_applies_from_the_next_step_of_a_run_and_between_runs() {
         let (release, gate) = mpsc::channel::<()>();
-        let provider = Arc::new(GatedProvider {
+        let entered = Arc::new(AtomicBool::new(false));
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let provider = Arc::new(TwoStepProvider {
             gate: Mutex::new(Some(gate)),
-            cancelled: Arc::new(AtomicBool::new(false)),
-            entered: Arc::new(AtomicBool::new(false)),
+            entered: Arc::clone(&entered),
+            seen: Arc::clone(&seen),
         });
         let agent = Agent::new(
             provider,
@@ -777,21 +906,39 @@ mod tests {
         let runtime = AgentRuntime::spawn(agent, Box::new(NoHooks));
         let other = ModelSpec {
             id: "other".into(),
+            thinking: crate::provider::ThinkingLevel::High,
             ..model()
         };
 
+        // During the run: the step in flight keeps its model, the next one
+        // runs on the new model and level.
         runtime.prompt(UserMessage::text("first")).unwrap();
-        assert_eq!(runtime.set_model(other.clone()), Err(PromptError::Busy));
+        wait_until(&entered);
+        runtime.set_model(other.clone()).unwrap();
         release.send(()).unwrap();
         wait_for_end(&runtime);
         wait_until_idle(&runtime);
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![
+                ("test".to_string(), crate::provider::ThinkingLevel::Off),
+                ("other".to_string(), crate::provider::ThinkingLevel::High),
+            ]
+        );
 
-        runtime.set_model(other.clone()).unwrap();
+        // Between runs it applies at once, and a switch the run did not reach
+        // does not override a later one.
+        let third = ModelSpec {
+            id: "third".into(),
+            ..model()
+        };
+        runtime.queues().set_next_model(other.clone());
+        runtime.set_model(third.clone()).unwrap();
         runtime
             .update(|agent| agent.set_system_prompt("terse"))
             .unwrap();
         let agent = runtime.shutdown().expect("worker returns the agent");
-        assert_eq!(agent.model(), &other);
+        assert_eq!(agent.model(), &third);
         assert_eq!(agent.system_prompt(), "terse");
     }
     #[test]
