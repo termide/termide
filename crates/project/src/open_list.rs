@@ -20,7 +20,7 @@ struct OpenProjectsFile {
     roots: Vec<PathBuf>,
 }
 
-/// The project roots saved last, in the order they were opened. Empty when
+/// The project roots saved last, in the order the menus listed them. Empty when
 /// none were saved or the file cannot be read.
 pub fn load_open_projects() -> Vec<PathBuf> {
     match get_data_dir() {

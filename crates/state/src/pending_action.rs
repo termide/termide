@@ -7,6 +7,18 @@ use termide_vfs::{VfsManager, VfsPath};
 
 use crate::batch::BatchOperation;
 
+/// Where closing or deleting a project was started, to return to once it
+/// is done or refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectsOrigin {
+    /// The project switcher (`Alt+\`).
+    Switcher,
+    /// The Projects menu, at this row.
+    Menu(usize),
+    /// The menu bar, at this project button.
+    Button(usize),
+}
+
 /// Action pending modal result
 #[derive(Debug, Clone)]
 pub enum PendingAction {
@@ -106,18 +118,16 @@ pub enum PendingAction {
     /// Close the project open in the background at `root` (with confirmation)
     CloseProject {
         root: PathBuf,
-        /// Projects menu row to reopen at afterwards (`None`: return to the
-        /// project switcher).
-        menu: Option<usize>,
+        /// Where to return afterwards.
+        from: ProjectsOrigin,
     },
     /// Create a new project in specified directory
     NewProject,
     /// Delete the saved layout of a project (with confirmation)
     DeleteProject {
         path: PathBuf,
-        /// Projects menu row to reopen at afterwards (`None`: return to the
-        /// project switcher).
-        menu: Option<usize>,
+        /// Where to return afterwards.
+        from: ProjectsOrigin,
     },
     /// Delete bookmark (with confirmation)
     DeleteBookmark {

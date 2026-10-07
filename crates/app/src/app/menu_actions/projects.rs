@@ -3,9 +3,10 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
+use super::super::parked_projects::ProjectStep;
 use super::super::App;
 use crate::projects_menu::{ProjectRow, ProjectsTarget};
-use crate::state::{ActiveModal, PendingAction};
+use crate::state::{ActiveModal, PendingAction, ProjectsOrigin};
 use crate::PanelExt;
 use termide_app_core::Panel;
 use termide_i18n as i18n;
@@ -187,6 +188,11 @@ impl App {
         use super::navigate_submenu;
         use super::SubmenuNavAction;
 
+        if let Some(step) = self.project_step_of(&key) {
+            self.move_selected_open_project(step);
+            return Ok(());
+        }
+
         let menu = self.state.projects_menu();
         let target = ProjectsTarget::of(menu.selected_row());
         let removable = match menu.selected_row() {
@@ -211,15 +217,37 @@ impl App {
                     let selection = self.state.ui.projects_submenu.selected;
                     self.state.close_menu();
                     if project.open {
-                        self.confirm_close_project(project.root, Some(selection));
+                        self.confirm_close_project(project.root, ProjectsOrigin::Menu(selection));
                     } else {
-                        self.confirm_delete_project(project.root, Some(selection));
+                        self.confirm_delete_project(project.root, ProjectsOrigin::Menu(selection));
                     }
                 }
             }
             SubmenuNavAction::Rename | SubmenuNavAction::Edit | SubmenuNavAction::None => {}
         }
         Ok(())
+    }
+
+    /// Move the open project selected in the Projects menu, the cursor with
+    /// it. Projects not open keep their order: the most recent first.
+    fn move_selected_open_project(&mut self, step: ProjectStep) {
+        let menu = self.state.projects_menu();
+        let root = match menu.selected_row() {
+            Some(ProjectRow::Project(project)) if project.open => project.root.clone(),
+            _ => return,
+        };
+        let Some(first) = menu
+            .rows
+            .iter()
+            .position(|row| matches!(row, ProjectRow::Project(_)))
+        else {
+            return;
+        };
+        drop(menu);
+        if let Some(place) = self.move_open_project(&root, step) {
+            self.state.ui.projects_submenu.selected = first + place;
+            self.state.needs_redraw = true;
+        }
     }
 
     /// Open the Projects menu at row `selection`, as close as the reloaded

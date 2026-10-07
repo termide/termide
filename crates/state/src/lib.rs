@@ -18,7 +18,7 @@ pub use batch::{
 };
 pub use layout::{LayoutInfo, LayoutMode};
 pub use operations::{ActiveOperation, OperationProgress, OperationType, SpeedTracker};
-pub use pending_action::PendingAction;
+pub use pending_action::{PendingAction, ProjectsOrigin};
 pub use ui::{
     DragState, PanelActionMenuState, PanelDragSource, PanelDragState, SubmenuState, TerminalState,
     UiState,

@@ -24,8 +24,8 @@ use termide_app_core::{ModalManager, StateManager};
 // Re-export pure types from state crate
 pub use termide_state::{
     ActiveOperation, BatchOperation, BatchOperationType, ConflictMode, DirSizeResult, LayoutInfo,
-    LayoutMode, OperationProgress, OperationType, PendingAction, RenamePattern, SourceLocation,
-    SpeedTracker, SubmenuState, TerminalState, UiState,
+    LayoutMode, OperationProgress, OperationType, PendingAction, ProjectsOrigin, RenamePattern,
+    SourceLocation, SpeedTracker, SubmenuState, TerminalState, UiState,
 };
 
 // Re-export ActiveModal from modal crate

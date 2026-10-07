@@ -20,14 +20,16 @@ mod tools;
 use anyhow::Result;
 use crossterm::event::KeyCode;
 
+use super::parked_projects::ProjectStep;
 use super::App;
-use crate::state::{ActiveModal, PendingAction};
+use crate::state::{ActiveModal, PendingAction, ProjectsOrigin};
 use termide_i18n as i18n;
 use termide_theme::Theme;
 use termide_ui_render::menu::{
     project_button_of, AI_MENU_INDEX, BOOKMARKS_MENU_INDEX, COMMANDS_MENU_INDEX,
     INDICATOR_CLOCK_INDEX, INDICATOR_CPU_INDEX, INDICATOR_DISK_INDEX, INDICATOR_NET_INDEX,
-    INDICATOR_RAM_INDEX, OPTIONS_MENU_INDEX, PROJECTS_MENU_INDEX, WINDOWS_MENU_INDEX,
+    INDICATOR_RAM_INDEX, OPTIONS_MENU_INDEX, PROJECTS_MENU_INDEX, PROJECT_BUTTON_BASE,
+    WINDOWS_MENU_INDEX,
 };
 use termide_ui_render::{OPTIONS_SUBMENU_LANGUAGE, OPTIONS_SUBMENU_THEMES};
 
@@ -129,6 +131,20 @@ impl App {
 
     /// Handle keyboard event in menu
     pub(super) fn handle_menu_key(&mut self, key: crossterm::event::KeyEvent) -> Result<()> {
+        let button = self.state.ui.selected_menu_item.and_then(project_button_of);
+        if let Some(button) = button {
+            if let Some(step) = self.project_step_of(&key) {
+                self.move_project_button(button, step);
+                return Ok(());
+            }
+            if matches!(key.code, KeyCode::Delete | KeyCode::F(8)) {
+                if let Some(root) = self.listed_open_roots().get(button).cloned() {
+                    self.state.close_menu();
+                    self.confirm_close_project(root, ProjectsOrigin::Button(button));
+                }
+                return Ok(());
+            }
+        }
         match key.code {
             KeyCode::Esc => {
                 self.state.close_menu();
@@ -198,18 +214,36 @@ impl App {
     /// the project's full path, which its button may have cut.
     fn select_project_button(&mut self, index: usize) {
         self.state.close_indicator_modal();
-        let mut roots: Vec<&std::path::Path> = self
-            .state
-            .open_projects
-            .iter()
-            .map(|view| view.root.as_path())
-            .collect();
-        roots.sort_by(|a, b| crate::projects_menu::path_order(a, b));
-        if let Some(root) = roots.get(index) {
-            let path = termide_core::util::shorten_home_path(&root.display().to_string());
+        if let Some(view) = self.state.open_projects.get(index) {
+            let path = termide_core::util::shorten_home_path(&view.root.display().to_string());
             self.state.set_info(path);
         }
         self.state.needs_redraw = true;
+    }
+
+    /// Move the project of button `index` along the bar, the selection with
+    /// it.
+    fn move_project_button(&mut self, index: usize, step: ProjectStep) {
+        let Some(root) = self.listed_open_roots().get(index).cloned() else {
+            return;
+        };
+        if let Some(place) = self.move_open_project(&root, step) {
+            self.state.ui.selected_menu_item = Some(PROJECT_BUTTON_BASE + place);
+            self.select_project_button(place);
+        }
+    }
+
+    /// Open the menu bar at project button `index`, or the last one when
+    /// fewer are left, after a project was closed from it. With one project
+    /// left there are no buttons, and the menu stays closed.
+    pub(in crate::app) fn reopen_menu_bar_at_button(&mut self, index: usize) {
+        let count = self.open_projects.count();
+        if count < 2 {
+            return;
+        }
+        let index = index.min(count - 1);
+        self.state.open_menu(Some(PROJECT_BUTTON_BASE + index));
+        self.select_project_button(index);
     }
 
     /// Open an indicator modal positioned as a dropdown under the indicator.

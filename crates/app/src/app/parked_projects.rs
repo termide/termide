@@ -17,9 +17,22 @@ use termide_layout::LayoutManager;
 use super::project_layout::save_layout_of;
 use super::App;
 use crate::open_projects::OpenProjectView;
-use crate::projects_menu::path_order;
-use crate::state::{ActiveModal, PendingAction};
+use crate::state::{ActiveModal, PendingAction, ProjectsOrigin};
 use crate::PanelExt;
+
+/// Where to move an open project in the list, with the keys that move a
+/// panel between groups.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ProjectStep {
+    /// One place up, or left on the menu bar (`swap_left`).
+    Back,
+    /// One place down, or right (`swap_right`).
+    Forward,
+    /// To the start (`move_first`).
+    First,
+    /// To the end (`move_last`).
+    Last,
+}
 
 /// What a project open in the background keeps.
 pub(super) struct ParkedProject {
@@ -239,6 +252,12 @@ impl App {
                 opened += 1;
             }
         }
+        // In the order they were kept, the current project among them.
+        let order: Vec<PathBuf> = termide_project::load_open_projects()
+            .into_iter()
+            .map(project_root_of)
+            .collect();
+        self.open_projects.arrange(&order);
         log::info!("Reopened {} projects of the last run", opened);
         self.sync_open_projects();
     }
@@ -278,10 +297,25 @@ impl App {
     }
 
     /// The open projects' roots in the order the menus list them.
-    fn listed_open_roots(&self) -> Vec<PathBuf> {
-        let mut roots: Vec<PathBuf> = self.open_projects.roots().map(Path::to_path_buf).collect();
-        roots.sort_by(|a, b| path_order(a, b));
-        roots
+    pub(super) fn listed_open_roots(&self) -> Vec<PathBuf> {
+        self.open_projects.roots().map(Path::to_path_buf).collect()
+    }
+
+    /// Move the open project at `root` as `step` says. Returns its new
+    /// place, or `None` when it did not move.
+    pub(super) fn move_open_project(&mut self, root: &Path, step: ProjectStep) -> Option<usize> {
+        let from = self.open_projects.position(root)?;
+        let to = match step {
+            ProjectStep::Back => from.checked_sub(1)?,
+            ProjectStep::Forward => from + 1,
+            ProjectStep::First => 0,
+            ProjectStep::Last => usize::MAX,
+        };
+        if !self.open_projects.move_to(root, to) {
+            return None;
+        }
+        self.sync_open_projects();
+        self.open_projects.position(root)
     }
 
     /// Switch to the open project at `index` in the order the menus list
@@ -322,13 +356,13 @@ impl App {
             .map(|root| root.to_path_buf())
     }
 
-    /// Ask before closing the open project at `root`. `menu` is where to
-    /// return afterwards, see `PendingAction::CloseProject`.
+    /// Ask before closing the open project at `root`, then return `from`
+    /// where it was asked.
     ///
     /// The current project closes by switching to the one left last, and
     /// only while another is open; it is asked about only when its panels
     /// hold running processes or unsaved changes.
-    pub(super) fn confirm_close_project(&mut self, root: PathBuf, menu: Option<usize>) {
+    pub(super) fn confirm_close_project(&mut self, root: PathBuf, from: ProjectsOrigin) {
         if !self.open_projects.is_open(&root) {
             return;
         }
@@ -337,7 +371,7 @@ impl App {
                 return;
             }
             if !self.has_panels_requiring_confirmation() {
-                if let Err(e) = self.close_project(&root, menu) {
+                if let Err(e) = self.close_project(&root, from) {
                     log::error!("Failed to close the current project: {}", e);
                 }
                 return;
@@ -347,7 +381,7 @@ impl App {
             let modal = termide_modal::ConfirmModal::new(t.projects_close_title(), message)
                 .defaulting_to_no();
             self.state.set_pending_action(
-                PendingAction::CloseProject { root, menu },
+                PendingAction::CloseProject { root, from },
                 ActiveModal::Confirm(Box::new(modal)),
             );
             return;
@@ -368,7 +402,7 @@ impl App {
             modal = modal.defaulting_to_no();
         }
         self.state.set_pending_action(
-            PendingAction::CloseProject { root, menu },
+            PendingAction::CloseProject { root, from },
             ActiveModal::Confirm(Box::new(modal)),
         );
     }
@@ -377,10 +411,10 @@ impl App {
     /// panels, which stops the processes in its terminals. The current
     /// project is first left for the one left last, and stays when no other
     /// is open.
-    pub(super) fn close_project(&mut self, root: &Path, menu: Option<usize>) -> Result<()> {
+    pub(super) fn close_project(&mut self, root: &Path, from: ProjectsOrigin) -> Result<()> {
         if root == self.project_root {
             let Some(successor) = self.successor_project() else {
-                return self.return_to_projects(menu);
+                return self.return_to_projects(from);
             };
             self.switch_to_project(successor)?;
         }
@@ -401,15 +435,15 @@ impl App {
             log::info!("Closed project {:?}", root);
         }
         self.sync_open_projects();
-        self.return_to_projects(menu)
+        self.return_to_projects(from)
     }
 
-    /// Go back to where closing or deleting a project was started: the
-    /// Projects menu at row `menu`, or the project switcher.
-    pub(super) fn return_to_projects(&mut self, menu: Option<usize>) -> Result<()> {
-        match menu {
-            Some(selection) => self.reopen_projects_menu(selection),
-            None => self.handle_open_projects_modal()?,
+    /// Go back to where closing or deleting a project was started.
+    pub(super) fn return_to_projects(&mut self, from: ProjectsOrigin) -> Result<()> {
+        match from {
+            ProjectsOrigin::Switcher => self.handle_open_projects_modal()?,
+            ProjectsOrigin::Menu(selection) => self.reopen_projects_menu(selection),
+            ProjectsOrigin::Button(button) => self.reopen_menu_bar_at_button(button),
         }
         Ok(())
     }

@@ -1,6 +1,6 @@
 //! Projects menu: the fixed actions, then every project worked on as one
-//! flat list — the projects open in this instance first, sorted by path,
-//! then the others, the most recently used first.
+//! flat list — the projects open in this instance first, in the order the
+//! user keeps them, then the others, the most recently used first.
 //!
 //! The project switcher (`Alt+\`) lists the same projects in the same
 //! order, see [`listed_projects`].
@@ -31,16 +31,8 @@ pub struct ListedProject {
     pub modified: Option<SystemTime>,
 }
 
-/// How projects are ordered in a list: by path, ignoring case first.
-pub fn path_order(a: &Path, b: &Path) -> std::cmp::Ordering {
-    let (a, b) = (a.to_string_lossy(), b.to_string_lossy());
-    a.to_lowercase()
-        .cmp(&b.to_lowercase())
-        .then_with(|| a.cmp(&b))
-}
-
-/// The projects to list: the `open` ones sorted by path — few, and their
-/// order numbers them for `goto_project_N` — then the `known` ones not open
+/// The projects to list: the `open` ones in their order — the user's, and
+/// it numbers them for `goto_project_N` — then the `known` ones not open
 /// (root and last use), the most recently used first.
 pub fn listed_projects(
     open: &[OpenProjectView],
@@ -55,7 +47,6 @@ pub fn listed_projects(
             modified: None,
         })
         .collect();
-    listed.sort_by(|a, b| path_order(&a.root, &b.root));
     let mut others: Vec<ListedProject> = known
         .iter()
         .filter(|(root, _)| !open.iter().any(|view| same_project(&view.root, root)))
@@ -268,8 +259,7 @@ impl AppState {
     /// The open projects as the menu bar's buttons, in the order the menus
     /// list them (so button `i` is `switch_to_open_project(i)`).
     pub fn project_buttons(&self) -> Vec<ProjectButton> {
-        let mut open: Vec<&OpenProjectView> = self.open_projects.iter().collect();
-        open.sort_by(|a, b| path_order(&a.root, &b.root));
+        let open: Vec<&OpenProjectView> = self.open_projects.iter().collect();
         let name = |root: &Path| {
             root.file_name()
                 .map(|name| name.to_string_lossy().into_owned())
@@ -359,22 +349,22 @@ mod tests {
         ];
         let buttons = state.project_buttons();
         let names: Vec<_> = buttons.iter().map(|b| b.name.as_str()).collect();
-        assert_eq!(names, ["a/app", "b/app", "termide"]);
+        assert_eq!(names, ["b/app", "termide", "a/app"]);
         let current: Vec<_> = buttons.iter().map(|b| b.current).collect();
-        assert_eq!(current, [false, true, false]);
-        assert!(buttons[2].attention);
+        assert_eq!(current, [true, false, false]);
+        assert!(buttons[1].attention);
     }
 
     #[test]
-    fn open_projects_come_first_by_path_then_the_rest_most_recent_first() {
+    fn open_projects_come_first_in_their_order_then_the_rest_most_recent_first() {
         let listed = listed_projects(
             &[open("/p/b", false), open("/p/a", true)],
             &known(&[("/p/c", 10), ("/p/a", 50), ("/p/d", 30)]),
         );
         let roots: Vec<_> = listed.iter().map(|p| p.root.to_str().unwrap()).collect();
-        assert_eq!(roots, vec!["/p/a", "/p/b", "/p/d", "/p/c"]);
-        assert!(listed[0].open && listed[0].attention);
-        assert_eq!(listed[0].modified, None, "an open project has no time");
+        assert_eq!(roots, vec!["/p/b", "/p/a", "/p/d", "/p/c"]);
+        assert!(listed[1].open && listed[1].attention);
+        assert_eq!(listed[1].modified, None, "an open project has no time");
         assert!(!listed[2].open && listed[2].modified.is_some());
     }
 
@@ -393,7 +383,7 @@ mod tests {
     fn the_menu_shows_rows_as_the_switcher_does() {
         let mut state = test_state();
         state.project_root = PathBuf::from("/p/one");
-        state.open_projects = vec![open("/p/two", true), open("/p/one", false)];
+        state.open_projects = vec![open("/p/one", false), open("/p/two", true)];
         state.cache.projects = known(&[("/p/one", 40), ("/p/three", 10), ("/p/four", 20)]);
 
         let menu = state.projects_menu();

@@ -5,7 +5,7 @@
 use anyhow::Result;
 
 use super::App;
-use crate::state::{ActiveModal, PendingAction};
+use crate::state::{ActiveModal, PendingAction, ProjectsOrigin};
 use termide_core::{CommandResult, PanelCommand};
 use termide_i18n as i18n;
 
@@ -373,8 +373,12 @@ impl App {
                 ProjectAction::Switch(path) => {
                     self.switch_to_project(path.clone())?;
                 }
-                ProjectAction::Close(path) => self.confirm_close_project(path.clone(), None),
-                ProjectAction::Delete(path) => self.confirm_delete_project(path.clone(), None),
+                ProjectAction::Close(path) => {
+                    self.confirm_close_project(path.clone(), ProjectsOrigin::Switcher)
+                }
+                ProjectAction::Delete(path) => {
+                    self.confirm_delete_project(path.clone(), ProjectsOrigin::Switcher)
+                }
             }
         }
         Ok(())
@@ -405,16 +409,20 @@ impl App {
         Ok(())
     }
 
-    /// Ask before deleting the saved layout of the project at `path`. `menu`
-    /// is where to return afterwards, see `PendingAction::DeleteProject`.
-    pub(super) fn confirm_delete_project(&mut self, path: std::path::PathBuf, menu: Option<usize>) {
+    /// Ask before deleting the saved layout of the project at `path`, then
+    /// return `from` where it was asked.
+    pub(super) fn confirm_delete_project(
+        &mut self,
+        path: std::path::PathBuf,
+        from: ProjectsOrigin,
+    ) {
         let t = termide_i18n::t();
         let message = t.projects_delete_fmt(&termide_core::util::shorten_home_path(
             &path.display().to_string(),
         ));
         let modal = termide_modal::ConfirmModal::new(t.projects_delete_title(), message);
         self.state.set_pending_action(
-            PendingAction::DeleteProject { path, menu },
+            PendingAction::DeleteProject { path, from },
             ActiveModal::Confirm(Box::new(modal)),
         );
     }
@@ -422,7 +430,7 @@ impl App {
     pub(super) fn handle_delete_project(
         &mut self,
         path: &std::path::Path,
-        menu: Option<usize>,
+        from: ProjectsOrigin,
     ) -> Result<()> {
         if let Err(e) = termide_project::ProjectLayout::delete_layout(path) {
             log::error!("Failed to delete project layout for {:?}: {}", path, e);
@@ -431,7 +439,7 @@ impl App {
             return Ok(());
         }
         log::info!("Deleted project layout for {:?}", path);
-        self.return_to_projects(menu)
+        self.return_to_projects(from)
     }
 
     /// Handle new project modal result - create/switch to a project in selected directory

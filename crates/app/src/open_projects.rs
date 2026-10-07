@@ -43,8 +43,9 @@ impl<P> Entry<P> {
     }
 }
 
-/// The open projects, in the order they were opened. Exactly one of them is
-/// current; `P` is what a parked one keeps.
+/// The open projects, in the order the menus list them: the order they were
+/// opened in until the user moves one. Exactly one of them is current; `P`
+/// is what a parked one keeps.
 pub struct OpenProjects<P> {
     entries: Vec<Entry<P>>,
     clock: u64,
@@ -147,7 +148,38 @@ impl<P> OpenProjects<P> {
         self.entries[current].root = root;
     }
 
-    /// Every open project's root, in the order they were opened.
+    /// Move the open project at `root` to place `to` (clamped to the last),
+    /// shifting the ones between. Returns whether it moved.
+    pub fn move_to(&mut self, root: &Path, to: usize) -> bool {
+        let Some(from) = self.entries.iter().position(|entry| entry.root == root) else {
+            return false;
+        };
+        let to = to.min(self.entries.len() - 1);
+        if from == to {
+            return false;
+        }
+        let entry = self.entries.remove(from);
+        self.entries.insert(to, entry);
+        true
+    }
+
+    /// Put the projects named in `order` in that order, ahead of the others,
+    /// which keep theirs.
+    pub fn arrange(&mut self, order: &[PathBuf]) {
+        self.entries.sort_by_key(|entry| {
+            order
+                .iter()
+                .position(|root| *root == entry.root)
+                .unwrap_or(usize::MAX)
+        });
+    }
+
+    /// Where the open project at `root` is listed.
+    pub fn position(&self, root: &Path) -> Option<usize> {
+        self.entries.iter().position(|entry| entry.root == root)
+    }
+
+    /// Every open project's root, in the order the menus list them.
     pub fn roots(&self) -> impl Iterator<Item = &Path> {
         self.entries.iter().map(|entry| entry.root.as_path())
     }
@@ -168,7 +200,7 @@ impl<P> OpenProjects<P> {
             .collect()
     }
 
-    /// The parked projects, in the order they were opened.
+    /// The parked projects, in the order the menus list them.
     pub fn parked(&self) -> impl Iterator<Item = (&Path, &P)> {
         self.entries
             .iter()
@@ -247,6 +279,35 @@ mod tests {
         assert_eq!(open.close(Path::new("/x")), None);
         assert_eq!(open.close(Path::new("/a")), Some("panels of a"));
         assert_eq!(roots(&open), vec!["/b"]);
+    }
+
+    #[test]
+    fn a_project_moves_to_a_place_and_the_others_shift() {
+        let mut open: OpenProjects<()> = OpenProjects::new(PathBuf::from("/a"));
+        open.open_pending(PathBuf::from("/b"));
+        open.open_pending(PathBuf::from("/c"));
+        assert!(open.move_to(Path::new("/c"), 0));
+        assert_eq!(roots(&open), vec!["/c", "/a", "/b"]);
+        assert!(open.move_to(Path::new("/c"), 99), "past the end: last");
+        assert_eq!(roots(&open), vec!["/a", "/b", "/c"]);
+        assert!(!open.move_to(Path::new("/c"), 2), "already there");
+        assert!(!open.move_to(Path::new("/x"), 0), "not open");
+        assert_eq!(open.current(), Path::new("/a"));
+        assert_eq!(open.position(Path::new("/b")), Some(1));
+    }
+
+    #[test]
+    fn arranging_puts_the_named_projects_first_in_their_order() {
+        let mut open: OpenProjects<()> = OpenProjects::new(PathBuf::from("/a"));
+        for root in ["/b", "/c", "/d"] {
+            open.open_pending(PathBuf::from(root));
+        }
+        open.arrange(&[
+            PathBuf::from("/c"),
+            PathBuf::from("/gone"),
+            PathBuf::from("/a"),
+        ]);
+        assert_eq!(roots(&open), vec!["/c", "/a", "/b", "/d"]);
     }
 
     #[test]

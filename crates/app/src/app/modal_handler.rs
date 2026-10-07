@@ -143,10 +143,10 @@ impl App {
                                 self.reopen_bookmarks_menu(None, is_project, selected);
                                 return Ok(());
                             }
-                            PendingAction::DeleteProject { menu, .. }
-                            | PendingAction::CloseProject { menu, .. } => {
+                            PendingAction::DeleteProject { from, .. }
+                            | PendingAction::CloseProject { from, .. } => {
                                 self.state.close_modal();
-                                self.return_to_projects(menu)?;
+                                self.return_to_projects(from)?;
                                 return Ok(());
                             }
                             PendingAction::Vault => {
@@ -527,21 +527,21 @@ impl App {
                 PendingAction::SwitchProject => {
                     self.handle_switch_project(value)?;
                 }
-                PendingAction::CloseProject { root, menu } => {
+                PendingAction::CloseProject { root, from } => {
                     if value.downcast_ref::<bool>().copied().unwrap_or(false) {
-                        self.close_project(&root, menu)?;
+                        self.close_project(&root, from)?;
                     } else {
-                        self.return_to_projects(menu)?;
+                        self.return_to_projects(from)?;
                     }
                 }
                 PendingAction::NewProject => {
                     self.handle_new_project_result(value)?;
                 }
-                PendingAction::DeleteProject { path, menu } => {
+                PendingAction::DeleteProject { path, from } => {
                     if value.downcast_ref::<bool>().copied().unwrap_or(false) {
-                        self.handle_delete_project(&path, menu)?;
+                        self.handle_delete_project(&path, from)?;
                     } else {
-                        self.return_to_projects(menu)?;
+                        self.return_to_projects(from)?;
                     }
                 }
                 PendingAction::DeleteBookmark {
