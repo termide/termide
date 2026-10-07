@@ -839,6 +839,12 @@ pub trait Translation: Send + Sync {
     fn agent_notice_model_pending(&self) -> &str;
     /// Agent notice: the session now runs on connection `name`.
     fn agent_notice_connection_fmt(&self, name: &str) -> String;
+    /// Agent live footer: the request waits for a free slot of its
+    /// connection, first in line.
+    fn agent_queued(&self) -> &str;
+    /// Agent live footer: the request waits for a free slot, `ahead` others
+    /// before it.
+    fn agent_queued_ahead_fmt(&self, ahead: usize) -> String;
     /// Agent notice: there is no connection `name`.
     fn agent_notice_no_connection_fmt(&self, name: &str) -> String;
     /// Agent toolset checklist: its title.
@@ -1005,6 +1011,8 @@ pub trait Translation: Send + Sync {
     fn settings_ai_connection_subagents(&self) -> &str;
     /// Settings modal: subagents left on the connection itself.
     fn settings_ai_connection_subagents_own(&self) -> &str;
+    /// Settings modal: how many requests a connection serves at once.
+    fn settings_ai_connection_max_requests(&self) -> &str;
     /// Settings modal: a connection left without a name, or with another's.
     fn settings_ai_connection_name_taken(&self) -> &str;
     /// Settings modal: the permission mode new agent sessions start in.

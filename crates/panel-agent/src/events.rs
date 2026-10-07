@@ -169,6 +169,14 @@ impl AgentPanel {
                     activity.prefill = Some((processed, total, cached));
                 }
             }
+            AgentEvent::MessageUpdate(
+                event @ (StreamEvent::Queued { .. } | StreamEvent::Admitted),
+            ) => {
+                if let Some(activity) = self.activity.as_mut().filter(|a| a.phase == Phase::Prefill)
+                {
+                    activity.note_queue(&event);
+                }
+            }
             AgentEvent::MessageUpdate(StreamEvent::Retry {
                 attempt,
                 max_attempts,
@@ -386,6 +394,9 @@ impl AgentPanel {
                             total,
                             cached,
                         } => activity.prefill = Some((processed, total, cached)),
+                        StreamEvent::Queued { .. } | StreamEvent::Admitted => {
+                            activity.note_queue(&event);
+                        }
                         _ => {}
                     }
                 }

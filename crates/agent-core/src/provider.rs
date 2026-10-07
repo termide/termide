@@ -157,6 +157,14 @@ pub enum StreamEvent {
         total: u64,
         cached: u64,
     },
+    /// The request waits for a free slot of its connection, with `ahead`
+    /// others waiting before it; sent again whenever that number changes.
+    Queued {
+        ahead: usize,
+    },
+    /// The request that was [`Self::Queued`] got its slot and is sent now:
+    /// the model's reading starts here, not when it began to wait.
+    Admitted,
     /// The request failed before any content arrived and will be retried
     /// after `delay_ms`.
     Retry {

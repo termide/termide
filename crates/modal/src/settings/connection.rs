@@ -23,6 +23,7 @@ pub(super) const PREFILL_PROGRESS: usize = 6;
 pub(super) const REASONING_PARAM: usize = 7;
 pub(super) const DEFAULT: usize = 8;
 pub(super) const SUBAGENTS: usize = 9;
+pub(super) const MAX_REQUESTS: usize = 10;
 
 /// The connection page, while one is open.
 #[derive(Debug, Clone)]
@@ -107,6 +108,10 @@ pub(super) fn connection_fields() -> Vec<FieldDescriptor> {
         FieldDescriptor {
             label: t.settings_ai_connection_subagents(),
             field_type: FieldType::Enum,
+        },
+        FieldDescriptor {
+            label: t.settings_ai_connection_max_requests(),
+            field_type: FieldType::Number,
         },
     ]
 }
@@ -215,6 +220,10 @@ impl SettingsModal {
         }
         if openai {
             rows.extend([Field(PREFILL_PROGRESS), Field(REASONING_PARAM)]);
+        }
+        // A CLI agent's requests go through its own process, not termide's.
+        if !cli {
+            rows.push(Field(MAX_REQUESTS));
         }
         rows.extend([Field(SUBAGENTS), Field(DEFAULT), Spacer, ConnectionButtons]);
         rows
@@ -385,6 +394,10 @@ impl SettingsModal {
             REASONING_PARAM => reasoning_param_label(connection.reasoning_param),
             DEFAULT => bool_str(self.config.ai.default_connection() == self.open_connection_name()),
             SUBAGENTS => subagents_label(connection, &connection.subagents),
+            MAX_REQUESTS if connection.max_concurrent_requests == 0 => {
+                i18n::t().settings_value_no_limit().to_string()
+            }
+            MAX_REQUESTS => connection.max_concurrent_requests.to_string(),
             _ => String::new(),
         }
     }
@@ -404,6 +417,7 @@ impl SettingsModal {
                 .context_window_fallback
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
+            MAX_REQUESTS => connection.max_concurrent_requests.to_string(),
             _ => String::new(),
         }
     }
@@ -566,6 +580,17 @@ impl SettingsModal {
         }
     }
 
+    /// Store a number typed on the page: how many requests the connection
+    /// serves at once, 0 for any number.
+    pub(super) fn apply_connection_number(&mut self, index: usize, value: u64) {
+        if index != MAX_REQUESTS {
+            return;
+        }
+        if let Some(connection) = self.edited_mut() {
+            connection.max_concurrent_requests = u32::try_from(value).unwrap_or(u32::MAX);
+        }
+    }
+
     /// Store the context window typed on the page; `None` is the default.
     pub(super) fn apply_connection_window(&mut self, window: Option<u64>) {
         if let Some(connection) = self.edited_mut() {
@@ -653,6 +678,7 @@ impl SettingsModal {
             connection.base_url = defaults.base_url;
             connection.api_key_env = defaults.api_key_env;
             connection.context_window_fallback = defaults.context_window_fallback;
+            connection.max_concurrent_requests = defaults.max_concurrent_requests;
         }
         if !speaks_openai(connection) {
             connection.prefill_progress = false;
@@ -1209,6 +1235,32 @@ mod tests {
         modal.apply_connection_enum(SUBAGENTS, "local");
         modal.delete_connection("local");
         assert!(modal.config.ai.connections["claude"].subagents.is_empty());
+    }
+
+    #[test]
+    fn the_request_limit_is_typed_for_an_endpoint_only() {
+        let mut modal = ai_modal(with_local());
+        modal.open_connection("local".into());
+        assert_eq!(
+            modal.connection_value(MAX_REQUESTS),
+            i18n::t().settings_value_no_limit()
+        );
+        edit(&mut modal, MAX_REQUESTS, "2");
+        assert_eq!(
+            modal.config.ai.connections["local"].max_concurrent_requests,
+            2
+        );
+        assert_eq!(modal.connection_value(MAX_REQUESTS), "2");
+        // A CLI agent sends its requests itself: the field and the value go.
+        modal.apply_connection_enum(PROVIDER, "claude_code");
+        let name = modal.open_connection_name().unwrap().to_string();
+        assert_eq!(
+            modal.config.ai.connections[&name].max_concurrent_requests,
+            0
+        );
+        assert!(!modal
+            .content_rows()
+            .contains(&ContentRow::Field(MAX_REQUESTS)));
     }
 
     #[test]

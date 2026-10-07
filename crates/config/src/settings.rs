@@ -200,6 +200,16 @@ pub struct Connection {
     /// built-in loop, so it needs a model connection, not a CLI agent.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub subagents: String,
+    /// How many requests the connection serves at once across the termide
+    /// process — the panels' agents, their subagents and side calls — the
+    /// rest waiting their turn; 0 sets no limit. A local server usually runs
+    /// one at a time (or llama.cpp's `--parallel` many).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub max_concurrent_requests: u32,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 /// `reasoning_param` of an `openai_compatible` connection.
@@ -274,6 +284,7 @@ impl Default for Connection {
             prefill_progress: false,
             reasoning_param: ReasoningParam::Auto,
             subagents: String::new(),
+            max_concurrent_requests: 0,
         }
     }
 }
@@ -1447,6 +1458,18 @@ mod ai_settings_tests {
         let text = toml::to_string(&claude).unwrap();
         assert!(text.contains("subagents = \"local\""), "{text}");
         assert_eq!(toml::from_str::<Connection>(&text).unwrap(), claude);
+    }
+
+    #[test]
+    fn a_connection_names_its_request_limit_only_when_set() {
+        let mut local = Connection::default();
+        assert!(!toml::to_string(&local)
+            .unwrap()
+            .contains("max_concurrent_requests"));
+        local.max_concurrent_requests = 1;
+        let text = toml::to_string(&local).unwrap();
+        assert!(text.contains("max_concurrent_requests = 1"), "{text}");
+        assert_eq!(toml::from_str::<Connection>(&text).unwrap(), local);
     }
 
     #[test]

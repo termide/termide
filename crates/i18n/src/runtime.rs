@@ -649,6 +649,7 @@ impl Translation for RuntimeTranslation {
         agent_delete_this_session,
         agent_fork_this_session,
         agent_notice_model_pending,
+        agent_queued,
         agent_toolset_title,
         agent_toolset_prompt,
         agent_toolset_builtin,
@@ -700,6 +701,7 @@ impl Translation for RuntimeTranslation {
         settings_ai_connection_reasoning_param,
         settings_ai_connection_subagents,
         settings_ai_connection_subagents_own,
+        settings_ai_connection_max_requests,
         settings_ai_connection_name_taken,
         settings_web_backend,
         menu_ai_show_browser,
@@ -1109,6 +1111,10 @@ impl Translation for RuntimeTranslation {
 
     fn agent_notice_connection_fmt(&self, name: &str) -> String {
         self.format("agent_notice_connection_fmt", &[("name", name)])
+    }
+
+    fn agent_queued_ahead_fmt(&self, ahead: usize) -> String {
+        self.format("agent_queued_ahead_fmt", &[("ahead", &ahead.to_string())])
     }
 
     fn agent_notice_no_connection_fmt(&self, name: &str) -> String {

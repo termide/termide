@@ -140,7 +140,21 @@ impl AgentPanel {
             Phase::Compact => activity.first_token.is_none(),
             Phase::Generating | Phase::Tool => false,
         };
-        if reading && !self.external {
+        // A request waiting for a free slot of its connection is not being
+        // read yet: the line says it waits, and how many wait before it.
+        if let (Some(ahead), true) = (activity.queued, reading) {
+            let t = termide_i18n::t();
+            let waiting = if ahead == 0 {
+                t.agent_queued().to_string()
+            } else {
+                t.agent_queued_ahead_fmt(ahead)
+            };
+            let dur = transcript::fmt_dur(activity.msg_start.elapsed().as_millis() as u32);
+            lines.push(transcript::right_meta(
+                width,
+                vec![Span::styled(format!("⏳ {dur} {waiting}"), dim)],
+            ));
+        } else if reading && !self.external {
             let prefill_ms = activity.msg_start.elapsed().as_millis() as u32;
             let dur = transcript::fmt_dur(prefill_ms);
             let text = match (activity.prefill, activity.prompt_tokens) {

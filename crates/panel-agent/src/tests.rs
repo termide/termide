@@ -1390,6 +1390,45 @@ fn the_live_footer_shows_the_prefill_until_the_first_token() {
 }
 
 #[test]
+fn the_live_footer_shows_a_wait_for_a_slot_until_the_request_is_sent() {
+    let text_of = |panel: &AgentPanel| -> Vec<String> {
+        panel
+            .live_footer_lines(80)
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect())
+            .collect()
+    };
+    let t = termide_i18n::t();
+    let mut panel = panel(vec![]);
+    panel.apply(AgentEvent::AgentStart);
+    panel.apply(AgentEvent::MessageStart {
+        prompt_tokens: Some(48_000),
+    });
+    // Waiting behind two others: a `⏳` line in place of the prefill's.
+    panel.apply(AgentEvent::MessageUpdate(StreamEvent::Queued { ahead: 2 }));
+    let lines = text_of(&panel);
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(
+        lines[0].contains('⏳') && lines[0].contains(&t.agent_queued_ahead_fmt(2)),
+        "{lines:?}"
+    );
+    panel.apply(AgentEvent::MessageUpdate(StreamEvent::Queued { ahead: 0 }));
+    assert!(text_of(&panel)[0].contains(t.agent_queued()));
+
+    // Sent: the model reads, and the prefill is timed from here.
+    let waited_from = panel.activity.unwrap().msg_start;
+    panel.apply(AgentEvent::MessageUpdate(StreamEvent::Admitted));
+    let activity = panel.activity.unwrap();
+    assert!(activity.queued.is_none());
+    assert!(activity.msg_start >= waited_from);
+    let lines = text_of(&panel);
+    assert!(
+        lines[0].contains('⏫') && !lines[0].contains('⏳'),
+        "{lines:?}"
+    );
+}
+
+#[test]
 fn a_tall_focused_block_scrolls_to_its_end() {
     // A reply taller than the viewport.
     let long = (1..=40)

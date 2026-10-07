@@ -19,7 +19,9 @@ use termide_agent_core::{
 };
 use termide_agent_hooks::CommandHooks;
 use termide_agent_mcp::{Connections, TokenStore};
-use termide_agent_providers::{AnthropicProvider, Compat, OpenAiCompatProvider, ReasoningParam};
+use termide_agent_providers::{
+    AnthropicProvider, Compat, OpenAiCompatProvider, ReasoningParam, Slots, SlottedProvider,
+};
 use termide_agent_recall::{PanelDir, RecallSetup, RecallTool, RepoFinder, Solver, TimeLimits};
 use termide_agent_tools::{
     builtin_tools, BashTool, QuestionTool, SkillTool, SubagentRun, SuggestCommandTool, TaskTool,
@@ -662,6 +664,12 @@ pub(crate) fn publish_ai_settings(settings: &AiSettings) {
     *APPLIED_AI
         .write()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(settings.clone());
+    // A limit changed in the settings reaches the requests already queued.
+    for (name, connection) in &settings.connections {
+        if !connection.is_cli() {
+            let _ = Slots::shared(name, connection.max_concurrent_requests as usize);
+        }
+    }
 }
 
 /// The settings applied last, else `built_with`, those a panel was built with.
@@ -707,7 +715,7 @@ impl ConnectionCatalog for AiConnections {
         Some(ConnectionChoice {
             name: name.to_string(),
             kind: connection.provider.clone(),
-            provider: build_provider(connection, api_key_of(connection)),
+            provider: connection_provider(name, connection),
             model: connection.model.clone(),
             context_window: connection.effective_context_window(),
             backend: cli_provider_backend(&connection.provider, agent),
@@ -881,7 +889,7 @@ fn side_model(
                 max_tokens: None,
                 thinking: ThinkingLevel::Off,
             };
-            let mut provider = build_provider(connection, api_key_of(connection));
+            let mut provider = connection_provider(name, connection);
             if id.trim().is_empty() {
                 provider = Arc::new(FirstListedModel {
                     inner: provider,
@@ -1096,8 +1104,8 @@ impl Subagents {
         // model: the id its `AGENT.md` names is one of the session's endpoint.
         let (provider, requested, context_window) =
             match subagent_connection(&applied_ai_settings(&self.settings), &active)? {
-                Some((_, connection)) => (
-                    build_provider(&connection, api_key_of(&connection)),
+                Some((name, connection)) => (
+                    connection_provider(&name, &connection),
                     connection.model.clone(),
                     connection.effective_context_window(),
                 ),
@@ -1227,7 +1235,7 @@ fn agent_setup(
     let (connection_name, connection) =
         session_connection(settings, session.as_ref()).unwrap_or_default();
     let provider_kind = connection.provider.clone();
-    let provider: Arc<dyn Provider> = build_provider(&connection, api_key_of(&connection));
+    let provider = connection_provider(&connection_name, &connection);
 
     let mut catalog = FsCatalog::new(&cwd, project_root);
     let web = shared_web(&settings.web, &catalog.dirs);
@@ -1459,6 +1467,19 @@ pub(crate) fn spawn_settings_model_fetch(
         let _ = tx.send(provider.list_models());
     });
     Some(rx)
+}
+
+/// The provider of connection `name` for a session or a side call: its
+/// requests take the connection's slots, which every panel of the process
+/// shares (see `max_concurrent_requests`). A CLI agent's is a placeholder
+/// that serves no request, so it takes none.
+fn connection_provider(name: &str, connection: &Connection) -> Arc<dyn Provider> {
+    let provider = build_provider(connection, api_key_of(connection));
+    if connection.is_cli() {
+        return provider;
+    }
+    let slots = Slots::shared(name, connection.max_concurrent_requests as usize);
+    Arc::new(SlottedProvider::new(provider, slots))
 }
 
 /// The provider `connection` names: the Anthropic Messages API, or the

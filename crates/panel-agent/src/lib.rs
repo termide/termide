@@ -440,6 +440,9 @@ struct Activity {
     /// How far the server has read the prompt, `(processed, total, cached)`
     /// in tokens, from a server that reports it.
     prefill: Option<(u64, u64, u64)>,
+    /// While the request waits for a free slot of its connection: how many
+    /// wait before it.
+    queued: Option<usize>,
 }
 
 impl Activity {
@@ -453,6 +456,7 @@ impl Activity {
             first_token: None,
             prompt_tokens: None,
             prefill: None,
+            queued: None,
         }
     }
 
@@ -460,6 +464,20 @@ impl Activity {
         self.phase = phase;
         self.since = Instant::now();
         self.gen_chars = 0;
+    }
+
+    /// A request's wait for a slot of its connection: how many wait before
+    /// it, or, once it is sent, the model starts reading now — the wait is
+    /// not the prefill's.
+    fn note_queue(&mut self, event: &termide_agent_core::StreamEvent) {
+        match event {
+            termide_agent_core::StreamEvent::Queued { ahead } => self.queued = Some(*ahead),
+            termide_agent_core::StreamEvent::Admitted => {
+                self.queued = None;
+                self.msg_start = Instant::now();
+            }
+            _ => {}
+        }
     }
 
     /// Rough live token count from streamed characters (~4 chars per token).

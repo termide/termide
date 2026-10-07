@@ -597,6 +597,7 @@ impl SettingsModal {
                     self.config.ai.max_tokens_per_turn = i64::try_from(val).unwrap_or(i64::MAX);
                 }
             }
+            SettingsTab::Connection => self.apply_connection_number(index, val),
             _ => {}
         }
     }

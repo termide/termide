@@ -12,8 +12,10 @@
 mod anthropic;
 mod openai;
 mod retry;
+mod slots;
 mod sse;
 
 pub use anthropic::AnthropicProvider;
 pub use openai::{Compat, OpenAiCompatProvider, ReasoningParam};
 pub use retry::RetryPolicy;
+pub use slots::{Permit, Slots, SlottedProvider};
