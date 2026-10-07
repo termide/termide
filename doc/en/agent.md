@@ -1329,17 +1329,21 @@ model calls, and one that fails reports why, the endpoint's error included.
 
 A delegate runs on the connection the session's connection names under
 **Subagents** on its settings page (`subagents` in the file), or on the
-session's own when it names none. The choices are the connection itself and
-every connection termide talks to a model on: a delegate runs the built-in
-loop, which a CLI agent does not. So the tasks of a session on Claude Code
-(which calls termide's `task`; Codex and Gemini CLI delegate on their own) run
-only once its connection names one — `task` then hands them to, say, a local
-server or a hosted API — and fail with a reason that says where to choose one
-until it does. On a connection of its own a delegate runs
-that connection's model; the `model` its `AGENT.md` names applies on the
-session's connection, whose endpoint the id is for. The choice follows a
-renamed connection, and a deleted one, or one turned into a CLI agent, hands
-its delegates back to their own connection.
+session's own when it names none. On a connection termide talks to a model on,
+it runs termide's own loop, on that connection's model; the `model` its
+`AGENT.md` names applies on the session's connection, whose endpoint the id is
+for. On a Claude Code connection it is a copy of Claude Code: a session of its
+own, started for the task and ended with it, with the delegate's prompt and
+tools as Claude Code takes the panel's, the connection's model picked before
+the task goes out, and the same checks — its own permission requests, with
+nobody to ask, are refused with the reason the model reads. So a Claude Code
+session delegates to copies of itself unless its connection names another, and
+a local model's session can hand its tasks to Claude Code. Codex and Gemini CLI
+keep tools of their own and run no delegates: their **Subagents** reads
+*none*, and only a connection named there runs their tasks — Codex and Gemini
+CLI delegate on their own anyway. The choice follows a renamed connection, and
+a deleted one, or one turned into Codex or Gemini CLI, hands its delegates back
+to their own connection.
 
 ### External agents
 

@@ -302,6 +302,15 @@ impl Connection {
     pub fn is_cli(&self) -> bool {
         is_cli_provider(&self.provider)
     }
+
+    /// Whether the agents a session delegates to can run on it: termide's
+    /// own loop on a model connection, or a copy of Claude Code on termide's
+    /// tools. Codex and Gemini CLI keep tools of their own, so termide does
+    /// not run its subagents on them.
+    #[must_use]
+    pub fn runs_subagents(&self) -> bool {
+        !self.is_cli() || self.provider == "claude_code"
+    }
 }
 
 /// `[ai] fold_blocks`: when reasoning and tool calls fold to one line.

@@ -256,7 +256,8 @@ impl Shared {
 /// The model of `offered` that `wanted` names: by its id, else by its id or
 /// name ignoring case, else the only one whose id or name contains it
 /// (`haiku`).
-fn match_model(wanted: &str, offered: &[BackendModel]) -> Option<String> {
+#[must_use]
+pub fn match_model(wanted: &str, offered: &[BackendModel]) -> Option<String> {
     let wanted = wanted.trim();
     if let Some(model) = offered.iter().find(|m| m.id == wanted) {
         return Some(model.id.clone());
