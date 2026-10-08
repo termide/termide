@@ -2227,6 +2227,21 @@ fn goal_works_turn_by_turn_until_the_judge_says_done() {
         .filter(|i| matches!(i, Item::User { .. }))
         .count();
     assert_eq!(users, 2);
+    // The first turn heads its block with the command as typed, and the
+    // notice does not repeat the goal.
+    let items = panel.transcript().items();
+    assert!(
+        items
+            .iter()
+            .any(|i| matches!(i, Item::User { command: Some(c), text, .. }
+            if c == "/goal get the build green" && text == "get the build green")),
+        "{items:?}"
+    );
+    assert!(items.iter().any(|i| matches!(i, Item::Notice { text, .. }
+        if text == termide_i18n::t().agent_notice_goal_working())));
+    assert!(!items
+        .iter()
+        .any(|i| matches!(i, Item::Notice { text, .. } if text.contains("get the build green"))));
     // The judge ran and the goal ended with the success reason.
     assert!(panel.transcript().items().iter().any(
         |i| matches!(i, Item::Notice { text, .. } if text.contains("checking whether the goal"))
@@ -2234,6 +2249,23 @@ fn goal_works_turn_by_turn_until_the_judge_says_done() {
     assert!(panel.transcript().items().iter().any(
             |i| matches!(i, Item::Notice { text, .. } if text.contains("goal reached: everything is green"))
         ));
+}
+
+#[test]
+fn goal_can_be_set_while_the_agent_works() {
+    let mut panel = panel(vec![]);
+    // A run is in flight: the goal joins it as a steering message.
+    panel.busy = true;
+    type_text(&mut panel, "/goal finish the refactor");
+    panel.submit();
+    assert!(panel.goal_task.is_some());
+    assert_eq!(
+        panel.queued_texts.iter().collect::<Vec<_>>(),
+        ["/goal finish the refactor"]
+    );
+    assert!(!panel.transcript().items().iter().any(
+        |i| matches!(i, Item::Notice { text, .. } if text == termide_i18n::t().agent_notice_busy())
+    ));
 }
 
 #[test]

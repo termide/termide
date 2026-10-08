@@ -602,6 +602,7 @@ impl Translation for RuntimeTranslation {
         agent_notice_loop_usage,
         agent_notice_goal_stopped,
         agent_notice_goal_usage,
+        agent_notice_goal_working,
         agent_state_queued,
         agent_notice_goal_checking,
         agent_notice_handoff_preparing,
@@ -1392,10 +1393,6 @@ impl Translation for RuntimeTranslation {
             "agent_notice_goal_stopped_max_fmt",
             &[("count", &count.to_string())],
         )
-    }
-
-    fn agent_notice_goal_working_fmt(&self, goal: &str) -> String {
-        self.format("agent_notice_goal_working_fmt", &[("goal", goal)])
     }
 
     fn agent_notice_looping_every_fmt(&self, interval: &str) -> String {

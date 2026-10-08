@@ -1617,7 +1617,9 @@ is reached. `goal.md` is that judge's system prompt, with `{{goal}}` for the
 goal text and the verdict question in its front matter (`request:`). The judge
 answers `DONE` or `CONTINUE` with a one-line reason; on `CONTINUE` the agent is
 sent back to work with what is still missing, until the judge says done, a turn
-errors, or the safety cap of fifty turns is hit. `/goal stop`, `Esc`, or
+errors, or the safety cap of fifty turns is hit. A goal can be set while the
+agent works: it joins the run in flight as a steering message, and the judge
+takes over once the run ends. `/goal stop`, `Esc`, or
 stopping the run ends it. Reword `goal.md` to change how strictly the goal is
 judged.
 

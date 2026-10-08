@@ -275,11 +275,10 @@ impl AgentPanel {
                     }
                     return vec![PanelEvent::NeedsRedraw];
                 }
-                if self.is_busy() {
-                    self.notice(termide_i18n::t().agent_notice_busy(), NoticeKind::Warn);
-                    return vec![PanelEvent::NeedsRedraw];
-                }
-                return self.start_goal(args.to_string());
+                // While the agent works, the goal joins the run in flight as a
+                // steering message, like `/loop`; the judge takes over once the
+                // run ends.
+                return self.start_goal(args.to_string(), command);
             }
             Some((HANDOFF_COMMAND, _)) => {
                 self.clear_input();
@@ -606,10 +605,11 @@ impl AgentPanel {
     }
 
     /// Start a `/goal`: work autonomously toward `goal`, a judge deciding after
-    /// each turn whether it is reached. The first work turn is the goal itself.
-    pub(crate) fn start_goal(&mut self, goal: String) -> Vec<PanelEvent> {
+    /// each turn whether it is reached. The first work turn is the goal itself,
+    /// shown as `command` (the `/goal …` typed) so the text is not repeated.
+    pub(crate) fn start_goal(&mut self, goal: String, command: Option<String>) -> Vec<PanelEvent> {
         self.notice(
-            termide_i18n::t().agent_notice_goal_working_fmt(&goal),
+            termide_i18n::t().agent_notice_goal_working(),
             NoticeKind::Info,
         );
         self.goal_task = Some(GoalTask {
@@ -618,12 +618,17 @@ impl AgentPanel {
             judge_at: None,
             judging: false,
         });
-        self.send_goal_turn(goal)
+        self.send_goal_turn_as(goal, command)
     }
 
     /// Send one work turn of the active goal as a fresh run and count it;
     /// stops the goal when the safety cap is reached.
     pub(crate) fn send_goal_turn(&mut self, prompt: String) -> Vec<PanelEvent> {
+        self.send_goal_turn_as(prompt, None)
+    }
+
+    /// [`Self::send_goal_turn`], shown in the transcript as `command`.
+    fn send_goal_turn_as(&mut self, prompt: String, command: Option<String>) -> Vec<PanelEvent> {
         let over_cap = match self.goal_task.as_mut() {
             Some(task) => {
                 task.iterations += 1;
@@ -641,7 +646,7 @@ impl AgentPanel {
             return vec![PanelEvent::NeedsRedraw];
         }
         self.goal_errored = false;
-        self.send(prompt)
+        self.send_as(prompt, command)
     }
 
     /// Ask the judge whether the active goal is reached; the verdict arrives as

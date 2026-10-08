@@ -690,6 +690,7 @@ pub trait Translation: Send + Sync {
     fn agent_notice_loop_usage(&self) -> &str;
     fn agent_notice_goal_stopped(&self) -> &str;
     fn agent_notice_goal_usage(&self) -> &str;
+    fn agent_notice_goal_working(&self) -> &str;
     /// Agent panel state strip: the label of a message queued for the next turn.
     fn agent_state_queued(&self) -> &str;
     /// Agent panel state strip: queued messages beyond the ones shown.
@@ -923,7 +924,6 @@ pub trait Translation: Send + Sync {
     fn agent_notice_empty_tool_text_fmt(&self, file: &str) -> String;
     fn agent_notice_loop_stopped_max_fmt(&self, count: usize) -> String;
     fn agent_notice_goal_stopped_max_fmt(&self, count: usize) -> String;
-    fn agent_notice_goal_working_fmt(&self, goal: &str) -> String;
     fn agent_notice_looping_every_fmt(&self, interval: &str) -> String;
     fn agent_notice_goal_reached_reason_fmt(&self, reason: &str) -> String;
     fn agent_notice_command_denied_fmt(&self, name: &str) -> String;
