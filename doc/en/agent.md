@@ -1276,8 +1276,9 @@ together (see [The agent directory](#the-agent-directory)).
   (in project)** under `.termide/ai/`, or **New (global)** under the
   configuration directory — asking for a name and opening the new file.
   Sessions are created by running an agent, so they have no create rows.
-- Each session row shows, dim on the right, when it was last worked on
-  (e.g. "2h ago").
+- Each session row shows, dim before its title, the local date and time it
+  was last worked on (`2026-10-08 14:22`), as the panel's welcome banner
+  dates its sessions.
 - An agent, skill or prompt with a description is listed as `name ·
   description` (the `description` front matter of an `AGENT.md`, a
   `SKILL.md` or a prompt); a row too long for the menu ends

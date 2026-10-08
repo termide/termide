@@ -461,8 +461,9 @@ pub(crate) fn push_history(transcript: &mut Transcript, logged: &LoggedMessage) 
 }
 
 /// Format an epoch-millis timestamp as the local `YYYY-MM-DD HH:MM`, how a
-/// list of sessions dates each one by its last change.
-pub(crate) fn local_minute(ms: u64) -> String {
+/// list of sessions dates each one by its last change. The AI menu's session
+/// rows use it too, so both lists read the same date.
+pub fn local_minute(ms: u64) -> String {
     use chrono::TimeZone;
     match chrono::Local.timestamp_millis_opt(ms as i64) {
         chrono::offset::LocalResult::Single(dt) => dt.format("%Y-%m-%d %H:%M").to_string(),

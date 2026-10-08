@@ -189,16 +189,6 @@ impl Default for AppState {
     }
 }
 
-/// A localized "N units ago" for a millisecond timestamp, for the Sessions
-/// list's "last worked on" column. Reuses [`termide_i18n::relative_age`].
-fn relative_millis_ago(modified_ms: u64) -> String {
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-    termide_i18n::relative_age(now_ms.saturating_sub(modified_ms) / 1000)
-}
-
 impl AppState {
     /// Create new application state, loading config from file
     pub fn new() -> Self {
@@ -455,6 +445,8 @@ impl AppState {
     }
 
     /// The Sessions section's rows: the project's session logs, newest first.
+    /// Each carries its last change as a dimmed date and time before the
+    /// title, the way the panel's welcome banner dates them.
     fn ai_session_items(&self) -> Vec<termide_ui_render::DropdownItem> {
         use termide_ui_render::DropdownItem;
         let sessions = self
@@ -471,7 +463,10 @@ impl AppState {
             .into_iter()
             .map(|s| {
                 DropdownItem::new(s.label(), format!("session:{}", s.path.to_string_lossy()))
-                    .with_shortcut(Some(relative_millis_ago(s.modified)))
+                    .with_prefix(
+                        "",
+                        format!("{}  ", termide_panel_agent::local_minute(s.modified)),
+                    )
             })
             .collect()
     }
