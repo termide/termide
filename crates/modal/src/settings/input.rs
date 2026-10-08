@@ -1377,3 +1377,79 @@ mod keybinding_double_click_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod wheel_tests {
+    use super::*;
+    use crate::settings::SettingsTab;
+    use crate::Modal;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+
+    fn rendered(tab: SettingsTab) -> (SettingsModal, Rect) {
+        let mut config = Config::default();
+        config.normalize();
+        let mut modal = SettingsModal::new(config, false);
+        modal.active_tab = tab;
+        modal.field_cursor = modal.first_selectable_row();
+        // Short enough that the hotkey list does not fit.
+        let screen = Rect::new(0, 0, 110, 20);
+        let mut buf = Buffer::empty(screen);
+        modal.render(screen, &mut buf, &termide_theme::Theme::default());
+        (modal, screen)
+    }
+
+    fn wheel(modal: &mut SettingsModal, screen: Rect, at: Rect, down: bool) {
+        let kind = if down {
+            MouseEventKind::ScrollDown
+        } else {
+            MouseEventKind::ScrollUp
+        };
+        let event = MouseEvent {
+            kind,
+            column: at.x + 1,
+            row: at.y,
+            modifiers: KeyModifiers::NONE,
+        };
+        modal.handle_mouse(event, screen).unwrap();
+        let mut buf = Buffer::empty(screen);
+        modal.render(screen, &mut buf, &termide_theme::Theme::default());
+    }
+
+    #[test]
+    fn the_wheel_scrolls_the_hotkey_list() {
+        let (mut modal, screen) = rendered(SettingsTab::Keybindings);
+        let content = modal.last_content_area.expect("content drawn");
+        assert!(kb_binding_names(modal.kb_section).len() > content.height as usize);
+
+        for _ in 0..20 {
+            wheel(&mut modal, screen, content, true);
+        }
+        assert!(modal.kb_scroll > 0, "the list scrolled down");
+        assert!(modal.kb_cursor < kb_binding_names(modal.kb_section).len());
+
+        for _ in 0..20 {
+            wheel(&mut modal, screen, content, false);
+        }
+        assert_eq!(modal.kb_scroll, 0, "and back up");
+        assert_eq!(modal.kb_cursor, 0);
+    }
+
+    #[test]
+    fn the_wheel_scrolls_a_field_list() {
+        let (mut modal, screen) = rendered(SettingsTab::General);
+        let content = modal.last_content_area.expect("content drawn");
+        let start = modal.field_cursor;
+        wheel(&mut modal, screen, content, true);
+        assert!(modal.field_cursor > start, "the cursor moved down");
+        assert!(modal.current_row().is_some_and(|row| row.is_selectable()));
+    }
+
+    #[test]
+    fn the_wheel_over_the_sidebar_leaves_the_section_alone() {
+        let (mut modal, screen) = rendered(SettingsTab::General);
+        let sidebar = modal.last_sidebar_area.expect("sidebar drawn");
+        wheel(&mut modal, screen, sidebar, true);
+        assert_eq!(modal.active_tab, SettingsTab::General);
+    }
+}

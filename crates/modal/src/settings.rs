@@ -493,19 +493,14 @@ impl Modal for SettingsModal {
             return Ok(None);
         }
 
-        if mouse.kind == MouseEventKind::ScrollUp {
-            if self.focus == FocusArea::Content && self.content_scroll > 0 {
-                self.content_scroll -= 1;
-            } else if self.focus == FocusArea::Sidebar && self.sidebar_scroll > 0 {
-                self.sidebar_scroll -= 1;
-            }
-            return Ok(None);
-        }
-        if mouse.kind == MouseEventKind::ScrollDown {
-            if self.focus == FocusArea::Content {
-                self.content_scroll += 1;
-            } else if self.focus == FocusArea::Sidebar {
-                self.sidebar_scroll += 1;
+        // The wheel scrolls the content list under the pointer. The sidebar
+        // is left out: moving its cursor would switch sections.
+        if let MouseEventKind::ScrollUp | MouseEventKind::ScrollDown = mouse.kind {
+            let over_content = self
+                .last_content_area
+                .is_some_and(|area| area.contains((mouse.column, mouse.row).into()));
+            if over_content {
+                self.wheel_content(mouse.kind == MouseEventKind::ScrollDown);
             }
             return Ok(None);
         }

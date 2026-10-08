@@ -474,6 +474,41 @@ impl SettingsModal {
 
     // ---- Scroll ----
 
+    /// Mouse-wheel step over the content area: move the content cursor by a
+    /// few rows and let the render clamp bring the view along. Moving only the
+    /// scroll offset would be undone by that clamp on the next frame. Focus is
+    /// left alone; an inline edit, a key capture and the LSP form keep their
+    /// cursor where it is.
+    pub(super) fn wheel_content(&mut self, forward: bool) {
+        const WHEEL_STEP: usize = 3;
+        if self.editing
+            || (self.active_tab == SettingsTab::Lsp && self.lsp_mode == LspMode::ServerEdit)
+        {
+            return;
+        }
+        if self.active_tab == SettingsTab::Keybindings {
+            if self.kb_mode != KbMode::Bindings {
+                return;
+            }
+            let last = kb_binding_names(self.kb_section).len().saturating_sub(1);
+            let cursor = if forward {
+                (self.kb_cursor + WHEEL_STEP).min(last)
+            } else {
+                self.kb_cursor.saturating_sub(WHEEL_STEP)
+            };
+            if cursor != self.kb_cursor {
+                self.kb_cursor = cursor;
+                self.kb_key_cursor = 0;
+            }
+            return;
+        }
+        for _ in 0..WHEEL_STEP {
+            if !self.step_cursor(forward) {
+                break;
+            }
+        }
+    }
+
     pub(super) fn clamp_scroll(&mut self, visible: usize) {
         self.content_scroll =
             termide_ui::ensure_offset_visible(self.content_scroll, self.field_cursor, visible);
