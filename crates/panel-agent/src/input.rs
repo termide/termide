@@ -1371,6 +1371,15 @@ impl AgentPanel {
                     self.cancel_pause();
                     return vec![PanelEvent::NeedsRedraw];
                 }
+                // A running subagent's row selects its block and brings it
+                // into view.
+                if let Some(&(_, index)) = self.task_rows.iter().find(|(y, _)| *y == event.row) {
+                    self.chat_focus = true;
+                    self.follow = false;
+                    self.selected = index;
+                    self.scroll_selected_into_view();
+                    return vec![PanelEvent::NeedsRedraw];
+                }
                 // Under the banner the notices take no clicks: the banner's
                 // own rows did above.
                 if inside && self.banner_shown() {

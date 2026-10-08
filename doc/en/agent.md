@@ -537,7 +537,11 @@ rows between the conversation and the input that appear only when there is
 something to show: a pending pause (`‖ will pause after the current step`) —
 once the pause takes effect the transcript's `‖` line takes over — and each
 message queued while the agent
-works (`› …`, its first line; after three, a count of the rest). Everything queued
+works (`› …`, its first line; after three, a count of the rest), and, closest to
+the input, each subagent still running (`& agent: task`, with what it did last
+or its wait for a slot, a spinner and its time; after three, `& +N`), so one
+whose block has scrolled out of view still shows it works — a click on its row
+selects the block and brings it into view. Everything queued
 goes to the agent at once, as a single message with the pieces joined by a
 blank line — messages typed while the agent works are usually one thought
 added to — and leaves the strip then, showing up in the conversation as your

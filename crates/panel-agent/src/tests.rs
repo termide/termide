@@ -8112,3 +8112,36 @@ fn dismissing_the_failure_card_ends_the_goal() {
     assert!(panel.goal_task.is_none());
     assert!(panel.pending.is_none());
 }
+
+/// A running subagent keeps a row in the state strip — its agent, task,
+/// latest progress and clock — and past three the rest fold into `+N`.
+#[test]
+fn running_subagents_show_in_the_state_strip() {
+    let colors = ThemeColors::default();
+    let row = |n: usize| {
+        (
+            "search".to_string(),
+            format!("find thing {n}"),
+            "· read src/lib.rs".to_string(),
+            65_000,
+        )
+    };
+    let text = |line: &Line| {
+        line.spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect::<String>()
+    };
+    let lines = crate::render::task_strip(&[row(1)], 80, &colors);
+    assert_eq!(lines.len(), 1);
+    let first = text(&lines[0]);
+    assert!(first.starts_with("& search: find thing 1"), "{first}");
+    assert!(first.contains("· read src/lib.rs"), "{first}");
+    let clock = crate::transcript::fmt_dur(65_000);
+    assert!(first.trim_end().ends_with(&clock), "{first}");
+    assert!(termide_ui::str_display_width(&first) <= 80, "{first}");
+
+    let lines = crate::render::task_strip(&(1..=5).map(row).collect::<Vec<_>>(), 80, &colors);
+    assert_eq!(lines.len(), 4);
+    assert_eq!(text(&lines[3]), "& +2");
+}

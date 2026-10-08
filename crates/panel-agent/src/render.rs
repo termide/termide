@@ -2,6 +2,8 @@
 //! run controls and state strip, and the status-bar segments.
 
 use crate::runtime::local_minute;
+use std::time::Instant;
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -85,6 +87,62 @@ pub(crate) fn state_strip<'a>(
     lines
 }
 
+/// The state strip's subagent rows, one per running `task` call
+/// (`(agent, prompt, progress, elapsed ms)`), at most [`STATE_QUEUED_ROWS`]
+/// before a `+N` row: `& agent: prompt` on the left and, at the right edge,
+/// what the subagent did last (or its wait for a slot), a spinner and its
+/// time. A block scrolled out of view stays in sight here while it runs.
+pub(crate) fn task_strip(
+    tasks: &[(String, String, String, u32)],
+    width: u16,
+    colors: &ThemeColors,
+) -> Vec<Line<'static>> {
+    let dim = Style::default().fg(colors.disabled);
+    let accent = Style::default().fg(colors.info);
+    let width = width as usize;
+    let cut = |text: &str, room: usize| termide_ui::path_utils::truncate_right(text, room);
+    let mut lines = Vec::new();
+    for (agent, prompt, progress, ms) in tasks.iter().take(STATE_QUEUED_ROWS) {
+        let frames = transcript::RUN_FRAMES;
+        let frame = (*ms / 120) as usize % frames.len();
+        let clock = format!(" {} {}", frames[frame], transcript::fmt_dur(*ms));
+        // What it does now takes at most a third of the row, so the task
+        // itself stays readable.
+        let progress = cut(progress, width / 3);
+        let right = if progress.is_empty() {
+            clock.clone()
+        } else {
+            format!(" {progress}{clock}")
+        };
+        let right_width = termide_ui::str_display_width(&right);
+        let head = format!("{agent}: {prompt}");
+        let room = width.saturating_sub(3 + right_width);
+        let body = cut(&head, room);
+        let used = 2 + termide_ui::str_display_width(&body) + right_width;
+        let mut spans = vec![
+            Span::styled("& ", accent),
+            Span::styled(body, Style::default().fg(colors.fg)),
+            Span::raw(" ".repeat(width.saturating_sub(used + 1))),
+        ];
+        if !progress.is_empty() {
+            spans.push(Span::styled(format!(" {progress}"), dim));
+        }
+        spans.push(Span::styled(
+            format!(" {}", frames[frame]),
+            accent.add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(format!(" {}", transcript::fmt_dur(*ms)), dim));
+        lines.push(Line::from(spans));
+    }
+    if tasks.len() > STATE_QUEUED_ROWS {
+        lines.push(Line::styled(
+            format!("& +{}", tasks.len() - STATE_QUEUED_ROWS),
+            dim,
+        ));
+    }
+    lines
+}
+
 /// An eight-cell fill bar for a 0–100 percentage, e.g. `▰▰▱▱▱▱▱▱` at 25%.
 /// Cells round to the nearest, so the bar never runs more than half a cell
 /// ahead of or behind the figure it stands beside.
@@ -120,6 +178,40 @@ impl AgentPanel {
             width,
             &self.colors,
         )
+    }
+
+    /// The running subagents for the state strip: each one's block index and
+    /// `(agent, prompt's first line, its latest progress line, elapsed ms)`.
+    /// The clock of each starts when it is first seen, and is dropped once
+    /// the call has returned.
+    pub(crate) fn running_task_rows(&mut self) -> Vec<(usize, (String, String, String, u32))> {
+        let now = Instant::now();
+        let mut seen = Vec::new();
+        let mut rows = Vec::new();
+        for (index, call, live) in self.transcript.running_tasks() {
+            let start = *self.task_clocks.entry(call.id.clone()).or_insert(now);
+            seen.push(call.id.clone());
+            let arg = |key: &str| call.arguments[key].as_str().unwrap_or("").to_string();
+            let prompt = arg("prompt");
+            let prompt = prompt
+                .lines()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let progress = live
+                .unwrap_or("")
+                .lines()
+                .rev()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let ms = now.duration_since(start).as_millis() as u32;
+            rows.push((index, (arg("agent"), prompt, progress, ms)));
+        }
+        self.task_clocks.retain(|id, _| seen.contains(id));
+        rows
     }
 
     /// The streaming block's live meta line: the same right-aligned zone a
@@ -669,6 +761,27 @@ impl AgentPanel {
         // transcript and the card, leaving the transcript at least one row.
         let text_width = area.width.saturating_sub(1).max(1);
         let mut state = self.state_lines(text_width);
+        // The subagents still running, closest to the input, so a block
+        // scrolled out of view does not hide that one works.
+        let task_items = self.running_task_rows();
+        let task_lines = task_strip(
+            &task_items
+                .iter()
+                .map(|(_, row)| row.clone())
+                .collect::<Vec<_>>(),
+            text_width,
+            &self.colors,
+        );
+        let tasks_from = if task_lines.is_empty() {
+            None
+        } else {
+            if state.is_empty() {
+                state.push(transcript::separator(text_width, &self.colors));
+            }
+            let from = state.len();
+            state.extend(task_lines);
+            Some(from)
+        };
         let room = area
             .height
             .saturating_sub(bar_rows + form_rows + u16::from(has_separator) + 1);
@@ -818,6 +931,18 @@ impl AgentPanel {
         for (row, line) in state.iter().enumerate() {
             buf.set_line(area.x, state_y + row as u16, line, text_width);
         }
+        // Each subagent row brings its block into view on a click.
+        self.task_rows = tasks_from
+            .map(|from| {
+                task_items
+                    .iter()
+                    .take(STATE_QUEUED_ROWS)
+                    .enumerate()
+                    .filter(|(i, _)| from + i < state.len())
+                    .map(|(i, (index, _))| (state_y + (from + i) as u16, *index))
+                    .collect()
+            })
+            .unwrap_or_default();
         // The strip's pending-pause line (after its rule) withdraws the pause
         // on a click.
         self.pause_row = (self.pause_requested && self.retry_wait.is_none() && state.len() > 1)

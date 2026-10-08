@@ -854,6 +854,12 @@ pub struct AgentPanel {
     /// The screen row of the state strip's pause line, a click target that
     /// continues the run.
     pause_row: Option<u16>,
+    /// When each running subagent (by its `task` call's id) was first seen,
+    /// for the state strip's clock.
+    task_clocks: HashMap<String, Instant>,
+    /// The screen rows of the state strip's subagent lines and the block
+    /// each stands for: a click brings the block into view.
+    task_rows: Vec<(u16, usize)>,
     /// The run controls last put on the prompt's border, in order, so a
     /// click maps back to one.
     run_buttons: Vec<RunButton>,
@@ -1115,6 +1121,8 @@ impl AgentPanel {
             resuming: false,
             permission_wait: None,
             pause_row: None,
+            task_clocks: HashMap::new(),
+            task_rows: Vec::new(),
             run_buttons: Vec::new(),
             queued_texts: VecDeque::new(),
             queued: (0, 0),

@@ -323,6 +323,21 @@ impl Transcript {
         }
     }
 
+    /// The `task` calls still running: each one's index, call and the
+    /// subagent's progress so far.
+    pub(crate) fn running_tasks(&self) -> Vec<(usize, &ToolCall, Option<&str>)> {
+        self.items
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| match item {
+                Item::Tool { call, live, .. } if call.name == "task" && is_live(item) => {
+                    Some((index, call, live.as_deref()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     #[must_use]
     pub fn items(&self) -> &[Item] {
         &self.items
