@@ -755,6 +755,12 @@ fn a_ctrl_click_on_a_url_follows_it() {
         matches!(events.as_slice(), [PanelEvent::OpenLink(LinkTarget::Url(url))] if url == "https://docs.rs"),
         "{events:?}"
     );
+    // Ctrl+Alt+click opens it outside instead.
+    let events = click(&mut panel, x, KeyModifiers::CONTROL | KeyModifiers::ALT);
+    assert!(
+        matches!(events.as_slice(), [PanelEvent::OpenLinkExternal(LinkTarget::Url(url))] if url == "https://docs.rs"),
+        "{events:?}"
+    );
     // A plain click selects the block instead, and Ctrl+click beside the URL
     // opens nothing.
     assert!(!opens(&click(&mut panel, x, KeyModifiers::NONE)));

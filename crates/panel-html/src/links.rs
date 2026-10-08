@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use termide_core::{LinkOpen, LinkTarget, PanelEvent};
+use termide_core::{LinkTarget, PanelEvent};
 
 use crate::HtmlPanel;
 
@@ -28,13 +28,12 @@ impl HtmlPanel {
         href.to_string()
     }
 
-    /// Follow a link. A same-page `#anchor` scrolls; inside a fetched page a
-    /// web link opened in the panel replaces the page in place, with history.
-    /// Anything else goes to the app as [`PanelEvent::OpenLink`], which opens
-    /// a link the same way from every panel (`open_links` and `open_images`
-    /// decide between a panel and the system opener); a scheme it does not
-    /// know (`mailto:`) goes to the system opener. `O` is the per-action
-    /// external override (handled by the caller).
+    /// Follow a link inside termide (`Enter`, a click). A same-page `#anchor`
+    /// scrolls; inside a fetched page a web link replaces the page in place,
+    /// with history. Anything else goes to the app as
+    /// [`PanelEvent::OpenLink`], which opens a link the same way from every
+    /// panel; a scheme it does not know (`mailto:`) goes to the system
+    /// opener. [`Self::activate_link_external`] is the outside twin.
     pub(crate) fn activate_link(&mut self, href: &str) -> Vec<PanelEvent> {
         if href.is_empty() {
             return vec![];
@@ -51,7 +50,7 @@ impl HtmlPanel {
         }
         let target = self.resolve(href);
         let is_web = target.starts_with("http://") || target.starts_with("https://");
-        if is_web && self.source_url.is_some() && self.open_links == LinkOpen::Panel {
+        if is_web && self.source_url.is_some() {
             self.history.truncate(self.hist_idx + 1);
             self.history.push(target.clone());
             self.hist_idx = self.history.len() - 1;
@@ -60,6 +59,28 @@ impl HtmlPanel {
         let base = self.file_path.parent().unwrap_or(std::path::Path::new("/"));
         match LinkTarget::from_href(&target, base) {
             Some(link) => vec![PanelEvent::OpenLink(link)],
+            None => vec![PanelEvent::OpenExternal(PathBuf::from(target))],
+        }
+    }
+
+    /// Open a link outside termide (`O`/`Alt+Enter`, `Alt+Click`): a web
+    /// address in the browser, a local file in its system application. A
+    /// same-page `#anchor` of a file-backed view has nowhere outside to go,
+    /// so it scrolls as a followed one does.
+    pub(crate) fn activate_link_external(&mut self, href: &str) -> Vec<PanelEvent> {
+        if href.is_empty() {
+            return vec![];
+        }
+        if href.starts_with('#') && self.source_url.is_none() {
+            return self.activate_link(href);
+        }
+        if termide_core::links::is_foreign_scheme(href) {
+            return vec![PanelEvent::OpenExternal(PathBuf::from(href))];
+        }
+        let target = self.resolve(href);
+        let base = self.file_path.parent().unwrap_or(std::path::Path::new("/"));
+        match LinkTarget::from_href(&target, base) {
+            Some(link) => vec![PanelEvent::OpenLinkExternal(link)],
             None => vec![PanelEvent::OpenExternal(PathBuf::from(target))],
         }
     }

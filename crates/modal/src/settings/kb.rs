@@ -174,7 +174,7 @@ pub(super) fn kb_binding_names(section: usize) -> &'static [&'static str] {
             "copy_row",
             "refresh",
         ],
-        8 => &["toggle_hex", "toggle_view"],
+        8 => &["toggle_hex", "toggle_view", "open_external"],
         _ => &[],
     }
 }
@@ -334,7 +334,13 @@ pub(super) fn get_kb_value(config: &Config, section: usize, name: &str) -> Strin
             copy_row,
             refresh
         ),
-        8 => kb_get!(config.viewer.keybindings, name, toggle_hex, toggle_view),
+        8 => kb_get!(
+            config.viewer.keybindings,
+            name,
+            toggle_hex,
+            toggle_view,
+            open_external
+        ),
         _ => String::new(),
     }
 }
@@ -562,7 +568,8 @@ pub(super) fn set_kb_value(config: &mut Config, section: usize, name: &str, valu
             name,
             value,
             toggle_hex,
-            toggle_view
+            toggle_view,
+            open_external
         ),
         _ => {}
     }

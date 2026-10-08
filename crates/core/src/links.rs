@@ -2,8 +2,10 @@
 //! the agent panel and the viewers share. A panel finds the link under the
 //! pointer — one a document marked up, or a web address or path written out
 //! in plain text — and hands its [`LinkTarget`] to the app in
-//! [`PanelEvent::OpenLink`](crate::PanelEvent::OpenLink), which opens it the
-//! same way whichever panel it came from.
+//! [`PanelEvent::OpenLink`](crate::PanelEvent::OpenLink), which opens it
+//! inside the same way whichever panel it came from, or in
+//! [`PanelEvent::OpenLinkExternal`](crate::PanelEvent::OpenLinkExternal) to
+//! open it outside (the browser, a system application).
 
 use std::ops::Range;
 use std::path::{Path, PathBuf};

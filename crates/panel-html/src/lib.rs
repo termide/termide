@@ -18,8 +18,8 @@ use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEven
 use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 
 use termide_core::{
-    CommandResult, Config, HotkeyTable, KeyChord, LinkOpen, Panel, PanelCommand, PanelEvent,
-    PanelState, RenderContext, SegmentKind, StatusSegment, Theme, ThemeColors, WidthPreference,
+    CommandResult, Config, HotkeyTable, KeyChord, Panel, PanelCommand, PanelEvent, PanelState,
+    RenderContext, SegmentKind, StatusSegment, Theme, ThemeColors, WidthPreference,
 };
 use termide_modal::FindBar;
 use termide_richtext::Rendered;
@@ -92,8 +92,6 @@ pub struct HtmlPanel {
     history: Vec<String>,
     /// Current position within `history`.
     hist_idx: usize,
-    /// Where a followed page/link opens by default (from config).
-    open_links: LinkOpen,
     /// Fragment to scroll to once content is (re)laid out — set when content
     /// loads from a URL carrying a `#fragment`.
     pending_anchor: Option<String>,
@@ -136,7 +134,6 @@ impl HtmlPanel {
             source_url: None,
             history: Vec::new(),
             hist_idx: 0,
-            open_links: LinkOpen::default(),
             pending_anchor: None,
             loading: None,
         }
@@ -364,8 +361,8 @@ impl Panel for HtmlPanel {
             self.last_config_ptr = ptr;
             let mut t = HotkeyTable::new();
             t.insert("toggle_view", &config.viewer.keybindings.toggle_view);
+            t.insert("open_external", &config.viewer.keybindings.open_external);
             self.hotkeys = t;
-            self.open_links = config.viewer.open_links;
         }
     }
 
@@ -526,6 +523,14 @@ impl Panel for HtmlPanel {
         if self.hotkeys.matches("toggle_view", &key) {
             return vec![PanelEvent::SwapActiveToText(self.file_path.clone())];
         }
+        // Open the link under the cursor outside termide (`O`/`Alt+Enter` by
+        // default), even where `Enter` would follow it in place.
+        if self.hotkeys.matches_canonical("open_external", &key) {
+            return match self.link_under_cursor().map(|l| l.url.clone()) {
+                Some(url) => self.activate_link_external(&url),
+                None => vec![],
+            };
+        }
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let page = (self.viewport_height() as i32 - 1).max(1);
@@ -584,14 +589,6 @@ impl Panel for HtmlPanel {
             KeyCode::Enter => {
                 if let Some(url) = self.link_under_cursor().map(|l| l.url.clone()) {
                     return self.activate_link(&url);
-                }
-                return vec![];
-            }
-            // Open the link under the cursor in the external browser, even when
-            // the viewer would otherwise navigate it in place.
-            KeyCode::Char('o') | KeyCode::Char('O') => {
-                if let Some(url) = self.link_under_cursor().map(|l| l.url.clone()) {
-                    return vec![PanelEvent::OpenExternal(PathBuf::from(self.resolve(&url)))];
                 }
                 return vec![];
             }
@@ -654,8 +651,14 @@ impl Panel for HtmlPanel {
                 self.anchor = None;
                 self.drag_from = Some(self.cursor);
                 if let Some(url) = self.link_at(line_idx, rel_col).map(|l| l.url.clone()) {
+                    // A click follows the link inside; Alt+Click opens it
+                    // outside, as `O` does.
                     let mut evs = vec![PanelEvent::NeedsRedraw];
-                    evs.extend(self.activate_link(&url));
+                    if event.modifiers.contains(KeyModifiers::ALT) {
+                        evs.extend(self.activate_link_external(&url));
+                    } else {
+                        evs.extend(self.activate_link(&url));
+                    }
                     return evs;
                 }
             }
@@ -793,7 +796,6 @@ mod tests {
             source_url: None,
             history: Vec::new(),
             hist_idx: 0,
-            open_links: LinkOpen::Panel,
             pending_anchor: None,
             loading: None,
         };
@@ -872,7 +874,7 @@ mod tests {
     #[test]
     fn file_backed_links_go_to_the_app() {
         // A web link from a file-backed view, and a local file, are the app's
-        // to open (by the open_links / open_images settings), not in place.
+        // to open (inside: a viewer, the image preview), not in place.
         let mut p = panel_from("<p>x</p>");
         let evs = p.activate_link("https://ex.com");
         assert!(
@@ -925,17 +927,46 @@ mod tests {
     }
 
     #[test]
-    fn external_setting_leaves_a_fetched_page_in_place() {
-        // With links set to open externally, a link in a fetched page goes to
-        // the app (the browser) instead of replacing the page.
-        let mut p = HtmlPanel::from_source("p".into(), "x".into(), Some("https://ex.com/a".into()));
-        p.open_links = LinkOpen::External;
-        let evs = p.activate_link("https://ex.com/b");
+    fn external_open_leaves_a_fetched_page_in_place() {
+        // `O`/`Alt+Click` on a link in a fetched page hands the resolved
+        // address to the browser instead of replacing the page.
+        let mut p =
+            HtmlPanel::from_source("p".into(), "x".into(), Some("https://ex.com/a/".into()));
+        let evs = p.activate_link_external("b");
         assert!(
-            matches!(evs.as_slice(), [PanelEvent::OpenLink(LinkTarget::Url(_))]),
+            matches!(evs.as_slice(), [PanelEvent::OpenLinkExternal(LinkTarget::Url(u))] if u == "https://ex.com/a/b"),
             "{evs:?}"
         );
         assert_eq!(p.history.len(), 1);
+        // A file link from a file-backed view goes to its system application.
+        let mut p = panel_from("<p>x</p>");
+        let evs = p.activate_link_external("/pics/logo.png");
+        assert!(
+            matches!(evs.as_slice(), [PanelEvent::OpenLinkExternal(LinkTarget::Path(p))] if p == std::path::Path::new("/pics/logo.png")),
+            "{evs:?}"
+        );
+        // A same-page anchor there has nowhere outside to go: it scrolls.
+        assert!(matches!(
+            p.activate_link_external("#x").as_slice(),
+            [PanelEvent::NeedsRedraw]
+        ));
+    }
+
+    #[test]
+    fn open_external_keys_match_o_and_alt_enter() {
+        // The default `viewer.keybindings.open_external` is the file manager's
+        // pair: `O` (the plain letter key) and `Alt+Enter`.
+        let mut kb = termide_config::ViewerKeybindings::default();
+        kb.with_defaults();
+        let mut t = HotkeyTable::new();
+        t.insert("open_external", &kb.open_external);
+        let key = |code, mods| crossterm::event::KeyEvent::new(code, mods);
+        assert!(t.matches(
+            "open_external",
+            &key(KeyCode::Char('o'), KeyModifiers::NONE)
+        ));
+        assert!(t.matches("open_external", &key(KeyCode::Enter, KeyModifiers::ALT)));
+        assert!(!t.matches("open_external", &key(KeyCode::Enter, KeyModifiers::NONE)));
     }
 
     #[test]

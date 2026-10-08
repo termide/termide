@@ -130,7 +130,8 @@ When the shell announces a directory, the announcement wins over the process.
 - **Double-click**: Select the word under the cursor; **triple-click**: select the whole line
 - **Scroll Wheel**: Scroll through terminal output history until the application inside the terminal enables mouse tracking. After that, the wheel is passed through to the application
 - **Ctrl+hover on a URL/path**: Highlight it — whole, across the rows it wraps over — and copy it to the clipboard. A path counts when it exists: absolute, `./`, `../` or `~/`; a `:line:col` after it is not part of it
-- **Ctrl+Click on URL/path**: Follow it as a viewer link opens (see [HTML preview](html.md)): a web address by `[viewer] open_links` — the built-in viewer by default, or the browser — a directory in the file manager, a file where **Open…** would open it
+- **Ctrl+Click on URL/path**: Follow it inside termide, as a viewer link opens (see [HTML preview](html.md)): a web address in the built-in viewer, a directory in the file manager, a file where **Open…** would open it
+- **Ctrl+Alt+Click on URL/path**: Open it outside — a web address in the browser, a file in its system application
 - **Ctrl+Click on hex color**: Show color preview popup (e.g. `#ff0000`, `#abc`) — visible while button is held, disappears on release
 - **Application Interaction**: If a console application (e.g., `htop` or `mc`) enables xterm mouse tracking, TermIDE gives it priority for click, drag, move, and wheel events inside the terminal content area
 

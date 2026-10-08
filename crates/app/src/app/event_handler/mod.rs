@@ -114,6 +114,10 @@ impl App {
                 self.event_open_link(link)?;
             }
 
+            PanelEvent::OpenLinkExternal(link) => {
+                self.event_open_link_external(link)?;
+            }
+
             PanelEvent::ViewHtml(path) => {
                 self.event_view_html(path)?;
             }

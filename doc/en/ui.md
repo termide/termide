@@ -76,7 +76,7 @@ The menu bar is located at the top of the window and includes: menu items on the
 Menu activation/deactivation and each item can be accessed by mouse click or [keyboard shortcuts](#keyboard-navigation-and-panel-management).
 
 **Menu items:**
-- `Bookmarks` — saved locations (directories, files, SSH, SFTP, web links). Opening one routes by type: directories and remote paths in the file manager, HTML/Markdown/Mermaid/image files and `http(s)` links in the built-in viewer (see [HTML preview](html.md); honours `[viewer] open_links`), other text files in the editor, SSH in a terminal, databases in the DB viewer. Clicking a group header toggles its submenu, as in Commands.
+- `Bookmarks` — saved locations (directories, files, SSH, SFTP, web links). Opening one routes by type: directories and remote paths in the file manager, HTML/Markdown/Mermaid/image files and `http(s)` links in the built-in viewer (see [HTML preview](html.md); `O` there hands a page on to the browser), other text files in the editor, SSH in a terminal, databases in the DB viewer. Clicking a group header toggles its submenu, as in Commands.
 - `Commands` — user-defined commands, project ones (bold) first, with group submenus; `Add command...` at the top creates one. Clicking a group header expands the submenu; clicking the same header again collapses it (toggle). See [Custom Commands](actions.md).
 - `Projects` — project management submenu:
   - New project — start a project in another directory

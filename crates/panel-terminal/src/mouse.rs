@@ -284,8 +284,14 @@ impl Terminal {
                 return vec![PanelEvent::NeedsRedraw];
             }
 
+            // Ctrl+Click follows the link inside termide; Ctrl+Alt+Click opens
+            // it outside (the browser, a system application).
             if let Some((link, _)) = &self.hovered_link {
-                return vec![PanelEvent::OpenLink(link.clone())];
+                return vec![if alt_pressed {
+                    PanelEvent::OpenLinkExternal(link.clone())
+                } else {
+                    PanelEvent::OpenLink(link.clone())
+                }];
             }
         }
 

@@ -915,11 +915,11 @@ impl HelpGenerator {
                 description: t.help_desc_viewer_copy().to_string(),
             },
             HelpEntry {
-                keys: "Enter".to_string(),
+                keys: "Enter / Click".to_string(),
                 description: t.help_desc_viewer_follow().to_string(),
             },
             HelpEntry {
-                keys: "O".to_string(),
+                keys: format!("{} / Alt+Click", Self::format_keys(&kb.open_external)),
                 description: t.help_desc_viewer_external().to_string(),
             },
             HelpEntry {

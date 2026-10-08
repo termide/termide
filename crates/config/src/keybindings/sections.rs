@@ -337,6 +337,10 @@ pub struct ViewerKeybindings {
     pub toggle_hex: Option<KeyBinding>,
     /// Toggle between rendered preview and source editing (markdown viewer).
     pub toggle_view: Option<KeyBinding>,
+    /// Open the link under the cursor outside termide — a web address in the
+    /// browser, a file in its system application (HTML/Markdown viewers).
+    /// `Enter` and a click follow it inside; `Alt+Click` is the mouse twin.
+    pub open_external: Option<KeyBinding>,
 }
 
 impl ViewerKeybindings {
@@ -352,6 +356,9 @@ impl ViewerKeybindings {
 
         set_default!(toggle_hex, "Ctrl+L");
         set_default!(toggle_view, "Ctrl+E");
+        if self.open_external.is_none() {
+            self.open_external = Some(KeyBinding::Multiple(vec!["O".into(), "Alt+Enter".into()]));
+        }
     }
 }
 

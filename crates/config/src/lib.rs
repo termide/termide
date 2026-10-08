@@ -30,7 +30,7 @@ pub use settings::{is_cli_provider, permission_modes};
 pub use settings::{
     AiSettings, Config, Connection, CustomLanguage, DatabaseSettings, EditorSettings,
     FileManagerSettings, FoldBlocks, GeneralSettings, GitDiffSettings, GitLogSettings,
-    GitStatusSettings, HighlightSettings, IconMode, LegacyConfig, LinkOpen, LoggingSettings,
+    GitStatusSettings, HighlightSettings, IconMode, LegacyConfig, LoggingSettings,
     LspServerSettings, LspSettings, ReasoningParam, RecallSettings, SideModel, TerminalSettings,
     VaultSettings, VfsSettings, ViewerSettings, WebSettings, DEFAULT_CONTEXT_WINDOW_FALLBACK,
 };

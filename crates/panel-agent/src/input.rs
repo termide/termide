@@ -1284,12 +1284,17 @@ impl AgentPanel {
                     return vec![PanelEvent::NeedsRedraw];
                 }
                 self.text_selection = None;
-                // Ctrl+click follows a link, as it does in the terminal
-                // panel; the app opens it the same way from every panel.
+                // Ctrl+click follows a link inside, Ctrl+Alt+click opens it
+                // outside, as in the terminal panel; the app opens it the
+                // same way from every panel.
                 if event.modifiers.contains(KeyModifiers::CONTROL) {
                     if let Some((target, _)) = self.link_under(press) {
                         self.hovered_link = None;
-                        return vec![PanelEvent::OpenLink(target)];
+                        return vec![if event.modifiers.contains(KeyModifiers::ALT) {
+                            PanelEvent::OpenLinkExternal(target)
+                        } else {
+                            PanelEvent::OpenLink(target)
+                        }];
                     }
                 }
                 return self.click_line(press.line);

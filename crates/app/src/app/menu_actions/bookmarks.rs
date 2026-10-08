@@ -627,14 +627,10 @@ impl App {
                 }
             }
             BookmarkType::HttpLink => {
-                // Open in the built-in viewer (text-mode browse) unless the user
-                // configured links to open in the system browser.
-                if self.state.config.viewer.open_links == termide_core::LinkOpen::External {
-                    self.open_external_detached(path);
-                } else {
-                    self.close_help_panels();
-                    self.start_url_fetch(path.to_string());
-                }
+                // Open in the built-in viewer (text-mode browse); `O` there
+                // hands the page on to the browser.
+                self.close_help_panels();
+                self.start_url_fetch(path.to_string());
             }
             BookmarkType::SftpPath
             | BookmarkType::FtpPath

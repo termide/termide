@@ -63,11 +63,12 @@ The preview has a movable cursor and supports text selection:
   typed path or `http(s)://` URL in the matching viewer (see the
   [HTML preview](html.md) for the URL-fetch policy).
 - Mouse wheel scrolls.
-- **Follow a link** (click or `Enter`): web links open in the viewer by default,
+- **Follow a link** (click or `Enter`): web links open in the viewer,
   image links in the image preview, a link to another local file in the viewer
   for its type (a sibling `.md` in this preview), and `#heading` anchors jump
   within the page.
-  `O` opens the link externally; `[`/`]` are history back/forward. See the
-  [HTML preview](html.md) for the link-open settings and fetch policy.
+  `O`, `Alt+Enter` or `Alt+Click` opens the link outside (the browser, a
+  system application); `[`/`]` are history back/forward. See the
+  [HTML preview](html.md) for the details and the fetch policy.
 
 The panel is saved with the project layout and reopens at the same file.

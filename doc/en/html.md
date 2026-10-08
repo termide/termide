@@ -61,20 +61,21 @@ The preview has a movable cursor and supports text selection:
   matching viewer (HTML, Markdown, image, or text) — a quick jump to a sibling
   file, or a basic text-mode browse of a web page (see *Fetching URLs* below).
 - Mouse wheel scrolls.
-- **Follow a link** — click it, or press `Enter` with the cursor on it. By
-  default links open **in the panel**: a fetched (URL-backed) page navigates in
-  place (relative links resolve against the page URL), a web link from a
-  file-backed view opens in a new viewer, and a link to an **image** opens in
-  the image preview. Two settings choose the default destination —
-  `[viewer] open_links` for pages and `[viewer] open_images` for image links —
-  each `panel` (default) or `external`. A link to a local file opens it where
-  **Open…** would — a Markdown or HTML file in its viewer, any other text
-  file in the read-only editor — and a directory opens in the file manager; a
-  `mailto:` link goes to the system's handler. A link followed with `Ctrl+Click`
-  in the [terminal](terminal.md) or the [agent panel](agent.md) opens by the
-  same rules.
-- **`O`** always opens the link under the cursor in the external browser
-  (regardless of the setting).
+- **Follow a link** — click it, or press `Enter` with the cursor on it. A link
+  opens **inside termide**: a fetched (URL-backed) page navigates in place
+  (relative links resolve against the page URL), a web link from a file-backed
+  view opens in a new viewer, and a link to an **image** opens in the image
+  preview. A link to a local file opens it where **Open…** would — a Markdown
+  or HTML file in its viewer, any other text file in the read-only editor —
+  and a directory opens in the file manager; a `mailto:` link goes to the
+  system's handler. A link followed with `Ctrl+Click` in the
+  [terminal](terminal.md) or the [agent panel](agent.md) opens by the same
+  rules.
+- **Open a link outside** — **`O`** or **`Alt+Enter`** on the link under the
+  cursor, or **`Alt+Click`** on it: a web address opens in the browser, a file
+  or image in its system application, as `O`/`Alt+Enter` do in the file
+  manager. The keys are `[viewer.keybindings] open_external`. (Some terminals
+  take `Alt`/`Option`+click for themselves; the keys always work.)
 - **`[` / `]`** (or **`Backspace`** for back) step back / forward through the
   page history of a navigated view.
 - **Anchor links** (`#section`) jump within the page (to the matching `id`);
@@ -112,7 +113,7 @@ bounded — this is a reader, not a browser engine:
 Links inside a fetched page are followed **in place** (`Enter`/click), with
 relative links resolved against the page URL and `[`/`]` (or `Backspace`) for
 history; the page stays, its title spinning with the new URL, until the next
-one arrives; `O` opens a link in the real browser instead. URL-loaded views are not
+one arrives; `O`/`Alt+Enter`/`Alt+Click` opens a link in the real browser instead. URL-loaded views are not
 restored with the project layout.
 
 A file-backed panel is saved with the project layout and reopens at the same file.

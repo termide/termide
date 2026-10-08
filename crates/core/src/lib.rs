@@ -53,5 +53,4 @@ pub use termide_keyboard::{KeyNormalizer, KeyboardCaps};
 
 // Re-export theme and config for convenience
 pub use termide_config::Config;
-pub use termide_config::LinkOpen;
 pub use termide_theme::Theme;

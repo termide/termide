@@ -546,11 +546,17 @@ pub enum PanelEvent {
     NavigateUrl(String),
 
     /// Follow a link the user clicked — in the terminal, the agent panel or a
-    /// viewer. The app opens it the same way from any panel: a web address
-    /// by the `open_links` setting (a viewer panel or the browser), a
-    /// directory in the file manager, a file by its type as Open… does, an
-    /// image by the `open_images` setting.
+    /// viewer. The app opens it inside, the same way from any panel: an
+    /// `http(s)` address fetched into a viewer (an `ftp://` one in the
+    /// browser, as the viewer cannot fetch it), a directory in the file
+    /// manager, a file by its type as Open… does.
     OpenLink(crate::links::LinkTarget),
+
+    /// Open a link outside termide — a web address in the browser, a local
+    /// path in its system application. The explicit "external" twin of
+    /// [`PanelEvent::OpenLink`]: `O`/`Alt+Enter`/`Alt+Click` in a viewer,
+    /// `Ctrl+Alt+Click` in the terminal and the agent panel.
+    OpenLinkExternal(crate::links::LinkTarget),
 
     /// Open an `.html` file in the rendered HTML viewer (read-only)
     ViewHtml(PathBuf),
