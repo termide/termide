@@ -2222,6 +2222,10 @@ impl Shared {
                         }
                         self.note_host_call(&call);
                         self.start_tool_call(tool_call_of(&call));
+                    } else if has_arguments(update) {
+                        // Claude Code streams the raw input: the call started
+                        // on its first keys, and later updates bring the rest.
+                        self.update_tool_arguments(id, update);
                     }
                 }
                 if is_finished(update) {
@@ -2293,6 +2297,53 @@ impl Shared {
         let mut calls = self.calls.lock().unwrap_or_else(PoisonError::into_inner);
         calls.unlogged.push(call.clone());
         calls.open.push(call);
+    }
+
+    /// Take the fuller raw input of a running call: its log entry, the
+    /// arguments a call of termide's own tool is known by, and the shown
+    /// block. Nothing happens for a call not started or with nothing new.
+    fn update_tool_arguments(&self, id: &str, update: &Value) {
+        let input = &update["rawInput"];
+        let call = {
+            let mut calls = self.calls.lock().unwrap_or_else(PoisonError::into_inner);
+            let Some(open) = calls.open.iter_mut().find(|call| call.id == id) else {
+                return;
+            };
+            let mut host_calls = self
+                .host_calls
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let arguments = match host_calls.get_mut(id) {
+                // termide's own tool: the raw input is its arguments, or
+                // carries them when Codex names the server and the tool.
+                Some((_, known)) => {
+                    let fresh = match host_tool_of(update) {
+                        Some((_, arguments)) => arguments,
+                        None => input.clone(),
+                    };
+                    *known = fresh.clone();
+                    fresh
+                }
+                // The agent's own tool keeps the title beside its raw input.
+                None => {
+                    let mut arguments = open.arguments.clone();
+                    for (key, value) in input.as_object().into_iter().flatten() {
+                        arguments[key] = value.clone();
+                    }
+                    arguments
+                }
+            };
+            if arguments == open.arguments {
+                return;
+            }
+            open.arguments = arguments.clone();
+            let shown = open.clone();
+            if let Some(unlogged) = calls.unlogged.iter_mut().find(|call| call.id == id) {
+                unlogged.arguments = arguments;
+            }
+            shown
+        };
+        let _ = self.events.send(AgentEvent::ToolCallUpdate { call });
     }
 
     /// Log the calls started and not yet logged, as one assistant message.
@@ -3195,6 +3246,59 @@ mod tests {
         let ended = ended.expect("the call ends");
         assert_eq!(ended.tool_name, "echo");
         assert_eq!(ended.details, Some(json!({ "said": "echoed" })));
+    }
+
+    #[test]
+    fn a_call_whose_raw_input_streams_shows_and_logs_it_in_full() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, _seen) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::ClaudeCode,
+            None,
+            ModeHandle::new(Mode::default()),
+        );
+        // Claude Code sends the raw input as it parses: the first key alone,
+        // then the rest. The call starts on the first and fills in after.
+        let shared = &runtime.shared;
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call", "toolCallId": "t1", "kind": "other",
+            "status": "pending", "title": "mcp__termide__task", "rawInput": {},
+        }));
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "t1",
+            "rawInput": { "agent": "default" },
+        }));
+        let full = json!({ "agent": "default", "prompt": "check the diff" });
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "t1", "rawInput": full,
+        }));
+        // The same input again changes nothing, so it says nothing.
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "t1", "rawInput": full,
+        }));
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed",
+            "content": [{ "type": "content", "content": { "type": "text", "text": "done" } }],
+        }));
+        let events = runtime.drain();
+        let updates: Vec<&ToolCall> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::ToolCallUpdate { call } => Some(call),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(updates.len(), 1, "{events:?}");
+        assert_eq!(updates[0].name, "task");
+        assert_eq!(updates[0].arguments, full);
+        let logged = events.iter().find_map(|e| match e {
+            AgentEvent::MessageEnd(Message::Assistant(message)) => match &message.content[..] {
+                [AssistantContent::ToolCall(call)] => Some(call.arguments.clone()),
+                _ => None,
+            },
+            _ => None,
+        });
+        assert_eq!(logged, Some(full), "{events:?}");
     }
 
     #[test]

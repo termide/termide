@@ -431,7 +431,7 @@ command (dim, wrapped to the width), a file tool with its path
 the query (`↓ Fetching https://docs.rs`, `? Searching ratatui scrollbar`), a
 skill with its name and arguments (`/ Using skill review src/x.rs`), a
 subagent with its name and the first line of the task (`& Delegating to
-reviewer: check the diff`), an MCP tool with its server, name and arguments as
+reviewer · check the diff`), an MCP tool with its server, name and arguments as
 `key=value` (`* Using MCP github: create_issue title=Crash`); any other tool
 as its name and a summary. The reasoning is its own block above the
 answer, and its text wraps to the width. Only the system prompt

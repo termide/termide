@@ -426,6 +426,12 @@ pub enum AgentEvent {
     ToolExecutionStart {
         call: ToolCall,
     },
+    /// A started call's arguments grew: a backend that streams them (Claude
+    /// Code over ACP) shows the call on its first keys and fills in the rest
+    /// as they arrive. `call` carries the same id and the arguments so far.
+    ToolCallUpdate {
+        call: ToolCall,
+    },
     ToolExecutionUpdate {
         tool_call_id: String,
         update: ToolUpdate,

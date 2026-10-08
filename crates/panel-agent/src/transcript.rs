@@ -1634,7 +1634,9 @@ fn tool_headline(
             action(
                 "&",
                 t.agent_tool_task(),
-                format!("{}: {}", arg("agent"), first.trim()),
+                // A middle dot, not a colon: `default:` alone on a row read as
+                // a cut-off phrase.
+                format!("{} · {}", arg("agent"), first.trim()),
             )
         }
         "question" => {
@@ -2489,7 +2491,7 @@ mod tests {
                 "task",
                 json!({ "agent": "reviewer", "prompt": "\ncheck the diff\nthen report" })
             ),
-            "& Delegating to reviewer: check the diff"
+            "& Delegating to reviewer · check the diff"
         );
         assert_eq!(
             headline(
@@ -3565,7 +3567,7 @@ mod tests {
             .join(" ");
         assert!(joined.ends_with("which ones skip validation"), "{rows:?}");
         // Continuation rows line up under the subject, past the action.
-        let indent = rows[0].find("clear:").unwrap();
+        let indent = rows[0].find("clear ·").unwrap();
         let indent = width_of(&rows[0][..indent]);
         assert!(rows[1].starts_with(&" ".repeat(indent)), "{rows:?}");
     }

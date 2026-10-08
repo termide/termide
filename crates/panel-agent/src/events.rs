@@ -337,6 +337,13 @@ impl AgentPanel {
                     waiting: false,
                 });
             }
+            AgentEvent::ToolCallUpdate { call: fuller } => {
+                self.transcript.with_tool(&fuller.id.clone(), |item| {
+                    if let Item::Tool { call, .. } = item {
+                        *call = fuller;
+                    }
+                });
+            }
             AgentEvent::ToolExecutionUpdate {
                 tool_call_id,
                 update: ToolUpdate::Output(output),

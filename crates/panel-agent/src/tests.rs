@@ -1243,6 +1243,34 @@ fn activity_follows_the_events_and_totals_accumulate() {
 }
 
 #[test]
+fn a_call_update_fills_in_the_shown_calls_arguments() {
+    let mut panel = panel(vec![]);
+    let call = |arguments: serde_json::Value| termide_agent_core::ToolCall {
+        id: "t1".into(),
+        name: "task".into(),
+        arguments,
+        extra_content: None,
+    };
+    panel.apply(AgentEvent::ToolExecutionStart {
+        call: call(serde_json::json!({ "agent": "default" })),
+    });
+    let full = serde_json::json!({ "agent": "default", "prompt": "check the diff" });
+    panel.apply(AgentEvent::ToolCallUpdate {
+        call: call(full.clone()),
+    });
+    let shown = panel
+        .transcript()
+        .items()
+        .iter()
+        .find_map(|item| match item {
+            Item::Tool { call, .. } => Some(call.arguments.clone()),
+            _ => None,
+        });
+    assert_eq!(shown, Some(full));
+    assert_eq!(panel.transcript().items().len(), 1);
+}
+
+#[test]
 fn the_live_footer_shows_generation_meta_and_a_clock() {
     let text_of = |panel: &AgentPanel| -> Vec<String> {
         panel
