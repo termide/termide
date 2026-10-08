@@ -156,7 +156,9 @@ endpoint, the panel drives that tool's own CLI as an
 [external agent](#external-agents) over ACP
 (`@agentclientprotocol/claude-agent-acp` / `@agentclientprotocol/codex-acp`
 / `@google/gemini-cli --acp`, the latest release, run through
-`npx`). The CLI owns the endpoint and the sign-in — its own subscription or
+`npx`; the copy in npm's cache starts without asking the registry, and
+TermIDE looks for a newer release once per run in the background, so a new
+one starts from the next panel on). The CLI owns the endpoint and the sign-in — its own subscription or
 API key — so the connection's `base_url`, `api_key_env` and context window do
 not apply; the settings modal hides them for these providers and clears them
 from the file. `model` is

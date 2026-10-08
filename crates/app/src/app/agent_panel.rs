@@ -1957,9 +1957,17 @@ fn cli_acp_config(provider: &str) -> Option<AcpConfig> {
     // old adapter lists old models (and none at all, for Codex). A power
     // user who wants a pinned binary can point an agent's own `command` at it
     // and pick a compatible provider instead.
+    //
+    // `--prefer-offline` takes what `@latest` meant at the last look from
+    // npm's cache instead of asking the registry at every start, which cost
+    // seconds per panel, side call and subagent, and over a minute with the
+    // registry out of reach. The look is taken once per process, off the
+    // thread, so the next start runs the new release.
+    #[cfg(not(test))]
+    refresh_adapter(package);
     Some(AcpConfig {
         command: "npx".to_string(),
-        args: ["-y", package]
+        args: ["-y", "--prefer-offline", package]
             .into_iter()
             .chain(flag)
             .map(str::to_string)
@@ -1968,6 +1976,70 @@ fn cli_acp_config(provider: &str) -> Option<AcpConfig> {
         timeout_secs: 120,
         flavor,
     })
+}
+
+/// Once per process for each adapter `package`, refresh npm's idea of its
+/// `@latest` and fetch a newer release into npx's cache, for the starts that
+/// [`cli_acp_config`] makes with `--prefer-offline`. Off the thread and after
+/// a delay, so it neither holds up nor races the install of the start that
+/// asked for it; a refresh that hangs is killed.
+#[cfg(not(test))]
+fn refresh_adapter(package: &'static str) {
+    use std::collections::HashSet;
+    use std::process::{Command, Stdio};
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    const DELAY: Duration = Duration::from_secs(60);
+    const LIMIT: Duration = Duration::from_secs(300);
+    static REFRESHED: Mutex<Option<HashSet<&'static str>>> = Mutex::new(None);
+
+    let first = REFRESHED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get_or_insert_with(HashSet::new)
+        .insert(package);
+    if !first {
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("termide-adapter-refresh".into())
+        .spawn(move || {
+            std::thread::sleep(DELAY);
+            // The spec must match the starts' so npx keeps one install;
+            // `--version` makes the adapter exit once it is in place.
+            let child = Command::new("npx")
+                .args(["-y", "--prefer-online", package, "--version"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
+            let mut child = match child {
+                Ok(child) => child,
+                Err(error) => {
+                    log::warn!("cannot refresh {package}: {error}");
+                    return;
+                }
+            };
+            let deadline = Instant::now() + LIMIT;
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_)) => return,
+                    Ok(None) if Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_secs(1));
+                    }
+                    _ => {
+                        log::warn!("refreshing {package} took too long; stopped");
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return;
+                    }
+                }
+            }
+        });
+    if let Err(error) = spawned {
+        log::warn!("cannot refresh {package}: {error}");
+    }
 }
 
 /// Start an off-thread `list_models` for the settings modal's model dropdown
