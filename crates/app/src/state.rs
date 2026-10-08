@@ -462,11 +462,14 @@ impl AppState {
         sessions
             .into_iter()
             .map(|s| {
-                DropdownItem::new(s.label(), format!("session:{}", s.path.to_string_lossy()))
-                    .with_prefix(
-                        "",
-                        format!("{}  ", termide_panel_agent::local_minute(s.modified)),
-                    )
+                DropdownItem::new(
+                    s.display_label(),
+                    format!("session:{}", s.path.to_string_lossy()),
+                )
+                .with_prefix(
+                    "",
+                    format!("{}  ", termide_panel_agent::local_minute(s.modified)),
+                )
             })
             .collect()
     }

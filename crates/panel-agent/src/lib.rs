@@ -22,6 +22,7 @@ mod slash;
 mod submit;
 mod toolset;
 mod transcript;
+mod unfinished;
 
 use std::any::Any;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
@@ -34,7 +35,7 @@ use crossterm::event::MouseEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use termide_agent_core::{
-    Backend, BackendModel, BackendOption, BackendSetup, CancelToken, CheckpointStore,
+    Autorun, Backend, BackendModel, BackendOption, BackendSetup, CancelToken, CheckpointStore,
     CommandScript, CompactionPolicy, CompactionPrompts, Decision, Failure, GoalPrompt,
     HandoffPrompt, Hooks, LateTools, LimitPolicy, McpReload, McpServerState, Mode, ModeHandle,
     ModelInfo, ModelSpec, PermissionEnvelope, PermissionRules, PersistScope, PlanPrompt,
@@ -542,6 +543,9 @@ struct LoopTask {
     interval: Option<Duration>,
     /// When the next iteration is due; `None` while a run is in flight.
     next_at: Option<Instant>,
+    /// The same as wall-clock epoch millis while an interval is waited out,
+    /// for the log: a reopen waits only what is left.
+    due_ms: Option<u64>,
     iterations: usize,
 }
 
@@ -846,6 +850,16 @@ pub struct AgentPanel {
     /// A `/continue` resumed the paused run, so the next `AgentStart` keeps
     /// the run's start and its clock goes on from the request.
     resuming: bool,
+    /// The pause was taken up from the log: the panel or termide closed
+    /// while work was under way; how `/continue` carries it on.
+    restored: Option<unfinished::Restored>,
+    /// The unattended work the session's log records last, so a change is
+    /// written once.
+    logged_autorun: Autorun,
+    /// A run started and its start is not in the log yet: it is written
+    /// after the run's first message, so the message hangs off where the
+    /// request started, as `/undo` and the rewind list expect.
+    run_start_due: bool,
     /// When the current permission question (or the model's question to the
     /// user) went up, and how long the
     /// running call had already waited before it: the wait is a pause of
@@ -1119,6 +1133,9 @@ impl AgentPanel {
             stop_requested: false,
             pause_start: None,
             resuming: false,
+            restored: None,
+            logged_autorun: Autorun::default(),
+            run_start_due: false,
             permission_wait: None,
             pause_row: None,
             task_clocks: HashMap::new(),
@@ -1148,6 +1165,7 @@ impl AgentPanel {
         panel.notice_slash_conflicts();
         panel.notice_definition_problems();
         panel.refresh_recent_sessions();
+        panel.restore_unfinished();
         panel
     }
 
@@ -1233,6 +1251,7 @@ impl Drop for AgentPanel {
     /// Closing the panel discards its session when it was never used, so an
     /// empty session leaves nothing behind in the list or on disk.
     fn drop(&mut self) {
+        self.sync_autorun();
         if let Some(session) = self.session.take() {
             discard_if_empty(session);
         }
@@ -1486,7 +1505,7 @@ impl Panel for AgentPanel {
                         format!(
                             "{mark}{} · {}",
                             crate::runtime::local_minute(summary.modified),
-                            truncate_title(&summary.label())
+                            truncate_title(&summary.display_label())
                         )
                     })
                     .collect();
@@ -1549,6 +1568,14 @@ impl Panel for AgentPanel {
 
     fn handle_key(&mut self, chord: KeyChord) -> Vec<PanelEvent> {
         self.on_key(chord)
+    }
+
+    /// Closing cuts off work under way: a run, or a goal or loop going. It
+    /// can be carried on when the session is opened again, but the user
+    /// should know it stops.
+    fn needs_close_confirmation(&self) -> Option<String> {
+        self.work_under_way()
+            .then(|| termide_i18n::t().agent_close_confirm_working().to_string())
     }
 
     fn captures_escape(&self) -> bool {

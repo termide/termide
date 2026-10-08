@@ -570,7 +570,7 @@ impl AgentPanel {
             // dim.
             let line = Line::from(vec![
                 Span::styled(format!("{}  ", local_minute(summary.modified)), dim),
-                Span::styled(truncate_title(&summary.label()), link),
+                Span::styled(truncate_title(&summary.display_label()), link),
             ]);
             doc.push((line, list_x, list_w, Some(BannerHit::Session(index))));
         }

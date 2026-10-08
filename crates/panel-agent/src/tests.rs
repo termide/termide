@@ -8,11 +8,12 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventK
 use ratatui::style::Modifier;
 use ratatui::text::Line;
 use termide_agent_core::{
-    permission_channel, question_channel, suggestion_channel, Agent, AgentEvent, AssistantContent,
-    AssistantMessage, CancelToken, EntryKind, LimitPolicy, Message, PermissionAnswer,
-    PermissionPrompter, QuestionAnswer, QuestionReply, Request, ShellOutput, ShellRunner,
-    StopReason, StreamEvent, Suggestion, SuggestionReply, ThinkingLevel, Timing, ToolCall,
-    ToolContext, ToolDecision, ToolResultMessage, ToolUpdate, Usage, UserMessage, MODEL_OPTION,
+    now_millis, permission_channel, question_channel, suggestion_channel, Agent, AgentEvent,
+    AssistantContent, AssistantMessage, Autorun, CancelToken, EntryKind, GoalRecord, LastRun,
+    LimitPolicy, LoopRecord, Message, PermissionAnswer, PermissionPrompter, QuestionAnswer,
+    QuestionReply, Request, ShellOutput, ShellRunner, StopReason, StreamEvent, Suggestion,
+    SuggestionReply, ThinkingLevel, Timing, ToolCall, ToolContext, ToolDecision, ToolResultMessage,
+    ToolUpdate, Usage, UserMessage, MODEL_OPTION,
 };
 use termide_core::{ConfirmAction, LinkTarget, PanelConfig, SegmentKind};
 use termide_ui::{ChoiceAction, ChoiceForm};
@@ -23,6 +24,7 @@ use crate::render::context_bar;
 use crate::runtime::{push_history, session_model};
 use crate::submit::{parse_duration, parse_loop_args, slash_command};
 use crate::toolset::{Blocked, ToolsetGuard, TOOLSET_ACTION};
+use crate::unfinished::Restored;
 
 /// Replays one scripted assistant message per model call and records
 /// which model each call asked for.
@@ -8210,4 +8212,344 @@ fn running_subagents_show_in_the_state_strip() {
     let lines = crate::render::task_strip(&(1..=5).map(row).collect::<Vec<_>>(), 80, &colors);
     assert_eq!(lines.len(), 4);
     assert_eq!(text(&lines[3]), "& +2");
+}
+
+/// A session log in `dir` holding one request, as the panel would have left
+/// it; `finish` writes what followed it.
+fn logged_request(dir: &Path, finish: impl FnOnce(&mut Session)) -> PathBuf {
+    let mut session = Session::create(dir, Path::new("/tmp")).unwrap();
+    session
+        .append_message(&Message::User(UserMessage::text("build it")))
+        .unwrap();
+    finish(&mut session);
+    session.path().to_path_buf()
+}
+
+fn reopen(path: &Path, dir: &Path, replies: Vec<AssistantMessage>) -> AgentPanel {
+    AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.to_path_buf()),
+        session: Some(Session::open_exclusive(path).unwrap()),
+        ..setup(replies)
+    })
+}
+
+/// The carry-on card's detail, failing when no such card is up.
+fn carry_on_card(panel: &AgentPanel) -> String {
+    match &panel.pending {
+        Some(Pending::Unfinished { form }) => {
+            assert_eq!(form.title(), termide_i18n::t().agent_unfinished_title());
+            form.detail().unwrap_or_default().to_string()
+        }
+        _ => panic!("no carry-on card"),
+    }
+}
+
+fn reply_calling(call: ToolCall) -> AssistantMessage {
+    AssistantMessage {
+        content: vec![AssistantContent::ToolCall(call)],
+        stop_reason: StopReason::ToolUse,
+        ..reply("")
+    }
+}
+
+#[test]
+fn a_run_cut_off_by_closing_is_asked_about_when_reopened() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = logged_request(dir.path(), |session| {
+        session.append_run_start().unwrap();
+    });
+    let mut panel = reopen(&path, dir.path(), vec![reply("built")]);
+    assert!(panel.paused);
+    assert_eq!(panel.restored, Some(Restored::Resume));
+    assert!(carry_on_card(&panel).contains(
+        &termide_i18n::t().agent_unfinished_run_cut_fmt(termide_i18n::t().time_just_now())
+    ));
+    assert!(panel.attention, "the panel asks to be looked at");
+    // The run's line says it was cut off.
+    assert!(matches!(
+        panel.transcript().items().last(),
+        Some(Item::RunEnd { cut: true, .. })
+    ));
+    // Nothing runs on its own.
+    panel.tick();
+    assert!(!panel.is_busy());
+
+    // Continue on the card resumes the run.
+    panel.apply_form_action(ChoiceAction::Chosen(0));
+    settle(&mut panel);
+    assert!(panel
+        .transcript()
+        .items()
+        .iter()
+        .any(|i| matches!(i, Item::Assistant { text, .. } if text == "built")));
+    assert!(!panel.paused);
+    assert_eq!(panel.session.as_ref().unwrap().last_run(), LastRun::Ended);
+}
+
+#[test]
+fn a_call_a_cut_off_run_left_is_closed_not_run_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let call = ToolCall {
+        id: "c1".into(),
+        name: "bash".into(),
+        arguments: serde_json::json!({ "command": "git push" }),
+        extra_content: None,
+    };
+    let path = logged_request(dir.path(), |session| {
+        session.append_run_start().unwrap();
+        session
+            .append_message(&Message::Assistant(reply_calling(call.clone())))
+            .unwrap();
+    });
+    let mut panel = reopen(&path, dir.path(), vec![reply("checked first")]);
+    // The call has its result already, saying it may have run in part.
+    let results: Vec<String> = panel
+        .session
+        .as_ref()
+        .unwrap()
+        .context_messages()
+        .iter()
+        .filter_map(|m| match m {
+            Message::ToolResult(r) if r.tool_call_id == "c1" => Some(r.plain_text()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(results.len(), 1);
+    assert!(results[0].contains("may have run in part"), "{results:?}");
+    panel.apply_form_action(ChoiceAction::Chosen(0));
+    settle(&mut panel);
+    // The model answered the result; nothing ran the call again.
+    let logged = panel.session.as_ref().unwrap().context_messages();
+    let results = logged
+        .iter()
+        .filter(|m| matches!(m, Message::ToolResult(r) if r.tool_call_id == "c1"))
+        .count();
+    assert_eq!(results, 1);
+    assert!(
+        matches!(logged.last(), Some(Message::Assistant(a)) if a.plain_text() == "checked first")
+    );
+}
+
+#[test]
+fn a_finished_run_reopens_idle() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = logged_request(dir.path(), |session| {
+        session.append_run_start().unwrap();
+        session
+            .append_message(&Message::Assistant(reply("done")))
+            .unwrap();
+    });
+    // Its end was never written, but its reply came in whole.
+    let panel = reopen(&path, dir.path(), vec![]);
+    assert!(!panel.paused);
+    assert!(panel.restored.is_none());
+    assert!(panel.pending.is_none());
+    assert!(panel.run_buttons().is_empty());
+}
+
+#[test]
+fn a_goal_left_going_is_judged_again_on_continue() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = logged_request(dir.path(), |session| {
+        session.append_run_start().unwrap();
+        session
+            .append_message(&Message::Assistant(reply("halfway")))
+            .unwrap();
+        session.append_run_end(false).unwrap();
+        session
+            .append_autorun(&Autorun {
+                goal: Some(GoalRecord {
+                    goal: "build it".into(),
+                    iterations: 3,
+                }),
+                repeat: None,
+            })
+            .unwrap();
+    });
+    let mut panel = reopen(&path, dir.path(), vec![reply("DONE\nit builds")]);
+    // The run itself ended: only the goal waits to go on.
+    assert_eq!(panel.restored, Some(Restored::Autorun));
+    assert_eq!(panel.goal_task.as_ref().map(|t| t.iterations), Some(3));
+    assert!(
+        carry_on_card(&panel).contains(&termide_i18n::t().agent_unfinished_goal_fmt(
+            "build it",
+            3,
+            GOAL_MAX_ITERATIONS
+        ))
+    );
+    // Decide later: the card goes, the pause stays.
+    panel.apply_form_action(ChoiceAction::Cancelled);
+    assert!(panel.pending.is_none());
+    assert!(panel.paused);
+    panel.tick();
+    assert!(
+        panel.goal_task.is_some(),
+        "nothing goes on before /continue"
+    );
+
+    type_text(&mut panel, "/continue");
+    panel.submit();
+    settle_goal(&mut panel);
+    assert!(!panel.paused);
+    panel.tick();
+    // The goal reached is written to the log, so it is not offered again.
+    assert!(panel.session.as_ref().unwrap().autorun().is_empty());
+}
+
+#[test]
+fn a_loop_waits_only_what_is_left_of_its_interval() {
+    let dir = tempfile::tempdir().unwrap();
+    let due = now_millis() + 600_000;
+    let path = logged_request(dir.path(), |session| {
+        session.append_run_end(false).unwrap();
+        session
+            .append_autorun(&Autorun {
+                goal: None,
+                repeat: Some(LoopRecord {
+                    prompt: "check".into(),
+                    interval_ms: Some(3_600_000),
+                    iterations: 2,
+                    due_ms: Some(due),
+                }),
+            })
+            .unwrap();
+    });
+    let mut panel = reopen(&path, dir.path(), vec![]);
+    assert!(carry_on_card(&panel).contains("60m"));
+    panel.apply_form_action(ChoiceAction::Chosen(0));
+    let next = panel.loop_task.as_ref().and_then(|t| t.next_at).unwrap();
+    let wait = next.saturating_duration_since(Instant::now());
+    assert!(
+        wait > Duration::from_secs(590) && wait <= Duration::from_secs(600),
+        "{wait:?}"
+    );
+}
+
+#[test]
+fn dropping_restored_work_takes_it_out_of_the_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = logged_request(dir.path(), |session| {
+        session.append_run_end(false).unwrap();
+        session
+            .append_autorun(&Autorun {
+                goal: None,
+                repeat: Some(LoopRecord {
+                    prompt: "check".into(),
+                    interval_ms: Some(60_000),
+                    iterations: 2,
+                    due_ms: None,
+                }),
+            })
+            .unwrap();
+    });
+    assert!(Session::list(dir.path()).unwrap()[0]
+        .display_label()
+        .starts_with("⏸ "));
+    let mut panel = reopen(&path, dir.path(), vec![]);
+    assert_eq!(
+        panel.loop_task.as_ref().map(|t| t.interval),
+        Some(Some(Duration::from_secs(60)))
+    );
+    panel.apply_form_action(ChoiceAction::Chosen(1));
+    panel.tick();
+    assert!(panel.loop_task.is_none());
+    assert!(panel.run_buttons().is_empty());
+    drop(panel);
+    let session = Session::open(&path).unwrap();
+    assert!(session.autorun().is_empty());
+    assert!(!Session::list(dir.path()).unwrap()[0].unfinished);
+}
+
+#[test]
+fn closing_while_work_is_under_way_asks_first() {
+    let mut panel = panel(vec![reply("working")]);
+    assert!(panel.needs_close_confirmation().is_none());
+    type_text(&mut panel, "/loop 5m check");
+    panel.submit();
+    assert_eq!(
+        panel.needs_close_confirmation().as_deref(),
+        Some(termide_i18n::t().agent_close_confirm_working())
+    );
+    settle(&mut panel);
+    // Waiting out its interval, the loop is still going.
+    assert!(panel.needs_close_confirmation().is_some());
+    type_text(&mut panel, "/loop stop");
+    panel.submit();
+    assert!(panel.needs_close_confirmation().is_none());
+}
+
+#[test]
+fn a_goal_under_way_is_in_the_log_until_it_stops() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![reply("working")])
+    });
+    let path = panel.session_path().unwrap().to_path_buf();
+    type_text(&mut panel, "/goal do the thing");
+    panel.submit();
+    settle(&mut panel);
+    panel.goal_task.as_mut().unwrap().judge_at = None;
+    panel.tick();
+    // The work turn's start and the goal are logged right after the
+    // request, which hangs off where the request started.
+    let logged = Session::open(&path).unwrap();
+    assert_eq!(logged.last_run(), LastRun::Ended);
+    let branch = logged.branch();
+    let user = branch
+        .iter()
+        .position(|e| {
+            matches!(
+                &e.kind,
+                EntryKind::Message {
+                    message: Message::User(_),
+                    ..
+                }
+            )
+        })
+        .unwrap();
+    assert!(matches!(branch[user + 1].kind, EntryKind::RunStart));
+    assert!(matches!(branch[user + 2].kind, EntryKind::Autorun { .. }));
+    assert_eq!(
+        logged.autorun().goal,
+        Some(GoalRecord {
+            goal: "do the thing".into(),
+            iterations: 1
+        })
+    );
+
+    type_text(&mut panel, "/goal stop");
+    panel.submit();
+    panel.tick();
+    assert!(Session::open(&path).unwrap().autorun().is_empty());
+}
+
+#[test]
+fn an_external_agent_cut_off_is_told_to_carry_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = Session::create(dir.path(), Path::new("/tmp")).unwrap();
+    session.append_agent_change("outside").unwrap();
+    session
+        .append_message(&Message::User(UserMessage::text("build it")))
+        .unwrap();
+    session.append_run_start().unwrap();
+    let path = session.path().to_path_buf();
+    drop(session);
+    let mut panel = reopen(&path, dir.path(), vec![]);
+    assert!(panel.external);
+    // It cannot be resumed between steps: it is told to go on instead.
+    assert_eq!(panel.restored, Some(Restored::Prompt));
+    panel.apply_form_action(ChoiceAction::Chosen(0));
+    settle(&mut panel);
+    let items = panel.transcript().items();
+    assert!(
+        items
+            .iter()
+            .any(|i| matches!(i, Item::User { command: Some(c), .. } if c == "/continue")),
+        "{items:?}"
+    );
+    assert!(items
+        .iter()
+        .any(|i| matches!(i, Item::Assistant { text, .. } if text == "from outside")));
+    assert_eq!(panel.session.as_ref().unwrap().last_run(), LastRun::Ended);
 }

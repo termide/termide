@@ -686,6 +686,13 @@ pub trait Translation: Send + Sync {
     fn agent_notice_nothing_to_pause(&self) -> &str;
     fn agent_notice_already_running(&self) -> &str;
     fn agent_notice_nothing_to_continue(&self) -> &str;
+    fn agent_unfinished_title(&self) -> &str;
+    fn agent_unfinished_continue(&self) -> &str;
+    fn agent_unfinished_drop(&self) -> &str;
+    fn agent_unfinished_later(&self) -> &str;
+    fn agent_unfinished_back_to_back(&self) -> &str;
+    fn agent_run_cut_off(&self) -> &str;
+    fn agent_close_confirm_working(&self) -> &str;
     fn agent_notice_loop_stopped(&self) -> &str;
     fn agent_notice_loop_usage(&self) -> &str;
     fn agent_notice_goal_stopped(&self) -> &str;
@@ -925,6 +932,17 @@ pub trait Translation: Send + Sync {
     fn agent_notice_loop_stopped_max_fmt(&self, count: usize) -> String;
     fn agent_notice_goal_stopped_max_fmt(&self, count: usize) -> String;
     fn agent_notice_looping_every_fmt(&self, interval: &str) -> String;
+    fn agent_unfinished_run_cut_fmt(&self, age: &str) -> String;
+    fn agent_unfinished_run_paused_fmt(&self, age: &str) -> String;
+    fn agent_unfinished_goal_fmt(&self, goal: &str, turn: usize, max: usize) -> String;
+    fn agent_unfinished_loop_fmt(
+        &self,
+        interval: &str,
+        prompt: &str,
+        turn: usize,
+        max: usize,
+    ) -> String;
+    fn agent_unfinished_loop_due_fmt(&self, wait: &str) -> String;
     fn agent_notice_goal_reached_reason_fmt(&self, reason: &str) -> String;
     fn agent_notice_command_denied_fmt(&self, name: &str) -> String;
     fn agent_notice_rolled_back_fmt(&self, count: usize, plural: &str) -> String;

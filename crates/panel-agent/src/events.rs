@@ -76,6 +76,9 @@ impl AgentPanel {
                 }
                 self.last_failure = None;
                 self.run_paused = false;
+                // A pause taken up from the log ends with any run that starts.
+                self.restored = None;
+                self.run_start_due = true;
             }
             AgentEvent::Paused => {
                 // The run's closing line records the pause; the state strip
@@ -87,6 +90,7 @@ impl AgentPanel {
             AgentEvent::AgentEnd => {
                 self.busy = false;
                 self.activity = None;
+                self.log_run_end();
                 // A failure is acted on unless the user stopped the run.
                 let failure = self.last_failure.take().filter(|_| !self.stop_requested);
                 // A stop was the user's own doing, so they are there.
@@ -144,6 +148,10 @@ impl AgentPanel {
                     if let Some(task) = self.loop_task.as_mut() {
                         task.next_at =
                             Some(Instant::now() + task.interval.unwrap_or(Duration::ZERO));
+                        task.due_ms = task.interval.map(|wait| {
+                            termide_agent_core::now_millis()
+                                .saturating_add(u64::try_from(wait.as_millis()).unwrap_or(u64::MAX))
+                        });
                     }
                 }
                 // A goal judges the finished work turn next, unless it was
@@ -323,6 +331,7 @@ impl AgentPanel {
                         log::warn!("agent session write failed: {error}");
                     }
                 }
+                self.log_run_start();
             }
             AgentEvent::ToolExecutionStart { call } => {
                 self.set_phase(Phase::Tool);
@@ -668,6 +677,13 @@ impl AgentPanel {
         {
             self.last_anim = Instant::now();
             changed = true;
+        }
+        changed |= self.settle_restored();
+        // A goal or loop started, stepped or stopped is written to the log,
+        // so a session reopened later offers to carry it on — between runs,
+        // so nothing comes between a request's start and its message.
+        if !self.is_busy() {
+            self.sync_autorun();
         }
         if changed || !events.is_empty() {
             events.push(PanelEvent::NeedsRedraw);

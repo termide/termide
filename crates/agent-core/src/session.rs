@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use crate::acp::ACP_PROVIDER;
 use crate::compaction::CompactionPrompts;
 use crate::context::file_timestamp;
-use crate::message::{now_millis, Message};
+use crate::message::{now_millis, Message, StopReason};
 use crate::provider::ThinkingLevel;
 use crate::prune::{prune_by, prune_to_decisions};
 
@@ -133,6 +133,79 @@ pub enum EntryKind {
     /// reopened session asks the agent for the same again, see
     /// [`Session::agent_options`].
     AgentOption { option: String, value: String },
+    /// A run started: until a [`EntryKind::RunEnd`] follows, it is under
+    /// way, so a session reopened after the panel or termide closed mid-run
+    /// knows the run was cut off, see [`Session::last_run`].
+    RunStart,
+    /// The run ended — `paused` when it stopped at a `/pause` with work
+    /// left for `/continue`.
+    RunEnd {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        paused: bool,
+    },
+    /// The unattended work (`/goal`, `/loop`) the branch has going from here;
+    /// empty once it stopped. A reopened session offers to carry it on, see
+    /// [`Session::autorun`].
+    Autorun { autorun: Autorun },
+}
+
+/// The unattended work a session has going: a `/goal`, a `/loop`, or both.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Autorun {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<GoalRecord>,
+    #[serde(default, rename = "loop", skip_serializing_if = "Option::is_none")]
+    pub repeat: Option<LoopRecord>,
+}
+
+impl Autorun {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.goal.is_none() && self.repeat.is_none()
+    }
+}
+
+/// A `/goal` under way: what it aims at and the work turns sent so far.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoalRecord {
+    pub goal: String,
+    pub iterations: usize,
+}
+
+/// A `/loop` under way: its prompt, the wait between runs (`None`: back to
+/// back) and the runs sent so far.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoopRecord {
+    pub prompt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interval_ms: Option<u64>,
+    pub iterations: usize,
+    /// When the next run is due (epoch millis), while the loop waits out its
+    /// interval, so a reopen waits only what is left of it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub due_ms: Option<u64>,
+}
+
+/// A run the branch left unfinished, see [`Session::unfinished_run`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunMark {
+    /// [`LastRun::Paused`] or [`LastRun::CutOff`].
+    pub state: LastRun,
+    /// When the run started and when it stopped (the pause, or the last
+    /// thing it logged), epoch millis.
+    pub started: u64,
+    pub stopped: u64,
+}
+
+/// How the branch's last run ended, see [`Session::last_run`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LastRun {
+    /// It ended (or there was none).
+    Ended,
+    /// It stopped at a `/pause`, its remaining work left for `/continue`.
+    Paused,
+    /// It never ended: the panel or termide closed while it ran.
+    CutOff,
 }
 
 /// An external agent's own session that still holds this branch's
@@ -671,7 +744,10 @@ impl Session {
                 | EntryKind::Toolset { .. }
                 | EntryKind::ConnectionChange { .. }
                 | EntryKind::ExternalSession { .. }
-                | EntryKind::AgentOption { .. } => {}
+                | EntryKind::AgentOption { .. }
+                | EntryKind::RunStart
+                | EntryKind::RunEnd { .. }
+                | EntryKind::Autorun { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
                 } => {
@@ -709,7 +785,10 @@ impl Session {
                 | EntryKind::Toolset { .. }
                 | EntryKind::ConnectionChange { .. }
                 | EntryKind::ExternalSession { .. }
-                | EntryKind::AgentOption { .. } => {}
+                | EntryKind::AgentOption { .. }
+                | EntryKind::RunStart
+                | EntryKind::RunEnd { .. }
+                | EntryKind::Autorun { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
                 } => {
@@ -803,7 +882,10 @@ impl Session {
                 | EntryKind::Toolset { .. }
                 | EntryKind::ConnectionChange { .. }
                 | EntryKind::ExternalSession { .. }
-                | EntryKind::AgentOption { .. } => None,
+                | EntryKind::AgentOption { .. }
+                | EntryKind::RunStart
+                | EntryKind::RunEnd { .. }
+                | EntryKind::Autorun { .. } => None,
             })
     }
 
@@ -913,7 +995,10 @@ impl Session {
                 | EntryKind::ReasoningChange { .. }
                 | EntryKind::ThinkingChange { .. }
                 | EntryKind::Toolset { .. }
-                | EntryKind::AgentOption { .. } => {}
+                | EntryKind::AgentOption { .. }
+                | EntryKind::RunStart
+                | EntryKind::RunEnd { .. }
+                | EntryKind::Autorun { .. } => {}
             }
         }
         None
@@ -946,6 +1031,92 @@ impl Session {
             }
         }
         picked
+    }
+
+    /// Record that a run started.
+    pub fn append_run_start(&mut self) -> std::io::Result<String> {
+        self.append(EntryKind::RunStart)
+    }
+
+    /// Record that the run ended, `paused` when at a `/pause`.
+    pub fn append_run_end(&mut self, paused: bool) -> std::io::Result<String> {
+        self.append(EntryKind::RunEnd { paused })
+    }
+
+    /// Record the unattended work going from here (empty: none).
+    pub fn append_autorun(&mut self, autorun: &Autorun) -> std::io::Result<String> {
+        self.append(EntryKind::Autorun {
+            autorun: autorun.clone(),
+        })
+    }
+
+    /// How the current branch's last run ended, see [`Self::unfinished_run`].
+    #[must_use]
+    pub fn last_run(&self) -> LastRun {
+        self.unfinished_run()
+            .map_or(LastRun::Ended, |mark| mark.state)
+    }
+
+    /// The branch's last run, when it did not end: paused, or cut off — it
+    /// started and never ended, and its last message leaves work to do (a
+    /// request or results the model has not answered, calls not run). One
+    /// whose last reply finished, or failed, is as good as ended: only its
+    /// end was not written. A log written before runs were recorded holds
+    /// none.
+    #[must_use]
+    pub fn unfinished_run(&self) -> Option<RunMark> {
+        let branch = self.branch();
+        let at = branch
+            .iter()
+            .rposition(|e| matches!(e.kind, EntryKind::RunStart | EntryKind::RunEnd { .. }))?;
+        // The start is written after the run's first message.
+        let started_of = |start: usize| branch[start.saturating_sub(1)].timestamp;
+        match branch[at].kind {
+            EntryKind::RunEnd { paused: true } => {
+                let start = branch[..at]
+                    .iter()
+                    .rposition(|e| matches!(e.kind, EntryKind::RunStart))
+                    .unwrap_or(at);
+                Some(RunMark {
+                    state: LastRun::Paused,
+                    started: started_of(start),
+                    stopped: branch[at].timestamp,
+                })
+            }
+            EntryKind::RunStart => {
+                let last = branch.iter().rev().find_map(|e| match &e.kind {
+                    EntryKind::Message { message, .. } => Some((message, e.timestamp)),
+                    _ => None,
+                })?;
+                let open = match last.0 {
+                    Message::Assistant(reply) => {
+                        reply.tool_calls().next().is_some()
+                            && !matches!(reply.stop_reason, StopReason::Error | StopReason::Aborted)
+                    }
+                    Message::User(_) | Message::ToolResult(_) => true,
+                };
+                open.then(|| RunMark {
+                    state: LastRun::CutOff,
+                    started: started_of(at),
+                    stopped: last.1,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// The unattended work recorded last on the current branch; empty when
+    /// none was, or it stopped.
+    #[must_use]
+    pub fn autorun(&self) -> Autorun {
+        self.branch()
+            .into_iter()
+            .rev()
+            .find_map(|entry| match &entry.kind {
+                EntryKind::Autorun { autorun } => Some(autorun.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
     }
 
     pub fn append_toolset(&mut self, disabled: &[String]) -> std::io::Result<String> {
@@ -1018,6 +1189,17 @@ impl SessionSummary {
             })
             .unwrap_or_else(|| self.id.clone())
     }
+
+    /// [`Self::label`] marked `⏸` when the session was left with work to
+    /// carry on, for the lists that offer sessions to open.
+    #[must_use]
+    pub fn display_label(&self) -> String {
+        if self.unfinished {
+            format!("⏸ {}", self.label())
+        } else {
+            self.label()
+        }
+    }
 }
 
 /// What a session picker shows.
@@ -1032,6 +1214,9 @@ pub struct SessionSummary {
     /// The first user prompt, as a title fallback.
     pub first_prompt: Option<String>,
     pub message_count: usize,
+    /// The session was left with work to carry on: a run cut off or
+    /// paused, a `/goal` or `/loop` going.
+    pub unfinished: bool,
 }
 
 impl From<&Session> for SessionSummary {
@@ -1049,7 +1234,10 @@ impl From<&Session> for SessionSummary {
             | EntryKind::Toolset { .. }
             | EntryKind::ConnectionChange { .. }
             | EntryKind::ExternalSession { .. }
-            | EntryKind::AgentOption { .. } => None,
+            | EntryKind::AgentOption { .. }
+            | EntryKind::RunStart
+            | EntryKind::RunEnd { .. }
+            | EntryKind::Autorun { .. } => None,
         });
         let first_prompt = messages.clone().find_map(|m| match m {
             Message::User(user) => Some(user.plain_text()),
@@ -1066,6 +1254,7 @@ impl From<&Session> for SessionSummary {
                 .map_or(session.header.created, |e| e.timestamp),
             first_prompt,
             message_count: messages.count(),
+            unfinished: session.unfinished_run().is_some() || !session.autorun().is_empty(),
         }
     }
 }
@@ -1139,6 +1328,60 @@ mod tests {
             provider: ACP_PROVIDER.into(),
             ..text_reply(text)
         })
+    }
+
+    #[test]
+    fn runs_and_unattended_work_survive_a_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
+        assert_eq!(session.last_run(), LastRun::Ended);
+        let before = session
+            .append_message(&Message::User(UserMessage::text("one")))
+            .unwrap();
+        session.append_run_start().unwrap();
+        let autorun = Autorun {
+            goal: Some(GoalRecord {
+                goal: "ship".into(),
+                iterations: 2,
+            }),
+            repeat: Some(LoopRecord {
+                prompt: "check".into(),
+                interval_ms: None,
+                iterations: 5,
+                due_ms: None,
+            }),
+        };
+        session.append_autorun(&autorun).unwrap();
+        let path = session.path().to_path_buf();
+        drop(session);
+
+        let mut session = Session::open(&path).unwrap();
+        assert_eq!(session.last_run(), LastRun::CutOff);
+        assert_eq!(session.autorun(), autorun);
+        // None of it reaches the model.
+        assert_eq!(session.context_messages().len(), 1);
+        session.append_run_end(true).unwrap();
+        assert_eq!(session.last_run(), LastRun::Paused);
+        session.append_autorun(&Autorun::default()).unwrap();
+        assert!(Session::open(&path).unwrap().autorun().is_empty());
+        // Undone back to before the run, the branch holds none of it.
+        session.rewind_to(Some(&before)).unwrap();
+        assert_eq!(session.last_run(), LastRun::Ended);
+    }
+
+    #[test]
+    fn a_run_whose_last_reply_finished_counts_as_ended() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
+        session
+            .append_message(&Message::User(UserMessage::text("one")))
+            .unwrap();
+        session.append_run_start().unwrap();
+        assert_eq!(session.last_run(), LastRun::CutOff);
+        // The reply came in whole; only the run's end was not written.
+        session.append_message(&agent_reply("answer")).unwrap();
+        assert_eq!(session.last_run(), LastRun::Ended);
+        assert!(!SessionSummary::from(&session).unfinished);
     }
 
     #[test]

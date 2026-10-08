@@ -598,6 +598,13 @@ impl Translation for RuntimeTranslation {
         agent_notice_nothing_to_pause,
         agent_notice_already_running,
         agent_notice_nothing_to_continue,
+        agent_unfinished_title,
+        agent_unfinished_continue,
+        agent_unfinished_drop,
+        agent_unfinished_later,
+        agent_unfinished_back_to_back,
+        agent_run_cut_off,
+        agent_close_confirm_working,
         agent_notice_loop_stopped,
         agent_notice_loop_usage,
         agent_notice_goal_stopped,
@@ -1397,6 +1404,47 @@ impl Translation for RuntimeTranslation {
 
     fn agent_notice_looping_every_fmt(&self, interval: &str) -> String {
         self.format("agent_notice_looping_every_fmt", &[("interval", interval)])
+    }
+
+    fn agent_unfinished_run_cut_fmt(&self, age: &str) -> String {
+        self.format("agent_unfinished_run_cut_fmt", &[("age", age)])
+    }
+
+    fn agent_unfinished_run_paused_fmt(&self, age: &str) -> String {
+        self.format("agent_unfinished_run_paused_fmt", &[("age", age)])
+    }
+
+    fn agent_unfinished_goal_fmt(&self, goal: &str, turn: usize, max: usize) -> String {
+        self.format(
+            "agent_unfinished_goal_fmt",
+            &[
+                ("goal", goal),
+                ("turn", &turn.to_string()),
+                ("max", &max.to_string()),
+            ],
+        )
+    }
+
+    fn agent_unfinished_loop_fmt(
+        &self,
+        interval: &str,
+        prompt: &str,
+        turn: usize,
+        max: usize,
+    ) -> String {
+        self.format(
+            "agent_unfinished_loop_fmt",
+            &[
+                ("interval", interval),
+                ("prompt", prompt),
+                ("turn", &turn.to_string()),
+                ("max", &max.to_string()),
+            ],
+        )
+    }
+
+    fn agent_unfinished_loop_due_fmt(&self, wait: &str) -> String {
+        self.format("agent_unfinished_loop_due_fmt", &[("wait", wait)])
     }
 
     fn agent_notice_goal_reached_reason_fmt(&self, reason: &str) -> String {

@@ -50,8 +50,9 @@ pub mod tool_text;
 
 pub use acp::{companion_tools, AcpConfig, AcpFlavor, ACP_PROVIDER, COMPANION_TOOLS, MODEL_OPTION};
 pub use agent::{
-    execute_tool, judge_tool_call, run_judged_call, Agent, AgentConfig, AgentEvent, ChainedHooks,
-    Hooks, JudgedCall, Judgment, NoHooks, QueueHandle, QueueMode, ToolDecision,
+    execute_tool, judge_tool_call, run_judged_call, unanswered_calls, Agent, AgentConfig,
+    AgentEvent, ChainedHooks, Hooks, JudgedCall, Judgment, NoHooks, QueueHandle, QueueMode,
+    ToolDecision,
 };
 pub use ask::{
     question_channel, Question, QuestionAnswer, QuestionEnvelope, QuestionOption, QuestionReply,
@@ -107,8 +108,8 @@ pub use runtime::{
     PromptError,
 };
 pub use session::{
-    Entry, EntryKind, ExternalSessionRef, LoggedMessage, Session, SessionHeader, SessionModel,
-    SessionSummary, Timing,
+    Autorun, Entry, EntryKind, ExternalSessionRef, GoalRecord, LastRun, LoggedMessage, LoopRecord,
+    RunMark, Session, SessionHeader, SessionModel, SessionSummary, Timing,
 };
 pub use shell::{ShellOutput, ShellRunner};
 pub use suggest::{

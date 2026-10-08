@@ -246,6 +246,8 @@ pub enum Item {
         /// The pause is still on: its line ticks and its `‖` stands out, as
         /// the live run clock does; once it ends both rest, dimmed.
         live: bool,
+        /// The run was cut off: the panel or termide closed while it ran.
+        cut: bool,
     },
 }
 
@@ -621,6 +623,7 @@ impl Transcript {
             ok,
             paused,
             live: paused,
+            cut: false,
         });
     }
 
@@ -2332,6 +2335,7 @@ fn render_body(
             ok,
             paused,
             live,
+            cut,
         } => {
             // The live run clock, frozen where it stood: right-aligned under
             // the last block, with no rule, and the time the run ended. A pause
@@ -2346,9 +2350,14 @@ fn render_body(
             } else {
                 dim
             };
+            let mut text = run_end_text(*elapsed_ms, at);
+            if *cut {
+                text.push_str(" · ");
+                text.push_str(termide_i18n::t().agent_run_cut_off());
+            }
             let mut spans = vec![
                 Span::styled(format!("{glyph} "), glyph_style),
-                Span::styled(run_end_text(*elapsed_ms, at), dim),
+                Span::styled(text, dim),
             ];
             if !*paused || !*ok {
                 spans.push(Span::raw(" "));
@@ -3688,6 +3697,7 @@ mod tests {
             ok: true,
             paused: false,
             live: false,
+            cut: false,
         });
         let lines = text_of(transcript.lines(60, &colors, false));
         // The frozen run clock, right-aligned with no rule above it.
@@ -3701,6 +3711,7 @@ mod tests {
             ok: true,
             paused: true,
             live: true,
+            cut: false,
         });
         let lines = text_of(transcript.lines(60, &colors, false));
         assert_eq!(lines.last().unwrap().trim(), "‖ 1m12s");
@@ -3728,6 +3739,7 @@ mod tests {
             ok: false,
             paused: false,
             live: false,
+            cut: false,
         });
         transcript.push(Item::Notice {
             text: "goal stopped".into(),

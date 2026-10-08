@@ -1094,28 +1094,7 @@ impl Agent {
     /// those a pause stopped before, including across a restart, since the
     /// transcript itself records them.
     fn unanswered_calls(&self) -> Vec<ToolCall> {
-        let Some(index) = self
-            .messages
-            .iter()
-            .rposition(|m| matches!(m, Message::Assistant(_)))
-        else {
-            return Vec::new();
-        };
-        let Message::Assistant(assistant) = &self.messages[index] else {
-            return Vec::new();
-        };
-        let answered: Vec<&str> = self.messages[index + 1..]
-            .iter()
-            .filter_map(|m| match m {
-                Message::ToolResult(result) => Some(result.tool_call_id.as_str()),
-                _ => None,
-            })
-            .collect();
-        assistant
-            .tool_calls()
-            .filter(|call| !answered.contains(&call.id.as_str()))
-            .cloned()
-            .collect()
+        unanswered_calls(&self.messages)
     }
 
     fn execute_call(
@@ -1624,6 +1603,33 @@ pub(crate) mod test_support {
     }
 }
 
+/// The tool calls of the last assistant message in `messages` that have no
+/// result after it: those a pause stopped before, or a run cut off left —
+/// the transcript itself records them, so this holds across a restart.
+#[must_use]
+pub fn unanswered_calls(messages: &[Message]) -> Vec<ToolCall> {
+    let Some(index) = messages
+        .iter()
+        .rposition(|m| matches!(m, Message::Assistant(_)))
+    else {
+        return Vec::new();
+    };
+    let Message::Assistant(assistant) = &messages[index] else {
+        return Vec::new();
+    };
+    let answered: Vec<&str> = messages[index + 1..]
+        .iter()
+        .filter_map(|m| match m {
+            Message::ToolResult(result) => Some(result.tool_call_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assistant
+        .tool_calls()
+        .filter(|call| !answered.contains(&call.id.as_str()))
+        .cloned()
+        .collect()
+}
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

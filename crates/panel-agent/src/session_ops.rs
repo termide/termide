@@ -45,6 +45,8 @@ impl AgentPanel {
             self.notice(termide_i18n::t().agent_notice_busy(), NoticeKind::Warn);
             return false;
         }
+        // What the session being left has going is written before it goes.
+        self.sync_autorun();
         let session = session.or_else(|| {
             start_session(
                 self.session_dir.as_deref(),
@@ -171,6 +173,9 @@ impl AgentPanel {
         self.run_start = None;
         self.loop_task = None;
         self.goal_task = None;
+        self.restored = None;
+        self.adopt_logged_autorun();
+        self.run_start_due = false;
         self.pause_requested = false;
         self.stop_requested = false;
         self.context_tokens = 0;
@@ -399,7 +404,10 @@ impl AgentPanel {
         }
         match Session::open_exclusive(&summary.path) {
             Ok(session) => {
-                self.switch_session(Some(session));
+                // Work the session was left with is offered to carry on.
+                if self.switch_session(Some(session)) {
+                    self.restore_unfinished();
+                }
             }
             Err(error) => {
                 log::warn!("cannot open {}: {error}", summary.path.display());

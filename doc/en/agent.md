@@ -474,6 +474,28 @@ controls take the panel border's accent color at rest; `[▶]` is green. Once `[
 a stop cannot be taken back: until the run has actually stopped, only a red
 `[■]` stays, and pressing it again does nothing.
 
+Closing the panel or termide does not end the work under way for good. While
+a run, a `/goal` or a `/loop` is going, closing the panel or quitting asks
+first. The session log records where each run starts and ends, and the goal or
+loop going with its count of turns and, for a loop waiting out its interval,
+when its next run is due. A session reopened after a run was cut off or
+paused, or with a goal or loop left going, shows the run's closing line (`✻ 3m41s
+· 21:03:41 · cut off` for a run cut off) and asks on a card whether to carry
+the work on, naming the run and how long ago it stopped, the goal or loop and
+how far each has gone. Nothing runs on its own. **Continue** (or `/continue`,
+`[▶]`) carries it on: a paused run first runs the calls it left unrun; a run
+cut off goes on from the transcript, but the calls it left without a result
+are not run again — each gets a result saying termide closed while it ran or
+before it started and that it may have run in part, so the model checks
+before repeating it. A goal is judged and a loop runs again once what is left
+of its wait has passed. Claude Code, Codex and Gemini CLI, which cannot be
+resumed between steps, are told to carry on where they stopped. **Drop it**
+(or `[■]`) gives the work up; **Decide later** leaves the panel waiting at the
+pause, and a new request takes over, as it does over any pause. A goal or loop
+keeps its count of turns across the reopen, so its cap still holds. Sessions
+left so are marked `⏸` in the session lists, and a panel that reopens one is
+highlighted until seen.
+
 ### When a run fails
 
 A failure is sorted by what can be done about it: a network error or an

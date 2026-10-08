@@ -79,6 +79,11 @@ pub(crate) enum Pending {
         choices: Vec<FailureChoice>,
         failure: Failure,
     },
+    /// A reopened session was left with work under way: carry it on, drop
+    /// it, or decide later at the pause.
+    Unfinished {
+        form: ChoiceForm,
+    },
 }
 
 impl Pending {
@@ -92,7 +97,8 @@ impl Pending {
             | Pending::Plan { form, .. }
             | Pending::Handoff { form, .. }
             | Pending::Suggestion { form, .. }
-            | Pending::Failure { form, .. } => form,
+            | Pending::Failure { form, .. }
+            | Pending::Unfinished { form } => form,
         }
     }
 
@@ -106,7 +112,8 @@ impl Pending {
             | Pending::Plan { form, .. }
             | Pending::Handoff { form, .. }
             | Pending::Suggestion { form, .. }
-            | Pending::Failure { form, .. } => form,
+            | Pending::Failure { form, .. }
+            | Pending::Unfinished { form } => form,
         }
     }
 }
@@ -828,6 +835,21 @@ impl AgentPanel {
             (Some(Pending::Failure { .. }), ChoiceAction::Cancelled | ChoiceAction::Custom(_)) => {
                 self.pending = None;
                 self.give_up_after_failure();
+            }
+            (Some(Pending::Unfinished { .. }), ChoiceAction::Chosen(index)) => {
+                self.pending = None;
+                if index == 0 {
+                    self.resume();
+                } else {
+                    self.stop_paused();
+                }
+            }
+            // Later: the pause stays, with `/continue`, `[▶]` and `[■]`.
+            (
+                Some(Pending::Unfinished { .. }),
+                ChoiceAction::Cancelled | ChoiceAction::Custom(_),
+            ) => {
+                self.pending = None;
             }
             (None, _) => {}
         }

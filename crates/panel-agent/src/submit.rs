@@ -254,6 +254,7 @@ impl AgentPanel {
                     prompt: prompt.to_string(),
                     interval,
                     next_at: None,
+                    due_ms: None,
                     iterations: 0,
                 });
                 return self.loop_step();
@@ -600,6 +601,7 @@ impl AgentPanel {
         };
         task.iterations += 1;
         task.next_at = None;
+        task.due_ms = None;
         let prompt = task.prompt.clone();
         self.send(prompt)
     }
@@ -745,6 +747,11 @@ impl AgentPanel {
     /// Resume the paused run. Its clock goes on from the request, and the
     /// pause's line keeps how long the pause lasted.
     pub(crate) fn resume(&mut self) {
+        // A pause taken up from the log that is not a run to resume here:
+        // the external agent is told to go on, or the goal or loop steps.
+        if self.carry_on_restored() {
+            return;
+        }
         match self.runtime.resume() {
             Ok(()) => {
                 self.busy = true;
@@ -764,6 +771,7 @@ impl AgentPanel {
     /// part of. The calls it left unrun are closed by the next request.
     pub(crate) fn stop_paused(&mut self) {
         self.paused = false;
+        self.restored = None;
         self.run_start = None;
         self.loop_task = None;
         self.goal_task = None;
