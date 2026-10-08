@@ -511,12 +511,16 @@ impl Drop for HttpClient {
     /// drops it now instead of holding it until its own timeout — which also
     /// closes the stream from its end. Best effort on purpose: this runs when
     /// a panel closes, the session may already be gone, and a server that
-    /// answers nothing is no worse off than one that was never reached. The
-    /// short timeout keeps a dead host from stalling the close.
+    /// answers nothing is no worse off than one that was never reached.
+    ///
+    /// The `DELETE` goes out on a thread of its own: a panel is usually
+    /// dropped on the UI thread, and a round trip per server there froze the
+    /// close for seconds with a few remote servers. A process that exits
+    /// meanwhile cuts it short, which the server's own timeout covers.
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        let inner = &self.inner;
-        if inner
+        if self
+            .inner
             .session
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -524,13 +528,21 @@ impl Drop for HttpClient {
         {
             return;
         }
-        let agent = ureq::AgentBuilder::new()
-            .timeout_connect(Duration::from_secs(2))
-            .timeout_read(Duration::from_secs(2))
-            .build();
-        let _ = inner
-            .decorate(agent.delete(&inner.url), inner.held_bearer().as_deref())
-            .call();
+        let inner = Arc::clone(&self.inner);
+        let spawned = std::thread::Builder::new()
+            .name(format!("termide-mcp-{}-close", inner.name))
+            .spawn(move || {
+                let agent = ureq::AgentBuilder::new()
+                    .timeout_connect(Duration::from_secs(2))
+                    .timeout_read(Duration::from_secs(2))
+                    .build();
+                let _ = inner
+                    .decorate(agent.delete(&inner.url), inner.held_bearer().as_deref())
+                    .call();
+            });
+        if let Err(error) = spawned {
+            log::warn!("mcp: cannot end the session: {error}");
+        }
     }
 }
 
@@ -787,5 +799,36 @@ mod tests {
             ..Default::default()
         };
         assert!(HttpClient::new("stdio", &stdio).is_err());
+    }
+
+    #[test]
+    fn dropping_a_client_does_not_wait_for_the_server() {
+        use std::io::Read;
+        use std::net::TcpListener;
+
+        // A server that takes the request and never answers it.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 16];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let _ = tx.send(String::from_utf8_lossy(&buf[..n]).into_owned());
+            std::thread::sleep(Duration::from_secs(5));
+        });
+        let config = McpServerConfig {
+            url: Some(url),
+            ..Default::default()
+        };
+        let client = HttpClient::new("silent", &config).unwrap();
+        *client.inner.session.lock().unwrap() = "s1".into();
+
+        let started = Instant::now();
+        drop(client);
+        assert!(started.elapsed() < Duration::from_millis(500));
+        // The session is still ended, off the dropping thread.
+        let request = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(request.starts_with("DELETE "), "{request}");
     }
 }
