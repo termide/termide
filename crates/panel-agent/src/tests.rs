@@ -1058,7 +1058,7 @@ fn typing_enter_runs_a_turn_and_renders_it() {
     let text = |segs: &[StatusSegment]| segs.iter().map(|s| s.text.as_str()).collect::<String>();
     assert_eq!(
             text(&segments[..split]),
-            " Agent: default │ Permissions: configured │ Reasoning: off │ Tools: 0/0 │ Connection: local · OpenAI Compatible │ Model: m"
+            " Agent: default │ Permissions: configured │ Reasoning: off │ Tools: 0/0 │ Connection: local │ Model: m"
         );
     assert_eq!(text(&segments[split + 1..]), "↑100 ↓20 120/1k ▰▱▱▱▱▱▱▱ ");
 }
@@ -4218,8 +4218,9 @@ fn the_connection_picker_switches_the_endpoint_and_its_model() {
     assert_eq!(panel.model.id, "claude-x");
     assert_eq!(panel.model.context_window, 200_000);
     assert!(!panel.external);
-    // The chip names the connection beside its protocol.
+    // The banner names the connection beside its protocol, the chip by name.
     assert_eq!(panel.connection_display(), "cloud · Anthropic Compatible");
+    assert_eq!(panel.connection_chip(), "cloud");
     // The log keeps it, so a reopened session reconnects there.
     let session = Session::open(panel.session_path().unwrap()).unwrap();
     assert_eq!(session.current_connection(), Some("cloud".to_string()));

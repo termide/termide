@@ -260,8 +260,17 @@ impl AgentPanel {
             .map_or_else(|| id.to_string(), |model| model.name)
     }
 
-    /// The connection as the banner and the chip show it: its name beside
-    /// the protocol.
+    /// The connection as the status-bar chip shows it: its name alone, the
+    /// protocol only when it has no name.
+    pub(crate) fn connection_chip(&self) -> String {
+        if self.connection.is_empty() {
+            provider_label(&self.provider_kind).to_string()
+        } else {
+            self.connection.clone()
+        }
+    }
+
+    /// The connection as the banner shows it: its name beside the protocol.
     pub(crate) fn connection_display(&self) -> String {
         let kind = provider_label(&self.provider_kind);
         if self.connection.is_empty() {
@@ -944,7 +953,7 @@ impl AgentPanel {
                         CONNECTION_ACTION,
                     ),
                     StatusSegment::clickable(
-                        self.connection_display(),
+                        self.connection_chip(),
                         SegmentKind::Active,
                         CONNECTION_ACTION,
                     ),
@@ -992,7 +1001,7 @@ impl AgentPanel {
                     CONNECTION_ACTION,
                 ),
                 StatusSegment::clickable(
-                    self.connection_display(),
+                    self.connection_chip(),
                     SegmentKind::Active,
                     CONNECTION_ACTION,
                 ),
