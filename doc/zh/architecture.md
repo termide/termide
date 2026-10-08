@@ -675,6 +675,27 @@ OpenSSL 或 libssh——SFTP 运行在 `russh` + `russh-sftp` 上，FTPS 运行�
 服务器不会留下滞留的字节。同连接内的重命名保持在服务器端（无需先下载再上传）。
 用户视角见 `doc/zh/vfs.md`，取消流程见 `doc/zh/operations.md`。
 
+### 10. 密码库
+
+**位置：** `crates/secrets/`（存储）、`crates/app/src/app/vault.rs`（提示与路由）、
+`crates/core/src/credentials.rs`（契约）。
+
+`termide-secrets` 是不含 UI 的密码库：一个 TOML 文件，其中的机密密封到一个 X25519
+公钥，私钥则用由 Argon2id 派生的主密钥加密。保存只需要公钥；读取需要已解锁的私钥。
+写入在锁文件下执行“读取-修改-写入”，然后原子重命名。
+
+面板永远看不到密码库。登录被拒绝的面板发出 `PanelEvent::CredentialsRequired { url, attempt }`，
+其中的 URL 不含密码。应用以两种方式之一作答：
+
+- 从密码库中取得，若密码库已锁定则先询问主密码；
+- 询问用户。
+
+随后应用广播 `PanelCommand::ProvideCredentials`（或 `CancelCredentials`），等待该 URL
+的面板接收它。成功后面板发出 `CredentialsAccepted`，只有此时用户要求保存的密码才会被
+写入。Git 网络操作从应用侧走同一路径：根据 git 的 stderr 识别失败，并通过 askpass 辅助
+程序重试。每个密码库提示的待处理动作都只是 `PendingAction::Vault`；提示的用途（包括
+机密）保存在应用的 `VaultState` 中。用户视角见 `doc/zh/passwords.md`。
+
 ## 未来架构考虑
 
 **潜在改进：**

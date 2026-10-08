@@ -41,7 +41,9 @@ ftps://secure.example.com/uploads
   percent-decode 回 UTF-8。
 - 省略用户名时 SFTP provider 会回退到 SSH 配置（见认证一节）。
 - 省略端口时使用协议默认值（22 / 21 / 990）。
-- URL 中嵌入密码可用但不推荐——SFTP 优先使用基于密钥的认证。
+- URL 中的密码不会被使用。服务器要求密码时，TermIDE 会询问它，
+  并可将其保存到[密码库](passwords.md)；对 SFTP 而言，基于密钥的
+  认证仍是更好的选择。
 
 ## 打开远程位置
 
@@ -68,7 +70,11 @@ SFTP 支持四种认证方式：
   `id_dsa`），最后是密码。
 - **SSH agent** — 当 `SSH_AUTH_SOCK` 指向正在运行的 agent 时使用。
 - **SSH key** — 明确指定私钥文件，可选带密码短语。
-- **Password** — 交互输入或预先存储的值。
+- **Password** — 上述方式都被拒绝时，TermIDE 从[密码库](passwords.md)
+  中取得密码或询问它。
+
+FTP 和 FTPS 使用 URL 中的用户登录；登录被拒绝时以同样的方式询问
+密码。URL 中没有用户时为匿名登录。
 
 由于 `Auto` 会读取 `~/.ssh/config`，可以在书签里只写简短 URL
 （`sftp://my-build-host/path`），让 SSH 配置补全真实的主机名、用户
@@ -174,5 +180,5 @@ DVD-Video、Blu-ray）只会显示其旁边很小的 ISO 9660 部分，通常只
 - 目前没有 `smb://` / `nfs://` provider，只有 URL 解析。
 - 中断的传输没有按 byte offset 续传：取消后的上传重新发起时从头
   开始。
-- TermIDE 内部无法持久保存交互密码;长期使用请配置 SSH 密钥或
-  依赖 SSH agent。
+- 远程面板不会询问加密 SSH 密钥的密码短语；请将密钥加载到
+  SSH agent 中。

@@ -32,10 +32,13 @@ TermIDE 内置了一个数据库浏览器，支持 **SQLite**、**PostgreSQL** �
 
 ### 密码
 
-与 SFTP/FTP 书签一样，密码不做特殊处理：书签存储的就是你输入的 URL。你可以依赖
+不要把密码写进 URL。服务器拒绝登录时，面板会从[密码库](passwords.md)中取得密码或
+询问它，并提供一个复选框将其保存到密码库。密码永远不会成为面板 URL 的一部分，因此
+已保存的布局中不含密码。
+
 免密码的认证方式（PostgreSQL 的 `~/.pgpass`/peer/trust、Unix 套接字、
-`PGPASSWORD` 等），或将密码直接写入 URL（`postgres://user:secret@host/db`）。如果
-写入密码，请注意书签会原样保存到 `bookmarks.toml`，请妥善处理该文件。
+`PGPASSWORD` 等）照常可用。写入 URL 的密码（`postgres://user:secret@host/db`）
+仍会被使用。将这样的 URL 保存为书签时，TermIDE 会提议将密码移入密码库。
 
 ## 布局
 
@@ -143,4 +146,3 @@ JSON 或表格放不下的宽行。值可在此处编辑，对话框还可将该
 - 特殊列类型（JSON、数组、UUID、时间戳、无符号整数）在此版本中显示为空/`NULL`；
   常见标量类型完整显示。
 - 当 URL 未指定数据库时支持选择数据库；模式选择（PostgreSQL）仍默认使用当前模式。
-- 暂无应用内密码提示——请使用免密码认证方式或在 URL 中包含密码（见上文）。
