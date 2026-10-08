@@ -111,7 +111,7 @@ install_binary() {
 # Install using Homebrew
 install_homebrew() {
     info "Installing via Homebrew..."
-    brew install termide/tap/termide
+    brew install termide/termide/termide
 }
 
 # Install using Cargo
