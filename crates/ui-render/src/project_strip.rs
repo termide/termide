@@ -34,7 +34,7 @@ pub struct PlacedButton {
     pub index: usize,
     /// First column of the button.
     pub x: u16,
-    /// The text drawn: the name, with its attention mark when it waits.
+    /// The text drawn: the name, after its attention mark when it waits.
     pub label: String,
 }
 
@@ -57,10 +57,11 @@ pub struct ProjectStrip {
 /// A cut name keeps at least this many columns: `…` and one character.
 const MIN_NAME_WIDTH: usize = 2;
 
-/// What follows the name of a project that waits.
+/// What precedes the name of a project that waits, as icons precede text
+/// elsewhere.
 fn mark(attention: bool) -> String {
     if attention {
-        format!(" {}", termide_core::attention_mark())
+        format!("{} ", termide_core::attention_mark())
     } else {
         String::new()
     }
@@ -166,8 +167,8 @@ pub fn fit_project_strip(buttons: &[ProjectButton], start: u16, width: usize) ->
                 }
                 let label = format!(
                     "{}{}",
-                    cut_start(&button.name, name_width),
-                    mark(button.attention)
+                    mark(button.attention),
+                    cut_start(&button.name, name_width)
                 );
                 let label_width = label.width() as u16;
                 placed.push(PlacedButton { index, x, label });
@@ -258,8 +259,8 @@ mod tests {
         waiting.attention = true;
         let strip = fit_project_strip(&[waiting, button("other")], 0, 20);
         let mark = mark(true);
-        assert!(strip.buttons[0].label.ends_with(&mark));
-        assert!(strip.buttons[0].label.starts_with('…'));
+        assert!(strip.buttons[0].label.starts_with(&mark));
+        assert!(strip.buttons[0].label[mark.len()..].starts_with('…'));
     }
 
     #[test]

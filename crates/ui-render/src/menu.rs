@@ -158,9 +158,10 @@ static CACHED_LAYOUT: std::sync::RwLock<Option<(u64, [&'static MenuLayout; 2])>>
 /// position lookup (clicks, dropdown anchors) follows what is on screen.
 static PROJECTS_MARKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// What follows the Projects title while a background project waits.
+/// What precedes the Projects title while a background project waits, as
+/// icons precede text elsewhere.
 fn projects_mark() -> String {
-    format!(" {}", termide_core::attention_mark())
+    format!("{} ", termide_core::attention_mark())
 }
 
 impl MenuLayout {
@@ -400,13 +401,13 @@ pub fn render_menu(frame: &mut Frame, area: Rect, params: &MenuRenderParams) {
             Style::default().fg(params.theme.accented_fg)
         };
 
-        spans.push(Span::styled(item.as_str(), style));
         if i == PROJECTS_MENU_INDEX && bar.projects_marked {
             // A mark, not a colour: several themes (the default included)
             // give menu titles the warning colour already, and a badge
             // reads as the selected item.
             spans.push(Span::styled(projects_mark(), style));
         }
+        spans.push(Span::styled(item.as_str(), style));
         // The gap after the last title is left to the padding below: the
         // project buttons start two columns after it, so that the strip of
         // projects reads as a block of its own.
