@@ -496,13 +496,7 @@ impl AgentPanel {
                 }
             }
             AgentEvent::GoalJudged { done, reason } => self.on_goal_verdict(done, &reason),
-            AgentEvent::GoalJudgeFailed { error } => {
-                self.goal_task = None;
-                self.notice(
-                    termide_i18n::t().agent_notice_goal_check_failed_fmt(&error.to_string()),
-                    NoticeKind::Warn,
-                );
-            }
+            AgentEvent::GoalJudgeFailed { error } => self.on_goal_judge_failed(&error),
             AgentEvent::Handoff { brief } => match brief {
                 Ok(text) => {
                     // Offer the brief, with what to do with it; the text is kept

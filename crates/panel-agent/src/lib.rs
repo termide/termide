@@ -148,6 +148,10 @@ const LOOP_MAX_ITERATIONS: usize = 100;
 const GOAL_COMMAND: &str = "goal";
 /// A `/goal` stops itself after this many work turns, so it cannot run away.
 const GOAL_MAX_ITERATIONS: usize = 50;
+/// A failed judge call is tried again this many times, waiting
+/// [`GOAL_JUDGE_RETRY_DELAY`] times the attempt, before the goal is paused.
+const GOAL_JUDGE_RETRIES: u32 = 2;
+const GOAL_JUDGE_RETRY_DELAY: Duration = Duration::from_secs(10);
 /// The built-in `/handoff` command: distil the unfinished work into a brief for
 /// a fresh session or another agent.
 const HANDOFF_COMMAND: &str = "handoff";
@@ -562,6 +566,8 @@ struct GoalTask {
     judge_at: Option<Instant>,
     /// A judge call is in flight; its verdict arrives as a `GoalJudged` event.
     judging: bool,
+    /// Judge calls failed in a row; reset by a verdict.
+    judge_failures: u32,
 }
 
 pub struct AgentPanel {

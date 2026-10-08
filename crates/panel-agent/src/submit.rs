@@ -4,7 +4,7 @@
 
 use std::sync::mpsc::{self, Receiver};
 use std::sync::PoisonError;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use termide_agent_core::{
     AgentCommand, CancelToken, CommandScript, Decision, DefinitionProblem, Message, PromptError,
@@ -16,11 +16,11 @@ use termide_ui::ChoiceForm;
 use crate::pending::Pending;
 use crate::session_ops::discard;
 use crate::{
-    millis, now_hms, slash, transcript, AgentPanel, GoalTask, Item, LoopTask, NoticeKind,
-    BUILTIN_COMMANDS, CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND, FORK_COMMAND, GOAL_COMMAND,
-    GOAL_MAX_ITERATIONS, HANDOFF_COMMAND, LOOP_COMMAND, LOOP_MAX_ITERATIONS, MCP_COMMAND,
-    NAME_COMMAND, NEW_COMMAND, PAUSE_COMMAND, PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND,
-    SHOW_PROMPT_ACTION, UNDO_COMMAND, USAGE_COMMAND,
+    millis, now_hms, slash, transcript, unfinished, AgentPanel, GoalTask, Item, LoopTask,
+    NoticeKind, BUILTIN_COMMANDS, CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND, FORK_COMMAND,
+    GOAL_COMMAND, GOAL_JUDGE_RETRIES, GOAL_JUDGE_RETRY_DELAY, GOAL_MAX_ITERATIONS, HANDOFF_COMMAND,
+    LOOP_COMMAND, LOOP_MAX_ITERATIONS, MCP_COMMAND, NAME_COMMAND, NEW_COMMAND, PAUSE_COMMAND,
+    PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND, SHOW_PROMPT_ACTION, UNDO_COMMAND, USAGE_COMMAND,
 };
 
 /// The work turn a `/goal` sends when the judge says the goal is not yet
@@ -619,6 +619,7 @@ impl AgentPanel {
             iterations: 0,
             judge_at: None,
             judging: false,
+            judge_failures: 0,
         });
         self.send_goal_turn_as(goal, command)
     }
@@ -684,6 +685,7 @@ impl AgentPanel {
         let goal = match self.goal_task.as_mut() {
             Some(task) => {
                 task.judging = false;
+                task.judge_failures = 0;
                 task.goal.clone()
             }
             None => return,
@@ -702,6 +704,37 @@ impl AgentPanel {
         }
         let prompt = goal_continuation(&goal, reason);
         let _ = self.send_goal_turn(prompt);
+    }
+
+    /// A judge call failed: tried again after a wait, a few times; then the
+    /// goal waits at a pause, where `/continue` judges it again and
+    /// `/goal stop` ends it — the work so far is not given up over a
+    /// failing check.
+    pub(crate) fn on_goal_judge_failed(&mut self, error: &str) {
+        let Some(task) = self.goal_task.as_mut() else {
+            return;
+        };
+        task.judging = false;
+        task.judge_failures += 1;
+        let t = termide_i18n::t();
+        if task.judge_failures <= GOAL_JUDGE_RETRIES {
+            let wait = GOAL_JUDGE_RETRY_DELAY * task.judge_failures;
+            task.judge_at = Some(Instant::now() + wait);
+            self.notice(
+                t.agent_notice_goal_check_retry_fmt(error, &fmt_secs(wait.as_secs())),
+                NoticeKind::Warn,
+            );
+            return;
+        }
+        task.judge_at = None;
+        task.judge_failures = 0;
+        self.paused = true;
+        self.restored = Some(unfinished::Restored::Autorun);
+        self.notice(
+            t.agent_notice_goal_check_paused_fmt(error),
+            NoticeKind::Warn,
+        );
+        self.raise_attention(true);
     }
 
     pub fn abort(&mut self) {

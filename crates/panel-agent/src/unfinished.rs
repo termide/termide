@@ -142,6 +142,7 @@ impl AgentPanel {
                 iterations: goal.iterations,
                 judge_at: None,
                 judging: false,
+                judge_failures: 0,
             });
         }
         if let Some(repeat) = autorun.repeat.clone() {

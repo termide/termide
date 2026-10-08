@@ -1143,8 +1143,15 @@ impl Translation for RuntimeTranslation {
         self.format("agent_notice_compaction_failed_fmt", &[("error", error)])
     }
 
-    fn agent_notice_goal_check_failed_fmt(&self, error: &str) -> String {
-        self.format("agent_notice_goal_check_failed_fmt", &[("error", error)])
+    fn agent_notice_goal_check_retry_fmt(&self, error: &str, wait: &str) -> String {
+        self.format(
+            "agent_notice_goal_check_retry_fmt",
+            &[("error", error), ("wait", wait)],
+        )
+    }
+
+    fn agent_notice_goal_check_paused_fmt(&self, error: &str) -> String {
+        self.format("agent_notice_goal_check_paused_fmt", &[("error", error)])
     }
 
     fn agent_notice_handoff_failed_fmt(&self, error: &str) -> String {

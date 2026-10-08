@@ -846,7 +846,8 @@ pub trait Translation: Send + Sync {
     fn agent_notice_cannot_handoff_fmt(&self, error: &str) -> String;
     fn agent_notice_cannot_write_handoff_fmt(&self, error: &str) -> String;
     fn agent_notice_compaction_failed_fmt(&self, error: &str) -> String;
-    fn agent_notice_goal_check_failed_fmt(&self, error: &str) -> String;
+    fn agent_notice_goal_check_retry_fmt(&self, error: &str, wait: &str) -> String;
+    fn agent_notice_goal_check_paused_fmt(&self, error: &str) -> String;
     fn agent_notice_handoff_failed_fmt(&self, error: &str) -> String;
     fn agent_notice_model_list_unavailable_fmt(&self, error: &str) -> String;
     fn agent_notice_mcp_error_fmt(&self, source: &str, error: &str) -> String;

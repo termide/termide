@@ -8553,3 +8553,57 @@ fn an_external_agent_cut_off_is_told_to_carry_on() {
         .any(|i| matches!(i, Item::Assistant { text, .. } if text == "from outside")));
     assert_eq!(panel.session.as_ref().unwrap().last_run(), LastRun::Ended);
 }
+
+#[test]
+fn a_failing_goal_check_is_tried_again_then_pauses_the_goal() {
+    let mut panel = panel(vec![reply("working")]);
+    type_text(&mut panel, "/goal do the thing");
+    panel.submit();
+    settle(&mut panel);
+    let fail = || AgentEvent::GoalJudgeFailed {
+        error: "session/prompt: Internal error (code -32603)".into(),
+    };
+    // The first failures wait and try again; the goal stays.
+    for attempt in 1..=GOAL_JUDGE_RETRIES {
+        panel.goal_task.as_mut().unwrap().judging = true;
+        panel.apply(fail());
+        let task = panel.goal_task.as_ref().expect("the goal stays");
+        assert_eq!(task.judge_failures, attempt);
+        assert!(!task.judging);
+        assert!(task.judge_at.is_some_and(|at| at > Instant::now()));
+        assert!(!panel.paused);
+    }
+    // Once they are used up, the goal waits at a pause instead of ending.
+    panel.apply(fail());
+    let task = panel
+        .goal_task
+        .as_ref()
+        .expect("the goal is paused, not dropped");
+    assert!(task.judge_at.is_none());
+    assert_eq!(task.judge_failures, 0);
+    assert!(panel.paused);
+    // `/continue` judges it again now.
+    type_text(&mut panel, "/continue");
+    panel.submit();
+    assert!(!panel.paused);
+    assert!(panel.goal_task.is_some());
+}
+
+#[test]
+fn a_goal_paused_by_failing_checks_ends_with_goal_stop() {
+    let mut panel = panel(vec![reply("working")]);
+    type_text(&mut panel, "/goal do the thing");
+    panel.submit();
+    settle(&mut panel);
+    for _ in 0..=GOAL_JUDGE_RETRIES {
+        panel.apply(AgentEvent::GoalJudgeFailed {
+            error: "boom".into(),
+        });
+    }
+    assert!(panel.paused);
+    type_text(&mut panel, "/goal stop");
+    panel.submit();
+    panel.tick();
+    assert!(panel.goal_task.is_none());
+    assert!(!panel.paused);
+}
