@@ -14,79 +14,140 @@
 
 ## 为什么选择 TermIDE？
 
-终端编辑器负责代码；而代码之外的一切 —— 远程主机上的文件、数据库、git、长时间运行的 shell、编程智能体 —— 通常需要插件或单独的工具。TermIDE 将这些全部集成在一个二进制文件中，在笔记本、服务器或手机上都能开箱即用：
+终端编辑器负责代码；而代码之外的一切 —— 远程主机上的文件、数据库、git、长时间运行的 shell、编程智能体 —— 通常需要插件或单独的工具。TermIDE 将这些全部集成在一个二进制文件中，在笔记本、服务器或手机上都能开箱即用。它并不试图取代这些工具，而是把你每天都要用到的那部分集中到一处：
+
+| 任务 | 通常使用 | 在 TermIDE 中 |
+|------|----------|---------------|
+| SSH 断开后保持工作不中断 | tmux、screen | 可分离实例 |
+| 在主机之间传输文件 | mc、ranger、scp | 支持 SFTP / FTP 的双栏文件管理器 |
+| 编辑代码和配置 | vim、nano | 带 LSP 的编辑器 |
+| 审查并提交 | lazygit、tig | Git 状态、日志和差异面板 |
+| 找出占用资源的进程 | htop、ss | 资源监控 |
+| 查看数据库 | sqlite3、psql | 数据库查看器 |
+| 让模型修改代码 | aider、Claude Code | 智能体面板，或在其中运行这些智能体 |
+
+编辑器、LSP、终端、git 和项目布局在终端编辑器中已是标配；下表列出的是其他编辑器所缺少或需要插件才能实现的功能：
 
 | 功能 | TermIDE | Fresh | Vim/Neovim | Helix | Micro |
 |---------|:-------:|:-----:|:----------:|:-----:|:-----:|
-| LSP 支持 | ✓ | ✓ | ✓ | ✓ | 插件 |
-| 零配置 | ✓ | ✓ | ✗ | ✓ | ✓ |
-| 脚本自动化 | ✓ | ✓ | ✓ | ✗ | 插件 |
-| 外部智能体（Claude Code、Codex、Gemini CLI） | ✓ | ✓ | 插件 | ✗ | ✗ |
-| 远程文件系统（SFTP/FTP） | ✓ | SSH | ✓ | ✗ | ✗ |
-| Markdown 预览 | ✓ | ✓ | 插件 | ✗ | ✗ |
-| 内置终端 | ✓ | ✓ | 插件 | ✗ | ✗ |
-| Git 集成 | ✓ | ✓ | 插件 | ✗ | ✗ |
-| 项目布局 | ✓ | ✓ | 插件 | ✗ | ✗ |
-| 多面板布局 | ✓ | ✓ | 插件 | ✗ | ✗ |
-| 书签 | ✓ | ✓ | 插件 | ✗ | ✗ |
-| 十六进制 / 二进制查看器 | ✓ | ✗ | 插件 | ✗ | 插件 |
-| 浏览压缩包（zip/tar） | ✓ | ✗ | ✓ | ✗ | ✗ |
-| 文件管理器 | ✓ | 仅文件树 | 插件 | ✗ | ✗ |
-| 可分离实例 | ✓ | ✓ | ✗ | ✗ | ✗ |
 | 内置编程智能体（本地或云端模型） | ✓ | ✗ | 插件 | ✗ | ✗ |
 | MCP 服务器 | ✓ | ✗ | 插件 | ✗ | ✗ |
-| 数据库查看器 | ✓ | ✗ | 插件 | ✗ | ✗ |
-| 图表查看器（Mermaid） | ✓ | ✗ | 插件 | ✗ | ✗ |
-| 图片查看器 | ✓ | ✗ | 插件 | ✗ | ✗ |
+| 双栏文件管理器 | ✓ | 仅文件树 | 插件 | ✗ | ✗ |
 | 后台文件操作 | ✓ | ✗ | 插件 | ✗ | ✗ |
+| 密码保险库 | ✓ | ✗ | 插件 | ✗ | ✗ |
+| 数据库查看器 | ✓ | ✗ | 插件 | ✗ | ✗ |
+| 十六进制 / 二进制查看器与编辑器 | ✓ | ✗ | 插件 | ✗ | 插件 |
+| 图表查看器（Mermaid） | ✓ | ✗ | 插件 | ✗ | ✗ |
+| HTML 预览 | ✓ | ✗ | 插件 | ✗ | ✗ |
+| 图片查看器 | ✓ | ✗ | 插件 | ✗ | ✗ |
 | 资源监控 | ✓ | ✗ | ✗ | ✗ | ✗ |
 
 **TermIDE = 编辑器 + 文件管理器 + 终端 + Git + 智能体，集成于一个 TUI 应用程序中。**
 
+## 设计原则
+
+- **自给自足** - 单个静态二进制文件，无任何运行时依赖：SSH、TLS 和加密均为纯 Rust 实现，因此同一个文件可在 Alpine、distroless 容器或 Termux 中运行。系统中已有的工具 —— git、语言服务器、供智能体网页搜索使用的浏览器 —— 存在时会自动使用。
+- **桌面与服务器皆宜** - 在工作站上支持原生图形和系统剪贴板；通过 SSH 使用时，`termide --detached` 让编辑器、shell 和任务在断线后继续运行（[可分离实例](doc/zh/detached-instances.md)），文件管理器可通过 SFTP / FTP 访问其他主机。
+- **你的数据归你所有** - 没有遥测，也不检查更新：termide 只连接你指定的服务器、数据库和模型端点。在你配置模型之前，智能体处于关闭状态；使用本地模型时，你的代码永远不会离开本机。
+- **机密受到保护** - 连接密码保存在由主密码保护的加密保险库中（Argon2 + ChaCha20-Poly1305），绝不会出现在书签、布局或日志中（[密码保险库](doc/zh/passwords.md)）；API 密钥从环境变量读取。
+- **没有任何隐藏** - 智能体模型看到的每一段提示词 —— 系统提示词、服务提示词、工具描述 —— 都是可以阅读和覆盖的普通文件，`/prompt` 可显示组装后的完整结果（[系统提示词](doc/zh/agent.md#系统提示词)）。设置、快捷键、主题和命令均为 TOML 格式。
+
 ## 功能特性
 
-- **基于终端的 IDE** - 支持 23 种语言的语法高亮、单词导航（Ctrl+Left/Right）、段落/符号导航（Ctrl+Up/Down）、自动缩进、自动关闭括号
-- **LSP 支持** - 代码补全、查找引用、重命名符号、跳转到定义，通过 rust-analyzer、pylsp、typescript-language-server 及其他 LSP 服务器实现
-- **编码代理** - 一个面板（`Alt+A`），语言模型通过任意 OpenAI 或 Anthropic 兼容端点（本地 llama.cpp / Ollama / vLLM / omlx 或托管服务）在你的项目中读取、编辑和运行命令，每次工具调用都会征求许可，并可通过 `/undo` 和检查点撤回其修改；技能、提示模板、MCP 服务器、命令钩子，以及通过 ACP 接入的外部代理（Claude Code、Codex、Gemini CLI）都在同一面板中
-- **智能文件管理器** - 可展开目录的树形视图、嵌套 Git 状态、批量操作、文件/内容搜索（glob/正则表达式）、树内增量搜索；zip、tar 和 ISO 压缩包可像只读目录一样打开（包括服务器上的和嵌套在其他压缩包中的），按 `P` 可将所选内容打包为 zip 或 tar
-- **远程文件系统** - 在文件管理器中通过 SFTP / FTP / FTPS 浏览和编辑远程服务器上的文件，在本地与远程面板之间复制 —— 纯 Rust（russh + rustls），无需原生库，可在静态 musl 上运行（`smb://` / `nfs://` 走系统挂载）
-- **后台文件操作** - 复制、移动、上传、下载、删除及批量传输在后台运行，每个操作带进度条、字节/耗时读数，支持暂停 / 恢复 / 取消（操作面板）
+| | |
+|:---:|:---:|
+| <img src="assets/screenshots/agent.png" alt="工作中的编程智能体" width="440"> | <img src="assets/screenshots/file-manager.png" alt="带嵌套 Git 状态的文件管理器" width="440"> |
+| 工作中的编程智能体 | 带嵌套 Git 状态的文件管理器 |
+| <img src="assets/screenshots/db.png" alt="数据库查看器" width="440"> | <img src="assets/screenshots/git.png" alt="带提交图的 Git 日志" width="440"> |
+| 数据库查看器 | 带提交图的 Git 日志 |
+
+### 代码
+
+- **编辑器** - 23 种语言的语法高亮；LSP 代码补全、悬停提示、跳转到定义、查找引用、重命名和诊断；切换注释、自动缩进、自动闭合括号；可选 Vim 模式
+- **大纲与诊断** - 与光标同步的代码结构导航（`Alt+O`）和 LSP 诊断面板（`Alt+I`）
+- **搜索和替换** - 实时预览、匹配计数、正则表达式
+- **文档与代码并排** - 渲染 Markdown、HTML（可将页面另存为 Markdown 的文本模式浏览器）以及以文本绘制的 Mermaid 图表；`Ctrl+E` 切换到源码
+- **十六进制编辑器** - 带字节光标、选择和搜索的 hex/ASCII 视图；覆盖编辑并生成 `.bak` 备份
+- **图片** - 在 Kitty、WezTerm、iTerm2、Ghostty 和 foot 中原生渲染图形
+
+### 编程智能体
+
+- **自带模型** - 任意 OpenAI 或 Anthropic 兼容端点：本机上的 llama.cpp、Ollama、vLLM、omlx，或托管服务
+- **未经你同意不做任何修改** - 每次工具调用都需许可，或在 auto 模式下交由审查模型决定；`/undo` 和检查点可撤回修改
+- **计划模式与子代理** - 智能体在写出计划之前与你逐轮敲定待决问题；子代理可并行工作
+- **工具** - 读取、编辑、shell、网页搜索与抓取、检索以往会话、git 历史和项目文件的 `recall`，以及 MCP 服务器
+- **同一面板中的其他智能体** - 通过 Agent Client Protocol 接入 Claude Code、Codex 和 Gemini CLI
+- **以文件扩展** - 技能、提示模板、命令脚本、钩子和项目说明
+- **无界面运行** - `termide --prompt "..." --output json` 在脚本和 CI 中运行同一个智能体
+
+### 文件与数据
+
+- **双栏文件管理器** - 带嵌套 Git 状态的树形视图、glob 和正则搜索、批量操作；zip、tar 和 ISO 压缩包可像文件夹一样打开，按 `P` 打包所选内容；文件可通过系统剪贴板与其他应用互相复制粘贴
+- **远程文件系统** - 纯 Rust 实现的 SFTP、FTP 和 FTPS，可在本地与远程面板之间复制；`smb://` 和 `nfs://` 通过系统挂载访问
+- **后台操作** - 复制、移动、上传和下载，带进度显示，支持暂停、恢复和取消
+- **数据库查看器** - 通过书签 URL 打开 SQLite、PostgreSQL 和 MySQL：服务端排序、按列过滤、单元格编辑，整行导出为 TSV、JSON 或 INSERT
+- **密码保险库** - 远程主机、数据库和 git 的密码保存在由主密码保护的加密保险库中
+- **书签与目录切换器** - 保存常用位置，使用 `Ctrl+\` 快速切换目录
+
+### 服务器与运维
+
+- **可分离实例** - `termide --detached` 让编辑器、shell 和任务在终端关闭后继续运行；`--attach` 可在任意尺寸的终端中恢复（仅限 Unix）
 - **集成终端** - 完整的 PTY 支持、VT100 转义序列、鼠标跟踪
-- **Git 集成** - 状态面板、带彩色 Unicode 提交图（ASCII 回退）的提交日志、暂存/取消暂存、分支及其工作树（worktree）、分支切换、暂存管理（stash）、内联 blame 注解
-- **数据库查看器** - 通过书签 URL 打开的 SQLite / PostgreSQL / MySQL 只读浏览器：带二维单元格光标的表格、服务端单列排序与按列类型感知过滤、滑动窗口分页，以及可复制为 TSV / JSON / INSERT 的整行详情对话框
-- **多面板布局** - 垂直拆分的面板组，每个面板高度可调，一键全屏切换（`Alt+F11`）；终端变窄时智能自动堆叠
-- **图片查看器** - 在 Kitty、WezTerm、iTerm2、Ghostty、foot 终端中原生渲染图形
-- **十六进制 / 二进制查看与编辑器** - 二进制文件的 hex/ASCII 视图（按 16 字节自适应分段），字节光标在两个区域同时显示，支持拖动/Shift 选择与剪贴板复制、ASCII 与十六进制字节搜索，以及 hex↔文本切换（`Ctrl+L`）；`F4` 以覆盖方式编辑，保存时生成 `.bak` 备份
-- **Markdown 预览** - `.md` / `.markdown` 的只读渲染视图（标题、列表、表格、语法高亮代码块、可点击链接与图片图标），支持光标导航、选择与剪贴板复制；`Ctrl+E` 切换到可编辑源码；内嵌的 ```mermaid``` 代码块渲染为图表
-- **Mermaid 图表查看器** - 将 `.mmd` / `.mermaid` 文件渲染为文本伪图形 —— flowchart、sequence、state、class、ER、gantt、pie、journey、mindmap、timeline、gitGraph、quadrant；二维滚动、复制到剪贴板，`Ctrl+E` 编辑源码
-- **外部应用** - 使用系统默认应用程序打开文件（Shift+Enter）
-- **44 款内置主题** - 暗色、亮色、复古和电影主题（Dracula、Nord、Monokai、Solarized、Matrix、Pip-Boy、Norton Commander、Windows 95 等）
-- **自定义主题** - 使用 TOML 格式创建自己的主题
+- **资源监控** - 菜单栏和状态栏显示 CPU、内存、网络和磁盘；点击即可查看占用最高的进程和监听端口
+- **你的 `$EDITOR`** - `EDITOR=termide` 可用于 `git commit`、`crontab -e` 和 `visudo`
+- **单个静态二进制文件** - Linux x86_64 和 ARM64（glibc 或 musl）、macOS、原生 Windows 以及 Android Termux
+
+### 工作区
+
+- **Git** - 状态、带彩色提交图的日志、差异、暂存、stash、blame、分支及其工作树
+- **项目** - 按项目恢复面板布局；切换离开的项目在后台继续运行，并以按钮形式显示在菜单栏中；`termide --restore` 重新打开上次运行的项目
+- **多面板布局** - 高度可调的面板组、全屏切换（`Alt+F11`），终端变窄时自动堆叠
+- **自定义命令** - 全局或项目级命令，支持快捷键、参数表单以及终端 / 后台 / 报告模式
+- **命令面板与打开提示** - `Ctrl+P` 通过模糊名称运行任意命令；`Ctrl+G` 打开文件、文件夹或 URL，带路径建议
+- **设置** - 全屏设置窗口（`Alt+P`），可直接录制快捷键
+
+### 外观与操作
+
+- **44 款内置主题** - 暗色、亮色、复古和电影主题；可用 TOML 编写自己的主题
 - **15 种界面语言** - 孟加拉语、中文、英语、法语、德语、印地语、印尼语、日语、韩语、葡萄牙语、俄语、西班牙语、泰语、土耳其语、越南语
-- **项目管理** - 按项目自动保存和恢复面板布局；切换离开的项目会在后台保持打开（终端继续运行，未保存的修改得以保留），“项目”菜单和 `Alt+\` 切换窗口列出已打开和最近使用的项目
-- **可分离实例** - `termide --detached` 让整个实例（编辑器、shell、LSP 服务器、运行中的任务）在终端关闭后继续运行；`termide --attach` 可从任意终端、任意尺寸重新接入（仅限 Unix）
-- **系统监控** - 菜单栏实时显示 CPU、RAM、网络 I/O；状态栏显示磁盘使用情况；点击指标可打开详细模态窗口
-- **搜索和替换** - 实时预览、匹配计数、正则表达式支持
-- **自定义命令** - 在命令菜单中运行 `commands.toml`（全局和项目级）中定义的 shell 命令：快捷键、分组、参数表单，以及终端 / 后台 / 报告模式
-- **跨平台** - Linux（x86_64、ARM64）、macOS（Intel、Apple Silicon）、Windows（原生 ConPTY、WSL）
-- **完整鼠标支持** - 点击导航、滚动、双击操作
-- **键盘布局** - 西里尔文支持，自动快捷键翻译
-- **Vim 模式** - 可选的 Vim 风格编辑，支持西里尔文键盘
-- **命令面板** - 使用 Ctrl+P 快速打开命令，支持模糊匹配
-- **打开提示** - 使用 Ctrl+G 打开文件、目录或 URL，带路径建议
-- **目录切换器** - 使用 `Ctrl+\` 快速切换目录
-- **书签** - 保存和管理常用位置
+- **键盘与鼠标** - 完整鼠标支持；快捷键在西里尔文键盘布局下同样有效；`Shift+Enter` 用系统应用打开文件
+
+## 常见问题
+
+**必须使用 AI 智能体吗？** 不必。默认没有设置任何提供商或模型，因此在你配置之前，智能体不会做任何事，也不会发送任何内容。其他功能都可以独立使用。
+
+**TermIDE 会回传数据吗？** 没有遥测、无需账号，也不检查更新。只有在你要求时才会联网：访问远程位置、网页、`git push` 或 `pull`，或调用智能体的模型。
+
+**它能取代 tmux 吗？** 对于通过 SSH 保持工作不中断这一常见场景，可以：`termide --detached` 让整个工作区保持运行，`--attach` 可将其恢复。它不像 tmux 那样管理任意会话和窗口，也可以在 tmux 中正常运行。
+
+**需要什么终端？** 任何支持真彩色的现代终端。在 Kitty、WezTerm、iTerm2、Ghostty 和 foot 中可原生显示图片；macOS 上的 `Alt` 快捷键需要支持 Kitty 键盘协议的终端。
+
+**能在 Windows 上运行吗？** 可以，通过 ConPTY 在 Windows Terminal 中原生运行，或在 WSL 中运行。可分离实例仅限 Unix。
 
 ## 安装
 
-**快速开始：** 从 [GitHub Releases](https://github.com/termide/termide/releases) 下载预编译的二进制文件，或通过包管理器安装。
+Linux 和 macOS —— 脚本会检测你的系统并提供适合的安装方式（软件包、Homebrew、二进制文件、Nix 或 Cargo）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/termide/termide/main/install.sh | sh
+```
+
+或使用包管理器：
+
+```bash
+brew tap termide/termide && brew install termide   # macOS / Linux
+yay -S termide-bin                                 # Arch Linux（AUR）
+nix run github:termide/termide                     # Nix，无需安装
+```
+
+在服务器上，只需复制[静态 musl 二进制文件](#portable-static-binary)并运行，无需安装其他任何东西。
 
 **支持的平台：** Linux（x86_64、ARM64）、macOS（Intel、Apple Silicon）、Windows（x86_64）
 
 ### 选择安装方式
 
-<details open>
-<summary><b>📦 预编译二进制文件（推荐）</b></summary>
+<details>
+<summary><b>📦 预编译二进制文件</b></summary>
 
 从 [GitHub Releases](https://github.com/termide/termide/releases) 下载适合您平台的最新版本：
 
@@ -284,6 +345,7 @@ cargo build --release
 
 </details>
 
+<a id="portable-static-binary"></a>
 <details>
 <summary><b>📦 便携静态二进制文件（Alpine / 任意 Linux）</b></summary>
 
@@ -315,14 +377,7 @@ nix build github:termide/termide#termide-static
 
 </details>
 
-## 系统要求
-
-- 预编译二进制文件：无额外要求
-- 从源码构建：
-  - Rust 1.70+（stable）
-  - Nix 用户：需启用 flakes 的 Nix
-
-### 命令行选项
+## 命令行选项
 
 ```
 termide [OPTIONS] [FILE]...
@@ -450,44 +505,9 @@ auto_completion = true
 min_level = "info"
 ```
 
-### 可用主题
+### 主题
 
-**暗色主题：**
-- `windows-xp` - 默认主题（Windows XP 风格）
-- `dracula` - 流行的 Dracula 主题
-- `monokai` - 经典 Monokai 主题
-- `nord` - Nord 蓝色调主题
-- `onedark` - Atom One Dark 主题
-- `solarized-dark` - 暗色 Solarized 主题
-- `midnight` - Midnight Commander 风格
-- `macos-dark` - macOS 暗色风格
-
-**亮色主题：**
-- `atom-one-light` - Atom One Light 主题
-- `ayu-light` - Ayu Light 主题
-- `github-light` - GitHub Light 主题
-- `manuscript` - 中世纪手稿风格，陈旧羊皮纸色调
-- `material-lighter` - Material Lighter 主题
-- `solarized-light` - 亮色 Solarized 主题
-- `macos-light` - macOS 亮色风格
-
-**复古主题：**
-- `far-manager` - FAR Manager 风格
-- `norton-commander` - Norton Commander 风格
-- `dos-navigator` - DOS Navigator 风格
-- `volkov-commander` - Volkov Commander 风格
-- `windows-95` - Windows 95 风格
-- `windows-98` - Windows 98 风格
-
-**电影主题：**
-- `matrix` - 黑客帝国数字雨（黑底绿字）
-- `pip-boy` - 辐射 Pip-Boy 3000 磷光 CRT
-- `terminator` - 天网 HUD / 火星红色调
-
-**其他主题：**
-- `terminal` - 经典终端风格（继承终端颜色）
-
-**主题示例：**
+44 款内置主题 —— 暗色、亮色、复古（Norton Commander、FAR Manager、Windows 95）和电影风格（Matrix、Pip-Boy）—— 可通过菜单切换，或在 `config.toml` 中设置 `theme`。完整列表见[主题](doc/zh/themes.md)。
 
 | | | |
 |:---:|:---:|:---:|
@@ -527,44 +547,11 @@ mode = "report"  # terminal（默认）、background 或 report
 
 ## 开发
 
-代码库是由模块化 crate 组成的 Cargo workspace。crate 布局、面板系统和事件流程，
-请参见 **[开发者指南](doc/zh/developer-guide.md)** 和 **[架构](doc/zh/architecture.md)**。
-
-### 构建
-
-```bash
-# 开发构建
-cargo build
-
-# 带优化的发布构建
-cargo build --release
-
-# 运行测试
-cargo test
-
-# 代码质量检查
-cargo clippy
-cargo fmt --check
-```
-
-### Nix 开发
-
-项目包含 Nix flake 以实现可重复的开发环境：
-
-```bash
-# 进入开发 shell
-nix develop
-
-# 使用 Nix 构建
-nix build
-
-# 运行检查
-nix flake check
-```
+代码库是由模块化 crate 组成的 Cargo workspace；工具链版本由 `rust-toolchain.toml` 固定。构建、测试、Nix 开发环境和 pre-commit 钩子见 **[开发者指南](doc/zh/developer-guide.md)**；crate 布局、面板系统和事件流见 **[架构](doc/zh/architecture.md)**。
 
 ## 贡献
 
-欢迎贡献！请随时提交 issue 和 pull request。
+欢迎提交 issue 和 pull request。每个克隆执行一次 `git config core.hooksPath .githooks`：pre-commit 钩子会运行与 CI 相同的 `fmt`、`clippy` 和测试检查。
 
 ## 许可证
 
@@ -579,3 +566,10 @@ nix flake check
 - [tree-sitter](https://github.com/tree-sitter/tree-sitter) - 语法高亮
 - [ropey](https://github.com/cessen/ropey) - 文本缓冲区
 - [sysinfo](https://github.com/GuillaumeGomez/sysinfo) - 系统资源监控
+- [russh](https://github.com/Eugeny/russh) 和 [russh-sftp](https://github.com/AspectUnk/russh-sftp) - 纯 Rust 实现的 SSH 和 SFTP
+- [suppaftp](https://github.com/veeso/suppaftp) - FTP / FTPS
+- [rustls](https://github.com/rustls/rustls) - 无需 OpenSSL 的 TLS
+- [SQLx](https://github.com/launchbadge/sqlx) - SQLite、PostgreSQL 和 MySQL 访问
+- [RustCrypto](https://github.com/RustCrypto) - 密码保险库使用的 Argon2 和 ChaCha20-Poly1305
+- [nucleo](https://github.com/helix-editor/nucleo) - 模糊匹配
+- [pulldown-cmark](https://github.com/pulldown-cmark/pulldown-cmark) 和 [html5ever](https://github.com/servo/html5ever) - Markdown 和 HTML 解析

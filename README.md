@@ -14,80 +14,140 @@ An all-in-one terminal workspace for your workstation and your servers: code edi
 
 ## Why TermIDE?
 
-Terminal editors cover the code; everything around it — files on remote hosts, databases, git, long-running shells, a coding agent — usually takes plugins or separate tools. TermIDE ships all of it in one binary that works out of the box on a laptop, a server, or a phone:
+Terminal editors cover the code; everything around it — files on remote hosts, databases, git, long-running shells, a coding agent — usually takes plugins or separate tools. TermIDE ships all of it in one binary that works out of the box on a laptop, a server, or a phone. It does not try to replace those tools; it covers the part you reach for every day, in one place:
+
+| Task | Usually | In TermIDE |
+|------|---------|------------|
+| Keep work alive after SSH drops | tmux, screen | Detached instances |
+| Move files between hosts | mc, ranger, scp | Dual-pane file manager with SFTP / FTP |
+| Edit code and configs | vim, nano | Editor with LSP |
+| Review and commit | lazygit, tig | Git status, log and diff panels |
+| Find what is eating the box | htop, ss | Resource monitor |
+| Look into a database | sqlite3, psql | Database viewer |
+| Ask a model to change code | aider, Claude Code | Agent panel, or those agents inside it |
+
+Editor, LSP, terminal, git and project layouts are a given among terminal editors; this table lists what the others lack or leave to plugins:
 
 | Feature | TermIDE | Fresh | Vim/Neovim | Helix | Micro |
 |---------|:-------:|:-----:|:----------:|:-----:|:-----:|
-| LSP Support | ✓ | ✓ | ✓ | ✓ | plugin |
-| Zero Config | ✓ | ✓ | ✗ | ✓ | ✓ |
-| Script Automation | ✓ | ✓ | ✓ | ✗ | plugin |
-| External Agents (Claude Code, Codex, Gemini CLI) | ✓ | ✓ | plugin | ✗ | ✗ |
-| Remote Filesystems (SFTP/FTP) | ✓ | SSH | ✓ | ✗ | ✗ |
-| Markdown Preview | ✓ | ✓ | plugin | ✗ | ✗ |
-| Built-in Terminal | ✓ | ✓ | plugin | ✗ | ✗ |
-| Git Integration | ✓ | ✓ | plugin | ✗ | ✗ |
-| Project Layouts | ✓ | ✓ | plugin | ✗ | ✗ |
-| Multi-panel Layout | ✓ | ✓ | plugin | ✗ | ✗ |
-| Bookmarks | ✓ | ✓ | plugin | ✗ | ✗ |
-| Hex / Binary Viewer | ✓ | ✗ | plugin | ✗ | plugin |
-| Archive Browsing (zip/tar) | ✓ | ✗ | ✓ | ✗ | ✗ |
-| File Manager | ✓ | tree only | plugin | ✗ | ✗ |
-| Detachable Instances | ✓ | ✓ | ✗ | ✗ | ✗ |
 | Built-in Coding Agent (local or hosted models) | ✓ | ✗ | plugin | ✗ | ✗ |
 | MCP Servers | ✓ | ✗ | plugin | ✗ | ✗ |
-| Database Viewer | ✓ | ✗ | plugin | ✗ | ✗ |
-| Diagram Viewer (Mermaid) | ✓ | ✗ | plugin | ✗ | ✗ |
-| Image Viewer | ✓ | ✗ | plugin | ✗ | ✗ |
+| Dual-pane File Manager | ✓ | tree only | plugin | ✗ | ✗ |
 | Background File Operations | ✓ | ✗ | plugin | ✗ | ✗ |
+| Password Vault | ✓ | ✗ | plugin | ✗ | ✗ |
+| Database Viewer | ✓ | ✗ | plugin | ✗ | ✗ |
+| Hex / Binary Viewer & Editor | ✓ | ✗ | plugin | ✗ | plugin |
+| Diagram Viewer (Mermaid) | ✓ | ✗ | plugin | ✗ | ✗ |
+| HTML Preview | ✓ | ✗ | plugin | ✗ | ✗ |
+| Image Viewer | ✓ | ✗ | plugin | ✗ | ✗ |
 | Resource Monitor | ✓ | ✗ | ✗ | ✗ | ✗ |
 
 **TermIDE = Editor + File Manager + Terminal + Git + Agent in one TUI application.**
 
+## Principles
+
+- **Self-contained** - One static binary with no runtime dependencies: SSH, TLS and crypto are pure Rust, so the same file runs on Alpine, in a distroless container or in Termux. Tools you already have — git, language servers, a browser for the agent's web search — are picked up when present.
+- **At home on a desktop and on a server** - Native graphics and the system clipboard on a workstation; over SSH, `termide --detached` keeps editors, shells and jobs alive across disconnects ([Detached Instances](doc/en/detached-instances.md)), and the file manager reaches other hosts over SFTP / FTP.
+- **Your data stays yours** - No telemetry, no update checks: termide connects only to the servers, databases and model endpoints you point it at. The agent stays off until you configure a model, and with a local one your code never leaves the machine.
+- **Secrets are guarded** - Connection passwords live in an encrypted vault under a master password (Argon2 + ChaCha20-Poly1305), never in bookmarks, layouts or logs ([Password Vault](doc/en/passwords.md)); API keys are read from environment variables.
+- **Nothing hidden from you** - Every prompt the agent's model sees — the system prompt, service prompts, tool descriptions — is a plain file you can read and override, and `/prompt` shows the assembled result ([The system prompt](doc/en/agent.md#the-system-prompt)). Settings, keybindings, themes and commands are TOML.
+
 ## Features
 
-- **Terminal-based IDE** - Syntax highlighting for 23 languages, word navigation (Ctrl+Left/Right), paragraph/symbol navigation (Ctrl+Up/Down), toggle comment (Ctrl+/), auto-indentation, auto-close brackets
-- **LSP Support** - Code completion, Find References (Shift+F12), Rename Symbol (F4), Go to Definition (Ctrl+Click), diagnostics
-- **Coding Agent** - A panel (`Alt+A`) where a language model reads, edits and runs commands in your project through any OpenAI- or Anthropic-compatible endpoint (local llama.cpp / Ollama / vLLM / omlx or hosted), asking permission per tool call, with `/undo` and checkpoints to take its edits back; skills, prompt templates, MCP servers, command hooks, and external agents over ACP (Claude Code, Codex, Gemini CLI) in the same panel
-- **Smart File Manager** - Tree view with expandable directories, nested git status, batch operations, file/content search (glob/regex), in-tree incremental search; zip, tar and ISO archives open like read-only directories (also on a server or inside another archive), and `P` packs the selection into zip or tar
-- **Remote Filesystems** - Browse and edit files on remote servers from the file manager over SFTP / FTP / FTPS, copying between local and remote panels — pure Rust (russh + rustls), no native libraries, works on static musl (`smb://` / `nfs://` via the OS mount)
-- **Background File Operations** - Copy, move, upload, download, delete and batch transfers run in the background with a per-operation progress bar, byte/elapsed readout, and pause / resume / cancel (Operations panel)
-- **Integrated Terminal** - Full PTY support, VT100 escape sequences, mouse tracking
-- **Git Integration** - Status panel, commit log with a coloured Unicode commit graph (ASCII fallback), staging/unstaging, branches with their worktrees, branch switching, stash management, inline blame
-- **Database Viewer** - Read-only browser for SQLite / PostgreSQL / MySQL opened from a bookmark URL: table grid with a 2D cell cursor, server-side single-column sort and type-aware per-column filtering, sliding-window pagination, and a row-detail dialog that copies as TSV / JSON / INSERT
-- **Multi-panel Layout** - Vertically split panel groups with adjustable per-panel heights and a one-key fullscreen toggle (`Alt+F11`); smart auto-stacking when the terminal narrows; new panels open after the currently active one
-- **Image Viewer** - Native graphics in Kitty, WezTerm, iTerm2, Ghostty, foot terminals
-- **Hex / Binary Viewer & Editor** - Hex/ASCII view (adaptive 16-byte sections) for binary files, with a byte cursor shown in both zones, drag/shift selection and clipboard copy, ASCII + hex-byte search, and a hex↔text toggle (`Ctrl+L`); `F4` opens it for overwrite editing with a `.bak` backup on save
-- **Markdown Preview** - Rendered read-only view for `.md` / `.markdown` (headings, lists, tables, syntax-highlighted code blocks, clickable links and image pictograms) with cursor navigation, selection and clipboard copy; `Ctrl+E` toggles to the editable source; embedded ```mermaid``` blocks render as diagrams
-- **Mermaid Diagram Viewer** - Render `.mmd` / `.mermaid` files as text pseudographics — flowchart, sequence, state, class, ER, gantt, pie, journey, mindmap, timeline, gitGraph, quadrant; 2D scroll, copy to clipboard, and `Ctrl+E` to edit the source
-- **External Apps** - Open files with system default applications (Shift+Enter)
-- **44 Built-in Themes** - Dark, light, retro, and cinematic themes (Dracula, Nord, Monokai, Solarized, Matrix, Pip-Boy, Norton Commander, Windows 95, etc.)
-- **Custom Themes** - Create your own themes in TOML format
-- **15 UI Languages** - Bengali, Chinese, English, French, German, Hindi, Indonesian, Japanese, Korean, Portuguese, Russian, Spanish, Thai, Turkish, Vietnamese (missing keys transparently fall back to English)
-- **Project Management** - Auto-save and restore panel layouts per project; projects you switch away from stay open in the background (terminals keep running, unsaved edits are kept), and the Projects menu and the `Alt+\` switcher list open and recent projects
-- **Detached Instances** - `termide --detached` keeps the whole instance — editors, shells, LSP servers, running jobs — alive after the terminal closes; `termide --attach` picks it up again from any terminal, at any size (Unix only)
-- **System Monitor** - Real-time CPU, RAM, network I/O in menu bar and disk usage in status bar; click any indicator to open a detail modal (top processes by CPU/RAM, top processes by network connections with listening ports); repeated click on the same indicator closes the modal (toggle)
-- **Search & Replace** - Live preview, match counter, regex support
-- **Custom Commands** - Shell commands from `commands.toml`, global and per project, in the Commands menu: hotkeys, groups, parameter forms, and terminal / background / report modes
-- **Settings Modal** - Full-screen configuration (`Alt+P`) with sidebar layout, grouped fields (Appearance / Input / Layout / Performance / …), and in-place keybinding capture for all 9 keybinding scopes
-- **Cross-platform** - Linux (x86_64, ARM64), macOS (Intel, Apple Silicon), Windows (native via ConPTY, WSL)
-- **Full Mouse Support** - Click navigation, scroll, double-click actions
-- **Keyboard Layouts** - Cyrillic support with automatic hotkey translation
-- **Vim Mode** - Optional Vim-style editing with Cyrillic keyboard support
-- **Directory Switcher** - Quick directory switching with `Ctrl+\`
-- **Bookmarks** - Save and organize frequently used locations
-- **Command Palette** - Quick access to all commands with fuzzy matching (Ctrl+P)
-- **Open Prompt** - Open a file, directory or URL with path suggestions (Ctrl+G)
+| | |
+|:---:|:---:|
+| <img src="assets/screenshots/agent.png" alt="Coding agent at work" width="440"> | <img src="assets/screenshots/file-manager.png" alt="File manager with nested git status" width="440"> |
+| Coding agent at work | File manager with nested git status |
+| <img src="assets/screenshots/db.png" alt="Database viewer" width="440"> | <img src="assets/screenshots/git.png" alt="Git log with the commit graph" width="440"> |
+| Database viewer | Git log with the commit graph |
+
+### Code
+
+- **Editor** - Syntax highlighting for 23 languages, LSP completion, hover, go to definition, references, rename and diagnostics; toggle comment, auto-indent, auto-close brackets; optional Vim mode
+- **Outline and diagnostics** - Structural navigation synced with the cursor (`Alt+O`) and an LSP diagnostics panel (`Alt+I`)
+- **Search and replace** - Live preview, match counter, regex
+- **Docs next to the code** - Rendered Markdown, HTML (a text-mode browser that saves pages as Markdown) and Mermaid diagrams drawn as text; `Ctrl+E` switches to the source
+- **Hex editor** - Hex/ASCII view with a byte cursor, selection and search; overwrite editing with a `.bak` backup
+- **Images** - Native graphics in Kitty, WezTerm, iTerm2, Ghostty and foot
+
+### Coding agent
+
+- **Bring your own model** - Any OpenAI- or Anthropic-compatible endpoint: llama.cpp, Ollama, vLLM, omlx on your machine, or a hosted provider
+- **Nothing changes without you** - Permission per tool call, or a reviewer model in auto mode; `/undo` and checkpoints take edits back
+- **Plan mode and subagents** - The agent settles open decisions with you before it writes a plan; subagents work in parallel
+- **Tools** - Read, edit, shell, web search and fetch, `recall` over earlier sessions, git history and project files, and MCP servers
+- **Other agents in the same panel** - Claude Code, Codex and Gemini CLI over the Agent Client Protocol
+- **Extend it in files** - Skills, prompt templates, command scripts, hooks and project instructions
+- **Headless** - `termide --prompt "..." --output json` runs the same agent in scripts and CI
+
+### Files and data
+
+- **Dual-pane file manager** - Tree with nested git status, glob and regex search, batch operations; zip, tar and ISO archives open like folders and `P` packs the selection; files copy and paste to and from other apps through the system clipboard
+- **Remote filesystems** - SFTP, FTP and FTPS in pure Rust, with copying between local and remote panels; `smb://` and `nfs://` through the OS mount
+- **Background operations** - Copy, move, upload and download with progress, pause, resume and cancel
+- **Database viewer** - SQLite, PostgreSQL and MySQL from a bookmark URL: server-side sort, per-column filters, cell editing, rows as TSV, JSON or INSERT
+- **Password vault** - Passwords of remote hosts, databases and git in an encrypted vault under a master password
+- **Bookmarks and directory switcher** - Saved locations and quick switching with `Ctrl+\`
+
+### Servers and ops
+
+- **Detached instances** - `termide --detached` keeps editors, shells and jobs running after the terminal closes; `--attach` brings them back at any size (Unix)
+- **Integrated terminal** - Full PTY with VT100 escape sequences and mouse tracking
+- **Resource monitor** - CPU, RAM, network and disk in the menu and status bars; a click shows top processes and listening ports
+- **Your `$EDITOR`** - `EDITOR=termide` for `git commit`, `crontab -e` and `visudo`
+- **One static binary** - Linux x86_64 and ARM64 (glibc or musl), macOS, native Windows and Android Termux
+
+### Workspace
+
+- **Git** - Status, log with a coloured commit graph, diff, staging, stash, blame, branches and their worktrees
+- **Projects** - Panel layouts restored per project; projects you switch away from keep running in the background, as buttons in the menu bar; `termide --restore` reopens the last run's set
+- **Multi-panel layout** - Stacked panel groups with adjustable heights, a fullscreen toggle (`Alt+F11`) and auto-stacking in narrow terminals
+- **Custom commands** - Global or per-project commands with hotkeys, parameter forms and terminal, background or report modes
+- **Command palette and Open prompt** - `Ctrl+P` runs any command by fuzzy name; `Ctrl+G` opens a file, a folder or a URL with path suggestions
+- **Settings** - A full-screen settings modal (`Alt+P`) with in-place keybinding capture
+
+### Look and feel
+
+- **44 built-in themes** - Dark, light, retro and cinematic; write your own in TOML
+- **15 UI languages** - Bengali, Chinese, English, French, German, Hindi, Indonesian, Japanese, Korean, Portuguese, Russian, Spanish, Thai, Turkish, Vietnamese
+- **Keyboard and mouse** - Full mouse support; hotkeys work on a Cyrillic layout; `Shift+Enter` opens a file in its system application
+
+## FAQ
+
+**Do I have to use the AI agent?** No. No provider or model is set by default, so the agent does nothing and sends nothing until you configure one. Everything else works without it.
+
+**Does TermIDE phone home?** No telemetry, no account and no update checks. It goes online only when you ask: a remote location, a web page, `git push` or `pull`, or a model for the agent.
+
+**Does it replace tmux?** For keeping work alive over SSH, yes: `termide --detached` keeps the whole workspace running and `--attach` brings it back. It does not manage arbitrary sessions and windows the way tmux does, and runs fine inside tmux.
+
+**Which terminals does it need?** Any modern terminal with true colour. Images are drawn natively in Kitty, WezTerm, iTerm2, Ghostty and foot; `Alt` hotkeys on macOS work in terminals with the Kitty keyboard protocol.
+
+**Does it run on Windows?** Yes, natively through ConPTY in Windows Terminal, or in WSL. Detached instances are Unix-only.
 
 ## Installation
 
-**Quick Start:** Download pre-built binaries from [GitHub Releases](https://github.com/termide/termide/releases) or install via your package manager.
+Linux and macOS — the script detects your system and offers the methods that fit it (package, Homebrew, binary, Nix or Cargo):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/termide/termide/main/install.sh | sh
+```
+
+Or with a package manager:
+
+```bash
+brew tap termide/termide && brew install termide   # macOS / Linux
+yay -S termide-bin                                 # Arch Linux (AUR)
+nix run github:termide/termide                     # Nix, without installing
+```
+
+On a server, copy the [static musl binary](#portable-static-binary) and run it — nothing else needs installing.
 
 **Supported Platforms:** Linux (x86_64, ARM64), macOS (Intel, Apple Silicon), Windows (x86_64)
 
 ### Choose Your Installation Method
 
-<details open>
-<summary><b>📦 Pre-built Binaries (Recommended)</b></summary>
+<details>
+<summary><b>📦 Pre-built Binaries</b></summary>
 
 Download the latest release for your platform from [GitHub Releases](https://github.com/termide/termide/releases):
 
@@ -285,6 +345,7 @@ cargo build --release
 
 </details>
 
+<a id="portable-static-binary"></a>
 <details>
 <summary><b>📦 Portable static binary (Alpine / any Linux)</b></summary>
 
@@ -319,14 +380,7 @@ musl-dev or glibc installed.
 
 </details>
 
-## Requirements
-
-- For pre-built binaries: No additional requirements
-- For building from source:
-  - Rust 1.70+ (stable)
-  - For Nix users: Nix with flakes enabled
-
-### Command-Line Options
+## Command-Line Options
 
 ```
 termide [OPTIONS] [FILE]...
@@ -463,63 +517,9 @@ auto_completion = true
 min_level = "info"
 ```
 
-### Available Themes
+### Themes
 
-**Dark Themes:**
-- `windows-xp` - Default theme (Windows XP style)
-- `dracula` - Popular Dracula theme
-- `monokai` - Classic Monokai theme
-- `nord` - Nord theme with blue tones
-- `onedark` - Atom One Dark theme
-- `solarized-dark` - Dark Solarized theme
-- `midnight` - Midnight Commander inspired
-- `macos-dark` - macOS dark style
-- `ayu-dark` - Ayu Dark theme
-- `billiard` - Billiard table green tones
-- `catppuccin-macchiato` - Catppuccin Macchiato theme
-- `everforest` - Everforest dark theme
-- `github-dark` - GitHub Dark theme
-- `gruvbox` - Gruvbox dark theme
-- `kanagawa` - Kanagawa theme
-- `material-ocean` - Material Ocean theme
-- `rosepine` - Rosé Pine theme
-- `tokyonight` - Tokyo Night theme
-- `black-earth` - Night path: black soil and night grass
-- `moonlit-dew` - Night path under the moon
-- `fireflies` - Night path lit by fireflies
-
-**Light Themes:**
-- `atom-one-light` - Atom One Light theme
-- `ayu-light` - Ayu Light theme
-- `github-light` - GitHub Light theme
-- `manuscript` - Medieval manuscript with aged parchment tones
-- `material-lighter` - Material Lighter theme
-- `solarized-light` - Light Solarized theme
-- `macos-light` - macOS light style
-- `blue-sky` - Blue Sky theme
-- `green-backs` - Green dollar bills theme
-- `pinky-pie` - Pinky Pie theme
-- `dry-path` - The night path by day: dry clay and dark grass
-- `morning-mist` - The path at dawn, misty and dewy
-- `summer-meadow` - The path at noon: warm sand and bright grass
-
-**Retro Themes:**
-- `far-manager` - FAR Manager style
-- `norton-commander` - Norton Commander style
-- `dos-navigator` - DOS Navigator style
-- `volkov-commander` - Volkov Commander style
-- `windows-95` - Windows 95 style
-- `windows-98` - Windows 98 style
-
-**Cinematic Themes:**
-- `matrix` - The Matrix digital rain (green on black)
-- `pip-boy` - Fallout Pip-Boy 3000 phosphor CRT
-- `terminator` - Skynet HUD / Mars red aesthetics
-
-**Other Themes:**
-- `terminal` - Classic terminal style (inherits terminal colors)
-
-**Theme Examples:**
+44 built-in themes — dark, light, retro (Norton Commander, FAR Manager, Windows 95) and cinematic (Matrix, Pip-Boy) — switch from the menu or with `theme` in `config.toml`. The full list is in [Themes](doc/en/themes.md).
 
 | | | |
 |:---:|:---:|:---:|
@@ -560,46 +560,11 @@ mode = "report"  # terminal (default), background, or report
 
 ## Development
 
-The codebase is a Cargo workspace of modular crates. For the crate layout,
-panel system, and event flow, see the
-**[Developer Guide](doc/en/developer-guide.md)** and
-**[Architecture](doc/en/architecture.md)**.
-
-### Building
-
-```bash
-# Development build
-cargo build
-
-# Release build with optimizations
-cargo build --release
-
-# Run tests
-cargo test
-
-# Check code quality
-cargo clippy
-cargo fmt --check
-```
-
-### Nix Development
-
-The project includes a Nix flake for reproducible development environments:
-
-```bash
-# Enter development shell
-nix develop
-
-# Build with Nix
-nix build
-
-# Run checks
-nix flake check
-```
+The codebase is a Cargo workspace of modular crates; `rust-toolchain.toml` pins the toolchain. Building, testing, the Nix shell and the pre-commit hook are in the **[Developer Guide](doc/en/developer-guide.md)**; the crate layout, panel system and event flow in **[Architecture](doc/en/architecture.md)**.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit issues and pull requests.
+Issues and pull requests are welcome. Run `git config core.hooksPath .githooks` once per clone: the pre-commit hook runs the same `fmt`, `clippy` and test checks as CI.
 
 ## License
 
@@ -614,3 +579,10 @@ Built with:
 - [tree-sitter](https://github.com/tree-sitter/tree-sitter) - Syntax highlighting
 - [ropey](https://github.com/cessen/ropey) - Text buffer
 - [sysinfo](https://github.com/GuillaumeGomez/sysinfo) - System resource monitoring
+- [russh](https://github.com/Eugeny/russh) and [russh-sftp](https://github.com/AspectUnk/russh-sftp) - SSH and SFTP in pure Rust
+- [suppaftp](https://github.com/veeso/suppaftp) - FTP / FTPS
+- [rustls](https://github.com/rustls/rustls) - TLS without OpenSSL
+- [SQLx](https://github.com/launchbadge/sqlx) - SQLite, PostgreSQL and MySQL access
+- [RustCrypto](https://github.com/RustCrypto) - Argon2 and ChaCha20-Poly1305 for the password vault
+- [nucleo](https://github.com/helix-editor/nucleo) - Fuzzy matching
+- [pulldown-cmark](https://github.com/pulldown-cmark/pulldown-cmark) and [html5ever](https://github.com/servo/html5ever) - Markdown and HTML parsing
