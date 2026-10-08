@@ -2872,16 +2872,18 @@ fn notices_before_the_first_request_go_under_the_banner() {
     assert!(cwd < rule && rule < notice, "{rows:#?}");
     assert!(!panel.banner_hits.is_empty());
 
-    // On a short panel the fields keep their rows and the newest notice
-    // is the one shown.
+    // On a short panel the notices scroll with the banner: the fields come
+    // first, and the wheel brings the newest notice in.
     for i in 0..10 {
         panel.notice(format!("note {i}"), NoticeKind::Info);
     }
     let rows = render_text(&mut panel, 60, 16);
     let all = rows.join("\n");
     let cwd = termide_i18n::t().agent_banner_cwd();
-    assert!(all.contains(cwd) && all.contains("note 9"), "{rows:#?}");
-    assert!(!all.contains("note 0"), "{rows:#?}");
+    assert!(all.contains(cwd) && !all.contains("note 9"), "{rows:#?}");
+    panel.handle_scroll(50, Rect::new(0, 0, 60, 16));
+    let all = render_text(&mut panel, 60, 16).join("\n");
+    assert!(all.contains("note 9") && !all.contains(cwd), "{all}");
 
     // The first request takes the banner away; the notices stay above it.
     type_text(&mut panel, "hello");
@@ -3264,11 +3266,16 @@ fn tab_walks_the_banner_sessions_and_enter_opens_one() {
     panel.handle_key(chord(KeyCode::Down, KeyModifiers::NONE));
     panel.handle_key(chord(KeyCode::Down, KeyModifiers::NONE));
     assert_eq!(panel.recent_selected, 2, "the cursor stops at the end");
+    // The whole banner scrolls to keep the cursor in view.
     let all = render_text(&mut panel, 80, 12).join("\n");
-    assert!(
-        all.contains("first task") && !all.contains("third task"),
-        "{all}"
-    );
+    assert!(all.contains("first task"), "{all}");
+    assert!(panel.banner_top > 0);
+    // Back on the first session the banner returns to its top.
+    panel.handle_key(chord(KeyCode::Up, KeyModifiers::NONE));
+    panel.handle_key(chord(KeyCode::Up, KeyModifiers::NONE));
+    assert_eq!(panel.recent_selected, 0);
+    assert_eq!(panel.banner_top, 0);
+    panel.handle_key(chord(KeyCode::End, KeyModifiers::NONE));
     // Typing while the list has the keyboard hands it back to the prompt,
     // and the character lands there; Esc hands it back too.
     type_text(&mut panel, "x");
@@ -3474,7 +3481,53 @@ fn clearing_the_name_of_a_listed_session_with_no_messages_discards_it() {
 }
 
 #[test]
-fn the_wheel_scrolls_the_banner_sessions() {
+fn the_wheel_scrolls_the_whole_banner() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![reply("one"), reply("two")])
+    });
+    for prompt in ["first task", "second task"] {
+        type_text(&mut panel, prompt);
+        panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+        settle(&mut panel);
+        panel.handle_status_action(NEW_SESSION_ACTION);
+    }
+    let area = Rect::new(0, 0, 80, 11);
+    let all = render_text(&mut panel, 80, 11).join("\n");
+    assert!(
+        all.contains("default") && !all.contains("first task"),
+        "{all}"
+    );
+    // The fields scroll away with the list, so the older session comes in
+    // and the panel's own scrollbar tracks the banner.
+    panel.handle_scroll(3, area);
+    let all = render_text(&mut panel, 80, 11).join("\n");
+    assert!(
+        all.contains("first task") && !all.contains("default"),
+        "{all}"
+    );
+    assert!(panel.scrollbars.vertical.is_some());
+    // Only rows on screen take clicks.
+    let view = panel.viewport_height() as u16;
+    assert!(panel.banner_hits.iter().all(|(rect, _)| rect.y < view));
+    assert!(!panel
+        .banner_hits
+        .iter()
+        .any(|(_, hit)| *hit == BannerHit::Action(AGENT_ACTION)));
+    // Past the end it stops, and back up the fields return.
+    panel.handle_scroll(50, area);
+    assert_eq!(panel.banner_top, panel.banner_max_top());
+    panel.handle_scroll(-50, area);
+    assert_eq!(panel.banner_top, 0);
+    // The wheel leaves the list's cursor where it is.
+    panel.handle_key(chord(KeyCode::Tab, KeyModifiers::NONE));
+    panel.handle_scroll(50, area);
+    assert_eq!(panel.recent_selected, 0);
+}
+
+#[test]
+fn a_notice_above_the_scrolled_banner_list_keeps_the_list_in_place() {
     let dir = tempfile::tempdir().unwrap();
     let mut panel = AgentPanel::new(AgentPanelSetup {
         session_dir: Some(dir.path().to_path_buf()),
@@ -3487,15 +3540,16 @@ fn the_wheel_scrolls_the_banner_sessions() {
         panel.handle_status_action(NEW_SESSION_ACTION);
     }
     let _ = render_text(&mut panel, 80, 11);
-    panel.handle_scroll(1, Rect::new(0, 0, 80, 11));
-    let all = render_text(&mut panel, 80, 11).join("\n");
-    assert!(
-        all.contains("first task") && !all.contains("second task"),
-        "{all}"
+    panel.handle_scroll(50, Rect::new(0, 0, 80, 11));
+    let before = render_text(&mut panel, 80, 11);
+    let row_of = |rows: &[String], text: &str| rows.iter().position(|r| r.contains(text));
+    panel.notice("mcp github: connecting".to_string(), NoticeKind::Info);
+    let after = render_text(&mut panel, 80, 11);
+    assert_eq!(
+        row_of(&before, "first task"),
+        row_of(&after, "first task"),
+        "{after:#?}"
     );
-    // Past the end it stops.
-    panel.handle_scroll(5, Rect::new(0, 0, 80, 11));
-    assert_eq!(panel.recent_top, 1);
 }
 
 fn ask_in_worker(

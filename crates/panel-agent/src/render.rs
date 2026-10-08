@@ -319,19 +319,24 @@ impl AgentPanel {
         5 + usize::from(!self.agent_description().is_empty()) + usize::from(self.has_toolset())
     }
 
-    /// The welcome banner shown while the session is empty: a logo on the left
-    /// and what the agent is set up with (agent, directory, connection, model)
-    /// on the right, at the top of the transcript area, with the recent sessions
-    /// filling the rows below. On a narrow panel the logo is dropped and only
-    /// the details show. The list's keyboard cursor is drawn only while
-    /// `panel_focused`, so a background panel does not draw the eye.
+    /// The welcome banner shown while the session is empty, in place of the
+    /// transcript: a logo on the left and what the agent is set up with
+    /// (agent, directory, connection, model) on the right, at the top, then
+    /// what the panel reported before the first request (`notices`, past a
+    /// dashed rule), then the recent sessions. The three scroll as one
+    /// document, so on a short panel the fields make way for the list. On a
+    /// narrow panel the logo is dropped and only the details show. The
+    /// list's keyboard cursor is drawn only while `panel_focused`, so a
+    /// background panel does not draw the eye. Returns the document's rows,
+    /// for the scrollbar.
     pub(crate) fn render_welcome(
         &mut self,
         area: Rect,
         buf: &mut Buffer,
         colors: &ThemeColors,
         panel_focused: bool,
-    ) {
+        notices: &[Line<'static>],
+    ) -> usize {
         const LOGO: [&str; WELCOME_LOGO_ROWS] = [
             "╭───────╮",
             "│ ▀█ █▀ │",
@@ -341,7 +346,7 @@ impl AgentPanel {
         ];
         self.banner_hits.clear();
         if area.width < 14 || area.height == 0 {
-            return;
+            return 0;
         }
         let logo_w = LOGO
             .iter()
@@ -356,6 +361,8 @@ impl AgentPanel {
         // column and the width that comes with it.
         let list_x = area.x + 2;
         let list_w = (area.x + area.width).saturating_sub(list_x + 1);
+        // The notices keep the transcript's full width.
+        let text_w = area.width.saturating_sub(1).max(1);
 
         let accent = Style::default()
             .fg(colors.info)
@@ -386,15 +393,15 @@ impl AgentPanel {
         let t = termide_i18n::t();
         // The title is the agent's name, re-pickable with a click, and its
         // description, when it has one, goes under it.
-        let mut info: Vec<(Line<'static>, Option<BannerHit>)> = vec![(
+        let mut fields: Vec<(Line<'static>, Option<BannerHit>)> = vec![(
             Line::styled(self.agent.clone(), accent),
             Some(BannerHit::Action(AGENT_ACTION)),
         )];
         let description = self.agent_description();
         if !description.is_empty() {
-            info.push((Line::styled(description, fg), None));
+            fields.push((Line::styled(description, fg), None));
         }
-        info.extend([
+        fields.extend([
             (Line::from(""), None),
             // The directory moves only while the panel is idle.
             (
@@ -420,92 +427,98 @@ impl AgentPanel {
         // when switching it off keeps it out of the context altogether.
         if self.has_toolset() {
             let (on, all) = self.toolset_counts();
-            info.push((
+            fields.push((
                 field(t.agent_banner_tools(), format!("{on}/{all}"), true),
                 Some(BannerHit::Action(TOOLSET_ACTION)),
             ));
         }
-        debug_assert_eq!(info.len(), self.banner_field_rows());
-        // This directory's other sessions, newest first, one click (or
-        // Tab, the arrows and Enter) away: as many rows as the panel's height
-        // leaves, scrolling through the rest.
-        // The banner sits at the top, so the list gets every row under the
-        // fields, a blank and its heading; a blank row above the banner only
-        // when the whole list fits anyway. The sessions go under the heading
-        // rather than beside it, so their titles get the full width.
-        let header_len = info.len();
-        let total = self.recent_sessions.len();
-        let list_need = if total > 0 { total + 2 } else { 0 };
-        let margin = usize::from(area.height as usize > header_len + list_need);
-        let rows = total.min((area.height as usize).saturating_sub(margin + header_len + 2));
-        let cursor_shown = self.chat_focus && panel_focused;
-        self.recent_rows = rows;
-        let list_start = header_len + 2;
-        if rows > 0 {
-            self.recent_top = self.recent_top.min(total - rows);
-            if self.chat_focus {
-                self.scroll_recent_selection_into_view();
-            }
-            info.push((Line::from(""), None));
-            info.push((
-                Line::styled(t.agent_banner_sessions().to_string(), dim),
+        debug_assert_eq!(fields.len(), self.banner_field_rows());
+
+        // The document, row by row: what each row shows, at which column and
+        // width, and what a click on it does.
+        let mut doc: Vec<(Line<'static>, u16, u16, Option<BannerHit>)> = Vec::new();
+        for (line, hit) in fields {
+            doc.push((line, info_x, info_w, hit));
+        }
+        if !notices.is_empty() {
+            doc.push((
+                transcript::separator(text_w + 1, colors),
+                area.x,
+                text_w,
                 None,
             ));
-            let first = self.recent_top;
-            for (index, summary) in self.recent_sessions[first..first + rows]
-                .iter()
-                .enumerate()
-                .map(|(row, summary)| (first + row, summary))
-            {
-                // Only the title is in the accent colour; the date before it
-                // is dim.
-                let line = Line::from(vec![
-                    Span::styled(format!("{}  ", local_minute(summary.modified)), dim),
-                    Span::styled(truncate_title(&summary.label()), link),
-                ]);
-                info.push((line, Some(BannerHit::Session(index))));
+            for line in notices {
+                doc.push((line.clone(), area.x, text_w, None));
             }
         }
-
+        // This directory's other sessions, newest first, one click (or
+        // Tab, the arrows and Enter) away. The sessions go under the heading
+        // rather than beside it, so their titles get the full width.
+        if !self.recent_sessions.is_empty() {
+            doc.push((Line::from(""), list_x, list_w, None));
+            doc.push((
+                Line::styled(t.agent_banner_sessions().to_string(), dim),
+                list_x,
+                list_w,
+                None,
+            ));
+        }
+        let list_start = doc.len();
+        for (index, summary) in self.recent_sessions.iter().enumerate() {
+            // Only the title is in the accent colour; the date before it is
+            // dim.
+            let line = Line::from(vec![
+                Span::styled(format!("{}  ", local_minute(summary.modified)), dim),
+                Span::styled(truncate_title(&summary.label()), link),
+            ]);
+            doc.push((line, list_x, list_w, Some(BannerHit::Session(index))));
+        }
+        // A blank row above the banner only when the whole document fits
+        // anyway, so a short panel spends none of its rows on it.
+        let height = area.height as usize;
+        let margin = usize::from(height > doc.len());
+        let total = doc.len() + margin;
+        let list_start = list_start + margin;
         // The logo starts on the title's row.
-        let bottom = area.y + area.height;
-        let top = area.y + margin as u16;
-        if show_logo {
-            for (i, line) in LOGO.iter().enumerate() {
-                let y = top + i as u16;
-                if y >= bottom {
-                    break;
-                }
+        let logo_row = margin;
+
+        // A notice arriving above the list while it is scrolled moves the
+        // view along with it, so the session under the pointer stays put.
+        if self.banner_top > 0 && list_start != self.banner_list_start {
+            self.banner_top = (self.banner_top + list_start).saturating_sub(self.banner_list_start);
+        }
+        self.banner_list_start = list_start;
+        self.banner_rows = total;
+        self.banner_top = self.banner_top.min(total.saturating_sub(height));
+
+        let cursor_shown = self.chat_focus && panel_focused;
+        let top = self.banner_top;
+        for screen_row in 0..height.min(total - top) {
+            let row = top + screen_row;
+            let y = area.y + screen_row as u16;
+            if show_logo && (logo_row..logo_row + WELCOME_LOGO_ROWS).contains(&row) {
                 buf.set_stringn(
                     area.x + 2,
                     y,
-                    line,
+                    LOGO[row - logo_row],
                     logo_w as usize,
                     Style::default().fg(colors.info),
                 );
             }
-        }
-        let info_top = top;
-        for (i, (line, hit)) in info.iter().enumerate() {
-            let y = info_top + i as u16;
-            if y >= bottom {
-                break;
-            }
-            let (x, w) = if i < header_len {
-                (info_x, info_w)
-            } else {
-                (list_x, list_w)
+            let Some((line, x, w, hit)) = row.checked_sub(margin).and_then(|i| doc.get(i)) else {
+                continue;
             };
-            buf.set_line(x, y, line, w);
+            buf.set_line(*x, y, line, *w);
             // The whole field row is the click target, so the label is as good
             // as the value; an external agent still routes the click, and its
-            // action answers with the "unsupported" notice.
+            // action answers with the "unsupported" notice. A row scrolled out
+            // of view takes no clicks.
             if let Some(hit) = hit {
                 self.banner_hits.push((
                     Rect {
-                        x,
+                        x: *x,
                         y,
-                        width: w,
+                        width: *w,
                         height: 1,
                     },
                     *hit,
@@ -514,26 +527,12 @@ impl AgentPanel {
             // The session under the keyboard cursor is shown inverted, like
             // a selected chat block.
             if cursor_shown && *hit == Some(BannerHit::Session(self.recent_selected)) {
-                for x in x..x + w {
+                for x in *x..*x + *w {
                     buf[(x, y)].set_style(Style::default().fg(colors.bg).bg(colors.fg));
                 }
             }
         }
-        // A list longer than its rows gets a scrollbar in the gutter beside it.
-        if rows > 0 {
-            let list_y = info_top + list_start as u16;
-            ScrollBar::render(
-                buf,
-                area.x + area.width - 1,
-                list_y,
-                (rows as u16).min(bottom.saturating_sub(list_y)),
-                self.recent_top,
-                rows,
-                total,
-                colors,
-                cursor_shown,
-            );
-        }
+        total
     }
 
     /// The run controls the current state offers: pause and stop while the
@@ -708,9 +707,6 @@ impl AgentPanel {
         // range to tint — computed now, before `lines` borrows the transcript.
         let item_count = self.transcript.items().len();
         let banner = self.banner_shown();
-        // The banner's top margin and its fields, which the notices under it
-        // leave room for.
-        let needed = 1 + self.banner_field_rows().max(WELCOME_LOGO_ROWS);
         let mut selected_range: Option<(usize, usize)> = None;
         // Under the banner the keyboard is in its list of sessions, not on
         // the notices.
@@ -733,29 +729,20 @@ impl AgentPanel {
         // The block under the chat cursor is shown inverted (text and
         // background swapped), so the selection reads as one solid block.
         let selected_style = Style::default().fg(colors.bg).bg(colors.fg);
+        // Rows and first row on screen of what the scrollbar tracks: the
+        // banner's document or the transcript.
+        let mut scroll = (self.top, total);
         if banner {
             // A fresh session shows a welcome banner in place of the
-            // transcript: the logo and what the agent is set up with. What
-            // the panel reports before the first request goes under it, past
-            // a dashed rule, the latest kept in view; the banner's list of
-            // sessions gives up its rows first, its fields never.
-            let room = (transcript_height as usize).saturating_sub(needed + 1);
-            let shown = lines.len().min(room);
-            let notices: Vec<Line<'static>> = lines[lines.len() - shown..].to_vec();
-            let rule_rows = u16::from(shown > 0);
+            // transcript, with what the panel reports before the first
+            // request inside it.
+            let notices: Vec<Line<'static>> = lines.to_vec();
             let welcome = Rect {
-                height: transcript_height - shown as u16 - rule_rows,
+                height: transcript_height,
                 ..area
             };
-            self.render_welcome(welcome, buf, &colors, ctx.is_focused);
-            if shown > 0 {
-                let rule_y = area.y + welcome.height;
-                let rule = transcript::separator(text_width + 1, &colors);
-                buf.set_line(area.x, rule_y, &rule, text_width);
-                for (row, line) in notices.iter().enumerate() {
-                    buf.set_line(area.x, rule_y + 1 + row as u16, line, text_width);
-                }
-            }
+            let rows = self.render_welcome(welcome, buf, &colors, ctx.is_focused, &notices);
+            scroll = (self.banner_top, rows);
         } else {
             // No banner while the session has content, so its click targets go.
             self.banner_hits.clear();
@@ -806,23 +793,17 @@ impl AgentPanel {
                 }
             }
         }
-        // The banner's list draws its own bar; the notices under it keep to
-        // their latest rows and scroll nowhere.
-        self.scrollbars.vertical = if banner {
-            None
-        } else {
-            ScrollBar::render_tracked(
-                buf,
-                ctx.border_right_x.unwrap_or(area.x + area.width - 1),
-                area.y,
-                transcript_height,
-                self.top,
-                transcript_height as usize,
-                total,
-                &self.colors,
-                ctx.is_focused,
-            )
-        };
+        self.scrollbars.vertical = ScrollBar::render_tracked(
+            buf,
+            ctx.border_right_x.unwrap_or(area.x + area.width - 1),
+            area.y,
+            transcript_height,
+            scroll.0,
+            transcript_height as usize,
+            scroll.1,
+            &self.colors,
+            ctx.is_focused,
+        );
 
         let state_y = area.y + transcript_height;
         for (row, line) in state.iter().enumerate() {

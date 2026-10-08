@@ -265,19 +265,21 @@ you start. The directory is shown that way too while the panel is idle: a
 click opens the directory picker (`.` there shows hidden directories), and the
 panel moves to the picked one in place — the session log moves with it, so the
 connection, model and agent picked stay, while the project agents, skills,
-hooks and the list of sessions below are now that directory's. Further down, under the sessions heading, the list of this
-directory's other sessions, newest first, each with the local date and time
-of its last change, starting from the logo's column so the titles get the
-panel's width, filling the space the panel has and scrolling through the rest
-with the wheel. A session open in another panel is left out, and comes back
+hooks and the list of sessions below are now that directory's. What the panel
+reports before your first message — an MCP server connected, a `/name`
+defined twice — follows the fields, past a dashed rule. Further down, under
+the sessions heading, the list of this directory's other sessions, newest
+first, each with the local date and time of its last change, starting from
+the logo's column so the titles get the panel's width. The banner scrolls as
+one page with the wheel or its scrollbar, so on a short panel the fields make
+way for the list. A session open in another panel is left out, and comes back
 once that panel lets it go. A click opens one in place of the empty session;
 from the keyboard, `Tab` moves into the list, the arrows, `PgUp`/`PgDn` and
-`Home`/`End` walk it, `Enter` opens the session under the cursor, `F2` renames
-it, `F8` or `Delete` deletes it after a confirmation, and `Tab` or `Esc` goes back to the
-prompt. What the panel reports before then — an MCP server connected, a
-`/name` defined twice — goes under the banner, past a dashed rule, the latest
-in view; the list of sessions gives up its rows to it first. Each MCP server
-keeps one line there, rewritten as it changes: its tools and how many of them
+`Home`/`End` walk it, scrolling the banner to keep the cursor in view (back
+on the first session the banner shows from its top), `Enter` opens the
+session under the cursor, `F2` renames it, `F8` or `Delete` deletes it after a
+confirmation, and `Tab` or `Esc` goes back to the prompt. Each MCP server
+keeps one line past the rule, rewritten as it changes: its tools and how many of them
 are on, connecting, needs sign-in. The banner gives way to the conversation as
 soon as you send your first message, and those lines stay at the top of it;
 from then on every change is a line of its own — a server reconnected or

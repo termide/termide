@@ -763,6 +763,15 @@ impl AgentPanel {
     }
 
     pub(crate) fn scroll_by(&mut self, delta: i32) {
+        // The welcome banner scrolls as its own document, the list's cursor
+        // left where it is, as a selected block is by the transcript's wheel.
+        if self.banner_shown() {
+            self.banner_top = self
+                .banner_top
+                .saturating_add_signed(delta as isize)
+                .min(self.banner_max_top());
+            return;
+        }
         let max_top = self.max_top();
         let next = if delta < 0 {
             self.top.saturating_sub(delta.unsigned_abs() as usize)
@@ -965,7 +974,7 @@ impl AgentPanel {
         // layout's character rather than its Latin canonical form.
         let typed = |code: KeyCode| matches!(code, KeyCode::Char(_)) && !ctrl && !alt;
         if self.chat_focus && self.recent_list_shown() {
-            let page = self.recent_rows.max(1) as isize;
+            let page = self.viewport_height().max(1) as isize;
             match key.code {
                 KeyCode::Delete => return self.ask_delete_recent_session(),
                 KeyCode::Tab | KeyCode::Esc => self.chat_focus = false,

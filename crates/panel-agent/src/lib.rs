@@ -605,10 +605,13 @@ pub struct AgentPanel {
     /// The recent session the keyboard cursor is on while the chat focus is
     /// in the banner's list, an index into `recent_sessions`.
     recent_selected: usize,
-    /// First recent session the banner's list shows.
-    recent_top: usize,
-    /// Rows the banner's list had at the last render, for paging.
-    recent_rows: usize,
+    /// First row of the welcome banner on screen: its fields, notices and
+    /// list of sessions scroll as one document.
+    banner_top: usize,
+    /// Rows the banner had at the last render.
+    banner_rows: usize,
+    /// The banner's row of its first recent session at the last render.
+    banner_list_start: usize,
     /// [`Session::open_generation`] when the list was read, to notice
     /// another panel opening or releasing a session.
     recent_generation: u64,
@@ -1004,8 +1007,9 @@ impl AgentPanel {
             session_choices: Vec::new(),
             recent_sessions: Vec::new(),
             recent_selected: 0,
-            recent_top: 0,
-            recent_rows: 0,
+            banner_top: 0,
+            banner_rows: 0,
+            banner_list_start: 0,
             recent_generation: 0,
             recent_to_delete: None,
             recent_to_rename: None,
@@ -1551,11 +1555,7 @@ impl Panel for AgentPanel {
     }
 
     fn handle_scroll(&mut self, delta: i32, _panel_area: Rect) -> Vec<PanelEvent> {
-        if self.recent_list_shown() {
-            self.scroll_recent(delta);
-        } else {
-            self.scroll_by(delta);
-        }
+        self.scroll_by(delta);
         vec![PanelEvent::NeedsRedraw]
     }
 
@@ -1736,7 +1736,9 @@ impl Panel for AgentPanel {
             }
             PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
             PanelCommand::SetScrollOffset { axis, offset } => {
-                if axis == ScrollAxis::Vertical {
+                if axis == ScrollAxis::Vertical && self.banner_shown() {
+                    self.banner_top = offset.min(self.banner_max_top());
+                } else if axis == ScrollAxis::Vertical {
                     self.top = offset.min(self.max_top());
                     self.follow = self.top >= self.max_top();
                 }

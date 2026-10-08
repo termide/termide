@@ -213,7 +213,7 @@ impl AgentPanel {
     pub(crate) fn refresh_recent_sessions(&mut self) {
         self.load_recent_sessions();
         self.recent_selected = 0;
-        self.recent_top = 0;
+        self.banner_top = 0;
     }
 
     /// Re-read the banner's sessions once another panel opened or released
@@ -257,26 +257,14 @@ impl AgentPanel {
     }
 
     /// Whether the welcome banner is up and lists recent sessions, so `Tab`
-    /// can take the keyboard into that list and the wheel scrolls it.
+    /// can take the keyboard into that list.
     pub(crate) fn recent_list_shown(&self) -> bool {
         self.banner_shown() && !self.recent_sessions.is_empty()
     }
 
-    /// Scroll the banner's list by `delta` rows. With the keyboard in the
-    /// list the cursor moves along, since the list keeps it in view.
-    pub(crate) fn scroll_recent(&mut self, delta: i32) {
-        if self.chat_focus {
-            self.move_recent_selection(delta as isize);
-            return;
-        }
-        let max_top = self
-            .recent_sessions
-            .len()
-            .saturating_sub(self.recent_rows.max(1));
-        self.recent_top = self
-            .recent_top
-            .saturating_add_signed(delta as isize)
-            .min(max_top);
+    /// The banner's last first row on screen, by the last render's layout.
+    pub(crate) fn banner_max_top(&self) -> usize {
+        self.banner_rows.saturating_sub(self.viewport_height())
     }
 
     /// Move the banner list's cursor by `delta` rows, clamped to the list,
@@ -288,13 +276,21 @@ impl AgentPanel {
     }
 
     /// Bring the banner list's cursor on screen, scrolling as little as
-    /// possible.
+    /// possible, by the last render's layout. On the first session the
+    /// banner scrolls back to its top when that leaves the cursor in view,
+    /// so walking up the list brings the fields back.
     pub(crate) fn scroll_recent_selection_into_view(&mut self) {
-        let rows = self.recent_rows.max(1);
-        if self.recent_selected < self.recent_top {
-            self.recent_top = self.recent_selected;
-        } else if self.recent_selected >= self.recent_top + rows {
-            self.recent_top = self.recent_selected + 1 - rows;
+        let view = self.viewport_height();
+        if view == 0 {
+            return;
+        }
+        let row = self.banner_list_start + self.recent_selected;
+        if self.recent_selected == 0 && row < view {
+            self.banner_top = 0;
+        } else if row < self.banner_top {
+            self.banner_top = row;
+        } else if row >= self.banner_top + view {
+            self.banner_top = row + 1 - view;
         }
     }
 
