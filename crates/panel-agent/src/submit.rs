@@ -221,7 +221,8 @@ impl AgentPanel {
                 self.clear_input();
                 let args = args.trim();
                 if args.is_empty() || args == "stop" || args == "off" {
-                    if self.loop_task.take().is_some() {
+                    if let Some(task) = self.loop_task.take() {
+                        self.withdraw_queued(|message| message.typed() == task.prompt);
                         self.notice(
                             termide_i18n::t().agent_notice_loop_stopped(),
                             NoticeKind::Info,
@@ -609,18 +610,27 @@ impl AgentPanel {
     /// Start a `/goal`: work autonomously toward `goal`, a judge deciding after
     /// each turn whether it is reached. The first work turn is the goal itself,
     /// shown as `command` (the `/goal …` typed) so the text is not repeated.
+    ///
+    /// Set while a run is under way, the goal is taken at once — a stop or
+    /// `/goal stop` ends it — but nothing joins the run: its first turn goes
+    /// when the run ends, where the judge would otherwise come in.
     pub(crate) fn start_goal(&mut self, goal: String, command: Option<String>) -> Vec<PanelEvent> {
-        self.notice(
-            termide_i18n::t().agent_notice_goal_working(),
-            NoticeKind::Info,
-        );
+        let busy = self.is_busy();
         self.goal_task = Some(GoalTask {
             goal: goal.clone(),
             iterations: 0,
             judge_at: None,
             judging: false,
             judge_failures: 0,
+            first_turn: busy.then(|| command.clone()),
         });
+        self.notice(
+            termide_i18n::t().agent_notice_goal_working(),
+            NoticeKind::Info,
+        );
+        if busy {
+            return vec![PanelEvent::NeedsRedraw];
+        }
         self.send_goal_turn_as(goal, command)
     }
 
@@ -654,7 +664,15 @@ impl AgentPanel {
 
     /// Ask the judge whether the active goal is reached; the verdict arrives as
     /// a `GoalJudged` event, applied in [`AgentPanel::on_goal_verdict`].
+    /// A goal set during a run sends its first turn here instead: there is
+    /// nothing to judge before the agent has seen it.
     pub(crate) fn run_goal_judge(&mut self) -> Vec<PanelEvent> {
+        if let Some(task) = self.goal_task.as_mut() {
+            if let Some(command) = task.first_turn.take() {
+                let goal = task.goal.clone();
+                return self.send_goal_turn_as(goal, command);
+            }
+        }
         let goal = match self.goal_task.as_mut() {
             Some(task) => {
                 task.judge_at = None;
@@ -738,15 +756,40 @@ impl AgentPanel {
     }
 
     pub fn abort(&mut self) {
-        // Stopping also ends any running loop or goal.
-        self.loop_task = None;
+        // Stopping also ends any running loop or goal, and withdraws what
+        // the loop still has waiting in the queue, so it does not reach the
+        // model later as a plain message.
         self.goal_task = None;
+        if let Some(task) = self.loop_task.take() {
+            self.withdraw_queued(|message| message.typed() == task.prompt);
+        }
         // A stop already under way needs no second request or notice.
         if self.is_busy() && !self.stop_requested {
             self.runtime.abort();
             self.stop_requested = true;
             self.notice(termide_i18n::t().agent_notice_stopping(), NoticeKind::Warn);
         }
+    }
+
+    /// Take the queued messages `drop` matches out of the queue; the rest
+    /// go back in their order.
+    fn withdraw_queued(&mut self, drop: impl Fn(&UserMessage) -> bool) {
+        if self.queued_texts.is_empty() {
+            return;
+        }
+        let taken = self.runtime.take_queued();
+        if !taken.iter().any(&drop) {
+            for message in taken {
+                self.runtime.steer(message);
+            }
+            return;
+        }
+        self.queued_texts.clear();
+        for message in taken.into_iter().filter(|message| !drop(message)) {
+            self.queued_texts.push_back(message.typed());
+            self.runtime.steer(message);
+        }
+        self.set_queued(self.runtime.queue_lens());
     }
 
     /// Record the runtime's queue lengths and drop the steering texts the

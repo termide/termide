@@ -143,6 +143,8 @@ impl AgentPanel {
                 judge_at: None,
                 judging: false,
                 judge_failures: 0,
+                // Logged before its first turn went, it starts with that.
+                first_turn: (goal.iterations == 0).then_some(None),
             });
         }
         if let Some(repeat) = autorun.repeat.clone() {

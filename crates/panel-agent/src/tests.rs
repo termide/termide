@@ -2255,19 +2255,38 @@ fn goal_works_turn_by_turn_until_the_judge_says_done() {
 
 #[test]
 fn goal_can_be_set_while_the_agent_works() {
-    let mut panel = panel(vec![]);
-    // A run is in flight: the goal joins it as a steering message.
+    let mut panel = panel(vec![reply("refactored")]);
+    // A run is in flight: the goal is taken at once, nothing joins the run.
     panel.busy = true;
     type_text(&mut panel, "/goal finish the refactor");
     panel.submit();
     assert!(panel.goal_task.is_some());
-    assert_eq!(
-        panel.queued_texts.iter().collect::<Vec<_>>(),
-        ["/goal finish the refactor"]
-    );
-    assert!(!panel.transcript().items().iter().any(
-        |i| matches!(i, Item::Notice { text, .. } if text == termide_i18n::t().agent_notice_busy())
-    ));
+    assert!(panel.queued_texts.is_empty());
+    assert!(panel.runtime.take_queued().is_empty());
+    let notices = |panel: &AgentPanel, wanted: &str| {
+        panel
+            .transcript()
+            .items()
+            .iter()
+            .any(|i| matches!(i, Item::Notice { text, .. } if text == wanted))
+    };
+    let t = termide_i18n::t();
+    assert!(notices(&panel, t.agent_notice_goal_working()));
+    assert!(!notices(&panel, t.agent_notice_busy()));
+    // Once the run ends, its first turn goes in place of the judge, headed
+    // by the `/goal …` typed.
+    panel.busy = false;
+    panel.goal_task.as_mut().unwrap().judge_at = Some(Instant::now());
+    panel.tick();
+    let task = panel.goal_task.as_ref().unwrap();
+    assert_eq!(task.iterations, 1);
+    assert!(task.first_turn.is_none());
+    assert!(!task.judging);
+    settle(&mut panel);
+    assert!(panel.transcript().items().iter().any(|i| matches!(
+        i,
+        Item::User { command: Some(c), .. } if c == "/goal finish the refactor"
+    )));
 }
 
 #[test]
@@ -8606,4 +8625,43 @@ fn a_goal_paused_by_failing_checks_ends_with_goal_stop() {
     panel.tick();
     assert!(panel.goal_task.is_none());
     assert!(!panel.paused);
+}
+
+#[test]
+fn a_goal_set_during_a_run_ends_with_a_stop_and_leaves_the_queue_alone() {
+    let mut panel = panel(vec![]);
+    panel.busy = true;
+    type_text(&mut panel, "/goal finish the refactor");
+    panel.submit();
+    type_text(&mut panel, "are you stuck?");
+    panel.submit();
+    assert_eq!(
+        panel.queued_texts.iter().collect::<Vec<_>>(),
+        ["are you stuck?"]
+    );
+    panel.abort();
+    assert!(panel.goal_task.is_none());
+    let left: Vec<String> = panel
+        .runtime
+        .take_queued()
+        .iter()
+        .map(UserMessage::typed)
+        .collect();
+    assert_eq!(left, ["are you stuck?"]);
+}
+
+#[test]
+fn stopping_withdraws_the_queued_loop_turn() {
+    let mut panel = panel(vec![]);
+    panel.busy = true;
+    type_text(&mut panel, "/loop 5m check the build");
+    panel.submit();
+    type_text(&mut panel, "are you stuck?");
+    panel.submit();
+    panel.abort();
+    assert!(panel.loop_task.is_none());
+    assert_eq!(
+        panel.queued_texts.iter().collect::<Vec<_>>(),
+        ["are you stuck?"]
+    );
 }

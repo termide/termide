@@ -281,7 +281,13 @@ impl AgentPanel {
                         let error = assistant.error_message.clone();
                         // A goal work turn that errored must not be judged and
                         // retried on the failure; note it for `AgentEnd`.
-                        if error.is_some() && self.goal_task.is_some() {
+                        // A goal still waiting for its first turn did not run.
+                        if error.is_some()
+                            && self
+                                .goal_task
+                                .as_ref()
+                                .is_some_and(|task| task.first_turn.is_none())
+                        {
                             self.goal_errored = true;
                         }
                         if error.is_some()

@@ -568,6 +568,9 @@ struct GoalTask {
     judging: bool,
     /// Judge calls failed in a row; reset by a verdict.
     judge_failures: u32,
+    /// The goal was set while a run was under way: its first turn, shown as
+    /// this `/goal …`, goes once the run ends, in place of the judge.
+    first_turn: Option<Option<String>>,
 }
 
 pub struct AgentPanel {
