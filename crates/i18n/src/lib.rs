@@ -825,6 +825,8 @@ pub trait Translation: Send + Sync {
     fn agent_suggest_dismiss(&self) -> &str;
     fn agent_notice_clipboard_failed(&self) -> &str;
     fn agent_notice_goal_reached(&self) -> &str;
+    fn agent_notice_goal_impossible(&self) -> &str;
+    fn agent_autorun_loop(&self) -> &str;
     fn agent_notice_looping(&self) -> &str;
 
     // Agent panel — transient notices (with values)
@@ -931,11 +933,11 @@ pub trait Translation: Send + Sync {
     /// A tool text with no body, passed over whole.
     fn agent_notice_empty_tool_text_fmt(&self, file: &str) -> String;
     fn agent_notice_loop_stopped_max_fmt(&self, count: usize) -> String;
-    fn agent_notice_goal_stopped_max_fmt(&self, count: usize) -> String;
+    fn agent_notice_goal_idle_paused_fmt(&self, count: usize) -> String;
     fn agent_notice_looping_every_fmt(&self, interval: &str) -> String;
     fn agent_unfinished_run_cut_fmt(&self, age: &str) -> String;
     fn agent_unfinished_run_paused_fmt(&self, age: &str) -> String;
-    fn agent_unfinished_goal_fmt(&self, goal: &str, turn: usize, max: usize) -> String;
+    fn agent_unfinished_goal_fmt(&self, goal: &str, turn: usize) -> String;
     fn agent_unfinished_loop_fmt(
         &self,
         interval: &str,
@@ -945,6 +947,8 @@ pub trait Translation: Send + Sync {
     ) -> String;
     fn agent_unfinished_loop_due_fmt(&self, wait: &str) -> String;
     fn agent_notice_goal_reached_reason_fmt(&self, reason: &str) -> String;
+    fn agent_notice_goal_impossible_reason_fmt(&self, reason: &str) -> String;
+    fn agent_autorun_loop_every_fmt(&self, interval: &str) -> String;
     fn agent_notice_command_denied_fmt(&self, name: &str) -> String;
     fn agent_notice_rolled_back_fmt(&self, count: usize, plural: &str) -> String;
     fn agent_notice_files_restored_fmt(&self, count: usize, plural: &str) -> String;

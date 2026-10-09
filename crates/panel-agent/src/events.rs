@@ -171,6 +171,15 @@ impl AgentPanel {
                 {
                     if let Some(task) = self.goal_task.as_mut() {
                         task.judge_at = Some(Instant::now());
+                        // A work turn of the goal (not the run it was set
+                        // during) counts toward the idle-turn check.
+                        if task.first_turn.is_none() {
+                            task.idle_turns = if task.used_tools {
+                                0
+                            } else {
+                                task.idle_turns + 1
+                            };
+                        }
                     }
                 }
             }
@@ -340,6 +349,9 @@ impl AgentPanel {
                 self.log_run_start();
             }
             AgentEvent::ToolExecutionStart { call } => {
+                if let Some(task) = self.goal_task.as_mut() {
+                    task.used_tools = true;
+                }
                 self.set_phase(Phase::Tool);
                 self.tool_starts.insert(call.id.clone(), Instant::now());
                 self.transcript.push(Item::Tool {
@@ -501,7 +513,9 @@ impl AgentPanel {
                     }
                 }
             }
-            AgentEvent::GoalJudged { done, reason } => self.on_goal_verdict(done, &reason),
+            AgentEvent::GoalJudged { outcome, reason } => {
+                self.on_goal_verdict(outcome, &reason);
+            }
             AgentEvent::GoalJudgeFailed { error } => self.on_goal_judge_failed(&error),
             AgentEvent::Handoff { brief } => match brief {
                 Ok(text) => {

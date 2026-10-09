@@ -17,10 +17,7 @@ use crate::pending::Pending;
 use crate::runtime::{hms_from_millis, push_history};
 use crate::submit::fmt_secs;
 use crate::transcript::Item;
-use crate::{
-    single_line, truncate_title, AgentPanel, GoalTask, LoopTask, GOAL_MAX_ITERATIONS,
-    LOOP_MAX_ITERATIONS,
-};
+use crate::{single_line, truncate_title, AgentPanel, GoalTask, LoopTask, LOOP_MAX_ITERATIONS};
 
 /// What a call a cut-off run left without a result is told: it may have run
 /// in part, so the model looks before it runs it again.
@@ -140,6 +137,10 @@ impl AgentPanel {
             self.goal_task = Some(GoalTask {
                 goal: goal.goal,
                 iterations: goal.iterations,
+                // The clock starts again on a reopen, as the idle count does.
+                started: Instant::now(),
+                used_tools: false,
+                idle_turns: 0,
                 judge_at: None,
                 judging: false,
                 judge_failures: 0,
@@ -226,7 +227,6 @@ impl AgentPanel {
             detail.push(t.agent_unfinished_goal_fmt(
                 &truncate_title(&single_line(&goal.goal)),
                 goal.iterations,
-                GOAL_MAX_ITERATIONS,
             ));
         }
         if let Some(repeat) = &autorun.repeat {

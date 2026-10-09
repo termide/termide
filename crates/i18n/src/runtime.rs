@@ -659,6 +659,8 @@ impl Translation for RuntimeTranslation {
         agent_suggest_denied_rule,
         agent_notice_clipboard_failed,
         agent_notice_goal_reached,
+        agent_notice_goal_impossible,
+        agent_autorun_loop,
         agent_notice_looping,
         agent_change_agent,
         agent_prompts,
@@ -1402,9 +1404,9 @@ impl Translation for RuntimeTranslation {
         )
     }
 
-    fn agent_notice_goal_stopped_max_fmt(&self, count: usize) -> String {
+    fn agent_notice_goal_idle_paused_fmt(&self, count: usize) -> String {
         self.format(
-            "agent_notice_goal_stopped_max_fmt",
+            "agent_notice_goal_idle_paused_fmt",
             &[("count", &count.to_string())],
         )
     }
@@ -1421,14 +1423,10 @@ impl Translation for RuntimeTranslation {
         self.format("agent_unfinished_run_paused_fmt", &[("age", age)])
     }
 
-    fn agent_unfinished_goal_fmt(&self, goal: &str, turn: usize, max: usize) -> String {
+    fn agent_unfinished_goal_fmt(&self, goal: &str, turn: usize) -> String {
         self.format(
             "agent_unfinished_goal_fmt",
-            &[
-                ("goal", goal),
-                ("turn", &turn.to_string()),
-                ("max", &max.to_string()),
-            ],
+            &[("goal", goal), ("turn", &turn.to_string())],
         )
     }
 
@@ -1457,6 +1455,17 @@ impl Translation for RuntimeTranslation {
     fn agent_notice_goal_reached_reason_fmt(&self, reason: &str) -> String {
         self.format(
             "agent_notice_goal_reached_reason_fmt",
+            &[("reason", reason)],
+        )
+    }
+
+    fn agent_autorun_loop_every_fmt(&self, interval: &str) -> String {
+        self.format("agent_autorun_loop_every_fmt", &[("interval", interval)])
+    }
+
+    fn agent_notice_goal_impossible_reason_fmt(&self, reason: &str) -> String {
+        self.format(
+            "agent_notice_goal_impossible_reason_fmt",
             &[("reason", reason)],
         )
     }

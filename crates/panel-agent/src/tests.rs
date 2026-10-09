@@ -2253,6 +2253,55 @@ fn goal_works_turn_by_turn_until_the_judge_says_done() {
         ));
 }
 
+/// A judge that finds the goal out of reach ends it, with the reason.
+#[test]
+fn an_impossible_goal_ends_with_the_reason() {
+    let mut panel = panel(vec![
+        reply("looked into it"),
+        reply("IMPOSSIBLE\nthe API it needs was removed"),
+    ]);
+    type_text(&mut panel, "/goal use the old API");
+    panel.submit();
+    settle_goal(&mut panel);
+    let wanted =
+        termide_i18n::t().agent_notice_goal_impossible_reason_fmt("the API it needs was removed");
+    assert!(panel
+        .transcript()
+        .items()
+        .iter()
+        .any(|i| matches!(i, Item::Notice { text, .. } if *text == wanted)));
+}
+
+/// With no turn cap, a goal whose turns call no tool is what stops it: after
+/// [`GOAL_IDLE_TURNS`] such turns it waits at a pause, still set.
+#[test]
+fn a_goal_that_only_talks_pauses_after_the_idle_turns() {
+    let mut replies = Vec::new();
+    for _ in 0..GOAL_IDLE_TURNS {
+        replies.push(reply("thinking about it"));
+        replies.push(reply("CONTINUE\nnothing has changed"));
+    }
+    let mut panel = panel(replies);
+    type_text(&mut panel, "/goal do the thing");
+    panel.submit();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !panel.paused {
+        panel.tick();
+        assert!(Instant::now() < deadline, "the goal did not pause");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let task = panel.goal_task.as_ref().expect("the goal is still set");
+    assert_eq!(task.iterations, GOAL_IDLE_TURNS);
+    assert_eq!(task.idle_turns, 0, "the count starts again after the pause");
+    assert_eq!(panel.restored, Some(Restored::Autorun));
+    let wanted = termide_i18n::t().agent_notice_goal_idle_paused_fmt(GOAL_IDLE_TURNS);
+    assert!(panel
+        .transcript()
+        .items()
+        .iter()
+        .any(|i| matches!(i, Item::Notice { text, .. } if *text == wanted)));
+}
+
 #[test]
 fn goal_can_be_set_while_the_agent_works() {
     let mut panel = panel(vec![reply("refactored")]);
@@ -2340,10 +2389,8 @@ fn bare_goal_and_loop_report_rather_than_stop() {
     assert!(panel.goal_task.is_some(), "a bare /goal left it going");
     let status = last_notice(&panel);
     assert!(status.contains("do the thing"), "{status}");
-    assert!(
-        status.contains(&GOAL_MAX_ITERATIONS.to_string()),
-        "{status}"
-    );
+    let turns = panel.goal_task.as_ref().unwrap().iterations;
+    assert_eq!(status, t.agent_unfinished_goal_fmt("do the thing", turns));
 
     let mut panel = looping_panel();
     type_text(&mut panel, "/loop");
@@ -2393,23 +2440,52 @@ fn an_active_goal_and_loop_show_in_the_state_strip() {
             .collect::<String>()
     };
     let goal = text(&lines[0]);
-    assert!(goal.starts_with("◎ /goal do the thing"), "{goal}");
     assert!(
-        goal.trim_end()
-            .ends_with(&format!("/{GOAL_MAX_ITERATIONS}")),
+        goal.starts_with("◎ Heading for the goal do the thing"),
         "{goal}"
     );
+    assert_eq!(
+        lines[0].spans[0].style.fg,
+        Some(colors.info),
+        "label in accent"
+    );
+    assert_eq!(
+        lines[0].spans[1].style.fg,
+        Some(colors.disabled),
+        "goal dim"
+    );
+    let stop = lines[0].spans.last().unwrap();
+    assert_eq!(
+        (stop.content.as_ref(), stop.style.fg),
+        ("✕", Some(colors.info))
+    );
+    // No turn count and no cap: only how long the goal has run, then `✕`.
+    assert!(!goal.contains('/'), "{goal}");
+    let unit = termide_i18n::t().agent_unit_secs();
+    assert!(goal.trim_end().ends_with(&format!("{unit} ✕")), "{goal}");
     let looped = text(&lines[1]);
-    assert!(looped.starts_with("↺ /loop 5m check the build"), "{looped}");
+    assert!(
+        looped.starts_with("↺ Repeating every 5m check the build"),
+        "{looped}"
+    );
+    assert_eq!(
+        lines[1].spans[0].style.fg,
+        Some(colors.info),
+        "label in accent"
+    );
     assert!(looped.contains("next run in"), "{looped}");
     assert!(
         looped
             .trim_end()
-            .ends_with(&format!("1/{LOOP_MAX_ITERATIONS}")),
+            .ends_with(&format!("1/{LOOP_MAX_ITERATIONS} ✕")),
         "{looped}"
     );
     for line in &lines {
-        assert!(termide_ui::str_display_width(&text(line)) <= 80);
+        let text = text(line);
+        assert!(termide_ui::str_display_width(&text) <= 80);
+        // The button sits where a click looks for it.
+        let column = crate::render::autorun_stop_column(80) as usize;
+        assert_eq!(text.chars().nth(column), Some('✕'), "{text:?}");
     }
 
     type_text(&mut panel, "/goal stop");
@@ -2417,6 +2493,61 @@ fn an_active_goal_and_loop_show_in_the_state_strip() {
     type_text(&mut panel, "/loop stop");
     panel.submit();
     assert!(panel.autorun_rows().is_empty());
+}
+
+/// A click on the `✕` of a goal or loop row stops just that one.
+#[test]
+fn the_strip_stop_button_ends_a_goal_or_loop() {
+    let mut panel = looping_panel();
+    type_text(&mut panel, "/goal do the thing");
+    panel.submit();
+    let (width, height) = (80, 30);
+    let click_stop = |panel: &mut AgentPanel, kind: crate::render::Autorun| {
+        let _ = render_text(panel, width, height);
+        let (at, _) = *panel
+            .autorun_stops
+            .iter()
+            .find(|(_, k)| *k == kind)
+            .expect("the row shows its stop button");
+        panel.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: at.x,
+                row: at.y,
+                modifiers: KeyModifiers::NONE,
+            },
+            Rect::new(0, 0, width, height),
+        );
+    };
+    // A click on the row away from `✕` brings the loop's run into view.
+    let _ = render_text(&mut panel, width, height);
+    let (at, _) = *panel
+        .autorun_stops
+        .iter()
+        .find(|(_, k)| *k == crate::render::Autorun::Loop)
+        .unwrap();
+    let block = panel
+        .autorun_block(crate::render::Autorun::Loop)
+        .expect("the loop's run is in the transcript");
+    panel.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 4,
+            row: at.y,
+            modifiers: KeyModifiers::NONE,
+        },
+        Rect::new(0, 0, width, height),
+    );
+    assert!(panel.loop_task.is_some(), "the row click does not stop it");
+    assert!(panel.chat_focus);
+    assert_eq!(panel.selected, block);
+    click_stop(&mut panel, crate::render::Autorun::Loop);
+    assert!(panel.loop_task.is_none());
+    assert!(panel.goal_task.is_some(), "only the loop stopped");
+    click_stop(&mut panel, crate::render::Autorun::Goal);
+    assert!(panel.goal_task.is_none());
+    let _ = render_text(&mut panel, width, height);
+    assert!(panel.autorun_stops.is_empty());
 }
 
 fn roles(messages: &[Message]) -> Vec<&'static str> {
@@ -8502,11 +8633,7 @@ fn a_goal_left_going_is_judged_again_on_continue() {
     assert_eq!(panel.restored, Some(Restored::Autorun));
     assert_eq!(panel.goal_task.as_ref().map(|t| t.iterations), Some(3));
     assert!(
-        carry_on_card(&panel).contains(&termide_i18n::t().agent_unfinished_goal_fmt(
-            "build it",
-            3,
-            GOAL_MAX_ITERATIONS
-        ))
+        carry_on_card(&panel).contains(&termide_i18n::t().agent_unfinished_goal_fmt("build it", 3))
     );
     // Decide later: the card goes, the pause stays.
     panel.apply_form_action(ChoiceAction::Cancelled);

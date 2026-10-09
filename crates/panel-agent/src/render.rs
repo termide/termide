@@ -5,7 +5,7 @@ use crate::runtime::local_minute;
 use std::time::Instant;
 
 use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use termide_core::{RenderContext, SegmentKind, StatusSegment, ThemeColors};
@@ -16,8 +16,7 @@ use crate::toolset::TOOLSET_ACTION;
 use crate::{
     format_tokens, provider_label, shorten_path, single_line, transcript, truncate_title,
     AgentEntry, AgentPanel, BannerHit, Phase, RunButton, AGENT_ACTION, CONNECTION_ACTION,
-    CWD_ACTION, GOAL_COMMAND, GOAL_MAX_ITERATIONS, LOOP_COMMAND, LOOP_MAX_ITERATIONS, MODEL_ACTION,
-    MODE_ACTION, OPTIONS_ACTION, REASONING_ACTION,
+    CWD_ACTION, LOOP_MAX_ITERATIONS, MODEL_ACTION, MODE_ACTION, OPTIONS_ACTION, REASONING_ACTION,
 };
 
 /// Rows of the welcome banner's logo.
@@ -145,12 +144,37 @@ pub(crate) fn task_strip(
     lines
 }
 
+/// Which of the self-running tasks a state-strip row stands for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Autorun {
+    Goal,
+    Loop,
+}
+
+/// One state-strip row of an active `/goal` or `/loop`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AutorunRow {
+    pub kind: Autorun,
+    pub glyph: &'static str,
+    /// What it does, as a verb (`Heading for the goal`), in the accent.
+    pub label: String,
+    /// What it works on: the goal, or the loop's prompt.
+    pub body: String,
+    /// Its state at the right edge, dim: elapsed time, run count, the wait.
+    pub state: String,
+}
+
+/// The stop button at the right end of an autorun row.
+pub(crate) const AUTORUN_STOP: &str = "✕";
+
 /// The state strip's rows for what goes on by itself between requests (an
-/// active `/goal` or `/loop`): `glyph command` on the left and, at the right
-/// edge, its state, dim. The right side takes at most half the row, so the
-/// command stays readable.
+/// active `/goal` or `/loop`): `glyph label` in the accent and the goal or
+/// prompt, dim, on the left; at the right edge its state, dim, and the stop
+/// button in the accent. The state takes at most half the row, so the goal stays
+/// readable. The button sits two cells in from the edge (see
+/// [`autorun_stop_column`]).
 pub(crate) fn autorun_strip(
-    rows: &[(&'static str, String, String)],
+    rows: &[AutorunRow],
     width: u16,
     colors: &ThemeColors,
 ) -> Vec<Line<'static>> {
@@ -160,24 +184,49 @@ pub(crate) fn autorun_strip(
         .add_modifier(Modifier::BOLD);
     let width = width as usize;
     let cut = |text: &str, room: usize| termide_ui::path_utils::truncate_right(text, room);
+    // ` ✕` after the state, then the row's last cell left blank.
+    let stop_width = 1 + termide_ui::str_display_width(AUTORUN_STOP);
     rows.iter()
-        .map(|(glyph, command, state)| {
-            let state = if state.is_empty() {
+        .map(|row| {
+            let state = if row.state.is_empty() {
                 String::new()
             } else {
-                format!(" {}", cut(state, width / 2))
+                format!(" {}", cut(&row.state, width / 2))
             };
             let state_width = termide_ui::str_display_width(&state);
-            let body = cut(command, width.saturating_sub(3 + state_width));
-            let used = 2 + termide_ui::str_display_width(&body) + state_width;
+            let head = format!("{} {} ", row.glyph, row.label);
+            let head_width = termide_ui::str_display_width(&head);
+            let body = cut(
+                &row.body,
+                width.saturating_sub(1 + head_width + state_width + stop_width),
+            );
+            let used = head_width + termide_ui::str_display_width(&body) + state_width + stop_width;
             Line::from(vec![
-                Span::styled(format!("{glyph} "), accent),
-                Span::styled(body, Style::default().fg(colors.fg)),
+                Span::styled(head, accent),
+                Span::styled(body, dim),
                 Span::raw(" ".repeat(width.saturating_sub(used + 1))),
                 Span::styled(state, dim),
+                Span::raw(" "),
+                Span::styled(AUTORUN_STOP, accent),
             ])
         })
         .collect()
+}
+
+/// The column of an autorun row's stop button, from the strip's left edge,
+/// for a strip `width` cells wide.
+pub(crate) fn autorun_stop_column(width: u16) -> u16 {
+    width.saturating_sub(2)
+}
+
+/// `text` with its first letter upper-cased, for a lower-case notice used as
+/// a label (`иду к цели` → `Иду к цели`).
+fn capitalized(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
 }
 
 /// The glyph of an active `/goal` in the state strip.
@@ -222,15 +271,11 @@ impl AgentPanel {
         )
     }
 
-    /// The active goal as a sentence (`Goal: … — turn 3 of 50`), for a bare
+    /// The active goal as a sentence (`Goal: … — turn 3`), for a bare
     /// `/goal`; `None` without one.
     pub(crate) fn goal_status(&self) -> Option<String> {
         let task = self.goal_task.as_ref()?;
-        Some(termide_i18n::t().agent_unfinished_goal_fmt(
-            &single_line(&task.goal),
-            task.iterations,
-            GOAL_MAX_ITERATIONS,
-        ))
+        Some(termide_i18n::t().agent_unfinished_goal_fmt(&single_line(&task.goal), task.iterations))
     }
 
     /// The active loop as a sentence (`Loop (5m): … — run 3 of 100, next
@@ -264,39 +309,45 @@ impl AgentPanel {
     }
 
     /// The state strip's rows for an active goal and loop (see
-    /// [`autorun_strip`]): the command as typed, and its turn or run count —
-    /// with the judge's check or the wait for the next run before it.
-    pub(crate) fn autorun_rows(&self) -> Vec<(&'static str, String, String)> {
+    /// [`autorun_strip`]): the goal with how long it has run, the loop's
+    /// command as typed with its run count — and the judge's check or the
+    /// wait for the next run before them.
+    pub(crate) fn autorun_rows(&self) -> Vec<AutorunRow> {
         let t = termide_i18n::t();
         let mut rows = Vec::new();
         if let Some(task) = &self.goal_task {
-            let count = format!("{}/{GOAL_MAX_ITERATIONS}", task.iterations);
+            let ms = u32::try_from(task.started.elapsed().as_millis()).unwrap_or(u32::MAX);
+            let elapsed = transcript::fmt_dur(ms);
             let state = if task.judging {
-                format!("{} · {count}", t.agent_notice_goal_checking())
+                format!("{} · {elapsed}", t.agent_notice_goal_checking())
             } else {
-                count
+                elapsed
             };
-            rows.push((
-                GOAL_GLYPH,
-                format!("/{GOAL_COMMAND} {}", single_line(&task.goal)),
+            rows.push(AutorunRow {
+                kind: Autorun::Goal,
+                glyph: GOAL_GLYPH,
+                label: capitalized(t.agent_notice_goal_working()),
+                body: single_line(&task.goal),
                 state,
-            ));
+            });
         }
         if let Some(task) = &self.loop_task {
-            let command = match task.interval {
-                Some(d) => format!(
-                    "/{LOOP_COMMAND} {} {}",
-                    fmt_secs(d.as_secs()),
-                    single_line(&task.prompt)
-                ),
-                None => format!("/{LOOP_COMMAND} {}", single_line(&task.prompt)),
+            let label = match task.interval {
+                Some(d) => t.agent_autorun_loop_every_fmt(&fmt_secs(d.as_secs())),
+                None => t.agent_autorun_loop().to_string(),
             };
             let count = format!("{}/{LOOP_MAX_ITERATIONS}", task.iterations);
             let state = match self.loop_wait() {
                 Some(wait) => format!("{} · {count}", t.agent_unfinished_loop_due_fmt(&wait)),
                 None => count,
             };
-            rows.push((LOOP_GLYPH, command, state));
+            rows.push(AutorunRow {
+                kind: Autorun::Loop,
+                glyph: LOOP_GLYPH,
+                label: capitalized(&label),
+                body: single_line(&task.prompt),
+                state,
+            });
         }
         rows
     }
@@ -884,13 +935,18 @@ impl AgentPanel {
         let mut state = self.state_lines(text_width);
         // An active goal or loop stays in sight while it goes on, between
         // its runs as well as during them.
-        let autorun = autorun_strip(&self.autorun_rows(), text_width, &self.colors);
-        if !autorun.is_empty() {
+        let autorun_rows = self.autorun_rows();
+        let autorun = autorun_strip(&autorun_rows, text_width, &self.colors);
+        let autorun_from = if autorun.is_empty() {
+            None
+        } else {
             if state.is_empty() {
                 state.push(transcript::separator(text_width, &self.colors));
             }
+            let from = state.len();
             state.extend(autorun);
-        }
+            Some(from)
+        };
         // The subagents still running, closest to the input, so a block
         // scrolled out of view does not hide that one works.
         let task_items = self.running_task_rows();
@@ -1070,6 +1126,24 @@ impl AgentPanel {
                     .enumerate()
                     .filter(|(i, _)| from + i < state.len())
                     .map(|(i, (index, _))| (state_y + (from + i) as u16, *index))
+                    .collect()
+            })
+            .unwrap_or_default();
+        // Each goal or loop row stops it on a click on its `✕`, and brings
+        // its latest run into view on a click elsewhere on the row.
+        self.autorun_stops = autorun_from
+            .map(|from| {
+                autorun_rows
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| from + i < state.len())
+                    .map(|(i, row)| {
+                        let at = Position {
+                            x: area.x + autorun_stop_column(text_width),
+                            y: state_y + (from + i) as u16,
+                        };
+                        (at, row.kind)
+                    })
                     .collect()
             })
             .unwrap_or_default();

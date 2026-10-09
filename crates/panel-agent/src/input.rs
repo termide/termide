@@ -1376,6 +1376,32 @@ impl AgentPanel {
                     self.cancel_pause();
                     return vec![PanelEvent::NeedsRedraw];
                 }
+                // A goal or loop row's `✕` stops it, as `/goal stop` and
+                // `/loop stop` do (one cell of slack either side).
+                if let Some(&(_, kind)) = self
+                    .autorun_stops
+                    .iter()
+                    .find(|(at, _)| at.y == event.row && event.column.abs_diff(at.x) <= 1)
+                {
+                    match kind {
+                        crate::render::Autorun::Goal => self.stop_goal(),
+                        crate::render::Autorun::Loop => self.stop_loop(),
+                    }
+                    self.settle_restored();
+                    return vec![PanelEvent::NeedsRedraw];
+                }
+                // Elsewhere on the row, its latest run comes into view.
+                if let Some(&(_, kind)) =
+                    self.autorun_stops.iter().find(|(at, _)| at.y == event.row)
+                {
+                    if let Some(index) = self.autorun_block(kind) {
+                        self.chat_focus = true;
+                        self.follow = false;
+                        self.selected = index;
+                        self.scroll_selected_into_view();
+                    }
+                    return vec![PanelEvent::NeedsRedraw];
+                }
                 // A running subagent's row selects its block and brings it
                 // into view.
                 if let Some(&(_, index)) = self.task_rows.iter().find(|(y, _)| *y == event.row) {

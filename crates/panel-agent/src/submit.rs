@@ -7,8 +7,8 @@ use std::sync::PoisonError;
 use std::time::{Duration, Instant};
 
 use termide_agent_core::{
-    AgentCommand, CancelToken, CommandScript, Decision, DefinitionProblem, Message, PromptError,
-    Session, SkillInfo, Timing, UserMessage,
+    AgentCommand, CancelToken, CommandScript, Decision, DefinitionProblem, GoalOutcome, Message,
+    PromptError, Session, SkillInfo, Timing, UserMessage,
 };
 use termide_core::{Panel, PanelEvent};
 use termide_ui::ChoiceForm;
@@ -18,10 +18,13 @@ use crate::session_ops::discard;
 use crate::{
     millis, now_hms, slash, transcript, unfinished, AgentPanel, GoalTask, Item, LoopTask,
     NoticeKind, BUILTIN_COMMANDS, CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND, FORK_COMMAND,
-    GOAL_COMMAND, GOAL_JUDGE_RETRIES, GOAL_JUDGE_RETRY_DELAY, GOAL_MAX_ITERATIONS, HANDOFF_COMMAND,
+    GOAL_COMMAND, GOAL_IDLE_TURNS, GOAL_JUDGE_RETRIES, GOAL_JUDGE_RETRY_DELAY, HANDOFF_COMMAND,
     LOOP_COMMAND, LOOP_MAX_ITERATIONS, MCP_COMMAND, NAME_COMMAND, NEW_COMMAND, PAUSE_COMMAND,
     PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND, SHOW_PROMPT_ACTION, UNDO_COMMAND, USAGE_COMMAND,
 };
+
+/// The opening of [`goal_continuation`], to tell its turns in the transcript.
+const GOAL_CONTINUATION: &str = "The goal is not reached yet. Keep working toward it.";
 
 /// The work turn a `/goal` sends when the judge says the goal is not yet
 /// reached: the goal restated, plus the one thing the judge found still
@@ -29,11 +32,9 @@ use crate::{
 pub(crate) fn goal_continuation(goal: &str, reason: &str) -> String {
     let reason = reason.trim();
     if reason.is_empty() {
-        format!("The goal is not reached yet. Keep working toward it.\nGoal: {goal}")
+        format!("{GOAL_CONTINUATION}\nGoal: {goal}")
     } else {
-        format!(
-            "The goal is not reached yet. Keep working toward it.\nGoal: {goal}\nStill missing: {reason}"
-        )
+        format!("{GOAL_CONTINUATION}\nGoal: {goal}\nStill missing: {reason}")
     }
 }
 
@@ -229,18 +230,7 @@ impl AgentPanel {
                     return vec![PanelEvent::NeedsRedraw];
                 }
                 if args == "stop" || args == "off" {
-                    if let Some(task) = self.loop_task.take() {
-                        self.withdraw_queued(|message| message.typed() == task.prompt);
-                        self.notice(
-                            termide_i18n::t().agent_notice_loop_stopped(),
-                            NoticeKind::Info,
-                        );
-                    } else {
-                        self.notice(
-                            termide_i18n::t().agent_notice_loop_usage(),
-                            NoticeKind::Info,
-                        );
-                    }
+                    self.stop_loop();
                     return vec![PanelEvent::NeedsRedraw];
                 }
                 let (interval, prompt) = parse_loop_args(args);
@@ -280,17 +270,7 @@ impl AgentPanel {
                     return vec![PanelEvent::NeedsRedraw];
                 }
                 if args == "stop" || args == "off" {
-                    if self.goal_task.take().is_some() {
-                        self.notice(
-                            termide_i18n::t().agent_notice_goal_stopped(),
-                            NoticeKind::Info,
-                        );
-                    } else {
-                        self.notice(
-                            termide_i18n::t().agent_notice_goal_usage(),
-                            NoticeKind::Info,
-                        );
-                    }
+                    self.stop_goal();
                     return vec![PanelEvent::NeedsRedraw];
                 }
                 // While the agent works, the goal joins the run in flight as a
@@ -635,6 +615,9 @@ impl AgentPanel {
         self.goal_task = Some(GoalTask {
             goal: goal.clone(),
             iterations: 0,
+            started: Instant::now(),
+            used_tools: false,
+            idle_turns: 0,
             judge_at: None,
             judging: false,
             judge_failures: 0,
@@ -650,30 +633,63 @@ impl AgentPanel {
         self.send_goal_turn_as(goal, command)
     }
 
-    /// Send one work turn of the active goal as a fresh run and count it;
-    /// stops the goal when the safety cap is reached.
+    /// The transcript block of the active goal's or loop's latest run: the
+    /// last user block that is the goal itself, a continuation of it, or the
+    /// loop's prompt. `None` before its first run shows.
+    pub(crate) fn autorun_block(&self, kind: crate::render::Autorun) -> Option<usize> {
+        let is_run = |text: &str| match kind {
+            crate::render::Autorun::Goal => self.goal_task.as_ref().is_some_and(|task| {
+                text == task.goal
+                    || (text.starts_with(GOAL_CONTINUATION)
+                        && text.contains(&format!("\nGoal: {}", task.goal)))
+            }),
+            crate::render::Autorun::Loop => self
+                .loop_task
+                .as_ref()
+                .is_some_and(|task| text == task.prompt),
+        };
+        self.transcript
+            .items()
+            .iter()
+            .rposition(|item| matches!(item, Item::User { text, .. } if is_run(text)))
+    }
+
+    /// `/loop stop` (and the strip's `✕`): end the loop and withdraw what it
+    /// still has waiting in the queue; without one, show the usage.
+    pub(crate) fn stop_loop(&mut self) {
+        let t = termide_i18n::t();
+        if let Some(task) = self.loop_task.take() {
+            self.withdraw_queued(|message| message.typed() == task.prompt);
+            self.notice(t.agent_notice_loop_stopped(), NoticeKind::Info);
+        } else {
+            self.notice(t.agent_notice_loop_usage(), NoticeKind::Info);
+        }
+    }
+
+    /// `/goal stop` (and the strip's `✕`): end the goal; without one, show
+    /// the usage. A turn already under way runs to its end.
+    pub(crate) fn stop_goal(&mut self) {
+        let t = termide_i18n::t();
+        if self.goal_task.take().is_some() {
+            self.notice(t.agent_notice_goal_stopped(), NoticeKind::Info);
+        } else {
+            self.notice(t.agent_notice_goal_usage(), NoticeKind::Info);
+        }
+    }
+
+    /// Send one work turn of the active goal as a fresh run and count it.
     pub(crate) fn send_goal_turn(&mut self, prompt: String) -> Vec<PanelEvent> {
         self.send_goal_turn_as(prompt, None)
     }
 
     /// [`Self::send_goal_turn`], shown in the transcript as `command`.
     fn send_goal_turn_as(&mut self, prompt: String, command: Option<String>) -> Vec<PanelEvent> {
-        let over_cap = match self.goal_task.as_mut() {
-            Some(task) => {
-                task.iterations += 1;
-                task.judge_at = None;
-                task.iterations > GOAL_MAX_ITERATIONS
-            }
-            None => return vec![PanelEvent::NeedsRedraw],
-        };
-        if over_cap {
-            self.goal_task = None;
-            self.notice(
-                termide_i18n::t().agent_notice_goal_stopped_max_fmt(GOAL_MAX_ITERATIONS),
-                NoticeKind::Warn,
-            );
+        let Some(task) = self.goal_task.as_mut() else {
             return vec![PanelEvent::NeedsRedraw];
-        }
+        };
+        task.iterations += 1;
+        task.judge_at = None;
+        task.used_tools = false;
         self.goal_errored = false;
         self.send_as(prompt, command)
     }
@@ -713,28 +729,53 @@ impl AgentPanel {
         vec![PanelEvent::NeedsRedraw]
     }
 
-    /// Apply the judge's verdict: finish when the goal is reached, otherwise
-    /// send the next work turn with what is still missing.
-    pub(crate) fn on_goal_verdict(&mut self, done: bool, reason: &str) {
-        let goal = match self.goal_task.as_mut() {
-            Some(task) => {
-                task.judging = false;
-                task.judge_failures = 0;
-                task.goal.clone()
-            }
-            None => return,
-        };
-        if done {
-            self.goal_task = None;
-            let reason = reason.trim();
-            let t = termide_i18n::t();
-            let msg = if reason.is_empty() {
-                t.agent_notice_goal_reached().to_string()
-            } else {
-                t.agent_notice_goal_reached_reason_fmt(reason)
-            };
-            self.notice(msg, NoticeKind::Info);
+    /// Apply the judge's verdict: finish when the goal is reached or out of
+    /// reach; otherwise send the next work turn with what is still missing —
+    /// unless the last [`GOAL_IDLE_TURNS`] turns called no tool, when the
+    /// goal waits at a pause instead of spinning.
+    pub(crate) fn on_goal_verdict(&mut self, outcome: GoalOutcome, reason: &str) {
+        let Some(task) = self.goal_task.as_mut() else {
             return;
+        };
+        task.judging = false;
+        task.judge_failures = 0;
+        let goal = task.goal.clone();
+        let t = termide_i18n::t();
+        let reason = reason.trim();
+        match outcome {
+            GoalOutcome::Done => {
+                self.goal_task = None;
+                let msg = if reason.is_empty() {
+                    t.agent_notice_goal_reached().to_string()
+                } else {
+                    t.agent_notice_goal_reached_reason_fmt(reason)
+                };
+                self.notice(msg, NoticeKind::Info);
+                return;
+            }
+            GoalOutcome::Impossible => {
+                self.goal_task = None;
+                let msg = if reason.is_empty() {
+                    t.agent_notice_goal_impossible().to_string()
+                } else {
+                    t.agent_notice_goal_impossible_reason_fmt(reason)
+                };
+                self.notice(msg, NoticeKind::Warn);
+                self.raise_attention(true);
+                return;
+            }
+            GoalOutcome::Continue if task.idle_turns >= GOAL_IDLE_TURNS => {
+                task.idle_turns = 0;
+                self.paused = true;
+                self.restored = Some(unfinished::Restored::Autorun);
+                self.notice(
+                    t.agent_notice_goal_idle_paused_fmt(GOAL_IDLE_TURNS),
+                    NoticeKind::Warn,
+                );
+                self.raise_attention(true);
+                return;
+            }
+            GoalOutcome::Continue => {}
         }
         let prompt = goal_continuation(&goal, reason);
         let _ = self.send_goal_turn(prompt);

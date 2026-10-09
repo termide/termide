@@ -13,7 +13,7 @@ use crate::compaction::{
     context_tokens, is_context_overflow_error, should_compact, split_point, CompactionPolicy,
     CompactionPrompts, CompactionReason, MIN_SUMMARY_CHARS,
 };
-use crate::goal::{parse_verdict, GoalPrompt, GoalVerdict};
+use crate::goal::{parse_verdict, GoalOutcome, GoalPrompt, GoalVerdict};
 use crate::handoff::HandoffPrompt;
 use crate::message::{
     AssistantMessage, Message, StopReason, ToolCall, ToolResultMessage, Usage, UserMessage,
@@ -467,9 +467,10 @@ pub enum AgentEvent {
         error: String,
     },
     /// The autonomous-goal judge ran (`/goal`) and returned its verdict: the
-    /// goal is reached, or more work is needed, with a one-line reason.
+    /// goal is reached, cannot be reached, or more work is needed, with a
+    /// one-line reason.
     GoalJudged {
-        done: bool,
+        outcome: GoalOutcome,
         reason: String,
     },
     /// The judge call did not succeed; the goal loop stops.
@@ -1272,7 +1273,7 @@ impl Agent {
         }
         let verdict = parse_verdict(&reply.plain_text());
         emit(AgentEvent::GoalJudged {
-            done: verdict.done,
+            outcome: verdict.outcome,
             reason: verdict.reason.clone(),
         });
         Ok(verdict)
@@ -2034,14 +2035,14 @@ mod tests {
         assert_eq!(
             verdict,
             GoalVerdict {
-                done: false,
+                outcome: GoalOutcome::Continue,
                 reason: "the build still fails".into(),
             }
         );
         assert_eq!(
             events,
             vec![AgentEvent::GoalJudged {
-                done: false,
+                outcome: GoalOutcome::Continue,
                 reason: "the build still fails".into(),
             }]
         );
@@ -2062,7 +2063,7 @@ mod tests {
         let verdict = agent
             .judge("ship it", &CancelToken::new(), &mut |_| {})
             .expect("judge succeeds");
-        assert!(verdict.done);
+        assert_eq!(verdict.outcome, GoalOutcome::Done);
         assert_eq!(verdict.reason, "everything compiles and tests pass");
     }
 

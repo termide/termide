@@ -146,8 +146,10 @@ const LOOP_MAX_ITERATIONS: usize = 100;
 /// The built-in `/goal` command: work autonomously toward a goal, a judge
 /// deciding after each turn whether it is reached.
 const GOAL_COMMAND: &str = "goal";
-/// A `/goal` stops itself after this many work turns, so it cannot run away.
-const GOAL_MAX_ITERATIONS: usize = 50;
+/// A `/goal` has no turn cap: it ends when the judge finds it reached or
+/// out of reach. What stops one that spins is this many work turns in a row
+/// without a single tool call — the goal then waits at a pause.
+const GOAL_IDLE_TURNS: usize = 3;
 /// A failed judge call is tried again this many times, waiting
 /// [`GOAL_JUDGE_RETRY_DELAY`] times the attempt, before the goal is paused.
 const GOAL_JUDGE_RETRIES: u32 = 2;
@@ -555,12 +557,19 @@ struct LoopTask {
 
 /// A running `/goal`: work autonomously toward `goal`. After each work turn a
 /// judge decides whether the goal is reached; if not, the panel sends the next
-/// continuation turn. Stops when the judge says done, on an error, or at the
-/// iteration cap.
+/// continuation turn. Stops when the judge says done or impossible, or on an
+/// error; pauses after [`GOAL_IDLE_TURNS`] work turns without a tool call.
 struct GoalTask {
     goal: String,
     /// Work turns sent so far.
     iterations: usize,
+    /// When the goal was set (or taken up again from the log), for the
+    /// elapsed time in the state strip.
+    started: Instant,
+    /// The current work turn has called a tool.
+    used_tools: bool,
+    /// Finished work turns in a row that called no tool.
+    idle_turns: usize,
     /// When the judge call is due (a work turn has finished); `None` while a
     /// work turn or the judge call is in flight.
     judge_at: Option<Instant>,
@@ -883,6 +892,9 @@ pub struct AgentPanel {
     /// The screen rows of the state strip's subagent lines and the block
     /// each stands for: a click brings the block into view.
     task_rows: Vec<(u16, usize)>,
+    /// Where the state strip's goal and loop rows show their stop button
+    /// (the row is its `y`), from the last render.
+    autorun_stops: Vec<(ratatui::layout::Position, render::Autorun)>,
     /// The run controls last put on the prompt's border, in order, so a
     /// click maps back to one.
     run_buttons: Vec<RunButton>,
@@ -1149,6 +1161,7 @@ impl AgentPanel {
             pause_row: None,
             task_clocks: HashMap::new(),
             task_rows: Vec::new(),
+            autorun_stops: Vec::new(),
             run_buttons: Vec::new(),
             queued_texts: VecDeque::new(),
             queued: (0, 0),

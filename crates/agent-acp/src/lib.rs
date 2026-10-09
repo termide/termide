@@ -638,7 +638,7 @@ impl Backend for AcpRuntime {
                 Ok(reply) if !reply.trim().is_empty() => {
                     let verdict = parse_verdict(&reply);
                     AgentEvent::GoalJudged {
-                        done: verdict.done,
+                        outcome: verdict.outcome,
                         reason: verdict.reason,
                     }
                 }
@@ -4333,7 +4333,7 @@ mod tests {
         runtime.judge("make the tests pass".into()).unwrap();
         let events = events_until(&runtime, |e| matches!(e, AgentEvent::GoalJudged { .. }));
         assert!(events.contains(&AgentEvent::GoalJudged {
-            done: true,
+            outcome: termide_agent_core::GoalOutcome::Done,
             reason: "the tests pass".into()
         }));
         // Nothing of it reached the transcript.
