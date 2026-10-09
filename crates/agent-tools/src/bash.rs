@@ -19,6 +19,11 @@ use crate::truncate::{head_tail, SHELL_MAX_BYTES};
 const UPDATE_INTERVAL: Duration = Duration::from_millis(200);
 /// How often the child is polled for exit, cancel and timeout.
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
+/// Once the command is over, how long its output may go quiet before what
+/// still holds the pipes (a process that left its group) is left behind.
+const DRAIN_QUIET: Duration = Duration::from_millis(500);
+/// And how long the output is read at most once the command is over.
+const DRAIN_MAX: Duration = Duration::from_secs(5);
 
 pub struct BashTool {
     pub default_timeout: Duration,
@@ -107,6 +112,10 @@ struct Run {
     exit_code: Option<i32>,
     timed_out: bool,
     cancelled: bool,
+    /// A process that left the command's group (a daemon, an ssh
+    /// `ControlPersist` master) still held its output when the command was
+    /// over, so the output was no longer read.
+    detached: bool,
     duration: Duration,
     /// The command that ran, for the command-aware cleaning rules.
     command: String,
@@ -176,15 +185,14 @@ impl BashTool {
             }
             std::thread::sleep(POLL_INTERVAL);
         };
-        for reader in readers {
-            let _ = reader.join();
-        }
+        let detached = drain(readers, &output);
         let output = std::mem::take(&mut *lock_mut(&output));
         Ok(Run {
             output,
             exit_code,
             timed_out,
             cancelled,
+            detached,
             duration: started.elapsed(),
             command: command.to_string(),
         })
@@ -254,7 +262,15 @@ impl BashTool {
             }
         }
 
+        if run.detached {
+            body.push_str(
+                "\n[a background process that left the command (a daemon, an ssh ControlPersist \
+                 master) still holds its output; stopped reading it]",
+            );
+        }
+
         let details = json!({
+            "detached": run.detached,
             "exit_code": run.exit_code,
             "timed_out": run.timed_out,
             "cancelled": run.cancelled,
@@ -345,6 +361,37 @@ fn kill_group(child: &mut Child) {
         }
     }
     let _ = child.kill();
+}
+
+/// Read what is left of the output once the command is over: until every
+/// pipe is closed, or, when something outside the killed group still holds
+/// one open, until the output has been quiet for [`DRAIN_QUIET`] (at most
+/// [`DRAIN_MAX`]). Readers still blocked then are left to end with the pipe;
+/// `true` when any was.
+fn drain(readers: Vec<std::thread::JoinHandle<()>>, output: &Mutex<Vec<u8>>) -> bool {
+    let started = Instant::now();
+    let mut last_len = lock_mut(output).len();
+    let mut last_growth = started;
+    while readers.iter().any(|reader| !reader.is_finished()) {
+        let len = lock_mut(output).len();
+        if len != last_len {
+            last_len = len;
+            last_growth = Instant::now();
+        }
+        if last_growth.elapsed() >= DRAIN_QUIET || started.elapsed() >= DRAIN_MAX {
+            break;
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    }
+    let mut detached = false;
+    for reader in readers {
+        if reader.is_finished() {
+            let _ = reader.join();
+        } else {
+            detached = true;
+        }
+    }
+    detached
 }
 
 fn pump(mut stream: impl Read, sink: &Mutex<Vec<u8>>) {
@@ -504,6 +551,35 @@ mod tests {
         assert!(result.is_error);
         assert!(result.plain_text().contains("timed out"));
         assert_eq!(result.details.unwrap()["timed_out"], true);
+    }
+
+    /// A process that leaves the group and keeps the output open (as an ssh
+    /// `ControlPersist` master does) neither holds a timed-out command past
+    /// its timeout nor a finished one past its end.
+    #[cfg(unix)]
+    #[test]
+    fn a_detached_process_holding_the_output_does_not_hang_the_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let daemon = "perl -e 'use POSIX; fork and exit; POSIX::setsid(); sleep 30' &";
+
+        let started = Instant::now();
+        let result = run(
+            dir.path(),
+            json!({ "command": format!("{daemon} echo done") }),
+        );
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(!result.is_error, "{}", result.plain_text());
+        assert!(result.plain_text().starts_with("done\n"));
+        assert!(result.plain_text().contains("stopped reading"));
+        assert_eq!(result.details.unwrap()["detached"], true);
+
+        let started = Instant::now();
+        let result = run(
+            dir.path(),
+            json!({ "command": format!("{daemon} sleep 30"), "timeout": 1 }),
+        );
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(result.plain_text().contains("timed out"));
     }
 
     #[test]
