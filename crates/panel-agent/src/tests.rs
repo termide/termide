@@ -2307,6 +2307,118 @@ fn goal_stop_ends_an_active_goal() {
             .any(|i| matches!(i, Item::Notice { text, .. } if text.contains(termide_i18n::t().agent_notice_goal_stopped()))));
 }
 
+/// A bare `/goal` or `/loop` tells what is going on and leaves it going;
+/// without one it shows the usage. Only `stop` (or `off`) ends either.
+#[test]
+fn bare_goal_and_loop_report_rather_than_stop() {
+    let t = termide_i18n::t();
+    let last_notice = |panel: &AgentPanel| {
+        panel
+            .transcript()
+            .items()
+            .iter()
+            .rev()
+            .find_map(|i| match i {
+                Item::Notice { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    };
+    let mut panel = panel(vec![reply("working"), reply("again")]);
+    type_text(&mut panel, "/goal");
+    panel.submit();
+    assert_eq!(last_notice(&panel), t.agent_notice_goal_usage());
+    type_text(&mut panel, "/loop");
+    panel.submit();
+    assert_eq!(last_notice(&panel), t.agent_notice_loop_usage());
+
+    type_text(&mut panel, "/goal do the thing");
+    panel.submit();
+    settle(&mut panel);
+    type_text(&mut panel, "/goal");
+    panel.submit();
+    assert!(panel.goal_task.is_some(), "a bare /goal left it going");
+    let status = last_notice(&panel);
+    assert!(status.contains("do the thing"), "{status}");
+    assert!(
+        status.contains(&GOAL_MAX_ITERATIONS.to_string()),
+        "{status}"
+    );
+
+    let mut panel = looping_panel();
+    type_text(&mut panel, "/loop");
+    panel.submit();
+    assert!(panel.loop_task.is_some(), "a bare /loop left it going");
+    let status = last_notice(&panel);
+    assert!(status.contains("check the build"), "{status}");
+    assert!(status.contains("5m"), "{status}");
+}
+
+/// A panel whose `/loop 5m check the build` ran once and waits for its
+/// next run.
+fn looping_panel() -> AgentPanel {
+    let mut panel = panel(vec![reply("built")]);
+    assert!(panel.autorun_rows().is_empty());
+    type_text(&mut panel, "/loop 5m check the build");
+    panel.submit();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while panel
+        .loop_task
+        .as_ref()
+        .is_some_and(|t| t.next_at.is_none())
+    {
+        panel.tick();
+        assert!(Instant::now() < deadline, "the loop did not wait");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panel
+}
+
+/// An active goal and loop stay pinned in the state strip: the command as
+/// typed on the left, the count (and the wait for the next run) at the right.
+#[test]
+fn an_active_goal_and_loop_show_in_the_state_strip() {
+    let mut panel = looping_panel();
+    type_text(&mut panel, "/goal do the thing");
+    panel.submit();
+
+    let rows = panel.autorun_rows();
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    let colors = ThemeColors::default();
+    let lines = crate::render::autorun_strip(&rows, 80, &colors);
+    let text = |line: &Line| {
+        line.spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect::<String>()
+    };
+    let goal = text(&lines[0]);
+    assert!(goal.starts_with("◎ /goal do the thing"), "{goal}");
+    assert!(
+        goal.trim_end()
+            .ends_with(&format!("/{GOAL_MAX_ITERATIONS}")),
+        "{goal}"
+    );
+    let looped = text(&lines[1]);
+    assert!(looped.starts_with("↺ /loop 5m check the build"), "{looped}");
+    assert!(looped.contains("next run in"), "{looped}");
+    assert!(
+        looped
+            .trim_end()
+            .ends_with(&format!("1/{LOOP_MAX_ITERATIONS}")),
+        "{looped}"
+    );
+    for line in &lines {
+        assert!(termide_ui::str_display_width(&text(line)) <= 80);
+    }
+
+    type_text(&mut panel, "/goal stop");
+    panel.submit();
+    type_text(&mut panel, "/loop stop");
+    panel.submit();
+    assert!(panel.autorun_rows().is_empty());
+}
+
 fn roles(messages: &[Message]) -> Vec<&'static str> {
     messages
         .iter()

@@ -220,7 +220,15 @@ impl AgentPanel {
             Some((LOOP_COMMAND, args)) => {
                 self.clear_input();
                 let args = args.trim();
-                if args.is_empty() || args == "stop" || args == "off" {
+                // Bare `/loop` only reports: stopping takes `stop` or `off`.
+                if args.is_empty() {
+                    let text = self
+                        .loop_status()
+                        .unwrap_or_else(|| termide_i18n::t().agent_notice_loop_usage().to_string());
+                    self.notice(&text, NoticeKind::Info);
+                    return vec![PanelEvent::NeedsRedraw];
+                }
+                if args == "stop" || args == "off" {
                     if let Some(task) = self.loop_task.take() {
                         self.withdraw_queued(|message| message.typed() == task.prompt);
                         self.notice(
@@ -263,7 +271,15 @@ impl AgentPanel {
             Some((GOAL_COMMAND, args)) => {
                 self.clear_input();
                 let args = args.trim();
-                if args.is_empty() || args == "stop" || args == "off" {
+                // Bare `/goal` only reports: stopping takes `stop` or `off`.
+                if args.is_empty() {
+                    let text = self
+                        .goal_status()
+                        .unwrap_or_else(|| termide_i18n::t().agent_notice_goal_usage().to_string());
+                    self.notice(&text, NoticeKind::Info);
+                    return vec![PanelEvent::NeedsRedraw];
+                }
+                if args == "stop" || args == "off" {
                     if self.goal_task.take().is_some() {
                         self.notice(
                             termide_i18n::t().agent_notice_goal_stopped(),

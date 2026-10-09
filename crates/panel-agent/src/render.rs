@@ -11,11 +11,13 @@ use ratatui::text::{Line, Span};
 use termide_core::{RenderContext, SegmentKind, StatusSegment, ThemeColors};
 use termide_ui::ScrollBar;
 
+use crate::submit::fmt_secs;
 use crate::toolset::TOOLSET_ACTION;
 use crate::{
-    format_tokens, provider_label, shorten_path, transcript, truncate_title, AgentEntry,
-    AgentPanel, BannerHit, Phase, RunButton, AGENT_ACTION, CONNECTION_ACTION, CWD_ACTION,
-    MODEL_ACTION, MODE_ACTION, OPTIONS_ACTION, REASONING_ACTION,
+    format_tokens, provider_label, shorten_path, single_line, transcript, truncate_title,
+    AgentEntry, AgentPanel, BannerHit, Phase, RunButton, AGENT_ACTION, CONNECTION_ACTION,
+    CWD_ACTION, GOAL_COMMAND, GOAL_MAX_ITERATIONS, LOOP_COMMAND, LOOP_MAX_ITERATIONS, MODEL_ACTION,
+    MODE_ACTION, OPTIONS_ACTION, REASONING_ACTION,
 };
 
 /// Rows of the welcome banner's logo.
@@ -143,6 +145,46 @@ pub(crate) fn task_strip(
     lines
 }
 
+/// The state strip's rows for what goes on by itself between requests (an
+/// active `/goal` or `/loop`): `glyph command` on the left and, at the right
+/// edge, its state, dim. The right side takes at most half the row, so the
+/// command stays readable.
+pub(crate) fn autorun_strip(
+    rows: &[(&'static str, String, String)],
+    width: u16,
+    colors: &ThemeColors,
+) -> Vec<Line<'static>> {
+    let dim = Style::default().fg(colors.disabled);
+    let accent = Style::default()
+        .fg(colors.info)
+        .add_modifier(Modifier::BOLD);
+    let width = width as usize;
+    let cut = |text: &str, room: usize| termide_ui::path_utils::truncate_right(text, room);
+    rows.iter()
+        .map(|(glyph, command, state)| {
+            let state = if state.is_empty() {
+                String::new()
+            } else {
+                format!(" {}", cut(state, width / 2))
+            };
+            let state_width = termide_ui::str_display_width(&state);
+            let body = cut(command, width.saturating_sub(3 + state_width));
+            let used = 2 + termide_ui::str_display_width(&body) + state_width;
+            Line::from(vec![
+                Span::styled(format!("{glyph} "), accent),
+                Span::styled(body, Style::default().fg(colors.fg)),
+                Span::raw(" ".repeat(width.saturating_sub(used + 1))),
+                Span::styled(state, dim),
+            ])
+        })
+        .collect()
+}
+
+/// The glyph of an active `/goal` in the state strip.
+pub(crate) const GOAL_GLYPH: &str = "◎";
+/// The glyph of an active `/loop` in the state strip.
+pub(crate) const LOOP_GLYPH: &str = "↺";
+
 /// An eight-cell fill bar for a 0–100 percentage, e.g. `▰▰▱▱▱▱▱▱` at 25%.
 /// Cells round to the nearest, so the bar never runs more than half a cell
 /// ahead of or behind the figure it stands beside.
@@ -178,6 +220,85 @@ impl AgentPanel {
             width,
             &self.colors,
         )
+    }
+
+    /// The active goal as a sentence (`Goal: … — turn 3 of 50`), for a bare
+    /// `/goal`; `None` without one.
+    pub(crate) fn goal_status(&self) -> Option<String> {
+        let task = self.goal_task.as_ref()?;
+        Some(termide_i18n::t().agent_unfinished_goal_fmt(
+            &single_line(&task.goal),
+            task.iterations,
+            GOAL_MAX_ITERATIONS,
+        ))
+    }
+
+    /// The active loop as a sentence (`Loop (5m): … — run 3 of 100, next
+    /// run in 4m`), for a bare `/loop`; `None` without one.
+    pub(crate) fn loop_status(&self) -> Option<String> {
+        let task = self.loop_task.as_ref()?;
+        let t = termide_i18n::t();
+        let interval = match task.interval {
+            Some(d) => fmt_secs(d.as_secs()),
+            None => t.agent_unfinished_back_to_back().to_string(),
+        };
+        let mut line = t.agent_unfinished_loop_fmt(
+            &interval,
+            &single_line(&task.prompt),
+            task.iterations,
+            LOOP_MAX_ITERATIONS,
+        );
+        if let Some(wait) = self.loop_wait() {
+            line.push_str(", ");
+            line.push_str(&t.agent_unfinished_loop_due_fmt(&wait));
+        }
+        Some(line)
+    }
+
+    /// What is left of the active loop's wait for its next run, rounded up
+    /// to the second; `None` while a run is in flight or due.
+    fn loop_wait(&self) -> Option<String> {
+        let at = self.loop_task.as_ref()?.next_at?;
+        let left = at.saturating_duration_since(Instant::now());
+        (!left.is_zero()).then(|| fmt_secs(left.as_secs() + u64::from(left.subsec_nanos() > 0)))
+    }
+
+    /// The state strip's rows for an active goal and loop (see
+    /// [`autorun_strip`]): the command as typed, and its turn or run count —
+    /// with the judge's check or the wait for the next run before it.
+    pub(crate) fn autorun_rows(&self) -> Vec<(&'static str, String, String)> {
+        let t = termide_i18n::t();
+        let mut rows = Vec::new();
+        if let Some(task) = &self.goal_task {
+            let count = format!("{}/{GOAL_MAX_ITERATIONS}", task.iterations);
+            let state = if task.judging {
+                format!("{} · {count}", t.agent_notice_goal_checking())
+            } else {
+                count
+            };
+            rows.push((
+                GOAL_GLYPH,
+                format!("/{GOAL_COMMAND} {}", single_line(&task.goal)),
+                state,
+            ));
+        }
+        if let Some(task) = &self.loop_task {
+            let command = match task.interval {
+                Some(d) => format!(
+                    "/{LOOP_COMMAND} {} {}",
+                    fmt_secs(d.as_secs()),
+                    single_line(&task.prompt)
+                ),
+                None => format!("/{LOOP_COMMAND} {}", single_line(&task.prompt)),
+            };
+            let count = format!("{}/{LOOP_MAX_ITERATIONS}", task.iterations);
+            let state = match self.loop_wait() {
+                Some(wait) => format!("{} · {count}", t.agent_unfinished_loop_due_fmt(&wait)),
+                None => count,
+            };
+            rows.push((LOOP_GLYPH, command, state));
+        }
+        rows
     }
 
     /// The running subagents for the state strip: each one's block index and
@@ -761,6 +882,15 @@ impl AgentPanel {
         // transcript and the card, leaving the transcript at least one row.
         let text_width = area.width.saturating_sub(1).max(1);
         let mut state = self.state_lines(text_width);
+        // An active goal or loop stays in sight while it goes on, between
+        // its runs as well as during them.
+        let autorun = autorun_strip(&self.autorun_rows(), text_width, &self.colors);
+        if !autorun.is_empty() {
+            if state.is_empty() {
+                state.push(transcript::separator(text_width, &self.colors));
+            }
+            state.extend(autorun);
+        }
         // The subagents still running, closest to the input, so a block
         // scrolled out of view does not hide that one works.
         let task_items = self.running_task_rows();

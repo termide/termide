@@ -5,6 +5,14 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **An active `/goal` and `/loop` stay in sight.** The state strip above the input pins a row for each while it goes on, beside the running subagents: `◎ /goal …` with its turn count (and the judge's check while it runs), `↺ /loop …` with its run count and the countdown to its next run.
+
+### Fixed
+- **A bare `/goal` or `/loop` no longer stops the active one.** It reports it — the goal and its turn, or the loop, its run and the wait for the next — and shows the usage when nothing is active. Only `stop` (or `off`) ends either.
+
 ## [0.40.0] - 2026-10-08
 
 [0.40.0]: https://github.com/termide/termide/releases/tag/0.40.0

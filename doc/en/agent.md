@@ -385,7 +385,7 @@ you have named or sent even one message to is always kept.
 | `F6` | Switch session — open the picker of this directory's sessions |
 | `F7` | Start a new session (the used one is kept in the list) |
 | `F8` | Delete this session (after a confirmation) and start a fresh one; in the banner's list of sessions, delete the one under the cursor |
-| `/name args` + `Enter` | Send the prompt template `name` with `args` filled in, run the command script `name` or send the skill `name` (`/skill:name` when the name is taken); `/compact [focus]` summarises the session, `/undo` takes the last request back, `/new` starts a fresh session, `/fork` copies this one into a new panel, `/clear` starts one after discarding the current session, and `/rename [name]` (or `/name`) renames it; `/pause` stops the run after the current step and `/continue` resumes it (or, before the step ends, cancels the pause, and after a failed run tries its request again); `/loop [interval] <prompt>` re-runs a prompt on an interval (or back-to-back), `/loop stop` (or `Esc`) ends it; `/goal <what to achieve>` works autonomously toward a goal until a judge says it is reached, `/goal stop` (or `Esc`) ends it; `/handoff` briefs the unfinished work, then offers to save it to `HANDOFF.md` or start a new session from it; `/usage` opens the session-info modal and `/prompt` opens the assembled system prompt; `/mcp` lists the MCP servers, `/mcp reload [server]` reads their configuration again (for one server, or all), and `/mcp login <server>` and `/mcp logout <server>` sign in to one and out of it (see [MCP servers](#mcp-servers)) |
+| `/name args` + `Enter` | Send the prompt template `name` with `args` filled in, run the command script `name` or send the skill `name` (`/skill:name` when the name is taken); `/compact [focus]` summarises the session, `/undo` takes the last request back, `/new` starts a fresh session, `/fork` copies this one into a new panel, `/clear` starts one after discarding the current session, and `/rename [name]` (or `/name`) renames it; `/pause` stops the run after the current step and `/continue` resumes it (or, before the step ends, cancels the pause, and after a failed run tries its request again); `/loop [interval] <prompt>` re-runs a prompt on an interval (or back-to-back), `/loop` alone shows the active loop, `/loop stop` (or `Esc`) ends it; `/goal <what to achieve>` works autonomously toward a goal until a judge says it is reached, `/goal` alone shows the active goal, `/goal stop` (or `Esc`) ends it; `/handoff` briefs the unfinished work, then offers to save it to `HANDOFF.md` or start a new session from it; `/usage` opens the session-info modal and `/prompt` opens the assembled system prompt; `/mcp` lists the MCP servers, `/mcp reload [server]` reads their configuration again (for one server, or all), and `/mcp login <server>` and `/mcp logout <server>` sign in to one and out of it (see [MCP servers](#mcp-servers)) |
 | `↑` / `↓` | Move between the rows of the input as drawn, a wrapped line included; on the first or last row: take back the messages still queued (`↑`, while any wait), else recall an earlier request of this session, or come back to what you were typing. A recalled request opens with the cursor on the edge the arrow came in through, so repeated presses keep walking history |
 | `Tab` | Complete the highlighted `/command` or `@file` while the list is open |
 | `Ctrl+↑` / `Ctrl+↓`, `PageUp` / `PageDown` | Scroll the session |
@@ -560,7 +560,10 @@ rows between the conversation and the input that appear only when there is
 something to show: a pending pause (`‖ will pause after the current step`) —
 once the pause takes effect the transcript's `‖` line takes over — and each
 message queued while the agent
-works (`› …`, its first line; after three, a count of the rest), and, closest to
+works (`› …`, its first line; after three, a count of the rest), an active
+goal (`◎ /goal …`, with its turn count, and the judge's check while it runs)
+and loop (`↺ /loop …`, with its run count and the countdown to its next run),
+for as long as either goes on, and, closest to
 the input, each subagent still running (`& agent: task`, with what it did last
 or its wait for a slot, a spinner and its time; after three, `& +N`), so one
 whose block has scrolled out of view still shows it works — a click on its row
@@ -1641,12 +1644,14 @@ answers `DONE` or `CONTINUE` with a one-line reason; on `CONTINUE` the agent is
 sent back to work with what is still missing, until the judge says done, a turn
 errors, or the safety cap of fifty turns is hit. A goal can be set while the
 agent works: it joins the run in flight as a steering message, and the judge
-takes over once the run ends. `/goal stop`, `Esc`, or
+takes over once the run ends. The goal stays in the state strip while it goes
+on, and a bare `/goal` reports it and its turn count. `/goal stop`, `Esc`, or
 stopping the run ends it. Reword `goal.md` to change how strictly the goal is
 judged.
 
 ```
 /goal get the test suite green    work until the judge agrees it is done
+/goal                             show the active goal and its turn
 /goal stop                        end the active goal
 ```
 

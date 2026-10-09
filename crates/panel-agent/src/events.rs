@@ -678,6 +678,13 @@ impl AgentPanel {
             self.last_anim = Instant::now();
             changed = true;
         }
+        // A loop waiting out its interval counts down in the state strip.
+        if self.loop_task.as_ref().is_some_and(|t| t.next_at.is_some())
+            && self.last_anim.elapsed() >= Duration::from_secs(1)
+        {
+            self.last_anim = Instant::now();
+            changed = true;
+        }
         changed |= self.settle_restored();
         // A goal or loop started, stepped or stopped is written to the log,
         // so a session reopened later offers to carry it on — between runs,
