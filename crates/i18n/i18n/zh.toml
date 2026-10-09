@@ -1149,6 +1149,7 @@ settings_kb_key_taken_fmt = "{key} 已绑定到此操作"
 settings_kb_conflict_fmt = "{key} 也已绑定到 {held}"
 
 [plurals]
+char = { one = "", other = "" }
 # Chinese doesn't have plural forms
 day = { one = "", other = "" }
 element = { one = "项目", other = "项目" }

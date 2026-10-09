@@ -1135,6 +1135,7 @@ settings_kb_key_taken_fmt = "{key} ya está asignada a esta acción"
 settings_kb_conflict_fmt = "{key} también está asignada a {held}"
 
 [plurals]
+char = { one = "", other = "" }
 day = { one = "", other = "s" }
 element = { one = "elemento", other = "elementos" }
 file = { one = "", other = "s" }

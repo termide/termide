@@ -1135,6 +1135,7 @@ settings_kb_key_taken_fmt = "{key} bu eyleme zaten atanmış"
 settings_kb_conflict_fmt = "{key} ayrıca {held} tuşuna atanmış"
 
 [plurals]
+char = { one = "", other = "" }
 day = { one = "", other = "" }
 element = { one = "öğe", other = "öğe" }
 file = { one = "", other = "" }

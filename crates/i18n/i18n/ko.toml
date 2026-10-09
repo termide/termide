@@ -1135,6 +1135,7 @@ settings_kb_key_taken_fmt = "{key}는 이 작업에 이미 할당되어 있습�
 settings_kb_conflict_fmt = "{key}는 {held}에도 할당되어 있습니다"
 
 [plurals]
+char = { one = "", other = "" }
 day = { one = "", other = "" }
 element = { one = "항목", other = "항목" }
 file = { one = "", other = "" }

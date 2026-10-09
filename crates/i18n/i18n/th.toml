@@ -1135,6 +1135,7 @@ settings_kb_key_taken_fmt = "{key} ผูกกับการนี้อยู
 settings_kb_conflict_fmt = "{key} ผูกกับ {held} ด้วย"
 
 [plurals]
+char = { one = "", other = "" }
 # Thai doesn't have plural forms
 day = { one = "", other = "" }
 element = { one = "รายการ", other = "รายการ" }

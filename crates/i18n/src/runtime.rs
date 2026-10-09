@@ -1780,11 +1780,19 @@ impl Translation for RuntimeTranslation {
     }
 
     fn agent_paste_lines_fmt(&self, count: usize) -> String {
-        self.format("agent_paste_lines_fmt", &[("count", &count.to_string())])
+        let plural = self.pluralize(count, "line");
+        self.format(
+            "agent_paste_lines_fmt",
+            &[("count", &count.to_string()), ("plural", plural)],
+        )
     }
 
     fn agent_paste_chars_fmt(&self, count: usize) -> String {
-        self.format("agent_paste_chars_fmt", &[("count", &count.to_string())])
+        let plural = self.pluralize(count, "char");
+        self.format(
+            "agent_paste_chars_fmt",
+            &[("count", &count.to_string()), ("plural", plural)],
+        )
     }
 
     fn agent_project_command_fmt(&self, description: &str) -> String {
@@ -2352,6 +2360,17 @@ mod tests {
             theirs.sort();
             assert_eq!(theirs, words, "{lang}");
         }
+    }
+
+    #[test]
+    fn russian_paste_placeholder_reads_as_a_phrase() {
+        let t = RuntimeTranslation::new("ru").unwrap();
+        let lines = |n| t.agent_paste_placeholder_fmt(1, &t.agent_paste_lines_fmt(n));
+        assert_eq!(lines(2), "[#1 вставлено 2 строки]");
+        assert_eq!(lines(6), "[#1 вставлено 6 строк]");
+        assert_eq!(lines(21), "[#1 вставлено 21 строка]");
+        assert_eq!(t.agent_paste_chars_fmt(1500), "1500 символов");
+        assert_eq!(t.agent_paste_chars_fmt(42), "42 символа");
     }
 
     #[test]

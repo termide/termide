@@ -1147,9 +1147,9 @@ db_connection_failed_fmt = "Сбой подключения: {error}"
 db_auth_failed_fmt = "ошибка авторизации — добавьте пароль в URL закладки ({error})"
 db_filter_title_fmt = "Фильтр · {column}"
 db_row_title_fmt = "Строка · {table}"
-agent_paste_placeholder_fmt = "[#{n} вставлено: {what}]"
-agent_paste_lines_fmt = "строк: {count}"
-agent_paste_chars_fmt = "символов: {count}"
+agent_paste_placeholder_fmt = "[#{n} вставлено {what}]"
+agent_paste_lines_fmt = "{count} строк{plural}"
+agent_paste_chars_fmt = "{count} символ{plural}"
 agent_project_command_fmt = "{description} (проект)"
 agent_running_command_fmt = "выполняется /{name}…"
 agent_notice_bang_running_cmd_fmt = "выполняется {command}…"
@@ -1169,6 +1169,7 @@ settings_kb_key_taken_fmt = "{key} уже назначена этому дейс
 settings_kb_conflict_fmt = "{key} также назначена {held}"
 
 [plurals]
+char = { one = "", few = "а", other = "ов" }
 # Russian pluralization: 1 день, 2-4 дня, 5+ дней
 day = { one = "день", few = "дня", other = "дней" }
 # 1 элемент, 2-4 элемента, 5+ элементов

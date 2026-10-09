@@ -1135,6 +1135,7 @@ settings_kb_key_taken_fmt = "{key} est déjà affectée à cette action"
 settings_kb_conflict_fmt = "{key} est aussi affectée à {held}"
 
 [plurals]
+char = { one = "", other = "" }
 day = { one = "", other = "s" }
 element = { one = "élément", other = "éléments" }
 file = { one = "", other = "s" }

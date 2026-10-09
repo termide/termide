@@ -1135,6 +1135,7 @@ settings_kb_key_taken_fmt = "{key} এই ক্রিয়ার সঙ্গ�
 settings_kb_conflict_fmt = "{key} {held}-এর সঙ্গেও বাঁধা"
 
 [plurals]
+char = { one = "", other = "" }
 day = { one = "", other = "" }
 element = { one = "আইটেম", other = "আইটেম" }
 file = { one = "", other = "" }

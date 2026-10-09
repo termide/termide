@@ -1135,6 +1135,7 @@ settings_kb_key_taken_fmt = "{key} はこのアクションに割り当て済み
 settings_kb_conflict_fmt = "{key} は {held} にも割り当てられています"
 
 [plurals]
+char = { one = "", other = "" }
 day = { one = "", other = "" }
 element = { one = "アイテム", other = "アイテム" }
 file = { one = "", other = "" }

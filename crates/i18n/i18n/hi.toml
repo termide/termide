@@ -1135,6 +1135,7 @@ settings_kb_key_taken_fmt = "{key} इस क्रिया से पहले
 settings_kb_conflict_fmt = "{key} {held} से भी बंधी है"
 
 [plurals]
+char = { one = "", other = "" }
 # Hindi has simple plural (same form for 1 and many in most cases)
 day = { one = "", other = "" }
 element = { one = "आइटम", other = "आइटम" }

@@ -1148,8 +1148,8 @@ db_auth_failed_fmt = "auth failed — add a password to the bookmark URL ({error
 db_filter_title_fmt = "Filter · {column}"
 db_row_title_fmt = "Row · {table}"
 agent_paste_placeholder_fmt = "[#{n} pasted {what}]"
-agent_paste_lines_fmt = "{count} lines"
-agent_paste_chars_fmt = "{count} chars"
+agent_paste_lines_fmt = "{count} line{plural}"
+agent_paste_chars_fmt = "{count} char{plural}"
 agent_project_command_fmt = "{description} (project)"
 agent_running_command_fmt = "running /{name}…"
 agent_notice_bang_running_cmd_fmt = "running {command}…"
@@ -1169,6 +1169,7 @@ settings_kb_key_taken_fmt = "{key} is already bound to this action"
 settings_kb_conflict_fmt = "{key} is also bound to {held}"
 
 [plurals]
+char = { one = "", other = "s" }
 day = { one = "", other = "s" }
 element = { one = "element", other = "elements" }
 file = { one = "", other = "s" }

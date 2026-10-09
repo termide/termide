@@ -1135,6 +1135,7 @@ settings_kb_key_taken_fmt = "{key} sudah ditetapkan ke aksi ini"
 settings_kb_conflict_fmt = "{key} juga ditetapkan ke {held}"
 
 [plurals]
+char = { one = "", other = "" }
 day = { one = "", other = "" }
 element = { one = "elemen", other = "elemen" }
 file = { one = "", other = "" }
