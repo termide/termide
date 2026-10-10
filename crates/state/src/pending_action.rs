@@ -328,11 +328,9 @@ pub enum PendingAction {
         /// Selected index to restore on return
         selected: usize,
     },
-    /// Apply settings from the Settings modal
+    /// The Settings modal is open. It saves as it goes, so nothing waits on
+    /// its result.
     Settings,
-    /// Confirm-modal result for "Remove project override". On `true` the
-    /// `<project>/.termide/config.toml` file is deleted.
-    RemoveProjectOverride,
     /// Confirm-modal result for cancelling a running background operation
     /// (triggered by Escape in the operations panel).
     CancelOperation(termide_file_ops::OperationId),

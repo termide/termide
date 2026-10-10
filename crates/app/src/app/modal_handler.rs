@@ -68,6 +68,10 @@ impl App {
         if let Some(modal) = self.state.get_active_modal_mut() {
             // Handle event in corresponding modal window
             let modal_result = modal.handle_key_erased(chord)?;
+            // Taken now: the result below may close the modal.
+            if let ActiveModal::Settings(settings) = modal {
+                self.settings_save = settings.take_save_request().or(self.settings_save.take());
+            }
 
             // If modal window returned result, handle it
             if let Some(result) = modal_result {
@@ -162,6 +166,9 @@ impl App {
                             // run it: a quit dismissed with Esc came back to end
                             // the app when an unrelated report modal closed.
                             PendingAction::QuitApplication => {}
+                            // Settings save as they change; closing is all
+                            // that is left of them.
+                            PendingAction::Settings => {}
                             other => self.state.pending_action = Some(other),
                         }
                     }
@@ -180,6 +187,7 @@ impl App {
                 }
             }
         }
+        self.flush_settings_save();
         self.try_apply_permissions_live();
         Ok(())
     }
@@ -204,6 +212,10 @@ impl App {
         if let Some(modal) = self.state.get_active_modal_mut() {
             // Handle event in corresponding modal window
             let modal_result = modal.handle_mouse_erased(mouse, modal_area)?;
+            // Taken now: the result below may close the modal.
+            if let termide_modal::ActiveModal::Settings(settings) = modal {
+                self.settings_save = settings.take_save_request().or(self.settings_save.take());
+            }
 
             // If modal window returned result, handle it
             if let Some(result) = modal_result {
@@ -236,6 +248,7 @@ impl App {
                 }
             }
         }
+        self.flush_settings_save();
         self.try_apply_permissions_live();
         Ok(())
     }
@@ -506,6 +519,8 @@ impl App {
                         self.state.quit();
                     }
                 }
+                // Closing the settings carries nothing: they save as they change.
+                PendingAction::Settings => {}
                 PendingAction::CancelOperation(op_id) => {
                     // User confirmed cancelling the background operation.
                     if value.downcast_ref::<bool>().copied().unwrap_or(false) {
@@ -912,91 +927,6 @@ impl App {
                         }
                     }
                     self.reopen_bookmarks_menu(group, is_project, selected);
-                }
-                PendingAction::Settings => {
-                    use termide_modal::SettingsResult;
-                    if let Some(result) = value.downcast_ref::<SettingsResult>() {
-                        match result {
-                            SettingsResult::Apply(config) => {
-                                if let Err(e) =
-                                    self.save_config_to_active_target((**config).clone())
-                                {
-                                    log::error!("Failed to save settings: {}", e);
-                                    self.show_error_modal(format!(
-                                        "Failed to save settings: {}",
-                                        e
-                                    ));
-                                } else {
-                                    // Refresh theme and language
-                                    let theme_name = config.general.theme.clone();
-                                    self.apply_theme(&theme_name)?;
-                                    let lang_code = config.general.language.clone();
-                                    let languages = termide_i18n::get_language_list();
-                                    if let Some((_, name)) =
-                                        languages.iter().find(|(c, _)| c == &lang_code)
-                                    {
-                                        self.apply_language(&lang_code, name)?;
-                                    }
-                                    self.state.set_info("Settings saved".to_string());
-                                }
-                            }
-                            SettingsResult::CreateProjectOverride(config) => {
-                                let cfg = (**config).clone();
-                                if let Err(e) = cfg
-                                    .save_project(&self.project_root, &self.state.global_baseline)
-                                {
-                                    log::error!("Failed to create project override: {}", e);
-                                    self.show_error_modal(format!(
-                                        "Failed to create project override: {}",
-                                        e
-                                    ));
-                                } else {
-                                    super::agent_panel::publish_ai_settings(&cfg.ai);
-                                    self.state.config = std::sync::Arc::new(cfg);
-                                    log::info!(
-                                        "Created project override at {}",
-                                        termide_config::project_config_path(&self.project_root)
-                                            .display()
-                                    );
-                                }
-                            }
-                            SettingsResult::RemoveProjectOverride => {
-                                let t = termide_i18n::t();
-                                let modal = termide_modal::ConfirmModal::new(
-                                    t.settings_remove_project_override_title(),
-                                    t.settings_remove_project_override_message(),
-                                );
-                                self.state.set_pending_action(
-                                    crate::state::PendingAction::RemoveProjectOverride,
-                                    crate::state::ActiveModal::Confirm(Box::new(modal)),
-                                );
-                            }
-                            SettingsResult::Cancel => {}
-                        }
-                    }
-                }
-                PendingAction::RemoveProjectOverride => {
-                    if value.downcast_ref::<bool>().copied().unwrap_or(false) {
-                        let path = termide_config::project_config_path(&self.project_root);
-                        match std::fs::remove_file(&path) {
-                            Ok(()) => {
-                                log::info!("Removed project override at {}", path.display());
-                                // Effective config falls back to defaults+global.
-                                super::agent_panel::publish_ai_settings(
-                                    &self.state.global_baseline.ai,
-                                );
-                                self.state.config =
-                                    std::sync::Arc::clone(&self.state.global_baseline);
-                            }
-                            Err(e) => {
-                                log::error!("Failed to remove project override: {}", e);
-                                self.show_error_modal(format!(
-                                    "Failed to remove project override: {}",
-                                    e
-                                ));
-                            }
-                        }
-                    }
                 }
                 PendingAction::DbFilter => {
                     use termide_modal::DbFilterResult;

@@ -74,7 +74,7 @@ pub use projects::{ProjectAction, ProjectItem, ProjectsModal};
 pub use rename_pattern::RenamePatternModal;
 pub use save_as::{SaveAsModal, SaveAsResult};
 pub use select::SelectModal;
-pub use settings::{SettingsModal, SettingsResult};
+pub use settings::{SettingsModal, SettingsResult, SettingsSave};
 
 /// Active modal window enum.
 ///

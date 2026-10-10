@@ -1170,13 +1170,17 @@ pub trait Translation: Send + Sync {
     fn settings_kb_viewer(&self) -> &str;
 
     // Settings modal — buttons
-    fn settings_btn_apply(&self) -> &str;
     fn settings_btn_reset(&self) -> &str;
     fn settings_btn_cancel(&self) -> &str;
-    fn settings_btn_create_project_override(&self) -> &str;
-    fn settings_btn_remove_project_override(&self) -> &str;
-    fn settings_remove_project_override_title(&self) -> &str;
-    fn settings_remove_project_override_message(&self) -> &str;
+    fn settings_storage_global(&self) -> &str;
+    fn settings_storage_project(&self) -> &str;
+    fn settings_btn_reset_to_global(&self) -> &str;
+    fn settings_btn_close(&self) -> &str;
+    fn settings_btn_discard(&self) -> &str;
+    fn settings_btn_move_to_global(&self) -> &str;
+    fn settings_confirm_reset_global(&self) -> &str;
+    fn settings_confirm_reset_project(&self) -> &str;
+    fn settings_confirm_leave_project(&self) -> &str;
 
     // Settings modal — General fields
     fn settings_general_vim_mode(&self) -> &str;

@@ -16,8 +16,8 @@ use crate::base::button_style;
 use super::fields::{fields_for_tab, ContentRow, FieldDescriptor, FieldType};
 use super::kb::{kb_binding_names, kb_keys_of};
 use super::{
-    button_labels, button_spans, FocusArea, KbCapture, KbMode, KbRow, KbSlot, LspMode,
-    SettingsModal, SettingsTab, SidebarRow, BUTTON_RESET, ENUM_PICKER_MAX_VISIBLE,
+    button_spans, FocusArea, KbCapture, KbMode, KbRow, KbSlot, LspMode, SettingsModal, SettingsTab,
+    SidebarRow, BUTTON_RESET, ENUM_PICKER_MAX_VISIBLE,
 };
 
 /// Width reserved for field labels, and therefore where values line up.
@@ -187,6 +187,23 @@ impl SettingsModal {
                 .set_style(Style::default().fg(theme.disabled));
         }
 
+        // A question waiting in the button row is written over the separator,
+        // right above the answers.
+        if let Some(prompt) = self.confirm_prompt() {
+            let text = format!(" {prompt} ");
+            let width = (text.width() as u16).min(area.width);
+            let x = area.x + (area.width - width) / 2;
+            buf.set_stringn(
+                x,
+                y,
+                &text,
+                width as usize,
+                Style::default()
+                    .fg(theme.accented_fg)
+                    .add_modifier(Modifier::BOLD),
+            );
+        }
+
         // Buttons on the next row
         let by = y + 1;
         if by >= area.y + area.height {
@@ -194,13 +211,14 @@ impl SettingsModal {
             return;
         }
 
-        let labels = button_labels(self.project_override_active);
+        let labels = self.button_labels();
         let spans = button_spans(area.x, area.width, &labels);
 
         for (i, label) in labels.iter().enumerate() {
             let mut x = spans[i].0;
             let is_selected = self.focus == FocusArea::Buttons && self.selected_button == i;
-            let style = if i == BUTTON_RESET && !self.reset_available && !is_selected {
+            let inert = !self.confirming() && i == BUTTON_RESET && !self.reset_available;
+            let style = if inert && !is_selected {
                 Style::default().fg(theme.disabled)
             } else {
                 button_style(is_selected, theme)

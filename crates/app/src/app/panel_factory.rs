@@ -171,18 +171,22 @@ impl App {
 
     /// Open Settings modal with tabbed interface.
     ///
-    /// The modal is seeded from `state.config` (the in-memory effective
-    /// config — defaults + global + project) so any uncommitted edits
-    /// from the current session are visible in the form. The third
-    /// footer button label is derived from the existence of the
-    /// per-project override file at modal-open time.
+    /// The modal is seeded from `state.config` (the effective config —
+    /// defaults + global + project) and the global layer. The settings are
+    /// stored in the project exactly when its `.termide/config.toml`
+    /// exists; every change is saved at once (see `flush_settings_save`).
     pub(super) fn open_settings_modal(&mut self) {
         use termide_modal::{ActiveModal, SettingsModal};
 
         let config = (*self.state.config).clone();
-        let project_override_active =
-            termide_config::project_config_path(&self.project_root).exists();
-        let modal = SettingsModal::new(config, project_override_active);
+        // Shown with the session's overrides, as the running config is:
+        // otherwise "reset to global" would turn `--no-lsp` off.
+        let global_layer = self
+            .state
+            .runtime_overrides
+            .applied_to(&self.state.global_baseline);
+        let in_project = termide_config::project_config_path(&self.project_root).exists();
+        let modal = SettingsModal::new(config, global_layer, in_project);
         self.settings_model_fetch = None;
         self.state.set_pending_action(
             crate::state::PendingAction::Settings,

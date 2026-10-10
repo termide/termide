@@ -145,55 +145,46 @@ enum KbCapture {
     Append,
 }
 
-/// Result returned when the settings modal closes.
-///
-/// `Apply` and `CreateProjectOverride` box `Config` because it's large
-/// (~3.6 KB) and infrequent — keeping the enum small avoids bloating
-/// every `ModalResult` carrier.
+/// Result returned when the settings modal closes. Settings save as they
+/// change (see [`SettingsModal::take_save_request`]), so closing carries
+/// nothing: the modal only ever ends with `ModalResult::Cancelled`.
 #[derive(Debug)]
-pub enum SettingsResult {
-    /// User clicked "Apply & Save" — apply and persist the config to the
-    /// currently-active target (project file if it exists, global
-    /// otherwise).
-    Apply(Box<Config>),
-    /// User clicked "Create project override" — write the current config
-    /// as a per-project diff against `defaults + global`.
-    CreateProjectOverride(Box<Config>),
-    /// User clicked "Remove project override" — delete the project file
-    /// (with a confirmation step handled by the caller).
-    RemoveProjectOverride,
-    /// User clicked "Cancel" (or Esc from tab bar).
-    Cancel,
+pub enum SettingsResult {}
+
+/// A change to persist, taken by the app with
+/// [`SettingsModal::take_save_request`].
+#[derive(Debug, Clone)]
+pub struct SettingsSave {
+    /// The whole effective config.
+    pub config: Config,
+    /// Where it is stored. `true`: as a diff against the global layer in
+    /// `<project>/.termide/config.toml`. `false`: in the global file, and
+    /// the project file, if any, is deleted.
+    pub in_project: bool,
 }
 
-/// Bottom buttons. The third slot toggles between
-/// "Create / Remove project override" depending on
-/// `SettingsModal::project_override_active`. The trailing slot is
-/// Cancel and is matched as the catch-all in `execute_selected_button`.
-const BUTTON_APPLY: usize = 0;
-const BUTTON_PROJECT_OVERRIDE: usize = 1;
-/// Reset sits next to Cancel, away from the two Apply buttons: it is the
-/// other destructive end of the row, and putting it between them invited
-/// wiping the config while reaching for "Apply to Project".
-const BUTTON_RESET: usize = 2;
-const BUTTON_COUNT: usize = 4;
-
-/// Get localized button labels. The third label depends on whether the
-/// per-project override file currently exists.
-fn button_labels(project_override_active: bool) -> [String; BUTTON_COUNT] {
-    let t = i18n::t();
-    let project_label = if project_override_active {
-        t.settings_btn_remove_project_override()
-    } else {
-        t.settings_btn_create_project_override()
-    };
-    [
-        t.settings_btn_apply().to_string(),
-        project_label.to_string(),
-        t.settings_btn_reset().to_string(),
-        t.settings_btn_cancel().to_string(),
-    ]
+/// A destructive action waiting for confirmation in the button row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Confirm {
+    /// Reset where the settings are stored: the project back to the global
+    /// settings, the global settings back to the defaults.
+    Reset,
+    /// Switch storage from the project to the global file.
+    LeaveProject,
 }
+
+/// Bottom buttons in normal mode. The storage switch comes first, Reset sits
+/// next to Close at the other end.
+const BUTTON_STORAGE: usize = 0;
+const BUTTON_RESET: usize = 1;
+const BUTTON_CLOSE: usize = 2;
+
+/// Buttons while [`Confirm::Reset`] is asked.
+const RESET_CONFIRM: usize = 0;
+/// Buttons while [`Confirm::LeaveProject`] is asked; the last one is Cancel
+/// in both.
+const LEAVE_DISCARD: usize = 0;
+const LEAVE_MOVE: usize = 1;
 
 // ---------------------------------------------------------------------------
 // SettingsModal
@@ -206,8 +197,11 @@ fn button_labels(project_override_active: bool) -> [String; BUTTON_COUNT] {
 /// Full-screen settings modal with tabs, scrollable fields, and action buttons.
 #[derive(Debug)]
 pub struct SettingsModal {
-    /// Working copy of config (mutated in-place; only saved on Apply).
+    /// The effective config, as last saved: every change is saved at once.
     config: Config,
+    /// Defaults + global file: what a project resets to, and what the
+    /// project file is diffed against.
+    global_layer: Config,
 
     // --- Tab state ---
     active_tab: SettingsTab,
@@ -300,11 +294,13 @@ pub struct SettingsModal {
 
     // --- Buttons ---
     selected_button: usize,
-    dirty: bool,
-    /// Whether `<project>/.termide/config.toml` exists. Drives the
-    /// "Create / Remove project override" button label and decides how
-    /// the modal result handler routes the third-button click.
-    project_override_active: bool,
+    /// Whether the settings are stored in `<project>/.termide/config.toml`
+    /// rather than the global file.
+    in_project: bool,
+    /// The config changed and the app has not taken it yet.
+    save_pending: bool,
+    /// A destructive action waiting for a yes in the button row.
+    confirm: Option<Confirm>,
 
     /// The open connection's models, fetched off-thread by the app and
     /// pushed in with [`SettingsModal::set_model_options`]; empty until they
@@ -376,11 +372,7 @@ impl Modal for SettingsModal {
         // Clear and draw outer frame
         Clear.render(modal_rect, buf);
         let block = Block::default()
-            .title(format!(
-                " {}{} ",
-                i18n::t().settings_title(),
-                if self.dirty { " *" } else { "" }
-            ))
+            .title(format!(" {} ", i18n::t().settings_title()))
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.accented_fg))
             .style(Style::default().bg(theme.bg));
@@ -575,7 +567,7 @@ impl Modal for SettingsModal {
         if let Some(btn_area) = self.last_buttons_area {
             if btn_area.contains((mouse.column, mouse.row).into()) {
                 self.focus = FocusArea::Buttons;
-                let labels = button_labels(self.project_override_active);
+                let labels = self.button_labels();
                 for (i, (start, end)) in button_spans(btn_area.x, btn_area.width, &labels)
                     .into_iter()
                     .enumerate()
@@ -629,7 +621,8 @@ mod button_layout_tests {
     /// The centre of every button must hit that button.
     #[test]
     fn clicking_the_middle_of_a_button_selects_it() {
-        let labels = button_labels(false);
+        let labels =
+            SettingsModal::new(Config::default(), Config::default(), false).button_labels();
         let spans = button_spans(3, 100, &labels);
 
         for (index, (start, end)) in spans.iter().enumerate() {
@@ -640,62 +633,5 @@ mod button_layout_tests {
                 .expect("the centre lands inside some button");
             assert_eq!(hit, index);
         }
-    }
-}
-
-#[cfg(test)]
-mod button_order_tests {
-    use super::*;
-
-    /// The constants index into `button_labels`, and nothing ties them to it.
-    /// Reordering the row without moving a constant would fire the wrong
-    /// action — reset where the user pressed Apply to Project.
-    #[test]
-    fn constants_match_the_rendered_order() {
-        let labels = button_labels(false);
-        let t = i18n::t();
-
-        assert_eq!(labels[BUTTON_APPLY], t.settings_btn_apply());
-        assert_eq!(
-            labels[BUTTON_PROJECT_OVERRIDE],
-            t.settings_btn_create_project_override()
-        );
-        assert_eq!(labels[BUTTON_RESET], t.settings_btn_reset());
-        assert_eq!(labels[BUTTON_COUNT - 1], t.settings_btn_cancel());
-    }
-
-    /// Reset must stay next to Cancel, away from the two Apply buttons.
-    #[test]
-    fn reset_sits_last_before_cancel() {
-        let labels = button_labels(false);
-        let order: Vec<&str> = labels.iter().map(|l| l.as_str()).collect();
-        let t = i18n::t();
-
-        let position = |needle: &str| {
-            order
-                .iter()
-                .position(|l| *l == needle)
-                .expect("label present")
-        };
-
-        assert!(
-            position(t.settings_btn_apply()) < position(t.settings_btn_create_project_override())
-        );
-        assert!(
-            position(t.settings_btn_create_project_override()) < position(t.settings_btn_reset())
-        );
-        assert_eq!(
-            position(t.settings_btn_reset()) + 1,
-            position(t.settings_btn_cancel())
-        );
-    }
-
-    #[test]
-    fn the_project_label_follows_whether_an_override_exists() {
-        let t = i18n::t();
-        assert_eq!(
-            button_labels(true)[BUTTON_PROJECT_OVERRIDE],
-            t.settings_btn_remove_project_override()
-        );
     }
 }

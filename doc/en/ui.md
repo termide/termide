@@ -32,7 +32,18 @@ Opened with `Alt+P` or menu **Options → Edit preferences**. The previous horiz
 **Three zones:**
 - **Left sidebar** (18 columns wide) — section list, navigated with Up/Down
 - **Content area** — fields of the selected section, organised under `── Group ──` subheaders and separated by blank spacers
-- **Bottom buttons** — `Apply & Save`, `Reset`, `Cancel`
+- **Bottom buttons** — `Stored: Global / Project`, `Reset`, `Close`
+
+**Saving.** Every change applies and saves at once: a switch or a dropdown when it is set, a text or number field on `Enter`. There is no Apply button and nothing to cancel.
+
+**Where settings are stored.** The first button switches storage:
+- **Global** — `~/.config/termide/config.toml`, shared by every project.
+- **Project** — `<project>/.termide/config.toml`, holding only what differs from the global settings. Switching to it creates the file; the settings themselves do not change.
+- Switching back to global deletes the project file and asks what to do with its settings: **Discard** them (the global ones apply) or **Move to Global** (they become the global settings for every project).
+
+**Reset** asks first and acts where the settings are stored: a project goes back to the global settings, the global settings to the defaults.
+
+Theme, language and shell chosen from the menus are stored the same way.
 
 **Sidebar sections:**
 - General, Editor, File Manager, Terminal, LSP, Logging, VFS — plain leaves
@@ -46,7 +57,7 @@ Opened with `Alt+P` or menu **Options → Edit preferences**. The previous horiz
 | `Tab` / `Shift+Tab` | Cycle focus zones (Sidebar ↔ Content ↔ Buttons) |
 | `Left` / `Right` | Do **not** change the zone: used for editing values (cycle enum, toggle bool), for moving between the keys of a keybinding row, and for collapsing the Keybindings group in the sidebar |
 | `Enter` / `Space` | Activate: in sidebar — enter the section; in content — toggle bool/enum or start editing number/text; on a group header — toggle expand |
-| `Escape` | Close the modal (Cancel) |
+| `Escape` / `Ctrl+S` | Close the modal (everything is already saved); in the buttons row, Escape first drops a pending question |
 | Mouse wheel | Scroll sidebar / content |
 
 **Fields and indicators:**

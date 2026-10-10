@@ -369,13 +369,17 @@ settings_web_display = "Browser window"
 settings_web_chrome_path = "Browser executable"
 
 # Settings modal — buttons
-settings_btn_apply = "Apply & Save"
 settings_btn_reset = "Reset to Defaults"
 settings_btn_cancel = "Cancel"
-settings_btn_create_project_override = "Apply to Project"
-settings_btn_remove_project_override = "Remove from Project"
-settings_remove_project_override_title = "Remove project override?"
-settings_remove_project_override_message = "Project-specific settings will be lost. The .termide/config.toml file will be deleted."
+settings_storage_global = "Stored: Global"
+settings_storage_project = "Stored: Project"
+settings_btn_reset_to_global = "Reset to Global"
+settings_btn_close = "Close"
+settings_btn_discard = "Discard"
+settings_btn_move_to_global = "Move to Global"
+settings_confirm_reset_global = "Reset all global settings to the defaults?"
+settings_confirm_reset_project = "Drop this project's settings and use the global ones?"
+settings_confirm_leave_project = "Store globally: .termide/config.toml will be deleted. Its settings:"
 
 # Settings modal — General fields
 settings_general_vim_mode = "Vim mode"

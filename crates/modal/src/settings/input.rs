@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use termide_config::{Config, KeyBinding, LspServerSettings, ParsedKeyBinding};
+use termide_config::{KeyBinding, LspServerSettings, ParsedKeyBinding};
 use termide_i18n as i18n;
 
 use crate::base::field_char_at;
@@ -17,9 +17,8 @@ use super::kb::{
     format_key_event, get_kb_binding, kb_binding_names, kb_keys_of, kb_section_key, set_kb_value,
 };
 use super::{
-    button_labels, EnumPicker, FocusArea, KbCapture, KbMode, LspMode, SettingsModal,
-    SettingsResult, SettingsTab, SidebarRow, BUTTON_APPLY, BUTTON_PROJECT_OVERRIDE, BUTTON_RESET,
-    ENUM_PICKER_MAX_VISIBLE,
+    EnumPicker, FocusArea, KbCapture, KbMode, LspMode, SettingsModal, SettingsResult, SettingsTab,
+    SidebarRow, ENUM_PICKER_MAX_VISIBLE,
 };
 
 impl SettingsModal {
@@ -104,9 +103,8 @@ impl SettingsModal {
                 return Ok(Some(ModalResult::Cancelled));
             }
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return Ok(Some(ModalResult::Confirmed(SettingsResult::Apply(
-                    Box::new(self.config.clone()),
-                ))));
+                // Everything is saved as it changes: Ctrl+S only closes.
+                return Ok(Some(ModalResult::Cancelled));
             }
             _ => {}
         }
@@ -309,9 +307,8 @@ impl SettingsModal {
                 self.focus = FocusArea::Sidebar;
             }
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return Ok(Some(ModalResult::Confirmed(SettingsResult::Apply(
-                    Box::new(self.config.clone()),
-                ))));
+                // Everything is saved as it changes: Ctrl+S only closes.
+                return Ok(Some(ModalResult::Cancelled));
             }
             KeyCode::Enter | KeyCode::Char(' ') => self.activate_current_row(),
             KeyCode::Delete if matches!(current, Some(ContentRow::Connection(_))) => {
@@ -598,15 +595,15 @@ impl SettingsModal {
     ) -> Result<Option<ModalResult<SettingsResult>>> {
         match key.code {
             KeyCode::Left => {
-                if self.selected_button > 0 {
-                    self.selected_button -= 1;
-                }
+                self.selected_button = self.selected_button.saturating_sub(1);
             }
             KeyCode::Right => {
-                if self.selected_button < button_labels(self.project_override_active).len() - 1 {
+                if self.selected_button + 1 < self.button_labels().len() {
                     self.selected_button += 1;
                 }
             }
+            // A question in the row keeps the focus until it is answered.
+            _ if self.confirming() && !matches!(key.code, KeyCode::Enter | KeyCode::Esc) => {}
             KeyCode::Up | KeyCode::BackTab => {
                 self.field_cursor = self.last_selectable_row();
                 self.focus = FocusArea::Content;
@@ -614,11 +611,13 @@ impl SettingsModal {
             KeyCode::Down | KeyCode::Tab => {
                 self.focus = FocusArea::Sidebar;
             }
-            KeyCode::Enter => {
+            KeyCode::Enter | KeyCode::Char(' ') => {
                 return self.execute_selected_button();
             }
             KeyCode::Esc => {
-                return Ok(Some(ModalResult::Cancelled));
+                if self.escape_buttons() {
+                    return Ok(Some(ModalResult::Cancelled));
+                }
             }
             _ => {}
         }
@@ -628,44 +627,7 @@ impl SettingsModal {
     pub(super) fn execute_selected_button(
         &mut self,
     ) -> Result<Option<ModalResult<SettingsResult>>> {
-        match self.selected_button {
-            BUTTON_APPLY => Ok(Some(ModalResult::Confirmed(SettingsResult::Apply(
-                Box::new(self.config.clone()),
-            )))),
-            BUTTON_RESET => {
-                // Greyed out means inert: with nothing to reset, a click here
-                // should not mark the modal dirty over an unchanged config.
-                if !self.reset_available {
-                    return Ok(None);
-                }
-                // `Config::default()` derives its keybindings, so they are
-                // all unset there; without normalising, the Keybindings tab
-                // would show an empty list until the modal is reopened.
-                let mut defaults = Config::default();
-                defaults.normalize();
-                self.config = defaults;
-                self.mark_dirty();
-                // The connection the page had open is gone with the rest.
-                self.connection_edit = None;
-                self.enum_picker = None;
-                self.field_cursor = 0;
-                self.content_scroll = 0;
-                self.editing = false;
-                Ok(None)
-            }
-            BUTTON_PROJECT_OVERRIDE => {
-                if self.project_override_active {
-                    Ok(Some(ModalResult::Confirmed(
-                        SettingsResult::RemoveProjectOverride,
-                    )))
-                } else {
-                    Ok(Some(ModalResult::Confirmed(
-                        SettingsResult::CreateProjectOverride(Box::new(self.config.clone())),
-                    )))
-                }
-            }
-            _ => Ok(Some(ModalResult::Cancelled)),
-        }
+        Ok(self.press_button().then_some(ModalResult::Cancelled))
     }
 
     /// Warn about a chord that another action already has, comparing parsed
@@ -781,9 +743,8 @@ impl SettingsModal {
                         self.focus = FocusArea::Buttons;
                     }
                     KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        return Ok(Some(ModalResult::Confirmed(SettingsResult::Apply(
-                            Box::new(self.config.clone()),
-                        ))));
+                        // Everything is saved as it changes: Ctrl+S only closes.
+                        return Ok(Some(ModalResult::Cancelled));
                     }
                     _ => {}
                 }
@@ -877,12 +838,13 @@ mod keybinding_picker_tests {
     use crossterm::event::KeyEvent;
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
+    use termide_config::Config;
 
     /// Global section, `close_panel` row — which ships bound to three keys.
     fn kb_modal() -> SettingsModal {
         let mut config = Config::default();
         config.normalize();
-        let mut modal = SettingsModal::new(config, false);
+        let mut modal = SettingsModal::new(config.clone(), config, false);
         modal.active_tab = SettingsTab::Keybindings;
         modal.focus = FocusArea::Content;
         modal.kb_section = 0;
@@ -1301,11 +1263,12 @@ mod keybinding_double_click_tests {
     use crossterm::event::KeyEvent;
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
+    use termide_config::Config;
 
     fn kb_modal() -> (SettingsModal, Vec<KbSlot>) {
         let mut config = Config::default();
         config.normalize();
-        let mut modal = SettingsModal::new(config, false);
+        let mut modal = SettingsModal::new(config.clone(), config, false);
         modal.active_tab = SettingsTab::Keybindings;
         modal.focus = FocusArea::Content;
         modal.kb_section = 0;
@@ -1385,11 +1348,12 @@ mod wheel_tests {
     use crate::Modal;
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
+    use termide_config::Config;
 
     fn rendered(tab: SettingsTab) -> (SettingsModal, Rect) {
         let mut config = Config::default();
         config.normalize();
-        let mut modal = SettingsModal::new(config, false);
+        let mut modal = SettingsModal::new(config.clone(), config, false);
         modal.active_tab = tab;
         modal.field_cursor = modal.first_selectable_row();
         // Short enough that the hotkey list does not fit.

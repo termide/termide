@@ -6,7 +6,6 @@
 // (take_config_update, dir_size_receiver) which don't fit the command pattern.
 
 use anyhow::Result;
-use std::sync::Arc;
 
 use super::App;
 use crate::state::{ActiveModal, PendingAction};
@@ -336,11 +335,9 @@ impl App {
             }
         }
 
-        // Apply config update if present (legacy, still used by Editor)
+        // The global config file was saved in the editor.
         if let Some(new_config) = config_update {
-            super::agent_panel::publish_ai_settings(&new_config.ai);
-            self.state.config = Arc::new(new_config.clone());
-            self.state.set_theme(&new_config.general.theme);
+            self.adopt_global_file(new_config);
             self.state
                 .set_info(termide_i18n::t().status_config_saved().to_string());
         }

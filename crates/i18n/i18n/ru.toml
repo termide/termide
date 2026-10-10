@@ -376,13 +376,17 @@ settings_web_display = "Окно браузера"
 settings_web_chrome_path = "Исполняемый файл браузера"
 
 # Settings modal — buttons
-settings_btn_apply = "Применить"
 settings_btn_reset = "Сбросить"
 settings_btn_cancel = "Отмена"
-settings_btn_create_project_override = "Применить в проекте"
-settings_btn_remove_project_override = "Убрать из проекта"
-settings_remove_project_override_title = "Удалить проектный override?"
-settings_remove_project_override_message = "Настройки, специфичные для проекта, будут потеряны. Файл .termide/config.toml будет удалён."
+settings_storage_global = "Хранить: глобально"
+settings_storage_project = "Хранить: в проекте"
+settings_btn_reset_to_global = "Сбросить к глобальным"
+settings_btn_close = "Закрыть"
+settings_btn_discard = "Отбросить"
+settings_btn_move_to_global = "Перенести в глобальные"
+settings_confirm_reset_global = "Сбросить все глобальные настройки к умолчаниям?"
+settings_confirm_reset_project = "Отбросить настройки проекта и использовать глобальные?"
+settings_confirm_leave_project = "Хранить глобально: .termide/config.toml будет удалён. Его настройки:"
 
 # Settings modal — General fields
 settings_general_vim_mode = "Режим Vim"

@@ -27,7 +27,8 @@ struct Cli {
     #[arg(long)]
     no_lsp: bool,
 
-    /// Path to config file (default: ~/.config/termide/config.toml)
+    /// Global config file to read and save, in place of config.toml in the
+    /// config directory; a project's .termide/config.toml still applies on top
     #[arg(long, value_name = "PATH")]
     config: Option<std::path::PathBuf>,
 
@@ -157,10 +158,13 @@ fn run_diagnostics(custom_config: Option<&std::path::Path>) -> bool {
 
     println!("Config:");
     let project_root = std::env::current_dir().ok();
-    let config_result = if let Some(path) = custom_config {
-        termide_config::Config::load_from(path).map(|_| path.display().to_string())
+    if let Some(path) = custom_config {
+        termide_config::set_global_config_file(path);
+    }
+    let config_result = if let Some(path) = custom_config.filter(|path| !path.is_file()) {
+        Err(anyhow::anyhow!("config file not found: {}", path.display()))
     } else if let Some(root) = project_root.as_ref() {
-        termide_config::Config::load_layered(None, root).and_then(|loaded| {
+        termide_config::Config::load_layered(root).and_then(|loaded| {
             if loaded.warnings.is_empty() {
                 Ok("layered (defaults + global + project) parses OK".to_string())
             } else {
@@ -243,10 +247,24 @@ fn restore_start_dir() -> Option<(std::path::PathBuf, std::path::PathBuf)> {
 }
 
 /// The arguments a detached instance's own termide starts with: the files
-/// to open and `--restore`, which the hosted process acts on itself.
+/// to open, `--restore`, and the settings flags (`--config`, `--log-level`,
+/// `--no-lsp`), which the hosted process acts on itself.
 #[cfg(unix)]
 fn hosted_args(cli: &Cli) -> Vec<std::ffi::OsString> {
     let mut args: Vec<std::ffi::OsString> = Vec::new();
+    if let Some(path) = &cli.config {
+        // The host may start elsewhere: name the file absolutely.
+        let path = std::path::absolute(path).unwrap_or_else(|_| path.clone());
+        args.push("--config".into());
+        args.push(path.into_os_string());
+    }
+    if let Some(level) = &cli.log_level {
+        args.push("--log-level".into());
+        args.push(level.into());
+    }
+    if cli.no_lsp {
+        args.push("--no-lsp".into());
+    }
     if cli.restore {
         args.push("--restore".into());
     }
@@ -405,46 +423,45 @@ fn main() -> Result<()> {
         .unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/")));
 
     // Layered load: defaults → global file → project overlay (if any).
-    // `--config <PATH>` bypasses layering and treats the file as the whole
-    // effective config (historical semantics). The second tuple element is
-    // the `defaults + global` snapshot used later as the diff baseline for
-    // the per-project override file.
+    // `--config <PATH>` takes the place of the global file, for loading and
+    // for saving alike. The second tuple element is the `defaults + global`
+    // snapshot used later as the diff baseline for the per-project file.
     // Capture config-load problems so we can re-emit them as
     // `log::warn!` after the logger comes up below. eprintln before
     // raw mode prints to a soon-to-be-overwritten terminal scrollback;
     // the Journal panel is where the user will actually look.
+    if let Some(ref path) = cli.config {
+        // A mistyped path should not quietly start on defaults and create
+        // a new file at the first change.
+        if !path.is_file() {
+            anyhow::bail!("config file not found: {}", path.display());
+        }
+        termide_config::set_global_config_file(path);
+    }
     let mut config_load_warnings: Vec<String> = Vec::new();
-    let (mut config, mut global_baseline) = if let Some(ref path) = cli.config {
-        let cfg = Config::load_from(path)?;
-        (cfg.clone(), cfg)
-    } else {
-        match Config::load_layered(None, &project_root) {
-            Ok(loaded) => {
-                config_load_warnings = loaded.warnings;
-                (loaded.effective, loaded.global_layer)
-            }
-            Err(e) => {
-                config_load_warnings.push(format!("Could not load config: {e}. Using defaults."));
-                (Config::default(), Config::default())
-            }
+    let (mut config, global_baseline) = match Config::load_layered(&project_root) {
+        Ok(loaded) => {
+            config_load_warnings = loaded.warnings;
+            (loaded.effective, loaded.global_layer)
+        }
+        // With `--config` the user named the file: a broken one is an error,
+        // not a reason to run on defaults and overwrite it at the next save.
+        Err(e) if cli.config.is_some() => return Err(e),
+        Err(e) => {
+            config_load_warnings.push(format!("Could not load config: {e}. Using defaults."));
+            (Config::default(), Config::default())
         }
     };
 
-    // Apply CLI overrides on top of the layered config. These are runtime-only
-    // — they do NOT propagate into the diff-against-baseline saves.
-    if let Some(ref level) = cli.log_level {
-        config.logging.min_level = level.clone();
-        global_baseline.logging.min_level = config.logging.min_level.clone();
-    }
-    if cli.no_lsp {
-        config.lsp.enabled = false;
-        global_baseline.lsp.enabled = false;
-    }
-
-    // On Linux VT, use norton-commander theme by default (better for 16-color)
-    if caps.is_linux_console && config.general.theme == "default" {
-        config.general.theme = "norton-commander".to_string();
-    }
+    // What this run forces on top: the command line, and on a Linux VT the
+    // norton-commander theme in place of the default one (better for 16
+    // colours). Kept out of every save — see `RuntimeOverrides`.
+    let mut runtime_overrides = termide_config::RuntimeOverrides::new(
+        cli.log_level.clone(),
+        cli.no_lsp,
+        caps.is_linux_console,
+    );
+    runtime_overrides.apply(&mut config);
 
     // `general.always_detachable`: put this instance in a host of its own and
     // attach to it, so that it is the host — not this process — that dies with
@@ -581,7 +598,14 @@ fn main() -> Result<()> {
     let height = size.height.max(5);
 
     // Create application with pre-loaded config (avoids double config loading)
-    let mut app = App::new_with_config(config, global_baseline, width, height, keyboard_caps);
+    let mut app = App::new_with_config(
+        config,
+        global_baseline,
+        runtime_overrides,
+        width,
+        height,
+        keyboard_caps,
+    );
 
     // Re-emit any deferred startup warnings now that the logger is up
     match vs16_probe {
@@ -678,6 +702,33 @@ mod cli_tests {
             assert!(cli.detached && cli.restore);
             assert_eq!(super::hosted_args(&cli), vec!["--restore"]);
         }
+    }
+
+    /// A detached instance runs with the settings flags it was started
+    /// with, not with the plain config.
+    #[cfg(unix)]
+    #[test]
+    fn a_detached_instance_keeps_the_settings_flags() {
+        let cli = Cli::try_parse_from([
+            "termide",
+            "--detached",
+            "--config",
+            "/etc/termide.toml",
+            "--log-level",
+            "debug",
+            "--no-lsp",
+        ])
+        .unwrap();
+        assert_eq!(
+            super::hosted_args(&cli),
+            vec![
+                "--config",
+                "/etc/termide.toml",
+                "--log-level",
+                "debug",
+                "--no-lsp"
+            ]
+        );
     }
 
     /// `--restore` sets up the full workspace, which the clean file view,

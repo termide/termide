@@ -889,7 +889,7 @@ mod tests {
     use crate::settings::{FocusArea, SettingsResult};
 
     fn ai_modal(config: Config) -> SettingsModal {
-        let mut modal = SettingsModal::new(config, false);
+        let mut modal = SettingsModal::new(config.clone(), config, false);
         modal.active_tab = SettingsTab::Ai;
         modal.focus = FocusArea::Content;
         modal
@@ -950,7 +950,7 @@ mod tests {
         focus(&mut modal, ContentRow::ConnectionAdd);
         press(&mut modal, KeyCode::Enter);
         assert_eq!(modal.open_connection_name(), Some("openai"));
-        assert!(modal.dirty);
+        assert!(modal.save_pending);
         // The first one is the default, and as the only one it stays so.
         assert_eq!(modal.config.ai.connection, "openai");
         assert_eq!(modal.connection_value(DEFAULT), "true");
@@ -1369,7 +1369,7 @@ mod tests {
         assert_eq!(modal.connection_value(PREFILL_PROGRESS), "false");
         modal.toggle_connection_field(PREFILL_PROGRESS);
         assert!(modal.config.ai.connections["local"].prefill_progress);
-        assert!(modal.dirty);
+        assert!(modal.save_pending);
         // The Messages API has no such field: the switch leaves the page and
         // the file.
         modal.apply_connection_enum(PROVIDER, "anthropic_compatible");

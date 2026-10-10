@@ -109,6 +109,11 @@ pub struct AppState {
     /// per-project override file so only project-specific deltas are
     /// recorded.
     pub global_baseline: Arc<Config>,
+    /// What this run forces on `config` (`--log-level`, `--no-lsp`, the
+    /// Linux console's theme). `config` holds the forced values; they are
+    /// swapped back before a save, so the files never get them.
+    /// `global_baseline` holds the values from the files.
+    pub runtime_overrides: termide_config::RuntimeOverrides,
     /// System resource monitor (CPU, RAM)
     pub system_monitor: SystemMonitor,
     /// Last time system resources were updated
@@ -255,6 +260,7 @@ impl AppState {
             theme,
             config: Arc::new(config),
             global_baseline: Arc::new(global_baseline),
+            runtime_overrides: termide_config::RuntimeOverrides::default(),
             system_monitor: SystemMonitor::new(),
             last_resource_update: std::time::Instant::now(),
             resource_modal_kind: None,

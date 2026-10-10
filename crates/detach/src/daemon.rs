@@ -60,7 +60,7 @@ pub const KILL_GRACE: Duration = Duration::from_secs(3);
 /// would deadlock the daemon.
 ///
 /// `args` are the command-line arguments the hosted termide starts with:
-/// files to open, `--restore`.
+/// files to open, `--restore`, the settings flags.
 pub fn spawn_detached(project_root: &Path, args: &[OsString]) -> Result<String> {
     registry::prune_dead()?;
 

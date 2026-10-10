@@ -147,6 +147,23 @@ impl App {
         self.state.project_bookmarks =
             termide_config::BookmarksConfig::load_from_project(&self.project_root);
 
+        // The settings of the project left must not carry over: the one
+        // entered gets the global layer with its own file, if it has one,
+        // on top. Otherwise the next settings save would write the old
+        // project's overrides into the new project or the global file.
+        match termide_config::Config::with_project_overlay(
+            &self.state.global_baseline,
+            &self.project_root,
+        ) {
+            Ok((config, warnings)) => {
+                for warning in warnings {
+                    log::warn!("{warning}");
+                }
+                self.adopt_stored_config(config);
+            }
+            Err(e) => log::warn!("Could not load the project's settings: {e}"),
+        }
+
         // Invalidate caches that depend on the project root: project-local
         // commands.toml lives under `<project_root>/.termide/`, so both the
         // commands registry and the global hotkey table (which folds

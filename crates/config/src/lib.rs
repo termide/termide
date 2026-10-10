@@ -9,6 +9,7 @@ pub mod conflicts;
 pub mod constants;
 pub mod diff;
 pub mod keybindings;
+mod overrides;
 mod settings;
 mod xdg;
 
@@ -25,6 +26,7 @@ pub use keybindings::{
     GitStatusKeybindings, GlobalKeybindings, KeyBinding, ParsedKeyBinding, TerminalKeybindings,
     ViewerKeybindings,
 };
+pub use overrides::{RuntimeOverrides, CONSOLE_THEME};
 pub use settings::{builtin_web_engines, WEB_BACKENDS, WEB_DISPLAYS};
 pub use settings::{is_cli_provider, permission_modes};
 pub use settings::{
@@ -81,6 +83,21 @@ pub mod defaults {
 /// user action in the Settings modal.
 pub fn project_config_path(project_root: &Path) -> PathBuf {
     project_root.join(".termide").join("config.toml")
+}
+
+/// The global config file chosen with `--config`, set once at startup.
+static GLOBAL_CONFIG_FILE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Use `path` as the global config file for the rest of the process, in
+/// place of `config.toml` in the config directory: it is read as the global
+/// layer and every global save writes to it. A relative path is resolved
+/// against the current directory now, so that it keeps naming the same file
+/// when the directory changes.
+///
+/// Returns `false`, changing nothing, when a file was already set.
+pub fn set_global_config_file(path: &Path) -> bool {
+    let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    GLOBAL_CONFIG_FILE.set(path).is_ok()
 }
 
 /// The fields `[ai]` described its single endpoint with before connections.
@@ -381,23 +398,9 @@ impl Config {
     /// - `warnings`: what had to be left out, for the caller to log once the
     ///   logger is up.
     ///
-    /// When `custom_global` is `Some`, layering is bypassed: the file is
-    /// loaded as the entire effective config, and `global_layer` is a
-    /// clone of it. This preserves the historical `--config` semantics
-    /// where the user-supplied file is the single source of truth.
-    pub fn load_layered(
-        custom_global: Option<&Path>,
-        project_root: &Path,
-    ) -> Result<LayeredConfig> {
-        if let Some(path) = custom_global {
-            let cfg = Self::load_from(path)?;
-            return Ok(LayeredConfig {
-                effective: cfg.clone(),
-                global_layer: cfg,
-                warnings: Vec::new(),
-            });
-        }
-
+    /// The global file is [`Config::config_file_path`], which `--config`
+    /// redirects through [`set_global_config_file`].
+    pub fn load_layered(project_root: &Path) -> Result<LayeredConfig> {
         let global_path = Self::config_file_path()?;
         let global_existed = global_path.exists();
         let loaded = Self::load_layers(Some(&global_path), &project_config_path(project_root))?;
@@ -475,8 +478,53 @@ impl Config {
             .unwrap_or_else(|| toml::Value::Table(Default::default()));
 
         let content = toml::to_string_pretty(&diff)?;
-        std::fs::write(path, content)?;
+        // Settings save on every change, so a crash or a full disk mid-write
+        // must not leave a truncated file: write a sibling, then rename it
+        // over the target, which replaces it in one step.
+        let tmp = path.with_extension("toml.tmp");
+        std::fs::write(&tmp, content)?;
+        if let Err(e) = std::fs::rename(&tmp, path) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.into());
+        }
         Ok(())
+    }
+
+    /// Whether this config differs from `baseline` in anything that would be
+    /// saved.
+    pub fn differs_from(&self, baseline: &Config) -> bool {
+        let Ok(actual) = toml::Value::try_from(self) else {
+            return false;
+        };
+        let Ok(baseline) = toml::Value::try_from(baseline) else {
+            return false;
+        };
+        crate::diff::diff_toml(&actual, &baseline).is_some()
+    }
+
+    /// Whether the `[ai]` sections of the two configs differ.
+    pub fn ai_differs_from(&self, other: &Config) -> bool {
+        toml::Value::try_from(&self.ai).ok() != toml::Value::try_from(&other.ai).ok()
+    }
+
+    /// The effective config of the project at `project_root`: its
+    /// `.termide/config.toml`, where it exists, overlaid on `global_layer`
+    /// (defaults + global file). Used when switching projects, so that the
+    /// settings of the project left do not carry over to the one entered.
+    pub fn with_project_overlay(
+        global_layer: &Config,
+        project_root: &Path,
+    ) -> Result<(Config, Vec<String>)> {
+        let mut value = toml::Value::try_from(global_layer)?;
+        let mut warnings = Vec::new();
+        overlay_file(
+            &mut value,
+            &project_config_path(project_root),
+            &mut warnings,
+        );
+        let mut effective: Self = value.try_into()?;
+        effective.normalize();
+        Ok((effective, warnings))
     }
 
     /// Whether this config holds anything other than the shipped defaults.
@@ -488,13 +536,7 @@ impl Config {
     pub fn differs_from_defaults(&self) -> bool {
         let mut defaults = Config::default();
         defaults.normalize();
-        let Ok(actual) = toml::Value::try_from(self) else {
-            return false;
-        };
-        let Ok(baseline) = toml::Value::try_from(defaults) else {
-            return false;
-        };
-        crate::diff::diff_toml(&actual, &baseline).is_some()
+        self.differs_from(&defaults)
     }
 
     /// Save the user's global config: only fields differing from the
@@ -530,8 +572,14 @@ impl Config {
         self.save_global()
     }
 
-    /// Get path to config file.
+    /// Path to the global config file: the one given by `--config`, if any
+    /// (see [`set_global_config_file`]), otherwise `config.toml` in the
+    /// config directory. Loading, saving and the editor's check for the
+    /// config file all go through here, so they agree on one file.
     pub fn config_file_path() -> Result<PathBuf> {
+        if let Some(path) = GLOBAL_CONFIG_FILE.get() {
+            return Ok(path.clone());
+        }
         Ok(get_config_dir()?.join("config.toml"))
     }
 

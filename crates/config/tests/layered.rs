@@ -164,3 +164,47 @@ fn command_less_lsp_server_does_not_poison_the_whole_config() {
     assert_eq!(cfg.lsp.servers["broken"].command, ""); // command defaulted
     assert_eq!(cfg.lsp.servers["broken"].args, vec!["--stdio".to_string()]);
 }
+
+/// Switching projects recomputes the effective config from the global
+/// layer and the entered project's own file, so one project's overrides
+/// never leak into another.
+#[test]
+fn project_overlay_applies_only_the_entered_projects_file() {
+    let mut global = Config::default();
+    global.normalize();
+    global.editor.tab_size = 2;
+
+    let with_file = TempDir::new().unwrap();
+    let mut project = global.clone();
+    project.general.vim_mode = true;
+    project.save_project(with_file.path(), &global).unwrap();
+
+    let (effective, warnings) = Config::with_project_overlay(&global, with_file.path()).unwrap();
+    assert!(warnings.is_empty());
+    assert!(effective.general.vim_mode, "the project's own setting");
+    assert_eq!(effective.editor.tab_size, 2, "the global layer under it");
+
+    let without_file = TempDir::new().unwrap();
+    let (effective, _) = Config::with_project_overlay(&global, without_file.path()).unwrap();
+    assert!(!effective.general.vim_mode, "no other project's settings");
+    assert!(!effective.differs_from(&global));
+}
+
+/// The save goes through a temporary sibling that must not be left behind.
+#[test]
+fn save_to_leaves_no_temporary_file() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("config.toml");
+    let mut cfg = Config::default();
+    cfg.editor.tab_size = 8;
+    cfg.save_to(&path, &Config::default()).unwrap();
+    cfg.editor.tab_size = 3;
+    cfg.save_to(&path, &Config::default()).unwrap();
+
+    let names: Vec<_> = fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(names, vec![std::ffi::OsString::from("config.toml")]);
+    assert!(read(&path).contains("tab_size = 3"));
+}

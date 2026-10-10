@@ -397,7 +397,7 @@ Options:
   --log-level <LEVEL>  Set log level (trace, debug, info, warn, error)
   --no-lsp             Disable LSP language servers
   -r, --restore        Reopen the last run's projects, in the project it was in
-  --config <PATH>      Use custom config file path
+  --config <PATH>      Use this file in place of the global config.toml
   --diagnostics        Run pre-flight diagnostics and exit (no UI)
   --detached           Start a detached instance that survives the terminal
                        closing, and print its id (Unix only)
