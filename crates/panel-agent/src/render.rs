@@ -90,7 +90,8 @@ pub(crate) fn state_strip<'a>(
 
 /// The state strip's subagent rows, one per running `task` call
 /// (`(agent, prompt, progress, elapsed ms)`), at most [`STATE_QUEUED_ROWS`]
-/// before a `+N` row: `& agent: prompt` on the left and, at the right edge,
+/// before a `+N` row: `& Delegating to agent · prompt` on the left (worded as
+/// the call's block in the transcript) and, at the right edge,
 /// what the subagent did last (or its wait for a slot), a spinner and its
 /// time. A block scrolled out of view stays in sight here while it runs.
 pub(crate) fn task_strip(
@@ -98,6 +99,7 @@ pub(crate) fn task_strip(
     width: u16,
     colors: &ThemeColors,
 ) -> Vec<Line<'static>> {
+    let t = termide_i18n::t();
     let dim = Style::default().fg(colors.disabled);
     let accent = Style::default().fg(colors.info);
     let width = width as usize;
@@ -116,13 +118,16 @@ pub(crate) fn task_strip(
             format!(" {progress}{clock}")
         };
         let right_width = termide_ui::str_display_width(&right);
-        let head = format!("{agent}: {prompt}");
-        let room = width.saturating_sub(3 + right_width);
-        let body = cut(&head, room);
-        let used = 2 + termide_ui::str_display_width(&body) + right_width;
+        // Worded as the call's block in the transcript, `& Delegating to
+        // agent · prompt`, so the row is known for the block it stands for.
+        let head = format!("& {} ", t.agent_tool_task());
+        let head_width = termide_ui::str_display_width(&head);
+        let room = width.saturating_sub(1 + head_width + right_width);
+        let body = cut(&format!("{agent} · {prompt}"), room);
+        let used = head_width + termide_ui::str_display_width(&body) + right_width;
         let mut spans = vec![
-            Span::styled("& ", accent),
-            Span::styled(body, Style::default().fg(colors.fg)),
+            Span::styled(head, accent.add_modifier(Modifier::BOLD)),
+            Span::styled(body, dim),
             Span::raw(" ".repeat(width.saturating_sub(used + 1))),
         ];
         if !progress.is_empty() {

@@ -8465,7 +8465,11 @@ fn running_subagents_show_in_the_state_strip() {
     let lines = crate::render::task_strip(&[row(1)], 80, &colors);
     assert_eq!(lines.len(), 1);
     let first = text(&lines[0]);
-    assert!(first.starts_with("& search: find thing 1"), "{first}");
+    let head = format!(
+        "& {} search · find thing 1",
+        termide_i18n::t().agent_tool_task()
+    );
+    assert!(first.starts_with(&head), "{first}");
     assert!(first.contains("· read src/lib.rs"), "{first}");
     let clock = crate::transcript::fmt_dur(65_000);
     assert!(first.trim_end().ends_with(&clock), "{first}");
