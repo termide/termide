@@ -202,30 +202,42 @@ impl App {
             if let Some(connection) = modal.take_model_fetch_request() {
                 self.settings_model_fetch =
                     super::agent_panel::spawn_settings_model_fetch(&connection);
+                if self.settings_model_fetch.is_none() {
+                    modal.set_model_options(Vec::new());
+                }
             }
         }
         if self.settings_model_fetch.is_none() {
             return;
         }
-        if !matches!(self.state.active_modal, Some(ActiveModal::Settings(_))) {
+        let Some(ActiveModal::Settings(modal)) = self.state.active_modal.as_mut() else {
             self.settings_model_fetch = None;
             return;
-        }
+        };
+        // The model field's spinner turns while the list is on its way.
+        self.state.needs_redraw = true;
         let received = self
             .settings_model_fetch
             .as_ref()
-            .and_then(|rx| rx.try_recv().ok());
+            .and_then(|rx| match rx.try_recv() {
+                Ok(result) => Some(result),
+                Err(std::sync::mpsc::TryRecvError::Empty) => None,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    Some(Err("the model fetch ended without a list".to_string()))
+                }
+            });
         let Some(result) = received else {
             return;
         };
         self.settings_model_fetch = None;
-        if let Ok(models) = result {
-            let ids: Vec<String> = models.into_iter().map(|m| m.id).collect();
-            if let Some(ActiveModal::Settings(modal)) = self.state.active_modal.as_mut() {
-                modal.set_model_options(ids);
-                self.state.needs_redraw = true;
+        let ids = match result {
+            Ok(models) => models.into_iter().map(|m| m.id).collect(),
+            Err(error) => {
+                log::warn!("cannot list the connection's models: {error}");
+                Vec::new()
             }
-        }
+        };
+        modal.set_model_options(ids);
     }
 
     /// Open or refresh the References panel with LSP find-references results.

@@ -193,6 +193,13 @@ pub struct Connection {
     /// [`DEFAULT_CONTEXT_WINDOW_FALLBACK`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window_fallback: Option<u64>,
+    /// A CLI agent's context window, in tokens, when it is to be smaller
+    /// than the model's: the agent compacts its conversation at it. Claude
+    /// Code takes it as `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (at least
+    /// [`CLAUDE_CODE_MIN_CONTEXT_LIMIT`]), Codex as `model_context_window`;
+    /// Gemini CLI has no such setting. Unset leaves the agent's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window_limit: Option<u64>,
     /// Ask an `openai_compatible` server for its prompt-processing progress
     /// (llama.cpp's `return_progress`), for a live prefill bar. Off by
     /// default: servers that do not know the field may reject the request.
@@ -291,6 +298,7 @@ impl Default for Connection {
             model: String::new(),
             api_key_env: String::new(),
             context_window_fallback: None,
+            context_window_limit: None,
             prefill_progress: false,
             reasoning_param: ReasoningParam::Auto,
             subagents: String::new(),
@@ -322,7 +330,23 @@ impl Connection {
     pub fn runs_subagents(&self) -> bool {
         !self.is_cli() || self.provider == "claude_code"
     }
+
+    /// Whether its context window can be limited: a CLI agent with a
+    /// setting for it, see [`Connection::context_window_limit`].
+    #[must_use]
+    pub fn takes_context_limit(&self) -> bool {
+        matches!(self.provider.as_str(), "claude_code" | "codex")
+    }
+
+    /// The smallest context window limit the agent takes, if any.
+    #[must_use]
+    pub fn min_context_limit(&self) -> Option<u64> {
+        (self.provider == "claude_code").then_some(CLAUDE_CODE_MIN_CONTEXT_LIMIT)
+    }
 }
+
+/// Claude Code reads a smaller `CLAUDE_CODE_AUTO_COMPACT_WINDOW` as this.
+pub const CLAUDE_CODE_MIN_CONTEXT_LIMIT: u64 = 100_000;
 
 /// `[ai] fold_blocks`: when reasoning and tool calls fold to one line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

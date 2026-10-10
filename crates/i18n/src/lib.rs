@@ -774,6 +774,9 @@ pub trait Translation: Send + Sync {
     fn agent_notice_external_failed_fmt(&self, error: &str) -> String;
     fn agent_queued_fmt(&self, count: usize) -> String;
     fn settings_value_default_fmt(&self, value: &str) -> String;
+    /// Settings modal: a CLI agent's context window limit below the least
+    /// it takes.
+    fn settings_ai_connection_context_limit_min_fmt(&self, value: &str) -> String;
     fn projects_delete_failed_fmt(&self, error: &str) -> String;
     fn command_edit_title_fmt(&self, name: &str) -> String;
     fn command_run_failed_fmt(&self, error: &str) -> String;
@@ -1061,6 +1064,8 @@ pub trait Translation: Send + Sync {
     fn settings_ai_connection_subagents(&self) -> &str;
     /// Settings modal: subagents left on the connection itself.
     fn settings_ai_connection_subagents_own(&self) -> &str;
+    /// Settings modal: the context window a CLI agent is limited to.
+    fn settings_ai_connection_context_limit(&self) -> &str;
     /// Settings modal: how many requests a connection serves at once.
     fn settings_ai_connection_max_requests(&self) -> &str;
     /// Settings modal: a connection left without a name, or with another's.

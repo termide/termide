@@ -10,7 +10,7 @@
 //! log, and a permission request from the session is refused.
 
 use super::*;
-use termide_agent_core::{permission_channel, PermissionRules, Request};
+use termide_agent_core::{permission_channel, ModelInfo, PermissionRules, Request};
 
 /// How long a side call's turn may take.
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(120);
@@ -149,6 +149,17 @@ impl Provider for AcpProvider {
             Err(error) => failed(error),
         }
     }
+
+    fn list_models(&self) -> Result<Vec<ModelInfo>, String> {
+        let models = self.shared()?.list_models(self.flavor)?;
+        Ok(models
+            .into_iter()
+            .map(|model| ModelInfo {
+                id: model.id,
+                context_window: None,
+            })
+            .collect())
+    }
 }
 
 impl Shared {
@@ -202,32 +213,35 @@ impl Shared {
         answer
     }
 
+    /// The models the agent offers on its login: a session is opened, as
+    /// for a side call, read and closed.
+    fn list_models(&self, flavor: AcpFlavor) -> Result<Vec<BackendModel>, String> {
+        let mut params = json!({ "cwd": self.cwd, "mcpServers": [] });
+        if flavor == AcpFlavor::ClaudeCode {
+            params["_meta"] = json!({
+                "claudeCode": { "options": {
+                    "settingSources": [], "strictMcpConfig": true, "tools": []
+                } },
+            });
+        }
+        let opened = self.request("session/new", params, Duration::from_secs(60))?;
+        if self.can_close.load(Ordering::Acquire) {
+            if let Some(session_id) = opened["sessionId"].as_str() {
+                let _ = self.request(
+                    "session/close",
+                    json!({ "sessionId": session_id }),
+                    Duration::from_secs(10),
+                );
+            }
+        }
+        Ok(offered_models(&opened).0)
+    }
+
     /// Switch session `session_id` to the model `wanted` names among those
     /// `opened` (its `session/new` result) offers; a name that matches none,
     /// or more than one, leaves the agent's own.
     fn pick_model(&self, session_id: &str, opened: &Value, wanted: &str) {
-        let option = opened["configOptions"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(option_of)
-            .find(|option| option.is("model") || option.id == "model");
-        let (offered, config_id) = match option {
-            Some(option) => (option.values, Some(option.id)),
-            None => {
-                let list = opened["models"]["availableModels"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|m| {
-                        let id = m["modelId"].as_str()?.to_string();
-                        let name = m["name"].as_str().unwrap_or(&id).to_string();
-                        Some(BackendModel { id, name })
-                    })
-                    .collect();
-                (list, None)
-            }
-        };
+        let (offered, config_id) = offered_models(opened);
         let Some(id) = match_model(wanted, &offered) else {
             log::warn!(
                 "acp {}: no model {wanted:?} among {:?}; the agent's own answers",
@@ -250,6 +264,34 @@ impl Shared {
         };
         if let Err(error) = set {
             log::warn!("acp {}: cannot switch to {id}: {error}", self.name);
+        }
+    }
+}
+
+/// The models a `session/new` result `opened` offers, and the id of the
+/// config option that switches them; `None` when the agent lists them in
+/// `models` and switches them with `session/set_model`.
+fn offered_models(opened: &Value) -> (Vec<BackendModel>, Option<String>) {
+    let option = opened["configOptions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(option_of)
+        .find(|option| option.is("model") || option.id == "model");
+    match option {
+        Some(option) => (option.values, Some(option.id)),
+        None => {
+            let list = opened["models"]["availableModels"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|m| {
+                    let id = m["modelId"].as_str()?.to_string();
+                    let name = m["name"].as_str().unwrap_or(&id).to_string();
+                    Some(BackendModel { id, name })
+                })
+                .collect();
+            (list, None)
         }
     }
 }
@@ -405,6 +447,28 @@ mod tests {
             AcpFlavor::ClaudeCode,
             true,
         )
+    }
+
+    #[test]
+    fn the_models_of_the_agents_login_are_listed_from_a_session_of_their_own() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let for_connect = Arc::clone(&seen);
+        let provider = AcpProvider::with_connector(
+            AcpFlavor::ClaudeCode,
+            Duration::from_secs(5),
+            Box::new(move || Ok(reviewer_agent(&for_connect))),
+        );
+        let models = provider.list_models().unwrap();
+        let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["default", "claude-haiku-4-5"]);
+        let seen = seen.lock().unwrap();
+        let methods: Vec<&str> = seen.iter().filter_map(|m| m["method"].as_str()).collect();
+        // Opened without tools or settings, read, closed; nothing is asked.
+        assert_eq!(methods, ["initialize", "session/new", "session/close"]);
+        assert_eq!(
+            seen[1]["params"]["_meta"]["claudeCode"]["options"]["tools"],
+            json!([])
+        );
     }
 
     fn ask(provider: &AcpProvider, model: &str) -> AssistantMessage {

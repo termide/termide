@@ -93,7 +93,8 @@ The settings modal (the gear, or the command palette) has all of it under
 **AI**. **Connections** comes first: each row names a connection with its
 provider and model, the one new sessions start on marked `●`. `Enter` or a
 click opens a connection on a page of its own — name, provider, base URL, API
-key variable, model, context window, **Prefill progress (llama.cpp)** and
+key variable, model, context window (for a CLI agent, **Context window
+limit**, see below), **Prefill progress (llama.cpp)** and
 **Reasoning parameter** (for an OpenAI-compatible one), **Requests at once** (not for a CLI agent), **Subagents**, **Auto mode reviewer** and **Use by default** (new sessions start
 on it) — and **[ Back to list ]**, `Esc` or `Backspace` returns to the list;
 **+ Add connection** adds an OpenAI-compatible one, and
@@ -103,7 +104,9 @@ takes over only when you tick its switch, and turning the switch off (or
 deleting the default) hands it to the first other connection by name. A new
 connection is named after its provider until you name it. The model is a
 dropdown: **Auto — the provider's choice** first, then the connection's
-models, fetched in the background when its page opens, and last "Enter a model
+models, fetched in the background when its page opens (a spinner turns in the
+field meanwhile; a CLI agent is started for it and lists the models of its
+sign-in), and last "Enter a model
 id…" to type one by hand when the endpoint cannot list them. Auto, a
 connection's model left empty, runs on the first model the provider lists (a
 CLI agent on its own default); a request sent before that list arrives waits
@@ -159,9 +162,16 @@ endpoint, the panel drives that tool's own CLI as an
 `npx`; the copy in npm's cache starts without asking the registry, and
 TermIDE looks for a newer release once per run in the background, so a new
 one starts from the next panel on). The CLI owns the endpoint and the sign-in — its own subscription or
-API key — so the connection's `base_url`, `api_key_env` and context window do
-not apply; the settings modal hides them for these providers and clears them
-from the file. `model` is
+API key — so the connection's `base_url`, `api_key_env` and fallback context
+window do not apply; the settings modal hides them for these providers and
+clears them from the file. The agent's window can be made **smaller** than the
+model's: `context_window_limit` (**Context window limit** in the modal; empty
+keeps the agent's own) reaches Claude Code as `CLAUDE_CODE_AUTO_COMPACT_WINDOW`
+(at least 100000 — the modal refuses less) and Codex as `model_context_window`
+through `CODEX_CONFIG`, compacting at 90% of it, with your own `CODEX_CONFIG`
+kept. Gemini CLI has no such setting, so the field is not shown for it. The
+agent compacts its conversation at that window, and the panel shows
+`Context:` no larger than it. `model` is
 kept: it is the model **pre-selected** on the agent — applied over ACP once the
 session starts — and at runtime the **Model** chip lists and switches the
 agent's own models. The

@@ -186,6 +186,9 @@ struct Shared {
     /// The context's fill and size, `(used, size)`, as `usage_update` last
     /// reported them.
     context: Mutex<Option<(u64, u64)>>,
+    /// The window the user limited the agent to, 0 for none: a reported
+    /// size above it is taken as it.
+    context_limit: AtomicU64,
     /// The panel's live permission mode.
     mode: ModeHandle,
     /// Plan mode's texts, for telling Claude Code of a switch.
@@ -344,6 +347,10 @@ impl AcpRuntime {
             config.flavor,
             service,
         );
+        runtime
+            .shared
+            .context_limit
+            .store(config.context_limit.unwrap_or(0), Ordering::Release);
         // The reviewer on "the session's model" asks the agent's own
         // subscription, in a process of its own.
         if !service {
@@ -434,6 +441,7 @@ impl AcpRuntime {
             host_calls: Mutex::new(HashMap::new()),
             calls: Mutex::new(CallLog::default()),
             context: Mutex::new(None),
+            context_limit: AtomicU64::new(0),
             told_plan: AtomicBool::new(setup.mode.get() == Mode::Plan),
             told_tools: Mutex::new(None),
             served_tools: Mutex::new(BTreeSet::new()),
@@ -2235,6 +2243,10 @@ impl Shared {
             "usage_update" => {
                 if let (Some(used), Some(size)) = (update["used"].as_u64(), update["size"].as_u64())
                 {
+                    let size = match self.context_limit.load(Ordering::Acquire) {
+                        0 => size,
+                        limit => size.min(limit),
+                    };
                     *self.context.lock().unwrap_or_else(PoisonError::into_inner) =
                         Some((used, size));
                 }
@@ -3574,6 +3586,15 @@ mod tests {
             .shared
             .on_update(&json!({ "sessionUpdate": "usage_update", "used": 975, "size": 1_000_000 }));
         assert_eq!(runtime.context_usage(), Some((975, 1_000_000)));
+        // Limited by the user, the window is shown no larger than the limit.
+        runtime
+            .shared
+            .context_limit
+            .store(200_000, Ordering::Release);
+        runtime
+            .shared
+            .on_update(&json!({ "sessionUpdate": "usage_update", "used": 975, "size": 1_000_000 }));
+        assert_eq!(runtime.context_usage(), Some((975, 200_000)));
     }
 
     #[test]

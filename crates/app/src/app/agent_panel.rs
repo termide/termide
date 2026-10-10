@@ -803,7 +803,7 @@ impl ConnectionCatalog for AiConnections {
             provider: connection_provider(name, connection),
             model: connection.model.clone(),
             context_window: connection.effective_context_window(),
-            backend: cli_provider_backend(&connection.provider, agent),
+            backend: cli_provider_backend(connection, agent),
             reviewer: reviewer_setup(&settings, &self.dirs, name),
         })
     }
@@ -984,7 +984,7 @@ fn side_model(
             }
             ModelChoice::own(provider, spec)
         }
-        Some(connection) => match cli_acp_config(&connection.provider) {
+        Some(connection) => match cli_acp_config(connection) {
             Some(config) => {
                 let id = if model.is_empty() {
                     connection.model.trim().to_string()
@@ -1569,7 +1569,7 @@ impl Subagents {
         cancel: &CancelToken,
         on_update: &mut dyn FnMut(ToolUpdate),
     ) -> Result<SubagentOutcome, String> {
-        let config = cli_acp_config(&run.connection.provider)
+        let config = cli_acp_config(&run.connection)
             .ok_or_else(|| format!("{} is not a CLI agent", run.connection.provider))?;
         let (prompter, permission_rx) = permission_channel(budget.clone());
         let setup = BackendSetup {
@@ -1822,7 +1822,7 @@ fn agent_setup(
     // A CLI-adapter provider (Claude Code, Codex, Gemini CLI) is an explicit choice of
     // backend, so it drives its own ACP adapter — over any `command` the agent
     // definition might carry. Otherwise the agent's own backend (if any) wins.
-    let provider_backend = cli_provider_backend(&provider_kind, &agent);
+    let provider_backend = cli_provider_backend(&connection, &agent);
     let backend = provider_backend.clone().or(profile.backend);
 
     let session_dir = session_dir_of(&cwd);
@@ -1919,8 +1919,8 @@ fn user_shell_runner(dirs: &AgentDirs, cwd: &Path) -> ShellRunner {
 /// speaks ACP itself), which signs in with the user's CLI
 /// login (a subscription or an API key — the adapter's concern, not ours).
 /// `None` for any other provider, so the built-in loop is used.
-fn cli_provider_backend(provider: &str, agent: &str) -> Option<BackendFactory> {
-    let config = cli_acp_config(provider)?;
+fn cli_provider_backend(connection: &Connection, agent: &str) -> Option<BackendFactory> {
+    let config = cli_acp_config(connection)?;
     let agent = agent.to_string();
     Some(Arc::new(move |setup: termide_agent_core::BackendSetup| {
         AcpRuntime::start(&agent, &config, setup)
@@ -1928,13 +1928,13 @@ fn cli_provider_backend(provider: &str, agent: &str) -> Option<BackendFactory> {
     }) as BackendFactory)
 }
 
-/// How a CLI-adapter provider's ACP adapter runs; `None` for any other
-/// provider.
-fn cli_acp_config(provider: &str) -> Option<AcpConfig> {
+/// How the ACP adapter of a CLI-adapter connection runs; `None` for any
+/// other provider.
+fn cli_acp_config(connection: &Connection) -> Option<AcpConfig> {
     // Claude Code takes termide's prompt and tools in place of its own; Codex
     // and Gemini CLI keep their own and have termide's permission mode mapped
     // onto their modes.
-    let (package, flag, flavor) = match provider {
+    let (package, flag, flavor) = match connection.provider.as_str() {
         "claude_code" => (
             "@agentclientprotocol/claude-agent-acp@latest",
             None,
@@ -1972,10 +1972,56 @@ fn cli_acp_config(provider: &str) -> Option<AcpConfig> {
             .chain(flag)
             .map(str::to_string)
             .collect(),
-        env: std::collections::BTreeMap::new(),
+        env: context_limit_env(connection),
         timeout_secs: 120,
         flavor,
+        context_limit: context_limit(connection),
     })
+}
+
+/// The window a CLI agent is limited to: the connection's
+/// `context_window_limit`, raised to the least the agent takes; `None` for
+/// none, or an agent that cannot be limited.
+fn context_limit(connection: &Connection) -> Option<u64> {
+    let limit = connection
+        .context_window_limit
+        .filter(|_| connection.takes_context_limit())?;
+    Some(limit.max(connection.min_context_limit().unwrap_or(0)))
+}
+
+/// The environment that limits a CLI agent's context window, see
+/// [`context_limit`]: Claude Code compacts at
+/// `CLAUDE_CODE_AUTO_COMPACT_WINDOW`; Codex takes its window, and compacts
+/// at nine tenths of it, from `CODEX_CONFIG`, which its adapter merges into
+/// the session's config — over what the user's own `CODEX_CONFIG` holds.
+fn context_limit_env(connection: &Connection) -> std::collections::BTreeMap<String, String> {
+    let mut env = std::collections::BTreeMap::new();
+    let Some(limit) = context_limit(connection) else {
+        return env;
+    };
+    match connection.provider.as_str() {
+        "claude_code" => {
+            env.insert("CLAUDE_CODE_AUTO_COMPACT_WINDOW".into(), limit.to_string());
+        }
+        "codex" => {
+            let own = std::env::var("CODEX_CONFIG").ok();
+            env.insert("CODEX_CONFIG".into(), codex_config(own.as_deref(), limit));
+        }
+        _ => {}
+    }
+    env
+}
+
+/// `CODEX_CONFIG` holding the user's own (`own`, when it is a JSON object)
+/// with the window set to `limit`.
+fn codex_config(own: Option<&str>, limit: u64) -> String {
+    let mut config = own
+        .and_then(|own| serde_json::from_str::<serde_json::Value>(own).ok())
+        .filter(serde_json::Value::is_object)
+        .unwrap_or_else(|| serde_json::json!({}));
+    config["model_context_window"] = limit.into();
+    config["model_auto_compact_token_limit"] = (limit / 10 * 9).into();
+    config.to_string()
 }
 
 /// Once per process for each adapter `package`, refresh npm's idea of its
@@ -2043,15 +2089,19 @@ fn refresh_adapter(package: &'static str) {
 }
 
 /// Start an off-thread `list_models` for the settings modal's model dropdown
-/// of `connection`. `None` for a CLI agent (its models come over ACP at
-/// runtime). The receiver is polled by the app loop.
+/// of `connection`. A CLI agent is started for it, as for a side call, and
+/// lists the models of its login; the process ends with the fetch. The
+/// receiver is polled by the app loop.
 pub(crate) fn spawn_settings_model_fetch(
     connection: &Connection,
 ) -> Option<std::sync::mpsc::Receiver<Result<Vec<termide_agent_core::ModelInfo>, String>>> {
-    if connection.is_cli() {
-        return None;
-    }
-    let provider = build_provider(connection, api_key_of(connection));
+    let provider: Arc<dyn Provider> = if connection.is_cli() {
+        let config = cli_acp_config(connection)?;
+        let cwd = std::env::current_dir().unwrap_or_default();
+        Arc::new(AcpProvider::new("settings", config, cwd))
+    } else {
+        build_provider(connection, api_key_of(connection))
+    };
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let _ = tx.send(provider.list_models());
@@ -2850,11 +2900,56 @@ mod tests {
     fn cli_providers_get_an_acp_backend() {
         // A CLI-adapter provider drives an external agent over ACP; a
         // wire-protocol provider uses the built-in loop (no backend override).
-        assert!(cli_provider_backend("claude_code", "default").is_some());
-        assert!(cli_provider_backend("codex", "default").is_some());
-        assert!(cli_provider_backend("gemini_cli", "default").is_some());
-        assert!(cli_provider_backend("openai_compatible", "default").is_none());
-        assert!(cli_provider_backend("anthropic_compatible", "default").is_none());
+        let on = |provider: &str| Connection {
+            provider: provider.into(),
+            ..Connection::default()
+        };
+        assert!(cli_provider_backend(&on("claude_code"), "default").is_some());
+        assert!(cli_provider_backend(&on("codex"), "default").is_some());
+        assert!(cli_provider_backend(&on("gemini_cli"), "default").is_some());
+        assert!(cli_provider_backend(&on("openai_compatible"), "default").is_none());
+        assert!(cli_provider_backend(&on("anthropic_compatible"), "default").is_none());
+    }
+
+    #[test]
+    fn a_cli_agents_window_limit_reaches_it_in_its_environment() {
+        let on = |provider: &str, limit: u64| Connection {
+            provider: provider.into(),
+            context_window_limit: Some(limit),
+            ..Connection::default()
+        };
+        // Claude Code, raised to the least it takes.
+        let claude = cli_acp_config(&on("claude_code", 50_000)).unwrap();
+        assert_eq!(claude.env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"], "100000");
+        assert_eq!(claude.context_limit, Some(100_000));
+        // Codex, compacting at nine tenths of it.
+        let codex = cli_acp_config(&on("codex", 64_000)).unwrap();
+        let config: serde_json::Value = serde_json::from_str(&codex.env["CODEX_CONFIG"]).unwrap();
+        assert_eq!(config["model_context_window"], 64_000);
+        assert_eq!(config["model_auto_compact_token_limit"], 57_600);
+        assert_eq!(codex.context_limit, Some(64_000));
+        // Gemini CLI has no setting for it; none set, none sent.
+        let gemini = cli_acp_config(&on("gemini_cli", 64_000)).unwrap();
+        assert!(gemini.env.is_empty());
+        assert_eq!(gemini.context_limit, None);
+        let unset = Connection {
+            context_window_limit: None,
+            ..on("codex", 1)
+        };
+        let own = cli_acp_config(&unset).unwrap();
+        assert!(own.env.is_empty());
+        assert_eq!(own.context_limit, None);
+    }
+
+    #[test]
+    fn codex_keeps_the_users_own_config_under_the_limit() {
+        let merged: serde_json::Value =
+            serde_json::from_str(&codex_config(Some(r#"{"model":"x"}"#), 1000)).unwrap();
+        assert_eq!(merged["model"], "x");
+        assert_eq!(merged["model_context_window"], 1000);
+        let fresh: serde_json::Value =
+            serde_json::from_str(&codex_config(Some("not json"), 1000)).unwrap();
+        assert_eq!(fresh["model_auto_compact_token_limit"], 900);
     }
 
     #[test]

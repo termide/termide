@@ -46,6 +46,10 @@ pub struct AcpConfig {
     /// Which adapter this is, when termide knows it; set by the provider,
     /// never by a file.
     pub flavor: AcpFlavor,
+    /// The context window the user limited the agent to, in tokens: the
+    /// window the agent reports is shown no larger. `None` takes the
+    /// agent's own.
+    pub context_limit: Option<u64>,
 }
 
 /// An ACP adapter termide knows how to take further than the protocol: the

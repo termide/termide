@@ -25,6 +25,7 @@ pub(super) const DEFAULT: usize = 8;
 pub(super) const SUBAGENTS: usize = 9;
 pub(super) const MAX_REQUESTS: usize = 10;
 pub(super) const REVIEWER: usize = 11;
+pub(super) const CONTEXT_LIMIT: usize = 12;
 
 /// The connection page, while one is open.
 #[derive(Debug, Clone)]
@@ -34,8 +35,8 @@ pub(super) struct ConnectionEdit {
     /// Named after its provider until the user names it, so choosing another
     /// provider renames it too.
     pub auto_named: bool,
-    /// Why the name typed last was refused.
-    pub error: Option<String>,
+    /// Why the value typed last was refused, and the field it was typed in.
+    pub error: Option<(usize, String)>,
     /// The button chosen on the buttons row: [`BACK`] or [`DELETE`].
     pub button: usize,
 }
@@ -117,6 +118,10 @@ pub(super) fn connection_fields() -> Vec<FieldDescriptor> {
         FieldDescriptor {
             label: t.settings_agent_auto_reviewer(),
             field_type: FieldType::Enum,
+        },
+        FieldDescriptor {
+            label: t.settings_ai_connection_context_limit(),
+            field_type: FieldType::OptionalNumber,
         },
     ]
 }
@@ -205,8 +210,9 @@ impl SettingsModal {
     }
 
     /// The rows of the connection page. A CLI agent brings its endpoint,
-    /// key and window, so only its model (pre-selected over ACP) applies;
-    /// prefill progress is an OpenAI-compatible request field.
+    /// key and window, so only its model (pre-selected over ACP) and, where
+    /// it has a setting for it, a smaller window apply; prefill progress is
+    /// an OpenAI-compatible request field.
     pub(super) fn connection_page_rows(&self) -> Vec<ContentRow> {
         use ContentRow::{ConnectionButtons, Field, Header, Spacer};
         let cli = self.edited().is_some_and(Connection::is_cli);
@@ -222,6 +228,9 @@ impl SettingsModal {
         rows.push(Field(MODEL));
         if !cli {
             rows.push(Field(CONTEXT_WINDOW));
+        }
+        if self.edited().is_some_and(Connection::takes_context_limit) {
+            rows.push(Field(CONTEXT_LIMIT));
         }
         if openai {
             rows.extend([Field(PREFILL_PROGRESS), Field(REASONING_PARAM)]);
@@ -392,14 +401,28 @@ impl SettingsModal {
             PROVIDER => provider_label(&connection.provider),
             BASE_URL => empty_or(&connection.base_url),
             API_KEY_ENV => empty_or(&connection.api_key_env),
-            MODEL if connection.model.is_empty() => i18n::t().settings_ai_model_auto().to_string(),
-            MODEL => connection.model.clone(),
+            MODEL => {
+                let model = if connection.model.is_empty() {
+                    i18n::t().settings_ai_model_auto().to_string()
+                } else {
+                    connection.model.clone()
+                };
+                if self.models_loading {
+                    format!("{} {model}", termide_config::constants::spinner_frame())
+                } else {
+                    model
+                }
+            }
             CONTEXT_WINDOW => connection.context_window_fallback.map_or_else(
                 || {
                     i18n::t().settings_value_default_fmt(
                         &termide_config::DEFAULT_CONTEXT_WINDOW_FALLBACK.to_string(),
                     )
                 },
+                |n| n.to_string(),
+            ),
+            CONTEXT_LIMIT => connection.context_window_limit.map_or_else(
+                || i18n::t().settings_value_auto().to_string(),
                 |n| n.to_string(),
             ),
             PREFILL_PROGRESS => bool_str(connection.prefill_progress),
@@ -444,6 +467,10 @@ impl SettingsModal {
             MODEL => connection.model.clone(),
             CONTEXT_WINDOW => connection
                 .context_window_fallback
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
+            CONTEXT_LIMIT => connection
+                .context_window_limit
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
             MAX_REQUESTS => connection.max_concurrent_requests.to_string(),
@@ -647,10 +674,30 @@ impl SettingsModal {
         }
     }
 
-    /// Store the context window typed on the page; `None` is the default.
-    pub(super) fn apply_connection_window(&mut self, window: Option<u64>) {
-        if let Some(connection) = self.edited_mut() {
+    /// Store a window typed on the page: the fallback window, or a CLI
+    /// agent's limit; `None` is the default. A limit below the least the
+    /// agent takes is refused, and the page says why.
+    pub(super) fn apply_connection_window(&mut self, index: usize, window: Option<u64>) {
+        let Some(connection) = self.edited_mut() else {
+            return;
+        };
+        if index != CONTEXT_LIMIT {
             connection.context_window_fallback = window;
+            return;
+        }
+        let least = connection.min_context_limit();
+        let error = match (window, least) {
+            (Some(window), Some(least)) if window < least => Some((
+                CONTEXT_LIMIT,
+                i18n::t().settings_ai_connection_context_limit_min_fmt(&least.to_string()),
+            )),
+            _ => {
+                connection.context_window_limit = window;
+                None
+            }
+        };
+        if let Some(edit) = self.connection_edit.as_mut() {
+            edit.error = error;
         }
     }
 
@@ -664,7 +711,10 @@ impl SettingsModal {
         }
         if name.is_empty() || self.config.ai.connections.contains_key(name) {
             if let Some(edit) = self.connection_edit.as_mut() {
-                edit.error = Some(i18n::t().settings_ai_connection_name_taken().to_string());
+                edit.error = Some((
+                    NAME,
+                    i18n::t().settings_ai_connection_name_taken().to_string(),
+                ));
             }
             return;
         }
@@ -757,6 +807,15 @@ impl SettingsModal {
             connection.context_window_fallback = defaults.context_window_fallback;
             connection.max_concurrent_requests = defaults.max_concurrent_requests;
         }
+        // Only an agent with a setting for it keeps a limit, one it takes.
+        let limit_taken = connection.takes_context_limit()
+            && connection
+                .context_window_limit
+                .zip(connection.min_context_limit())
+                .is_none_or(|(limit, least)| limit >= least);
+        if !limit_taken {
+            connection.context_window_limit = None;
+        }
         if !speaks_openai(connection) {
             connection.prefill_progress = false;
             connection.reasoning_param = ReasoningParam::Auto;
@@ -778,10 +837,11 @@ impl SettingsModal {
         self.request_models();
     }
 
-    /// Ask the app for the open connection's models; a CLI agent lists its
-    /// own over ACP.
+    /// Ask the app for the open connection's models — a CLI agent lists
+    /// those of its login over ACP — and show the wait in the model field.
     fn request_models(&mut self) {
-        self.model_fetch_request = self.edited().filter(|c| !c.is_cli()).cloned();
+        self.model_fetch_request = self.edited().cloned();
+        self.models_loading = self.model_fetch_request.is_some();
     }
 
     /// The connection whose models the model dropdown waits for, once: the
@@ -1072,11 +1132,90 @@ mod tests {
         press(&mut modal, KeyCode::Enter);
         assert_eq!(modal.config.ai.connections["local"].model, "typed");
 
-        // Another endpoint asks again; a CLI agent lists its own models.
+        // Another endpoint asks again, and so does a CLI agent, which the
+        // app starts to list the models of its login.
         edit(&mut modal, BASE_URL, "http://other/v1");
         assert!(modal.take_model_fetch_request().is_some());
         modal.apply_connection_enum(PROVIDER, "codex");
-        assert!(modal.take_model_fetch_request().is_none());
+        let asked = modal.take_model_fetch_request().expect("a fetch request");
+        assert_eq!(asked.provider, "codex");
+    }
+
+    #[test]
+    fn the_model_field_spins_until_the_models_are_in() {
+        let mut modal = ai_modal(with_local());
+        modal.open_connection("local".into());
+        assert!(modal.models_loading);
+        let frames = termide_config::constants::SPINNER_FRAMES;
+        let value = modal.connection_value(MODEL);
+        assert!(value.ends_with(" qwen"), "{value}");
+        assert!(
+            frames.iter().any(|frame| value.starts_with(frame)),
+            "{value}"
+        );
+        // An empty list ends the wait as well: the endpoint could not list.
+        modal.set_model_options(Vec::new());
+        assert!(!modal.models_loading);
+        assert_eq!(modal.connection_value(MODEL), "qwen");
+    }
+
+    #[test]
+    fn a_cli_agents_window_is_limited_where_it_has_a_setting_for_it() {
+        let mut modal = ai_modal(with_local());
+        modal.open_connection("local".into());
+        // An endpoint has its fallback window, not a limit.
+        assert!(!modal
+            .content_rows()
+            .contains(&ContentRow::Field(CONTEXT_LIMIT)));
+        modal.apply_connection_enum(PROVIDER, "codex");
+        let name = modal.open_connection_name().unwrap().to_string();
+        let rows = modal.content_rows();
+        assert!(rows.contains(&ContentRow::Field(CONTEXT_LIMIT)));
+        assert!(!rows.contains(&ContentRow::Field(CONTEXT_WINDOW)));
+        assert_eq!(
+            modal.connection_value(CONTEXT_LIMIT),
+            i18n::t().settings_value_auto()
+        );
+        edit(&mut modal, CONTEXT_LIMIT, "64000");
+        assert_eq!(
+            modal.config.ai.connections[&name].context_window_limit,
+            Some(64_000)
+        );
+        // Claude Code takes no less than its least: the limit goes with the
+        // switch, and a smaller one typed is refused with the reason.
+        modal.apply_connection_enum(PROVIDER, "claude_code");
+        let name = modal.open_connection_name().unwrap().to_string();
+        assert_eq!(
+            modal.config.ai.connections[&name].context_window_limit,
+            None
+        );
+        edit(&mut modal, CONTEXT_LIMIT, "50000");
+        assert_eq!(
+            modal.config.ai.connections[&name].context_window_limit,
+            None
+        );
+        let error = modal.connection_edit.as_ref().unwrap().error.clone();
+        assert_eq!(error.map(|(field, _)| field), Some(CONTEXT_LIMIT));
+        assert!(screen(&mut modal)
+            .iter()
+            .any(|line| line.contains("100000")));
+        edit(&mut modal, CONTEXT_LIMIT, "150000");
+        assert_eq!(
+            modal.config.ai.connections[&name].context_window_limit,
+            Some(150_000)
+        );
+        assert!(modal.connection_edit.as_ref().unwrap().error.is_none());
+        // Emptied, it is the agent's own again.
+        edit(&mut modal, CONTEXT_LIMIT, "");
+        assert_eq!(
+            modal.config.ai.connections[&name].context_window_limit,
+            None
+        );
+        // Gemini CLI has no setting for it.
+        modal.apply_connection_enum(PROVIDER, "gemini_cli");
+        assert!(!modal
+            .content_rows()
+            .contains(&ContentRow::Field(CONTEXT_LIMIT)));
     }
 
     #[test]
@@ -1401,7 +1540,8 @@ mod tests {
         let mut modal = ai_modal(with_local());
         modal.open_connection("local".into());
         let rows = modal.content_rows();
-        for index in 0..connection_fields().len() {
+        // But a CLI agent's window limit.
+        for index in (0..connection_fields().len()).filter(|i| *i != CONTEXT_LIMIT) {
             assert!(rows.contains(&ContentRow::Field(index)), "field {index}");
         }
         // The sidebar leaves the page.

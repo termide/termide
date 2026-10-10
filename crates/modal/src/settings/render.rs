@@ -361,16 +361,17 @@ impl SettingsModal {
 
                     let display_value = fit_width(value, max_value_width);
                     buf.set_string(value_x as u16, y, &display_value, value_style);
-                    // A refused name says why, after the name kept.
+                    // A refused value says why, after the value kept.
                     let refused = self
                         .connection_edit
                         .as_ref()
-                        .and_then(|edit| edit.error.as_deref())
-                        .filter(|_| {
+                        .and_then(|edit| edit.error.as_ref())
+                        .filter(|(field, _)| {
                             self.field_tab() == SettingsTab::Connection
-                                && field_idx == super::connection::NAME
+                                && *field == field_idx
                                 && !self.editing
-                        });
+                        })
+                        .map(|(_, error)| error.as_str());
                     if let Some(error) = refused {
                         let x = value_x + display_value.width() + 2;
                         let room = (area.x as usize + area.width as usize).saturating_sub(x);

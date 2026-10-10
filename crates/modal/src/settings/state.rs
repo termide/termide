@@ -59,6 +59,7 @@ impl SettingsModal {
             dirty: false,
             project_override_active,
             model_options: Vec::new(),
+            models_loading: false,
             last_modal_area: None,
             last_sidebar_area: None,
             last_content_area: None,
@@ -70,9 +71,11 @@ impl SettingsModal {
     }
 
     /// Provide the open connection's model list (fetched off-thread by the
-    /// app), so the model field's dropdown lists them.
+    /// app), so the model field's dropdown lists them; an empty list ends
+    /// the wait with none (the endpoint or agent could not list them).
     pub fn set_model_options(&mut self, models: Vec<String>) {
         self.model_options = models;
+        self.models_loading = false;
     }
 
     /// The dropdown options for a field of the tab the content shows.
@@ -640,8 +643,13 @@ impl SettingsModal {
 
     /// Apply an optional-number field (`None` means "(auto)").
     fn apply_optional_number(&mut self, tab: SettingsTab, index: usize, val: Option<u64>) {
-        if tab == SettingsTab::Connection && index == connection::CONTEXT_WINDOW {
-            self.apply_connection_window(val);
+        if tab == SettingsTab::Connection
+            && matches!(
+                index,
+                connection::CONTEXT_WINDOW | connection::CONTEXT_LIMIT
+            )
+        {
+            self.apply_connection_window(index, val);
         }
     }
 

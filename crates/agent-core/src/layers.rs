@@ -612,6 +612,7 @@ impl AgentSpec {
                 env,
                 timeout_secs,
                 flavor,
+                context_limit: None,
             })
         });
         let spec = Self {

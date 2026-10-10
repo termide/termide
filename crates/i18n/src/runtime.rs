@@ -734,6 +734,7 @@ impl Translation for RuntimeTranslation {
         settings_ai_connection_reasoning_param,
         settings_ai_connection_subagents,
         settings_ai_connection_subagents_own,
+        settings_ai_connection_context_limit,
         settings_ai_connection_max_requests,
         settings_ai_connection_name_taken,
         settings_web_backend,
@@ -1855,6 +1856,13 @@ impl Translation for RuntimeTranslation {
 
     fn settings_value_default_fmt(&self, value: &str) -> String {
         self.format("settings_value_default_fmt", &[("value", value)])
+    }
+
+    fn settings_ai_connection_context_limit_min_fmt(&self, value: &str) -> String {
+        self.format(
+            "settings_ai_connection_context_limit_min_fmt",
+            &[("value", value)],
+        )
     }
 
     fn projects_delete_failed_fmt(&self, error: &str) -> String {

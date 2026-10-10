@@ -311,6 +311,9 @@ pub struct SettingsModal {
     /// arrive (or when the endpoint cannot list them), when the model field
     /// falls back to typing an id.
     pub(super) model_options: Vec<String>,
+    /// Whether the open connection's models are on their way: asked for and
+    /// not yet in, while the model field shows a spinner.
+    pub(super) models_loading: bool,
 
     // --- Area caches (for mouse hit-testing) ---
     last_modal_area: Option<Rect>,
