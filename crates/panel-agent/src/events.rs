@@ -60,6 +60,14 @@ impl AgentPanel {
         }
     }
 
+    /// The judge's call is over: its live line goes, unless a run took the
+    /// line over meanwhile.
+    pub(crate) fn end_judging(&mut self) {
+        if self.activity.is_some_and(|a| a.phase == Phase::Judge) {
+            self.activity = None;
+        }
+    }
+
     /// Apply one runtime event to the transcript and the session log.
     pub(crate) fn apply(&mut self, event: AgentEvent) {
         match event {
@@ -97,7 +105,7 @@ impl AgentPanel {
                 let long = self
                     .run_start
                     .is_some_and(|start| start.elapsed() >= LONG_RUN);
-                self.raise_attention(long && !self.stop_requested);
+                let ring = long && !self.stop_requested;
                 if self.run_paused {
                     // The run waits at a pause: its line ticks the pause's
                     // length (no time of day), and the run's own clock stays
@@ -181,6 +189,16 @@ impl AgentPanel {
                             };
                         }
                     }
+                }
+                // A goal or loop that carries on by itself waits for no one:
+                // only its end (or a pause, a card, a failure) calls the user.
+                let goes_on = self
+                    .goal_task
+                    .as_ref()
+                    .is_some_and(|t| t.judge_at.is_some())
+                    || self.loop_task.as_ref().is_some_and(|t| t.next_at.is_some());
+                if !goes_on {
+                    self.raise_attention(ring);
                 }
             }
             AgentEvent::TurnStart | AgentEvent::TurnEnd => {}
@@ -454,8 +472,12 @@ impl AgentPanel {
                     NoticeKind::Info,
                 )
             }
-            AgentEvent::CompactionUpdate(event) => {
-                if let Some(activity) = self.activity.as_mut().filter(|a| a.phase == Phase::Compact)
+            AgentEvent::CompactionUpdate(event) | AgentEvent::GoalJudgeUpdate(event) => {
+                // The summary call and the judge's both show their progress.
+                if let Some(activity) = self
+                    .activity
+                    .as_mut()
+                    .filter(|a| matches!(a.phase, Phase::Compact | Phase::Judge))
                 {
                     match event {
                         StreamEvent::TextDelta(delta) | StreamEvent::ThinkingDelta(delta) => {
@@ -514,9 +536,13 @@ impl AgentPanel {
                 }
             }
             AgentEvent::GoalJudged { outcome, reason } => {
+                self.end_judging();
                 self.on_goal_verdict(outcome, &reason);
             }
-            AgentEvent::GoalJudgeFailed { error } => self.on_goal_judge_failed(&error),
+            AgentEvent::GoalJudgeFailed { error } => {
+                self.end_judging();
+                self.on_goal_judge_failed(&error);
+            }
             AgentEvent::Handoff { brief } => match brief {
                 Ok(text) => {
                     // Offer the brief, with what to do with it; the text is kept

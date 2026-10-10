@@ -16,11 +16,12 @@ use termide_ui::ChoiceForm;
 use crate::pending::Pending;
 use crate::session_ops::discard;
 use crate::{
-    millis, now_hms, slash, transcript, unfinished, AgentPanel, GoalTask, Item, LoopTask,
-    NoticeKind, BUILTIN_COMMANDS, CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND, FORK_COMMAND,
-    GOAL_COMMAND, GOAL_IDLE_TURNS, GOAL_JUDGE_RETRIES, GOAL_JUDGE_RETRY_DELAY, HANDOFF_COMMAND,
-    LOOP_COMMAND, LOOP_MAX_ITERATIONS, MCP_COMMAND, NAME_COMMAND, NEW_COMMAND, PAUSE_COMMAND,
-    PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND, SHOW_PROMPT_ACTION, UNDO_COMMAND, USAGE_COMMAND,
+    millis, now_hms, slash, transcript, unfinished, Activity, AgentPanel, GoalTask, Item, LoopTask,
+    NoticeKind, Phase, BUILTIN_COMMANDS, CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND,
+    FORK_COMMAND, GOAL_COMMAND, GOAL_IDLE_TURNS, GOAL_JUDGE_RETRIES, GOAL_JUDGE_RETRY_DELAY,
+    HANDOFF_COMMAND, LOOP_COMMAND, LOOP_MAX_ITERATIONS, MCP_COMMAND, NAME_COMMAND, NEW_COMMAND,
+    PAUSE_COMMAND, PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND, SHOW_PROMPT_ACTION, UNDO_COMMAND,
+    USAGE_COMMAND,
 };
 
 /// The opening of [`goal_continuation`], to tell its turns in the transcript.
@@ -591,6 +592,7 @@ impl AgentPanel {
                 termide_i18n::t().agent_notice_loop_stopped_max_fmt(LOOP_MAX_ITERATIONS),
                 NoticeKind::Warn,
             );
+            self.raise_attention(true);
             return vec![PanelEvent::NeedsRedraw];
         }
         let Some(task) = self.loop_task.as_mut() else {
@@ -671,6 +673,7 @@ impl AgentPanel {
     pub(crate) fn stop_goal(&mut self) {
         let t = termide_i18n::t();
         if self.goal_task.take().is_some() {
+            self.end_judging();
             self.notice(t.agent_notice_goal_stopped(), NoticeKind::Info);
         } else {
             self.notice(t.agent_notice_goal_usage(), NoticeKind::Info);
@@ -714,16 +717,25 @@ impl AgentPanel {
             None => return vec![PanelEvent::NeedsRedraw],
         };
         match self.runtime.judge(goal) {
-            Ok(()) => self.notice(
-                termide_i18n::t().agent_notice_goal_checking(),
-                NoticeKind::Info,
-            ),
+            Ok(()) => {
+                // The call shows a live line like a model message's: the
+                // clock ticks, and the model's progress where it reports it.
+                self.activity = Some(Activity {
+                    prompt_tokens: (self.context_tokens > 0).then_some(self.context_tokens),
+                    ..Activity::new(Phase::Judge)
+                });
+                self.notice(
+                    termide_i18n::t().agent_notice_goal_checking(),
+                    NoticeKind::Info,
+                );
+            }
             Err(error) => {
                 self.goal_task = None;
                 self.notice(
                     termide_i18n::t().agent_notice_cannot_check_goal_fmt(&error.to_string()),
                     NoticeKind::Warn,
                 );
+                self.raise_attention(true);
             }
         }
         vec![PanelEvent::NeedsRedraw]
@@ -751,6 +763,7 @@ impl AgentPanel {
                     t.agent_notice_goal_reached_reason_fmt(reason)
                 };
                 self.notice(msg, NoticeKind::Info);
+                self.raise_attention(true);
                 return;
             }
             GoalOutcome::Impossible => {
@@ -817,6 +830,7 @@ impl AgentPanel {
         // the loop still has waiting in the queue, so it does not reach the
         // model later as a plain message.
         self.goal_task = None;
+        self.end_judging();
         if let Some(task) = self.loop_task.take() {
             self.withdraw_queued(|message| message.typed() == task.prompt);
         }

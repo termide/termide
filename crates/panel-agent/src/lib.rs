@@ -437,6 +437,8 @@ enum Phase {
     Tool,
     /// The conversation is being compacted.
     Compact,
+    /// The `/goal` judge is deciding whether the goal is reached.
+    Judge,
 }
 
 /// A run control on the prompt box's top border.

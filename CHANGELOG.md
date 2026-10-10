@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **An active `/goal` and `/loop` stay in sight.** The state strip above the input pins a row for each while it goes on, beside the running subagents: `◎ /goal …` with its turn count (and the judge's check while it runs), `↺ /loop …` with its run count and the countdown to its next run.
 
 ### Fixed
+- **The `/goal` check shows that it is working.** While the judge decides, the transcript shows the live line a model message has: the ticking clock, and with the built-in agent the reading progress (`⏫`) and the answer's tokens. A long check on a local model no longer looks hung.
+- **An active `/goal` or `/loop` rings the bell at its end only.** A run the goal's judge or the loop's next run follows rings no bell, however long it took; the goal reached, given up, paused or failed, and the loop ended at its cap, ring.
 - **A bare `/goal` or `/loop` no longer stops the active one.** It reports it — the goal and its turn, or the loop, its run and the wait for the next — and shows the usage when nothing is active. Only `stop` (or `off`) ends either.
 
 ## [0.40.0] - 2026-10-08

@@ -1027,7 +1027,8 @@ does not ask unseen; the header of such a panel shows 🔔 in place of its icon
 until the panel is focused, and so does it when a run ends. Unless the panel is the one
 in front of you in a focused terminal window, the question also rings the
 terminal bell, and so does the end of a run that took ten seconds or more (not
-one you stopped); it rings once until you look at the panel, and
+one you stopped, nor one an active `/goal` or `/loop` carries on from: those
+ring when they end); it rings once until you look at the panel, and
 `bell_on_attention = false` under `[ai]` silences it. "In this project" appends the rule to
 `.termide/config.toml` in the project, "everywhere" to the global
 configuration; answers for the session live until the panel closes.

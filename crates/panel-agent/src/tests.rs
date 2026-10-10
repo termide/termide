@@ -2253,6 +2253,58 @@ fn goal_works_turn_by_turn_until_the_judge_says_done() {
         ));
 }
 
+/// A goal's work turn that the judge takes up next rings no bell, however
+/// long it ran; the goal's end does.
+#[test]
+fn a_goal_rings_only_when_it_ends() {
+    let mut panel = panel(vec![]);
+    panel.busy = true;
+    type_text(&mut panel, "/goal finish the refactor");
+    panel.submit();
+    panel.busy = false;
+    end_run_of(&mut panel, 60);
+    assert!(panel.goal_task.as_ref().unwrap().judge_at.is_some());
+    assert!(!panel.rung);
+    assert!(!panel.needs_attention());
+    panel.apply(AgentEvent::GoalJudged {
+        outcome: termide_agent_core::GoalOutcome::Done,
+        reason: "done".into(),
+    });
+    assert!(panel.goal_task.is_none());
+    assert!(panel.rung);
+}
+
+/// A loop's run with the next one scheduled rings no bell either.
+#[test]
+fn a_loop_run_with_another_to_come_rings_no_bell() {
+    let mut panel = panel(vec![]);
+    panel.busy = true;
+    type_text(&mut panel, "/loop 5m check the build");
+    panel.submit();
+    panel.busy = false;
+    assert!(panel.loop_task.is_some());
+    end_run_of(&mut panel, 60);
+    assert!(panel.loop_task.as_ref().unwrap().next_at.is_some());
+    assert!(!panel.rung);
+}
+
+/// While the judge decides, its call shows the ticking live line; the
+/// verdict takes it away.
+#[test]
+fn the_goal_check_shows_a_live_line_until_the_verdict() {
+    let mut panel = panel(vec![reply("DONE\nall green")]);
+    panel.busy = true;
+    type_text(&mut panel, "/goal get the build green");
+    panel.submit();
+    panel.busy = false;
+    panel.goal_task.as_mut().unwrap().first_turn = None;
+    panel.run_goal_judge();
+    assert_eq!(panel.activity.map(|a| a.phase), Some(Phase::Judge));
+    assert!(!panel.live_footer_lines(60).is_empty());
+    settle_goal(&mut panel);
+    assert!(panel.activity.is_none());
+}
+
 /// A judge that finds the goal out of reach ends it, with the reason.
 #[test]
 fn an_impossible_goal_ends_with_the_reason() {

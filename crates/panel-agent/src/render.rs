@@ -413,7 +413,7 @@ impl AgentPanel {
         // no prefill to show.
         let reading = match activity.phase {
             Phase::Prefill => true,
-            Phase::Compact => activity.first_token.is_none(),
+            Phase::Compact | Phase::Judge => activity.first_token.is_none(),
             Phase::Generating | Phase::Tool => false,
         };
         // A request waiting for a free slot of its connection is not being
@@ -454,7 +454,7 @@ impl AgentPanel {
         // is still known (the cost needs it), but nothing is being generated.
         // An external agent sends its text in bursts and reports no tokens, so
         // there is no generation to time: none is shown for it.
-        if let (Phase::Generating | Phase::Compact, Some(first_token), false) =
+        if let (Phase::Generating | Phase::Compact | Phase::Judge, Some(first_token), false) =
             (activity.phase, activity.first_token, self.external)
         {
             let gen_ms = first_token.elapsed().as_millis() as u32;

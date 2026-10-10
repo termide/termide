@@ -473,6 +473,8 @@ pub enum AgentEvent {
         outcome: GoalOutcome,
         reason: String,
     },
+    /// The judge call's stream, for its live progress (`/goal`).
+    GoalJudgeUpdate(StreamEvent),
     /// The judge call did not succeed; the goal loop stops.
     GoalJudgeFailed {
         error: String,
@@ -1261,7 +1263,11 @@ impl Agent {
             tools: &[],
             thinking: ThinkingLevel::Off,
         };
-        let reply = self.provider.stream(&request, &mut |_| {}, cancel);
+        let reply = self.provider.stream(
+            &request,
+            &mut |event| emit(AgentEvent::GoalJudgeUpdate(event)),
+            cancel,
+        );
         if matches!(reply.stop_reason, StopReason::Error | StopReason::Aborted) {
             let error = reply
                 .error_message
@@ -2039,13 +2045,19 @@ mod tests {
                 reason: "the build still fails".into(),
             }
         );
+        // The call's stream comes first, for its live progress; the verdict
+        // closes it.
+        let (verdict_event, stream) = events.split_last().expect("events");
         assert_eq!(
-            events,
-            vec![AgentEvent::GoalJudged {
+            verdict_event,
+            &AgentEvent::GoalJudged {
                 outcome: GoalOutcome::Continue,
                 reason: "the build still fails".into(),
-            }]
+            }
         );
+        assert!(stream
+            .iter()
+            .all(|e| matches!(e, AgentEvent::GoalJudgeUpdate(_))));
         // The judge is a read-only call: the transcript is untouched, and the
         // request carried only the appended verdict question.
         assert!(agent.messages().is_empty());
