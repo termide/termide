@@ -66,8 +66,11 @@ pub enum PendingAction {
         create_relative_symlink: bool,
     },
     /// Pack files/directories into a new archive; the modal answers with
-    /// the archive path.
-    PackPaths { sources: Vec<PathBuf> },
+    /// the archive path. `level` follows the modal's compression row.
+    PackPaths {
+        sources: Vec<PathBuf>,
+        level: termide_vfs::archive::pack::CompressionLevel,
+    },
     /// Unpack local archives; the modal answers with the destination
     /// directory (the app builds that modal, as for copy).
     UnpackArchives { archives: Vec<PathBuf> },

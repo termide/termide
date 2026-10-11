@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use termide_vfs::archive::pack::CompressionLevel;
 use termide_vfs::VfsPath;
 
 /// Unique identifier for an operation.
@@ -533,6 +534,8 @@ pub struct OperationRequest {
     pub conflict_mode: ConflictMode,
     /// Passwords of encrypted archives to unpack, checked beforehand.
     pub archive_passwords: ArchivePasswords,
+    /// How hard a pack compresses; other operations ignore it.
+    pub compression: CompressionLevel,
 }
 
 impl OperationRequest {
@@ -546,6 +549,7 @@ impl OperationRequest {
             is_move: false,
             conflict_mode: ConflictMode::Ask,
             archive_passwords: ArchivePasswords::default(),
+            compression: CompressionLevel::Normal,
         }
     }
 
@@ -559,6 +563,7 @@ impl OperationRequest {
             is_move: true,
             conflict_mode: ConflictMode::Ask,
             archive_passwords: ArchivePasswords::default(),
+            compression: CompressionLevel::Normal,
         }
     }
 
@@ -572,6 +577,7 @@ impl OperationRequest {
             is_move: false,
             conflict_mode: ConflictMode::Ask,
             archive_passwords: ArchivePasswords::default(),
+            compression: CompressionLevel::Normal,
         }
     }
 
@@ -585,6 +591,7 @@ impl OperationRequest {
             is_move: false,
             conflict_mode: ConflictMode::Ask,
             archive_passwords: ArchivePasswords::default(),
+            compression: CompressionLevel::Normal,
         }
     }
 
@@ -599,6 +606,7 @@ impl OperationRequest {
             is_move: false,
             conflict_mode: ConflictMode::Ask,
             archive_passwords: ArchivePasswords::default(),
+            compression: CompressionLevel::Normal,
         }
     }
 
@@ -613,6 +621,7 @@ impl OperationRequest {
             is_move: false,
             conflict_mode: ConflictMode::Ask,
             archive_passwords: ArchivePasswords::default(),
+            compression: CompressionLevel::Normal,
         }
     }
 
@@ -632,6 +641,7 @@ impl OperationRequest {
             is_move: false,
             conflict_mode: ConflictMode::Ask,
             archive_passwords: ArchivePasswords::default(),
+            compression: CompressionLevel::Normal,
         }
     }
 
@@ -644,6 +654,12 @@ impl OperationRequest {
     /// Set the conflict handling mode.
     pub fn with_conflict_mode(mut self, mode: ConflictMode) -> Self {
         self.conflict_mode = mode;
+        self
+    }
+
+    /// Set how hard a pack compresses.
+    pub fn with_compression(mut self, level: CompressionLevel) -> Self {
+        self.compression = level;
         self
     }
 }

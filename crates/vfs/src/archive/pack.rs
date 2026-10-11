@@ -39,6 +39,35 @@ pub struct PackItem {
     pub modified: Option<SystemTime>,
 }
 
+/// How hard to compress. Each format maps it onto its own scale; a plain
+/// `.tar` ignores it. bzip2 and xz have no stored mode, so `Store` gives
+/// their weakest level; zstd only tells `Store` from the rest, since its
+/// pure-Rust encoder has a single compressing level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CompressionLevel {
+    /// No compression: entries are stored as they are.
+    Store,
+    Fast,
+    #[default]
+    Normal,
+    Best,
+}
+
+impl CompressionLevel {
+    /// Every level, from none to the strongest.
+    pub const ALL: [Self; 4] = [Self::Store, Self::Fast, Self::Normal, Self::Best];
+
+    /// The 0–9 level of the deflate, bzip2 and xz encoders.
+    fn numeric(self) -> u32 {
+        match self {
+            Self::Store => 0,
+            Self::Fast => 1,
+            Self::Normal => 6,
+            Self::Best => 9,
+        }
+    }
+}
+
 /// Progress of a pack run, reported after every chunk.
 #[derive(Debug, Clone, Default)]
 pub struct PackProgress {
@@ -155,11 +184,13 @@ fn mode_of(_meta: &fs::Metadata) -> Option<u32> {
 }
 
 /// Write `items` into a new archive at `dest`, in the format its name asks
-/// for. `progress` runs after every chunk; returning an error (such as
-/// [`VfsError::Cancelled`]) stops the run, and blocking in it pauses it.
+/// for, compressed at `level`. `progress` runs after every chunk; returning
+/// an error (such as [`VfsError::Cancelled`]) stops the run, and blocking in
+/// it pauses it.
 pub fn pack(
     items: &[PackItem],
     dest: &Path,
+    level: CompressionLevel,
     progress: &mut dyn FnMut(&PackProgress) -> VfsResult<()>,
 ) -> VfsResult<()> {
     let format = dest
@@ -189,8 +220,8 @@ pub fn pack(
         aborted: None,
     };
     let written = match format {
-        ArchiveFormat::Zip => write_zip(items, file, &mut state),
-        ArchiveFormat::Tar(compression) => write_tar(items, file, compression, &mut state),
+        ArchiveFormat::Zip => write_zip(items, file, level, &mut state),
+        ArchiveFormat::Tar(compression) => write_tar(items, file, compression, level, &mut state),
         ArchiveFormat::Iso => Err(VfsError::NotSupported(
             "ISO images can be browsed, not packed".to_string(),
         )),
@@ -283,14 +314,27 @@ fn zip_name(name: &Path) -> String {
 /// Header ID of the Info-ZIP extended timestamp field.
 const EXTENDED_TIMESTAMP: u16 = 0x5455;
 
-fn write_zip(items: &[PackItem], file: File, progress: &mut Progress<'_>) -> VfsResult<()> {
+fn write_zip(
+    items: &[PackItem],
+    file: File,
+    level: CompressionLevel,
+    progress: &mut Progress<'_>,
+) -> VfsResult<()> {
     use zip::write::FullFileOptions;
 
+    let (method, numeric) = match level {
+        CompressionLevel::Store => (zip::CompressionMethod::Stored, None),
+        _ => (
+            zip::CompressionMethod::Deflated,
+            Some(i64::from(level.numeric())),
+        ),
+    };
     let mut zip = zip::ZipWriter::new(BufWriter::with_capacity(COPY_BUFFER, file));
     for item in items {
         progress.start(item)?;
         let mut options = FullFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated)
+            .compression_method(method)
+            .compression_level(numeric)
             .large_file(item.size >= u64::from(u32::MAX));
         if let Some(mode) = item.mode {
             options = options.unix_permissions(mode);
@@ -337,9 +381,10 @@ fn write_tar(
     items: &[PackItem],
     file: File,
     compression: TarCompression,
+    level: CompressionLevel,
     progress: &mut Progress<'_>,
 ) -> VfsResult<()> {
-    let mut builder = tar::Builder::new(Compressor::new(file, compression)?);
+    let mut builder = tar::Builder::new(Compressor::new(file, compression, level)?);
     for item in items {
         progress.start(item)?;
         let mut header = tar::Header::new_gnu();
@@ -438,31 +483,32 @@ enum Compressor {
 }
 
 impl Compressor {
-    fn new(file: File, compression: TarCompression) -> io::Result<Self> {
+    fn new(file: File, compression: TarCompression, level: CompressionLevel) -> io::Result<Self> {
         let out = BufWriter::with_capacity(COPY_BUFFER, file);
+        let numeric = level.numeric();
         Ok(match compression {
             TarCompression::None => Self::None(out),
             TarCompression::Gzip => Self::Gzip(flate2::write::GzEncoder::new(
                 out,
-                flate2::Compression::default(),
+                flate2::Compression::new(numeric),
             )),
             TarCompression::Bzip2 => Self::Bzip2(bzip2::write::BzEncoder::new(
                 out,
-                bzip2::Compression::default(),
+                bzip2::Compression::new(numeric.max(1)),
             )),
             TarCompression::Xz => Self::Xz(Box::new(lzma_rust2::XzWriter::new(
                 out,
-                lzma_rust2::XzOptions::with_preset(6),
+                lzma_rust2::XzOptions::with_preset(numeric),
             )?)),
             TarCompression::Zstd => {
+                let zstd_level = match level {
+                    CompressionLevel::Store => ruzstd::encoding::CompressionLevel::Uncompressed,
+                    _ => ruzstd::encoding::CompressionLevel::Fastest,
+                };
                 let (reader, pipe) = io::pipe()?;
                 let worker = std::thread::spawn(move || {
                     let mut out = out;
-                    ruzstd::encoding::compress(
-                        reader,
-                        &mut out,
-                        ruzstd::encoding::CompressionLevel::Fastest,
-                    );
+                    ruzstd::encoding::compress(reader, &mut out, zstd_level);
                     if let Err(e) = out.flush() {
                         // Surfaces as a failed join below.
                         panic!("zstd output: {e}");

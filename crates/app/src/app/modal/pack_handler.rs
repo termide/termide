@@ -6,18 +6,39 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use super::super::App;
+use crate::state::ActiveModal;
 use crate::state::OperationType;
 use termide_file_ops::OperationRequest;
 use termide_ui::path_utils;
+use termide_vfs::archive::pack::CompressionLevel;
 use termide_vfs::archive::ArchiveFormat;
 
 impl App {
+    /// Copy the pack modal's compression row into `PendingAction::PackPaths`
+    /// before the modal closes.
+    pub(in crate::app) fn sync_pack_level(&mut self) {
+        let Some(ActiveModal::EditableSelect(modal)) = &self.state.active_modal else {
+            return;
+        };
+        let Some(index) = modal.choice_index() else {
+            return;
+        };
+        if let Some(termide_state::PendingAction::PackPaths { level, .. }) =
+            &mut self.state.pending_action
+        {
+            if let Some(chosen) = CompressionLevel::ALL.get(index) {
+                *level = *chosen;
+            }
+        }
+    }
+
     /// Start a tracked pack operation into the archive the prompt named.
     /// A relative path is taken from the selection's directory; a
     /// directory gets an archive named after the selection inside it.
     pub(in crate::app) fn handle_pack_paths(
         &mut self,
         sources: Vec<PathBuf>,
+        level: CompressionLevel,
         value: Box<dyn std::any::Any>,
     ) -> Result<()> {
         let Some(input) = value.downcast_ref::<String>() else {
@@ -59,7 +80,7 @@ impl App {
             [single] => single.display().to_string(),
             many => t.status_item_count(many.len()),
         };
-        let request = OperationRequest::pack(sources, archive.clone());
+        let request = OperationRequest::pack(sources, archive.clone()).with_compression(level);
         if let Err(e) = self.start_tracked_operation(
             request,
             Arc::new(termide_vfs::VfsManager::new()),

@@ -170,7 +170,11 @@ mod tests {
         std::fs::write(src.join("a.txt"), "a").unwrap();
         std::fs::write(src.join("sub/b.txt"), "b").unwrap();
         let archive = dir.join(format!("{name}.zip"));
-        let mut pack = PackWorker::new(vec![src], archive.clone());
+        let mut pack = PackWorker::new(
+            vec![src],
+            archive.clone(),
+            termide_vfs::archive::pack::CompressionLevel::Normal,
+        );
         assert!(run(&mut pack, &OperationControl::new()).is_success());
         archive
     }

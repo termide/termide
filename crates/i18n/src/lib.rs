@@ -1430,6 +1430,12 @@ pub trait Translation: Send + Sync {
     fn op_error_not_found(&self) -> &str;
     fn op_error_already_exists(&self) -> &str;
     fn op_error_archive(&self) -> &str;
+    /// Label of the pack modal's compression level row.
+    fn pack_compression_label(&self) -> &str;
+    fn pack_level_store(&self) -> &str;
+    fn pack_level_fast(&self) -> &str;
+    fn pack_level_normal(&self) -> &str;
+    fn pack_level_best(&self) -> &str;
     fn modal_archive_password_title(&self) -> &str;
     fn settings_vault_lock_after(&self) -> &str;
     fn vault_password_title(&self) -> &str;

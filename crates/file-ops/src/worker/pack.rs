@@ -20,13 +20,15 @@ const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 pub struct PackWorker {
     sources: Vec<PathBuf>,
     destination: PathBuf,
+    level: pack::CompressionLevel,
 }
 
 impl PackWorker {
-    pub fn new(sources: Vec<PathBuf>, destination: PathBuf) -> Self {
+    pub fn new(sources: Vec<PathBuf>, destination: PathBuf, level: pack::CompressionLevel) -> Self {
         Self {
             sources,
             destination,
+            level,
         }
     }
 }
@@ -60,7 +62,7 @@ impl OperationWorker for PackWorker {
         let mut speed = SpeedTracker::new();
         let mut last_sent: Option<Instant> = None;
         let mut last = pack::PackProgress::for_items(&items);
-        let result = pack::pack(&items, &self.destination, &mut |p| {
+        let result = pack::pack(&items, &self.destination, self.level, &mut |p| {
             control
                 .check_cancelled()
                 .and_then(|()| control.wait_if_paused())
@@ -115,7 +117,11 @@ mod tests {
         std::fs::write(dir.path().join("docs/a.txt"), "a").unwrap();
         let dest = dir.path().join("docs.tar.gz");
 
-        let mut worker = PackWorker::new(vec![dir.path().join("docs")], dest.clone());
+        let mut worker = PackWorker::new(
+            vec![dir.path().join("docs")],
+            dest.clone(),
+            Default::default(),
+        );
         let result = run(&mut worker, &OperationControl::new());
         assert!(matches!(result, OperationResult::SuccessWithPath(ref p) if *p == dest));
         assert!(dest.is_file());
@@ -129,7 +135,11 @@ mod tests {
         let control = OperationControl::new();
         control.cancel();
 
-        let mut worker = PackWorker::new(vec![dir.path().join("a.txt")], dest.clone());
+        let mut worker = PackWorker::new(
+            vec![dir.path().join("a.txt")],
+            dest.clone(),
+            Default::default(),
+        );
         assert!(matches!(
             run(&mut worker, &control),
             OperationResult::Cancelled
@@ -144,7 +154,11 @@ mod tests {
         let dest = dir.path().join("a.zip");
         std::fs::write(&dest, "keep").unwrap();
 
-        let mut worker = PackWorker::new(vec![dir.path().join("a.txt")], dest.clone());
+        let mut worker = PackWorker::new(
+            vec![dir.path().join("a.txt")],
+            dest.clone(),
+            Default::default(),
+        );
         assert!(matches!(
             run(&mut worker, &OperationControl::new()),
             OperationResult::Failed(_)

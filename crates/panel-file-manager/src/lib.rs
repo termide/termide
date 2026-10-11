@@ -1586,9 +1586,20 @@ mod tests {
         fm.selected = fm.find_entry_index("report.pdf").unwrap();
         fm.execute_command(keyboard::FmCommand::Pack);
         match fm.modal_request.take() {
-            Some((PendingAction::PackPaths { sources }, ActiveModal::EditableSelect(modal))) => {
+            Some((
+                PendingAction::PackPaths { sources, level },
+                ActiveModal::EditableSelect(modal),
+            )) => {
                 assert_eq!(sources, [dir.join("report.pdf")]);
                 assert_eq!(modal.value(), dir.join("report.zip").display().to_string());
+                // The compression row starts at the level the action holds.
+                assert_eq!(level, termide_vfs::archive::pack::CompressionLevel::Normal);
+                assert_eq!(
+                    modal
+                        .choice_index()
+                        .map(|i| termide_vfs::archive::pack::CompressionLevel::ALL[i]),
+                    Some(level)
+                );
             }
             other => panic!("expected the pack prompt, got {:?}", other.map(|(a, _)| a)),
         }

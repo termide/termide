@@ -392,7 +392,11 @@ impl OperationManager {
                         ))
                     }
                 };
-                Ok(Box::new(PackWorker::new(sources, archive)))
+                Ok(Box::new(PackWorker::new(
+                    sources,
+                    archive,
+                    request.compression,
+                )))
             }
 
             OperationType::Unpack => {

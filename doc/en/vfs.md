@@ -210,6 +210,13 @@ suffix picks the format — `.zip`, `.tar`, `.tar.gz`, `.tar.bz2`,
 directory, and a directory gets an archive named after the selection
 inside it.
 
+The **Compression** row under the name (reached with `↓`, changed with
+`←`/`→`, `Space` or a click) picks **None**, **Fast**, **Normal** (the
+default) or **Best**. zip, `.tar.gz`, `.tar.bz2` and `.tar.xz` map them
+to levels 0, 1, 6 and 9; bzip2 and xz have no uncompressed mode, so
+**None** gives their weakest level. `.tar.zst` only tells **None** from
+the rest, and a plain `.tar` is never compressed.
+
 Packing runs in the [Operations panel](operations.md) with progress,
 pause and cancel. Symbolic links are stored as links, not followed;
 permissions and modification times are kept. The archive is written
