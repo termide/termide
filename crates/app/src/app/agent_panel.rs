@@ -2503,8 +2503,30 @@ mod tests {
         );
     }
 
+    /// The applied `[ai]` settings are one per process: the tests that read
+    /// or publish them take turns, and a publisher clears them as it ends.
+    static APPLIED_TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn applied_turn() -> std::sync::MutexGuard<'static, ()> {
+        APPLIED_TURN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Clears the applied settings when dropped, a failed assertion included.
+    struct ClearApplied;
+
+    impl Drop for ClearApplied {
+        fn drop(&mut self) {
+            *APPLIED_AI
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        }
+    }
+
     #[test]
     fn connections_build_and_hand_their_provider_to_delegated_tasks() {
+        let _turn = applied_turn();
         let mut settings = with_cloud();
         // `cloud`'s calls are reviewed by `local`'s model; `local` leaves it
         // to `[ai.auto_reviewer]`, which says the session's model.
@@ -2773,6 +2795,8 @@ mod tests {
 
     #[test]
     fn an_open_panel_offers_the_connections_applied_since() {
+        let _turn = applied_turn();
+        let _clear = ClearApplied;
         let mut built_with = with_cloud();
         built_with.connections.remove("cloud");
         let connections = AiConnections {
@@ -2781,8 +2805,7 @@ mod tests {
             dirs: AgentDirs::new(Path::new("/tmp"), None, None),
         };
         // Applying the settings modal adds `cloud`; the panel offers it at
-        // once. (The same settings the other tests build with, since the
-        // applied ones are shared across the process.)
+        // once.
         publish_ai_settings(&with_cloud());
         let names: Vec<String> = connections.list().into_iter().map(|e| e.name).collect();
         assert_eq!(names, ["cloud", "local"]);
