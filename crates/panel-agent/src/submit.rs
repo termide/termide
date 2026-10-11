@@ -67,17 +67,6 @@ pub(crate) fn parse_duration(token: &str) -> Option<Duration> {
     (n > 0).then(|| Duration::from_secs(n * unit))
 }
 
-/// A short human duration for the loop notice: `45s`, `5m`, `1m30s`.
-pub(crate) fn fmt_secs(secs: u64) -> String {
-    if secs < 60 {
-        format!("{secs}s")
-    } else if secs.is_multiple_of(60) {
-        format!("{}m", secs / 60)
-    } else {
-        format!("{}m{}s", secs / 60, secs % 60)
-    }
-}
-
 /// `/<name> args` at the start of a message: the command name and the
 /// rest. `skill:` may prefix the name (see `slash`). A word with further
 /// slashes (`/usr/bin`) is text, not a command.
@@ -245,7 +234,7 @@ impl AgentPanel {
                 let t = termide_i18n::t();
                 self.notice(
                     match interval {
-                        Some(d) => t.agent_notice_looping_every_fmt(&fmt_secs(d.as_secs())),
+                        Some(d) => t.agent_notice_looping_every_fmt(&termide_i18n::duration(d)),
                         None => t.agent_notice_looping().to_string(),
                     },
                     NoticeKind::Info,
@@ -809,7 +798,7 @@ impl AgentPanel {
             let wait = GOAL_JUDGE_RETRY_DELAY * task.judge_failures;
             task.judge_at = Some(Instant::now() + wait);
             self.notice(
-                t.agent_notice_goal_check_retry_fmt(error, &fmt_secs(wait.as_secs())),
+                t.agent_notice_goal_check_retry_fmt(error, &termide_i18n::duration(wait)),
                 NoticeKind::Warn,
             );
             return;
@@ -834,11 +823,12 @@ impl AgentPanel {
         if let Some(task) = self.loop_task.take() {
             self.withdraw_queued(|message| message.typed() == task.prompt);
         }
-        // A stop already under way needs no second request or notice.
-        if self.is_busy() && !self.stop_requested {
+        // A stop already under way needs no second request. The live line
+        // ticks it while it lasts; the stopped answer then says it was
+        // cancelled, so no notice stays behind.
+        if self.is_busy() && self.stop_requested.is_none() {
             self.runtime.abort();
-            self.stop_requested = true;
-            self.notice(termide_i18n::t().agent_notice_stopping(), NoticeKind::Warn);
+            self.stop_requested = Some(Instant::now());
         }
     }
 

@@ -604,6 +604,7 @@ impl Translation for RuntimeTranslation {
         agent_unfinished_later,
         agent_unfinished_back_to_back,
         agent_run_cut_off,
+        agent_run_cancelled,
         agent_close_confirm_working,
         agent_notice_loop_stopped,
         agent_notice_loop_usage,
@@ -614,6 +615,7 @@ impl Translation for RuntimeTranslation {
         agent_notice_goal_checking,
         agent_notice_handoff_preparing,
         agent_notice_stopping,
+        agent_notice_restarted_after_stop,
         agent_notice_goal_stopped_failed,
         agent_notice_compacting,
         agent_failure_transient,
@@ -667,10 +669,10 @@ impl Translation for RuntimeTranslation {
         agent_no_prompts,
         agent_undo,
         agent_thinking,
-        agent_unit_secs,
-        agent_unit_mins,
-        agent_unit_hours,
-        agent_unit_days,
+        time_unit_secs,
+        time_unit_mins,
+        time_unit_hours,
+        time_unit_days,
         agent_unit_tok_per_sec,
         agent_tool_bash,
         agent_pick_connection,
@@ -813,9 +815,6 @@ impl Translation for RuntimeTranslation {
         settings_kb_hint_capturing_replace,
         projects_title,
         time_just_now,
-        time_short_hours,
-        time_short_minutes,
-        time_short_seconds,
         status_dir,
         status_file,
         status_mod,
@@ -1645,6 +1644,7 @@ impl Translation for RuntimeTranslation {
     fn fm_pack_exists(&self, name: &str) -> String {
         self.format("fm_pack_exists", &[("name", name)])
     }
+
     fn fm_unpack_prompt(&self, name: &str) -> String {
         self.format("fm_unpack_prompt", &[("name", name)])
     }
@@ -2158,10 +2158,6 @@ impl Translation for RuntimeTranslation {
         self.format("op_speed_rate", &[("speed", speed)])
     }
 
-    fn op_elapsed(&self, time: &str) -> String {
-        self.format("op_elapsed", &[("time", time)])
-    }
-
     fn git_action_files_fmt(&self, action: &str, count: usize) -> String {
         let plural = self.pluralize(count, "file");
         self.format(
@@ -2498,36 +2494,30 @@ mod tests {
         }
     }
 
-    /// Every language must carry its own compact duration units — a missing key
+    /// Every language must carry its own duration units — a missing key
     /// silently falls back to English, which is the bug these replaced.
     #[test]
-    fn compact_duration_units_are_translated_everywhere() {
-        let english = RuntimeTranslation::new("en").unwrap();
-        let (en_h, en_m, en_s) = (
-            english.time_short_hours().to_string(),
-            english.time_short_minutes().to_string(),
-            english.time_short_seconds().to_string(),
-        );
-
+    fn duration_units_are_translated_everywhere() {
+        let units = |t: &RuntimeTranslation| {
+            [
+                t.time_unit_days().to_string(),
+                t.time_unit_hours().to_string(),
+                t.time_unit_mins().to_string(),
+                t.time_unit_secs().to_string(),
+            ]
+        };
+        let english = units(&RuntimeTranslation::new("en").unwrap());
         for (code, _) in crate::SUPPORTED_LANGUAGES {
-            let t = RuntimeTranslation::new(code).unwrap();
-            for unit in [
-                t.time_short_hours(),
-                t.time_short_minutes(),
-                t.time_short_seconds(),
-            ] {
-                assert!(!unit.is_empty(), "{code}: missing a duration unit");
-            }
+            let own = units(&RuntimeTranslation::new(code).unwrap());
+            assert!(
+                own.iter().all(|unit| !unit.is_empty()),
+                "{code}: missing a duration unit"
+            );
             // Latin-script languages legitimately share some units with
             // English; the ones with their own script must not.
             if ["ru", "zh", "ja", "ko", "th", "hi", "bn"].contains(code) {
                 assert_ne!(
-                    (
-                        t.time_short_hours(),
-                        t.time_short_minutes(),
-                        t.time_short_seconds()
-                    ),
-                    (en_h.as_str(), en_m.as_str(), en_s.as_str()),
+                    own, english,
                     "{code}: duration units left as the English fallback"
                 );
             }

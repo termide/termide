@@ -482,7 +482,18 @@ closed by the next request). Claude Code, Codex and Gemini CLI run their own
 loop, which cannot stop between steps: they show `[■]` alone, and `/pause` says so. The
 controls take the panel border's accent color at rest; `[▶]` is green. Once `[■]` (or `Esc`) is pressed,
 a stop cannot be taken back: until the run has actually stopped, only a red
-`[■]` stays, and pressing it again does nothing.
+`[■]` stays, and pressing it again does nothing. Meanwhile the run clock gives
+way to `stopping… ✻ 2s`, ticking how long the stop takes; once it is done, the
+stopped answer ends on `✗ cancelled` with its time and status, and nothing else
+is left behind. An external agent stopped before it answered anything is
+started anew on the same session, with a notice saying so: its adapter may
+otherwise go on with the cancelled request out of sight and keep the next one
+waiting behind it.
+
+Every ticking timer in termide — the run clock, a subagent's, a pause, a
+stop, a file operation's, a remote connection's — shows the same `✻` spinner
+and the same duration: whole seconds, as the two largest parts (`45s`,
+`1m13s`, `2h5m`, `3d4h`), a zero smaller part left out (`5m`, `1h`).
 
 Closing the panel or termide does not end the work under way for good. While
 a run, a `/goal` or a `/loop` is going, closing the panel or quitting asks

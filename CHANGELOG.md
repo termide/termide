@@ -12,9 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A CLI agent's models in the settings.** Opening a Claude Code, Codex or Gemini CLI connection lists the models of its sign-in in the model dropdown, and the field shows a spinner while any connection's models load.
 
 ### Changed
+- **One ticking timer everywhere.** The agent's run clock, subagents, pauses, `/loop` countdowns, the file operations panel and a remote connection's status all show the same `✻` spinner beside the same duration: whole seconds as the two largest parts (`45s`, `1m13s`, `2h5m`, `3d4h`), a zero smaller part left out (`5m`, `1h`). The operations panel and the `/loop` interval used other formats before (`1h 10m 5s`, an untranslated `60m`).
+- **A stop reads as one line, then one status.** While a run stops, the run clock gives way to `stopping… ✻ 2s`; the stopped answer then ends on a translated `✗ cancelled` with its time and status. The `stopping…` notice and the provider's raw `aborted` no longer both stay in the transcript, and sessions reopened from the log show `cancelled` too.
 - **An active `/goal` and `/loop` stay in sight.** The state strip above the input pins a row for each while it goes on, beside the running subagents: `◎ /goal …` with its turn count (and the judge's check while it runs), `↺ /loop …` with its run count and the countdown to its next run.
 
 ### Fixed
+- **A Claude Code request sent right after a quick stop no longer hangs.** Stopped before it answered anything, Claude Code's ACP adapter could go on with the cancelled prompt out of sight and keep the next one waiting behind it. An external agent stopped before its first reply is now started anew on the same session, which also ends the hidden work, and the transcript says so.
 - **The `/goal` check shows that it is working.** While the judge decides, the transcript shows the live line a model message has: the ticking clock, and with the built-in agent the reading progress (`⏫`) and the answer's tokens. A long check on a local model no longer looks hung.
 - **An active `/goal` or `/loop` rings the bell at its end only.** A run the goal's judge or the loop's next run follows rings no bell, however long it took; the goal reached, given up, paused or failed, and the loop ended at its cap, ring.
 - **A bare `/goal` or `/loop` no longer stops the active one.** It reports it — the goal and its turn, or the loop, its run and the wait for the next — and shows the usage when nothing is active. Only `stop` (or `off`) ends either.

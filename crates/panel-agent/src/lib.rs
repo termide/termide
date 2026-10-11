@@ -847,6 +847,13 @@ pub struct AgentPanel {
     /// The external agent was started anew for the current request already,
     /// so a second death is asked about rather than restarted again.
     restarted: bool,
+    /// The agent has answered the current run in some way — text, reasoning
+    /// or a tool call — so a stop interrupts work it has taken in.
+    run_heard: bool,
+    /// An external agent was stopped before it answered anything: an ACP
+    /// adapter may still run the cancelled prompt hidden, and hold the next
+    /// one behind it, so the agent is started anew once it is free.
+    restart_due: bool,
     /// A run ended or a question arrived since the panel was last rendered
     /// focused; its header is highlighted while it is unfocused.
     attention: bool,
@@ -861,9 +868,9 @@ pub struct AgentPanel {
     /// A `/pause` was asked for and the run has not reached a step boundary
     /// yet; shown in the state strip.
     pause_requested: bool,
-    /// A stop was asked for and the run has not ended yet; the stop control
-    /// is red until it does.
-    stop_requested: bool,
+    /// When a stop was asked for, while the run has not ended yet: the stop
+    /// control is red and the live line ticks how long the stop takes.
+    stop_requested: Option<Instant>,
     /// When the current pause began, while the run is paused: its closing
     /// line ticks the pause's length until `/continue`.
     pause_start: Option<Instant>,
@@ -1148,12 +1155,14 @@ impl AgentPanel {
             retry_attempts: 0,
             retry_ready: false,
             restarted: false,
+            run_heard: false,
+            restart_due: false,
             attention: false,
             rung: false,
             host_focused: true,
             run_paused: false,
             pause_requested: false,
-            stop_requested: false,
+            stop_requested: None,
             pause_start: None,
             resuming: false,
             restored: None,

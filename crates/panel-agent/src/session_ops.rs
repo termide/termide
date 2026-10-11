@@ -177,7 +177,7 @@ impl AgentPanel {
         self.adopt_logged_autorun();
         self.run_start_due = false;
         self.pause_requested = false;
-        self.stop_requested = false;
+        self.stop_requested = None;
         self.context_tokens = 0;
         // What the previous agent stated is not this one's.
         self.acp_has_models = false;

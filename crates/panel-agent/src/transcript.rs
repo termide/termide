@@ -1005,37 +1005,24 @@ fn push_time_meta(
     lines.push(right_meta(width, meta));
 }
 
-/// A duration in whole seconds with localized units, as its two largest
-/// parts: `2s` under a minute, `1m13s` under an hour, `2h5m` under a day,
-/// `3d4h` beyond. Tenths add no useful information here.
 /// What a subagent spent, as the session's totals show tokens.
 fn spent_label(spent: &termide_agent_core::Usage) -> String {
     crate::token_label(spent.uncached(), spent.cache_read, spent.output)
 }
 
-pub(crate) fn fmt_dur(ms: u32) -> String {
-    let t = termide_i18n::t();
-    let total = (u64::from(ms) + 500) / 1000;
-    let (mins, secs) = (total / 60, total % 60);
-    let (hours, mins_left) = (mins / 60, mins % 60);
-    let (days, hours_left) = (hours / 24, hours % 24);
-    if mins == 0 {
-        format!("{secs}{}", t.agent_unit_secs())
-    } else if hours == 0 {
-        format!("{mins}{}{secs}{}", t.agent_unit_mins(), t.agent_unit_secs())
-    } else if days == 0 {
-        format!(
-            "{hours}{}{mins_left}{}",
-            t.agent_unit_hours(),
-            t.agent_unit_mins()
-        )
-    } else {
-        format!(
-            "{days}{}{hours_left}{}",
-            t.agent_unit_days(),
-            t.agent_unit_hours()
-        )
+/// The error an answer shows under it: an answer the user stopped says it
+/// was cancelled, in the user's language, rather than the provider's
+/// `aborted`; any other failure shows its own message.
+pub(crate) fn shown_error(assistant: &termide_agent_core::AssistantMessage) -> Option<String> {
+    if assistant.stop_reason == termide_agent_core::StopReason::Aborted {
+        return Some(termide_i18n::t().agent_run_cancelled().to_string());
     }
+    assistant.error_message.clone()
+}
+
+/// A duration in ms as every timer shows it (see [`termide_i18n::duration`]).
+pub(crate) fn fmt_dur(ms: u32) -> String {
+    termide_i18n::duration(std::time::Duration::from_millis(u64::from(ms)))
 }
 
 /// Average token throughput for a phase, localized (e.g. `88 tok/s`).
@@ -2402,13 +2389,9 @@ fn annotation(
 /// The mark of a paused run, on its closing line and in the state strip.
 pub(crate) const PAUSED_GLYPH: &str = "‖";
 
-/// The frames of the live run clock, swelling and shrinking back; it comes to
-/// rest on [`RUN_GLYPH`] when the run ends.
-pub(crate) const RUN_FRAMES: [&str; 10] = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
-
 /// The glyph of a run's total time: the live clock at rest, on the answer that
 /// closed the run or on its closing line.
-pub(crate) const RUN_GLYPH: &str = "✻";
+pub(crate) const RUN_GLYPH: &str = termide_config::constants::TICK_GLYPH;
 
 /// The text of a run's closing line after its glyph: `3m41s · 21:03:41`, or
 /// the duration alone for a pause, which carries no time of day.
@@ -3250,14 +3233,6 @@ mod tests {
         assert!(transcript.toggle_expanded(0));
         let lines = text_of(transcript.lines(40, &colors, false));
         assert!(lines.iter().any(|l| l.contains("🕒") && l.contains('✗')));
-    }
-
-    #[test]
-    fn durations_grow_into_hours_and_days() {
-        assert_eq!(fmt_dur(1_400), "1s");
-        assert_eq!(fmt_dur(73_000), "1m13s");
-        assert_eq!(fmt_dur((2 * 3600 + 5 * 60 + 30) * 1000), "2h5m");
-        assert_eq!(fmt_dur((3 * 86_400 + 4 * 3600) * 1000), "3d4h");
     }
 
     #[test]

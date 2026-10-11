@@ -2,7 +2,9 @@
 //! run controls and state strip, and the status-bar segments.
 
 use crate::runtime::local_minute;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+use termide_config::constants::tick_frame;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
@@ -11,7 +13,6 @@ use ratatui::text::{Line, Span};
 use termide_core::{RenderContext, SegmentKind, StatusSegment, ThemeColors};
 use termide_ui::ScrollBar;
 
-use crate::submit::fmt_secs;
 use crate::toolset::TOOLSET_ACTION;
 use crate::{
     format_tokens, provider_label, shorten_path, single_line, transcript, truncate_title,
@@ -106,9 +107,8 @@ pub(crate) fn task_strip(
     let cut = |text: &str, room: usize| termide_ui::path_utils::truncate_right(text, room);
     let mut lines = Vec::new();
     for (agent, prompt, progress, ms) in tasks.iter().take(STATE_QUEUED_ROWS) {
-        let frames = transcript::RUN_FRAMES;
-        let frame = (*ms / 120) as usize % frames.len();
-        let clock = format!(" {} {}", frames[frame], transcript::fmt_dur(*ms));
+        let frame = tick_frame(Duration::from_millis(u64::from(*ms)));
+        let clock = format!(" {frame} {}", transcript::fmt_dur(*ms));
         // What it does now takes at most a third of the row, so the task
         // itself stays readable.
         let progress = cut(progress, width / 3);
@@ -134,7 +134,7 @@ pub(crate) fn task_strip(
             spans.push(Span::styled(format!(" {progress}"), dim));
         }
         spans.push(Span::styled(
-            format!(" {}", frames[frame]),
+            format!(" {frame}"),
             accent.add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(format!(" {}", transcript::fmt_dur(*ms)), dim));
@@ -289,7 +289,7 @@ impl AgentPanel {
         let task = self.loop_task.as_ref()?;
         let t = termide_i18n::t();
         let interval = match task.interval {
-            Some(d) => fmt_secs(d.as_secs()),
+            Some(d) => termide_i18n::duration(d),
             None => t.agent_unfinished_back_to_back().to_string(),
         };
         let mut line = t.agent_unfinished_loop_fmt(
@@ -310,7 +310,11 @@ impl AgentPanel {
     fn loop_wait(&self) -> Option<String> {
         let at = self.loop_task.as_ref()?.next_at?;
         let left = at.saturating_duration_since(Instant::now());
-        (!left.is_zero()).then(|| fmt_secs(left.as_secs() + u64::from(left.subsec_nanos() > 0)))
+        (!left.is_zero()).then(|| {
+            termide_i18n::duration(Duration::from_secs(
+                left.as_secs() + u64::from(left.subsec_nanos() > 0),
+            ))
+        })
     }
 
     /// The state strip's rows for an active goal and loop (see
@@ -338,7 +342,7 @@ impl AgentPanel {
         }
         if let Some(task) = &self.loop_task {
             let label = match task.interval {
-                Some(d) => t.agent_autorun_loop_every_fmt(&fmt_secs(d.as_secs())),
+                Some(d) => t.agent_autorun_loop_every_fmt(&termide_i18n::duration(d)),
                 None => t.agent_autorun_loop().to_string(),
             };
             let count = format!("{}/{LOOP_MAX_ITERATIONS}", task.iterations);
@@ -397,6 +401,29 @@ impl AgentPanel {
     /// check, an animated spinner. Sits after the last block, animating on the
     /// panel's ~10 fps redraw while busy; `None` when idle.
     pub(crate) fn live_footer_lines(&self, width: u16) -> Vec<Line<'static>> {
+        // A stop under way: the line ticks how long the stop takes, in place
+        // of the run clock and whatever the turn was doing.
+        if let Some(stopping) = self.stop_requested.filter(|_| self.is_busy()) {
+            let elapsed = stopping.elapsed();
+            let warn = Style::default().fg(self.colors.warning);
+            return vec![transcript::right_meta(
+                width,
+                vec![
+                    Span::styled(
+                        format!("{} ", termide_i18n::t().agent_notice_stopping()),
+                        warn,
+                    ),
+                    Span::styled(
+                        format!("{} ", tick_frame(elapsed)),
+                        warn.add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        termide_i18n::duration(elapsed),
+                        Style::default().fg(self.colors.disabled),
+                    ),
+                ],
+            )];
+        }
         let Some(activity) = self.activity.as_ref() else {
             return Vec::new();
         };
@@ -478,13 +505,11 @@ impl AgentPanel {
         let elapsed = self
             .run_start
             .map_or_else(|| activity.msg_start.elapsed(), |start| start.elapsed());
-        let frames = transcript::RUN_FRAMES;
-        let frame = (elapsed.as_millis() / 120) as usize % frames.len();
         lines.push(transcript::right_meta(
             width,
             vec![
                 Span::styled(
-                    format!("{} ", frames[frame]),
+                    format!("{} ", tick_frame(elapsed)),
                     Style::default()
                         .fg(self.colors.info)
                         .add_modifier(Modifier::BOLD),
@@ -819,7 +844,7 @@ impl AgentPanel {
     /// idle.
     pub(crate) fn run_buttons(&self) -> Vec<RunButton> {
         let paused = (self.paused || self.retry_wait.is_some()) && !self.is_busy();
-        if self.is_busy() && self.stop_requested {
+        if self.is_busy() && self.stop_requested.is_some() {
             vec![RunButton::Stop]
         } else if paused || (self.is_busy() && self.pause_requested) {
             vec![RunButton::Continue, RunButton::Stop]
@@ -845,7 +870,7 @@ impl AgentPanel {
         match button {
             RunButton::Pause => self.colors.border_focused,
             RunButton::Continue => self.colors.success,
-            RunButton::Stop if self.stop_requested => self.colors.error,
+            RunButton::Stop if self.stop_requested.is_some() => self.colors.error,
             RunButton::Stop => self.colors.border_focused,
         }
     }

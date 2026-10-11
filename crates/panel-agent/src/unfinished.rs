@@ -15,7 +15,6 @@ use termide_ui::ChoiceForm;
 
 use crate::pending::Pending;
 use crate::runtime::{hms_from_millis, push_history};
-use crate::submit::fmt_secs;
 use crate::transcript::Item;
 use crate::{single_line, truncate_title, AgentPanel, GoalTask, LoopTask, LOOP_MAX_ITERATIONS};
 
@@ -231,7 +230,7 @@ impl AgentPanel {
         }
         if let Some(repeat) = &autorun.repeat {
             let interval = match repeat.interval_ms {
-                Some(ms) => fmt_secs(ms / 1000),
+                Some(ms) => termide_i18n::duration(Duration::from_millis(ms)),
                 None => t.agent_unfinished_back_to_back().to_string(),
             };
             let mut line = t.agent_unfinished_loop_fmt(
@@ -242,7 +241,9 @@ impl AgentPanel {
             );
             if let Some(due) = repeat.due_ms.filter(|&due| due > now) {
                 line.push_str(", ");
-                line.push_str(&t.agent_unfinished_loop_due_fmt(&fmt_secs((due - now) / 1000)));
+                line.push_str(&t.agent_unfinished_loop_due_fmt(&termide_i18n::duration(
+                    Duration::from_millis(due - now),
+                )));
             }
             detail.push(line);
         }

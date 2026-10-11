@@ -420,7 +420,7 @@ pub(crate) fn push_history(transcript: &mut Transcript, logged: &LoggedMessage) 
             // when the reasoning already stands for the turn (a tool-only turn),
             // so no phantom block is left behind.
             let answer = assistant.plain_text();
-            let error = assistant.error_message.clone();
+            let error = transcript::shown_error(assistant);
             if !answer.trim().is_empty() || !has_thinking || error.is_some() {
                 transcript.push(Item::Assistant {
                     text: answer,

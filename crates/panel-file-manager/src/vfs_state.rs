@@ -190,10 +190,10 @@ impl VfsState {
     }
 
     /// Get connection status with elapsed time.
-    /// Returns (status_message, elapsed_seconds) if connecting.
-    pub fn connection_status_with_elapsed(&self) -> Option<(String, Option<u64>)> {
+    /// Returns (status_message, elapsed) if connecting.
+    pub fn connection_status_with_elapsed(&self) -> Option<(String, Option<std::time::Duration>)> {
         if let Some(status) = &self.connection_status {
-            let elapsed = self.connection_started.map(|t| t.elapsed().as_secs());
+            let elapsed = self.connection_started.map(|t| t.elapsed());
             Some((status.clone(), elapsed))
         } else {
             None

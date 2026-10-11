@@ -70,6 +70,15 @@ impl AgentPanel {
 
     /// Apply one runtime event to the transcript and the session log.
     pub(crate) fn apply(&mut self, event: AgentEvent) {
+        if matches!(
+            event,
+            AgentEvent::MessageStart { .. }
+                | AgentEvent::MessageUpdate(_)
+                | AgentEvent::ToolExecutionStart { .. }
+                | AgentEvent::ToolCallUpdate { .. }
+        ) {
+            self.run_heard = true;
+        }
         match event {
             AgentEvent::AgentStart => {
                 self.busy = true;
@@ -83,6 +92,7 @@ impl AgentPanel {
                     self.run_failed = false;
                 }
                 self.last_failure = None;
+                self.run_heard = false;
                 self.run_paused = false;
                 // A pause taken up from the log ends with any run that starts.
                 self.restored = None;
@@ -100,12 +110,15 @@ impl AgentPanel {
                 self.activity = None;
                 self.log_run_end();
                 // A failure is acted on unless the user stopped the run.
-                let failure = self.last_failure.take().filter(|_| !self.stop_requested);
+                let failure = self
+                    .last_failure
+                    .take()
+                    .filter(|_| self.stop_requested.is_none());
                 // A stop was the user's own doing, so they are there.
                 let long = self
                     .run_start
                     .is_some_and(|start| start.elapsed() >= LONG_RUN);
-                let ring = long && !self.stop_requested;
+                let ring = long && self.stop_requested.is_none();
                 if self.run_paused {
                     // The run waits at a pause: its line ticks the pause's
                     // length (no time of day), and the run's own clock stays
@@ -121,7 +134,10 @@ impl AgentPanel {
                     );
                 }
                 self.pause_requested = false;
-                self.stop_requested = false;
+                if self.external && self.stop_requested.is_some() && !self.run_heard {
+                    self.restart_due = true;
+                }
+                self.stop_requested = None;
                 self.set_queued(self.runtime.queue_lens());
                 if let Some(store) = &self.checkpoints {
                     store
@@ -340,7 +356,7 @@ impl AgentPanel {
                         let answer_cost = if had_thinking { None } else { cost };
                         self.transcript.finish_assistant(
                             assistant.plain_text(),
-                            error,
+                            transcript::shown_error(assistant),
                             answer_cost,
                             at,
                             had_thinking,
@@ -568,6 +584,22 @@ impl AgentPanel {
         }
     }
 
+    /// Start an external agent anew once a stop before its first reply has
+    /// ended (see `restart_due`), on the same session; `true` when it did.
+    fn restart_after_early_stop(&mut self) -> bool {
+        if !self.restart_due || self.is_busy() {
+            return false;
+        }
+        self.restart_due = false;
+        let session = self.session.take();
+        self.switch_session(session);
+        self.notice(
+            termide_i18n::t().agent_notice_restarted_after_stop(),
+            NoticeKind::Info,
+        );
+        true
+    }
+
     /// The body of [`Panel::tick`]: drain the runtime's events, poll the
     /// cards, pickers and probes, and run a due `/loop` or `/goal` step.
     pub(crate) fn on_tick(&mut self) -> Vec<PanelEvent> {
@@ -604,6 +636,7 @@ impl AgentPanel {
             self.apply(event);
             changed = true;
         }
+        changed |= self.restart_after_early_stop();
         changed |= self.take_reviewer_spent();
         let mut events = self.poll_permissions();
         events.append(&mut self.poll_questions());

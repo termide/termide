@@ -19,6 +19,28 @@ pub fn spinner_frame() -> &'static str {
     SPINNER_FRAMES[frame_idx]
 }
 
+/// The frames of a ticking timer's spinner, swelling and shrinking back: the
+/// glyph beside every running clock (`✻ 1m13s`), its time formatted by
+/// `termide_i18n::duration`. Plain loading without a clock keeps
+/// [`SPINNER_FRAMES`].
+pub const TICK_FRAMES: [&str; 10] = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
+
+/// A ticking timer's glyph at rest, once what it timed has ended.
+pub const TICK_GLYPH: &str = "✻";
+
+/// How long each [`TICK_FRAMES`] frame stays up.
+const TICK_FRAME_MS: u128 = 120;
+
+/// The spinner frame of a timer that has run for `elapsed`, so it turns in
+/// step with its own clock.
+#[must_use]
+pub fn tick_frame(elapsed: std::time::Duration) -> &'static str {
+    TICK_FRAMES[(elapsed.as_millis() / TICK_FRAME_MS) as usize % TICK_FRAMES.len()]
+}
+
+/// How often a view with a ticking timer redraws, so its spinner turns.
+pub const TICK_REDRAW: std::time::Duration = std::time::Duration::from_millis(120);
+
 /// File sizes.
 pub const KILOBYTE: u64 = 1024;
 pub const MEGABYTE: u64 = KILOBYTE * 1024;

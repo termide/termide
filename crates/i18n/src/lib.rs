@@ -700,6 +700,9 @@ pub trait Translation: Send + Sync {
     fn agent_unfinished_later(&self) -> &str;
     fn agent_unfinished_back_to_back(&self) -> &str;
     fn agent_run_cut_off(&self) -> &str;
+    /// Agent transcript: what an answer the user stopped shows in place of
+    /// an error.
+    fn agent_run_cancelled(&self) -> &str;
     fn agent_close_confirm_working(&self) -> &str;
     fn agent_notice_loop_stopped(&self) -> &str;
     fn agent_notice_loop_usage(&self) -> &str;
@@ -792,6 +795,9 @@ pub trait Translation: Send + Sync {
     fn agent_notice_goal_checking(&self) -> &str;
     fn agent_notice_handoff_preparing(&self) -> &str;
     fn agent_notice_stopping(&self) -> &str;
+    /// Agent panel: an external agent stopped before its first reply was
+    /// started anew, so it cannot go on with the cancelled request.
+    fn agent_notice_restarted_after_stop(&self) -> &str;
     fn agent_notice_goal_stopped_failed(&self) -> &str;
     fn agent_notice_compacting(&self) -> &str;
     /// Agent panel: the title of the card after a failed run, by kind.
@@ -982,14 +988,14 @@ pub trait Translation: Send + Sync {
     fn agent_more_lines_above(&self, count: usize) -> String;
     /// Agent transcript: hidden lines below a folded message/output preview.
     fn agent_more_lines(&self, count: usize) -> String;
-    /// Agent transcript: unit for seconds in a block's meta line.
-    fn agent_unit_secs(&self) -> &str;
-    /// Agent transcript: unit for minutes in a block's meta line.
-    fn agent_unit_mins(&self) -> &str;
-    /// Agent transcript: unit for hours in a block's meta line.
-    fn agent_unit_hours(&self) -> &str;
-    /// Agent transcript: unit for days in a block's meta line.
-    fn agent_unit_days(&self) -> &str;
+    /// Unit suffix for seconds in a duration (see [`duration`]), e.g. `s`.
+    fn time_unit_secs(&self) -> &str;
+    /// Unit suffix for minutes in a duration, e.g. `m`.
+    fn time_unit_mins(&self) -> &str;
+    /// Unit suffix for hours in a duration, e.g. `h`.
+    fn time_unit_hours(&self) -> &str;
+    /// Unit suffix for days in a duration, e.g. `d`.
+    fn time_unit_days(&self) -> &str;
     /// Agent transcript: tokens-per-second unit in a block's meta line.
     fn agent_unit_tok_per_sec(&self) -> &str;
     /// Agent transcript: the action verb after a shell call's `$`.
@@ -1276,12 +1282,6 @@ pub trait Translation: Send + Sync {
 
     // Relative time
     fn time_just_now(&self) -> &str;
-    /// Compact unit suffix for hours in a duration, e.g. `h`.
-    fn time_short_hours(&self) -> &str;
-    /// Compact unit suffix for minutes in a duration, e.g. `m`.
-    fn time_short_minutes(&self) -> &str;
-    /// Compact unit suffix for seconds in a duration, e.g. `s`.
-    fn time_short_seconds(&self) -> &str;
     fn time_minutes_ago(&self, count: usize) -> String;
     fn time_hours_ago(&self, count: usize) -> String;
     fn time_days_ago(&self, count: usize) -> String;
@@ -1395,7 +1395,6 @@ pub trait Translation: Send + Sync {
     fn op_files_progress(&self, current: usize, total: usize) -> String;
     fn op_data_progress(&self, current: &str, total: &str) -> String;
     fn op_speed_rate(&self, speed: &str) -> String;
-    fn op_elapsed(&self, time: &str) -> String;
 
     // Modal titles
     fn modal_confirm_title(&self) -> &str;
@@ -1686,31 +1685,32 @@ pub fn relative_age(seconds: u64) -> String {
     }
 }
 
-/// Localized compact duration for an elapsed-time counter: `5s`, `2m 5s`,
-/// `1h 02m 05s`, with unit suffixes from the current translation.
+/// A duration as every timer in termide shows it: whole seconds (rounded)
+/// with localized units, as its two largest parts — `45s` under a minute,
+/// `1m13s` under an hour, `2h5m` under a day, `3d4h` beyond — and a zero
+/// smaller part left out (`5m`, `2h`).
 ///
 /// Distinct from [`relative_age`], which says how long *ago* something
-/// happened. This one counts how long something has been running, so the
-/// units are suffixes rather than a phrase.
+/// happened: this one counts how long something lasts or has been running.
 #[must_use]
-pub fn compact_duration(seconds: u64) -> String {
+pub fn duration(elapsed: std::time::Duration) -> String {
     let tr = t();
-    let (hours, minutes, secs) = (seconds / 3_600, (seconds % 3_600) / 60, seconds % 60);
-    if hours > 0 {
-        format!(
-            "{hours}{} {minutes}{} {secs}{}",
-            tr.time_short_hours(),
-            tr.time_short_minutes(),
-            tr.time_short_seconds()
-        )
-    } else if minutes > 0 {
-        format!(
-            "{minutes}{} {secs}{}",
-            tr.time_short_minutes(),
-            tr.time_short_seconds()
-        )
+    let total = (elapsed.as_millis() + 500) / 1000;
+    let (mins, secs) = (total / 60, total % 60);
+    let (hours, mins_left) = (mins / 60, mins % 60);
+    let (days, hours_left) = (hours / 24, hours % 24);
+    let parts = if mins == 0 {
+        (secs, tr.time_unit_secs(), 0, "")
+    } else if hours == 0 {
+        (mins, tr.time_unit_mins(), secs, tr.time_unit_secs())
+    } else if days == 0 {
+        (hours, tr.time_unit_hours(), mins_left, tr.time_unit_mins())
     } else {
-        format!("{secs}{}", tr.time_short_seconds())
+        (days, tr.time_unit_days(), hours_left, tr.time_unit_hours())
+    };
+    match parts {
+        (big, big_unit, 0, _) => format!("{big}{big_unit}"),
+        (big, big_unit, small, small_unit) => format!("{big}{big_unit}{small}{small_unit}"),
     }
 }
 
@@ -1763,7 +1763,8 @@ pub fn get_language_name(code: &str) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{compact_duration, relative_age};
+    use super::{duration, relative_age};
+    use std::time::Duration;
 
     // `relative_age` falls back to the built-in English translation when no
     // language is initialized, so these assert the English bucket wording.
@@ -1780,16 +1781,19 @@ mod tests {
         assert_eq!(relative_age(31_536_000), "1 year ago");
     }
 
-    /// Elapsed counters used to hard-code `h`/`m`/`s`, which stayed English in
-    /// every locale. The units now come from the translation; with none
-    /// initialized these assert the English fallback.
+    /// The units come from the translation; with none initialized these
+    /// assert the English fallback.
     #[test]
-    fn compact_duration_scales_units() {
-        assert_eq!(compact_duration(0), "0s");
-        assert_eq!(compact_duration(45), "45s");
-        assert_eq!(compact_duration(60), "1m 0s");
-        assert_eq!(compact_duration(125), "2m 5s");
-        assert_eq!(compact_duration(3_600), "1h 0m 0s");
-        assert_eq!(compact_duration(4_205), "1h 10m 5s");
+    fn durations_show_their_two_largest_parts() {
+        let ms = |ms: u64| duration(Duration::from_millis(ms));
+        assert_eq!(ms(0), "0s");
+        assert_eq!(ms(1_400), "1s");
+        assert_eq!(ms(45_000), "45s");
+        assert_eq!(ms(60_000), "1m");
+        assert_eq!(ms(73_000), "1m13s");
+        assert_eq!(ms(3_600_000), "1h");
+        assert_eq!(ms((2 * 3600 + 5 * 60 + 30) * 1000), "2h5m");
+        assert_eq!(ms((3 * 86_400 + 4 * 3600) * 1000), "3d4h");
+        assert_eq!(ms(2 * 86_400_000 + 59_000), "2d");
     }
 }

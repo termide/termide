@@ -22,7 +22,8 @@ impl FileManager {
         }
 
         // Check for VFS connection timeout (cancel stuck connections)
-        if let Some((status, Some(secs))) = self.vfs.connection_status_with_elapsed() {
+        if let Some((status, Some(elapsed))) = self.vfs.connection_status_with_elapsed() {
+            let secs = elapsed.as_secs();
             // Opening an archive is local work that can legitimately take a
             // while for a big compressed tar; Esc still cancels it.
             if secs >= self.cached_vfs_timeout_secs && !self.vfs.current_path().is_archive() {
@@ -43,7 +44,12 @@ impl FileManager {
                 }
             } else if !self.is_stale {
                 // Show connection progress in status bar (no early return — must reach vfs.tick)
-                events.push(PanelEvent::ShowMessage(format!("{} {}s", status, secs)));
+                // The ticking timer every running clock shows.
+                events.push(PanelEvent::ShowMessage(format!(
+                    "{status} {} {}",
+                    termide_config::constants::tick_frame(elapsed),
+                    termide_i18n::duration(elapsed)
+                )));
             }
         }
 

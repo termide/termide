@@ -58,11 +58,23 @@ impl App {
             return;
         }
         self.state.operations_panel_dirty = true;
-        // Force redraw every 1s to update elapsed time display in operation cards
+        // Redraw on the ticking timer's cadence while an operation runs, so
+        // its spinner turns; once a second while all are paused, for the
+        // elapsed time alone.
+        let interval = if self
+            .state
+            .active_operations
+            .values()
+            .any(|op| !op.is_paused)
+        {
+            termide_config::constants::TICK_REDRAW
+        } else {
+            std::time::Duration::from_secs(1)
+        };
         let should_redraw = self
             .state
             .last_operations_elapsed_redraw
-            .is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1));
+            .is_none_or(|t| t.elapsed() >= interval);
         if should_redraw {
             self.state.last_operations_elapsed_redraw = Some(std::time::Instant::now());
             self.state.needs_redraw = true;

@@ -1002,7 +1002,7 @@ fn a_run_the_user_stopped_rings_no_bell() {
     let mut panel = AgentPanel::new(setup(vec![]));
     panel.apply(AgentEvent::AgentStart);
     panel.run_start = Some(Instant::now() - Duration::from_secs(60));
-    panel.stop_requested = true;
+    panel.stop_requested = Some(Instant::now());
     panel.apply(AgentEvent::AgentEnd);
     assert!(!rings(&panel.tick()));
 }
@@ -1279,6 +1279,92 @@ fn a_call_update_fills_in_the_shown_calls_arguments() {
 }
 
 #[test]
+fn a_stop_ticks_on_the_live_line_and_the_answer_says_cancelled() {
+    let footer = |panel: &AgentPanel| -> Vec<String> {
+        panel
+            .live_footer_lines(60)
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect())
+            .collect()
+    };
+    let mut panel = panel(vec![]);
+    panel.apply(AgentEvent::AgentStart);
+    panel.apply(AgentEvent::MessageStart {
+        prompt_tokens: None,
+    });
+    panel.abort();
+    // The stop ticks in place of the run clock, and leaves no notice behind.
+    let stopping = termide_i18n::t().agent_notice_stopping();
+    let lines = footer(&panel);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].trim_start().starts_with(stopping), "{lines:?}");
+    assert!(
+        termide_config::constants::TICK_FRAMES
+            .iter()
+            .any(|f| lines[0].contains(&format!(" {f} "))),
+        "{lines:?}"
+    );
+    assert!(!panel
+        .transcript
+        .items()
+        .iter()
+        .any(|i| matches!(i, Item::Notice { .. })));
+    // The stopped answer says it was cancelled, not the provider's `aborted`.
+    panel.apply(AgentEvent::MessageEnd(Message::Assistant(
+        AssistantMessage::failed("p", "m", StopReason::Aborted, "aborted"),
+    )));
+    panel.apply(AgentEvent::AgentEnd);
+    assert!(footer(&panel).is_empty());
+    let cancelled = termide_i18n::t().agent_run_cancelled();
+    assert!(panel.transcript.items().iter().any(|i| matches!(
+        i,
+        Item::Assistant { error: Some(e), .. } if e == cancelled
+    )));
+}
+
+/// An ACP adapter may go on with a prompt stopped before the agent answered
+/// anything, hidden, and hold the next prompt behind it: the agent is started
+/// anew. One stopped after it answered was interrupted for real.
+#[test]
+fn an_external_agent_stopped_before_its_first_reply_is_restarted() {
+    let restarted = |panel: &AgentPanel| {
+        let wanted = termide_i18n::t().agent_notice_restarted_after_stop();
+        panel
+            .transcript
+            .items()
+            .iter()
+            .any(|i| matches!(i, Item::Notice { text, .. } if text == wanted))
+    };
+    let stopped = |panel: &mut AgentPanel| {
+        panel.abort();
+        panel.apply(AgentEvent::MessageEnd(Message::Assistant(
+            AssistantMessage::failed("p", "m", StopReason::Aborted, "aborted"),
+        )));
+        panel.apply(AgentEvent::AgentEnd);
+        panel.busy = false;
+        panel.tick();
+    };
+    let mut panel = panel(vec![]);
+    panel.external = true;
+    panel.apply(AgentEvent::AgentStart);
+    stopped(&mut panel);
+    assert!(restarted(&panel));
+    assert!(!panel.restart_due);
+
+    let mut panel = self::panel(vec![]);
+    panel.external = true;
+    panel.apply(AgentEvent::AgentStart);
+    panel.apply(AgentEvent::MessageStart {
+        prompt_tokens: None,
+    });
+    panel.apply(AgentEvent::MessageUpdate(StreamEvent::TextDelta(
+        "on it".into(),
+    )));
+    stopped(&mut panel);
+    assert!(!restarted(&panel));
+}
+
+#[test]
 fn the_live_footer_shows_generation_meta_and_a_clock() {
     let text_of = |panel: &AgentPanel| -> Vec<String> {
         panel
@@ -1297,7 +1383,7 @@ fn the_live_footer_shows_generation_meta_and_a_clock() {
     let lines = text_of(&panel);
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(
-        transcript::RUN_FRAMES
+        termide_config::constants::TICK_FRAMES
             .iter()
             .any(|f| lines[0].trim_start().starts_with(f)),
         "{lines:?}"
@@ -2513,7 +2599,7 @@ fn an_active_goal_and_loop_show_in_the_state_strip() {
     );
     // No turn count and no cap: only how long the goal has run, then `✕`.
     assert!(!goal.contains('/'), "{goal}");
-    let unit = termide_i18n::t().agent_unit_secs();
+    let unit = termide_i18n::t().time_unit_secs();
     assert!(goal.trim_end().ends_with(&format!("{unit} ✕")), "{goal}");
     let looped = text(&lines[1]);
     assert!(
@@ -8729,7 +8815,7 @@ fn a_loop_waits_only_what_is_left_of_its_interval() {
             .unwrap();
     });
     let mut panel = reopen(&path, dir.path(), vec![]);
-    assert!(carry_on_card(&panel).contains("60m"));
+    assert!(carry_on_card(&panel).contains("1h"));
     panel.apply_form_action(ChoiceAction::Chosen(0));
     let next = panel.loop_task.as_ref().and_then(|t| t.next_at).unwrap();
     let wait = next.saturating_duration_since(Instant::now());

@@ -255,10 +255,16 @@ fn render_snapshot_card(
         y += 1;
     }
 
-    // Elapsed time (for all operations)
+    // Elapsed time (for all operations): the ticking timer every running
+    // clock shows, its spinner at rest while the operation is paused.
     {
-        let elapsed = op.started_at.elapsed().as_secs();
-        let elapsed_display = t.op_elapsed(&termide_i18n::compact_duration(elapsed));
+        let elapsed = op.started_at.elapsed();
+        let glyph = if op.is_paused {
+            termide_config::constants::TICK_GLYPH
+        } else {
+            termide_config::constants::tick_frame(elapsed)
+        };
+        let elapsed_display = format!("{glyph} {}", termide_i18n::duration(elapsed));
         buf.set_line(
             inner.x,
             y,
