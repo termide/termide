@@ -674,6 +674,12 @@ impl Agent {
     }
 
     #[must_use]
+    pub fn with_loop_prompt(mut self, prompt: LoopPrompt) -> Self {
+        self.loop_prompt = prompt;
+        self
+    }
+
+    #[must_use]
     pub fn with_handoff_prompt(mut self, prompt: HandoffPrompt) -> Self {
         self.handoff_prompt = prompt;
         self

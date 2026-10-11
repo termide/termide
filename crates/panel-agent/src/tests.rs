@@ -241,6 +241,7 @@ fn setup_with(provider: Arc<Scripted>) -> AgentPanelSetup {
         plan_prompt: PlanPrompt::default(),
         goal_prompt: GoalPrompt::default(),
         handoff_prompt: HandoffPrompt::default(),
+        loop_prompt: termide_agent_core::LoopPrompt::default(),
         reviewer: ReviewerSetup::default(),
         refusals: Refusals::default(),
         persist_rule: None,

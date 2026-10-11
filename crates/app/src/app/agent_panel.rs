@@ -1786,6 +1786,7 @@ fn agent_setup(
     let plan_prompt = catalog.dirs.plan_prompt();
     let goal_prompt = catalog.dirs.goal_prompt();
     let handoff_prompt = catalog.dirs.handoff_prompt();
+    let loop_prompt = catalog.dirs.loop_prompt();
     let refusals = catalog.dirs.refusals();
     let hooks: Option<HooksFactory> = {
         let configs = catalog.dirs.hooks();
@@ -1858,6 +1859,7 @@ fn agent_setup(
         plan_prompt,
         goal_prompt,
         handoff_prompt,
+        loop_prompt,
         reviewer,
         refusals,
         fold: match settings.fold_blocks {

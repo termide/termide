@@ -37,11 +37,11 @@ use ratatui::layout::Rect;
 use termide_agent_core::{
     Autorun, Backend, BackendModel, BackendOption, BackendSetup, CancelToken, CheckpointStore,
     CommandScript, CompactionPolicy, CompactionPrompts, Decision, Failure, GoalPrompt,
-    HandoffPrompt, Hooks, LateTools, LimitPolicy, McpReload, McpServerState, Mode, ModeHandle,
-    ModelInfo, ModelSpec, PermissionEnvelope, PermissionRules, PersistScope, PlanPrompt,
-    PromptError, PromptTemplate, Provider, QuestionEnvelope, Refusals, ReviewerSetup, Session,
-    SessionSummary, ShellOutput, ShellRunner, SkillInfo, SuggestionEnvelope, Tool, ToolRegistry,
-    DEFAULT_AGENT,
+    HandoffPrompt, Hooks, LateTools, LimitPolicy, LoopPrompt, McpReload, McpServerState, Mode,
+    ModeHandle, ModelInfo, ModelSpec, PermissionEnvelope, PermissionRules, PersistScope,
+    PlanPrompt, PromptError, PromptTemplate, Provider, QuestionEnvelope, Refusals, ReviewerSetup,
+    Session, SessionSummary, ShellOutput, ShellRunner, SkillInfo, SuggestionEnvelope, Tool,
+    ToolRegistry, DEFAULT_AGENT,
 };
 use termide_config::Config;
 use termide_core::{
@@ -229,6 +229,9 @@ pub struct AgentPanelSetup {
     pub goal_prompt: GoalPrompt,
     /// The handoff-brief texts, from the agent directory's `system/handoff.md`.
     pub handoff_prompt: HandoffPrompt,
+    /// The nudge after a call that went round in circles, from the agent
+    /// directory's `system/loop.md`.
+    pub loop_prompt: LoopPrompt,
     /// The `auto` mode reviewer: its texts from `system/classify.md`, and a
     /// model of its own when one is configured.
     pub reviewer: ReviewerSetup,
@@ -756,6 +759,8 @@ pub struct AgentPanel {
     goal_prompt: GoalPrompt,
     /// The handoff-brief texts, passed to the agent for `/handoff`.
     handoff_prompt: HandoffPrompt,
+    /// The nudge after a looped call, passed to each agent spawned.
+    loop_prompt: LoopPrompt,
     /// Builds the `auto` mode reviewer of each agent the panel spawns.
     reviewer: ReviewerSetup,
     /// The refusal texts every agent the panel spawns uses.
@@ -1020,6 +1025,7 @@ impl AgentPanel {
             &setup.plan_prompt,
             &setup.goal_prompt,
             &setup.handoff_prompt,
+            &setup.loop_prompt,
             &setup.reviewer,
             &setup.refusals,
             setup.persist_rule,
@@ -1115,6 +1121,7 @@ impl AgentPanel {
             plan_prompt: setup.plan_prompt,
             goal_prompt: setup.goal_prompt,
             handoff_prompt: setup.handoff_prompt,
+            loop_prompt: setup.loop_prompt,
             reviewer: setup.reviewer,
             refusals: setup.refusals,
             fold: setup.fold,

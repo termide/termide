@@ -20,6 +20,7 @@ use crate::context::SEED_TEMPLATE;
 use crate::goal::{GoalPrompt, SEED_GOAL};
 use crate::handoff::{HandoffPrompt, SEED_HANDOFF};
 use crate::hooks::{HookConfig, HOOKS_FILE};
+use crate::loop_guard::{LoopPrompt, SEED_LOOP};
 use crate::mcp::{mcp_servers_from_json, McpServerConfig, MCP_FILE, MCP_JSON_FILE};
 use crate::permissions::Mode;
 use crate::plan::{PlanPrompt, SEED_PLAN};
@@ -326,6 +327,7 @@ fn shipped_assets() -> Vec<(String, &'static str)> {
         (format!("{SYSTEM_DIR}/plan.md"), SEED_PLAN),
         (format!("{SYSTEM_DIR}/goal.md"), SEED_GOAL),
         (format!("{SYSTEM_DIR}/handoff.md"), SEED_HANDOFF),
+        (format!("{SYSTEM_DIR}/loop.md"), SEED_LOOP),
         (format!("{SYSTEM_DIR}/recall.md"), SEED_RECALL),
         (format!("{SYSTEM_DIR}/classify.md"), SEED_CLASSIFY),
         (format!("{SYSTEM_DIR}/permissions.md"), SEED_PERMISSIONS),
@@ -767,6 +769,13 @@ impl AgentDirs {
     #[must_use]
     pub fn goal_prompt(&self) -> GoalPrompt {
         GoalPrompt::from_file(&self.system_file("goal.md", SEED_GOAL))
+    }
+
+    /// The nudge after a call that went round in circles: `system/loop.md`
+    /// from the first level that has it, the seed otherwise.
+    #[must_use]
+    pub fn loop_prompt(&self) -> LoopPrompt {
+        LoopPrompt::from_file(&self.system_file("loop.md", SEED_LOOP))
     }
 
     /// The handoff-brief texts: `system/handoff.md` from the first level that

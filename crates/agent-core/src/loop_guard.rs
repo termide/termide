@@ -160,13 +160,21 @@ pub struct LoopPrompt {
 
 impl Default for LoopPrompt {
     fn default() -> Self {
-        Self {
-            template: SEED_LOOP.trim().to_string(),
-        }
+        Self::from_file(SEED_LOOP)
     }
 }
 
 impl LoopPrompt {
+    /// Parse `loop.md`: the nudge is the body; front matter, if any, is
+    /// left out.
+    #[must_use]
+    pub fn from_file(text: &str) -> Self {
+        let (_, body) = crate::layers::split_front_matter(text);
+        Self {
+            template: body.trim().to_string(),
+        }
+    }
+
     /// The nudge for `report`.
     #[must_use]
     pub fn render(&self, report: &LoopReport) -> String {
@@ -255,6 +263,21 @@ mod tests {
         assert_eq!(
             normalise("**OK** — let me just START implementing!"),
             normalise("ok, let me just start implementing.")
+        );
+    }
+
+    #[test]
+    fn a_custom_file_replaces_the_nudge() {
+        let custom =
+            LoopPrompt::from_file("---\nnote: mine\n---\nStop. You kept saying:\n{{thoughts}}\n");
+        let report = LoopReport {
+            repeats: 20,
+            thoughts: vec![A.into()],
+            loop_start: 0,
+        };
+        assert_eq!(
+            custom.render(&report),
+            format!("Stop. You kept saying:\n- {A}")
         );
     }
 

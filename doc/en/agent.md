@@ -1374,6 +1374,7 @@ ai/
   system/plan.md           what plan mode tells the agent, and what accepting a plan sends
   system/goal.md           how the judge decides whether a /goal is reached
   system/handoff.md        how /handoff briefs the unfinished work
+  system/loop.md           what a model that reasons in circles is told
   system/recall.md         how recall's solver answers from the results
   system/classify.md       what the auto mode reviewer allows and blocks
   system/permissions.md    what the model reads when a call is refused
@@ -1687,6 +1688,14 @@ the panel's directory (where another agent, even an external one that reads
 files, can pick it up — add it to `.gitignore`) or to **start a new session
 from it**, seeding the fresh session with the brief. Reword `handoff.md` to
 change what a brief contains.
+
+`loop.md` is what the built-in agent tells a model that went round in
+circles. The agent watches the reasoning and the answer as they stream; once
+most recent sentences restate ones already said several times, it cuts the
+call, keeps the reasoning up to where the circling began, and sends `loop.md`
+with `{{thoughts}}` replaced by the points the model kept going back to; the
+next call is made without reasoning. A second loop stops the run, and an
+active `/goal` with it, and the panel lists those points for you to decide.
 
 [Recall](#recall)'s solver uses `recall.md`: the system prompt of the call that
 answers from the search results, with the question line in its front matter

@@ -8,11 +8,11 @@ use std::sync::{Arc, Mutex};
 use termide_agent_core::{
     permission_channel, question_channel, suggestion_channel, Agent, AgentRuntime, Backend,
     BackendSetup, CancelToken, ChainedHooks, CheckpointHooks, CheckpointStore, CompactionPolicy,
-    CompactionPrompts, GoalPrompt, HandoffPrompt, Hooks, HostTools, LoggedMessage, Message, Mode,
-    ModeHandle, ModelInfo, ModelSpec, PermissionEnvelope, PermissionHooks, PermissionRules,
-    PersistRule, PlanGuard, PlanPrompt, Provider, QuestionEnvelope, Refusals, ReviewerSetup,
-    Session, ShellRunner, SkillInfo, SuggestionEnvelope, Timing, ToolContext, ToolRegistry,
-    MODEL_OPTION,
+    CompactionPrompts, GoalPrompt, HandoffPrompt, Hooks, HostTools, LoggedMessage, LoopPrompt,
+    Message, Mode, ModeHandle, ModelInfo, ModelSpec, PermissionEnvelope, PermissionHooks,
+    PermissionRules, PersistRule, PlanGuard, PlanPrompt, Provider, QuestionEnvelope, Refusals,
+    ReviewerSetup, Session, ShellRunner, SkillInfo, SuggestionEnvelope, Timing, ToolContext,
+    ToolRegistry, MODEL_OPTION,
 };
 
 use crate::toolset::{Blocked, ToolsetGuard};
@@ -189,6 +189,7 @@ pub(crate) fn spawn_runtime(
     plan_prompt: &PlanPrompt,
     goal_prompt: &GoalPrompt,
     handoff_prompt: &HandoffPrompt,
+    loop_prompt: &LoopPrompt,
     reviewer: &ReviewerSetup,
     refusals: &Refusals,
     persist_rule: Option<PersistFn>,
@@ -334,6 +335,7 @@ pub(crate) fn spawn_runtime(
     .with_compaction_prompts(compaction_prompts.clone())
     .with_goal_prompt(goal_prompt.clone())
     .with_handoff_prompt(handoff_prompt.clone())
+    .with_loop_prompt(loop_prompt.clone())
     .with_messages(messages)
     .with_session_id(session.map(|s| s.id().to_string()))
     .with_asker(asker)

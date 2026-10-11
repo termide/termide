@@ -113,6 +113,7 @@ impl AgentPanel {
             &self.plan_prompt,
             &self.goal_prompt,
             &self.handoff_prompt,
+            &self.loop_prompt,
             &self.reviewer,
             &self.refusals,
             self.persist_rule,
