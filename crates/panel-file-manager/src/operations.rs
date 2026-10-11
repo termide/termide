@@ -226,6 +226,18 @@ fn is_source_file(filename: &str) -> bool {
 /// Archive suffixes the pack prompt offers, the default first.
 const PACK_EXTENSIONS: [&str; 5] = [".zip", ".tar.gz", ".tar.zst", ".tar.xz", ".tar.bz2"];
 
+/// The pack prompt's name for a compression level.
+fn compression_level_name(level: termide_vfs::archive::pack::CompressionLevel) -> &'static str {
+    use termide_vfs::archive::pack::CompressionLevel;
+    let t = termide_i18n::t();
+    match level {
+        CompressionLevel::Store => t.pack_level_store(),
+        CompressionLevel::Fast => t.pack_level_fast(),
+        CompressionLevel::Normal => t.pack_level_normal(),
+        CompressionLevel::Best => t.pack_level_best(),
+    }
+}
+
 /// The archive name for packing `path` alone: a directory keeps its name,
 /// a file drops its last extension (`report.pdf` → `report`).
 fn archive_stem(path: &std::path::Path) -> String {
@@ -402,10 +414,22 @@ impl FileManager {
             })
             .collect();
         let default = options[0].value.clone();
+        let level = termide_vfs::archive::pack::CompressionLevel::default();
+        let levels = termide_vfs::archive::pack::CompressionLevel::ALL;
+        let level_names = levels
+            .iter()
+            .map(|l| compression_level_name(*l).to_string())
+            .collect();
+        let selected = levels.iter().position(|l| *l == level).unwrap_or(0);
         let modal =
-            termide_modal::EditableSelectModal::new(t.modal_pack_title(), prompt, default, options);
+            termide_modal::EditableSelectModal::new(t.modal_pack_title(), prompt, default, options)
+                .with_choice(
+                    t.pack_compression_label().to_string(),
+                    level_names,
+                    selected,
+                );
         self.modal_request = Some((
-            termide_state::PendingAction::PackPaths { sources },
+            termide_state::PendingAction::PackPaths { sources, level },
             termide_modal::ActiveModal::EditableSelect(Box::new(modal)),
         ));
     }

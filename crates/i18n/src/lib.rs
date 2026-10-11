@@ -1399,6 +1399,12 @@ pub trait Translation: Send + Sync {
     fn modal_pack_title(&self) -> &str;
     /// Shown when packing is asked for in a remote or archive panel.
     fn fm_pack_local_only(&self) -> &str;
+    /// Label of the pack modal's compression level row.
+    fn pack_compression_label(&self) -> &str;
+    fn pack_level_store(&self) -> &str;
+    fn pack_level_fast(&self) -> &str;
+    fn pack_level_normal(&self) -> &str;
+    fn pack_level_best(&self) -> &str;
     fn modal_archive_password_title(&self) -> &str;
     fn settings_vault_lock_after(&self) -> &str;
     fn vault_password_title(&self) -> &str;

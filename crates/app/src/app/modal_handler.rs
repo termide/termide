@@ -175,6 +175,7 @@ impl App {
                 }
 
                 self.sync_copy_symlink_flag();
+                self.sync_pack_level();
                 // Read InputModal checkbox before closing (used by stash push)
                 if let Some(termide_modal::ActiveModal::Input(ref modal)) = self.state.active_modal
                 {
@@ -225,6 +226,7 @@ impl App {
                 }
 
                 self.sync_copy_symlink_flag();
+                self.sync_pack_level();
                 // Read InputModal checkbox before closing (used by stash push)
                 if let Some(termide_modal::ActiveModal::Input(ref modal)) = self.state.active_modal
                 {
@@ -456,8 +458,8 @@ impl App {
                     }
                     self.handle_move_path(sources, target_directory, value)?;
                 }
-                PendingAction::PackPaths { sources } => {
-                    self.handle_pack_paths(sources, value)?;
+                PendingAction::PackPaths { sources, level } => {
+                    self.handle_pack_paths(sources, level, value)?;
                 }
                 PendingAction::ArchivePassword { archive } => {
                     if let Some(password) = value.downcast_ref::<String>() {

@@ -52,8 +52,11 @@ pub enum PendingAction {
         create_relative_symlink: bool,
     },
     /// Pack files/directories into a new archive; the modal answers with
-    /// the archive path.
-    PackPaths { sources: Vec<PathBuf> },
+    /// the archive path. `level` follows the modal's compression row.
+    PackPaths {
+        sources: Vec<PathBuf>,
+        level: termide_vfs::archive::pack::CompressionLevel,
+    },
     /// Open the encrypted archive at `archive` (its root) with the password
     /// the modal answers with.
     ArchivePassword { archive: termide_vfs::VfsPath },

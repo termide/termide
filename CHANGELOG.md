@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A compression level for packing.** The pack prompt (`P`) has a **Compression** row — None, Fast, Normal (the default) or Best — that sets the zip, gzip, bzip2 and xz level; zstd tells only None from the rest.
 - **Limit a CLI agent's context window.** A Claude Code or Codex connection takes a **Context window limit** (`context_window_limit`) smaller than the model's: Claude Code gets it as `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (at least 100000), Codex as `model_context_window` through `CODEX_CONFIG`. The agent compacts at it, and the panel's `Context:` shows no more than it.
 - **A CLI agent's models in the settings.** Opening a Claude Code, Codex or Gemini CLI connection lists the models of its sign-in in the model dropdown, and the field shows a spinner while any connection's models load.
 

@@ -162,6 +162,7 @@ mod tests {
             priority,
             is_move: false,
             conflict_mode: crate::types::ConflictMode::Ask,
+            compression: Default::default(),
         }
     }
 

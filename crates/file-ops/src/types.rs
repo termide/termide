@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use termide_vfs::archive::pack::CompressionLevel;
 use termide_vfs::VfsPath;
 
 /// Unique identifier for an operation.
@@ -506,6 +507,8 @@ pub struct OperationRequest {
     pub is_move: bool,
     /// How to handle file conflicts.
     pub conflict_mode: ConflictMode,
+    /// How hard a pack compresses; other operations ignore it.
+    pub compression: CompressionLevel,
 }
 
 impl OperationRequest {
@@ -518,6 +521,7 @@ impl OperationRequest {
             priority: OperationPriority::Normal,
             is_move: false,
             conflict_mode: ConflictMode::Ask,
+            compression: CompressionLevel::Normal,
         }
     }
 
@@ -530,6 +534,7 @@ impl OperationRequest {
             priority: OperationPriority::Normal,
             is_move: true,
             conflict_mode: ConflictMode::Ask,
+            compression: CompressionLevel::Normal,
         }
     }
 
@@ -542,6 +547,7 @@ impl OperationRequest {
             priority: OperationPriority::Normal,
             is_move: false,
             conflict_mode: ConflictMode::Ask,
+            compression: CompressionLevel::Normal,
         }
     }
 
@@ -554,6 +560,7 @@ impl OperationRequest {
             priority: OperationPriority::Normal,
             is_move: false,
             conflict_mode: ConflictMode::Ask,
+            compression: CompressionLevel::Normal,
         }
     }
 
@@ -567,6 +574,7 @@ impl OperationRequest {
             priority: OperationPriority::Normal,
             is_move: false,
             conflict_mode: ConflictMode::Ask,
+            compression: CompressionLevel::Normal,
         }
     }
 
@@ -579,6 +587,7 @@ impl OperationRequest {
             priority: OperationPriority::Normal,
             is_move: false,
             conflict_mode: ConflictMode::Ask,
+            compression: CompressionLevel::Normal,
         }
     }
 
@@ -591,6 +600,12 @@ impl OperationRequest {
     /// Set the conflict handling mode.
     pub fn with_conflict_mode(mut self, mode: ConflictMode) -> Self {
         self.conflict_mode = mode;
+        self
+    }
+
+    /// Set how hard a pack compresses.
+    pub fn with_compression(mut self, level: CompressionLevel) -> Self {
+        self.compression = level;
         self
     }
 }
