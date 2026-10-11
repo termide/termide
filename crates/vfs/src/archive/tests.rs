@@ -84,6 +84,26 @@ mod encryption {
     }
 
     #[test]
+    fn check_password_tells_missing_wrong_and_right_apart() {
+        let dir = tempfile::tempdir().unwrap();
+        let aes = dir.path().join("aes.zip");
+        aes_zip(&aes);
+        assert!(matches!(
+            check_password(&aes, None),
+            Err(VfsError::PasswordRequired)
+        ));
+        assert!(matches!(
+            check_password(&aes, Some("nope")),
+            Err(VfsError::WrongPassword)
+        ));
+        assert!(check_password(&aes, Some("hunter2")).is_ok());
+
+        let plain = dir.path().join("plain.zip");
+        write_zip(&plain);
+        assert!(check_password(&plain, None).is_ok());
+    }
+
+    #[test]
     fn a_plain_archive_ignores_a_password() {
         let dir = tempfile::tempdir().unwrap();
         let archive = dir.path().join("plain.zip");

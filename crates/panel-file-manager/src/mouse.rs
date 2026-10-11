@@ -195,8 +195,14 @@ impl FileManager {
                         self.selected = clicked_index;
                         self.selection.drag_start = Some(clicked_index);
                         self.selection.start_shift_drag(clicked_index);
-                    } else if mouse.modifiers.contains(KeyModifiers::CONTROL) {
-                        // Ctrl+click - toggle selection on clicked element
+                    } else if mouse
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                    {
+                        // Ctrl+click or Alt+click - toggle selection on the
+                        // clicked element. Alt is the spelling that reaches
+                        // us on macOS, where terminals turn Ctrl+click into a
+                        // right click.
                         self.selection.toggle(clicked_index);
                         self.selected = clicked_index;
                         self.selection.start_ctrl_drag(clicked_index);

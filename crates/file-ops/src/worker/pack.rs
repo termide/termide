@@ -31,6 +31,20 @@ impl PackWorker {
     }
 }
 
+impl PackWorker {
+    /// The failure as the operations panel shows it, in the user's language.
+    fn failed(&self, error: &VfsError) -> OperationResult {
+        let name = self
+            .destination
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        OperationResult::Failed(
+            termide_i18n::t().op_pack_failed(&name, &crate::messages::vfs_error_text(error)),
+        )
+    }
+}
+
 impl OperationWorker for PackWorker {
     fn execute(
         &mut self,
@@ -40,7 +54,7 @@ impl OperationWorker for PackWorker {
         let _ = progress_tx.send(OperationProgress::scanning());
         let items = match pack::collect(&self.sources, &self.destination) {
             Ok(items) => items,
-            Err(e) => return OperationResult::Failed(e.to_string()),
+            Err(e) => return self.failed(&e),
         };
 
         let mut speed = SpeedTracker::new();
@@ -80,7 +94,7 @@ impl OperationWorker for PackWorker {
                 OperationResult::SuccessWithPath(self.destination.clone())
             }
             Err(VfsError::Cancelled) => OperationResult::Cancelled,
-            Err(e) => OperationResult::Failed(e.to_string()),
+            Err(e) => self.failed(&e),
         }
     }
 }

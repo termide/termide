@@ -459,6 +459,22 @@ impl App {
                 PendingAction::PackPaths { sources } => {
                     self.handle_pack_paths(sources, value)?;
                 }
+                PendingAction::UnpackArchives { archives } => {
+                    self.handle_unpack_archives(archives, value)?;
+                }
+                PendingAction::ConfirmUnpack { plan } => {
+                    self.handle_confirm_unpack(plan, value)?;
+                }
+                PendingAction::UnpackPassword { plan } => {
+                    self.handle_unpack_password(plan, value)?;
+                }
+                PendingAction::SelectByMask { select } => {
+                    if let Some(mask) = value.downcast_ref::<String>() {
+                        if let Some(fm) = self.active_file_manager_mut() {
+                            fm.apply_selection_mask(mask, select);
+                        }
+                    }
+                }
                 PendingAction::ArchivePassword { archive } => {
                     if let Some(password) = value.downcast_ref::<String>() {
                         if let Some(fm) = self.active_file_manager_mut() {

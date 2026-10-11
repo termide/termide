@@ -20,6 +20,22 @@ mod source;
 
 pub use format::{ArchiveFormat, TarCompression};
 
+/// Check whether the local archive at `path` opens with `password`:
+/// `Err(PasswordRequired)` when it has encrypted entries and none was given,
+/// `Err(WrongPassword)` when the one given is rejected, `Ok` otherwise.
+///
+/// Only zip archives can be encrypted, and for them this reads the central
+/// directory and decrypts the smallest encrypted entry, so it is cheap
+/// enough to run before starting an extraction. Other formats are not read
+/// past their leading bytes.
+pub fn check_password(path: &Path, password: Option<&str>) -> VfsResult<()> {
+    if ArchiveFormat::detect(path)? != Some(ArchiveFormat::Zip) {
+        return Ok(());
+    }
+    let (_, mut backend) = source::open(path, ArchiveFormat::Zip)?;
+    backend.unlock(password)
+}
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;

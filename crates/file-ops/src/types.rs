@@ -55,6 +55,8 @@ pub enum OperationType {
     Upload,
     /// Pack local files into a new archive.
     Pack,
+    /// Unpack local archives into a local directory.
+    Unpack,
 }
 
 /// Priority level for operations.
@@ -491,6 +493,29 @@ pub enum ConflictMode {
     RenameAll,
 }
 
+/// Passwords of encrypted archives, by archive path. `Debug` shows only how
+/// many there are, so a logged request does not leak them.
+#[derive(Clone, Default)]
+pub struct ArchivePasswords(std::collections::HashMap<PathBuf, String>);
+
+impl ArchivePasswords {
+    /// Record the password for `archive`.
+    pub fn insert(&mut self, archive: PathBuf, password: String) {
+        self.0.insert(archive, password);
+    }
+
+    /// The password recorded for `archive`, if any.
+    pub fn get(&self, archive: &std::path::Path) -> Option<&str> {
+        self.0.get(archive).map(String::as_str)
+    }
+}
+
+impl std::fmt::Debug for ArchivePasswords {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ArchivePasswords({} redacted)", self.0.len())
+    }
+}
+
 /// Request to create a new operation.
 #[derive(Debug, Clone)]
 pub struct OperationRequest {
@@ -506,6 +531,8 @@ pub struct OperationRequest {
     pub is_move: bool,
     /// How to handle file conflicts.
     pub conflict_mode: ConflictMode,
+    /// Passwords of encrypted archives to unpack, checked beforehand.
+    pub archive_passwords: ArchivePasswords,
 }
 
 impl OperationRequest {
@@ -518,6 +545,7 @@ impl OperationRequest {
             priority: OperationPriority::Normal,
             is_move: false,
             conflict_mode: ConflictMode::Ask,
+            archive_passwords: ArchivePasswords::default(),
         }
     }
 
@@ -530,6 +558,7 @@ impl OperationRequest {
             priority: OperationPriority::Normal,
             is_move: true,
             conflict_mode: ConflictMode::Ask,
+            archive_passwords: ArchivePasswords::default(),
         }
     }
 
@@ -542,6 +571,7 @@ impl OperationRequest {
             priority: OperationPriority::Normal,
             is_move: false,
             conflict_mode: ConflictMode::Ask,
+            archive_passwords: ArchivePasswords::default(),
         }
     }
 
@@ -554,6 +584,7 @@ impl OperationRequest {
             priority: OperationPriority::Normal,
             is_move: false,
             conflict_mode: ConflictMode::Ask,
+            archive_passwords: ArchivePasswords::default(),
         }
     }
 
@@ -567,7 +598,28 @@ impl OperationRequest {
             priority: OperationPriority::Normal,
             is_move: false,
             conflict_mode: ConflictMode::Ask,
+            archive_passwords: ArchivePasswords::default(),
         }
+    }
+
+    /// Create a request to unpack local `archives` into `destination`: one
+    /// archive straight into it, several into a directory each under it.
+    pub fn unpack(archives: Vec<PathBuf>, destination: PathBuf) -> Self {
+        Self {
+            op_type: OperationType::Unpack,
+            sources: archives.into_iter().map(OperationPath::Local).collect(),
+            destination: Some(OperationPath::Local(destination)),
+            priority: OperationPriority::Normal,
+            is_move: false,
+            conflict_mode: ConflictMode::Ask,
+            archive_passwords: ArchivePasswords::default(),
+        }
+    }
+
+    /// Give the passwords of the encrypted archives an unpack opens.
+    pub fn with_archive_passwords(mut self, passwords: ArchivePasswords) -> Self {
+        self.archive_passwords = passwords;
+        self
     }
 
     /// Create an upload operation request (local to remote).
@@ -579,6 +631,7 @@ impl OperationRequest {
             priority: OperationPriority::Normal,
             is_move: false,
             conflict_mode: ConflictMode::Ask,
+            archive_passwords: ArchivePasswords::default(),
         }
     }
 

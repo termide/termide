@@ -14,7 +14,7 @@ mod disk;
 mod format;
 mod net_processes;
 
-pub use disk::{get_all_disk_space_info, get_disk_space_info};
+pub use disk::{browsable_mount_points, get_all_disk_space_info, get_disk_space_info};
 pub use format::{format_bytes, format_net_speed, DiskSpaceInfoExt};
 
 #[cfg(unix)]

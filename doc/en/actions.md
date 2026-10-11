@@ -167,7 +167,7 @@ The form is shown however the command is started: from the `Commands` menu, by i
 
 ## Hotkeys
 
-`key` uses the same notation as the keybindings in `config.toml` (see [keybindings.md](keybindings.md)), e.g. `Ctrl+Shift+D` or `Alt+F5`. `Ctrl+Shift+<letter>` reaches TermIDE only in terminals with the Kitty keyboard protocol (see [Universal vs Enhanced bindings](keybindings.md#universal-vs-enhanced-bindings)). A command hotkey is checked together with the global TermIDE shortcuts, so it works whichever panel has focus. A project command and a global command with the same identifier keep separate hotkeys.
+`key` uses the same notation as the keybindings in `config.toml` (see [keybindings.md](keybindings.md)), e.g. `Ctrl+Shift+D` or `Alt+F6`. `Ctrl+Shift+<letter>` reaches TermIDE only in terminals with the Kitty keyboard protocol (see [Universal vs Enhanced bindings](keybindings.md#universal-vs-enhanced-bindings)). A command hotkey is checked together with the global TermIDE shortcuts, so it works whichever panel has focus. A project command and a global command with the same identifier keep separate hotkeys.
 
 Commands with a hotkey are also listed in the command palette (`Ctrl+P`) as `Run command: <label>`.
 

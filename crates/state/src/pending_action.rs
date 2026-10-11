@@ -19,6 +19,20 @@ pub enum ProjectsOrigin {
     Button(usize),
 }
 
+/// An unpack being prepared: the passwords of encrypted archives are asked
+/// for one at a time and replacing existing files is confirmed before it
+/// starts. `Debug` keeps the passwords out of logs.
+#[derive(Debug, Clone)]
+pub struct UnpackPlan {
+    pub archives: Vec<PathBuf>,
+    pub destination: PathBuf,
+    pub passwords: termide_file_ops::ArchivePasswords,
+    /// How many archives, in order, have been checked for a password.
+    pub checked: usize,
+    /// Whether unpacking over existing files was confirmed.
+    pub confirmed: bool,
+}
+
 /// Action pending modal result
 #[derive(Debug, Clone)]
 pub enum PendingAction {
@@ -54,6 +68,17 @@ pub enum PendingAction {
     /// Pack files/directories into a new archive; the modal answers with
     /// the archive path.
     PackPaths { sources: Vec<PathBuf> },
+    /// Unpack local archives; the modal answers with the destination
+    /// directory (the app builds that modal, as for copy).
+    UnpackArchives { archives: Vec<PathBuf> },
+    /// Unpack into a destination that already holds files, once confirmed.
+    ConfirmUnpack { plan: UnpackPlan },
+    /// The password of the encrypted archive `plan.archives[plan.checked]`,
+    /// which the modal answers with.
+    UnpackPassword { plan: UnpackPlan },
+    /// Select (`select`) or unselect the active file manager's entries
+    /// matching the mask the modal answers with.
+    SelectByMask { select: bool },
     /// Open the encrypted archive at `archive` (its root) with the password
     /// the modal answers with.
     ArchivePassword { archive: termide_vfs::VfsPath },

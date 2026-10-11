@@ -136,14 +136,18 @@ impl App {
             }
         }
 
-        // Drive roots (Windows only): the one way to another drive without
+        // Drive roots (Windows) and mount points (Unix: the root, disks,
+        // removable media, network shares): the way to another drive without
         // typing its path, and what ".." at a drive root opens.
-        for path in termide_vfs::drive_roots() {
+        let locations = termide_vfs::drive_roots()
+            .into_iter()
+            .chain(termide_system_monitor::browsable_mount_points());
+        for path in locations {
             if items.iter().any(|item| item.path == path) {
                 continue;
             }
             items.push(DirectoryItem {
-                display: path.display().to_string(),
+                display: termide_core::util::shorten_home_path(&path.display().to_string()),
                 is_current: current_dir.as_ref() == Some(&path),
                 path,
                 is_bookmark: false,

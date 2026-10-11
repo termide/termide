@@ -28,6 +28,7 @@ pub(crate) fn build_fm_hotkey_table(config: &Config) -> HotkeyTable {
     t.insert("delete", &kb.delete);
     t.insert("info", &kb.info);
     t.insert("pack", &kb.pack);
+    t.insert("unpack", &kb.unpack);
 
     // Search
     t.insert("search", &kb.search);
@@ -40,6 +41,9 @@ pub(crate) fn build_fm_hotkey_table(config: &Config) -> HotkeyTable {
     t.insert("go_home", &kb.go_home);
     t.insert("toggle_selection", &kb.toggle_selection);
     t.insert("select_all", &kb.select_all);
+    t.insert("select_group", &kb.select_group);
+    t.insert("unselect_group", &kb.unselect_group);
+    t.insert("invert_selection", &kb.invert_selection);
     t.insert("toggle_hidden", &kb.toggle_hidden);
 
     // open_external: config binding, always ensure O present
@@ -153,6 +157,21 @@ impl FileManager {
             FmCommand::MoveDownWithToggle => self.move_down_with_toggle(),
             FmCommand::PageUpWithToggle => self.page_up_with_toggle(),
             FmCommand::PageDownWithToggle => self.page_down_with_toggle(),
+            FmCommand::SelectGroup | FmCommand::UnselectGroup => {
+                let select = matches!(command, FmCommand::SelectGroup);
+                let t = termide_i18n::t();
+                let title = if select {
+                    t.modal_select_group_title()
+                } else {
+                    t.modal_unselect_group_title()
+                };
+                let modal = InputModal::with_default(title, t.fm_select_mask_prompt(), "*");
+                self.modal_request = Some((
+                    PendingAction::SelectByMask { select },
+                    ActiveModal::Input(Box::new(modal)),
+                ));
+            }
+            FmCommand::InvertSelection => self.invert_selection(),
 
             // File operations
             FmCommand::NewFile => {
@@ -227,6 +246,7 @@ impl FileManager {
                 }
             }
             FmCommand::Pack => self.request_pack(),
+            FmCommand::Unpack => self.request_unpack(),
             FmCommand::MoveFiles => {
                 let paths = self.get_selected_paths();
                 if !paths.is_empty() {

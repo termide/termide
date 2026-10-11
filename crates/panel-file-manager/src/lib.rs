@@ -1613,6 +1613,73 @@ mod tests {
         ));
     }
 
+    /// Alt+F9 hands the app the archives in the selection, leaving the rest
+    /// out, and says so when there is none.
+    #[test]
+    fn unpack_asks_for_the_selected_archives_only() {
+        let temp_dir = TempDir::new().unwrap();
+        std::fs::write(temp_dir.path().join("a.zip"), "x").unwrap();
+        std::fs::write(temp_dir.path().join("b.tar.gz"), "x").unwrap();
+        std::fs::write(temp_dir.path().join("notes.txt"), "x").unwrap();
+        let mut fm = FileManager::new_with_path(temp_dir.path().to_path_buf());
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+        let dir = canonical_temp_path(&temp_dir);
+
+        fm.apply_selection_mask("*", true);
+        fm.execute_command(keyboard::FmCommand::Unpack);
+        match fm.modal_request.take() {
+            Some((PendingAction::UnpackArchives { mut archives }, _)) => {
+                archives.sort();
+                assert_eq!(archives, [dir.join("a.zip"), dir.join("b.tar.gz")]);
+            }
+            other => panic!(
+                "expected an unpack request, got {:?}",
+                other.map(|(a, _)| a)
+            ),
+        }
+
+        fm.clear_selection();
+        fm.selected = fm.find_entry_index("notes.txt").unwrap();
+        fm.execute_command(keyboard::FmCommand::Unpack);
+        assert!(matches!(
+            fm.modal_request.take(),
+            Some((PendingAction::VfsMessage, ActiveModal::InfoAction(_)))
+        ));
+    }
+
+    /// `+` / `-` select and unselect by mask, files and `dir/` patterns
+    /// apart; `*` inverts.
+    #[test]
+    fn mask_selection_and_inversion() {
+        let temp_dir = TempDir::new().unwrap();
+        std::fs::create_dir(temp_dir.path().join("src")).unwrap();
+        for name in ["a.rs", "b.RS", "c.md"] {
+            std::fs::write(temp_dir.path().join(name), "x").unwrap();
+        }
+        let mut fm = FileManager::new_with_path(temp_dir.path().to_path_buf());
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+        let selected = |fm: &FileManager| {
+            let mut names: Vec<String> = fm
+                .get_selected_paths()
+                .iter()
+                .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+                .collect();
+            names.sort();
+            names
+        };
+
+        assert_eq!(fm.apply_selection_mask("*.rs", true), 2);
+        assert_eq!(selected(&fm), ["a.rs", "b.RS"]);
+        fm.apply_selection_mask("*/", true);
+        assert_eq!(selected(&fm), ["a.rs", "b.RS", "src"]);
+        fm.apply_selection_mask("b*", false);
+        assert_eq!(selected(&fm), ["a.rs", "src"]);
+        fm.execute_command(keyboard::FmCommand::InvertSelection);
+        assert_eq!(selected(&fm), ["b.RS", "c.md"]);
+    }
+
     /// A scrollbar drag must not be undone by the next render: the panel pulls
     /// `scroll_offset` back toward `selected` while drawing, so the command has
     /// to move the cursor into the new viewport as wheel scrolling does.

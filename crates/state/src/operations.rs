@@ -25,6 +25,8 @@ pub enum OperationType {
     Delete,
     /// Pack files into a new archive
     Pack,
+    /// Unpack archives into a directory
+    Unpack,
     /// Background command (.bg.) — ⚙ icon
     CommandBackground,
     /// Background command with result modal (.report.) — 📋 icon

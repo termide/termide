@@ -6,6 +6,7 @@ mod download;
 mod local;
 mod pack;
 mod remote_delete;
+mod unpack;
 mod upload;
 
 use std::sync::mpsc;
@@ -18,6 +19,7 @@ pub use download::DownloadWorker;
 pub use local::{destination_overlap, DestinationOverlap, LocalCopyWorker, LocalDeleteWorker};
 pub use pack::PackWorker;
 pub use remote_delete::RemoteDeleteWorker;
+pub use unpack::{unpack_dir_name, unpack_targets, UnpackWorker};
 pub use upload::UploadWorker;
 
 use std::time::Instant;

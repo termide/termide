@@ -16,5 +16,6 @@ mod pack_handler;
 mod path_handler;
 mod path_suggestions;
 mod select_handler;
+mod unpack_handler;
 
 pub(in crate::app) use path_suggestions::PathSuggestions;

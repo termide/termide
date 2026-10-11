@@ -38,6 +38,12 @@ pub enum FmCommand {
     MoveDownWithToggle,
     PageUpWithToggle,
     PageDownWithToggle,
+    /// Ask for a mask and select the entries matching it (`+`).
+    SelectGroup,
+    /// Ask for a mask and unselect the entries matching it (`-`).
+    UnselectGroup,
+    /// Invert the selection (`*`).
+    InvertSelection,
 
     // File operations
     NewFile,
@@ -51,6 +57,8 @@ pub enum FmCommand {
     OpenExternal,
     /// Pack the selection into a new archive.
     Pack,
+    /// Unpack the archives in the selection, or the one under the cursor.
+    Unpack,
 
     // Search
     Search,
@@ -136,6 +144,9 @@ impl FmCommand {
         if hotkeys.matches("pack", &key) {
             return Self::Pack;
         }
+        if hotkeys.matches("unpack", &key) {
+            return Self::Unpack;
+        }
         if hotkeys.matches("search", &key) {
             return Self::Search;
         }
@@ -159,6 +170,15 @@ impl FmCommand {
         }
         if hotkeys.matches("select_all", &key) {
             return Self::SelectAll;
+        }
+        if hotkeys.matches("select_group", &key) {
+            return Self::SelectGroup;
+        }
+        if hotkeys.matches("unselect_group", &key) {
+            return Self::UnselectGroup;
+        }
+        if hotkeys.matches("invert_selection", &key) {
+            return Self::InvertSelection;
         }
         if hotkeys.matches("toggle_hidden", &key) {
             return Self::ToggleHidden;
@@ -260,6 +280,60 @@ mod tests {
         let mut config = termide_config::Config::default();
         config.normalize();
         crate::command_dispatch::build_fm_hotkey_table(&config)
+    }
+
+    /// The group keys and Alt+F9 as a legacy terminal or the Kitty protocol
+    /// report them (`+` with or without Shift), after canonicalization.
+    #[test]
+    fn group_selection_and_unpack_keys() {
+        let hk = default_hotkeys();
+        let cases = [
+            (
+                KeyCode::Char('+'),
+                KeyModifiers::NONE,
+                FmCommand::SelectGroup,
+            ),
+            (
+                KeyCode::Char('+'),
+                KeyModifiers::SHIFT,
+                FmCommand::SelectGroup,
+            ),
+            (
+                KeyCode::Char('-'),
+                KeyModifiers::NONE,
+                FmCommand::UnselectGroup,
+            ),
+            (
+                KeyCode::Char('*'),
+                KeyModifiers::NONE,
+                FmCommand::InvertSelection,
+            ),
+            (
+                KeyCode::Char('*'),
+                KeyModifiers::SHIFT,
+                FmCommand::InvertSelection,
+            ),
+            (KeyCode::F(9), KeyModifiers::ALT, FmCommand::Unpack),
+        ];
+        for caps in [
+            termide_keyboard::KeyboardCaps::default(),
+            termide_keyboard::KeyboardCaps {
+                kitty_full: true,
+                event_types: true,
+                disambiguate: true,
+                ..Default::default()
+            },
+        ] {
+            let normalizer = termide_keyboard::KeyNormalizer::new(caps);
+            for (code, mods, expected) in &cases {
+                let event = normalizer.canonicalize(key(*code, *mods));
+                assert_eq!(
+                    FmCommand::from_key_event(event, &hk, false),
+                    *expected,
+                    "{code:?} {mods:?} with {caps:?}"
+                );
+            }
+        }
     }
 
     #[test]

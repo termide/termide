@@ -359,6 +359,10 @@ impl HelpGenerator {
                 description: t.help_desc_pack().to_string(),
             },
             HelpEntry {
+                keys: Self::format_keys(&kb.unpack),
+                description: t.help_desc_unpack().to_string(),
+            },
+            HelpEntry {
                 keys: Self::format_keys(&kb.search),
                 description: t.help_desc_search().to_string(),
             },
@@ -389,6 +393,18 @@ impl HelpGenerator {
             HelpEntry {
                 keys: Self::format_keys(&kb.select_all),
                 description: t.help_desc_select_all().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.select_group),
+                description: t.help_desc_select_group().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.unselect_group),
+                description: t.help_desc_unselect_group().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.invert_selection),
+                description: t.help_desc_invert_selection().to_string(),
             },
             HelpEntry {
                 keys: Self::format_keys(&kb.toggle_hidden),

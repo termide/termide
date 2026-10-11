@@ -74,6 +74,7 @@
 //! ```
 
 pub mod manager;
+mod messages;
 pub mod queue;
 pub mod retry;
 pub mod types;
@@ -81,14 +82,17 @@ pub mod worker;
 
 // Re-export main types for convenience
 pub use manager::{OperationManager, OperationManagerConfig};
+pub use messages::vfs_error_text;
 pub use queue::{OperationQueue, QueuedOperation};
 pub use retry::{is_retryable_error, RetryPolicy, RetryState};
 pub use types::{
-    BackgroundOperationSummary, ConflictInfo, ConflictMode, ConflictResolution, OperationControl,
-    OperationError, OperationEvent, OperationId, OperationInfo, OperationPath, OperationPhase,
-    OperationPriority, OperationProgress, OperationRequest, OperationResult, OperationType,
+    ArchivePasswords, BackgroundOperationSummary, ConflictInfo, ConflictMode, ConflictResolution,
+    OperationControl, OperationError, OperationEvent, OperationId, OperationInfo, OperationPath,
+    OperationPhase, OperationPriority, OperationProgress, OperationRequest, OperationResult,
+    OperationType,
 };
 pub use worker::{
     destination_overlap, ConflictContext, DestinationOverlap, DownloadWorker, LocalCopyWorker,
     LocalDeleteWorker, OperationWorker, SpeedTracker, UploadWorker,
 };
+pub use worker::{unpack_dir_name, unpack_targets};

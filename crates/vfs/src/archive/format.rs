@@ -67,6 +67,17 @@ impl ArchiveFormat {
             .map(|&(_, format)| format)
     }
 
+    /// The name without its archive suffix (`docs.tar.gz` -> `docs`), the
+    /// natural name of the directory it unpacks into. `None` when the name
+    /// carries no recognised suffix.
+    pub fn strip_suffix(name: &str) -> Option<&str> {
+        let lower = name.to_ascii_lowercase();
+        SUFFIXES
+            .iter()
+            .find(|(suffix, _)| lower.len() > suffix.len() && lower.ends_with(suffix))
+            .map(|(suffix, _)| &name[..name.len() - suffix.len()])
+    }
+
     /// Whether [`pack`](super::pack::pack) can write this format; ISO
     /// images are only read.
     pub fn can_pack(self) -> bool {
@@ -134,6 +145,15 @@ fn read_up_to(reader: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strip_suffix_removes_the_whole_archive_suffix() {
+        assert_eq!(ArchiveFormat::strip_suffix("docs.tar.gz"), Some("docs"));
+        assert_eq!(ArchiveFormat::strip_suffix("Docs.v2.ZIP"), Some("Docs.v2"));
+        assert_eq!(ArchiveFormat::strip_suffix("отчёт.tgz"), Some("отчёт"));
+        assert_eq!(ArchiveFormat::strip_suffix("notes.txt"), None);
+        assert_eq!(ArchiveFormat::strip_suffix(".zip"), None);
+    }
 
     #[test]
     fn file_name_picks_the_longest_suffix() {

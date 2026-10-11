@@ -202,7 +202,7 @@ saved projects like any other VFS URL.
 
 ### Packing
 
-`P` packs the selected files and directories (or the entry under the
+`P` (or `Alt+F5`) packs the selected files and directories (or the entry under the
 cursor) into a new archive. The prompt suggests `<name>.zip` next to
 the selection and lists the other formats in its dropdown; the name's
 suffix picks the format — `.zip`, `.tar`, `.tar.gz`, `.tar.bz2`,
@@ -216,6 +216,22 @@ permissions and modification times are kept. The archive is written
 to a temporary file and appears under its name only when complete, so
 a cancelled or failed run leaves nothing behind, and an existing file
 is never overwritten. Only local files can be packed.
+
+### Unpacking
+
+`Alt+F9` unpacks the archives in the selection, or the archive under the
+cursor; other selected entries are left out. The prompt suggests a
+directory named after the archive in the nearest other file manager's
+directory and lists the other panels' directories in its dropdown. A
+single archive is unpacked into the directory you give, which is created
+if needed; several archives go into a directory each, named after the
+archive, under it. A relative path is taken from the archive's directory.
+
+Unpacking runs in the [Operations panel](operations.md) with progress,
+pause and cancel. When a target directory already holds files, TermIDE
+asks first, since files with the same names are replaced. Only local
+archives can be unpacked. For an encrypted zip archive TermIDE asks for
+the password before starting and asks again after a wrong one.
 
 ## Limitations / known gaps
 

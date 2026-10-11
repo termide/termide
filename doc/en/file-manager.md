@@ -21,15 +21,18 @@ directories — see [Archives](vfs.md#archives).
 | `→` / `l`       | Expand directory (tree view)                |
 | `←` / `h`       | Collapse directory (tree view)              |
 | `/`              | In-tree incremental search                  |
-| `Ctrl+\`          | Open directory switcher                    |
+| `Ctrl+\` / `Alt+F1` | Open directory switcher                    |
 | `Ctrl+G`          | Go to path/URL, with [suggestions](ui.md#open-prompt); a file is selected in its directory |
 | `Alt+B`           | Add bookmark                               |
 | `Tab`             | Go to next panel                           |
 | `Shift+Tab`       | Go to previous panel                       |
 
-On Windows the directory switcher also lists every drive. At the root of a
-drive or network share there is no parent to go to, so `..` and `Backspace`
-open the switcher there instead.
+Besides the directories of open panels and bookmarks, the directory switcher
+lists every drive on Windows and, on Linux and macOS, the mount points worth
+visiting: the root, mounted disks and partitions, removable media and network
+shares (system mounts such as `/proc`, `/boot` or `/System/Volumes/*` are
+left out). At the root of a Windows drive or network share there is no parent
+to go to, so `..` and `Backspace` open the switcher there instead.
 
 ## File Selection
 
@@ -38,7 +41,14 @@ open the switcher there instead.
 | `Insert`          | Toggle selection of current file           |
 | `Shift + ↑ / ↓`   | Select multiple consecutive files          |
 | `Ctrl+A`          | Select all files and directories in panel  |
+| `+` / `-`         | Select / unselect by mask                  |
+| `*`               | Invert selection                           |
 | `Escape`          | Clear all selections                       |
+
+`+` and `-` ask for a mask, `*` by default: one or more glob patterns
+separated by spaces, commas or semicolons, matched against names without
+regard to case (`*.rs *.md`). A pattern matches files; end it with `/` to
+match directories instead (`*/` for all of them, `target/` for one).
 
 In tree view, selecting a directory with `Insert` cascades the selection to all files within it. Collapsing a selected directory keeps the selection on its children.
 
@@ -46,12 +56,13 @@ In tree view, selecting a directory with `Insert` cascades the selection to all 
 
 | Shortcut           | Action                                     |
 |-------------------|--------------------------------------------|
-| `Ctrl+N`          | Create new file                            |
+| `F` / `Ctrl+N` / `Shift+F4` | Create new file                            |
 | `D` / `F7`        | Create new directory                       |
 | `Delete` / `F8`   | Delete selected files/directories          |
 | `C` / `F5`        | Copy selected files/directories            |
 | `M` / `F6`        | Move/rename files/directories              |
-| `P`               | Pack selected files/directories into an [archive](vfs.md#packing) |
+| `P` / `Alt+F5`    | Pack selected files/directories into an [archive](vfs.md#packing) |
+| `Alt+F9`          | [Unpack](vfs.md#unpacking) the selected archives or the one under the cursor |
 | `E` / `F4`        | Open file in editor                        |
 | `R` / `F2`        | Rename file/directory                      |
 | `V` / `F3`        | View file (preview without executing)      |
@@ -76,7 +87,7 @@ subdirectories — the operation is refused before anything is written.
 
 | Shortcut           | Action                                     |
 |-------------------|--------------------------------------------|
-| `Ctrl+F`          | Search files by name (glob patterns)       |
+| `Ctrl+F` / `Alt+F7` | Search files by name (glob patterns)       |
 | `Ctrl+Shift+F`    | Search in file contents                    |
 | `Ctrl+Shift+H`    | Search & replace in file contents          |
 | `/`              | In-tree incremental search (filter as you type) |
@@ -278,6 +289,9 @@ The image opens fitted to the panel: as large as the width or height allows, asp
 
 - **Single click**: Select a file or directory
 - **Double click**: Enter directory or open file
+- **Ctrl+click** or **Alt+click**: Toggle the selection of a row (on macOS,
+  where terminals turn `Ctrl+click` into a right click, use `Alt+click`)
+- **Shift+click**: Select the rows from the cursor to the clicked one
 - **Scroll wheel**: Scroll through file list
 
 ## Display

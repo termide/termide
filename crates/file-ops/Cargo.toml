@@ -12,6 +12,8 @@ dunce.workspace = true
 thiserror = "2.0"
 log = "0.4"
 termide-vfs = { path = "../vfs" }
+termide-i18n = { path = "../i18n" }
 
 [dev-dependencies]
 tempfile.workspace = true
+zip = { version = "8.6", default-features = false, features = ["deflate-flate2", "aes-crypto"] }

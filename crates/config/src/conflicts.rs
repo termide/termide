@@ -205,6 +205,7 @@ pub fn enumerate_bindings(config: &Config) -> Vec<(BindingLocation, ParsedKeyBin
     push(&mut out, "file_manager", "delete", &f.delete);
     push(&mut out, "file_manager", "info", &f.info);
     push(&mut out, "file_manager", "pack", &f.pack);
+    push(&mut out, "file_manager", "unpack", &f.unpack);
     push(&mut out, "file_manager", "search", &f.search);
     push(
         &mut out,
@@ -235,6 +236,19 @@ pub fn enumerate_bindings(config: &Config) -> Vec<(BindingLocation, ParsedKeyBin
         &f.toggle_selection,
     );
     push(&mut out, "file_manager", "select_all", &f.select_all);
+    push(&mut out, "file_manager", "select_group", &f.select_group);
+    push(
+        &mut out,
+        "file_manager",
+        "unselect_group",
+        &f.unselect_group,
+    );
+    push(
+        &mut out,
+        "file_manager",
+        "invert_selection",
+        &f.invert_selection,
+    );
     push(&mut out, "file_manager", "open_external", &f.open_external);
     push(&mut out, "file_manager", "toggle_hidden", &f.toggle_hidden);
 

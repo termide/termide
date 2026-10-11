@@ -167,7 +167,7 @@ default = true
 
 ## 快捷键
 
-`key` 使用与 `config.toml` 中键绑定相同的写法（参见 [keybindings.md](keybindings.md)），例如 `Ctrl+Shift+D` 或 `Alt+F5`。`Ctrl+Shift+<字母>` 只有在支持 Kitty 键盘协议的终端中才能到达 TermIDE（参见[通用层 vs 增强层](keybindings.md#通用层-vs-增强层)）。命令快捷键与 TermIDE 全局快捷键一起检查，因此无论哪个面板拥有焦点都能生效。标识符相同的项目命令和全局命令各自保留独立的快捷键。
+`key` 使用与 `config.toml` 中键绑定相同的写法（参见 [keybindings.md](keybindings.md)），例如 `Ctrl+Shift+D` 或 `Alt+F6`。`Ctrl+Shift+<字母>` 只有在支持 Kitty 键盘协议的终端中才能到达 TermIDE（参见[通用层 vs 增强层](keybindings.md#通用层-vs-增强层)）。命令快捷键与 TermIDE 全局快捷键一起检查，因此无论哪个面板拥有焦点都能生效。标识符相同的项目命令和全局命令各自保留独立的快捷键。
 
 带快捷键的命令也会以 `Run command: <label>` 的形式列在命令面板（`Ctrl+P`）中。
 

@@ -42,6 +42,7 @@ fn op_type_icon(op_type: &termide_state::OperationType) -> &'static str {
         termide_state::OperationType::MoveDownload => "\u{2193}", // ↓
         termide_state::OperationType::Delete => "\u{2715}", // ✕
         termide_state::OperationType::Pack => "\u{25A3}", // ▣
+        termide_state::OperationType::Unpack => "\u{25A2}", // ▢
         termide_state::OperationType::CommandBackground => "\u{2699}", // ⚙
         termide_state::OperationType::CommandReport => "\u{1F4CB}", // 📋
     }
@@ -60,6 +61,7 @@ fn op_type_label(op_type: &termide_state::OperationType) -> &str {
         termide_state::OperationType::MoveDownload => t.op_type_move_download(),
         termide_state::OperationType::Delete => t.progress_delete_title(),
         termide_state::OperationType::Pack => t.op_type_pack(),
+        termide_state::OperationType::Unpack => t.op_type_unpack(),
         termide_state::OperationType::CommandBackground => t.op_type_command(),
         termide_state::OperationType::CommandReport => t.op_type_command(),
     }

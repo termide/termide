@@ -336,6 +336,14 @@ pub trait Translation: Send + Sync {
     fn fm_pack_prompt_multiple(&self, count: usize) -> String;
     fn fm_pack_unknown_format(&self, name: &str) -> String;
     fn fm_pack_exists(&self, name: &str) -> String;
+    fn fm_unpack_prompt(&self, name: &str) -> String;
+    fn fm_unpack_prompt_multiple(&self, count: usize) -> String;
+    /// Confirms unpacking into a directory that already holds files.
+    fn fm_unpack_not_empty(&self, dir: &str) -> String;
+    /// Operations panel: an unpack failed; `error` is already localized.
+    fn op_unpack_failed(&self, name: &str, error: &str) -> String;
+    /// Operations panel: a pack failed; `error` is already localized.
+    fn op_pack_failed(&self, name: &str, error: &str) -> String;
     fn fm_archive_password_prompt(&self, name: &str) -> String;
     /// Re-asks after the archive rejected the password.
     fn fm_archive_password_wrong(&self, name: &str) -> String;
@@ -1398,6 +1406,27 @@ pub trait Translation: Send + Sync {
     fn op_type_pack(&self) -> &str;
     fn modal_pack_title(&self) -> &str;
     /// Shown when packing is asked for in a remote or archive panel.
+    fn help_desc_unpack(&self) -> &str;
+    fn op_type_unpack(&self) -> &str;
+    fn modal_unpack_title(&self) -> &str;
+    /// Shown when unpacking is asked for in a remote or archive panel.
+    fn fm_unpack_local_only(&self) -> &str;
+    /// Shown when unpacking finds no archive to work on.
+    fn fm_unpack_no_archive(&self) -> &str;
+    fn help_desc_select_group(&self) -> &str;
+    fn help_desc_unselect_group(&self) -> &str;
+    fn help_desc_invert_selection(&self) -> &str;
+    fn modal_select_group_title(&self) -> &str;
+    fn modal_unselect_group_title(&self) -> &str;
+    fn fm_select_mask_prompt(&self) -> &str;
+    // Reasons an archive operation failed, shown after its name.
+    fn op_error_password_required(&self) -> &str;
+    fn op_error_wrong_password(&self) -> &str;
+    fn op_error_no_space(&self) -> &str;
+    fn op_error_permission_denied(&self) -> &str;
+    fn op_error_not_found(&self) -> &str;
+    fn op_error_already_exists(&self) -> &str;
+    fn op_error_archive(&self) -> &str;
     fn fm_pack_local_only(&self) -> &str;
     fn modal_archive_password_title(&self) -> &str;
     fn settings_vault_lock_after(&self) -> &str;

@@ -374,6 +374,9 @@ impl App {
                     modal = self.prepare_copy_move_modal(sources, target_directory, is_copy);
                 }
             }
+            PendingAction::UnpackArchives { archives } if !archives.is_empty() => {
+                modal = self.prepare_unpack_modal(archives);
+            }
             _ => {}
         }
 

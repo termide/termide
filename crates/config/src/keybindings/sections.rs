@@ -151,6 +151,7 @@ pub struct FileManagerKeybindings {
     pub delete: Option<KeyBinding>,
     pub info: Option<KeyBinding>,
     pub pack: Option<KeyBinding>,
+    pub unpack: Option<KeyBinding>,
 
     // Search
     pub search: Option<KeyBinding>,
@@ -167,6 +168,9 @@ pub struct FileManagerKeybindings {
     // Selection
     pub toggle_selection: Option<KeyBinding>,
     pub select_all: Option<KeyBinding>,
+    pub select_group: Option<KeyBinding>,
+    pub unselect_group: Option<KeyBinding>,
+    pub invert_selection: Option<KeyBinding>,
 
     // Other
     pub open_external: Option<KeyBinding>,
@@ -693,7 +697,11 @@ impl FileManagerKeybindings {
             self.create_dir = Some(KeyBinding::Multiple(vec!["F7".into(), "D".into()]));
         }
         if self.create_file.is_none() {
-            self.create_file = Some(KeyBinding::Multiple(vec!["F".into(), "Ctrl+N".into()]));
+            self.create_file = Some(KeyBinding::Multiple(vec![
+                "F".into(),
+                "Ctrl+N".into(),
+                "Shift+F4".into(),
+            ]));
         }
         if self.delete.is_none() {
             self.delete = Some(KeyBinding::Multiple(vec!["Delete".into(), "F8".into()]));
@@ -701,10 +709,18 @@ impl FileManagerKeybindings {
         if self.info.is_none() {
             self.info = Some(KeyBinding::Multiple(vec!["F12".into(), "Space".into()]));
         }
-        set_default!(pack, "P");
+        // `Alt+F5` (pack), `Alt+F7` (search) and `Shift+F4` (new file) are
+        // aliases from the Far / Total Commander tradition.
+        if self.pack.is_none() {
+            self.pack = Some(KeyBinding::Multiple(vec!["P".into(), "Alt+F5".into()]));
+        }
+        // Total Commander's partner of `Alt+F5`.
+        set_default!(unpack, "Alt+F9");
 
         // Search
-        set_default!(search, "Ctrl+F");
+        if self.search.is_none() {
+            self.search = Some(KeyBinding::Multiple(vec!["Ctrl+F".into(), "Alt+F7".into()]));
+        }
         set_default!(search_content, "Ctrl+Shift+F");
         set_default!(search_replace, "Ctrl+Shift+H");
 
@@ -714,13 +730,24 @@ impl FileManagerKeybindings {
         set_default!(go_home, "~");
         // Parallel to global `open_projects = "Alt+\\"`: `Ctrl+\\` for
         // the analogous "switch directory" action. Reaches VTE via
-        // the `Ctrl+4→Ctrl+\\` quirk in `KeyNormalizer`.
-        set_default!(switch_directory, "Ctrl+\\");
+        // the `Ctrl+4→Ctrl+\\` quirk in `KeyNormalizer`. `Alt+F1` is the
+        // Far spelling of its drive list, which the switcher also is.
+        if self.switch_directory.is_none() {
+            self.switch_directory = Some(KeyBinding::Multiple(vec![
+                "Ctrl+\\".into(),
+                "Alt+F1".into(),
+            ]));
+        }
         set_default!(go_to_path, "Ctrl+G");
 
         // Selection
         set_default!(toggle_selection, "Insert");
         set_default!(select_all, "Ctrl+A");
+        // The Far / Total Commander / mc group keys, without the numeric
+        // keypad most laptops lack: `+` and `-` ask for a mask, `*` inverts.
+        set_default!(select_group, "+");
+        set_default!(unselect_group, "-");
+        set_default!(invert_selection, "*");
 
         // Other
         if self.open_external.is_none() {

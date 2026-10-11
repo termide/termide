@@ -892,6 +892,24 @@ impl Translation for RuntimeTranslation {
         help_desc_pack,
         op_type_pack,
         modal_pack_title,
+        help_desc_unpack,
+        op_type_unpack,
+        modal_unpack_title,
+        fm_unpack_local_only,
+        fm_unpack_no_archive,
+        help_desc_select_group,
+        help_desc_unselect_group,
+        help_desc_invert_selection,
+        modal_select_group_title,
+        modal_unselect_group_title,
+        fm_select_mask_prompt,
+        op_error_password_required,
+        op_error_wrong_password,
+        op_error_no_space,
+        op_error_permission_denied,
+        op_error_not_found,
+        op_error_already_exists,
+        op_error_archive,
         fm_pack_local_only,
         modal_archive_password_title,
         settings_vault_lock_after,
@@ -1626,6 +1644,28 @@ impl Translation for RuntimeTranslation {
 
     fn fm_pack_exists(&self, name: &str) -> String {
         self.format("fm_pack_exists", &[("name", name)])
+    }
+    fn fm_unpack_prompt(&self, name: &str) -> String {
+        self.format("fm_unpack_prompt", &[("name", name)])
+    }
+
+    fn fm_unpack_prompt_multiple(&self, count: usize) -> String {
+        self.format(
+            "fm_unpack_prompt_multiple",
+            &[("count", &count.to_string())],
+        )
+    }
+
+    fn fm_unpack_not_empty(&self, dir: &str) -> String {
+        self.format("fm_unpack_not_empty", &[("dir", dir)])
+    }
+
+    fn op_unpack_failed(&self, name: &str, error: &str) -> String {
+        self.format("op_unpack_failed", &[("name", name), ("error", error)])
+    }
+
+    fn op_pack_failed(&self, name: &str, error: &str) -> String {
+        self.format("op_pack_failed", &[("name", name), ("error", error)])
     }
 
     fn fm_archive_password_prompt(&self, name: &str) -> String {

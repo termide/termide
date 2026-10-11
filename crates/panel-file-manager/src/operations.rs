@@ -410,6 +410,35 @@ impl FileManager {
         ));
     }
 
+    /// Ask where to unpack the archives in the selection, or the archive
+    /// under the cursor (Alt+F9). Entries that are not archives are left
+    /// out; the app builds the destination prompt, as it does for copy.
+    pub(crate) fn request_unpack(&mut self) {
+        let t = termide_i18n::t();
+        if self.vfs.is_remote() {
+            self.show_info_modal(t.modal_error_title(), t.fm_unpack_local_only());
+            return;
+        }
+        let archives: Vec<std::path::PathBuf> = self
+            .get_selected_paths()
+            .into_iter()
+            .filter(|path| {
+                path.is_file()
+                    && path.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                        termide_vfs::archive::ArchiveFormat::from_file_name(n).is_some()
+                    })
+            })
+            .collect();
+        if archives.is_empty() {
+            self.show_info_modal(t.modal_unpack_title(), t.fm_unpack_no_archive());
+            return;
+        }
+        self.modal_request = Some((
+            termide_state::PendingAction::UnpackArchives { archives },
+            termide_modal::ActiveModal::Input(Box::new(termide_modal::InputModal::new("", ""))),
+        ));
+    }
+
     /// Open file for editing (F4)
     pub(crate) fn edit_file(&mut self) -> Option<PanelEvent> {
         let te = self.entry_under_cursor()?;

@@ -437,4 +437,150 @@ impl FileManager {
         self.selected = target;
         self.scroll_offset = 0;
     }
+
+    /// Select (`select`) or unselect every visible entry matching `mask`
+    /// (`+` / `-`). Returns how many entries the mask matched.
+    ///
+    /// The mask is one or more glob patterns separated by spaces, commas or
+    /// semicolons, matched case-insensitively against the entry name. A
+    /// pattern matches files; ending it with `/` makes it match directories
+    /// instead (`*/` for all of them), which take their visible contents
+    /// along, as `Insert` does.
+    pub fn apply_selection_mask(&mut self, mask: &str, select: bool) -> usize {
+        let masks = SelectionMask::parse(mask);
+        let mut matched = 0;
+        for vis_idx in 0..self.visible_count() {
+            if self.is_unselectable(vis_idx) {
+                continue;
+            }
+            let Some(te) = self.tree_entry_at(vis_idx) else {
+                continue;
+            };
+            if !masks.matches(&te.file_entry.name, te.file_entry.is_dir) {
+                continue;
+            }
+            matched += 1;
+            let descendants = self.visible_descendants_range(vis_idx);
+            if select {
+                self.selection.items.insert(vis_idx);
+                for i in descendants {
+                    if !self.is_unselectable(i) {
+                        self.selection.items.insert(i);
+                    }
+                }
+            } else {
+                self.selection.items.remove(&vis_idx);
+                for i in descendants {
+                    self.selection.items.remove(&i);
+                }
+            }
+            self.sync_parent_selection(vis_idx);
+        }
+        matched
+    }
+
+    /// Invert the selection of every visible entry (`*`).
+    pub(crate) fn invert_selection(&mut self) {
+        let count = self.visible_count();
+        for vis_idx in 0..count {
+            if self.is_unselectable(vis_idx) {
+                continue;
+            }
+            if !self.selection.items.remove(&vis_idx) {
+                self.selection.items.insert(vis_idx);
+            }
+        }
+        // An expanded directory stands selected exactly when all its visible
+        // contents are; flipping every row breaks that for a directory whose
+        // contents were partly selected. Settle innermost directories first.
+        for vis_idx in (0..count).rev() {
+            let mut descendants = self.visible_descendants_range(vis_idx);
+            if descendants.is_empty() || self.is_unselectable(vis_idx) {
+                continue;
+            }
+            if descendants.all(|i| self.selection.items.contains(&i)) {
+                self.selection.items.insert(vis_idx);
+            } else {
+                self.selection.items.remove(&vis_idx);
+            }
+        }
+    }
+}
+
+/// Parsed `+` / `-` mask: glob patterns for files and for directories.
+#[derive(Debug, Default)]
+pub(crate) struct SelectionMask {
+    files: Vec<glob::Pattern>,
+    dirs: Vec<glob::Pattern>,
+}
+
+impl SelectionMask {
+    const OPTIONS: glob::MatchOptions = glob::MatchOptions {
+        case_sensitive: false,
+        require_literal_separator: false,
+        require_literal_leading_dot: false,
+    };
+
+    /// Split on spaces, commas and semicolons; a pattern ending in `/` is a
+    /// directory pattern. Patterns that do not parse are dropped.
+    pub(crate) fn parse(mask: &str) -> Self {
+        let mut parsed = Self::default();
+        for token in mask
+            .split(|c: char| c.is_whitespace() || c == ',' || c == ';')
+            .filter(|t| !t.is_empty())
+        {
+            let (pattern, is_dir) = match token.strip_suffix('/') {
+                Some(dir) => (dir, true),
+                None => (token, false),
+            };
+            let Ok(pattern) = glob::Pattern::new(if pattern.is_empty() { "*" } else { pattern })
+            else {
+                continue;
+            };
+            if is_dir {
+                parsed.dirs.push(pattern);
+            } else {
+                parsed.files.push(pattern);
+            }
+        }
+        parsed
+    }
+
+    pub(crate) fn matches(&self, name: &str, is_dir: bool) -> bool {
+        let patterns = if is_dir { &self.dirs } else { &self.files };
+        patterns.iter().any(|p| p.matches_with(name, Self::OPTIONS))
+    }
+}
+
+#[cfg(test)]
+mod mask_tests {
+    use super::SelectionMask;
+
+    #[test]
+    fn plain_patterns_match_files_case_insensitively() {
+        let mask = SelectionMask::parse("*.rs, *.MD;Makefile");
+        assert!(mask.matches("lib.rs", false));
+        assert!(mask.matches("README.md", false));
+        assert!(mask.matches("makefile", false));
+        assert!(!mask.matches("main.c", false));
+        assert!(
+            !mask.matches("src.rs", true),
+            "a file pattern skips directories"
+        );
+    }
+
+    #[test]
+    fn a_trailing_slash_matches_directories() {
+        let mask = SelectionMask::parse("*/ target");
+        assert!(mask.matches("src", true));
+        assert!(!mask.matches("notes.txt", false));
+        assert!(mask.matches("target", false));
+        assert!(SelectionMask::parse("/").matches("any", true));
+    }
+
+    #[test]
+    fn star_matches_hidden_files_and_an_empty_mask_nothing() {
+        assert!(SelectionMask::parse("*").matches(".env", false));
+        assert!(!SelectionMask::parse("  ").matches("a", false));
+    }
 }
