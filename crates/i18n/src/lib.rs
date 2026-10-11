@@ -1405,6 +1405,7 @@ pub trait Translation: Send + Sync {
     fn op_type_pack(&self) -> &str;
     fn modal_pack_title(&self) -> &str;
     /// Shown when packing is asked for in a remote or archive panel.
+    fn fm_pack_local_only(&self) -> &str;
     fn help_desc_unpack(&self) -> &str;
     fn op_type_unpack(&self) -> &str;
     fn modal_unpack_title(&self) -> &str;
@@ -1426,7 +1427,6 @@ pub trait Translation: Send + Sync {
     fn op_error_not_found(&self) -> &str;
     fn op_error_already_exists(&self) -> &str;
     fn op_error_archive(&self) -> &str;
-    fn fm_pack_local_only(&self) -> &str;
     fn modal_archive_password_title(&self) -> &str;
     fn settings_vault_lock_after(&self) -> &str;
     fn vault_password_title(&self) -> &str;
