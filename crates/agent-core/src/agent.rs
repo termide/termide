@@ -15,8 +15,10 @@ use crate::compaction::{
 };
 use crate::goal::{parse_verdict, GoalOutcome, GoalPrompt, GoalVerdict};
 use crate::handoff::HandoffPrompt;
+use crate::loop_guard::{LoopGuard, LoopPrompt, LoopReport};
 use crate::message::{
-    AssistantMessage, Message, StopReason, ToolCall, ToolResultMessage, Usage, UserMessage,
+    AssistantContent, AssistantMessage, Message, StopReason, ToolCall, ToolResultMessage, Usage,
+    UserMessage,
 };
 use crate::permissions::{DecidedBy, PermissionNote};
 use crate::provider::{ModelSpec, Provider, Request, StreamEvent, ThinkingLevel};
@@ -484,6 +486,14 @@ pub enum AgentEvent {
     Handoff {
         brief: Result<String, String>,
     },
+    /// A model call went round in circles and was cut short (see
+    /// [`crate::loop_guard`]). With `retrying` the loop nudges the model and
+    /// calls it once more without reasoning; without, the second call looped
+    /// too and the run stops for the user to decide.
+    ThinkingLoop {
+        report: LoopReport,
+        retrying: bool,
+    },
     /// The loop stopped early on a pause request with work still pending, so
     /// the run can be resumed. Not emitted on a natural finish.
     Paused,
@@ -513,6 +523,8 @@ pub struct Agent {
     compaction_prompts: CompactionPrompts,
     goal_prompt: GoalPrompt,
     handoff_prompt: HandoffPrompt,
+    /// The nudge sent after a call that went round in circles.
+    loop_prompt: LoopPrompt,
     /// Whom the `question` tool asks; `None` when no one is watching.
     asker: Option<UserAsker>,
     /// Whom the `suggest_command` tool offers commands to; `None` when no one
@@ -554,6 +566,7 @@ impl Agent {
             compaction_prompts: CompactionPrompts::default(),
             goal_prompt: GoalPrompt::default(),
             handoff_prompt: HandoffPrompt::default(),
+            loop_prompt: LoopPrompt::default(),
             asker: None,
             suggester: None,
             shell_run: None,
@@ -914,8 +927,31 @@ impl Agent {
             prompt_tokens: Some(context_tokens(&self.messages)),
         });
         let mut retried_after_overflow = false;
+        // After a call that went round in circles, the next one is made
+        // without reasoning; a second loop stops the run.
+        let mut thinking = self.model.thinking;
+        let mut looped_once = false;
         let assistant = loop {
-            let reply = self.call_model(cancel, emit);
+            let (reply, looped) = self.call_model(thinking, cancel, emit);
+            if let Some(report) = looped {
+                self.push(Message::Assistant(cut_loop(reply, &report)), emit);
+                emit(AgentEvent::ThinkingLoop {
+                    report: report.clone(),
+                    retrying: !looped_once,
+                });
+                if looped_once {
+                    emit(AgentEvent::TurnEnd);
+                    return TurnOutcome::Halt;
+                }
+                looped_once = true;
+                thinking = ThinkingLevel::Off;
+                let nudge = self.loop_prompt.render(&report);
+                self.push(Message::User(UserMessage::text(nudge)), emit);
+                emit(AgentEvent::MessageStart {
+                    prompt_tokens: Some(context_tokens(&self.messages)),
+                });
+                continue;
+            }
             let overflow = reply.stop_reason == StopReason::Error
                 && reply
                     .error_message
@@ -1136,23 +1172,59 @@ impl Agent {
         }
     }
 
+    /// Call the model on the transcript at `thinking`. The streamed reasoning
+    /// and answer are watched for a loop; one cuts the call short and comes
+    /// back as the report beside the (partial) reply. A stop asked for by the
+    /// user is never reported as a loop.
     fn call_model(
         &self,
+        thinking: ThinkingLevel,
         cancel: &CancelToken,
         emit: &mut dyn FnMut(AgentEvent),
-    ) -> AssistantMessage {
+    ) -> (AssistantMessage, Option<LoopReport>) {
         let request = Request {
             model: &self.model,
             system_prompt: &self.system_prompt,
             messages: &self.messages,
             tools: &self.tools.specs(),
-            thinking: self.model.thinking,
+            thinking,
         };
-        self.provider.stream(
+        let call_cancel = cancel.child();
+        let mut reasoning = LoopGuard::new();
+        let mut answer = LoopGuard::new();
+        let mut cut = false;
+        let reply = self.provider.stream(
             &request,
-            &mut |event| emit(AgentEvent::MessageUpdate(event)),
-            cancel,
-        )
+            &mut |event| {
+                let looped = match &event {
+                    StreamEvent::ThinkingDelta(delta) => reasoning.feed(delta),
+                    StreamEvent::TextDelta(delta) => answer.feed(delta),
+                    _ => false,
+                };
+                emit(AgentEvent::MessageUpdate(event));
+                if looped && !call_cancel.is_cancelled() {
+                    cut = true;
+                    call_cancel.cancel();
+                }
+            },
+            &call_cancel,
+        );
+        // Only the guard stops the call alone: any other stop of it is a
+        // stop of the run.
+        if call_cancel.is_cancelled() && !cut {
+            cancel.cancel();
+        }
+        if cancel.is_cancelled() || !cut {
+            return (reply, None);
+        }
+        let report = reasoning.report().or_else(|| {
+            // A loop in the answer keeps no reasoning: none of it is cut.
+            answer.report().map(|report| LoopReport {
+                loop_start: usize::MAX,
+                ..report
+            })
+        });
+        (reply, report)
     }
 
     /// Replace the older part of the transcript with a model-written summary,
@@ -1395,6 +1467,44 @@ enum TurnOutcome {
     Halt,
 }
 
+/// What of a reply cut for looping enters the transcript: its reasoning up
+/// to where the circling began, unsealed (a cut reasoning is no provider's to
+/// read back), and nothing else — a half-written answer or call is not one.
+/// It ends as cut short by length, not as a failure: nothing went wrong with
+/// the request.
+fn cut_loop(mut reply: AssistantMessage, report: &LoopReport) -> AssistantMessage {
+    let mut left = report.loop_start;
+    reply.content = reply
+        .content
+        .into_iter()
+        .filter_map(|block| match block {
+            AssistantContent::Thinking {
+                mut text,
+                redacted: false,
+                ..
+            } => {
+                let mut keep = left.min(text.len());
+                while !text.is_char_boundary(keep) {
+                    keep -= 1;
+                }
+                left -= keep;
+                text.truncate(keep);
+                let text = text.trim_end().to_string();
+                (!text.is_empty()).then_some(AssistantContent::Thinking {
+                    text,
+                    signature: None,
+                    redacted: false,
+                })
+            }
+            _ => None,
+        })
+        .collect();
+    reply.stop_reason = StopReason::Length;
+    reply.error_message = None;
+    reply.failure = None;
+    reply
+}
+
 impl std::fmt::Debug for Agent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Agent")
@@ -1426,6 +1536,8 @@ pub(crate) mod test_support {
         pub seen: Mutex<Vec<Vec<Message>>>,
         /// Cancel the run from inside the stream on the n-th call (0-based).
         pub cancel_on_call: Option<usize>,
+        /// The reasoning level each call asked for.
+        pub thinking_seen: Mutex<Vec<ThinkingLevel>>,
     }
 
     impl ScriptedProvider {
@@ -1457,6 +1569,7 @@ pub(crate) mod test_support {
                 seen.push(request.messages.to_vec());
                 seen.len() - 1
             };
+            self.thinking_seen.lock().unwrap().push(request.thinking);
             if self.cancel_on_call == Some(call_index) {
                 cancel.cancel();
             }
@@ -2195,6 +2308,121 @@ mod tests {
         };
         assert!(result.is_error);
         assert!(result.plain_text().contains("cut off"));
+    }
+
+    /// A reply whose reasoning goes round the same two thoughts.
+    fn looping_reply() -> AssistantMessage {
+        let head = "The table is only filled under the x86-ir verb, which matters here.\n";
+        let circle = "Actually, I should present the scope question to the owner first.\n\
+OK let me just start implementing and see what happens.\n";
+        AssistantMessage {
+            content: vec![
+                AssistantContent::Thinking {
+                    text: format!("{head}{}", circle.repeat(60)),
+                    signature: Some("sealed".into()),
+                    redacted: false,
+                },
+                AssistantContent::Text {
+                    text: "half an answer".into(),
+                },
+            ],
+            stop_reason: StopReason::Stop,
+            ..text_reply("")
+        }
+    }
+
+    #[test]
+    fn a_looping_reply_is_cut_and_tried_again_without_reasoning() {
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            looping_reply(),
+            text_reply("I will ask the owner."),
+        ]));
+        let mut agent = Agent::new(
+            provider.clone(),
+            ToolRegistry::new(),
+            ModelSpec {
+                thinking: ThinkingLevel::High,
+                ..model()
+            },
+            PathBuf::from("."),
+        );
+        let events = collect(&mut agent, "go", &mut NoHooks);
+
+        assert_eq!(
+            roles(agent.messages()),
+            vec!["user", "assistant", "user", "assistant"]
+        );
+        // The cut reply keeps the reasoning before the circling, unsealed,
+        // and none of the answer; it is no failure.
+        let Message::Assistant(cut) = &agent.messages()[1] else {
+            panic!("expected the cut reply");
+        };
+        assert_eq!(cut.stop_reason, StopReason::Length);
+        assert_eq!(cut.plain_text(), "");
+        let [AssistantContent::Thinking {
+            text, signature, ..
+        }] = cut.content.as_slice()
+        else {
+            panic!("expected the kept reasoning alone: {:?}", cut.content);
+        };
+        assert!(text.starts_with("The table is only filled"));
+        assert!(text.matches("scope question").count() <= 2, "{text}");
+        assert!(signature.is_none());
+        // The nudge names what the model went round, and the next call is
+        // made without reasoning.
+        let Message::User(nudge) = &agent.messages()[2] else {
+            panic!("expected the nudge");
+        };
+        assert!(nudge.plain_text().contains("- Actually, I should present"));
+        assert_eq!(
+            *provider.thinking_seen.lock().unwrap(),
+            vec![ThinkingLevel::High, ThinkingLevel::Off]
+        );
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::ThinkingLoop { retrying: true, report } if report.thoughts.len() == 2
+        )));
+        assert!(!events.iter().any(|e| matches!(
+            e,
+            AgentEvent::ThinkingLoop {
+                retrying: false,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn a_second_loop_stops_the_run() {
+        let (mut agent, _) = agent(
+            ScriptedProvider::new(vec![looping_reply(), looping_reply(), text_reply("never")]),
+            ToolRegistry::new(),
+        );
+        let events = collect(&mut agent, "go", &mut NoHooks);
+
+        assert_eq!(
+            roles(agent.messages()),
+            vec!["user", "assistant", "user", "assistant"]
+        );
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::ThinkingLoop {
+                retrying: false,
+                ..
+            }
+        )));
+        assert!(matches!(events.last(), Some(AgentEvent::AgentEnd)));
+    }
+
+    #[test]
+    fn a_stop_by_the_user_is_no_loop() {
+        let mut provider = ScriptedProvider::new(vec![looping_reply()]);
+        provider.cancel_on_call = Some(0);
+        let (mut agent, _) = agent(provider, ToolRegistry::new());
+        let events = collect(&mut agent, "go", &mut NoHooks);
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ThinkingLoop { .. })));
+        assert_eq!(roles(agent.messages()), vec!["user", "assistant"]);
     }
 
     #[test]

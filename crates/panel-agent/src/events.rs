@@ -581,6 +581,32 @@ impl AgentPanel {
                     NoticeKind::Warn,
                 ),
             },
+            AgentEvent::ThinkingLoop { report, retrying } => {
+                let t = termide_i18n::t();
+                if retrying {
+                    self.notice(
+                        t.agent_notice_thinking_loop_retry_fmt(report.repeats),
+                        NoticeKind::Warn,
+                    );
+                } else {
+                    // A goal must not judge and resend a turn that looped
+                    // twice: the user decides what comes next, and is called.
+                    if self.goal_task.take().is_some() {
+                        self.end_judging();
+                        self.notice(t.agent_notice_goal_stopped(), NoticeKind::Info);
+                    }
+                    let thoughts = report
+                        .thoughts
+                        .iter()
+                        .map(|thought| format!("• {thought}"))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    self.notice(
+                        t.agent_notice_thinking_loop_stopped_fmt(&thoughts),
+                        NoticeKind::Warn,
+                    );
+                }
+            }
         }
     }
 

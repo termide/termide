@@ -118,8 +118,9 @@ and state the assumptions you made in your final answer.",
             }
             QuestionReply::Declined => ToolResultMessage::error(
                 call,
-                "The user declined to answer the questions. Do not ask them again; wait for \
-the user's next message.",
+                "The user dismissed these questions. Do not put them again now: go on with \
+what you can do without the answers, or end your turn and wait for the user's next message. \
+A later decision that is theirs to make you may still ask about.",
             ),
         }
     }
@@ -363,6 +364,9 @@ mod tests {
         );
         answerer.join().unwrap();
         assert!(result.is_error);
-        assert!(result.plain_text().contains("declined"));
+        let text = result.plain_text();
+        assert!(text.contains("dismissed"));
+        // Not a ban for the rest of the session: a later decision may be asked.
+        assert!(text.contains("may still ask"));
     }
 }

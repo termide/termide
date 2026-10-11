@@ -32,6 +32,7 @@ pub mod goal;
 pub mod handoff;
 pub mod hooks;
 pub mod layers;
+pub mod loop_guard;
 pub mod mcp;
 pub mod message;
 pub mod permissions;
@@ -81,6 +82,7 @@ pub use layers::{
     PROMPTS_DIR, SEED_ENGINES, SESSIONS_DIR, SHARED_SKILLS_DIR, SHIMS_DIR, SKILLS_DIR, SKILL_FILE,
     SYSTEM_DIR, WEB_ENGINES_DIR,
 };
+pub use loop_guard::{LoopGuard, LoopPrompt, LoopReport, SEED_LOOP};
 pub use mcp::{
     expand_env, mcp_servers_from_json, McpOAuth, McpReload, McpServerConfig, McpServerState,
     McpSignIn, McpStatus, McpTarget, MCP_FILE, MCP_JSON_FILE,

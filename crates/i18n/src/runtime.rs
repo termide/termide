@@ -1182,6 +1182,20 @@ impl Translation for RuntimeTranslation {
         self.format("agent_notice_handoff_failed_fmt", &[("error", error)])
     }
 
+    fn agent_notice_thinking_loop_retry_fmt(&self, count: usize) -> String {
+        self.format(
+            "agent_notice_thinking_loop_retry_fmt",
+            &[("count", &count.to_string())],
+        )
+    }
+
+    fn agent_notice_thinking_loop_stopped_fmt(&self, thoughts: &str) -> String {
+        self.format(
+            "agent_notice_thinking_loop_stopped_fmt",
+            &[("thoughts", thoughts)],
+        )
+    }
+
     fn agent_notice_model_list_unavailable_fmt(&self, error: &str) -> String {
         self.format(
             "agent_notice_model_list_unavailable_fmt",
