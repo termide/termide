@@ -242,6 +242,9 @@ struct Shared {
     /// `/handoff` brief) is sent in, so the conversation is left as it was.
     can_fork: AtomicBool,
     can_close: AtomicBool,
+    /// Whether the agent takes image blocks in a prompt
+    /// (`promptCapabilities.image`); without it attached images are left out.
+    takes_images: AtomicBool,
     /// The side request in flight: the session it runs in and the answer
     /// so far, which reaches neither the panel nor the log.
     side: Mutex<HashMap<String, String>>,
@@ -470,6 +473,7 @@ impl AcpRuntime {
             service,
             can_fork: AtomicBool::new(false),
             can_close: AtomicBool::new(false),
+            takes_images: AtomicBool::new(false),
             side: Mutex::new(HashMap::new()),
             goal: setup.goal,
             handoff: setup.handoff,
@@ -906,6 +910,10 @@ impl Shared {
                 .store(sessions["fork"].is_object(), Ordering::Release);
             self.can_close
                 .store(sessions["close"].is_object(), Ordering::Release);
+            self.takes_images.store(
+                init["agentCapabilities"]["promptCapabilities"]["image"] == true,
+                Ordering::Release,
+            );
         }
         if self.service {
             *self.conn.lock().unwrap_or_else(PoisonError::into_inner) = match outcome {
@@ -1400,7 +1408,21 @@ impl Shared {
             prompt.push(json!({ "type": "text", "text": note }));
         }
         prompt.push(json!({ "type": "text", "text": text }));
+        prompt.extend(self.image_blocks(&message));
         self.send_turn(session_id, prompt);
+    }
+
+    /// `message`'s images as ACP image blocks, when the agent takes them.
+    fn image_blocks(&self, message: &UserMessage) -> Vec<Value> {
+        if !self.takes_images.load(Ordering::Acquire) {
+            return Vec::new();
+        }
+        message
+            .images()
+            .map(|(media_type, data)| {
+                json!({ "type": "image", "mimeType": media_type, "data": data })
+            })
+            .collect()
     }
 
     /// A turn that tries the last failed one again: no new message is
@@ -1687,7 +1709,8 @@ impl Shared {
             return;
         };
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let text = message.plain_text();
+        let mut prompt = vec![json!({ "type": "text", "text": message.plain_text() })];
+        prompt.extend(self.image_blocks(&message));
         self.steering_out
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -1696,7 +1719,7 @@ impl Shared {
             "jsonrpc": "2.0", "id": id, "method": "_session/steering",
             "params": {
                 "sessionId": session_id,
-                "prompt": [{ "type": "text", "text": text }],
+                "prompt": prompt,
                 "_meta": { "steering": { "idleBehavior": "promptRequired" } },
             },
         });

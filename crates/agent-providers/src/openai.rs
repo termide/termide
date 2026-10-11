@@ -181,7 +181,21 @@ impl OpenAiCompatProvider {
 
     fn convert(&self, message: &Message) -> Value {
         match message {
-            Message::User(user) => json!({ "role": "user", "content": user.model_text() }),
+            // Plain text stays a string, which every compatible server takes;
+            // only a message with images needs the list of parts.
+            Message::User(user) if user.images().next().is_none() => {
+                json!({ "role": "user", "content": user.model_text() })
+            }
+            Message::User(user) => {
+                let mut parts = vec![json!({ "type": "text", "text": user.model_text() })];
+                parts.extend(user.images().map(|(media_type, data)| {
+                    json!({
+                        "type": "image_url",
+                        "image_url": { "url": format!("data:{media_type};base64,{data}") },
+                    })
+                }));
+                json!({ "role": "user", "content": parts })
+            }
             Message::ToolResult(result) => json!({
                 "role": "tool",
                 "tool_call_id": result.tool_call_id,
@@ -511,6 +525,22 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn a_message_with_images_goes_as_parts() {
+        let provider = OpenAiCompatProvider::new("p", "http://x/v1/");
+        let plain = provider.convert(&Message::User(UserMessage::text("hi")));
+        assert_eq!(plain, json!({ "role": "user", "content": "hi" }));
+        let shot = UserMessage::text("see").with_images(vec![("image/png".into(), "QUJD".into())]);
+        let wire = provider.convert(&Message::User(shot));
+        assert_eq!(
+            wire["content"],
+            json!([
+                { "type": "text", "text": "see" },
+                { "type": "image_url", "image_url": { "url": "data:image/png;base64,QUJD" } },
+            ])
+        );
+    }
 
     fn model() -> ModelSpec {
         ModelSpec {

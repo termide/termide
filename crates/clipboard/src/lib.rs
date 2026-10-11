@@ -13,6 +13,11 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
+mod picture;
+pub use picture::{
+    paste_picture, picture_from_data, picture_from_path, picture_kind, Picture, MAX_SIDE,
+};
+
 #[cfg(target_os = "linux")]
 use arboard::{GetExtLinux, LinuxClipboardKind, SetExtLinux};
 

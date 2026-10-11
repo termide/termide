@@ -541,10 +541,14 @@ impl Activity {
 }
 
 /// A large paste kept out of the input: `placeholder` stands in the prompt
-/// box, `text` is the full content spliced back in on submit.
+/// box, `text` is the full content spliced back in on submit. A pasted
+/// picture holds it in `picture` instead: its placeholder stays in the text,
+/// for the model to tell the pictures apart by, and the picture goes with
+/// the message while the placeholder is still in it.
 struct Paste {
     placeholder: String,
     text: String,
+    picture: Option<termide_ui::clipboard::Picture>,
 }
 
 /// A running `/loop`: re-submit `prompt` after each run finishes — on
@@ -1652,6 +1656,18 @@ impl Panel for AgentPanel {
                 }
                 false => CommandResult::Handled(false),
             },
+            // An empty paste is what some terminals send for a clipboard that
+            // holds only a picture, which they cannot type: read it here.
+            PanelCommand::PasteText { text } if text.is_empty() => {
+                match termide_ui::clipboard::paste_picture() {
+                    Some(picture) => {
+                        self.attach_picture(picture);
+                        self.after_edit();
+                        CommandResult::NeedsRedraw(true)
+                    }
+                    None => CommandResult::Handled(false),
+                }
+            }
             PanelCommand::PasteText { text } => {
                 self.paste(&text);
                 self.after_edit();

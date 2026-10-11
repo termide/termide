@@ -780,6 +780,7 @@ pub trait Translation: Send + Sync {
     fn agent_paste_placeholder_fmt(&self, n: usize, what: &str) -> String;
     fn agent_paste_lines_fmt(&self, count: usize) -> String;
     fn agent_paste_chars_fmt(&self, count: usize) -> String;
+    fn agent_paste_image_fmt(&self, width: u32, height: u32) -> String;
     fn agent_project_command_fmt(&self, description: &str) -> String;
     fn agent_running_command_fmt(&self, name: &str) -> String;
     fn agent_notice_external_failed_fmt(&self, error: &str) -> String;

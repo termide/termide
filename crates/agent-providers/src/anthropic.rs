@@ -328,10 +328,14 @@ fn convert_messages(messages: &[Message], replay_model: Option<&str>) -> Vec<Val
             }
             Message::User(user) => {
                 flush(&mut out, &mut pending_results);
-                out.push(json!({
-                    "role": "user",
-                    "content": [{ "type": "text", "text": user.model_text() }],
+                let mut content = vec![json!({ "type": "text", "text": user.model_text() })];
+                content.extend(user.images().map(|(media_type, data)| {
+                    json!({
+                        "type": "image",
+                        "source": { "type": "base64", "media_type": media_type, "data": data },
+                    })
                 }));
+                out.push(json!({ "role": "user", "content": content }));
             }
             Message::Assistant(assistant) => {
                 flush(&mut out, &mut pending_results);
@@ -1158,6 +1162,19 @@ mod tests {
         assert_eq!(wire.len(), 1);
         assert_eq!(wire[0]["role"], json!("user"));
         assert_eq!(wire[0]["content"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn an_image_follows_the_text_as_a_base64_block() {
+        let shot = UserMessage::text("see").with_images(vec![("image/png".into(), "QUJD".into())]);
+        let wire = convert_messages(&[Message::User(shot)], None);
+        assert_eq!(
+            wire[0]["content"],
+            json!([
+                { "type": "text", "text": "see" },
+                { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "QUJD" } },
+            ])
+        );
     }
 
     #[test]

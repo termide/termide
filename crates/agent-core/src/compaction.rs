@@ -140,6 +140,7 @@ fn message_chars(message: &Message) -> usize {
             .iter()
             .map(|block| match block {
                 UserContent::Text { text } => text.chars().count(),
+                UserContent::Image { .. } => crate::message::IMAGE_ESTIMATE_CHARS,
             })
             .sum(),
         Message::Assistant(assistant) => assistant

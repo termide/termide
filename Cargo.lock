@@ -5130,6 +5130,7 @@ dependencies = [
  "arboard",
  "base64",
  "dunce",
+ "image",
  "log",
  "objc2-app-kit",
  "objc2-foundation",

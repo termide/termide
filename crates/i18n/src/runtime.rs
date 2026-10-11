@@ -1863,6 +1863,16 @@ impl Translation for RuntimeTranslation {
         )
     }
 
+    fn agent_paste_image_fmt(&self, width: u32, height: u32) -> String {
+        self.format(
+            "agent_paste_image_fmt",
+            &[
+                ("width", &width.to_string()),
+                ("height", &height.to_string()),
+            ],
+        )
+    }
+
     fn agent_project_command_fmt(&self, description: &str) -> String {
         self.format("agent_project_command_fmt", &[("description", description)])
     }

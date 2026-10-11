@@ -4899,6 +4899,43 @@ fn up_takes_the_queue_back_into_the_input() {
     );
 }
 
+/// A 1×1 PNG.
+const DOT_PNG: &[u8] = &[
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+    0x89, 0x00, 0x00, 0x00, 0x0B, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x60, 0x00, 0x02, 0x00,
+    0x00, 0x05, 0x00, 0x01, 0x7A, 0x5E, 0xAB, 0x3F, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44,
+    0xAE, 0x42, 0x60, 0x82,
+];
+
+#[test]
+fn a_pasted_picture_path_attaches_the_picture_and_survives_the_queue() {
+    let dir = tempfile::tempdir().unwrap();
+    let shot = dir.path().join("dot.png");
+    std::fs::write(&shot, DOT_PNG).unwrap();
+    let mut panel = panel(vec![]);
+    panel.apply(AgentEvent::AgentStart);
+    type_text(&mut panel, "what is ");
+    panel.paste(&shot.display().to_string());
+    let placeholder = termide_i18n::t()
+        .agent_paste_placeholder_fmt(1, &termide_i18n::t().agent_paste_image_fmt(1, 1));
+    assert_eq!(panel.input_text(), format!("what is {placeholder}"));
+    assert_eq!(panel.held_pictures(&panel.input_text()).len(), 1);
+
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(panel.runtime.queue_lens(), (1, 0));
+    assert!(panel.input_text().is_empty());
+
+    // Taken back into the input, the picture is held under its placeholder.
+    panel.handle_key(chord(KeyCode::Up, KeyModifiers::NONE));
+    assert_eq!(panel.input_text(), format!("what is {placeholder}"));
+    let held = panel.held_pictures(&panel.input_text());
+    assert_eq!(held.len(), 1);
+    assert_eq!(held[0].0, "image/png");
+    // Deleting the placeholder drops the picture.
+    assert!(panel.held_pictures("what is").is_empty());
+}
+
 #[test]
 fn a_call_that_fails_before_its_first_token_shows_no_cost() {
     let mut panel = AgentPanel::new(setup(vec![]));

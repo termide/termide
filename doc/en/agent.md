@@ -707,6 +707,19 @@ so the model still gets all of it. Pasting the same block again unmasks it: the
 placeholder gives way to the full text, to read or edit in place. A smaller
 paste goes in as it is.
 
+Pictures go to the model too. `Ctrl+V` with a picture on the clipboard — a
+screenshot, an image copied in a browser — or with picture files copied in a
+file manager attaches each as a `[#1 pasted image 1280×720]` placeholder; so
+does pasting or dropping the path of a picture file (PNG, JPEG, GIF, WebP)
+onto the prompt. The placeholder stays in the text, so you can refer to the
+picture by its number, and the picture goes with the message as long as the
+placeholder is in it: delete the placeholder to drop the picture. A queued
+message taken back into the prompt with `↑` keeps its pictures. A picture
+larger than 1568 pixels on its longer side is scaled down first. On macOS use
+`Ctrl+V`, not `Cmd+V`: `Cmd+V` is the terminal's own paste, which can type
+only text. Over SSH the clipboard read is the remote machine's. The model has
+to read images — an external agent gets them only when it says it takes them.
+
 **Model** asks the endpoint for the models it serves and lists them, the
 current one marked `●`; the last entry lets you type an id instead, which is
 also what you get when the endpoint cannot list its models. The switch takes

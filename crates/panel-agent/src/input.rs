@@ -69,6 +69,79 @@ pub(crate) fn file_completions(root: &std::path::Path, prefix: &str) -> Vec<Comp
         .collect()
 }
 
+/// The picture files `text` names, when it names nothing else: one path or
+/// several, each on its own line or separated by spaces, as a terminal types
+/// files dropped onto it — quoted, or with spaces escaped by `\`. A
+/// relative path is taken from `cwd`. `None` when any part is not an
+/// existing picture file.
+pub(crate) fn picture_paths(text: &str, cwd: &std::path::Path) -> Option<Vec<std::path::PathBuf>> {
+    let text = text.trim();
+    if text.is_empty() || text.len() > 8192 {
+        return None;
+    }
+    let is_picture = |path: &std::path::Path| {
+        termide_ui::clipboard::picture_kind(path).is_some() && path.is_file()
+    };
+    let resolve = |word: &str| {
+        let word = word.strip_prefix("file://").unwrap_or(word);
+        let path = std::path::Path::new(word);
+        let path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            cwd.join(path)
+        };
+        is_picture(&path).then_some(path)
+    };
+    // One path per line first, so a path with a bare space still counts.
+    let lines: Option<Vec<_>> = text.lines().map(|line| resolve(line.trim())).collect();
+    if lines.is_some() {
+        return lines;
+    }
+    let words = split_words(text)?;
+    words.iter().map(|word| resolve(word)).collect()
+}
+
+/// `text` split into words as a shell splits them: on unquoted whitespace,
+/// with `'…'`, `"…"` and `\` escapes taken out. `None` for an unclosed quote.
+fn split_words(text: &str) -> Option<Vec<String>> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut in_word = false;
+    let mut quote: Option<char> = None;
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some('"'), '\\') | (None, '\\') => {
+                word.push(chars.next()?);
+                in_word = true;
+            }
+            (Some(_), c) => word.push(c),
+            (None, '\'' | '"') => {
+                quote = Some(c);
+                in_word = true;
+            }
+            (None, c) if c.is_whitespace() => {
+                if in_word {
+                    words.push(std::mem::take(&mut word));
+                    in_word = false;
+                }
+            }
+            (None, c) => {
+                word.push(c);
+                in_word = true;
+            }
+        }
+    }
+    if quote.is_some() {
+        return None;
+    }
+    if in_word {
+        words.push(word);
+    }
+    Some(words)
+}
+
 impl AgentPanel {
     /// The prompt box's text area. The input bar holds exactly one multi-line
     /// field, so both accessors always resolve.
@@ -95,6 +168,20 @@ impl AgentPanel {
     /// a short `[#n pasted …]` placeholder whose full content is spliced back
     /// in on [`AgentPanel::submit`].
     pub(crate) fn paste(&mut self, text: &str) {
+        // A dropped or pasted path to a picture attaches the picture, as a
+        // terminal types the path of a file dragged onto it.
+        if let Some(paths) = picture_paths(text, &self.cwd) {
+            let pictures: Vec<_> = paths
+                .iter()
+                .filter_map(|path| termide_ui::clipboard::picture_from_path(path))
+                .collect();
+            if pictures.len() == paths.len() {
+                for picture in pictures {
+                    self.attach_picture(picture);
+                }
+                return;
+            }
+        }
         let lines = text.lines().count();
         let large = text.chars().count() > PASTE_MAX_CHARS || lines > PASTE_MAX_LINES;
         if !large {
@@ -124,7 +211,34 @@ impl AgentPanel {
         self.pastes.push(Paste {
             placeholder,
             text: text.to_string(),
+            picture: None,
         });
+    }
+
+    /// Hold `picture` for the next message, a `[#n pasted image W×H]`
+    /// placeholder standing for it at the cursor.
+    pub(crate) fn attach_picture(&mut self, picture: termide_ui::clipboard::Picture) {
+        self.paste_seq += 1;
+        let t = termide_i18n::t();
+        let label = t.agent_paste_image_fmt(picture.width, picture.height);
+        let placeholder = t.agent_paste_placeholder_fmt(self.paste_seq, &label);
+        self.input_area_mut().insert_str(&placeholder);
+        self.pastes.push(Paste {
+            placeholder,
+            text: String::new(),
+            picture: Some(picture),
+        });
+    }
+
+    /// The pictures whose placeholder is still in `text`, as `(media_type,
+    /// base64 data)`: one whose placeholder was deleted is dropped with it.
+    pub(crate) fn held_pictures(&self, text: &str) -> Vec<(String, String)> {
+        self.pastes
+            .iter()
+            .filter(|paste| text.contains(&paste.placeholder))
+            .filter_map(|paste| paste.picture.as_ref())
+            .map(|picture| (picture.media_type.clone(), picture.data.clone()))
+            .collect()
     }
 
     /// Copy the prompt's selection to the clipboard. Returns whether there was
@@ -247,11 +361,22 @@ impl AgentPanel {
     /// Paste the clipboard into the prompt; a large paste is held as a
     /// placeholder rather than flooding the input.
     pub(crate) fn paste_clipboard(&mut self) -> bool {
-        // `paste_text_or_paths` covers a clipboard holding only a native file
-        // list, which carries no text flavor on macOS/Linux.
-        match termide_ui::clipboard::paste_text_or_paths() {
-            Some(text) => {
-                self.paste(&text);
+        use termide_ui::clipboard;
+        // Files copied in a file manager: pictures among them are attached
+        // by `paste`, which their paths reach as text. Checked before the
+        // text flavor, which for a Finder copy is only the file name.
+        if let Some(files) = clipboard::paste_files() {
+            self.paste(&clipboard::paths_to_text(&files));
+            return true;
+        }
+        if let Some(text) = clipboard::paste().filter(|text| !text.is_empty()) {
+            self.paste(&text);
+            return true;
+        }
+        // A bitmap with no text: a screenshot, an image copied in a browser.
+        match clipboard::paste_picture() {
+            Some(picture) => {
+                self.attach_picture(picture);
                 true
             }
             None => false,
@@ -272,7 +397,7 @@ impl AgentPanel {
     /// Splice every held paste's full content back in place of its placeholder.
     pub(crate) fn expand_pastes(&self, text: &str) -> String {
         let mut out = text.to_string();
-        for paste in &self.pastes {
+        for paste in self.pastes.iter().filter(|paste| paste.picture.is_none()) {
             out = out.replace(&paste.placeholder, &paste.text);
         }
         out
@@ -325,7 +450,48 @@ impl AgentPanel {
             format!("{}\n\n{typed}", queued.typed())
         };
         self.set_input(&text);
+        self.hold_queued_pictures(&queued);
         true
+    }
+
+    /// Hold the pictures of `queued`, just taken back into the input, again:
+    /// each under the placeholder it was pasted with when that is still in
+    /// the text, in order, else under a new one put at the end.
+    fn hold_queued_pictures(&mut self, queued: &UserMessage) {
+        let t = termide_i18n::t();
+        let mut from = 0;
+        for (media_type, data) in queued.images() {
+            let Some(picture) = termide_ui::clipboard::picture_from_data(media_type, data) else {
+                continue;
+            };
+            let label = t.agent_paste_image_fmt(picture.width, picture.height);
+            let text = self.input_text();
+            // The earliest placeholder for a picture of this size past the
+            // one the previous picture took.
+            let found = (1..=self.paste_seq.max(64))
+                .filter_map(|n| {
+                    let placeholder = t.agent_paste_placeholder_fmt(n, &label);
+                    let at = from + text.get(from..)?.find(&placeholder)?;
+                    Some((at, n, placeholder))
+                })
+                .min_by_key(|(at, ..)| *at);
+            match found {
+                Some((at, n, placeholder)) => {
+                    from = at + placeholder.len();
+                    self.paste_seq = self.paste_seq.max(n);
+                    self.pastes.push(Paste {
+                        placeholder,
+                        text: String::new(),
+                        picture: Some(picture),
+                    });
+                }
+                None => {
+                    self.input_area_mut().move_to_end();
+                    self.attach_picture(picture);
+                    from = self.input_text().len();
+                }
+            }
+        }
     }
 
     /// Show an earlier (`older`) or later request in the input, the way a
@@ -1433,5 +1599,46 @@ impl AgentPanel {
             _ => return vec![],
         }
         vec![PanelEvent::NeedsRedraw]
+    }
+}
+
+#[cfg(test)]
+mod picture_path_tests {
+    use super::{picture_paths, split_words};
+
+    #[test]
+    fn words_split_as_a_shell_splits_them() {
+        assert_eq!(
+            split_words(r#"a\ b.png 'c d.png' "e\"f.png""#).unwrap(),
+            ["a b.png", "c d.png", "e\"f.png"]
+        );
+        assert_eq!(split_words("'open"), None);
+    }
+
+    #[test]
+    fn only_text_naming_nothing_but_pictures_is_taken() {
+        let dir = tempfile::tempdir().unwrap();
+        let shot = dir.path().join("Screen Shot.png");
+        let photo = dir.path().join("photo.jpg");
+        let notes = dir.path().join("notes.txt");
+        for path in [&shot, &photo, &notes] {
+            std::fs::write(path, b"x").unwrap();
+        }
+        let cwd = dir.path();
+        let escaped = shot.display().to_string().replace(' ', "\\ ");
+        assert_eq!(
+            picture_paths(&format!("{escaped} {}", photo.display()), cwd),
+            Some(vec![shot.clone(), photo.clone()])
+        );
+        // A path with a bare space, alone on its line.
+        assert_eq!(
+            picture_paths(&format!("{}\n", shot.display()), cwd),
+            Some(vec![shot.clone()])
+        );
+        assert_eq!(picture_paths("photo.jpg", cwd), Some(vec![photo.clone()]));
+        assert_eq!(picture_paths(&notes.display().to_string(), cwd), None);
+        assert_eq!(picture_paths("look at photo.jpg", cwd), None);
+        assert_eq!(picture_paths("missing.png", cwd), None);
+        assert_eq!(picture_paths("", cwd), None);
     }
 }

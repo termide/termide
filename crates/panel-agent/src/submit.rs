@@ -90,7 +90,10 @@ impl AgentPanel {
     pub fn submit(&mut self) -> Vec<PanelEvent> {
         // Held pastes are spliced back in before anything reads the message, so
         // the full content is what a command, a template or the model sees.
-        let text = self.expand_pastes(&self.input_area().text());
+        let typed = self.input_area().text();
+        // Pictures go with the request the model gets, whichever arm makes it.
+        let pictures = self.held_pictures(&typed);
+        let text = self.expand_pastes(&typed);
         let text = text.trim().to_string();
         if text.is_empty() {
             return vec![];
@@ -355,7 +358,7 @@ impl AgentPanel {
             return vec![PanelEvent::NeedsRedraw];
         }
         self.clear_input();
-        self.send_as(text, command)
+        self.send_with(text, command, pictures)
     }
 
     /// The commands the external agent offers of its own.
@@ -383,8 +386,21 @@ impl AgentPanel {
     /// [`Self::send`] for text a typed `/name args` produced: the transcript
     /// and the input history show the command, the model gets the text.
     pub(crate) fn send_as(&mut self, text: String, command: Option<String>) -> Vec<PanelEvent> {
+        self.send_with(text, command, Vec::new())
+    }
+
+    /// [`Self::send_as`] with `pictures` attached, as `(media_type, base64
+    /// data)`.
+    pub(crate) fn send_with(
+        &mut self,
+        text: String,
+        command: Option<String>,
+        pictures: Vec<(String, String)>,
+    ) -> Vec<PanelEvent> {
         self.follow = true;
-        let message = UserMessage::text(text).with_command(command);
+        let message = UserMessage::text(text)
+            .with_command(command)
+            .with_images(pictures);
         if self.is_busy() {
             // The message waits in the state strip until the agent takes it,
             // then shows as a user block.

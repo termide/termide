@@ -84,8 +84,22 @@ const SPENT_KEY: &str = "usage";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UserContent {
-    Text { text: String },
+    Text {
+        text: String,
+    },
+    /// A picture the user attached: pasted from the clipboard or named by a
+    /// pasted path. `data` is the encoded file in base64, `media_type` its
+    /// MIME type (`image/png`, `image/jpeg`, …).
+    Image {
+        media_type: String,
+        data: String,
+    },
 }
+
+/// The characters an attached image counts as in token estimates: a picture
+/// costs the model on the order of a thousand or two tokens, whatever the
+/// size of its base64.
+pub const IMAGE_ESTIMATE_CHARS: usize = 6000;
 
 /// A tool invocation requested by the model.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -178,6 +192,26 @@ impl UserMessage {
         }
     }
 
+    /// The message with `images` attached after its text, as `(media_type,
+    /// base64 data)` pairs.
+    #[must_use]
+    pub fn with_images(mut self, images: Vec<(String, String)>) -> Self {
+        self.content.extend(
+            images
+                .into_iter()
+                .map(|(media_type, data)| UserContent::Image { media_type, data }),
+        );
+        self
+    }
+
+    /// The attached images, as `(media_type, base64 data)`.
+    pub fn images(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.content.iter().filter_map(|block| match block {
+            UserContent::Image { media_type, data } => Some((media_type.as_str(), data.as_str())),
+            UserContent::Text { .. } => None,
+        })
+    }
+
     /// The message as produced by the typed `command`.
     #[must_use]
     pub fn with_command(mut self, command: Option<String>) -> Self {
@@ -241,16 +275,22 @@ impl UserMessage {
             .map(UserMessage::plain_text)
             .collect::<Vec<_>>()
             .join("\n\n");
-        Some(UserMessage::text(text))
+        let images = messages
+            .iter()
+            .flat_map(UserMessage::images)
+            .map(|(media_type, data)| (media_type.to_string(), data.to_string()))
+            .collect();
+        Some(UserMessage::text(text).with_images(images))
     }
 
-    /// Concatenated text blocks.
+    /// Concatenated text blocks; images are left out.
     #[must_use]
     pub fn plain_text(&self) -> String {
         self.content
             .iter()
-            .map(|block| match block {
-                UserContent::Text { text } => text.as_str(),
+            .filter_map(|block| match block {
+                UserContent::Text { text } => Some(text.as_str()),
+                UserContent::Image { .. } => None,
             })
             .collect()
     }
@@ -449,6 +489,27 @@ pub enum Message {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn images_ride_beside_the_text_and_survive_a_merge() {
+        let shot = UserMessage::text("look [#1 pasted image 2×2]")
+            .with_images(vec![("image/png".into(), "AAAA".into())]);
+        assert_eq!(shot.plain_text(), "look [#1 pasted image 2×2]");
+        assert_eq!(shot.images().collect::<Vec<_>>(), [("image/png", "AAAA")]);
+        let line = serde_json::to_value(&shot).unwrap();
+        assert_eq!(
+            line["content"][1],
+            json!({ "type": "image", "media_type": "image/png", "data": "AAAA" })
+        );
+        assert_eq!(serde_json::from_value::<UserMessage>(line).unwrap(), shot);
+
+        let merged = UserMessage::merge(vec![shot, UserMessage::text("and this")]).unwrap();
+        assert_eq!(
+            merged.plain_text(),
+            "look [#1 pasted image 2×2]\n\nand this"
+        );
+        assert_eq!(merged.images().count(), 1);
+    }
 
     #[test]
     fn what_a_tool_spent_rides_in_its_details_beside_the_rest() {
