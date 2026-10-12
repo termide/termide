@@ -1,0 +1,17 @@
+name: termide CodeQL config
+
+# Two Rust rules are switched off. Every alert they raised was dismissed by
+# hand (#8–#43):
+#
+# - rust/cleartext-logging taints whole structs: once a request carries a
+#   password, logging any other field of it (a path, an error) is flagged.
+#   Secrets are kept out of logs by design instead: ArchivePasswords and
+#   the like have redacting `Debug` impls.
+# - rust/hard-coded-cryptographic-value flags fixture passwords in unit
+#   tests. Our tests are inline `#[cfg(test)]` modules inside `src/`, so
+#   `paths-ignore` cannot exclude them.
+query-filters:
+  - exclude:
+      id: rust/cleartext-logging
+  - exclude:
+      id: rust/hard-coded-cryptographic-value
