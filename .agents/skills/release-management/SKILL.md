@@ -775,6 +775,7 @@ Workflow steps:
 4. ⏳ Build .deb packages
 5. ⏳ Build .rpm packages
 6. ⏳ Create GitHub Release
+7. ⏳ Update AUR, the Homebrew tap and the website
 
 You can monitor progress at:
 https://github.com/termide/termide/actions/workflows/release.yml
@@ -782,6 +783,12 @@ https://github.com/termide/termide/actions/workflows/release.yml
 📧 Notifications:
 GitHub will send you an email when the release is published.
 ```
+
+The website job (`update-site`) sets the version and the download size on
+termide.github.io and rebuilds its pages; it fails without the
+`SITE_DEPLOY_KEY` secret. Screenshots are not part of it: when the UI they
+show has changed, re-record them with `tools/screenshots/run.sh` and copy
+`out/site/` into the website repository.
 
 ## Error Handling
 

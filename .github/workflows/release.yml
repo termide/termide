@@ -427,3 +427,59 @@ jobs:
             git commit -m "Update to ${VERSION}"
             GIT_SSH_COMMAND="ssh -i ~/.ssh/homebrew_tap" git push
           fi
+
+  # Refresh the website: the version, the download size, the generated pages
+  update-site:
+    name: Update website
+    needs: release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Setup SSH for the website repository
+        env:
+          SITE_DEPLOY_KEY: ${{ secrets.SITE_DEPLOY_KEY }}
+        run: |
+          if [ -z "$SITE_DEPLOY_KEY" ]; then
+            echo "::error::SITE_DEPLOY_KEY is not set: add a deploy key with write access to termide/termide.github.io"
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          echo "$SITE_DEPLOY_KEY" > ~/.ssh/site
+          chmod 600 ~/.ssh/site
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      - name: Set the version and download size, rebuild the pages
+        env:
+          VERSION: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/site -o StrictHostKeyChecking=accept-new" \
+            git clone git@github.com:termide/termide.github.io.git /tmp/site
+          cd /tmp/site
+
+          # The median of the binary archives (.tar.gz, .zip), in whole MB.
+          MB=$(gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" --json assets \
+            -q '[.assets[] | select(.name | test("\\.(tar\\.gz|zip)$")) | .size] | sort | .[length / 2 | floor] / 1048576 + 0.5 | floor')
+          echo "version ${VERSION}, download ~${MB} MB"
+
+          python3 - "$VERSION" "$MB" <<'EOF'
+          import json, sys
+          path = "src/data.json"
+          raw = open(path, encoding="utf-8").read()
+          data = json.loads(raw)
+          data["version"], data["download_mb"] = sys.argv[1], int(sys.argv[2])
+          end = "\n" if raw.endswith("\n") else ""
+          open(path, "w", encoding="utf-8").write(json.dumps(data, ensure_ascii=False, indent=2) + end)
+          EOF
+          python3 build.py
+          python3 build.py --check
+
+          git config user.email "github-actions@termide.dev"
+          git config user.name "GitHub Actions"
+          git add src/data.json index.html ru/index.html zh/index.html
+          if git diff --cached --quiet; then
+            echo "Website already up to date for ${VERSION}"
+          else
+            git commit -m "chore: refresh landing to v${VERSION}"
+            GIT_SSH_COMMAND="ssh -i ~/.ssh/site" git push
+          fi
