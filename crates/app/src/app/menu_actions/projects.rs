@@ -330,7 +330,8 @@ impl App {
             initial_dir,
             t.projects_new().to_string(),
             t.directory_picker_create().to_string(),
-        );
+        )
+        .with_keybindings(&self.state.config.file_manager.keybindings);
         self.state.set_pending_action(
             PendingAction::NewProject,
             ActiveModal::DirectoryPicker(Box::new(modal)),
@@ -351,7 +352,8 @@ impl App {
             initial_dir,
             t.projects_change_root().to_string(),
             t.directory_picker_move().to_string(),
-        );
+        )
+        .with_keybindings(&self.state.config.file_manager.keybindings);
         self.state.set_pending_action(
             PendingAction::ChangeRootPath,
             ActiveModal::DirectoryPicker(Box::new(modal)),

@@ -459,7 +459,8 @@ impl App {
                                     current_path,
                                     t.directory_switcher_title().to_string(),
                                     t.directory_picker_move().to_string(),
-                                );
+                                )
+                                .with_keybindings(&self.state.config.file_manager.keybindings);
                                 self.state.set_pending_action(
                                     PendingAction::SwitchDirectory,
                                     ActiveModal::DirectoryPicker(Box::new(modal)),

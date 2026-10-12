@@ -138,7 +138,8 @@ impl App {
             cwd.clone(),
             t.agent_cwd_title().to_string(),
             t.directory_picker_select().to_string(),
-        );
+        )
+        .with_keybindings(&self.state.config.file_manager.keybindings);
         self.state.set_pending_action(
             termide_state::PendingAction::ChangeAgentCwd { session, cwd },
             termide_modal::ActiveModal::DirectoryPicker(Box::new(modal)),

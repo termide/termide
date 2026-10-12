@@ -806,6 +806,10 @@ impl Translation for RuntimeTranslation {
         directory_picker_move,
         directory_picker_select,
         directory_picker_cancel,
+        directory_picker_new_folder,
+        directory_picker_name_empty,
+        directory_picker_name_invalid,
+        directory_picker_not_empty,
         directory_switcher_title,
         directory_switcher_no_paths,
         directory_switcher_unsupported,
@@ -1646,6 +1650,10 @@ impl Translation for RuntimeTranslation {
 
     fn status_dir_created(&self, name: &str) -> String {
         self.format("status_dir_created", &[("name", name)])
+    }
+
+    fn directory_picker_exists(&self, name: &str) -> String {
+        self.format("directory_picker_exists", &[("name", name)])
     }
 
     fn fm_pack_prompt(&self, name: &str) -> String {

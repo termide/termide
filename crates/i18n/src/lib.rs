@@ -1276,6 +1276,11 @@ pub trait Translation: Send + Sync {
     fn directory_picker_move(&self) -> &str;
     fn directory_picker_select(&self) -> &str;
     fn directory_picker_cancel(&self) -> &str;
+    fn directory_picker_new_folder(&self) -> &str;
+    fn directory_picker_name_empty(&self) -> &str;
+    fn directory_picker_name_invalid(&self) -> &str;
+    fn directory_picker_not_empty(&self) -> &str;
+    fn directory_picker_exists(&self, name: &str) -> String;
 
     // Directory switcher
     fn directory_switcher_title(&self) -> &str;

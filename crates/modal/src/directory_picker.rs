@@ -3,9 +3,14 @@
 //! Supports expand/collapse of subdirectories (Right/Left arrows), toggling
 //! hidden directories (`.`, as in the file manager), cursor rendering
 //! matching the file manager panel style.
+//!
+//! Directories can be created, renamed and (when empty) deleted in place with
+//! the file manager's `create_dir`, `rename` and `delete` keys. A name is
+//! typed into the tree row itself; a new directory goes beside the entry
+//! under the cursor, never inside it.
 
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -14,13 +19,19 @@ use ratatui::{
     widgets::{List, ListItem, Widget},
 };
 
-use crate::base::render_modal_block;
-use std::path::PathBuf;
+use crate::base::{render_input_field_scrolled, render_modal_block};
+use crate::input_keys::handle_input_key;
+use std::path::{Path, PathBuf};
 use unicode_width::UnicodeWidthStr;
 
+use termide_config::FileManagerKeybindings;
+use termide_core::HotkeyTable;
 use termide_theme::Theme;
 
-use crate::{calculate_modal_width, centered_rect_with_size, Modal, ModalResult, ModalWidthConfig};
+use crate::{
+    calculate_modal_width, centered_rect_with_size, Modal, ModalResult, ModalWidthConfig,
+    TextInputHandler,
+};
 
 /// Directory entry for tree display
 #[derive(Debug, Clone)]
@@ -31,6 +42,33 @@ struct DirEntry {
     /// `Some(true)` = expanded, `Some(false)` = collapsed, `None` = ".." entry
     expanded: Option<bool>,
 }
+
+/// What an inline row edit does on Enter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditKind {
+    /// The row is a placeholder for a directory still to be created.
+    Create,
+    /// The row is an existing directory being renamed.
+    Rename,
+}
+
+/// A name being typed into a tree row.
+#[derive(Debug)]
+struct RowEdit {
+    kind: EditKind,
+    /// Index into `entries` of the edited row.
+    row: usize,
+    /// Directory the name is created or renamed in.
+    parent: PathBuf,
+    /// Cursor to return to when a create is cancelled.
+    prev_cursor: usize,
+    input: TextInputHandler,
+}
+
+/// Button order in the bottom row.
+const BUTTON_CONFIRM: usize = 0;
+const BUTTON_NEW_FOLDER: usize = 1;
+const BUTTON_CANCEL: usize = 2;
 
 /// Directory picker modal window with tree navigation
 #[derive(Debug)]
@@ -50,8 +88,14 @@ pub struct DirectoryPickerModal {
     last_list_area: Option<Rect>,
     last_buttons_area: Option<Rect>,
     create_label: String,
+    new_folder_label: String,
     cancel_label: String,
     cached_width: Option<u16>,
+    /// `create_dir`, `rename` and `delete`, as bound in the file manager.
+    hotkeys: HotkeyTable,
+    edit: Option<RowEdit>,
+    /// An error shown in place of the path line until the next key.
+    message: Option<String>,
 }
 
 const MAX_VISIBLE_ITEMS: usize = 15;
@@ -74,11 +118,25 @@ impl DirectoryPickerModal {
             last_list_area: None,
             last_buttons_area: None,
             create_label: confirm_label,
+            new_folder_label: t.directory_picker_new_folder().to_string(),
             cancel_label: t.directory_picker_cancel().to_string(),
             cached_width: None,
+            hotkeys: picker_hotkeys(&{
+                let mut kb = FileManagerKeybindings::default();
+                kb.with_defaults();
+                kb
+            }),
+            edit: None,
+            message: None,
         };
         modal.load_root();
         modal
+    }
+
+    /// Use the file manager's keys as configured instead of the defaults.
+    pub fn with_keybindings(mut self, keybindings: &FileManagerKeybindings) -> Self {
+        self.hotkeys = picker_hotkeys(keybindings);
+        self
     }
 
     /// Get the currently selected path
@@ -213,17 +271,27 @@ impl DirectoryPickerModal {
     /// and the cursor where they still exist.
     fn toggle_hidden(&mut self) {
         self.show_hidden = !self.show_hidden;
-        let expanded: Vec<PathBuf> = self
-            .entries
-            .iter()
-            .filter(|e| e.expanded == Some(true))
-            .map(|e| e.full_path.clone())
-            .collect();
+        let expanded = self.expanded_paths();
         let under_cursor = self
             .visible_indices
             .get(self.cursor)
             .map(|&i| self.entries[i].full_path.clone());
+        self.reload(&expanded, under_cursor.as_deref());
+    }
 
+    /// Paths of the expanded branches.
+    fn expanded_paths(&self) -> Vec<PathBuf> {
+        self.entries
+            .iter()
+            .filter(|e| e.expanded == Some(true))
+            .map(|e| e.full_path.clone())
+            .collect()
+    }
+
+    /// Read the tree from disk again with the `expanded` branches open, the
+    /// cursor on `select` — or else on its closest ancestor still listed, or
+    /// else at the top.
+    fn reload(&mut self, expanded: &[PathBuf], select: Option<&Path>) {
         self.load_root();
         // Parents precede their children, so one pass re-expands nested
         // branches in order.
@@ -241,7 +309,7 @@ impl DirectoryPickerModal {
 
         // The cursor stays on its entry, or else on its closest ancestor
         // still listed (a hidden directory it was inside of).
-        if let Some(path) = under_cursor {
+        if let Some(path) = select {
             let found = path.ancestors().find_map(|ancestor| {
                 self.visible_indices.iter().position(|&t| {
                     let entry = &self.entries[t];
@@ -251,6 +319,224 @@ impl DirectoryPickerModal {
             self.cursor = found.unwrap_or(0);
             self.adjust_scroll();
         }
+    }
+
+    /// Index just past `tree_idx` and every entry loaded below it.
+    fn subtree_end(&self, tree_idx: usize) -> usize {
+        let depth = self.entries[tree_idx].depth;
+        let mut end = tree_idx + 1;
+        while self.entries.get(end).is_some_and(|e| e.depth > depth) {
+            end += 1;
+        }
+        end
+    }
+
+    /// The directory under the cursor (not `..`) and its tree index.
+    fn dir_under_cursor(&self) -> Option<usize> {
+        let &tree_idx = self.visible_indices.get(self.cursor)?;
+        self.entries[tree_idx]
+            .expanded
+            .is_some()
+            .then_some(tree_idx)
+    }
+
+    /// Open an empty name row beside the entry under the cursor: after it
+    /// and its subtree, at its depth, so the new directory becomes its
+    /// sibling. On `..` or an empty list the row goes to the top level.
+    fn start_create(&mut self) {
+        self.button_focused = false;
+        let (parent, depth, row) = match self.dir_under_cursor() {
+            Some(tree_idx) => {
+                let entry = &self.entries[tree_idx];
+                let parent = entry
+                    .full_path
+                    .parent()
+                    .map_or_else(|| self.current_dir.clone(), Path::to_path_buf);
+                (parent, entry.depth, self.subtree_end(tree_idx))
+            }
+            None => {
+                let row = usize::from(self.entries.first().is_some_and(|e| e.expanded.is_none()));
+                (self.current_dir.clone(), 0, row)
+            }
+        };
+        self.entries.insert(
+            row,
+            DirEntry {
+                name: String::new(),
+                full_path: parent.clone(),
+                depth,
+                expanded: Some(false),
+            },
+        );
+        let prev_cursor = self.cursor;
+        self.recompute_visible();
+        self.cursor = self
+            .visible_indices
+            .iter()
+            .position(|&t| t == row)
+            .unwrap_or(0);
+        self.adjust_scroll();
+        self.edit = Some(RowEdit {
+            kind: EditKind::Create,
+            row,
+            parent,
+            prev_cursor,
+            input: TextInputHandler::new(),
+        });
+    }
+
+    /// Turn the row under the cursor into a field holding its name.
+    fn start_rename(&mut self) {
+        let Some(tree_idx) = self.dir_under_cursor() else {
+            return;
+        };
+        let entry = &self.entries[tree_idx];
+        let Some(parent) = entry.full_path.parent() else {
+            return;
+        };
+        self.button_focused = false;
+        self.edit = Some(RowEdit {
+            kind: EditKind::Rename,
+            row: tree_idx,
+            parent: parent.to_path_buf(),
+            prev_cursor: self.cursor,
+            input: TextInputHandler::with_text(entry.name.clone()),
+        });
+    }
+
+    /// Drop the edit; a create also takes its placeholder row away.
+    fn cancel_edit(&mut self) {
+        let Some(edit) = self.edit.take() else {
+            return;
+        };
+        if edit.kind == EditKind::Create {
+            self.entries.remove(edit.row);
+            self.recompute_visible();
+            self.cursor = edit
+                .prev_cursor
+                .min(self.visible_indices.len().saturating_sub(1));
+            self.adjust_scroll();
+        }
+    }
+
+    /// Create or rename with the typed name. On failure the field stays
+    /// open with the reason shown above the tree.
+    fn commit_edit(&mut self) {
+        let Some(edit) = self.edit.as_ref() else {
+            return;
+        };
+        let name = edit.input.text().to_string();
+        if let Err(message) = validate_name(&name) {
+            self.message = Some(message);
+            return;
+        }
+        let target = edit.parent.join(&name);
+        let t = termide_i18n::t();
+
+        match edit.kind {
+            EditKind::Create => {
+                if target.symlink_metadata().is_ok() {
+                    self.message = Some(t.directory_picker_exists(&name));
+                    return;
+                }
+                if let Err(e) = std::fs::create_dir(&target) {
+                    self.message = Some(e.to_string());
+                    return;
+                }
+                let row = edit.row;
+                self.edit = None;
+                self.entries.remove(row);
+                let expanded = self.expanded_paths();
+                self.reload(&expanded, Some(&target));
+            }
+            EditKind::Rename => {
+                let old = self.entries[edit.row].full_path.clone();
+                if target == old {
+                    self.edit = None;
+                    return;
+                }
+                // A case-only rename on a case-insensitive file system finds
+                // the directory itself under the new name.
+                if target.symlink_metadata().is_ok() && !same_entry(&old, &target) {
+                    self.message = Some(t.directory_picker_exists(&name));
+                    return;
+                }
+                if let Err(e) = std::fs::rename(&old, &target) {
+                    self.message = Some(e.to_string());
+                    return;
+                }
+                self.edit = None;
+                let expanded: Vec<PathBuf> = self
+                    .expanded_paths()
+                    .into_iter()
+                    .map(|p| match p.strip_prefix(&old) {
+                        Ok(rest) => target.join(rest),
+                        Err(_) => p,
+                    })
+                    .collect();
+                self.reload(&expanded, Some(&target));
+            }
+        }
+    }
+
+    /// Remove the directory under the cursor if it is empty; a directory
+    /// with anything in it is left alone with a message.
+    fn delete_under_cursor(&mut self) {
+        let Some(tree_idx) = self.dir_under_cursor() else {
+            return;
+        };
+        let path = self.entries[tree_idx].full_path.clone();
+        match std::fs::remove_dir(&path) {
+            Ok(()) => {
+                let cursor = self.cursor;
+                let expanded = self.expanded_paths();
+                self.reload(&expanded, None);
+                self.cursor = cursor.min(self.visible_indices.len().saturating_sub(1));
+                self.adjust_scroll();
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty => {
+                self.message = Some(termide_i18n::t().directory_picker_not_empty().to_string());
+            }
+            Err(e) => self.message = Some(e.to_string()),
+        }
+    }
+
+    /// Keys while a name is being typed: Enter commits, Esc cancels, the
+    /// rest edit the field. The raw event is used so letters arrive as typed
+    /// on any layout.
+    fn handle_edit_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => self.cancel_edit(),
+            KeyCode::Enter => self.commit_edit(),
+            // The row stays put while it is edited.
+            KeyCode::Tab
+            | KeyCode::BackTab
+            | KeyCode::Up
+            | KeyCode::Down
+            | KeyCode::PageUp
+            | KeyCode::PageDown => {}
+            _ => {
+                if let Some(edit) = self.edit.as_mut() {
+                    handle_input_key(&mut edit.input, key);
+                }
+            }
+        }
+    }
+
+    /// Start and width of each button, left to right, centred in `area`.
+    fn button_layout(&self, area: Rect) -> [(u16, u16); 3] {
+        let widths = [
+            self.create_label.width() as u16 + 4,
+            self.new_folder_label.width() as u16 + 4,
+            self.cancel_label.width() as u16 + 4,
+        ];
+        let total = widths.iter().sum::<u16>() + 4;
+        let mut x = area.x + area.width.saturating_sub(total) / 2;
+        widths.map(|w| {
+            let start = x;
+            x += w + 2;
+            (start, w)
+        })
     }
 
     /// Recompute visible indices and tree prefixes
@@ -270,7 +556,10 @@ impl DirectoryPickerModal {
             .unwrap_or(0);
         let path_width = self.current_dir.to_string_lossy().len() as u16 + 5;
 
-        let buttons_width = self.create_label.len() as u16 + self.cancel_label.len() as u16 + 12;
+        let buttons_width = (self.create_label.width()
+            + self.new_folder_label.width()
+            + self.cancel_label.width()) as u16
+            + 18;
 
         calculate_modal_width(
             [
@@ -345,12 +634,26 @@ impl Modal for DirectoryPickerModal {
         let modal_area = centered_rect_with_size(modal_width, modal_height, area);
         let inner = render_modal_block(modal_area, buf, &self.title, theme);
 
-        // Path display (truncate left if too wide)
-        let selected = self.selected_path();
-        let path_str = selected.to_string_lossy();
-        let display_path = termide_ui::path_utils::truncate_left(&path_str, inner.width as usize);
-        let path_style = Style::default().fg(theme.fg);
-        buf.set_string(inner.x, inner.y, &display_path, path_style);
+        // Path line: an error if there is one, else the path the edited
+        // name or the cursor stands for (truncated on the left).
+        if let Some(message) = &self.message {
+            let text = termide_ui::path_utils::truncate_left(message, inner.width as usize);
+            buf.set_string(inner.x, inner.y, &text, Style::default().fg(theme.error));
+        } else {
+            let selected = match &self.edit {
+                Some(edit) => edit.parent.join(edit.input.text()),
+                None => self.selected_path(),
+            };
+            let path_str = selected.to_string_lossy();
+            let display_path =
+                termide_ui::path_utils::truncate_left(&path_str, inner.width as usize);
+            buf.set_string(
+                inner.x,
+                inner.y,
+                &display_path,
+                Style::default().fg(theme.fg),
+            );
+        }
 
         // Separator
         let sep_y = inner.y + 1;
@@ -369,6 +672,9 @@ impl Modal for DirectoryPickerModal {
 
         let prefix_style = Style::default().fg(theme.disabled);
         let mut list_items: Vec<ListItem> = Vec::new();
+        let edit_row = self.edit.as_ref().map(|e| e.row);
+        // Where the name field goes: (x, y, width) inside the edited row.
+        let mut field_at: Option<(u16, u16, u16)> = None;
 
         for (vis_pos, &tree_idx) in self
             .visible_indices
@@ -378,7 +684,8 @@ impl Modal for DirectoryPickerModal {
             .take(MAX_VISIBLE_ITEMS)
         {
             let entry = &self.entries[tree_idx];
-            let is_selected = vis_pos == self.cursor && !self.button_focused;
+            let is_edited = edit_row == Some(tree_idx);
+            let is_selected = vis_pos == self.cursor && !self.button_focused && !is_edited;
 
             // Tree prefix (├─, └─, etc.)
             let tree_prefix = self
@@ -412,7 +719,14 @@ impl Modal for DirectoryPickerModal {
                 (Style::default().fg(theme.fg), prefix_style)
             };
 
-            let text = format!("{} {}", icon, entry.name);
+            let text = if is_edited {
+                let x = 1 + tree_prefix.width() as u16 + icon.width() as u16 + 1;
+                let y = list_area.y + (vis_pos - self.scroll_offset) as u16;
+                field_at = Some((inner.x + x, y, inner.width.saturating_sub(x + 1)));
+                format!("{} ", icon)
+            } else {
+                format!("{} {}", icon, entry.name)
+            };
             let line_width = 1 + tree_prefix.width() + text.width();
             let padding = " ".repeat((inner.width as usize).saturating_sub(line_width));
 
@@ -431,6 +745,22 @@ impl Modal for DirectoryPickerModal {
         list.render(list_area, buf);
         self.last_list_area = Some(list_area);
 
+        if let (Some((x, y, width)), Some(edit)) = (field_at, self.edit.as_mut()) {
+            let scroll = edit.input.follow_scroll(width);
+            render_input_field_scrolled(
+                buf,
+                x,
+                y,
+                width,
+                edit.input.text(),
+                edit.input.cursor_pos(),
+                edit.input.selection_range(),
+                true,
+                theme,
+                scroll,
+            );
+        }
+
         // Separator before buttons
         let sep2_y = list_area.y + list_area.height;
         for x in inner.x..inner.x + inner.width {
@@ -447,46 +777,53 @@ impl Modal for DirectoryPickerModal {
         };
         self.last_buttons_area = Some(buttons_area);
 
-        let create_style = if self.button_focused && self.selected_button == 0 {
-            Style::default()
-                .fg(theme.bg)
-                .bg(theme.fg)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(theme.fg)
-        };
-
-        let cancel_style = if self.button_focused && self.selected_button == 1 {
-            Style::default()
-                .fg(theme.bg)
-                .bg(theme.fg)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(theme.fg)
-        };
-
-        let create_btn = format!("[ {} ]", self.create_label);
-        let cancel_btn = format!("[ {} ]", self.cancel_label);
-
-        let total_btn_width = create_btn.width() + 2 + cancel_btn.width();
-        let btn_start_x = inner.x + (inner.width.saturating_sub(total_btn_width as u16)) / 2;
-
-        buf.set_string(btn_start_x, buttons_y, &create_btn, create_style);
-        buf.set_string(
-            btn_start_x + create_btn.width() as u16 + 2,
-            buttons_y,
-            &cancel_btn,
-            cancel_style,
-        );
+        let labels = [
+            &self.create_label,
+            &self.new_folder_label,
+            &self.cancel_label,
+        ];
+        for (i, (label, (x, _))) in labels
+            .into_iter()
+            .zip(self.button_layout(buttons_area))
+            .enumerate()
+        {
+            let style = if self.button_focused && self.selected_button == i {
+                Style::default()
+                    .fg(theme.bg)
+                    .bg(theme.fg)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme.fg)
+            };
+            buf.set_string(x, buttons_y, format!("[ {} ]", label), style);
+        }
     }
 
     fn handle_key(
         &mut self,
         chord: termide_core::KeyChord,
     ) -> Result<Option<ModalResult<Self::Result>>> {
-        // No text input here: letter keys are shortcuts, matched on the
+        self.message = None;
+        if self.edit.is_some() {
+            self.handle_edit_key(chord.raw);
+            return Ok(None);
+        }
+
+        // Outside a name field letter keys are shortcuts, matched on the
         // layout-normalized form so they work on a Cyrillic layout too.
         let key = chord.canonical;
+        if self.hotkeys.matches_canonical("create_dir", &key) {
+            self.start_create();
+            return Ok(None);
+        }
+        if self.hotkeys.matches_canonical("rename", &key) {
+            self.start_rename();
+            return Ok(None);
+        }
+        if self.hotkeys.matches_canonical("delete", &key) {
+            self.delete_under_cursor();
+            return Ok(None);
+        }
         match key.code {
             KeyCode::Esc => Ok(Some(ModalResult::Cancelled)),
             KeyCode::Char('.') => {
@@ -532,11 +869,11 @@ impl Modal for DirectoryPickerModal {
             }
             // Button navigation
             KeyCode::Left if self.button_focused => {
-                self.selected_button = 0;
+                self.selected_button = self.selected_button.saturating_sub(1);
                 Ok(None)
             }
             KeyCode::Right if self.button_focused => {
-                self.selected_button = 1;
+                self.selected_button = (self.selected_button + 1).min(BUTTON_CANCEL);
                 Ok(None)
             }
             // Go to parent directory (reload tree root)
@@ -551,7 +888,11 @@ impl Modal for DirectoryPickerModal {
             KeyCode::Enter => {
                 if self.button_focused {
                     match self.selected_button {
-                        0 => Ok(Some(ModalResult::Confirmed(self.selected_path()))),
+                        BUTTON_CONFIRM => Ok(Some(ModalResult::Confirmed(self.selected_path()))),
+                        BUTTON_NEW_FOLDER => {
+                            self.start_create();
+                            Ok(None)
+                        }
                         _ => Ok(Some(ModalResult::Cancelled)),
                     }
                 } else {
@@ -580,6 +921,11 @@ impl Modal for DirectoryPickerModal {
     ) -> Result<Option<ModalResult<Self::Result>>> {
         use crate::{check_mouse_click, MouseClickResult};
 
+        // A name being typed keeps its row; Enter or Esc ends it first.
+        if self.edit.is_some() {
+            return Ok(None);
+        }
+
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 for _ in 0..3 {
@@ -606,17 +952,20 @@ impl Modal for DirectoryPickerModal {
                 && mouse.column >= buttons_area.x
                 && mouse.column < buttons_area.x + buttons_area.width
             {
-                let create_btn_width = self.create_label.len() + 4;
-                let total_btn_width = create_btn_width + 2 + self.cancel_label.len() + 4;
-                let btn_start_x = buttons_area.x
-                    + (buttons_area.width.saturating_sub(total_btn_width as u16)) / 2;
-
-                if mouse.column >= btn_start_x
-                    && mouse.column < btn_start_x + create_btn_width as u16
-                {
-                    return Ok(Some(ModalResult::Confirmed(self.selected_path())));
-                } else if mouse.column >= btn_start_x + create_btn_width as u16 + 2 {
-                    return Ok(Some(ModalResult::Cancelled));
+                let hit = self
+                    .button_layout(buttons_area)
+                    .iter()
+                    .position(|&(x, w)| mouse.column >= x && mouse.column < x + w);
+                match hit {
+                    Some(BUTTON_CONFIRM) => {
+                        return Ok(Some(ModalResult::Confirmed(self.selected_path())));
+                    }
+                    Some(BUTTON_NEW_FOLDER) => {
+                        self.start_create();
+                        return Ok(None);
+                    }
+                    Some(_) => return Ok(Some(ModalResult::Cancelled)),
+                    None => {}
                 }
             }
         }
@@ -652,6 +1001,58 @@ impl Modal for DirectoryPickerModal {
             }
             _ => Ok(None),
         }
+    }
+
+    /// A paste goes into the name being typed, on one line.
+    fn handle_paste(&mut self, text: &str) -> bool {
+        let Some(edit) = self.edit.as_mut() else {
+            return false;
+        };
+        let line: String = text.chars().filter(|c| !matches!(c, '\n' | '\r')).collect();
+        edit.input.paste(&line);
+        true
+    }
+}
+
+/// The picker's share of the file manager keys.
+fn picker_hotkeys(keybindings: &FileManagerKeybindings) -> HotkeyTable {
+    let mut table = HotkeyTable::new();
+    table.insert("create_dir", &keybindings.create_dir);
+    table.insert("rename", &keybindings.rename);
+    table.insert("delete", &keybindings.delete);
+    table
+}
+
+/// A single path component: not empty, no separator, not `.` or `..`.
+fn validate_name(name: &str) -> std::result::Result<(), String> {
+    let t = termide_i18n::t();
+    if name.trim().is_empty() {
+        return Err(t.directory_picker_name_empty().to_string());
+    }
+    if name == "."
+        || name == ".."
+        || name.contains(['/', '\0'])
+        || name.contains(std::path::MAIN_SEPARATOR)
+    {
+        return Err(t.directory_picker_name_invalid().to_string());
+    }
+    Ok(())
+}
+
+/// Whether `a` and `b` name the same file system entry.
+fn same_entry(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match (a.symlink_metadata(), b.symlink_metadata()) {
+            (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
+            _ => false,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        // Without inode numbers, trust a case-insensitive spelling match.
+        a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
     }
 }
 
@@ -802,6 +1203,215 @@ mod tests {
         assert_eq!(modal.selected_path(), root.join(".git/objects"));
         press(&mut modal, KeyCode::Char('.'));
         assert_eq!(modal.cursor, 0);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    fn type_text(modal: &mut DirectoryPickerModal, text: &str) {
+        for c in text.chars() {
+            press(modal, KeyCode::Char(c));
+        }
+    }
+
+    #[test]
+    fn new_directory_goes_beside_the_entry_under_the_cursor() {
+        let root = scratch("create-sibling");
+        let mut modal = DirectoryPickerModal::new(root.clone(), String::new(), String::new());
+        // Expand `src` and step onto `bin` inside it.
+        press(&mut modal, KeyCode::Down);
+        press(&mut modal, KeyCode::Right);
+        press(&mut modal, KeyCode::Down);
+
+        press(&mut modal, KeyCode::F(7));
+        type_text(&mut modal, "lib");
+        press(&mut modal, KeyCode::Enter);
+
+        assert!(root.join("src/lib").is_dir());
+        assert!(modal.edit.is_none());
+        assert_eq!(names(&modal), ["..", "src", "bin", "lib", "target"]);
+        assert_eq!(modal.selected_path(), root.join("src/lib"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn new_directory_on_an_expanded_branch_lands_beside_it_not_inside() {
+        let root = scratch("create-expanded");
+        let mut modal = DirectoryPickerModal::new(root.clone(), String::new(), String::new());
+        press(&mut modal, KeyCode::Down);
+        press(&mut modal, KeyCode::Right);
+
+        press(&mut modal, KeyCode::F(7));
+        type_text(&mut modal, "docs");
+        press(&mut modal, KeyCode::Enter);
+
+        assert!(root.join("docs").is_dir());
+        assert!(!root.join("src/docs").exists());
+        assert_eq!(names(&modal), ["..", "docs", "src", "bin", "target"]);
+        assert_eq!(modal.selected_path(), root.join("docs"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn new_directory_on_dotdot_lands_at_the_top_level() {
+        let root = scratch("create-dotdot");
+        let mut modal = DirectoryPickerModal::new(root.clone(), String::new(), String::new());
+        press(&mut modal, KeyCode::F(7));
+        type_text(&mut modal, "app");
+        press(&mut modal, KeyCode::Enter);
+
+        assert!(root.join("app").is_dir());
+        assert_eq!(names(&modal), ["..", "app", "src", "target"]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn esc_takes_the_new_row_away_and_creates_nothing() {
+        let root = scratch("create-cancel");
+        let mut modal = DirectoryPickerModal::new(root.clone(), String::new(), String::new());
+        press(&mut modal, KeyCode::Down);
+        press(&mut modal, KeyCode::Right);
+        press(&mut modal, KeyCode::Down);
+
+        press(&mut modal, KeyCode::F(7));
+        assert_eq!(names(&modal), ["..", "src", "bin", "", "target"]);
+        type_text(&mut modal, "x");
+        press(&mut modal, KeyCode::Esc);
+
+        assert!(modal.edit.is_none());
+        assert_eq!(names(&modal), ["..", "src", "bin", "target"]);
+        assert_eq!(modal.selected_path(), root.join("src/bin"));
+        assert!(!root.join("src/x").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn letters_in_the_name_field_are_typed_not_shortcuts() {
+        let root = scratch("create-letters");
+        let mut modal = DirectoryPickerModal::new(root.clone(), String::new(), String::new());
+        press(&mut modal, KeyCode::F(7));
+        // `D` creates, `j`/`h` move, `.` toggles hidden outside the field.
+        type_text(&mut modal, "Dj.h");
+        press(&mut modal, KeyCode::Enter);
+
+        assert!(root.join("Dj.h").is_dir());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_bad_or_taken_name_keeps_the_field_open() {
+        let root = scratch("create-invalid");
+        let mut modal = DirectoryPickerModal::new(root.clone(), String::new(), String::new());
+        press(&mut modal, KeyCode::F(7));
+
+        press(&mut modal, KeyCode::Enter);
+        assert!(modal.message.is_some());
+        assert!(modal.edit.is_some());
+
+        type_text(&mut modal, "a/b");
+        press(&mut modal, KeyCode::Enter);
+        assert!(modal.message.is_some());
+        assert!(!root.join("a").exists());
+
+        for _ in 0..3 {
+            press(&mut modal, KeyCode::Backspace);
+        }
+        type_text(&mut modal, "target");
+        press(&mut modal, KeyCode::Enter);
+        assert!(modal.message.is_some());
+        assert!(modal.edit.is_some());
+
+        // The message lasts until the next key.
+        press(&mut modal, KeyCode::Esc);
+        assert!(modal.message.is_none());
+        assert_eq!(names(&modal), ["..", "src", "target"]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rename_keeps_the_branch_open_under_the_new_name() {
+        let root = scratch("rename");
+        let mut modal = DirectoryPickerModal::new(root.clone(), String::new(), String::new());
+        press(&mut modal, KeyCode::Down);
+        press(&mut modal, KeyCode::Right);
+
+        press(&mut modal, KeyCode::F(2));
+        for _ in 0.."src".len() {
+            press(&mut modal, KeyCode::Backspace);
+        }
+        type_text(&mut modal, "source");
+        press(&mut modal, KeyCode::Enter);
+
+        assert!(root.join("source/bin").is_dir());
+        assert!(!root.join("src").exists());
+        assert_eq!(names(&modal), ["..", "source", "bin", "target"]);
+        assert_eq!(modal.selected_path(), root.join("source"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rename_on_dotdot_does_nothing() {
+        let root = scratch("rename-dotdot");
+        let mut modal = DirectoryPickerModal::new(root.clone(), String::new(), String::new());
+        press(&mut modal, KeyCode::F(2));
+        assert!(modal.edit.is_none());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn delete_removes_only_an_empty_directory() {
+        let root = scratch("delete");
+        let mut modal = DirectoryPickerModal::new(root.clone(), String::new(), String::new());
+        // `src` holds `bin`: refused with a message.
+        press(&mut modal, KeyCode::Down);
+        press(&mut modal, KeyCode::Delete);
+        assert!(root.join("src/bin").is_dir());
+        assert!(modal.message.is_some());
+
+        // `target` is empty: gone, the cursor stays on the row it was on.
+        press(&mut modal, KeyCode::Down);
+        press(&mut modal, KeyCode::F(8));
+        assert!(!root.join("target").exists());
+        assert_eq!(names(&modal), ["..", "src"]);
+        assert_eq!(modal.selected_path(), root.join("src"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn new_folder_button_opens_the_name_row() {
+        let root = scratch("button");
+        let mut modal = DirectoryPickerModal::new(root.clone(), String::new(), String::new());
+        press(&mut modal, KeyCode::Tab);
+        press(&mut modal, KeyCode::Right);
+        press(&mut modal, KeyCode::Enter);
+        assert!(modal.edit.is_some());
+        assert!(!modal.button_focused);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_name_row_and_three_buttons_are_drawn() {
+        let root = scratch("render");
+        let mut modal = DirectoryPickerModal::new(root.clone(), "T".into(), "Go".into());
+        press(&mut modal, KeyCode::F(7));
+        type_text(&mut modal, "newdir");
+
+        let area = Rect::new(0, 0, 80, 30);
+        let mut buf = Buffer::empty(area);
+        modal.render(area, &mut buf, &Theme::default());
+        let screen: String = (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect::<String>()
+                    + "\n"
+            })
+            .collect();
+
+        assert!(screen.contains("▶ newdir"), "{screen}");
+        // The path line (cut on the left when long) ends in the typed name.
+        assert!(screen.contains("/newdir"), "{screen}");
+        assert!(screen.contains("[ Go ]"));
+        assert!(screen.contains("[ New folder ]"));
+        assert!(screen.contains("[ Cancel ]"));
         std::fs::remove_dir_all(root).unwrap();
     }
 }
