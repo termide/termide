@@ -421,6 +421,13 @@ pub trait Panel: Any {
         false
     }
 
+    /// Close transient popups (selector dropdowns and the like).
+    ///
+    /// Called before every render of a panel that is not focused, so an open
+    /// dropdown closes whichever way the panel lost focus. Must be cheap and
+    /// idempotent.
+    fn close_popups(&mut self) {}
+
     /// Whether the click that focuses this panel also acts inside it.
     ///
     /// When false, a left press on the panel while it is not the active one

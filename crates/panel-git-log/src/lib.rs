@@ -293,6 +293,14 @@ impl Panel for GitLogPanel {
         self.render_content(area, buf, ctx.is_focused, ctx.border_right_x);
     }
 
+    fn close_popups(&mut self) {
+        if self.repo_dropdown_open || self.branch_dropdown_open {
+            self.repo_dropdown_open = false;
+            self.branch_dropdown_open = false;
+            self.dropdown_cursor = 0;
+        }
+    }
+
     fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
         match cmd {
             PanelCommand::Reload => {

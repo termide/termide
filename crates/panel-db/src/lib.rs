@@ -1096,6 +1096,11 @@ impl Panel for DbPanel {
         }
     }
 
+    fn close_popups(&mut self) {
+        self.db_dd.open = false;
+        self.table_dd.open = false;
+    }
+
     fn captures_escape(&self) -> bool {
         // An open cell editor takes Escape to cancel the edit, so it must not
         // reach the app (where it would close the panel).

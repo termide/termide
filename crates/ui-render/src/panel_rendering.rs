@@ -630,6 +630,11 @@ pub fn render_expanded_panel(
     // Prepare panel for rendering (update cached theme/config)
     panel.prepare_render(theme, config);
 
+    // A panel that lost focus drops its open dropdowns.
+    if !is_focused {
+        panel.close_popups();
+    }
+
     // Render panel content
     panel.render(inner, buf, &ctx);
 }
