@@ -5,7 +5,9 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.41.0] - 2026-10-12
+
+[0.41.0]: https://github.com/termide/termide/releases/tag/0.41.0
 
 ### Breaking Changes
 - **Links open inside termide; `[viewer] open_links` and `open_images` are gone.** A followed link opens a web address in the viewer, a file where Open… opens it, an image in the image preview, and a web bookmark always in the viewer. To open one outside, use `O`, `Alt+Enter` or `Alt+Click` in the HTML and Markdown viewers (`open_external` under `[viewer.keybindings]`, rebindable, listed in Settings and the help) and `Ctrl+Alt+Click` in the terminal and agent panel, where `Ctrl+Click` still follows a link inside. The old keys in `config.toml` are ignored.
