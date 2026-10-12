@@ -172,6 +172,10 @@ impl AgentPanel {
         self.pause_start = None;
         self.resuming = false;
         self.run_start = None;
+        // An external agent may have streamed past its turn's end, leaving a
+        // live clock no `AgentEnd` will clear: it must not tick under the new
+        // session's banner.
+        self.activity = None;
         self.loop_task = None;
         self.goal_task = None;
         self.restored = None;

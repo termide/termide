@@ -262,7 +262,26 @@ struct Shared {
     /// When the account's limit resets (Unix seconds), as Claude Code last
     /// reported it rejected.
     limit_reset: Mutex<Option<u64>>,
+    /// Set while the agent works with no turn of ours out: Claude Code goes
+    /// on by itself when a task it moved to the background finishes. The
+    /// panel sees it as a run (busy, its clock ticking) until the agent falls
+    /// quiet, the user stops it or a message of theirs starts a turn.
+    unsolicited: AtomicBool,
+    /// When the agent last streamed something, and whether it was answer
+    /// text: after the answer it is done sooner than after a call, which
+    /// the model may take a while to follow up.
+    last_update: Mutex<Instant>,
+    last_was_text: AtomicBool,
+    /// How long the agent must stay quiet to end a run of its own, after
+    /// answer text and after anything else (milliseconds).
+    quiet_after_text_ms: AtomicU64,
+    quiet_ms: AtomicU64,
 }
+
+/// How long an agent working by itself must stay quiet after its answer
+/// text, and after anything else, before its run is taken as over.
+const UNSOLICITED_QUIET_AFTER_TEXT: Duration = Duration::from_secs(5);
+const UNSOLICITED_QUIET: Duration = Duration::from_secs(30);
 
 /// The agent's tool calls as the session log keeps the built-in loop's: an
 /// assistant message with the calls, then a result for each. The agent
@@ -481,6 +500,11 @@ impl AcpRuntime {
             turn_acted: AtomicBool::new(false),
             retry_pending: AtomicBool::new(false),
             limit_reset: Mutex::new(None),
+            unsolicited: AtomicBool::new(false),
+            last_update: Mutex::new(Instant::now()),
+            last_was_text: AtomicBool::new(false),
+            quiet_after_text_ms: AtomicU64::new(UNSOLICITED_QUIET_AFTER_TEXT.as_millis() as u64),
+            quiet_ms: AtomicU64::new(UNSOLICITED_QUIET.as_millis() as u64),
         });
         let for_reader = Arc::clone(&shared);
         std::thread::spawn(move || for_reader.read_loop(reader));
@@ -559,6 +583,12 @@ impl Backend for AcpRuntime {
             .unwrap_or_else(PoisonError::into_inner)
             .push(message.clone());
         self.shared.report_queue();
+        // The agent working by itself takes no steering: its run ends and
+        // the message goes as a turn.
+        if self.shared.unsolicited.load(Ordering::Acquire) {
+            self.shared.finish_unsolicited(StopReason::Stop, None);
+            return;
+        }
         if self.shared.steering.load(Ordering::Acquire)
             && self.shared.turn_running.load(Ordering::Acquire)
         {
@@ -617,6 +647,9 @@ impl Backend for AcpRuntime {
                 .shared
                 .notify("session/cancel", json!({ "sessionId": session_id }));
         }
+        // No turn of ours answers the cancel: the agent's own run ends here.
+        self.shared
+            .finish_unsolicited(StopReason::Aborted, Some("aborted".to_string()));
     }
 
     fn is_busy(&self) -> bool {
@@ -1311,6 +1344,22 @@ impl Shared {
             // A message a turn did not take back after all (see
             // [`Self::requeue`]) may have arrived meanwhile: it runs now.
             self.run_queued();
+            // Output that came after the turn's answer, before it was
+            // closed, is the agent going on by itself.
+            let late = self
+                .open_message
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_some()
+                || !self
+                    .calls
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .open
+                    .is_empty();
+            if late {
+                self.begin_unsolicited();
+            }
             return;
         };
         let this = Arc::clone(self);
@@ -1812,6 +1861,114 @@ impl Shared {
         }
     }
 
+    /// Note what the agent streams; output with no run on starts one of the
+    /// agent's own (see [`Self::unsolicited`]).
+    fn note_update(self: &Arc<Self>, update: &Value) {
+        let kind = update["sessionUpdate"].as_str().unwrap_or("");
+        if self.service
+            || self.replaying.load(Ordering::Acquire)
+            || !matches!(
+                kind,
+                "agent_message_chunk"
+                    | "agent_thought_chunk"
+                    | "tool_call"
+                    | "tool_call_update"
+                    | "plan"
+            )
+        {
+            return;
+        }
+        *self
+            .last_update
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Instant::now();
+        self.last_was_text
+            .store(kind == "agent_message_chunk", Ordering::Release);
+        if !self.busy.load(Ordering::Acquire)
+            && matches!(
+                *self.conn.lock().unwrap_or_else(PoisonError::into_inner),
+                Conn::Ready { .. }
+            )
+        {
+            self.begin_unsolicited();
+        }
+    }
+
+    /// Open a run for the agent working by itself, and watch for its end:
+    /// the agent quiet long enough with no call open.
+    fn begin_unsolicited(self: &Arc<Self>) {
+        if self
+            .busy
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return;
+        }
+        self.unsolicited.store(true, Ordering::Release);
+        *self
+            .last_update
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Instant::now();
+        self.cancel.reset();
+        let _ = self.events.send(AgentEvent::AgentStart);
+        let this = Arc::clone(self);
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(100));
+            if !this.unsolicited.load(Ordering::Acquire) {
+                return;
+            }
+            let failed = matches!(
+                *this.conn.lock().unwrap_or_else(PoisonError::into_inner),
+                Conn::Failed(_)
+            );
+            let quiet = Duration::from_millis(if this.last_was_text.load(Ordering::Acquire) {
+                this.quiet_after_text_ms.load(Ordering::Acquire)
+            } else {
+                this.quiet_ms.load(Ordering::Acquire)
+            });
+            let open = !this
+                .calls
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .open
+                .is_empty()
+                || !this
+                    .announced
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .is_empty();
+            let silent = this
+                .last_update
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .elapsed()
+                >= quiet;
+            if failed || (silent && !open) {
+                this.finish_unsolicited(StopReason::Stop, None);
+                return;
+            }
+        });
+    }
+
+    /// Close the agent's own run, as a turn's end closes ours; a message
+    /// that waits then goes as the next turn.
+    fn finish_unsolicited(self: &Arc<Self>, stop: StopReason, error: Option<String>) {
+        if !self.unsolicited.swap(false, Ordering::AcqRel) {
+            return;
+        }
+        self.close_unfinished_calls();
+        self.close_message(stop, error);
+        self.flush_steered();
+        if self.cancel.is_cancelled() {
+            self.queue
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clear();
+        }
+        self.report_queue();
+        self.kick();
+    }
+
     /// Tell the panel how many messages wait.
     fn report_queue(&self) {
         let queued = self
@@ -2015,6 +2172,7 @@ impl Shared {
                         if self.side_update(params["sessionId"].as_str(), &params["update"]) {
                             continue;
                         }
+                        self.note_update(&params["update"]);
                         self.on_update(&params["update"]);
                     } else {
                         log::debug!("acp {}: notification {method}", self.name);
@@ -5300,5 +5458,175 @@ mod tests {
         let (events, prompt) = run_prompt(&runtime, &seen, "first");
         assert_eq!(opened(&events), ["fake:fresh"]);
         assert_eq!(prompt, [json!({ "type": "text", "text": "first" })]);
+    }
+
+    /// An agent that answers a prompt at once and then, like Claude Code
+    /// when a task it moved to the background finishes, goes on by itself:
+    /// `after` is streamed a moment after the turn's answer, as no turn's.
+    fn self_starting_agent(dir: PathBuf, after: &'static str) -> AcpRuntime {
+        let (to_agent_rx, to_agent_tx) = pipe().unwrap();
+        let (from_agent_rx, from_agent_tx) = pipe().unwrap();
+        std::thread::spawn(move || {
+            let out = Arc::new(Mutex::new(from_agent_tx));
+            let send = |out: &Arc<Mutex<std::io::PipeWriter>>, value: Value| {
+                writeln!(out.lock().unwrap(), "{value}").unwrap();
+            };
+            let mut reader = BufReader::new(to_agent_rx).lines();
+            let mut first = true;
+            while let Some(Ok(line)) = reader.next() {
+                let message: Value = serde_json::from_str(&line).unwrap();
+                let id = message["id"].clone();
+                let result = match message["method"].as_str() {
+                    Some("initialize") => json!({ "protocolVersion": 1 }),
+                    Some("session/new") => json!({ "sessionId": "s1" }),
+                    Some("session/prompt") => {
+                        let text = message["params"]["prompt"][0]["text"]
+                            .as_str()
+                            .unwrap_or("")
+                            .to_string();
+                        send(
+                            &out,
+                            json!({ "jsonrpc": "2.0", "method": "session/update", "params": {
+                            "sessionId": "s1", "update": {
+                                "sessionUpdate": "agent_message_chunk",
+                                "content": { "type": "text", "text": format!("re:{text}") } } } }),
+                        );
+                        if std::mem::take(&mut first) {
+                            let later = Arc::clone(&out);
+                            std::thread::spawn(move || {
+                                std::thread::sleep(Duration::from_millis(150));
+                                send(
+                                    &later,
+                                    json!({ "jsonrpc": "2.0", "method": "session/update", "params": {
+                                    "sessionId": "s1", "update": {
+                                        "sessionUpdate": "agent_message_chunk",
+                                        "content": { "type": "text", "text": after } } } }),
+                                );
+                            });
+                        }
+                        json!({ "stopReason": "end_turn" })
+                    }
+                    Some(_) => json!({}),
+                    None => continue,
+                };
+                send(
+                    &out,
+                    json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+                );
+            }
+        });
+        let cancel = CancelToken::new();
+        let (prompter, _permissions) = permission_channel(cancel.clone());
+        let runtime = AcpRuntime::from_streams(
+            "fake",
+            from_agent_rx,
+            to_agent_tx,
+            BackendSetup {
+                cwd: dir,
+                prompter,
+                cancel,
+                rules: PermissionRules::default(),
+                persist: None,
+                mode: ModeHandle::new(Mode::default()),
+                system_prompt: String::new(),
+                plan: PlanPrompt::default(),
+                goal: GoalPrompt::default(),
+                handoff: HandoffPrompt::default(),
+                reviewer: ReviewerSetup::default(),
+                host_tools: None,
+                resume: None,
+                history: Vec::new(),
+            },
+            5,
+            AcpFlavor::Generic,
+        );
+        runtime
+            .shared
+            .quiet_after_text_ms
+            .store(300, Ordering::Release);
+        runtime.shared.quiet_ms.store(300, Ordering::Release);
+        runtime
+    }
+
+    #[test]
+    fn an_agent_going_on_after_its_turn_is_a_run_until_it_falls_quiet() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = self_starting_agent(dir.path().to_path_buf(), "background done");
+        runtime.prompt(UserMessage::text("first")).unwrap();
+        let mut events = events_until(&runtime, |e| matches!(e, AgentEvent::AgentEnd));
+        // The agent's own output opens a run: the panel is busy meanwhile.
+        events.extend(events_until(&runtime, |e| {
+            matches!(e, AgentEvent::AgentStart)
+        }));
+        assert!(runtime.is_busy());
+        events.extend(events_until(&runtime, |e| {
+            matches!(e, AgentEvent::AgentEnd)
+        }));
+        let ends = |events: &[AgentEvent]| {
+            events
+                .iter()
+                .filter(|e| matches!(e, AgentEvent::AgentEnd))
+                .count()
+        };
+        // Two runs: the turn and the agent's own, each closed.
+        assert_eq!(ends(&events), 2, "{events:?}");
+        assert!(!runtime.is_busy());
+        assert_eq!(
+            logged(&events),
+            [
+                "user:first",
+                "assistant:re:first",
+                "assistant:background done"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_message_typed_while_the_agent_works_by_itself_goes_as_a_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = self_starting_agent(dir.path().to_path_buf(), "working");
+        runtime
+            .shared
+            .quiet_after_text_ms
+            .store(60_000, Ordering::Release);
+        runtime.prompt(UserMessage::text("first")).unwrap();
+        let mut events = events_until(&runtime, |e| matches!(e, AgentEvent::AgentEnd));
+        events.extend(events_until(
+            &runtime,
+            |e| matches!(e, AgentEvent::MessageUpdate(StreamEvent::TextDelta(t)) if t == "working"),
+        ));
+        assert!(runtime.is_busy());
+        // The panel steers while busy; the agent's run gives way to a turn.
+        runtime.steer(UserMessage::text("next"));
+        events.extend(events_until(&runtime, |e| {
+            matches!(e, AgentEvent::AgentEnd)
+        }));
+        assert_eq!(
+            logged(&events),
+            [
+                "user:first",
+                "assistant:re:first",
+                "assistant:working",
+                "user:next",
+                "assistant:re:next"
+            ]
+        );
+        assert!(!runtime.is_busy());
+    }
+
+    #[test]
+    fn stopping_the_agent_working_by_itself_ends_its_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = self_starting_agent(dir.path().to_path_buf(), "working");
+        runtime
+            .shared
+            .quiet_after_text_ms
+            .store(60_000, Ordering::Release);
+        runtime.prompt(UserMessage::text("first")).unwrap();
+        events_until(&runtime, |e| matches!(e, AgentEvent::AgentEnd));
+        events_until(&runtime, |e| matches!(e, AgentEvent::AgentStart));
+        runtime.abort();
+        events_until(&runtime, |e| matches!(e, AgentEvent::AgentEnd));
+        assert!(!runtime.is_busy());
     }
 }

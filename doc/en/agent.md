@@ -1556,6 +1556,14 @@ offers none shows none of them, and a generic agent's own modes sit under
 `/handoff` work as described there too. A generic agent's skills, prompt
 templates and MCP servers are its own affair.
 
+An agent may go on after its answer by itself — Claude Code does when a
+command it moved to the background (to take a message typed while it ran)
+finishes. What it then does counts as a run of its own: the run clock ticks,
+the session cannot be switched or deleted meanwhile, and `Esc` stops it. The
+run ends once the agent has no call open and stays quiet — 5 seconds after
+its answer text, 30 after anything else; a message you type meanwhile ends it
+and goes as the next request.
+
 The session log records the agent's own session, so a reopened session, or a
 switch back to the agent, continues that session through ACP's
 `session/resume` or `session/load` when the agent offers either (Claude Code
