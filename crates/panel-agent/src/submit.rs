@@ -861,7 +861,8 @@ impl AgentPanel {
             }
             return;
         }
-        self.queued_texts.clear();
+        // What the agent already holds stays in the strip, leading.
+        self.queued_texts.truncate(self.runtime.queue_lens().0);
         for message in taken.into_iter().filter(|message| !drop(message)) {
             self.queued_texts.push_back(message.typed());
             self.runtime.steer(message);

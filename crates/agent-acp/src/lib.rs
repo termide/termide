@@ -627,7 +627,7 @@ impl Backend for AcpRuntime {
         // While a turn runs, its own message is not in the queue; while the
         // session is starting, the first message is.
         (
-            queued.saturating_sub(usize::from(!running && queued > 0)),
+            queued.saturating_sub(usize::from(!running && queued > 0)) + self.shared.in_flight(),
             0,
         )
     }
@@ -1580,7 +1580,7 @@ impl Shared {
             .unwrap_or_else(PoisonError::into_inner)
             .len();
         let _ = self.events.send(AgentEvent::QueueUpdate {
-            steering: queued,
+            steering: queued + self.in_flight(),
             follow_up: 0,
         });
         self.kick();
@@ -1829,6 +1829,25 @@ impl Shared {
                 .events
                 .send(AgentEvent::MessageEnd(Message::User(message)));
         }
+        self.report_queue();
+    }
+
+    /// The agent writes again while messages it took wait to be logged: it
+    /// has gone on from the calls still open. Claude Code drops a call it
+    /// was streaming when a message comes in, and never answers it; left
+    /// open, it held the message out of the transcript until the turn's
+    /// end, logged after the answer it got.
+    fn steered_on(&self) {
+        let waiting = !self
+            .steered
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_empty();
+        if !waiting {
+            return;
+        }
+        self.close_open_calls("The agent went on without this call.");
+        self.flush_steered();
     }
 
     /// Put back a message the running turn did not take, first in line, and
@@ -1978,11 +1997,27 @@ impl Shared {
             .len();
         let running = self.busy.load(Ordering::Acquire);
         // While the session is starting, the first message is the run's own.
-        let steering = queued.saturating_sub(usize::from(!running && queued > 0));
+        let steering =
+            queued.saturating_sub(usize::from(!running && queued > 0)) + self.in_flight();
         let _ = self.events.send(AgentEvent::QueueUpdate {
             steering,
             follow_up: 0,
         });
+    }
+
+    /// The messages handed to the running turn and not yet logged: they
+    /// still show as waiting, so a message typed during a turn stays in
+    /// sight until it takes its place in the transcript.
+    fn in_flight(&self) -> usize {
+        self.steering_out
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
+            + self
+                .steered
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .len()
     }
 
     /// Finish the assistant message being streamed, or make one for an
@@ -2333,6 +2368,7 @@ impl Shared {
         }
         match kind {
             "agent_message_chunk" => {
+                self.steered_on();
                 let text = update["content"]["text"].as_str().unwrap_or("").to_string();
                 let mut open = self
                     .open_message
@@ -2352,6 +2388,7 @@ impl Shared {
                     .send(AgentEvent::MessageUpdate(StreamEvent::TextDelta(text)));
             }
             "agent_thought_chunk" => {
+                self.steered_on();
                 let text = update["content"]["text"].as_str().unwrap_or("").to_string();
                 if self
                     .open_message
@@ -2590,6 +2627,11 @@ impl Shared {
     /// At the turn's end, give each call still without a result one saying
     /// it did not finish, so the log holds no call left unanswered.
     fn close_unfinished_calls(&self) {
+        self.close_open_calls("The turn ended before this call finished.");
+    }
+
+    /// Give each call still open a result saying `why` it has none.
+    fn close_open_calls(&self, why: &str) {
         let open = std::mem::take(
             &mut self
                 .calls
@@ -2602,8 +2644,7 @@ impl Shared {
         }
         self.log_started_calls();
         for call in open {
-            let result =
-                ToolResultMessage::error(&call, "The turn ended before this call finished.");
+            let result = ToolResultMessage::error(&call, why);
             let _ = self
                 .events
                 .send(AgentEvent::MessageEnd(Message::ToolResult(result)));
@@ -4237,7 +4278,10 @@ mod tests {
 
     /// An agent that steers: its turn for "first" streams a word, then waits
     /// for a `_session/steering` request, answers it `outcome`, streams
-    /// another word and ends. Every prompt's text is recorded.
+    /// another word and ends. Every prompt's text is recorded. With
+    /// `"injected, call dropped"` it starts a call after the word and, the
+    /// message taken, goes on without ever answering it, as Claude Code
+    /// does with a call it was streaming.
     fn steering_agent(dir: PathBuf, outcome: &'static str) -> (AcpRuntime, Arc<Mutex<Vec<Value>>>) {
         let (to_agent_rx, to_agent_tx) = pipe().unwrap();
         let (from_agent_rx, from_agent_tx) = pipe().unwrap();
@@ -4278,6 +4322,11 @@ mod tests {
                             continue;
                         }
                         send(chunk("working"));
+                        if outcome == "injected, call dropped" {
+                            send(update(
+                                json!({ "sessionUpdate": "tool_call", "toolCallId": "t1", "title": "comment", "kind": "other", "status": "in_progress", "rawInput": { "issue": "X-1" } }),
+                            ));
+                        }
                         let steer = loop {
                             let Some(Ok(line)) = reader.next() else {
                                 return;
@@ -4288,7 +4337,7 @@ mod tests {
                                 break m;
                             }
                         };
-                        if outcome == "injected" {
+                        if outcome.starts_with("injected") {
                             send(
                                 json!({ "jsonrpc": "2.0", "id": steer["id"], "result": { "outcome": "injected" } }),
                             );
@@ -4407,6 +4456,50 @@ mod tests {
         // It went into the turn, not as a turn of its own.
         let prompts = seen_where(&seen, |m| m["method"] == "session/prompt");
         assert_eq!(prompts.len(), 1);
+        assert_eq!(runtime.queue_lens(), (0, 0));
+    }
+
+    /// A call the agent drops when the message comes in, never answered,
+    /// does not hold the message back to the turn's end: it is logged
+    /// before the answer to it, and stays in the queue strip until then.
+    #[test]
+    fn a_message_taken_past_a_dropped_call_is_logged_before_its_answer() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, _seen) = steering_agent(dir.path().to_path_buf(), "injected, call dropped");
+        let events = steer_into_first(&runtime);
+        let logged: Vec<String> = logged(&events)
+            .into_iter()
+            .filter(|m| m != "assistant:")
+            .collect();
+        assert_eq!(
+            logged,
+            [
+                "user:first",
+                "assistant:working",
+                "user:more",
+                "assistant:noted"
+            ]
+        );
+        let dropped = events.iter().find_map(|e| match e {
+            AgentEvent::MessageEnd(Message::ToolResult(r)) if r.tool_call_id == "t1" => Some(r),
+            _ => None,
+        });
+        assert!(dropped.is_some_and(|r| r.is_error), "{events:?}");
+        // The strip never empties while "more" is out of sight.
+        let shown = events
+            .iter()
+            .position(|e| matches!(e, AgentEvent::MessageEnd(Message::User(u)) if u.plain_text() == "more"))
+            .unwrap();
+        let first_steer = events
+            .iter()
+            .position(|e| matches!(e, AgentEvent::QueueUpdate { steering: 1, .. }))
+            .unwrap();
+        assert!(
+            !events[first_steer..shown]
+                .iter()
+                .any(|e| matches!(e, AgentEvent::QueueUpdate { steering: 0, .. })),
+            "{events:?}"
+        );
         assert_eq!(runtime.queue_lens(), (0, 0));
     }
 

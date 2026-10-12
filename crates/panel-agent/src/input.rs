@@ -438,8 +438,11 @@ impl AgentPanel {
             return false;
         }
         let taken = self.runtime.take_queued();
-        self.set_queued(self.runtime.queue_lens());
-        self.queued_texts.clear();
+        // What the agent already holds stays in the strip: it was sent
+        // first, so it leads.
+        let lens = self.runtime.queue_lens();
+        self.queued_texts.truncate(lens.0);
+        self.set_queued(lens);
         let Some(queued) = UserMessage::merge(taken) else {
             return false;
         };
