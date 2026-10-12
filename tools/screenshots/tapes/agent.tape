@@ -1,5 +1,6 @@
-# Coding agent against the scripted mock model: read, edit, a permission
-# card for bash, then the answer.
+# Coding agent against the scripted mock model, set to work by /goal: the
+# goal's row in the state strip, read, edit, a permission card for bash, the
+# answer, then the judge's verdict.
 Output out/agent.gif
 Source tapes/_settings.tape
 Source tapes/_start.tape
@@ -8,7 +9,7 @@ Sleep 2s
 Source tapes/_widen.tape
 Show
 Sleep 500ms
-Type "Flag critical low-stock items in the reorder report, then run the tests"
+Type "/goal flag critical low-stock items in the reorder report, tests green"
 Sleep 500ms
 Screenshot out/agent-prompt.png
 Enter
@@ -17,6 +18,6 @@ Screenshot out/agent-working.png
 Sleep 6s
 Screenshot out/agent-permission.png
 Type "1"
-Sleep 10s
+Sleep 14s
 Screenshot out/agent-done.png
 Sleep 2s

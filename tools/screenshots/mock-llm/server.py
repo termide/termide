@@ -110,7 +110,16 @@ class Handler(BaseHTTPRequestHandler):
         messages = request.get("messages", [])
         if not request.get("tools"):
             # A service call (title, compaction, judge): a short plain answer.
-            step = {"reasoning": "", "text": "Flag low-stock items in the reorder report", "tool": None}
+            # The /goal judge is told it is one in its system prompt
+            # (agent-core's goal.md) and gets the verdict it waits for.
+            system = " ".join(
+                str(m.get("content")) for m in messages if m.get("role") == "system"
+            )
+            if "judge of an autonomous coding session" in system:
+                text = "DONE\nCritical items are flagged and the 6 tests pass."
+            else:
+                text = "Flag low-stock items in the reorder report"
+            step = {"reasoning": "", "text": text, "tool": None}
         else:
             done = sum(1 for m in messages if m.get("role") == "tool")
             step = SCRIPT[min(done, len(SCRIPT) - 1)]
