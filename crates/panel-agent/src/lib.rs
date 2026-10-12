@@ -998,6 +998,11 @@ impl AgentPanel {
                 setup.rules.mode = mode;
             }
         }
+        // The mode the session last ran in outlives a reopen, over the
+        // agent's and the configured one.
+        if let Some(mode) = session.as_ref().and_then(Session::current_mode) {
+            setup.rules.mode = mode;
+        }
         // The full lists the checklist offers, the set-up profile's too.
         let (offered_tools, offered_skills) = offered.unwrap_or_else(|| {
             setup

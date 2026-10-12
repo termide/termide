@@ -90,6 +90,11 @@ impl AgentPanel {
                 self.rules.mode = mode;
             }
         }
+        // The mode the session last ran in outlives a reopen, over the
+        // agent's and the configured one.
+        if let Some(mode) = session.as_ref().and_then(Session::current_mode) {
+            self.rules.mode = mode;
+        }
         self.toolset_off = toolset_off;
         self.sync_blocked();
         let blocked = Arc::clone(&self.blocked);
@@ -809,6 +814,8 @@ impl AgentPanel {
                 log::warn!("agent session rewind failed: {error}");
             }
         }
+        // Undoing the conversation leaves the mode the user is in.
+        self.log_mode(self.mode.get());
         let count = undone.files.len();
         let session = self.session.take();
         self.switch_session(session);

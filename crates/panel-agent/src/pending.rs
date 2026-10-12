@@ -634,6 +634,9 @@ impl AgentPanel {
     /// is cleared first, in the log and in the agent's history alike; the
     /// commands reach the agent in order, so before the request.
     pub(crate) fn carry_out_plan(&mut self, mode: Mode, clean: bool) -> Vec<PanelEvent> {
+        // The mode first: its log entry goes before the clearing, which an
+        // undo of the request finds right ahead of it.
+        let mut events = vec![self.set_mode(mode)];
         if clean {
             if let Some(session) = &mut self.session {
                 if let Err(error) = session.append_pruned() {
@@ -649,7 +652,6 @@ impl AgentPanel {
             // Known again with the next reply, as after a session switch.
             self.context_tokens = 0;
         }
-        let mut events = vec![self.set_mode(mode)];
         let request = self.plan_prompt.request(clean).trim().to_string();
         if request.is_empty() {
             self.notice(

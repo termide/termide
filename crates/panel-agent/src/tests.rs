@@ -8773,6 +8773,40 @@ fn a_call_a_cut_off_run_left_is_closed_not_run_again() {
 }
 
 #[test]
+fn a_paused_run_reopens_in_the_mode_it_ran_in() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        session: Some(Session::create(dir.path(), Path::new("/tmp")).unwrap()),
+        ..setup(vec![])
+    });
+    let _ = panel.set_mode(Mode::Edit);
+    let path = {
+        let session = panel.session.as_mut().unwrap();
+        session
+            .append_message(&Message::User(UserMessage::text("build it")))
+            .unwrap();
+        session.append_run_start().unwrap();
+        session.append_run_end(true).unwrap();
+        session.path().to_path_buf()
+    };
+    drop(panel);
+
+    let mut panel = reopen(&path, dir.path(), vec![]);
+    assert!(panel.paused);
+    assert_eq!(panel.mode.get(), Mode::Edit);
+    assert_eq!(panel.rules.mode, Mode::Edit);
+
+    // An undo goes back past the change, yet the mode the user is in stays.
+    let _ = panel.set_mode(Mode::All);
+    panel.session.as_mut().unwrap().rewind_to(None).unwrap();
+    panel.log_mode(panel.mode.get());
+    let session = panel.session.take();
+    panel.switch_session(session);
+    assert_eq!(panel.mode.get(), Mode::All);
+}
+
+#[test]
 fn a_finished_run_reopens_idle() {
     let dir = tempfile::tempdir().unwrap();
     let path = logged_request(dir.path(), |session| {

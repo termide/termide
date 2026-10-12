@@ -21,6 +21,7 @@ use crate::acp::ACP_PROVIDER;
 use crate::compaction::CompactionPrompts;
 use crate::context::file_timestamp;
 use crate::message::{now_millis, Message, StopReason};
+use crate::permissions::Mode;
 use crate::provider::ThinkingLevel;
 use crate::prune::{prune_by, prune_to_decisions};
 
@@ -110,6 +111,9 @@ pub enum EntryKind {
     /// The connection (`[ai.connections.<name>]`) the branch runs on from
     /// here, so a reopened session reconnects to the same endpoint.
     ConnectionChange { connection: String },
+    /// The permission mode the branch runs in from here, so a reopened
+    /// session — a paused run above all — goes on under the same mode.
+    ModeChange { mode: Mode },
     /// The user undid a request: the branch continues from this entry's
     /// parent, the undone messages stay in the file on a dead branch.
     Rewind,
@@ -743,6 +747,7 @@ impl Session {
                 | EntryKind::ThinkingChange { .. }
                 | EntryKind::Toolset { .. }
                 | EntryKind::ConnectionChange { .. }
+                | EntryKind::ModeChange { .. }
                 | EntryKind::ExternalSession { .. }
                 | EntryKind::AgentOption { .. }
                 | EntryKind::RunStart
@@ -784,6 +789,7 @@ impl Session {
                 | EntryKind::ThinkingChange { .. }
                 | EntryKind::Toolset { .. }
                 | EntryKind::ConnectionChange { .. }
+                | EntryKind::ModeChange { .. }
                 | EntryKind::ExternalSession { .. }
                 | EntryKind::AgentOption { .. }
                 | EntryKind::RunStart
@@ -881,6 +887,7 @@ impl Session {
                 | EntryKind::ThinkingChange { .. }
                 | EntryKind::Toolset { .. }
                 | EntryKind::ConnectionChange { .. }
+                | EntryKind::ModeChange { .. }
                 | EntryKind::ExternalSession { .. }
                 | EntryKind::AgentOption { .. }
                 | EntryKind::RunStart
@@ -934,6 +941,23 @@ impl Session {
             .rev()
             .find_map(|entry| match &entry.kind {
                 EntryKind::ConnectionChange { connection } => Some(connection.clone()),
+                _ => None,
+            })
+    }
+
+    /// Record the permission mode the branch runs in from here.
+    pub fn append_mode_change(&mut self, mode: Mode) -> std::io::Result<String> {
+        self.append(EntryKind::ModeChange { mode })
+    }
+
+    /// The permission mode recorded last on the current branch, if any.
+    #[must_use]
+    pub fn current_mode(&self) -> Option<Mode> {
+        self.branch()
+            .into_iter()
+            .rev()
+            .find_map(|entry| match &entry.kind {
+                EntryKind::ModeChange { mode } => Some(*mode),
                 _ => None,
             })
     }
@@ -995,6 +1019,7 @@ impl Session {
                 | EntryKind::ReasoningChange { .. }
                 | EntryKind::ThinkingChange { .. }
                 | EntryKind::Toolset { .. }
+                | EntryKind::ModeChange { .. }
                 | EntryKind::AgentOption { .. }
                 | EntryKind::RunStart
                 | EntryKind::RunEnd { .. }
@@ -1233,6 +1258,7 @@ impl From<&Session> for SessionSummary {
             | EntryKind::ThinkingChange { .. }
             | EntryKind::Toolset { .. }
             | EntryKind::ConnectionChange { .. }
+            | EntryKind::ModeChange { .. }
             | EntryKind::ExternalSession { .. }
             | EntryKind::AgentOption { .. }
             | EntryKind::RunStart
@@ -1780,6 +1806,19 @@ mod tests {
             .unwrap();
         let reopened = Session::open(session.path()).unwrap();
         assert_eq!(reopened.current_thinking(), Some(ThinkingLevel::XHigh));
+    }
+
+    #[test]
+    fn the_permission_mode_survives_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
+        assert_eq!(session.current_mode(), None);
+        session.append_mode_change(Mode::Plan).unwrap();
+        session.append_mode_change(Mode::Edit).unwrap();
+        let reopened = Session::open(session.path()).unwrap();
+        assert_eq!(reopened.current_mode(), Some(Mode::Edit));
+        // A setup entry: the session stays empty.
+        assert!(reopened.is_empty());
     }
 
     #[test]

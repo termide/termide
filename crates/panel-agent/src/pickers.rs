@@ -321,6 +321,7 @@ impl AgentPanel {
         self.rules.mode = mode;
         self.catalog.set_mode(mode);
         self.runtime.set_mode(mode);
+        self.log_mode(mode);
         if was_plan != (mode == Mode::Plan) {
             self.sync_system_prompt();
         }
@@ -331,6 +332,19 @@ impl AgentPanel {
                 mode.label()
             ),
             is_error: false,
+        }
+    }
+
+    /// Record `mode` in the session log when it is not the mode the log
+    /// holds already, so a reopened session goes on under it.
+    pub(crate) fn log_mode(&mut self, mode: Mode) {
+        if let Some(session) = &mut self.session {
+            if session.current_mode() == Some(mode) {
+                return;
+            }
+            if let Err(error) = session.append_mode_change(mode) {
+                log::warn!("agent session write failed: {error}");
+            }
         }
     }
 
@@ -429,6 +443,7 @@ impl AgentPanel {
             self.backend = profile.backend;
             if let Some(mode) = profile.mode {
                 self.rules.mode = mode;
+                self.log_mode(mode);
             }
             if let Some(id) = profile.model {
                 self.model.id = id;
@@ -501,6 +516,7 @@ impl AgentPanel {
             self.mode.set(mode);
             self.rules.mode = mode;
             self.catalog.set_mode(mode);
+            self.log_mode(mode);
         }
         self.agent = name.to_string();
         if !self.is_fresh() {

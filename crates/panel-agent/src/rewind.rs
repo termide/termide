@@ -273,6 +273,8 @@ impl AgentPanel {
                     log::warn!("agent session rewind failed: {error}");
                 }
             }
+            // Undoing the conversation leaves the mode the user is in.
+            self.log_mode(self.mode.get());
             let session = self.session.take();
             self.switch_session(session);
             // The message comes back to be edited and sent again, unless the
