@@ -582,13 +582,16 @@ something to show: a pending pause (`‖ will pause after the current step`) —
 once the pause takes effect the transcript's `‖` line takes over — and each
 message queued while the agent
 works (`› …`, its first line; after three, a count of the rest), an active
-goal (`◎ /goal …`, with its turn count, and the judge's check while it runs)
-and loop (`↺ /loop …`, with its run count and the countdown to its next run),
-for as long as either goes on, and, closest to
-the input, each subagent still running (`& agent: task`, with what it did last
-or its wait for a slot, a spinner and its time; after three, `& +N`), so one
-whose block has scrolled out of view still shows it works — a click on its row
-selects the block and brings it into view. Everything queued
+goal (`◎ Heading for the goal …`, with how long it has run, and the judge's
+check while it runs) and loop (`↺ Repeating every 5m …`, with its run count
+and the countdown to its next run), for as long as either goes on, each with a
+`✕` that stops it — a click elsewhere on the row brings its latest run into
+view — and, closest to
+the input, each subagent still running (`& Delegating to agent · task`,
+worded as its block, with what it did last or its wait for a slot, a spinner
+and its time; after three, `& +N`), so one whose block has scrolled out of
+view still shows it works — a click on its row selects the block and brings
+it into view. Everything queued
 goes to the agent at once, as a single message with the pieces joined by a
 blank line — messages typed while the agent works are usually one thought
 added to — and leaves the strip then, showing up in the conversation as your
@@ -1684,14 +1687,20 @@ message, which the session log leaves out: the body when the mode comes on,
 after each turn a judge — a separate, read-only model call — decides whether it
 is reached. `goal.md` is that judge's system prompt, with `{{goal}}` for the
 goal text and the verdict question in its front matter (`request:`). The judge
-answers `DONE` or `CONTINUE` with a one-line reason; on `CONTINUE` the agent is
-sent back to work with what is still missing, until the judge says done, a turn
-errors, or the safety cap of fifty turns is hit. A goal can be set while the
-agent works: it joins the run in flight as a steering message, and the judge
-takes over once the run ends. The goal stays in the state strip while it goes
-on, and a bare `/goal` reports it and its turn count. `/goal stop`, `Esc`, or
-stopping the run ends it. Reword `goal.md` to change how strictly the goal is
-judged.
+answers `DONE`, `IMPOSSIBLE` or `CONTINUE` with a one-line reason; on
+`CONTINUE` the agent is sent back to work with what is still missing, until the
+judge says done or out of reach, or a turn errors — there is no turn cap. A
+goal whose agent only talks, three work turns in a row without a tool call,
+pauses, still set: `/continue` carries on, `/goal stop` ends it. A failed check
+is tried again after 10 s and 20 s, then the goal pauses the same way and
+`/continue` checks again. A goal can be set while the agent works: it is taken
+at once, nothing is queued, and once the run ends its first turn, headed by the
+`/goal` as typed, goes in place of the judge. The goal stays in the state strip
+while it goes on (`◎ Heading for the goal …` with how long it has run, and the
+check while it runs; a click on `✕` stops it, elsewhere on the row brings its
+latest run into view), and a bare `/goal` reports it and its turn count.
+`/goal stop`, `Esc`, or stopping the run ends it. Reword `goal.md` to change how
+strictly the goal is judged.
 
 ```
 /goal get the test suite green    work until the judge agrees it is done
