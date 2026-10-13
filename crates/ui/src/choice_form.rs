@@ -302,7 +302,15 @@ impl ChoiceForm {
             _ => "",
         };
         let body = match (row, &self.typing, &self.custom_answer) {
-            (Row::Custom, Some(input), _) => format!("{label}: {}▏", input.text()),
+            (Row::Custom, Some(input), _) => {
+                // The caret sits where the cursor is, not always at the end.
+                let text = input.text();
+                let at = text
+                    .char_indices()
+                    .nth(input.cursor_pos())
+                    .map_or(text.len(), |(i, _)| i);
+                format!("{label}: {}▏{}", &text[..at], &text[at..])
+            }
             (Row::Custom, None, Some(kept)) => format!("{label}: {kept}"),
             _ => label.to_string(),
         };
@@ -617,6 +625,8 @@ impl ChoiceForm {
                     break 'rows;
                 }
                 side(buf, y);
+                // The row's style spans the whole width, as in other menus.
+                buf.set_style(Rect::new(area.x + 1, y, inner as u16, 1), style);
                 let used = width_of(&line).min(inner);
                 buf.set_stringn(area.x + 1, y, &line, inner, style);
                 if !note.is_empty() {
@@ -820,6 +830,9 @@ mod tests {
         typing.handle_key(KeyEvent::from(KeyCode::Enter));
         assert_eq!(typing.typed(), Some("my words"));
         assert_eq!(typing.handle_key(left), ChoiceAction::Handled);
+        // The drawn caret follows the cursor.
+        let lines = typing.row_lines(3, &Row::Custom, 80);
+        assert!(lines[0].0.contains("my word▏s"), "{lines:?}");
 
         let multi = ChoiceForm::new("Pick", vec!["a".into(), "b".into(), "c".into()])
             .with_multi("Submit")
@@ -841,6 +854,10 @@ mod tests {
         assert!(row(4).contains("git push"), "detail: {}", row(4));
         assert!(row(6).contains("1. Allow once"), "{}", row(6));
         assert!(row(8).contains("3. Deny"), "{}", row(8));
+        // The highlight of the selected row spans up to the right border.
+        let bg = ThemeColors::default().selection_bg;
+        assert!((3..51).all(|x| buf[(x, 6)].bg == bg));
+        assert_ne!(buf[(50, 7)].bg, bg);
     }
 
     #[test]
