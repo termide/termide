@@ -1,5 +1,6 @@
 #[cfg(unix)]
 mod completions;
+mod stderr_guard;
 mod ui;
 
 use anyhow::Result;
@@ -231,6 +232,7 @@ fn run_diagnostics(custom_config: Option<&std::path::Path>) -> bool {
 /// Restore terminal to a usable state (raw mode off, alternate screen off, etc.).
 /// Called both on normal exit and from the panic handler.
 fn restore_terminal() {
+    stderr_guard::restore();
     termide_core::leave_terminal_modes();
 }
 
@@ -606,6 +608,11 @@ fn main() -> Result<()> {
         height,
         keyboard_caps,
     );
+
+    // From here on anything written to fd 2 would land on the drawn frame;
+    // send it to the journal instead (the logger came up with the app above).
+    // `restore_terminal` gives stderr back. See `stderr_guard`.
+    stderr_guard::divert();
 
     // Re-emit any deferred startup warnings now that the logger is up
     match vs16_probe {
