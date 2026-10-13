@@ -1396,16 +1396,30 @@ mod wheel_tests {
             wheel(&mut modal, screen, content, false);
         }
         assert_eq!(modal.kb_scroll, 0, "and back up");
-        assert_eq!(modal.kb_cursor, 0);
+        assert!(
+            modal.kb_cursor < modal.kb_visible,
+            "the cursor stays in view"
+        );
+    }
+
+    #[test]
+    fn one_notch_moves_the_hotkey_view_at_once() {
+        let (mut modal, screen) = rendered(SettingsTab::Keybindings);
+        let content = modal.last_content_area.expect("content drawn");
+        assert_eq!((modal.kb_scroll, modal.kb_cursor), (0, 0));
+        wheel(&mut modal, screen, content, true);
+        assert_eq!(modal.kb_scroll, 3, "the view moved, not just the cursor");
+        assert_eq!(modal.kb_cursor, 3, "the cursor was pulled into the view");
     }
 
     #[test]
     fn the_wheel_scrolls_a_field_list() {
         let (mut modal, screen) = rendered(SettingsTab::General);
         let content = modal.last_content_area.expect("content drawn");
-        let start = modal.field_cursor;
+        assert!(modal.content_rows().len() > modal.content_visible);
         wheel(&mut modal, screen, content, true);
-        assert!(modal.field_cursor > start, "the cursor moved down");
+        assert_eq!(modal.content_scroll, 3, "one notch moves the view");
+        assert!(modal.field_cursor >= modal.content_scroll, "cursor in view");
         assert!(modal.current_row().is_some_and(|row| row.is_selectable()));
     }
 

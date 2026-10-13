@@ -92,6 +92,18 @@ impl GitLogPanel {
         (self.last_area.height.saturating_sub(2) as usize).max(1)
     }
 
+    /// Mouse wheel: scroll the commit list by `rows` and pull the selection
+    /// along, rather than move the selection and wait for the view to follow.
+    pub(crate) fn wheel(&mut self, rows: isize) {
+        (self.scroll, self.selected) = termide_ui::wheel_scroll(
+            self.scroll,
+            self.selected,
+            self.commits.len(),
+            self.visible_rows(),
+            rows,
+        );
+    }
+
     /// Ensure selected item is visible
     pub(crate) fn ensure_visible(&mut self) {
         let visible_height = self.last_area.height.saturating_sub(2) as usize;

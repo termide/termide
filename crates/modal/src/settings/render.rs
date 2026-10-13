@@ -294,6 +294,7 @@ impl SettingsModal {
         }
 
         let visible_rows = area.height as usize;
+        self.content_visible = visible_rows;
         self.clamp_scroll(visible_rows);
 
         let fields = fields_for_tab(self.field_tab());
@@ -702,6 +703,7 @@ impl SettingsModal {
 
         let names = kb_binding_names(self.kb_section);
         let visible = list_h as usize;
+        self.kb_visible = visible;
         if self.kb_cursor < self.kb_scroll {
             self.kb_scroll = self.kb_cursor;
         }

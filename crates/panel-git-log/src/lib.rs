@@ -357,9 +357,8 @@ impl Panel for GitLogPanel {
                 let reachable = self.commits.len().saturating_sub(visible);
                 self.scroll_target = (offset > reachable && self.has_more()).then_some(offset);
                 self.scroll = offset.min(reachable);
-                // The wheel moves the selection here and lets `ensure_visible`
-                // drag the window along; a thumb drag moves the window, so pull
-                // the selection into it — otherwise the highlight sits off
+                // A thumb drag moves the window, so pull the selection into
+                // it, as the wheel does — otherwise the highlight sits off
                 // screen and the next arrow key jumps back.
                 let offset = self.scroll;
                 let last = self.commits.len().saturating_sub(1);
@@ -737,7 +736,7 @@ impl GitLogPanel {
                 if self.repo_dropdown_open || self.branch_dropdown_open {
                     self.dropdown_cursor = self.dropdown_cursor.saturating_sub(1);
                 } else {
-                    self.move_up();
+                    self.wheel(-3);
                 }
             }
             MouseEventKind::ScrollDown => {
@@ -747,7 +746,7 @@ impl GitLogPanel {
                         self.dropdown_cursor += 1;
                     }
                 } else {
-                    self.move_down();
+                    self.wheel(3);
                 }
             }
             _ => {}
@@ -767,14 +766,7 @@ impl GitLogPanel {
             }
             return vec![];
         }
-        if delta < 0 {
-            // Scroll up - move selection up by delta
-            self.selected = self.selected.saturating_sub(lines);
-        } else {
-            // Scroll down - move selection down by delta
-            self.selected = (self.selected + lines).min(self.commits.len().saturating_sub(1));
-        }
-        self.ensure_visible();
+        self.wheel(delta as isize * 3); // 3 lines per scroll unit
         vec![]
     }
 }

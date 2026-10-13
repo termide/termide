@@ -34,6 +34,7 @@ impl SettingsModal {
             focus: FocusArea::Sidebar,
             field_cursor: 0,
             content_scroll: 0,
+            content_visible: 0,
             editing: false,
             edit_input: termide_ui::TextInput::new(),
             edit_area: None,
@@ -54,6 +55,7 @@ impl SettingsModal {
             kb_cursor: 0,
             kb_key_cursor: 0,
             kb_scroll: 0,
+            kb_visible: 0,
             kb_rows: Vec::new(),
             kb_clicks: termide_ui::ClickTracker::new(),
             kb_capture_message: None,
@@ -649,9 +651,11 @@ impl SettingsModal {
 
     // ---- Scroll ----
 
-    /// Mouse-wheel step over the content area: move the content cursor by a
-    /// few rows and let the render clamp bring the view along. Moving only the
-    /// scroll offset would be undone by that clamp on the next frame. Focus is
+    /// Mouse-wheel step over the content area: scroll the view by a few rows
+    /// and pull the content cursor into it, so the render clamp keeps the new
+    /// offset. Moving the cursor instead left the view still until the cursor
+    /// reached its edge, which looked like lag — the more so with the content
+    /// unfocused and the cursor not drawn. Focus is
     /// left alone; an inline edit, a key capture and the LSP form keep their
     /// cursor where it is.
     pub(super) fn wheel_content(&mut self, forward: bool) {
@@ -665,21 +669,52 @@ impl SettingsModal {
             if self.kb_mode != KbMode::Bindings {
                 return;
             }
-            let last = kb_binding_names(self.kb_section).len().saturating_sub(1);
-            let cursor = if forward {
-                (self.kb_cursor + WHEEL_STEP).min(last)
+            // The wheel scrolls the window, not the cursor: moving the cursor
+            // left the view still until it reached the edge, which looked
+            // like lag, all the more so with the content unfocused and the
+            // cursor not drawn. The cursor is pulled into the new window.
+            let len = kb_binding_names(self.kb_section).len();
+            let visible = self.kb_visible.max(1);
+            let max_scroll = len.saturating_sub(visible);
+            self.kb_scroll = if forward {
+                (self.kb_scroll + WHEEL_STEP).min(max_scroll)
             } else {
-                self.kb_cursor.saturating_sub(WHEEL_STEP)
+                self.kb_scroll.saturating_sub(WHEEL_STEP)
             };
+            let last = len.saturating_sub(1);
+            let low = self.kb_scroll.min(last);
+            let high = (self.kb_scroll + visible - 1).min(last);
+            let cursor = self.kb_cursor.clamp(low, high);
             if cursor != self.kb_cursor {
                 self.kb_cursor = cursor;
                 self.kb_key_cursor = 0;
             }
             return;
         }
-        for _ in 0..WHEEL_STEP {
-            if !self.step_cursor(forward) {
-                break;
+        let rows = self.content_rows();
+        if rows.is_empty() {
+            return;
+        }
+        let visible = self.content_visible.max(1);
+        let max_scroll = rows.len().saturating_sub(visible);
+        self.content_scroll = if forward {
+            (self.content_scroll + WHEEL_STEP).min(max_scroll)
+        } else {
+            self.content_scroll.saturating_sub(WHEEL_STEP)
+        };
+        // Pull the cursor onto the nearest selectable row of the new window;
+        // a window of headers only keeps it, and the render clamp wins.
+        let low = self.content_scroll;
+        let high = (low + visible).min(rows.len());
+        let window = low..high;
+        if !window.contains(&self.field_cursor) {
+            let pick = if self.field_cursor < low {
+                window.clone().find(|&i| rows[i].is_selectable())
+            } else {
+                window.clone().rev().find(|&i| rows[i].is_selectable())
+            };
+            if let Some(i) = pick {
+                self.field_cursor = i;
             }
         }
     }

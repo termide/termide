@@ -25,6 +25,34 @@ pub fn ensure_offset_visible(offset: usize, selected: usize, height: usize) -> u
     }
 }
 
+/// Mouse-wheel step for a list with a selection: scroll the window by `rows`
+/// (negative is up) and pull `selected` into it, returning the new
+/// `(offset, selected)`.
+///
+/// Moving the selection instead and letting [`ensure_offset_visible`] drag the
+/// window along leaves the view still until the selection reaches its edge,
+/// which reads as lag — and as nothing at all when the selection is not drawn
+/// because the list is unfocused. `len` is the item count and `height` the
+/// rows on screen; a `height` of 0 is treated as 1.
+#[must_use]
+pub fn wheel_scroll(
+    offset: usize,
+    selected: usize,
+    len: usize,
+    height: usize,
+    rows: isize,
+) -> (usize, usize) {
+    if len == 0 {
+        return (0, 0);
+    }
+    let height = height.max(1);
+    let max_offset = len.saturating_sub(height);
+    let offset = offset.saturating_add_signed(rows).min(max_offset);
+    let last = len - 1;
+    let selected = selected.clamp(offset.min(last), (offset + height - 1).min(last));
+    (offset, selected)
+}
+
 /// Viewport state for scrollable content.
 ///
 /// Handles scroll offset calculation to ensure the cursor/selected item
@@ -179,6 +207,25 @@ impl Viewport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_wheel_moves_the_window_at_once() {
+        // Selection at the top: one notch shifts the view, not just the row.
+        assert_eq!(wheel_scroll(0, 0, 100, 10, 3), (3, 3));
+        // Selection mid-window stays put while it remains visible.
+        assert_eq!(wheel_scroll(0, 5, 100, 10, 3), (3, 5));
+        // Scrolling up pulls it back in from below.
+        assert_eq!(wheel_scroll(10, 19, 100, 10, -3), (7, 16));
+    }
+
+    #[test]
+    fn the_wheel_stops_at_the_ends() {
+        assert_eq!(wheel_scroll(88, 95, 100, 10, 3), (90, 95));
+        assert_eq!(wheel_scroll(1, 4, 100, 10, -3), (0, 4));
+        // A list that fits does not scroll.
+        assert_eq!(wheel_scroll(0, 2, 5, 10, 3), (0, 2));
+        assert_eq!(wheel_scroll(0, 0, 0, 10, 3), (0, 0));
+    }
 
     #[test]
     fn test_new() {

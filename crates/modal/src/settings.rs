@@ -220,6 +220,8 @@ pub struct SettingsModal {
     field_cursor: usize,
     /// Vertical scroll offset for the content area.
     content_scroll: usize,
+    /// Content rows drawn by the last frame; the wheel scrolls by them.
+    content_visible: usize,
 
     // --- Editing ---
     /// True when a text/number field is being edited inline.
@@ -277,6 +279,9 @@ pub struct SettingsModal {
     kb_key_cursor: usize,
     /// Scroll offset for binding list.
     kb_scroll: usize,
+    /// Rows of the binding list drawn by the last frame, so the wheel can
+    /// scroll the window itself rather than nudge the cursor toward its edge.
+    kb_visible: usize,
     /// The slots drawn on each visible row, keyed by the row's index in
     /// `kb_binding_names(kb_section)`. A slot whose `key` is `None` is the
     /// `+` at the end of the row. Keyed by row index rather than screen row

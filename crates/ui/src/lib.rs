@@ -40,7 +40,7 @@ pub use selection_style::{
 };
 pub use suggestion_input::{DropdownState, SuggestionAction, SuggestionInput};
 pub use textarea::TextArea;
-pub use viewport::{ensure_offset_visible, Viewport};
+pub use viewport::{ensure_offset_visible, wheel_scroll, Viewport};
 
 // Re-exports for convenience
 pub use termide_clipboard as clipboard;

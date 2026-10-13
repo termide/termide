@@ -219,6 +219,17 @@ impl OutlinePanel {
         std::mem::take(&mut self.needs_repopulate)
     }
 
+    /// Mouse wheel: scroll the list by `rows` and pull the selection along.
+    fn wheel(&mut self, rows: isize) {
+        (self.scroll_offset, self.selected_index) = termide_ui::wheel_scroll(
+            self.scroll_offset,
+            self.selected_index,
+            self.symbols.len(),
+            self.last_height,
+            rows,
+        );
+    }
+
     /// Ensure selected item is visible.
     fn ensure_visible(&mut self) {
         let content_height = self.last_height;
@@ -305,9 +316,8 @@ impl Panel for OutlinePanel {
             PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
             PanelCommand::SetScrollOffset { offset, .. } => {
                 self.scroll_offset = offset;
-                // The wheel moves the selection here and lets `ensure_visible`
-                // drag the window along; a thumb drag moves the window, so pull
-                // the selection into it to keep the two consistent.
+                // A thumb drag moves the window, so pull the selection into
+                // it, as the wheel does, to keep the two consistent.
                 let visible = self.scrollbars.vertical.map_or(1, |bar| bar.visible).max(1);
                 let last = self.symbols.len().saturating_sub(1);
                 let low = offset.min(last);
@@ -560,12 +570,8 @@ impl Panel for OutlinePanel {
         let content_bottom = area.bottom().saturating_sub(1);
 
         match mouse.kind {
-            MouseEventKind::ScrollUp => {
-                self.select_prev();
-            }
-            MouseEventKind::ScrollDown => {
-                self.select_next();
-            }
+            MouseEventKind::ScrollUp => self.wheel(-3),
+            MouseEventKind::ScrollDown => self.wheel(3),
             MouseEventKind::Down(MouseButton::Left)
                 if mouse.row >= content_top && mouse.row < content_bottom =>
             {
@@ -582,15 +588,7 @@ impl Panel for OutlinePanel {
     }
 
     fn handle_scroll(&mut self, delta: i32, _area: Rect) -> Vec<PanelEvent> {
-        let count = self.symbols.len();
-        let lines = delta.unsigned_abs() as usize;
-
-        if delta < 0 {
-            self.selected_index = self.selected_index.saturating_sub(lines);
-        } else {
-            self.selected_index = (self.selected_index + lines).min(count.saturating_sub(1));
-        }
-        self.ensure_visible();
+        self.wheel(delta as isize * 3); // 3 lines per scroll unit
         vec![]
     }
 
