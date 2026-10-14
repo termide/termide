@@ -6571,6 +6571,74 @@ impl Backend for Idle {
     }
 }
 
+/// A backend whose goal check is refused with the error it holds.
+struct RefusesJudge(PromptError);
+
+impl Backend for RefusesJudge {
+    fn prompt(&self, _message: UserMessage) -> Result<(), PromptError> {
+        Err(PromptError::Stopped)
+    }
+    fn steer(&self, _message: UserMessage) {}
+    fn queue_lens(&self) -> (usize, usize) {
+        (0, 0)
+    }
+    fn abort(&self) {}
+    fn is_busy(&self) -> bool {
+        false
+    }
+    fn drain(&self) -> Vec<AgentEvent> {
+        Vec::new()
+    }
+    fn update(&self, _update: Box<dyn FnOnce(&mut Agent) + Send>) -> Result<(), PromptError> {
+        Err(PromptError::Unsupported)
+    }
+    fn compact(&self, _focus: Option<String>) -> Result<(), PromptError> {
+        Err(PromptError::Unsupported)
+    }
+    fn judge(&self, _goal: String) -> Result<(), PromptError> {
+        Err(self.0)
+    }
+    fn into_agent(self: Box<Self>) -> Option<Agent> {
+        None
+    }
+}
+
+/// A panel with a goal set and due to be checked, on a backend refusing the
+/// check with `error`.
+fn goal_check_refused(error: PromptError) -> AgentPanel {
+    let mut panel = panel(vec![]);
+    panel.busy = true;
+    type_text(&mut panel, "/goal get the build green");
+    panel.submit();
+    panel.busy = false;
+    panel.goal_task.as_mut().unwrap().first_turn = None;
+    panel.runtime = Box::new(RefusesJudge(error));
+    panel.run_goal_judge();
+    panel
+}
+
+/// An external agent still starting — a reopen, then `/continue` on the
+/// goal at once — is asked again shortly; the goal stays, with no warning.
+#[test]
+fn a_goal_check_refused_as_busy_is_asked_again_soon() {
+    let panel = goal_check_refused(PromptError::Busy);
+    let task = panel.goal_task.as_ref().expect("the goal is kept");
+    assert!(!task.judging);
+    assert!(task.judge_at.is_some_and(|at| at > Instant::now()));
+    assert_eq!(task.judge_failures, 0);
+}
+
+/// A gone agent fails the check like a failed call: retried after a wait,
+/// the goal kept rather than dropped.
+#[test]
+fn a_goal_check_on_a_stopped_agent_keeps_the_goal() {
+    let panel = goal_check_refused(PromptError::Stopped);
+    let task = panel.goal_task.as_ref().expect("the goal is kept");
+    assert!(!task.judging);
+    assert_eq!(task.judge_failures, 1);
+    assert!(task.judge_at.is_some());
+}
+
 thread_local! {
     /// What the last [`External`] started on this thread was handed: the
     /// session to resume and the history, as `role:text`.

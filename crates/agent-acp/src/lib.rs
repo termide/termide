@@ -1701,9 +1701,13 @@ impl Shared {
         {
             return Err(PromptError::Busy);
         }
-        self.session_id()
-            .map(|_| ())
-            .map_err(|_| PromptError::Stopped)
+        // An agent still starting (a reopen, a restart) is busy, not gone:
+        // the caller asks again once its session is up.
+        match &*self.conn.lock().unwrap_or_else(PoisonError::into_inner) {
+            Conn::Ready { .. } => Ok(()),
+            Conn::Starting => Err(PromptError::Busy),
+            Conn::Failed(_) => Err(PromptError::Stopped),
+        }
     }
 
     /// Ask the agent `text` aside from the conversation and return its

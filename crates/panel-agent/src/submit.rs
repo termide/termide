@@ -18,10 +18,10 @@ use crate::session_ops::discard;
 use crate::{
     millis, now_hms, slash, transcript, unfinished, Activity, AgentPanel, GoalTask, Item, LoopTask,
     NoticeKind, Phase, BUILTIN_COMMANDS, CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND,
-    FORK_COMMAND, GOAL_COMMAND, GOAL_IDLE_TURNS, GOAL_JUDGE_RETRIES, GOAL_JUDGE_RETRY_DELAY,
-    HANDOFF_COMMAND, LOOP_COMMAND, LOOP_MAX_ITERATIONS, MCP_COMMAND, NAME_COMMAND, NEW_COMMAND,
-    PAUSE_COMMAND, PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND, SHOW_PROMPT_ACTION, UNDO_COMMAND,
-    USAGE_COMMAND,
+    FORK_COMMAND, GOAL_COMMAND, GOAL_IDLE_TURNS, GOAL_JUDGE_BUSY_DELAY, GOAL_JUDGE_RETRIES,
+    GOAL_JUDGE_RETRY_DELAY, HANDOFF_COMMAND, LOOP_COMMAND, LOOP_MAX_ITERATIONS, MCP_COMMAND,
+    NAME_COMMAND, NEW_COMMAND, PAUSE_COMMAND, PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND,
+    SHOW_PROMPT_ACTION, UNDO_COMMAND, USAGE_COMMAND,
 };
 
 /// The opening of [`goal_continuation`], to tell its turns in the transcript.
@@ -733,6 +733,19 @@ impl AgentPanel {
                     termide_i18n::t().agent_notice_goal_checking(),
                     NoticeKind::Info,
                 );
+            }
+            // Not free yet — an external agent still starting after a
+            // reopen, a side request under way: asked again shortly.
+            Err(PromptError::Busy) => {
+                if let Some(task) = self.goal_task.as_mut() {
+                    task.judging = false;
+                    task.judge_at = Some(Instant::now() + GOAL_JUDGE_BUSY_DELAY);
+                }
+            }
+            // The agent is gone: a failed check, retried and then paused
+            // like one, so the goal is not dropped over it.
+            Err(PromptError::Stopped) => {
+                self.on_goal_judge_failed(&PromptError::Stopped.to_string());
             }
             Err(error) => {
                 self.goal_task = None;

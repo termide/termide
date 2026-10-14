@@ -154,6 +154,9 @@ const GOAL_IDLE_TURNS: usize = 3;
 /// [`GOAL_JUDGE_RETRY_DELAY`] times the attempt, before the goal is paused.
 const GOAL_JUDGE_RETRIES: u32 = 2;
 const GOAL_JUDGE_RETRY_DELAY: Duration = Duration::from_secs(10);
+/// How soon a goal check refused as busy — an external agent still starting
+/// after a reopen — is asked again.
+const GOAL_JUDGE_BUSY_DELAY: Duration = Duration::from_secs(1);
 /// The built-in `/handoff` command: distil the unfinished work into a brief for
 /// a fresh session or another agent.
 const HANDOFF_COMMAND: &str = "handoff";
