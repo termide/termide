@@ -160,6 +160,11 @@ impl AgentPanel {
                             self.retry_attempts = 0;
                             self.restarted = false;
                             self.retry_ready = false;
+                            // The request went: no failure waits on the user,
+                            // and the log is told so — otherwise a session
+                            // reopened later asks about a limit that has long
+                            // been answered, on another connection even.
+                            self.sync_retry();
                         }
                         false
                     }
@@ -796,11 +801,13 @@ impl AgentPanel {
         }
         // A loop whose wait has elapsed starts its next iteration once the
         // panel is free (no run in flight, no card waiting for an answer).
-        let due = self
-            .loop_task
-            .as_ref()
-            .and_then(|t| t.next_at)
-            .is_some_and(|at| at <= Instant::now());
+        // The wall clock decides as well, so a sleep does not put it off.
+        let due = self.loop_task.as_ref().is_some_and(|t| {
+            t.next_at.is_some_and(|at| at <= Instant::now())
+                || (t.next_at.is_some()
+                    && t.due_ms
+                        .is_some_and(|due| due <= termide_agent_core::now_millis()))
+        });
         if due && !self.is_busy() && self.pending.is_none() {
             events.extend(self.loop_step());
             changed = true;

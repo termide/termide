@@ -40,6 +40,14 @@ pub(crate) fn discard(session: Session) {
 impl AgentPanel {
     /// Replace the running agent with one continuing `session` (or a fresh
     /// one when `None`). Refuses while a run is in flight.
+    ///
+    /// A failed request belongs to the conversation, not to the agent or the
+    /// endpoint that failed on it: [`Self::rebuild_keeping_prompt`] keeps its
+    /// card and its wait across the rebuild, so one can pick another
+    /// connection or agent from the status strip and answer the card with
+    /// "Try again now" — which is how a subscription limit is got past. Here,
+    /// where the conversation itself may change, they are given up: the
+    /// request stays with the log it failed on.
     pub fn switch_session(&mut self, session: Option<Session>) -> bool {
         if self.is_busy() {
             self.notice(termide_i18n::t().agent_notice_busy(), NoticeKind::Warn);
@@ -170,6 +178,14 @@ impl AgentPanel {
         self.follow = true;
         self.queued = (0, 0);
         self.queued_texts.clear();
+        // So does a failed request: its retry would go to this runtime now,
+        // on a conversation that never made it.
+        if let Some(Pending::Failure { .. }) = &self.pending {
+            self.pending = None;
+        }
+        self.retry_wait = None;
+        self.retry_attempts = 0;
+        self.retry_ready = false;
         // A paused run belonged to the runtime just dropped: it cannot be
         // resumed, so the pause and the loop or goal it was part of end here.
         self.paused = false;
@@ -211,6 +227,16 @@ impl AgentPanel {
         let prompt = self.input.multiline(0).cloned();
         let pastes = std::mem::take(&mut self.pastes);
         let paste_seq = self.paste_seq;
+        // What the failed request holds is kept over this rebuild: the switch
+        // changes who answers, not what was asked. See [`Self::switch_session`].
+        let held = self.pending.take();
+        let (wait, attempts, ready) = (self.retry_wait, self.retry_attempts, self.retry_ready);
+        let waiting = matches!(held, Some(Pending::Failure { .. })) || wait.is_some();
+        let (goal, task) = if waiting {
+            (self.goal_task.take(), self.loop_task.take())
+        } else {
+            (None, None)
+        };
         let session = self.session.take();
         let rebuilt = self.switch_session(session);
         if let (Some(prompt), Some(area)) = (prompt, self.input.multiline_mut(0)) {
@@ -218,6 +244,16 @@ impl AgentPanel {
         }
         self.pastes = pastes;
         self.paste_seq = paste_seq;
+        if rebuilt && waiting {
+            self.pending = held;
+            self.goal_task = goal;
+            self.loop_task = task;
+        }
+        if rebuilt {
+            self.retry_wait = wait;
+            self.retry_attempts = attempts;
+            self.retry_ready = ready;
+        }
         rebuilt
     }
 

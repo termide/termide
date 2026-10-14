@@ -416,6 +416,9 @@ impl AgentPanel {
                     NoticeKind::Info,
                 );
             }
+            // The new request answers the failed one: the log is told, so a
+            // session reopened later does not ask about it again.
+            self.sync_retry();
             self.retry_attempts = 0;
             self.retry_ready = false;
             self.restarted = false;

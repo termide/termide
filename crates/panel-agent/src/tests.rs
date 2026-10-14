@@ -9631,3 +9631,197 @@ fn a_restored_retry_of_an_external_agent_carries_on() {
         .iter()
         .any(|i| matches!(i, Item::Assistant { text, .. } if text == "from outside")));
 }
+
+/// The run answered, at last: no `done` block means nothing went through.
+fn answered_done(panel: &AgentPanel) -> bool {
+    panel
+        .transcript()
+        .items()
+        .iter()
+        .any(|item| matches!(item, Item::Assistant { text, error: None, .. } if text == "done"))
+}
+
+/// A wait whose monotonic clock stood still in a sleep goes by the wall clock.
+#[test]
+fn a_wait_goes_by_the_wall_clock_after_a_sleep() {
+    let mut panel = panel(vec![limited(), reply("done")]);
+    panel.on_limit = LimitPolicy::Wait;
+    panel.send("do it".to_string());
+    settle(&mut panel);
+    // As after a sleep: the wall clock passed the reset, the monotonic one not.
+    panel.retry_wait.as_mut().unwrap().wall = crate::failure::unix_now();
+    panel.tick();
+    settle(&mut panel);
+    assert!(panel.retry_wait.is_none());
+    assert!(answered_done(&panel));
+}
+
+/// A request that went through answers the failure it follows: the log keeps
+/// no retry for it, so a session reopened later asks about nothing — least of
+/// all about a limit the request outran on another connection.
+#[test]
+fn a_run_that_goes_takes_the_held_failure_out_of_the_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![limited(), reply("done")])
+    });
+    let path = panel.session_path().unwrap().to_path_buf();
+    panel.send("do it".to_string());
+    settle(&mut panel);
+    assert!(matches!(panel.pending, Some(Pending::Failure { .. })));
+    assert!(
+        panel.session.as_ref().unwrap().pending_retry().is_some(),
+        "the card holds the failure in the log"
+    );
+
+    // The user answers by sending a new request, as one does to carry on.
+    panel.apply_form_action(ChoiceAction::Cancelled);
+    panel.send("go on".to_string());
+    settle(&mut panel);
+    assert!(panel
+        .transcript()
+        .items()
+        .iter()
+        .any(|item| matches!(item, Item::Assistant { text, error: None, .. } if text == "done")));
+
+    assert!(
+        panel.session.as_ref().unwrap().pending_retry().is_none(),
+        "the request went: no failure waits on the user"
+    );
+    drop(panel);
+    let reopened = reopen(&path, dir.path(), vec![reply("done")]);
+    assert!(
+        !matches!(reopened.pending, Some(Pending::Failure { .. })),
+        "nothing is asked at a reopen"
+    );
+}
+
+/// A connection catalog whose every endpoint answers from one scripted
+/// provider, so a request retried after a switch meets its answer there.
+struct Switchable {
+    provider: Arc<dyn Provider>,
+}
+
+impl ConnectionCatalog for Switchable {
+    fn list(&self) -> Vec<ConnectionEntry> {
+        [
+            ("local", "openai_compatible", "m"),
+            ("cloud", "anthropic_compatible", "claude-x"),
+            ("cli", "codex", ""),
+        ]
+        .into_iter()
+        .map(|(name, kind, model)| ConnectionEntry {
+            name: name.into(),
+            kind: kind.into(),
+            model: model.into(),
+        })
+        .collect()
+    }
+    fn build(&self, name: &str, _agent: &str) -> Option<ConnectionChoice> {
+        let entry = self.list().into_iter().find(|entry| entry.name == name)?;
+        let backend: Option<BackendFactory> = (name == "cli").then(|| {
+            Arc::new(|setup: BackendSetup| {
+                Ok(Box::new(External::following_modes(setup)) as Box<dyn Backend>)
+            }) as BackendFactory
+        });
+        Some(ConnectionChoice {
+            name: entry.name,
+            kind: entry.kind,
+            provider: Arc::clone(&self.provider),
+            model: entry.model,
+            context_window: 200_000,
+            backend,
+            reviewer: ReviewerSetup::default(),
+        })
+    }
+}
+
+/// A panel on `dir`'s log, on the `local` endpoint, answering from `replies`.
+fn on_endpoint(dir: &Path, replies: Vec<AssistantMessage>) -> AgentPanel {
+    let provider = Arc::new(Scripted::new(replies));
+    let mut setup = setup_with(Arc::clone(&provider));
+    setup.session_dir = Some(dir.to_path_buf());
+    setup.connections = Some(Arc::new(Switchable {
+        provider: Arc::clone(&provider) as Arc<dyn Provider>,
+    }));
+    AgentPanel::new(setup)
+}
+
+/// A limit belongs to the endpoint that hit it, not to the conversation:
+/// switching connections rebuilds the agent and keeps the card up, so the
+/// request can be tried again there — which is how a subscription limit is
+/// got past.
+#[test]
+fn a_connection_switch_keeps_the_failure_card_up() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = on_endpoint(dir.path(), vec![limited(), reply("done")]);
+    panel.send("do it".to_string());
+    settle(&mut panel);
+    assert!(matches!(panel.pending, Some(Pending::Failure { .. })));
+
+    assert!(panel.switch_connection("cloud"));
+    assert!(
+        matches!(panel.pending, Some(Pending::Failure { .. })),
+        "the choice is still owed: the endpoint changed, not the request"
+    );
+    assert!(panel.retry_ready, "`/continue` still holds it");
+
+    let rows = failure_rows(&panel);
+    let now = rows.iter().position(|row| row == "Try again now").unwrap();
+    panel.apply_form_action(ChoiceAction::Chosen(now));
+    settle(&mut panel);
+    assert!(
+        answered_done(&panel),
+        "the request went on the new endpoint"
+    );
+}
+
+/// The same across a switch onto a CLI agent, whose runtime is rebuilt whole.
+#[test]
+fn a_switch_to_a_cli_agent_keeps_the_failure_card_up() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = on_endpoint(dir.path(), vec![limited(), reply("done")]);
+    panel.send("do it".to_string());
+    settle(&mut panel);
+    assert!(panel.switch_connection("cli"));
+    assert!(panel.external);
+    assert!(matches!(panel.pending, Some(Pending::Failure { .. })));
+}
+
+/// A wait out of a limit survives it too, so `ask_else_wait` keeps counting
+/// toward the reset while the endpoint is changed under it.
+#[test]
+fn a_connection_switch_keeps_a_wait_and_the_goal_waiting_on_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = on_endpoint(dir.path(), vec![limited(), reply("done")]);
+    panel.on_limit = LimitPolicy::Wait;
+    type_text(&mut panel, "/goal get it done");
+    panel.submit();
+    settle(&mut panel);
+    assert!(panel.retry_wait.is_some(), "the reset is waited for");
+
+    assert!(panel.switch_connection("cloud"));
+    let wait = panel.retry_wait.expect("the wait is kept");
+    assert!(wait.wall > crate::failure::unix_now() + 3_000);
+    assert!(panel.goal_task.is_some(), "the goal keeps waiting on it");
+}
+
+/// Leaving for another session is not a rebuild: the failed request stays
+/// with the log it failed on, so its card and its wait go with it.
+#[test]
+fn another_session_takes_the_failure_card_with_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = on_endpoint(dir.path(), vec![limited()]);
+    panel.send("do it".to_string());
+    settle(&mut panel);
+    assert!(matches!(panel.pending, Some(Pending::Failure { .. })));
+
+    panel.switch_session(None);
+    assert!(
+        !matches!(panel.pending, Some(Pending::Failure { .. })),
+        "a fresh session owes no answer for another's request"
+    );
+    assert!(!panel.retry_ready);
+    assert!(panel.retry_wait.is_none());
+}

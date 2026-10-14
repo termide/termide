@@ -371,11 +371,18 @@ impl AgentPanel {
     /// goal or loop under way carries on.
     pub(crate) fn restart_and_retry(&mut self) -> bool {
         self.restarted = true;
-        let (goal, task) = (self.goal_task.take(), self.loop_task.take());
+        // The same session, so what the request has been through is kept: a
+        // restart joins the backoff the tries have grown, not starts it over.
+        let (goal, task, attempts) = (
+            self.goal_task.take(),
+            self.loop_task.take(),
+            self.retry_attempts,
+        );
         let session = self.session.take();
         self.switch_session(session);
         self.goal_task = goal;
         self.loop_task = task;
+        self.retry_attempts = attempts;
         self.retry_now()
     }
 
@@ -394,7 +401,11 @@ impl AgentPanel {
 
     /// The wait is over: try again, once the panel is free.
     pub(crate) fn poll_retry_wait(&mut self) -> bool {
-        let due = self.retry_wait.filter(|wait| wait.at <= Instant::now());
+        // The wall clock decides as well: a monotonic clock stands still
+        // while the machine sleeps, which would put the try off by as long.
+        let due = self
+            .retry_wait
+            .filter(|wait| wait.at <= Instant::now() || wait.wall <= unix_now());
         if let Some(wait) = due.filter(|_| !self.is_busy() && self.pending.is_none()) {
             if wait.restart {
                 self.restart_and_retry();
