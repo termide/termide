@@ -12,11 +12,11 @@ use termide_agent_core::{
     apply_tool_texts, build_system_prompt, discover_context_files, ensure_global_layout,
     permission_channel, AcpConfig, AcpFlavor, Agent, AgentDirs, AgentEvent, AssistantMessage,
     AutoDenyPrompter, Backend, BackendSetup, CancelToken, ChainedHooks, CompactionPolicy, Decision,
-    HostTools, IntentLog, Message, ModeHandle, ModelChoice, ModelSpec, PermissionAnswer,
-    PermissionHooks, PermissionRules, PersistScope, PlanGuard, PromptOptions, Provider, Refusals,
-    ReviewerSetup, Session, SessionSummary, ShellOutput, ShellRunner, StreamEvent, ThinkingLevel,
-    Tool, ToolCall, ToolContext, ToolRegistry, ToolUpdate, Usage, UserMessage, DEFAULT_AGENT,
-    GLOBAL_AGENT_DIR, SESSIONS_DIR,
+    HostTools, IntentLog, Message, MessageOrigin, ModeHandle, ModelChoice, ModelSpec, OriginKind,
+    PermissionAnswer, PermissionHooks, PermissionRules, PersistScope, PlanGuard, PromptOptions,
+    Provider, Refusals, ReviewerSetup, Session, SessionParent, SessionSummary, ShellOutput,
+    ShellRunner, StreamEvent, ThinkingLevel, Tool, ToolCall, ToolContext, ToolRegistry, ToolUpdate,
+    Usage, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
 };
 use termide_agent_hooks::CommandHooks;
 use termide_agent_mcp::{Connections, TokenStore};
@@ -25,7 +25,7 @@ use termide_agent_providers::{
 };
 use termide_agent_recall::{PanelDir, RecallSetup, RecallTool, RepoFinder, Solver, TimeLimits};
 use termide_agent_tools::{
-    builtin_tools, BashTool, QuestionTool, SkillTool, SubagentOutcome, SubagentRun,
+    builtin_tools, BashTool, QuestionTool, SkillTool, SubagentOutcome, SubagentRun, SubagentTask,
     SuggestCommandTool, TaskTool,
 };
 use termide_agent_web::{web_tools, Web, WebConfig};
@@ -544,10 +544,10 @@ impl AgentCatalog for FsCatalog {
                 let delegates = self.delegatable(name);
                 if !delegates.is_empty() {
                     let runner = Arc::clone(subagents);
-                    let run: SubagentRun =
-                        Arc::new(move |agent, prompt, ctx, cancel, on_update| {
-                            runner.run(agent, prompt, ctx, cancel, on_update)
-                        });
+                    let caller = name.to_string();
+                    let run: SubagentRun = Arc::new(move |task, ctx, cancel, on_update| {
+                        runner.run(&caller, task, ctx, cancel, on_update)
+                    });
                     tools.insert(Arc::new(TaskTool::new(delegates, run)));
                 }
             }
@@ -1089,6 +1089,9 @@ struct Subagents {
     mcp: Arc<Connections>,
     cwd: PathBuf,
     project_root: PathBuf,
+    /// Where a delegated task's session log goes: the panel's sessions;
+    /// `None` keeps no log.
+    session_dir: Option<PathBuf>,
     rules: PermissionRules,
     /// The session's live permission mode, which a delegated task runs in
     /// unless its definition names its own.
@@ -1355,8 +1358,73 @@ impl SubagentReport {
                 |error| format!("the subagent failed: {error}"),
             )),
         };
-        SubagentOutcome { answer, spent }
+        SubagentOutcome {
+            answer,
+            spent,
+            session: None,
+        }
     }
+}
+
+/// The log of a delegated task's session, written as the task runs, so what
+/// the delegate did can be read, searched and carried on afterwards. Nothing
+/// is written when the log cannot be started; the task runs all the same.
+struct DelegateLog(Option<Session>);
+
+impl DelegateLog {
+    /// A log in `dir`, of a session in `cwd` naming `parent`, that starts
+    /// on its connection and model (empty for an agent's own) with its
+    /// agent, as a panel's does; none without a `dir`.
+    fn start(dir: Option<&Path>, cwd: &Path, parent: SessionParent, run: &DelegateRun) -> Self {
+        let Some(dir) = dir else {
+            return Self(None);
+        };
+        let mut session = match Session::create_delegate(dir, cwd, parent) {
+            Ok(session) => session,
+            Err(error) => {
+                log::warn!("cannot start a delegate's session log: {error}");
+                return Self(None);
+            }
+        };
+        let mut written = session.append_connection_change(run.connection).map(drop);
+        if !run.model.is_empty() {
+            written = written.and_then(|()| {
+                session
+                    .append_model_change(run.provider, run.model, run.context_window)
+                    .map(drop)
+            });
+        }
+        if let Err(error) = written.and_then(|()| session.append_agent_change(run.agent).map(drop))
+        {
+            log::warn!("delegate session write failed: {error}");
+        }
+        Self(Some(session))
+    }
+
+    /// Write a finished message of the task's.
+    fn note(&mut self, message: &Message) {
+        if let Some(session) = &mut self.0 {
+            if let Err(error) = session.append_message(message) {
+                log::warn!("delegate session write failed: {error}");
+            }
+        }
+    }
+
+    /// `outcome` with the log noted beside it.
+    fn into_outcome(self, mut outcome: SubagentOutcome) -> SubagentOutcome {
+        outcome.session = self.0.map(|session| session.path().to_path_buf());
+        outcome
+    }
+}
+
+/// What a delegate's session starts on, for its log.
+struct DelegateRun<'a> {
+    connection: &'a str,
+    /// The connection's provider kind.
+    provider: &'a str,
+    model: &'a str,
+    context_window: Option<u64>,
+    agent: &'a str,
 }
 
 impl Subagents {
@@ -1388,27 +1456,29 @@ impl Subagents {
         (tools, skills, system_prompt)
     }
 
+    /// Run `task`, which the agent `caller` handed over.
     fn run(
         &self,
-        name: &str,
-        prompt: &str,
+        caller: &str,
+        task: &SubagentTask,
         ctx: &ToolContext,
         cancel: &CancelToken,
         on_update: &mut dyn FnMut(ToolUpdate),
     ) -> SubagentOutcome {
-        self.delegate(name, prompt, ctx, cancel, on_update)
+        self.delegate(caller, task, ctx, cancel, on_update)
             .unwrap_or_else(|error| Err(error).into())
     }
 
     /// Run the task; an error is one that came before anything was spent.
     fn delegate(
         &self,
-        name: &str,
-        prompt: &str,
+        caller: &str,
+        task: &SubagentTask,
         ctx: &ToolContext,
         cancel: &CancelToken,
         on_update: &mut dyn FnMut(ToolUpdate),
     ) -> Result<SubagentOutcome, String> {
+        let name = task.agent;
         let definition = self.dirs.agent(name);
         if definition.spec.acp.is_some() {
             return Err(format!(
@@ -1453,8 +1523,34 @@ impl Subagents {
         // session answer must not let a change through.
         let hooks = ChainedHooks::new(vec![Box::new(plan_guard), Box::new(permissions)]);
 
-        let (provider, requested, context_window) = match target {
+        // The task reaches the delegate as its parent's words, never the
+        // user's, and its log names where it came from.
+        let parent_session = ctx.session.as_ref().and_then(|session| session.id.clone());
+        let message = UserMessage::text(task.prompt).with_origin(MessageOrigin {
+            session: parent_session.clone().unwrap_or_default(),
+            agent: caller.to_string(),
+            kind: OriginKind::Task,
+        });
+        let lineage = SessionParent {
+            session: parent_session,
+            agent: caller.to_string(),
+            call: task.call.to_string(),
+        };
+
+        let (provider, requested, context_window, connection_name, kind) = match target {
             SubagentTarget::Cli(connection_name, connection) => {
+                let log = DelegateLog::start(
+                    self.session_dir.as_deref(),
+                    &self.cwd,
+                    lineage,
+                    &DelegateRun {
+                        connection: &connection_name,
+                        provider: &connection.provider,
+                        model: connection.model.trim(),
+                        context_window: None,
+                        agent: name,
+                    },
+                );
                 let run = CliSubagent {
                     name: format!("{connection_name}:{name}"),
                     max_turns,
@@ -1467,16 +1563,18 @@ impl Subagents {
                     rules,
                 };
                 return self
-                    .run_cli(run, prompt, &budget, cancel, on_update)
+                    .run_cli(run, message, log, &budget, cancel, on_update)
                     .map(with_reviews);
             }
             // On a connection of its own the subagent runs that connection's
             // model: the id its `AGENT.md` names is one of the session's
             // endpoint.
-            SubagentTarget::Model(name, connection) => (
-                connection_provider(&name, &connection),
+            SubagentTarget::Model(connection_name, connection) => (
+                connection_provider(&connection_name, &connection),
                 connection.model.clone(),
                 connection.effective_context_window(),
+                connection_name,
+                connection.provider,
             ),
             SubagentTarget::Session => (
                 Arc::clone(&active.provider),
@@ -1486,6 +1584,8 @@ impl Subagents {
                     .clone()
                     .unwrap_or_else(|| active.model.clone()),
                 active.context_window,
+                active.connection.clone(),
+                active.kind.clone(),
             ),
         };
         let Some(id) = resolve_model(provider.as_ref(), &requested) else {
@@ -1498,6 +1598,18 @@ impl Subagents {
             max_tokens: self.max_tokens,
             thinking: self.reasoning,
         };
+        let mut log = DelegateLog::start(
+            self.session_dir.as_deref(),
+            &self.cwd,
+            lineage,
+            &DelegateRun {
+                connection: &connection_name,
+                provider: &kind,
+                model: &model.id,
+                context_window: Some(model.context_window),
+                agent: name,
+            },
+        );
         // The reviewer judges the subagent's calls against what the user asked
         // the delegating agent; the task itself counts as that agent's words.
         let parent = ctx
@@ -1526,6 +1638,12 @@ impl Subagents {
                 }
             });
             let mut emit = |event: AgentEvent| match &event {
+                AgentEvent::MessageEnd(message) => {
+                    log.note(message);
+                    if let Message::Assistant(message) = message {
+                        report.said(message, on_update);
+                    }
+                }
                 AgentEvent::MessageStart { .. } => {
                     if report.turn() {
                         budget.cancel();
@@ -1537,9 +1655,6 @@ impl Subagents {
                 AgentEvent::MessageUpdate(StreamEvent::Admitted) => {
                     report.waiting(None, on_update);
                 }
-                AgentEvent::MessageEnd(Message::Assistant(message)) => {
-                    report.said(message, on_update);
-                }
                 AgentEvent::ToolExecutionStart { call } => {
                     report.called(call, &self.cwd, on_update);
                 }
@@ -1548,13 +1663,15 @@ impl Subagents {
                 }
                 _ => {}
             };
-            agent.run(UserMessage::text(prompt), &mut hooks, &budget, &mut emit);
+            agent.run(message, &mut hooks, &budget, &mut emit);
             finished.store(true, std::sync::atomic::Ordering::Release);
         });
         if report.answer.is_none() && report.error.is_none() {
             report.error = run_error(agent.messages());
         }
-        Ok(with_reviews(report.into_outcome(cancel.is_cancelled())))
+        Ok(with_reviews(
+            log.into_outcome(report.into_outcome(cancel.is_cancelled())),
+        ))
     }
 
     /// Run `run` as a session of its own of its CLI agent, which calls the
@@ -1565,7 +1682,8 @@ impl Subagents {
     fn run_cli(
         &self,
         run: CliSubagent,
-        prompt: &str,
+        message: UserMessage,
+        mut log: DelegateLog,
         budget: &CancelToken,
         cancel: &CancelToken,
         on_update: &mut dyn FnMut(ToolUpdate),
@@ -1606,7 +1724,14 @@ impl Subagents {
             cancel,
         };
         // The process goes with the runtime, once the task is over.
-        drive.run(&runtime, &|| runtime.is_starting(), prompt, on_update)
+        let outcome = drive.run(
+            &runtime,
+            &|| runtime.is_starting(),
+            message,
+            &mut log,
+            on_update,
+        );
+        outcome.map(|outcome| log.into_outcome(outcome))
     }
 }
 
@@ -1634,7 +1759,8 @@ impl CliDrive<'_> {
         &self,
         backend: &dyn Backend,
         starting: &dyn Fn() -> bool,
-        prompt: &str,
+        message: UserMessage,
+        log: &mut DelegateLog,
         on_update: &mut dyn FnMut(ToolUpdate),
     ) -> Result<SubagentOutcome, String> {
         let stopped = || self.cancel.is_cancelled() || self.budget.is_cancelled();
@@ -1666,7 +1792,7 @@ impl CliDrive<'_> {
             return Err("the subagent was stopped".into());
         }
         backend
-            .prompt(UserMessage::text(prompt))
+            .prompt(message)
             .map_err(|error| format!("the subagent did not start: {error:?}"))?;
         let mut report = SubagentReport::new(self.max_turns);
         let mut aborted: Option<std::time::Instant> = None;
@@ -1678,6 +1804,9 @@ impl CliDrive<'_> {
                     .send(PermissionAnswer::DenyWithReason(self.refusal.to_string()));
             }
             for event in backend.drain() {
+                if let AgentEvent::MessageEnd(message) = &event {
+                    log.note(message);
+                }
                 match event {
                     AgentEvent::MessageEnd(Message::Assistant(message)) => {
                         let over = report.turn();
@@ -1776,6 +1905,7 @@ fn agent_setup(
         mcp: Arc::clone(&catalog.mcp),
         cwd: cwd.clone(),
         project_root: project_root.to_path_buf(),
+        session_dir: session_dir_of(&cwd),
         rules: settings.permissions.clone(),
         mode: termide_agent_core::ModeHandle::new(settings.permissions.mode),
         max_tokens: settings.output_limit(),
@@ -2387,7 +2517,7 @@ mod tests {
         tools.insert(Arc::new(termide_agent_web::WebSearchTool::new(web)));
         tools.insert(Arc::new(QuestionTool));
         tools.insert(Arc::new(SuggestCommandTool));
-        let run: SubagentRun = Arc::new(|_, _, _, _, _| unreachable!());
+        let run: SubagentRun = Arc::new(|_, _, _, _| unreachable!());
         tools.insert(Arc::new(TaskTool::new(
             vec![("review".into(), "Reviews".into())],
             run,
@@ -2671,8 +2801,10 @@ mod tests {
                 "bash",
                 serde_json::json!({ "command": "cargo test\n--quiet" }),
             );
+            // As an ACP agent's turn does, the task is logged first.
             self.events.lock().unwrap().extend([
                 AgentEvent::AgentStart,
+                AgentEvent::MessageEnd(Message::User(message)),
                 said("working"),
                 AgentEvent::ToolExecutionStart { call: read.clone() },
                 AgentEvent::ToolExecutionStart { call: test.clone() },
@@ -2749,11 +2881,34 @@ mod tests {
         };
         let cli = FakeCli::default();
         let mut progress = Vec::new();
-        let answer = drive.run(&cli, &|| false, "find it", &mut |update| {
+        let logs = tempfile::tempdir().unwrap();
+        let parent = SessionParent {
+            session: Some("p1".into()),
+            agent: "lead".into(),
+            call: "call-7".into(),
+        };
+        let mut log = DelegateLog::start(
+            Some(logs.path()),
+            Path::new("/proj"),
+            parent.clone(),
+            &DelegateRun {
+                connection: "claude",
+                provider: "claude_code",
+                model: "haiku",
+                context_window: None,
+                agent: "search",
+            },
+        );
+        let task = UserMessage::text("find it").with_origin(MessageOrigin {
+            session: "p1".into(),
+            agent: "lead".into(),
+            kind: OriginKind::Task,
+        });
+        let answer = drive.run(&cli, &|| false, task.clone(), &mut log, &mut |update| {
             let ToolUpdate::Output(text) = update;
             progress.push(text);
         });
-        let outcome = answer.unwrap();
+        let outcome = log.into_outcome(answer.unwrap());
         assert_eq!(outcome.answer.as_deref(), Ok("the answer"));
         // Every reply's tokens count, not the last one's alone.
         assert_eq!((outcome.spent.input, outcome.spent.output), (200, 20));
@@ -2761,7 +2916,27 @@ mod tests {
             cli.picked.lock().unwrap().as_deref(),
             Some("claude-haiku-5")
         );
-        assert_eq!(*cli.prompted.lock().unwrap(), ["find it"]);
+        // The task goes as the delegating agent's words.
+        assert_eq!(*cli.prompted.lock().unwrap(), [task.model_text()]);
+        assert!(task.model_text().contains("from=\"lead\""));
+        // Its session is logged, naming where it came from: the task, as
+        // the agent's, and what the delegate said.
+        let path = outcome.session.expect("a log");
+        let logged = Session::open(&path).unwrap();
+        assert_eq!(logged.header().parent.as_ref(), Some(&parent));
+        let summary = SessionSummary::from(&logged);
+        assert_eq!(summary.display_label(), "& find it");
+        let messages: Vec<Message> = logged
+            .entries()
+            .iter()
+            .filter_map(|entry| match &entry.kind {
+                termide_agent_core::EntryKind::Message { message, .. } => Some(message.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(messages.len(), 3);
+        assert!(matches!(&messages[0], Message::User(user) if user.origin.is_some()));
+        assert!(matches!(&messages[2], Message::Assistant(_)));
         // Its calls show one line each among what it said, relative to its
         // directory, a failed one marked; a command shows its first line.
         assert_eq!(
@@ -2771,7 +2946,13 @@ mod tests {
 
         cancel.cancel();
         let stopped = FakeCli::default();
-        let answer = drive.run(&stopped, &|| false, "find it", &mut |_| {});
+        let answer = drive.run(
+            &stopped,
+            &|| false,
+            UserMessage::text("find it"),
+            &mut DelegateLog(None),
+            &mut |_| {},
+        );
         assert!(answer.is_err());
         assert!(stopped.prompted.lock().unwrap().is_empty());
     }
@@ -3244,6 +3425,7 @@ mod tests {
             mcp: Connections::new(std::collections::BTreeMap::new()),
             cwd: tmp.path().to_path_buf(),
             project_root: tmp.path().to_path_buf(),
+            session_dir: Some(tmp.path().join("sessions")),
             rules: settings.permissions.clone(),
             mode: termide_agent_core::ModeHandle::new(settings.permissions.mode),
             max_tokens: settings.output_limit(),
@@ -3261,8 +3443,12 @@ mod tests {
         };
         let started = std::time::Instant::now();
         let result = subagents.run(
-            DEFAULT_AGENT,
-            "look around",
+            "lead",
+            &SubagentTask {
+                agent: DEFAULT_AGENT,
+                prompt: "look around",
+                call: "c1",
+            },
             &ToolContext::new(tmp.path().to_path_buf()),
             &cancel,
             &mut |_| {},
@@ -3270,6 +3456,22 @@ mod tests {
         stopper.join().unwrap();
         assert_eq!(result.answer, Err("the subagent was stopped".to_string()));
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
+        // A stopped task leaves its log too, the task in it as the
+        // delegating agent's.
+        let logged = Session::open(&result.session.expect("a log")).unwrap();
+        let parent = logged.header().parent.clone().unwrap();
+        assert_eq!(
+            (parent.agent.as_str(), parent.call.as_str()),
+            ("lead", "c1")
+        );
+        assert!(logged.entries().iter().any(|entry| matches!(
+            &entry.kind,
+            termide_agent_core::EntryKind::Message {
+                message: Message::User(user),
+                ..
+            } if user.plain_text() == "look around"
+                && user.origin.as_ref().is_some_and(|o| o.kind == OriginKind::Task)
+        )));
     }
 
     /// A subagent may take as many model calls as its limit says; the one
@@ -3378,6 +3580,7 @@ done"#;
             mcp,
             cwd: tmp.path().to_path_buf(),
             project_root: tmp.path().to_path_buf(),
+            session_dir: None,
             rules: settings.permissions.clone(),
             mode: termide_agent_core::ModeHandle::new(settings.permissions.mode),
             max_tokens: settings.output_limit(),
@@ -3411,6 +3614,7 @@ done"#;
             mcp: Arc::clone(&catalog.mcp),
             cwd: tmp.path().to_path_buf(),
             project_root: tmp.path().to_path_buf(),
+            session_dir: None,
             rules: settings.permissions.clone(),
             mode: termide_agent_core::ModeHandle::new(settings.permissions.mode),
             max_tokens: settings.output_limit(),

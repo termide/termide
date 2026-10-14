@@ -38,6 +38,22 @@ pub struct SessionHeader {
     pub cwd: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// The session that delegated this one's task, for a delegate's session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<SessionParent>,
+}
+
+/// Where a delegate's session came from: the delegating session and call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionParent {
+    /// The delegating session's id, when its agent ran on termide's loop;
+    /// an external agent's calls come without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+    /// The delegating agent's name.
+    pub agent: String,
+    /// The id of the `task` call that handed the task over.
+    pub call: String,
 }
 
 /// How long a logged message took to produce, recorded by the UI so a
@@ -403,6 +419,18 @@ impl Drop for Session {
 impl Session {
     /// Create a new session file in `dir` (created if missing).
     pub fn create(dir: &Path, cwd: &Path) -> std::io::Result<Self> {
+        Self::create_with(dir, cwd, None)
+    }
+
+    /// Create the session of a task delegated by `parent`, in `dir`, held
+    /// exclusively as a panel's is: no panel opens it while the task runs.
+    pub fn create_delegate(dir: &Path, cwd: &Path, parent: SessionParent) -> std::io::Result<Self> {
+        let mut session = Self::create_with(dir, cwd, Some(parent))?;
+        session.lock = claim(&session.path);
+        Ok(session)
+    }
+
+    fn create_with(dir: &Path, cwd: &Path, parent: Option<SessionParent>) -> std::io::Result<Self> {
         std::fs::create_dir_all(dir)?;
         let created = now_millis();
         let id = new_id();
@@ -412,6 +440,7 @@ impl Session {
             created,
             cwd: cwd.to_path_buf(),
             name: None,
+            parent,
         };
         let path = dir.join(format!("{}_{id}.jsonl", file_timestamp(created)));
         let mut file = OpenOptions::new()
@@ -1332,14 +1361,18 @@ impl SessionSummary {
     }
 
     /// [`Self::label`] marked `⏸` when the session was left with work to
-    /// carry on, for the lists that offer sessions to open.
+    /// carry on and `&` when it is a delegate's, the way the panel marks a
+    /// delegated task, for the lists that offer sessions to open.
     #[must_use]
     pub fn display_label(&self) -> String {
-        if self.unfinished {
-            format!("⏸ {}", self.label())
-        } else {
-            self.label()
+        let mut label = self.label();
+        if self.parent.is_some() {
+            label = format!("& {label}");
         }
+        if self.unfinished {
+            label = format!("⏸ {label}");
+        }
+        label
     }
 }
 
@@ -1358,6 +1391,8 @@ pub struct SessionSummary {
     /// The session was left with work to carry on: a run cut off or
     /// paused, a `/goal` or `/loop` going.
     pub unfinished: bool,
+    /// Where a delegate's session came from.
+    pub parent: Option<SessionParent>,
 }
 
 impl From<&Session> for SessionSummary {
@@ -1399,6 +1434,7 @@ impl From<&Session> for SessionSummary {
             first_prompt,
             message_count: messages.count(),
             unfinished: session.unfinished_run().is_some() || !session.autorun().is_empty(),
+            parent: session.header.parent.clone(),
         }
     }
 }

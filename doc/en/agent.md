@@ -1496,6 +1496,13 @@ fails); once it is done, the block holds its answer. While a delegate's
 request waits for a slot of its connection (`max_concurrent_requests`), its
 block says so under what it has said.
 
+Each delegated task keeps a session of its own, written as it runs and kept
+when it ends or is stopped: the task, what the delegate said and the tools it
+called. It is listed with the other sessions, marked `&` (`& find the config
+loader`), so you can open it to see how the delegate got its answer or go on
+talking to it, and `recall` finds what it did. While the task runs, its
+session is not offered.
+
 A delegate runs on the connection the session's connection names under
 **Subagents** on its settings page (`subagents` in the file), or on the
 session's own when it names none. On a connection termide talks to a model on,

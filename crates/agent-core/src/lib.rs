@@ -113,7 +113,7 @@ pub use runtime::{
 };
 pub use session::{
     Autorun, Entry, EntryKind, ExternalSessionRef, GoalRecord, LastRun, LoggedMessage, LoopRecord,
-    RunMark, Session, SessionHeader, SessionModel, SessionSummary, Timing,
+    RunMark, Session, SessionHeader, SessionModel, SessionParent, SessionSummary, Timing,
 };
 pub use shell::{ShellOutput, ShellRunner};
 pub use suggest::{

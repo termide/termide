@@ -203,7 +203,8 @@ pub struct UserMessage {
 /// Who sent a message between agents, and what it is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageOrigin {
-    /// The id of the sending agent's session.
+    /// The id of the sending agent's session; empty when it has none termide
+    /// knows of (an external agent's).
     pub session: String,
     /// The sending agent's name.
     pub agent: String,
@@ -336,15 +337,20 @@ impl UserMessage {
 
     /// The text with, for another agent's message, the frame that says who
     /// sent it and what it is, so the model never takes it for the user's:
-    /// `<agent-message from="…" session="…" kind="…">`.
+    /// `<agent-message from="…" session="…" kind="…">`, without the session
+    /// when there is none.
     #[must_use]
     pub fn framed_text(&self) -> String {
         let text = self.plain_text();
         match &self.origin {
             Some(origin) => format!(
-                "<agent-message from=\"{}\" session=\"{}\" kind=\"{}\">\n{}\n</agent-message>",
+                "<agent-message from=\"{}\"{} kind=\"{}\">\n{}\n</agent-message>",
                 attribute(&origin.agent),
-                attribute(&origin.session),
+                if origin.session.is_empty() {
+                    String::new()
+                } else {
+                    format!(" session=\"{}\"", attribute(&origin.session))
+                },
                 origin.kind.as_str(),
                 // A closing tag inside would end the frame early, the rest
                 // then reading as the user's.

@@ -155,12 +155,27 @@ the user's words for the reviewer — go one by one with their marks. Taking
 the queue back into the input leaves agents' messages queued. Recall indexes
 them as `agent message`. Nothing sends one yet.
 
-Logs: every delegate writes a session log, hidden ones included (now they
-run with `persist: None` and only the answer survives, in the parent's
-log). The header names the parent session and the `task` call. The banner's
-list shows such sessions with a mark; the parent's `task` block opens the
-delegate's transcript in a panel, where the conversation can go on as an
-ordinary session.
+Logs: every delegate writes a session log, hidden ones included (before,
+nothing wrote a hidden run's events, and only its answer survived, in the
+parent's log). The header names the parent session and the `task` call. The
+banner's list shows such sessions with a mark; the parent's `task` block
+opens the delegate's transcript in a panel, where the conversation can go on
+as an ordinary session.
+
+Done of it: `SessionHeader::parent` (`SessionParent`: the delegating
+session's id when its agent runs on termide's loop — an external agent's
+calls come without one —, the agent's name and the `task` call's id).
+`Subagents` keeps the panel's session directory and starts a log with
+`Session::create_delegate`, held exclusively while the task runs so no panel
+opens it; it records the connection, model and agent as a panel's log does,
+then every finished message of the run, on termide's loop and on a Claude
+Code copy alike, a stopped run's included. The task goes in as a
+`MessageOrigin` of kind `task` from the delegating agent, whose name the
+`task` tool's closure carries (`SubagentTask`). The result's details name the
+log (`subagent_session`); `display_label` marks a delegate's session `&`.
+Not yet: the link from the `task` block, which needs a panel opened from the
+app as step 4 does, and a transcript that tells an agent's message from the
+user's.
 
 Not planned: automatic isolation. Two agents in one tree may edit the same
 file; rather than guessing when to isolate or how to merge, the first step
