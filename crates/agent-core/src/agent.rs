@@ -154,9 +154,7 @@ impl QueueHandle {
 
 fn take(queue: &mut VecDeque<UserMessage>, mode: QueueMode) -> Vec<UserMessage> {
     match mode {
-        QueueMode::Merged => UserMessage::merge(queue.drain(..).collect())
-            .into_iter()
-            .collect(),
+        QueueMode::Merged => UserMessage::take_merged(queue).into_iter().collect(),
         QueueMode::OneAtATime => queue.pop_front().into_iter().collect(),
         QueueMode::All => queue.drain(..).collect(),
     }
@@ -1528,19 +1526,11 @@ impl Agent {
     fn record_intent(&self, message: &Message) {
         match message {
             Message::User(user) => {
-                if let Some(command) = &user.ran {
-                    self.intent.push(IntentEntry::Ran(command.clone()));
+                if user.ran.is_none() && self.compaction_prompts.is_summary(&user.plain_text()) {
                     return;
                 }
-                let text = user.plain_text();
-                if self.compaction_prompts.is_summary(&text) {
-                    return;
-                }
-                self.intent.push(if self.delegated {
-                    IntentEntry::Delegated(text)
-                } else {
-                    IntentEntry::User(text)
-                });
+                self.intent
+                    .push(IntentEntry::of_message(user, self.delegated));
             }
             Message::Assistant(assistant) => self.intent.push_calls(assistant.tool_calls()),
             Message::ToolResult(_) => {}

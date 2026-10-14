@@ -33,6 +33,8 @@ const CALL_INDEX_BYTES: usize = 2 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DocKind {
     User,
+    /// A message another agent sent: a task, a reply, a note or a question.
+    AgentMessage,
     Assistant,
     Thinking,
     ToolCall,
@@ -49,7 +51,7 @@ impl DocKind {
     pub fn weight(self) -> f64 {
         match self {
             Self::Compaction | Self::Handoff => 1.5,
-            Self::User | Self::Assistant => 1.0,
+            Self::User | Self::AgentMessage | Self::Assistant => 1.0,
             Self::ToolCall => 0.8,
             Self::Thinking => 0.5,
             Self::ToolOutput => 0.3,
@@ -60,6 +62,7 @@ impl DocKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::User => "user",
+            Self::AgentMessage => "agent message",
             Self::Assistant => "assistant",
             Self::Thinking => "thinking",
             Self::ToolCall => "tool call",
@@ -363,7 +366,9 @@ fn parse(
                             Vec::new(),
                         );
                     } else {
-                        let kind = if text.starts_with(CONTINUATION_LEAD) {
+                        let kind = if user.origin.is_some() {
+                            DocKind::AgentMessage
+                        } else if text.starts_with(CONTINUATION_LEAD) {
                             DocKind::Handoff
                         } else {
                             DocKind::User
@@ -689,6 +694,11 @@ pub fn open(
                         blocks.push((
                             "user ran".into(),
                             format!("$ {command}\n{}", user.plain_text()),
+                        ));
+                    } else if let Some(origin) = &user.origin {
+                        blocks.push((
+                            format!("{} from agent {}", origin.kind.as_str(), origin.agent),
+                            user.plain_text(),
                         ));
                     } else {
                         blocks.push(("user".into(), user.plain_text()));

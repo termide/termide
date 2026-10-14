@@ -437,7 +437,16 @@ impl AgentPanel {
         if self.history_pos.is_some() || self.queued_texts.is_empty() {
             return false;
         }
-        let taken = self.runtime.take_queued();
+        // Another agent's message is not the user's to edit: in the input it
+        // would go out as their words, so it goes back to wait its turn.
+        let (taken, agents): (Vec<_>, Vec<_>) = self
+            .runtime
+            .take_queued()
+            .into_iter()
+            .partition(|message| message.origin.is_none());
+        for message in agents {
+            self.runtime.steer(message);
+        }
         // What the agent already holds stays in the strip: it was sent
         // first, so it leads.
         let lens = self.runtime.queue_lens();

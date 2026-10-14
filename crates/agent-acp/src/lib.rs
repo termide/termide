@@ -1417,15 +1417,14 @@ impl Shared {
             std::thread::spawn(move || this.run_retry(&session_id, prompt));
             return;
         }
-        // Everything queued goes as one turn: messages typed while the agent
-        // works are usually one thought written in pieces.
-        let message = UserMessage::merge(
-            self.queue
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .drain(..)
-                .collect(),
-        );
+        // What the user typed while the agent worked goes as one turn: it is
+        // usually one thought written in pieces. A command's output or
+        // another agent's message goes on its own, keeping its mark.
+        let message = {
+            let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
+            let run = UserMessage::merged_run(queue.iter());
+            UserMessage::merge(queue.drain(..run).collect())
+        };
         let Some(message) = message else {
             let _ = self.events.send(AgentEvent::AgentEnd);
             self.busy.store(false, Ordering::Release);
@@ -1526,7 +1525,7 @@ impl Shared {
             steering: queued,
             follow_up: 0,
         });
-        let text = message.plain_text();
+        let text = message.framed_text();
         let mut prompt = Vec::new();
         // Kept out of the log, like the plan note: the log holds the
         // conversation itself.
@@ -1836,7 +1835,7 @@ impl Shared {
             return;
         };
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let mut prompt = vec![json!({ "type": "text", "text": message.plain_text() })];
+        let mut prompt = vec![json!({ "type": "text", "text": message.framed_text() })];
         prompt.extend(self.image_blocks(&message));
         self.steering_out
             .lock()

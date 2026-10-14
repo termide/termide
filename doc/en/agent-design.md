@@ -141,6 +141,20 @@ answers it or asks the user through its own `question`, instead of the
 delegate's request being refused. Hidden and panel runs then differ only in
 how the messages travel and whether the run is seen.
 
+Done of it: the message itself. `UserMessage::origin` (`MessageOrigin`,
+`OriginKind`) is in the log; `framed_text` frames it for the model, built-in
+loop and ACP agent alike, a closing tag inside the text defused and the
+attributes kept from breaking the tag. The reviewer's log files a task as
+`IntentEntry::Delegated` and the rest as `IntentEntry::Agent` ("message from
+another agent, not written by the user"), which a delegate's reviewer
+inherits but which never counts as a request to judge a call against.
+Queued messages merge only while they are the user's words
+(`UserMessage::take_merged`): an agent's message, and a hand-run command's
+output — which a merge used to strip of its `ran`, turning the output into
+the user's words for the reviewer — go one by one with their marks. Taking
+the queue back into the input leaves agents' messages queued. Recall indexes
+them as `agent message`. Nothing sends one yet.
+
 Logs: every delegate writes a session log, hidden ones included (now they
 run with `persist: None` and only the answer survives, in the parent's
 log). The header names the parent session and the `task` call. The banner's

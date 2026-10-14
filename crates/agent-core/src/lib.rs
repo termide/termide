@@ -90,8 +90,8 @@ pub use mcp::{
     McpSignIn, McpStatus, McpTarget, MCP_FILE, MCP_JSON_FILE,
 };
 pub use message::{
-    now_millis, AssistantContent, AssistantMessage, Message, StopReason, ToolCall,
-    ToolResultContent, ToolResultMessage, Usage, UserContent, UserMessage,
+    now_millis, AssistantContent, AssistantMessage, Message, MessageOrigin, OriginKind, StopReason,
+    ToolCall, ToolResultContent, ToolResultMessage, Usage, UserContent, UserMessage,
 };
 pub use permissions::{
     is_read_only_call, permission_channel, shell_parts, subject_of, AskedPart, AutoDenyPrompter,
