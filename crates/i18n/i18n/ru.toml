@@ -1106,6 +1106,7 @@ agent_command_run_title_fmt = "Запустить команду проекта 
 agent_notice_cannot_continue_fmt = "не удалось продолжить: {error}"
 agent_failure_wait_until_fmt = "Подождать до {time} и повторить"
 agent_failure_resets_fmt = "Сброс в {time} (через {left})."
+agent_failure_reset_passed_fmt = "Сброс был в {time}; это время прошло."
 agent_notice_retry_waiting_fmt = "повторю в {time}"
 agent_notice_cannot_retry_fmt = "не удалось повторить: {error}"
 agent_state_retry_at_fmt = "{reason}: повтор в {time} (через {left}); /continue — сейчас"

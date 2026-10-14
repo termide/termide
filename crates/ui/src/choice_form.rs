@@ -132,9 +132,40 @@ impl ChoiceForm {
     /// Blank text adds no block.
     #[must_use]
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.set_detail(detail);
+        self
+    }
+
+    /// Replace the detail of a card already on screen, keeping whether it is
+    /// expanded. Blank text takes the block away. The card's height can
+    /// change with it, so the caller redraws.
+    pub fn set_detail(&mut self, detail: impl Into<String>) {
         let detail = detail.into();
         self.detail = (!detail.trim().is_empty()).then_some(detail);
-        self
+        self.detail_drawn = None;
+    }
+
+    /// Replace the options of a card already on screen: for a card whose rows
+    /// depend on a moment in time, which passes while the user reads it (a
+    /// limit's reset, so waiting for it is no longer a thing to do). The
+    /// selection follows the row it stood on, by its label, and stays put when
+    /// that row is gone; descriptions and the picks of a multi-select form are
+    /// the caller's to set again, and the click map goes until the next render.
+    pub fn set_options(&mut self, options: Vec<String>) {
+        let stood_on = self.rows().get(self.selected).and_then(|row| match row {
+            Row::Option(option) => self.options.get(*option).cloned(),
+            _ => None,
+        });
+        self.options = options;
+        self.descriptions.clear();
+        self.checked.resize(self.options.len(), false);
+        self.selected = stood_on
+            .as_deref()
+            .and_then(|label| self.options.iter().position(|o| o == label))
+            .unwrap_or(self.selected)
+            .min(self.row_count().saturating_sub(1));
+        self.rows_top = None;
+        self.line_rows.clear();
     }
 
     /// A dim note after each option's label, in the options' order; a blank
@@ -1021,5 +1052,77 @@ mod tests {
         assert_eq!(wrap("a\nb", 10), vec!["a", "b"]);
         // A word longer than the width is hard-broken.
         assert_eq!(wrap("abcdef", 3), vec!["abc", "def"]);
+    }
+
+    /// A card whose rows stand for moments in time takes new ones as those
+    /// pass: the selection follows its row, the detail follows, and the click
+    /// map waits for the next render.
+    #[test]
+    fn rows_and_detail_of_a_shown_card_can_be_replaced() {
+        let mut form = ChoiceForm::new(
+            "Rate limit reached",
+            vec!["Wait until 21:50".into(), "Try again now".into()],
+        )
+        .with_detail("Resets at 21:50 (in 59 mins).")
+        .with_cancel("Stop");
+        let area = Rect::new(0, 0, 40, form.height(40));
+        let mut buf = Buffer::empty(area);
+        form.render(area, &mut buf, &ThemeColors::default(), true);
+        // Title border, one detail line, a divider, then the rows.
+        assert!(form.hit(5, area.y + 3) == Some(0), "the rows are mapped");
+        form.select(1);
+
+        // The reset has gone by: the wait is no longer a thing to do.
+        form.set_options(vec!["Try again now".into()]);
+        form.set_detail("The reset was at 21:50; it has passed.");
+        assert_eq!(form.options(), ["Try again now"]);
+        assert_eq!(
+            form.selected(),
+            0,
+            "the selection follows the row it stood on"
+        );
+        assert_eq!(
+            form.detail(),
+            Some("The reset was at 21:50; it has passed.")
+        );
+        assert_eq!(form.height(40), 6, "one row less than the seven it had");
+        assert!(form.hit(5, area.y + 3).is_none(), "the old map is gone");
+
+        // A row picked after the swap answers with the new row.
+        assert_eq!(
+            form.handle_key(KeyEvent::from(KeyCode::Enter)),
+            ChoiceAction::Chosen(0)
+        );
+    }
+
+    /// A row taken away from under the selection leaves it on the next, not
+    /// past the last.
+    #[test]
+    fn a_selection_outlives_the_row_it_stood_on() {
+        let mut form = ChoiceForm::new(
+            "Rate limit reached",
+            vec!["Wait until 21:50".into(), "Try again now".into()],
+        )
+        .with_cancel("Stop");
+        form.select(2);
+        form.set_options(vec!["Try again now".into()]);
+        assert_eq!(form.selected(), 1, "the cancel row, the last there is");
+    }
+
+    /// Replacing the detail keeps whether it is folded open.
+    #[test]
+    fn a_new_detail_keeps_the_folding_of_the_old() {
+        let lines = |from: usize, to: usize| {
+            (from..=to)
+                .map(|n| format!("line {n}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let mut form = ChoiceForm::new("Rate limit reached", vec!["Try again now".into()])
+            .with_detail(lines(1, 8));
+        // Folded: five detail lines, a divider, one option, two borders.
+        assert_eq!(form.height(40), 9);
+        form.set_detail(lines(1, 12));
+        assert_eq!(form.height(40), 9, "still folded");
     }
 }

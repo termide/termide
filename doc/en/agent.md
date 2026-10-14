@@ -547,6 +547,11 @@ Then a card asks what to do, with the error and, when known, the reset time:
   there; the new agent gets the conversation as on any switch.
 - **Stop** (`Esc`) — gives the request up, and a `/loop` or `/goal` with it.
 
+The card keeps up with the clock while it stands open: its reset time counts
+down, and once the reset has gone by its **Wait until…** row goes with it —
+the detail then says the reset was at that time and has passed, and what is
+left to pick is **Try again now**. A row never names a moment already behind.
+
 Trying again sends no new message: the built-in agent asks the model again on
 the conversation as it stands, and an external agent gets the same request
 again, or, when its failed turn had already called tools, a note to carry on

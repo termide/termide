@@ -1068,6 +1068,7 @@ agent_command_run_title_fmt = "Exécuter la commande du projet /{name} ({path}) 
 agent_notice_cannot_continue_fmt = "impossible de reprendre : {error}"
 agent_failure_wait_until_fmt = "Attendre {time} et réessayer"
 agent_failure_resets_fmt = "Réinitialisation à {time} (dans {left})."
+agent_failure_reset_passed_fmt = "La réinitialisation était à {time} ; elle est passée."
 agent_notice_retry_waiting_fmt = "nouvel essai à {time}"
 agent_notice_cannot_retry_fmt = "impossible de réessayer : {error}"
 agent_state_retry_at_fmt = "{reason} : nouvel essai à {time} (dans {left}) ; /continue tout de suite"

@@ -849,6 +849,9 @@ pub struct AgentPanel {
     /// The wait's line as the state strip last showed it, so the countdown
     /// redraws only when it changes.
     retry_wait_shown: Option<String>,
+    /// The second an open failure card's text was last rebuilt from, so the
+    /// countdown moves once a second and not every tick.
+    failure_card_shown: Option<u64>,
     /// Tries of the current failed request so far; the wait grows with them.
     retry_attempts: u32,
     /// The last run failed and can be tried again (`/continue`).
@@ -1168,6 +1171,7 @@ impl AgentPanel {
             on_limit: setup.on_limit,
             retry_wait: None,
             retry_wait_shown: None,
+            failure_card_shown: None,
             retry_attempts: 0,
             retry_ready: false,
             restarted: false,

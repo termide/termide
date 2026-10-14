@@ -1141,6 +1141,10 @@ impl Translation for RuntimeTranslation {
         )
     }
 
+    fn agent_failure_reset_passed_fmt(&self, time: &str) -> String {
+        self.format("agent_failure_reset_passed_fmt", &[("time", time)])
+    }
+
     fn agent_notice_retry_waiting_fmt(&self, time: &str) -> String {
         self.format("agent_notice_retry_waiting_fmt", &[("time", time)])
     }

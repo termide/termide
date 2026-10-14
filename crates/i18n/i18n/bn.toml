@@ -1068,6 +1068,7 @@ agent_command_run_title_fmt = "প্রকল্পের কমান্ড /{
 agent_notice_cannot_continue_fmt = "চালিয়ে যাওয়া যাচ্ছে না: {error}"
 agent_failure_wait_until_fmt = "{time} পর্যন্ত অপেক্ষা করে আবার চেষ্টা করুন"
 agent_failure_resets_fmt = "{time}-এ রিসেট হবে ({left} পরে)।"
+agent_failure_reset_passed_fmt = "রিসেট {time}-এ হবো; সময় পার হবো।"
 agent_notice_retry_waiting_fmt = "{time}-এ আবার চেষ্টা হবে"
 agent_notice_cannot_retry_fmt = "আবার চেষ্টা করা যাচ্ছে না: {error}"
 agent_state_retry_at_fmt = "{reason}: {time}-এ আবার চেষ্টা ({left} পরে); /continue এখনই"

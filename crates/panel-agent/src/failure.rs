@@ -120,9 +120,38 @@ impl AgentPanel {
     /// The card after a failure: what happened, and what can be done.
     fn offer_failure(&mut self, failure: Failure, error: &str) {
         let t = termide_i18n::t();
+        let now = unix_now();
+        let (labels, choices, detail) = self.failure_rows(failure, error, now);
+        self.failure_card_shown = Some(now);
+        let form = ChoiceForm::new(title(failure.kind), labels)
+            .with_detail(detail)
+            .with_cancel(t.agent_failure_stop());
+        self.pending = Some(Pending::Failure {
+            form,
+            choices,
+            failure,
+            error: error.trim().to_string(),
+        });
+        self.raise_attention(true);
+    }
+
+    /// The card's rows, what each does, and its detail, as they stand at
+    /// `now`: a limit whose reset has gone by is no longer waited for, so its
+    /// row is not offered. [`Self::refresh_failure_card`] recomputes them
+    /// while the card is up.
+    fn failure_rows(
+        &self,
+        failure: Failure,
+        error: &str,
+        now: u64,
+    ) -> (Vec<String>, Vec<FailureChoice>, String) {
+        let t = termide_i18n::t();
         let mut rows: Vec<(String, FailureChoice)> = Vec::new();
-        let wait = failure.retry_delay(self.retry_attempts, unix_now());
-        if let (Some(_), Some(at)) = (wait, failure.resets_at) {
+        let wait = failure.retry_delay(self.retry_attempts, now);
+        // A reset stated in the past has come and gone: waiting for it would
+        // name a moment already behind, so the request is simply retried.
+        let ahead = failure.resets_at.filter(|at| *at > now);
+        if let (Some(_), Some(at)) = (wait, ahead) {
             rows.push((
                 t.agent_failure_wait_until_fmt(&clock(at)),
                 FailureChoice::Wait,
@@ -160,22 +189,46 @@ impl AgentPanel {
         let mut detail = error.trim().to_string();
         if let Some(at) = failure.resets_at {
             detail.push('\n');
-            detail.push_str(&t.agent_failure_resets_fmt(&clock(at), &left_until(at)));
+            detail.push_str(&if ahead.is_some() {
+                t.agent_failure_resets_fmt(&clock(at), &left_until(at))
+            } else {
+                t.agent_failure_reset_passed_fmt(&clock(at))
+            });
         }
         if failure.kind == FailureKind::Auth {
             detail.push('\n');
             detail.push_str(t.agent_failure_auth_hint());
         }
         let (labels, choices): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
-        let form = ChoiceForm::new(title(failure.kind), labels)
-            .with_detail(detail)
-            .with_cancel(t.agent_failure_stop());
-        self.pending = Some(Pending::Failure {
-            form,
-            choices,
-            failure,
-        });
-        self.raise_attention(true);
+        (labels, choices, detail)
+    }
+
+    /// Keep an open failure card true as time goes by: its countdown moves,
+    /// and once a limit's reset has gone by its "wait until" row goes with it.
+    /// `true` when the card changed and is to be redrawn.
+    pub(crate) fn refresh_failure_card(&mut self) -> bool {
+        // The text moves by whole seconds, so it is rebuilt once a second at
+        // most, however often the panel ticks.
+        let now = unix_now();
+        if self.failure_card_shown.is_some_and(|shown| shown >= now) {
+            return false;
+        }
+        let Some(Pending::Failure { failure, error, .. }) = &self.pending else {
+            return false;
+        };
+        let (failure, error) = (*failure, error.clone());
+        self.failure_card_shown = Some(now);
+        let (labels, fresh, detail) = self.failure_rows(failure, &error, now);
+        let Some(Pending::Failure { form, choices, .. }) = &mut self.pending else {
+            return false;
+        };
+        if labels == form.options() && detail == form.detail().unwrap_or_default() {
+            return false;
+        }
+        form.set_options(labels);
+        form.set_detail(detail);
+        *choices = fresh;
+        true
     }
 
     /// Carry out a row of the failure card.

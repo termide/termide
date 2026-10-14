@@ -857,6 +857,8 @@ pub trait Translation: Send + Sync {
     fn agent_notice_cannot_continue_fmt(&self, error: &str) -> String;
     fn agent_failure_wait_until_fmt(&self, time: &str) -> String;
     fn agent_failure_resets_fmt(&self, time: &str, left: &str) -> String;
+    /// The reset time has gone by while the card stood open.
+    fn agent_failure_reset_passed_fmt(&self, time: &str) -> String;
     fn agent_notice_retry_waiting_fmt(&self, time: &str) -> String;
     fn agent_notice_cannot_retry_fmt(&self, error: &str) -> String;
     /// Agent panel state strip: a failed request waiting to be tried again.

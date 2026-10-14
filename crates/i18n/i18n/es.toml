@@ -1068,6 +1068,7 @@ agent_command_run_title_fmt = "¿Ejecutar el comando del proyecto /{name} ({path
 agent_notice_cannot_continue_fmt = "no se puede continuar: {error}"
 agent_failure_wait_until_fmt = "Esperar hasta las {time} y reintentar"
 agent_failure_resets_fmt = "Se restablece a las {time} (en {left})."
+agent_failure_reset_passed_fmt = "El restablecimiento era a las {time}; ya pasó."
 agent_notice_retry_waiting_fmt = "se reintentará a las {time}"
 agent_notice_cannot_retry_fmt = "no se puede reintentar: {error}"
 agent_state_retry_at_fmt = "{reason}: reintento a las {time} (en {left}); /continue ahora"

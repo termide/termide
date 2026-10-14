@@ -1068,6 +1068,7 @@ agent_command_run_title_fmt = "प्रोजेक्ट कमांड /{nam
 agent_notice_cannot_continue_fmt = "जारी नहीं रख सकते: {error}"
 agent_failure_wait_until_fmt = "{time} तक इंतज़ार करके फिर कोशिश करें"
 agent_failure_resets_fmt = "{time} पर रीसेट होगा ({left} बाद)।"
+agent_failure_reset_passed_fmt = "रीसेट {time} पर हो चुका है।"
 agent_notice_retry_waiting_fmt = "{time} पर फिर कोशिश होगी"
 agent_notice_cannot_retry_fmt = "फिर कोशिश नहीं हो सकी: {error}"
 agent_state_retry_at_fmt = "{reason}: {time} पर फिर कोशिश ({left} बाद); /continue अभी"

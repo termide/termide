@@ -807,6 +807,9 @@ impl AgentPanel {
         }
         // A failed request whose wait is over is tried again.
         changed |= self.poll_retry_wait();
+        // A failure card left open keeps up with the clock: its countdown
+        // moves, and a reset that has gone by takes its "wait until" row away.
+        changed |= self.refresh_failure_card();
         // A goal whose work turn has finished runs the judge once the panel is
         // free and no judge call is already in flight.
         let judge_due = self

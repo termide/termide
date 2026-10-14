@@ -8764,6 +8764,112 @@ fn dismissing_the_failure_card_ends_the_goal() {
     assert!(panel.pending.is_none());
 }
 
+/// The rows and the detail of the failure card that is up.
+fn failure_card(panel: &AgentPanel) -> (Vec<String>, String) {
+    match &panel.pending {
+        Some(Pending::Failure { form, .. }) => (
+            form.options().to_vec(),
+            form.detail().unwrap_or_default().to_string(),
+        ),
+        _ => panic!("no failure card is up"),
+    }
+}
+
+/// Move the reset of the failure the card is about to `at`.
+fn set_reset(panel: &mut AgentPanel, at: u64) {
+    match &mut panel.pending {
+        Some(Pending::Failure { failure, .. }) => failure.resets_at = Some(at),
+        _ => panic!("no failure card is up"),
+    }
+}
+
+/// A card left open keeps up with the clock: its countdown moves, and once
+/// the reset has gone by it offers no wait for a moment already behind — the
+/// request is simply tried again.
+#[test]
+fn an_open_failure_card_follows_the_clock_and_drops_a_reset_past() {
+    let mut panel = panel(vec![limited(), reply("done")]);
+    panel.send("do it".to_string());
+    settle(&mut panel);
+
+    let (rows, detail) = failure_card(&panel);
+    assert!(rows[0].starts_with("Wait until"), "{rows:?}");
+    assert!(detail.contains("Resets at"), "{detail}");
+    let first_wait = rows[0].clone();
+
+    // The reset moves further off: the row and the detail say so.
+    set_reset(&mut panel, crate::failure::unix_now() + 7_200);
+    panel.failure_card_shown = None;
+    assert!(panel.refresh_failure_card(), "the stated time moved");
+    let (rows, detail) = failure_card(&panel);
+    assert_ne!(rows[0], first_wait, "{rows:?}");
+    assert!(detail.contains("Resets at"), "{detail}");
+
+    // The reset comes and goes while the card stands open.
+    set_reset(&mut panel, crate::failure::unix_now() - 60);
+    panel.failure_card_shown = None;
+    assert!(panel.refresh_failure_card());
+    let (rows, detail) = failure_card(&panel);
+    assert!(
+        !rows.iter().any(|row| row.starts_with("Wait until")),
+        "a reset already past is not waited for: {rows:?}"
+    );
+    assert!(rows.iter().any(|row| row == "Try again now"), "{rows:?}");
+    assert!(detail.contains("has passed"), "{detail}");
+
+    // The row picked is the one that does it: the request goes again.
+    let now = rows.iter().position(|row| row == "Try again now").unwrap();
+    panel.apply_form_action(ChoiceAction::Chosen(now));
+    settle(&mut panel);
+    assert!(panel.pending.is_none());
+    assert!(panel
+        .transcript()
+        .items()
+        .iter()
+        .any(|item| matches!(item, Item::Assistant { text, error: None, .. } if text == "done")));
+}
+
+/// The card's text moves once a second, not on every tick of the loop.
+#[test]
+fn the_failure_card_counts_down_once_a_second() {
+    let mut panel = panel(vec![limited()]);
+    panel.send("do it".to_string());
+    settle(&mut panel);
+    let (rows, _) = failure_card(&panel);
+
+    // The same second: nothing is rebuilt, however the moment is moved.
+    set_reset(&mut panel, crate::failure::unix_now() + 7_200);
+    panel.failure_card_shown = Some(crate::failure::unix_now());
+    assert!(
+        !panel.refresh_failure_card(),
+        "a second already rebuilt is not rebuilt again"
+    );
+    assert_eq!(failure_card(&panel).0, rows, "the text stands still");
+
+    // A new second takes the change up.
+    panel.failure_card_shown = None;
+    assert!(panel.refresh_failure_card(), "a new second rebuilds it");
+    assert_ne!(failure_card(&panel).0, rows, "the stated time moved");
+}
+
+/// A card asked about a limit whose reset was already in the past when the
+/// run failed never offers to wait for it.
+#[test]
+fn a_reset_already_past_offers_no_wait() {
+    let mut failed = limited();
+    failed.failure.as_mut().unwrap().resets_at = Some(crate::failure::unix_now() - 120);
+    let mut panel = panel(vec![failed]);
+    panel.send("do it".to_string());
+    settle(&mut panel);
+
+    let (rows, detail) = failure_card(&panel);
+    assert!(
+        !rows.iter().any(|row| row.starts_with("Wait until")),
+        "{rows:?}"
+    );
+    assert!(detail.contains("has passed"), "{detail}");
+}
+
 /// A running subagent keeps a row in the state strip — its agent, task,
 /// latest progress and clock — and past three the rest fold into `+N`.
 #[test]

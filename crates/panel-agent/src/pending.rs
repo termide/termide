@@ -78,6 +78,9 @@ pub(crate) enum Pending {
         /// What each row does, in their order.
         choices: Vec<FailureChoice>,
         failure: Failure,
+        /// The error's text, as it was reported; the card's detail is rebuilt
+        /// from it as time goes by.
+        error: String,
     },
     /// A reopened session was left with work under way: carry it on, drop
     /// it, or decide later at the pause.

@@ -1068,6 +1068,7 @@ agent_command_run_title_fmt = "Proje komutu /{name} ({path}) çalıştırılsın
 agent_notice_cannot_continue_fmt = "sürdürülemiyor: {error}"
 agent_failure_wait_until_fmt = "{time} saatine kadar bekle ve yeniden dene"
 agent_failure_resets_fmt = "{time} saatinde sıfırlanır ({left} sonra)."
+agent_failure_reset_passed_fmt = "Sıfırlama {time} saatindeydi; geçti."
 agent_notice_retry_waiting_fmt = "{time} saatinde yeniden denenecek"
 agent_notice_cannot_retry_fmt = "yeniden denenemiyor: {error}"
 agent_state_retry_at_fmt = "{reason}: {time} saatinde yeniden deneme ({left} sonra); /continue hemen"
