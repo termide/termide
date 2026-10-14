@@ -23,7 +23,7 @@ max_tokens_per_turn = 0            # default: no limit, the model decides
 reasoning = "high"                 # default; off | minimal | low | medium | high | xhigh | max
 fold_blocks = "immediately"        # immediately (default) | on-finish | never
 bell_on_attention = true           # default; ring the bell when a panel out of sight waits for you
-on_limit = "ask"                   # default; ask | wait | stop — see "When a run fails"
+on_limit = "ask"                   # default; ask | ask_else_wait | wait | stop — see "When a run fails"
 
 [ai.connections.local]
 provider = "openai_compatible"     # openai_compatible (default), anthropic_compatible, claude_code, codex, gemini_cli
@@ -579,8 +579,15 @@ belonged to comes back with the card and waits on it.
 whether the card comes up for failures that pass on their own — a limit, a
 network outage: `ask` (default) shows it, `wait` waits for the reset (or keeps
 trying) without asking — the choice for an unattended `/goal` or `/loop`,
-which carries on afterwards — and `stop` ends the run as before. A sign-in, a
-refused request and a full context always ask.
+which carries on afterwards — and `stop` ends the run as before.
+`ask_else_wait` shows the card and, if nobody answers it by the moment `wait`
+would try again — the reset, or the backoff when none is stated — tries the
+request again by itself; the card names that moment. A card brought back on
+reopen whose reset has already passed gives about half a minute first. A
+sign-in, a refused request and a full context always ask.
+
+Waits go by the wall clock as well, so a reset that passes while the machine
+sleeps is tried as soon as it wakes.
 
 The closing line is one kind of annotation — a line that marks a moment in the
 conversation rather than holding content. The others are the panel's notices:

@@ -819,6 +819,8 @@ pub trait Translation: Send + Sync {
     fn agent_failure_auth_hint(&self) -> &str;
     fn agent_notice_agent_restarting(&self) -> &str;
     fn agent_notice_retrying(&self) -> &str;
+    /// A failure card left unanswered until its time (`on_limit = "ask_else_wait"`).
+    fn agent_notice_unanswered_retry(&self) -> &str;
     fn agent_notice_retry_cancelled(&self) -> &str;
     fn agent_notice_no_model_choices(&self) -> &str;
     fn agent_notice_plan_no_request(&self) -> &str;
@@ -859,6 +861,8 @@ pub trait Translation: Send + Sync {
     fn agent_failure_resets_fmt(&self, time: &str, left: &str) -> String;
     /// The reset time has gone by while the card stood open.
     fn agent_failure_reset_passed_fmt(&self, time: &str) -> String;
+    /// Failure card under `on_limit = "ask_else_wait"`: when it retries unanswered.
+    fn agent_failure_auto_retry_fmt(&self, time: &str, left: &str) -> String;
     fn agent_notice_retry_waiting_fmt(&self, time: &str) -> String;
     fn agent_notice_cannot_retry_fmt(&self, error: &str) -> String;
     /// Agent panel state strip: a failed request waiting to be tried again.
@@ -1101,6 +1105,7 @@ pub trait Translation: Send + Sync {
     /// AI settings: what a run stopped by a limit or an outage does.
     fn settings_agent_on_limit(&self) -> &str;
     fn settings_agent_on_limit_ask(&self) -> &str;
+    fn settings_agent_on_limit_ask_else_wait(&self) -> &str;
     fn settings_agent_on_limit_wait(&self) -> &str;
     fn settings_agent_on_limit_stop(&self) -> &str;
     /// Settings modal: AI tab, web tools field labels.

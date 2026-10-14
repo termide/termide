@@ -110,7 +110,7 @@ impl AgentPanel {
             match self.on_limit {
                 LimitPolicy::Wait => return self.schedule_retry(failure),
                 LimitPolicy::Stop => return false,
-                LimitPolicy::Ask => {}
+                LimitPolicy::Ask | LimitPolicy::AskElseWait => {}
             }
         }
         self.offer_failure(failure, error);
@@ -123,7 +123,16 @@ impl AgentPanel {
     pub(crate) fn offer_failure(&mut self, failure: Failure, error: &str) {
         let t = termide_i18n::t();
         let now = unix_now();
-        let (labels, choices, detail) = self.failure_rows(failure, error, now);
+        // Unanswered, the card does what a wait would: tries again at the
+        // reset, or after the backoff when none is stated.
+        let auto_at = if self.on_limit == LimitPolicy::AskElseWait {
+            failure
+                .retry_delay(self.retry_attempts, now)
+                .map(|delay| now + delay.as_secs())
+        } else {
+            None
+        };
+        let (labels, choices, detail) = self.failure_rows(failure, error, now, auto_at);
         self.failure_card_shown = Some(now);
         let form = ChoiceForm::new(title(failure.kind), labels)
             .with_detail(detail)
@@ -133,6 +142,7 @@ impl AgentPanel {
             choices,
             failure,
             error: error.trim().to_string(),
+            auto_at,
         });
         // The choice is now the user's to make: keep it across a close.
         self.sync_retry();
@@ -148,6 +158,7 @@ impl AgentPanel {
         failure: Failure,
         error: &str,
         now: u64,
+        auto_at: Option<u64>,
     ) -> (Vec<String>, Vec<FailureChoice>, String) {
         let t = termide_i18n::t();
         let mut rows: Vec<(String, FailureChoice)> = Vec::new();
@@ -199,6 +210,10 @@ impl AgentPanel {
                 t.agent_failure_reset_passed_fmt(&clock(at))
             });
         }
+        if let Some(at) = auto_at {
+            detail.push('\n');
+            detail.push_str(&t.agent_failure_auto_retry_fmt(&clock(at), &left_until(at)));
+        }
         if failure.kind == FailureKind::Auth {
             detail.push('\n');
             detail.push_str(t.agent_failure_auth_hint());
@@ -211,18 +226,27 @@ impl AgentPanel {
     /// and once a limit's reset has gone by its "wait until" row goes with it.
     /// `true` when the card changed and is to be redrawn.
     pub(crate) fn refresh_failure_card(&mut self) -> bool {
+        if self.retry_unanswered() {
+            return true;
+        }
         // The text moves by whole seconds, so it is rebuilt once a second at
         // most, however often the panel ticks.
         let now = unix_now();
         if self.failure_card_shown.is_some_and(|shown| shown >= now) {
             return false;
         }
-        let Some(Pending::Failure { failure, error, .. }) = &self.pending else {
+        let Some(Pending::Failure {
+            failure,
+            error,
+            auto_at,
+            ..
+        }) = &self.pending
+        else {
             return false;
         };
-        let (failure, error) = (*failure, error.clone());
+        let (failure, error, auto_at) = (*failure, error.clone(), *auto_at);
         self.failure_card_shown = Some(now);
-        let (labels, fresh, detail) = self.failure_rows(failure, &error, now);
+        let (labels, fresh, detail) = self.failure_rows(failure, &error, now, auto_at);
         let Some(Pending::Failure { form, choices, .. }) = &mut self.pending else {
             return false;
         };
@@ -232,6 +256,28 @@ impl AgentPanel {
         form.set_options(labels);
         form.set_detail(detail);
         *choices = fresh;
+        true
+    }
+
+    /// A card left unanswered past its time (`on_limit = "ask_else_wait"`)
+    /// is taken as a wait that is over: the request is tried again. `true`
+    /// when it was.
+    fn retry_unanswered(&mut self) -> bool {
+        let due = matches!(
+            &self.pending,
+            Some(Pending::Failure { auto_at: Some(at), .. }) if *at <= unix_now()
+        );
+        if !due || self.is_busy() {
+            return false;
+        }
+        self.pending = None;
+        self.notice(
+            termide_i18n::t().agent_notice_unanswered_retry(),
+            NoticeKind::Info,
+        );
+        if !self.retry_now() {
+            self.give_up_after_failure();
+        }
         true
     }
 

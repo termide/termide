@@ -635,6 +635,7 @@ impl Translation for RuntimeTranslation {
         agent_failure_auth_hint,
         agent_notice_agent_restarting,
         agent_notice_retrying,
+        agent_notice_unanswered_retry,
         agent_notice_retry_cancelled,
         agent_notice_no_model_choices,
         agent_notice_plan_no_request,
@@ -721,6 +722,7 @@ impl Translation for RuntimeTranslation {
         settings_agent_auto_reviewer_model_default,
         settings_agent_on_limit,
         settings_agent_on_limit_ask,
+        settings_agent_on_limit_ask_else_wait,
         settings_agent_on_limit_wait,
         settings_agent_on_limit_stop,
         settings_ai_add_connection,
@@ -1143,6 +1145,13 @@ impl Translation for RuntimeTranslation {
 
     fn agent_failure_reset_passed_fmt(&self, time: &str) -> String {
         self.format("agent_failure_reset_passed_fmt", &[("time", time)])
+    }
+
+    fn agent_failure_auto_retry_fmt(&self, time: &str, left: &str) -> String {
+        self.format(
+            "agent_failure_auto_retry_fmt",
+            &[("time", time), ("left", left)],
+        )
     }
 
     fn agent_notice_retry_waiting_fmt(&self, time: &str) -> String {

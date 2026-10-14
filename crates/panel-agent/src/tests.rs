@@ -9825,3 +9825,120 @@ fn another_session_takes_the_failure_card_with_it() {
     assert!(!panel.retry_ready);
     assert!(panel.retry_wait.is_none());
 }
+
+/// When the card that is up tries again by itself, if it does.
+fn auto_at(panel: &AgentPanel) -> Option<u64> {
+    match &panel.pending {
+        Some(Pending::Failure { auto_at, .. }) => *auto_at,
+        _ => panic!("no failure card is up"),
+    }
+}
+
+fn set_auto_at(panel: &mut AgentPanel, at: u64) {
+    match &mut panel.pending {
+        Some(Pending::Failure { auto_at, .. }) => *auto_at = Some(at),
+        _ => panic!("no failure card is up"),
+    }
+}
+
+/// `ask_else_wait`: the card asks, and left unanswered until the reset it
+/// tries the request again by itself.
+#[test]
+fn an_unanswered_card_tries_again_at_the_reset() {
+    let mut panel = panel(vec![limited(), reply("done")]);
+    panel.on_limit = LimitPolicy::AskElseWait;
+    panel.send("do it".to_string());
+    settle(&mut panel);
+
+    let at = auto_at(&panel).expect("the card has a time");
+    assert!(
+        at > crate::failure::unix_now() + 3_000,
+        "the reset, not sooner"
+    );
+    let (_, detail) = failure_card(&panel);
+    assert!(detail.contains("No answer by then"), "{detail}");
+    panel.tick();
+    assert!(!panel.is_busy(), "nothing goes before its time");
+
+    // The reset comes, the card still unanswered.
+    set_auto_at(&mut panel, crate::failure::unix_now());
+    panel.tick();
+    settle(&mut panel);
+    assert!(panel.pending.is_none());
+    assert!(answered_done(&panel));
+}
+
+#[test]
+fn an_answered_card_does_not_try_again_by_itself() {
+    let mut panel = panel(vec![limited(), reply("done")]);
+    panel.on_limit = LimitPolicy::AskElseWait;
+    panel.send("do it".to_string());
+    settle(&mut panel);
+    set_auto_at(&mut panel, crate::failure::unix_now());
+    panel.apply_form_action(ChoiceAction::Cancelled);
+    panel.tick();
+    settle(&mut panel);
+    assert!(!answered_done(&panel), "stopping is the answer");
+}
+
+#[test]
+fn the_ask_policy_never_tries_again_by_itself() {
+    let mut panel = panel(vec![limited(), reply("done")]);
+    panel.send("do it".to_string());
+    settle(&mut panel);
+    assert_eq!(auto_at(&panel), None);
+}
+
+/// Without a stated reset the card's time is the backoff a wait would take.
+#[test]
+fn an_unanswered_card_without_a_reset_waits_the_backoff() {
+    let outage = AssistantMessage::failed("scripted", "m", StopReason::Error, "network down")
+        .with_failure(termide_agent_core::Failure::new(
+            termide_agent_core::FailureKind::Transient,
+        ));
+    let mut panel = panel(vec![outage, reply("done")]);
+    panel.on_limit = LimitPolicy::AskElseWait;
+    let before = crate::failure::unix_now();
+    panel.send("do it".to_string());
+    settle(&mut panel);
+    let at = auto_at(&panel).expect("the card has a time");
+    assert!(
+        (before + 15..=crate::failure::unix_now() + 15).contains(&at),
+        "{at} vs {before}"
+    );
+}
+
+/// A card brought back on reopen whose reset passed while termide was
+/// closed tries again after a short grace, not at once.
+#[test]
+fn a_reopened_card_past_its_reset_tries_again_after_a_grace() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![limited()])
+    });
+    let path = panel.session_path().unwrap().to_path_buf();
+    panel.send("do it".to_string());
+    settle(&mut panel);
+    set_reset(&mut panel, crate::failure::unix_now() - 60);
+    // Logged with the reset gone by, as after a long close.
+    panel.logged_retry = None;
+    panel.sync_retry();
+    drop(panel);
+
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        session: Some(Session::open_exclusive(&path).unwrap()),
+        on_limit: LimitPolicy::AskElseWait,
+        ..setup(vec![reply("done")])
+    });
+    let now = crate::failure::unix_now();
+    let at = auto_at(&panel).expect("the reopened card has a time");
+    assert!(at > now && at <= now + 31, "{at} vs {now}");
+    panel.tick();
+    assert!(!panel.is_busy(), "not at once");
+    set_auto_at(&mut panel, now);
+    panel.tick();
+    settle(&mut panel);
+    assert!(answered_done(&panel));
+}

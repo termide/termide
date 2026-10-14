@@ -15,7 +15,7 @@ max_tokens_per_turn = 0            # 默认：不限制，由模型决定
 reasoning = "high"                 # 默认；off | minimal | low | medium | high | xhigh | max
 fold_blocks = "immediately"        # immediately（默认）| on-finish | never
 bell_on_attention = true           # 默认；不在视线内的面板等待你时响铃
-on_limit = "ask"                   # 默认；ask | wait | stop——见"运行失败时"
+on_limit = "ask"                   # 默认；ask | ask_else_wait | wait | stop——见"运行失败时"
 
 [ai.connections.local]
 provider = "openai_compatible"     # openai_compatible（默认）、anthropic_compatible、claude_code、codex、gemini_cli
@@ -155,7 +155,9 @@ termide 中所有计时器——运行时钟、子代理、暂停、停止、文
 
 请求等待重试期间，输入框上方的状态条显示 `↻`、原因和下次尝试的时间并倒计时；`[▶]` 或 `/continue` 立即重试，`[■]` 放弃等待，发送新请求也会放弃等待。卡片关闭后，`/continue` 也会重试失败的请求。
 
-`[ai]` 下的 `on_limit`（设置中的 **遇到限额或中断时**）决定对会自行消失的失败（限额、网络中断）是否显示卡片：`ask`（默认）显示卡片，`wait` 不经询问等待重置（或持续重试）——适合无人值守的 `/goal` 或 `/loop`，之后它们会继续——`stop` 像以前一样结束运行。登录、被拒绝的请求和上下文已满总是会询问。
+`[ai]` 下的 `on_limit`（设置中的 **遇到限额或中断时**）决定对会自行消失的失败（限额、网络中断）是否显示卡片：`ask`（默认）显示卡片，`wait` 不经询问等待重置（或持续重试）——适合无人值守的 `/goal` 或 `/loop`，之后它们会继续——`stop` 像以前一样结束运行。`ask_else_wait` 显示卡片，若到 `wait` 会重试的时刻（重置时间，未给出时则为退避间隔）仍无人回应，就自行重试请求；卡片会写明该时刻。重新打开时恢复的卡片若重置已过，会先留出约半分钟。登录、被拒绝的请求和上下文已满总是会询问。
+
+等待也以系统时钟为准，因此在电脑休眠期间到达的重置会在唤醒后立即重试。
 
 结束行是注释的一种——注释是标记对话中某个时刻而不承载内容的行。其他注释是面板的提示：`·` 表示信息（切换模型、压缩完成），`!` 表示警告（目标已停止、代理忙），`✗` 表示块之外的错误（压缩失败、MCP 错误）。一轮中的错误留在其回答块中。注释从不折叠。提示的文本在其符号下按宽度换行；对话光标可以停在提示上，因此错误可以像块一样被选中和复制，而光标会跳过运行的结束行。
 

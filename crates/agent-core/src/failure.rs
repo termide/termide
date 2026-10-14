@@ -219,6 +219,10 @@ pub enum LimitPolicy {
     /// Show the choices and let the user pick.
     #[default]
     Ask,
+    /// Show the choices; left unanswered, try again on its own once the
+    /// wait [`Wait`](Self::Wait) would take is over — at the reset, or after
+    /// the backoff.
+    AskElseWait,
     /// Wait for the reset (or back off) and try again on its own.
     Wait,
     /// Stop, as any other failure does.
@@ -226,13 +230,14 @@ pub enum LimitPolicy {
 }
 
 impl LimitPolicy {
-    pub const ALL: [LimitPolicy; 3] = [Self::Ask, Self::Wait, Self::Stop];
+    pub const ALL: [LimitPolicy; 4] = [Self::Ask, Self::AskElseWait, Self::Wait, Self::Stop];
 
     /// The value as the config file writes it.
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
             Self::Ask => "ask",
+            Self::AskElseWait => "ask_else_wait",
             Self::Wait => "wait",
             Self::Stop => "stop",
         }

@@ -624,6 +624,7 @@ fn on_limit_label(policy: LimitPolicy) -> String {
     let t = i18n::t();
     match policy {
         LimitPolicy::Ask => t.settings_agent_on_limit_ask(),
+        LimitPolicy::AskElseWait => t.settings_agent_on_limit_ask_else_wait(),
         LimitPolicy::Wait => t.settings_agent_on_limit_wait(),
         LimitPolicy::Stop => t.settings_agent_on_limit_stop(),
     }
@@ -1031,15 +1032,20 @@ mod enum_option_tests {
         assert_eq!(fields_for_tab(SettingsTab::Ai).len(), field + 1);
         assert_eq!(config.ai.on_limit, LimitPolicy::Ask);
         cycle_enum_forward(&mut config, SettingsTab::Ai, field);
+        assert_eq!(config.ai.on_limit, LimitPolicy::AskElseWait);
+        cycle_enum_forward(&mut config, SettingsTab::Ai, field);
         assert_eq!(config.ai.on_limit, LimitPolicy::Wait);
+        cycle_enum_backward(&mut config, SettingsTab::Ai, field);
         cycle_enum_backward(&mut config, SettingsTab::Ai, field);
         cycle_enum_backward(&mut config, SettingsTab::Ai, field);
         assert_eq!(config.ai.on_limit, LimitPolicy::Stop);
+        apply_enum_value(&mut config, SettingsTab::Ai, field, "ask_else_wait");
+        assert_eq!(config.ai.on_limit, LimitPolicy::AskElseWait);
         apply_enum_value(&mut config, SettingsTab::Ai, field, "wait");
         assert_eq!(config.ai.on_limit, LimitPolicy::Wait);
         let options = enum_options(&config, SettingsTab::Ai, field).unwrap();
-        assert_eq!(options.values, ["ask", "wait", "stop"]);
-        assert_eq!(options.current, Some(1));
+        assert_eq!(options.values, ["ask", "ask_else_wait", "wait", "stop"]);
+        assert_eq!(options.current, Some(2));
     }
 
     #[test]
