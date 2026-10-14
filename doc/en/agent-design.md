@@ -88,6 +88,74 @@ token), and the parent's cancel aborts the sub-run. Not done yet: parallel
 delegation (the loop runs one tool at a time) and streaming the sub-run as a
 foldable sub-transcript rather than the plain text it reports.
 
+### Linked panels (planned)
+
+Considered: two shapes of agents working together across panels — a
+delegate run in a panel of its own instead of headless (hierarchy), and
+panels sending each other messages (peers). Decision: one protocol for both,
+built hierarchy first; peer messaging comes later on the same protocol.
+
+Where a delegate runs is a setting, `subagent_run` = `hidden` (the default,
+today's headless run), `ask`, `existing_panel` or `panel`, in `[ai]` with
+an `AGENT.md` able to name its own. `existing_panel` takes a banner panel
+already open (chosen as below) and runs hidden when there is none, so a
+delegate never changes the layout; `panel` opens one instead. `ask` puts
+one card per batch of delegations (all hidden, all in panels, one by one),
+not one card per task. `termide --prompt` has
+no panels and always runs hidden; in plan mode a delegate in a panel is held
+to plan mode as a hidden one is.
+
+Choosing the panel: the first agent panel that shows the banner (an empty
+session), has an empty input and does not hold the focus — a panel the user
+just opened to type in is never taken. Its agent, connection, cwd and mode
+are switched to the delegate's, which is cheap on an empty session. With no
+such panel, `panel` opens a new one where `handle_open_agent` puts one and
+`existing_panel` runs the task hidden. One task, one
+session: when the task ends the panel goes back to the banner, found or
+opened alike (closing an opened one would move the layout under the user),
+and the delegate's session stays in the banner's list, marked as a delegate.
+The next task looks for a banner panel again rather than writing on.
+
+Who owns the panel: the delegating agent, while the task runs. The input is
+off — typed text, `$` and `/` alike, since all of them speak as the user —
+and shows instead whose delegate it is and the task. What stays on: the
+permission and question cards (the reason to run in a panel at all: the
+delegate asks the user instead of being refused, which also lets external
+agents be delegates), stop and pause. Stop ends the task for the parent as
+an error, "stopped by the user". A *take over* action ends the task for the
+parent with "taken over by the user" and what the delegate has said so far,
+cuts the link and leaves the panel as an ordinary session, not reset to the
+banner. So the reset rule needs no guess about whether the user stepped in:
+only an explicit take-over keeps the panel.
+
+The protocol: a message between agents is a `UserMessage` with an `origin`
+(the sending session's id, the agent's name and a kind — `task`, `reply`,
+`info`, `question`), the way `ran` marks a shell command's output today. The
+model reads it wrapped (`<agent-message from="…" kind="…">`). An agent's
+words never carry the user's authority: the reviewer files them as
+`IntentEntry::Delegated`, as it does a task prompt now; they cannot answer a
+permission card, grant an `allow always`, expand a `/` command or change the
+mode. They are information, a reply or a request — no more. One gain for
+hidden delegates too: a delegate's `question` goes to its parent, which
+answers it or asks the user through its own `question`, instead of the
+delegate's request being refused. Hidden and panel runs then differ only in
+how the messages travel and whether the run is seen.
+
+Logs: every delegate writes a session log, hidden ones included (now they
+run with `persist: None` and only the answer survives, in the parent's
+log). The header names the parent session and the `task` call. The banner's
+list shows such sessions with a mark; the parent's `task` block opens the
+delegate's transcript in a panel, where the conversation can go on as an
+ordinary session.
+
+Not planned: automatic isolation. Two agents in one tree may edit the same
+file; rather than guessing when to isolate or how to merge, the first step
+is to detect it exactly — an edit of a file another live session changed
+since this one read it is refused with the reason. A git worktree per
+delegate may come later only as an explicit choice (`isolation =
+"worktree"`), its result the branch and a diff summary, merged by the
+parent or the user.
+
 ## 3b. Web tools
 
 Most requests that reach outside the checkout are searches, and `curl` fails
