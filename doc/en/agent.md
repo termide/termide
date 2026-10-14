@@ -565,6 +565,16 @@ While a request waits to be tried again, the state strip above the input shows
 request. `/continue` also tries a failed request again after the card was
 dismissed.
 
+Closing termide while the card is up, or while a request waits, does not lose
+the choice. The session log records the held failure, so reopening that
+session raises the same card again — with its countdown as it stands then, so
+a reset that has gone by is not offered — and runs nothing until you answer.
+**Try again now** resends the request as it would have been resent then; an
+external agent, which keeps no copy of it across a close, is told to carry on
+instead. **Stop** answers for good: the card does not come back. A session left
+so is marked `⏸` in the session lists. A `/goal` or `/loop` the request
+belonged to comes back with the card and waits on it.
+
 `on_limit` under `[ai]` (in the settings, **On a limit or outage**) decides
 whether the card comes up for failures that pass on their own — a limit, a
 network outage: `ask` (default) shows it, `wait` waits for the reset (or keeps

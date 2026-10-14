@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use crate::acp::ACP_PROVIDER;
 use crate::compaction::{CompactionCall, CompactionPrompts};
 use crate::context::file_timestamp;
+use crate::failure::Failure;
 use crate::fit::{fit, FitStep};
 use crate::message::{now_millis, Message, StopReason};
 use crate::permissions::Mode;
@@ -180,6 +181,15 @@ pub enum EntryKind {
     /// empty once it stopped. A reopened session offers to carry it on, see
     /// [`Session::autorun`].
     Autorun { autorun: Autorun },
+    /// A request that failed on something that passes — a limit, an outage —
+    /// and was asked about or is waited on, with what it was: the card the
+    /// panel raised, so a session reopened after termide closed offers the
+    /// same again. `None` takes the offer back (the user gave the request up,
+    /// or it was tried again). See [`Session::pending_retry`].
+    Retry {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        failure: Option<Failure>,
+    },
 }
 
 /// The unattended work a session has going: a `/goal`, a `/loop`, or both.
@@ -781,6 +791,7 @@ impl Session {
                 | EntryKind::AgentOption { .. }
                 | EntryKind::RunStart
                 | EntryKind::RunEnd { .. }
+                | EntryKind::Retry { .. }
                 | EntryKind::Autorun { .. }
                 | EntryKind::CompactionFailed { .. } => {}
                 EntryKind::Compaction {
@@ -827,6 +838,7 @@ impl Session {
                 | EntryKind::AgentOption { .. }
                 | EntryKind::RunStart
                 | EntryKind::RunEnd { .. }
+                | EntryKind::Retry { .. }
                 | EntryKind::Autorun { .. }
                 | EntryKind::CompactionFailed { .. } => {}
                 EntryKind::Compaction {
@@ -1004,6 +1016,7 @@ impl Session {
                 | EntryKind::AgentOption { .. }
                 | EntryKind::RunStart
                 | EntryKind::RunEnd { .. }
+                | EntryKind::Retry { .. }
                 | EntryKind::Autorun { .. }
                 | EntryKind::CompactionFailed { .. }
                 | EntryKind::Fitted { .. } => None,
@@ -1138,6 +1151,7 @@ impl Session {
                 | EntryKind::AgentOption { .. }
                 | EntryKind::RunStart
                 | EntryKind::RunEnd { .. }
+                | EntryKind::Retry { .. }
                 | EntryKind::Autorun { .. }
                 | EntryKind::CompactionFailed { .. } => {}
             }
@@ -1189,6 +1203,26 @@ impl Session {
         self.append(EntryKind::Autorun {
             autorun: autorun.clone(),
         })
+    }
+
+    /// Record a failed request the panel still holds (`None`: it let it go),
+    /// see [`Self::pending_retry`].
+    pub fn append_retry(&mut self, failure: Option<Failure>) -> std::io::Result<String> {
+        self.append(EntryKind::Retry { failure })
+    }
+
+    /// The failed request the branch last left held by a card or a wait, when
+    /// nothing has taken it back: see [`EntryKind::Retry`].
+    #[must_use]
+    pub fn pending_retry(&self) -> Option<Failure> {
+        self.branch()
+            .into_iter()
+            .rev()
+            .find_map(|entry| match &entry.kind {
+                EntryKind::Retry { failure } => Some(*failure),
+                _ => None,
+            })
+            .flatten()
     }
 
     /// How the current branch's last run ended, see [`Self::unfinished_run`].
@@ -1379,6 +1413,7 @@ impl From<&Session> for SessionSummary {
             | EntryKind::AgentOption { .. }
             | EntryKind::RunStart
             | EntryKind::RunEnd { .. }
+            | EntryKind::Retry { .. }
             | EntryKind::Autorun { .. }
             | EntryKind::CompactionFailed { .. }
             | EntryKind::Fitted { .. } => None,
@@ -1398,7 +1433,9 @@ impl From<&Session> for SessionSummary {
                 .map_or(session.header.created, |e| e.timestamp),
             first_prompt,
             message_count: messages.count(),
-            unfinished: session.unfinished_run().is_some() || !session.autorun().is_empty(),
+            unfinished: session.unfinished_run().is_some()
+                || !session.autorun().is_empty()
+                || session.pending_retry().is_some(),
         }
     }
 }
@@ -1427,6 +1464,7 @@ fn write_line(file: &mut File, line: &Line) -> std::io::Result<()> {
 mod tests {
     use super::*;
     use crate::agent::test_support::text_reply;
+    use crate::failure::FailureKind;
     use crate::message::{AssistantMessage, UserMessage};
 
     #[test]
@@ -1525,6 +1563,42 @@ mod tests {
         // The reply came in whole; only the run's end was not written.
         session.append_message(&agent_reply("answer")).unwrap();
         assert_eq!(session.last_run(), LastRun::Ended);
+        assert!(!SessionSummary::from(&session).unfinished);
+    }
+
+    /// A held request survives a reopen and is taken back when it is
+    /// retried or given up; the branch's own end says nothing about it.
+    #[test]
+    fn a_held_retry_survives_reopen_and_is_taken_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
+        session
+            .append_message(&Message::User(UserMessage::text("build it")))
+            .unwrap();
+        session.append_run_start().unwrap();
+        session.append_run_end(false).unwrap();
+        assert_eq!(session.pending_retry(), None);
+        assert!(!SessionSummary::from(&session).unfinished);
+
+        let failure = Failure {
+            kind: FailureKind::QuotaExhausted,
+            resets_at: Some(1_800),
+        };
+        session.append_retry(Some(failure)).unwrap();
+        let path = session.path().to_path_buf();
+        assert_eq!(session.pending_retry(), Some(failure));
+        assert!(SessionSummary::from(&session).unfinished);
+        drop(session);
+
+        let reopened = Session::open(&path).unwrap();
+        assert_eq!(reopened.pending_retry(), Some(failure));
+        // The run itself ended: the held request is a choice, not a run.
+        assert_eq!(reopened.last_run(), LastRun::Ended);
+        drop(reopened);
+
+        let mut session = Session::open(&path).unwrap();
+        session.append_retry(None).unwrap();
+        assert_eq!(session.pending_retry(), None);
         assert!(!SessionSummary::from(&session).unfinished);
     }
 

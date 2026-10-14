@@ -895,6 +895,9 @@ pub struct AgentPanel {
     /// The unattended work the session's log records last, so a change is
     /// written once.
     logged_autorun: Autorun,
+    /// The failed request the session's log records last held (`None`: none,
+    /// some `Some` with nothing held), so a change is written once.
+    logged_retry: Option<Option<Failure>>,
     /// A run started and its start is not in the log yet: it is written
     /// after the run's first message, so the message hangs off where the
     /// request started, as `/undo` and the rewind list expect.
@@ -1187,6 +1190,7 @@ impl AgentPanel {
             resuming: false,
             restored: None,
             logged_autorun: Autorun::default(),
+            logged_retry: None,
             run_start_due: false,
             permission_wait: None,
             pause_row: None,

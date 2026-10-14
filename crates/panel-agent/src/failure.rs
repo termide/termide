@@ -117,8 +117,10 @@ impl AgentPanel {
         true
     }
 
-    /// The card after a failure: what happened, and what can be done.
-    fn offer_failure(&mut self, failure: Failure, error: &str) {
+    /// The card after a failure: what happened, and what can be done. Also
+    /// raised at a reopen for a request the log left held; see
+    /// [`crate::unfinished`].
+    pub(crate) fn offer_failure(&mut self, failure: Failure, error: &str) {
         let t = termide_i18n::t();
         let now = unix_now();
         let (labels, choices, detail) = self.failure_rows(failure, error, now);
@@ -132,6 +134,8 @@ impl AgentPanel {
             failure,
             error: error.trim().to_string(),
         });
+        // The choice is now the user's to make: keep it across a close.
+        self.sync_retry();
         self.raise_attention(true);
     }
 
@@ -275,6 +279,8 @@ impl AgentPanel {
     pub(crate) fn give_up_after_failure(&mut self) {
         self.retry_attempts = 0;
         self.retry_wait = None;
+        // Answered: a reopen asks nothing again.
+        self.sync_retry();
         if self.goal_task.take().is_some() {
             self.notice(
                 termide_i18n::t().agent_notice_goal_stopped_failed(),
@@ -298,6 +304,7 @@ impl AgentPanel {
             failure,
             restart: false,
         });
+        self.sync_retry();
         self.notice(
             termide_i18n::t().agent_notice_retry_waiting_fmt(&clock(wall)),
             NoticeKind::Info,
@@ -309,6 +316,7 @@ impl AgentPanel {
     pub(crate) fn cancel_retry_wait(&mut self) {
         if self.retry_wait.take().is_some() {
             self.retry_attempts = 0;
+            self.sync_retry();
             self.loop_task = None;
             self.goal_task = None;
             self.notice(
@@ -336,6 +344,8 @@ impl AgentPanel {
         }
         match self.runtime.retry() {
             Ok(()) => {
+                // The request is on its way: no choice waits for the user.
+                self.sync_retry();
                 self.retry_attempts = self.retry_attempts.saturating_add(1);
                 self.busy = true;
                 self.goal_errored = false;

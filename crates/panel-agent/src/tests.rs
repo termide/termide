@@ -6681,6 +6681,35 @@ impl Backend for External {
         events.push(AgentEvent::AgentEnd);
         Ok(())
     }
+    /// Like an ACP adapter's retry: the failed turn goes again and logs no
+    /// new message.
+    fn retry(&self) -> Result<(), PromptError> {
+        let mut events = self.events.lock().unwrap();
+        events.push(AgentEvent::AgentStart);
+        events.push(AgentEvent::TurnStart);
+        events.push(AgentEvent::MessageStart {
+            prompt_tokens: None,
+        });
+        events.push(AgentEvent::MessageUpdate(StreamEvent::TextDelta(
+            "from outside".into(),
+        )));
+        events.push(AgentEvent::MessageEnd(Message::Assistant(
+            AssistantMessage {
+                content: vec![AssistantContent::Text {
+                    text: "from outside".into(),
+                }],
+                stop_reason: StopReason::Stop,
+                usage: Usage::default(),
+                provider: "acp".into(),
+                model: "outside".into(),
+                error_message: None,
+                failure: None,
+                timestamp: 0,
+            },
+        )));
+        events.push(AgentEvent::AgentEnd);
+        Ok(())
+    }
     fn steer(&self, _message: UserMessage) {}
     fn queue_lens(&self) -> (usize, usize) {
         (0, 0)
@@ -9247,6 +9276,131 @@ fn a_goal_under_way_is_in_the_log_until_it_stops() {
     assert!(Session::open(&path).unwrap().autorun().is_empty());
 }
 
+/// A limit the panel asked about and termide closed on: reopening the session
+/// asks the same again, with the same rows, and runs nothing by itself.
+#[test]
+fn a_limit_asked_about_comes_back_on_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![limited()])
+    });
+    let path = panel.session_path().unwrap().to_path_buf();
+    panel.send("do it".to_string());
+    settle(&mut panel);
+    assert!(matches!(panel.pending, Some(Pending::Failure { .. })));
+    // Closing the panel gives the log back to the file.
+    drop(panel);
+
+    let mut panel = reopen(&path, dir.path(), vec![reply("done")]);
+    let (rows, detail) = failure_card(&panel);
+    assert!(rows[0].starts_with("Wait until"), "{rows:?}");
+    assert!(rows.iter().any(|row| row == "Try again now"), "{rows:?}");
+    assert!(detail.contains("session limit"), "{detail}");
+    assert!(panel.retry_ready, "`/continue` takes it too");
+    assert!(!panel.paused, "a failed request is not a pause");
+    // Nothing runs by itself.
+    panel.tick();
+    assert!(!panel.is_busy());
+
+    // The row picked does what it names.
+    let now = rows.iter().position(|row| row == "Try again now").unwrap();
+    panel.apply_form_action(ChoiceAction::Chosen(now));
+    settle(&mut panel);
+    assert!(panel
+        .transcript()
+        .items()
+        .iter()
+        .any(|item| matches!(item, Item::Assistant { text, error: None, .. } if text == "done")));
+    // The held request is taken back out of the log.
+    assert_eq!(Session::open(&path).unwrap().pending_retry(), None);
+}
+
+/// Stopping the restored card gives the request up for good: a third reopen
+/// asks nothing, since the user has answered.
+#[test]
+fn stopping_a_restored_limit_card_asks_nothing_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![limited()])
+    });
+    let path = panel.session_path().unwrap().to_path_buf();
+    panel.send("do it".to_string());
+    settle(&mut panel);
+
+    drop(panel);
+    let mut panel = reopen(&path, dir.path(), vec![reply("done")]);
+    assert!(matches!(panel.pending, Some(Pending::Failure { .. })));
+    panel.apply_form_action(ChoiceAction::Cancelled);
+    assert!(panel.pending.is_none());
+    // Esc gives the request up for the card, and `/continue` still holds it
+    // until a new request takes over — as it does before any close.
+    assert!(panel.retry_ready);
+    drop(panel);
+
+    let panel = reopen(&path, dir.path(), vec![reply("done")]);
+    assert!(
+        !matches!(panel.pending, Some(Pending::Failure { .. })),
+        "the user answered: nothing to ask"
+    );
+}
+
+/// A wait out of a limit that termide closed over: reopening asks rather than
+/// waiting on its own or sending anything — the reset may have come and gone.
+#[test]
+fn a_wait_closed_over_asks_on_reopen_and_waits_for_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        on_limit: LimitPolicy::Wait,
+        ..setup(vec![limited()])
+    });
+    let path = panel.session_path().unwrap().to_path_buf();
+    panel.send("do it".to_string());
+    settle(&mut panel);
+    assert!(panel.pending.is_none(), "the policy asks nothing");
+    assert!(panel.retry_wait.is_some(), "the reset is waited for");
+    drop(panel);
+
+    let mut panel = reopen(&path, dir.path(), vec![reply("done")]);
+    assert!(matches!(panel.pending, Some(Pending::Failure { .. })));
+    assert!(panel.retry_wait.is_none(), "the wait does not go on unseen");
+    panel.tick();
+    assert!(!panel.is_busy(), "nothing goes to the model unasked");
+
+    // A reset already gone by takes its row away, as on any open card.
+    set_reset(&mut panel, crate::failure::unix_now() - 60);
+    panel.failure_card_shown = None;
+    assert!(panel.refresh_failure_card());
+    let (rows, detail) = failure_card(&panel);
+    assert!(
+        !rows.iter().any(|row| row.starts_with("Wait until")),
+        "a reset already past is not waited for: {rows:?}"
+    );
+    assert!(detail.contains("has passed"), "{detail}");
+}
+
+/// A goal left waiting on a failure card comes back with it, so the choice
+/// carries both.
+#[test]
+fn a_goal_waiting_on_a_limit_card_comes_back_with_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![limited()])
+    });
+    let path = panel.session_path().unwrap().to_path_buf();
+    type_text(&mut panel, "/goal get it done");
+    panel.submit();
+    settle(&mut panel);
+    drop(panel);
+
+    let panel = reopen(&path, dir.path(), vec![reply("done")]);
+    assert!(matches!(panel.pending, Some(Pending::Failure { .. })));
+    assert!(panel.goal_task.is_some(), "the goal waits on the card");
+}
+
 #[test]
 fn an_external_agent_cut_off_is_told_to_carry_on() {
     let dir = tempfile::tempdir().unwrap();
@@ -9368,4 +9522,44 @@ fn stopping_withdraws_the_queued_loop_turn() {
         panel.queued_texts.iter().collect::<Vec<_>>(),
         ["are you stuck?"]
     );
+}
+
+/// An external agent holds no copy of the request across a close, so its
+/// restored retry is told to carry on rather than sent the same turn twice.
+#[test]
+fn a_restored_retry_of_an_external_agent_carries_on() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = Session::create(dir.path(), Path::new("/tmp")).unwrap();
+    session.append_agent_change("outside").unwrap();
+    session
+        .append_message(&Message::User(UserMessage::text("build it")))
+        .unwrap();
+    session.append_run_start().unwrap();
+    session.append_run_end(false).unwrap();
+    session
+        .append_retry(Some(termide_agent_core::Failure {
+            kind: termide_agent_core::FailureKind::QuotaExhausted,
+            resets_at: Some(crate::failure::unix_now() + 600),
+        }))
+        .unwrap();
+    let path = session.path().to_path_buf();
+    drop(session);
+
+    let mut panel = reopen(&path, dir.path(), vec![reply("from outside")]);
+    assert!(panel.external);
+    let (rows, _) = failure_card(&panel);
+    let now = rows.iter().position(|row| row == "Try again now").unwrap();
+    panel.apply_form_action(ChoiceAction::Chosen(now));
+    settle(&mut panel);
+    // The request goes once, as a carry-on; the user's prompt is not sent a
+    // second time.
+    let items = panel.transcript().items();
+    let users: Vec<_> = items
+        .iter()
+        .filter(|i| matches!(i, Item::User { .. }))
+        .collect();
+    assert_eq!(users.len(), 1, "the prompt is not sent twice: {items:?}");
+    assert!(items
+        .iter()
+        .any(|i| matches!(i, Item::Assistant { text, .. } if text == "from outside")));
 }

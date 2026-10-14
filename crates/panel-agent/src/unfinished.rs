@@ -8,8 +8,8 @@
 use std::time::{Duration, Instant};
 
 use termide_agent_core::{
-    now_millis, unanswered_calls, Agent, Autorun, GoalRecord, LastRun, LoggedMessage, LoopRecord,
-    Message, RunMark, Session, ToolResultMessage,
+    now_millis, unanswered_calls, Agent, Autorun, Failure, GoalRecord, LastRun, LoggedMessage,
+    LoopRecord, Message, RunMark, Session, ToolResultMessage,
 };
 use termide_ui::ChoiceForm;
 
@@ -82,6 +82,39 @@ impl AgentPanel {
             .unwrap_or_default();
     }
 
+    /// The failed request the panel still holds: one a card asks about, or one
+    /// waited on. `None` when neither — the request went, was retried or was
+    /// given up.
+    fn held_failure(&self) -> Option<Failure> {
+        match &self.pending {
+            Some(Pending::Failure { failure, .. }) => Some(*failure),
+            _ => self.retry_wait.map(|wait| wait.failure),
+        }
+    }
+
+    /// Write the held failed request to the log when it changed since the log
+    /// last recorded it: a card raised, a wait scheduled, the request taken
+    /// back. So a session reopened after termide closed asks the same again.
+    pub(crate) fn sync_retry(&mut self) {
+        let held = self.held_failure();
+        if self.logged_retry == Some(held) {
+            return;
+        }
+        if let Some(session) = &mut self.session {
+            if let Err(error) = session.append_retry(held) {
+                log::warn!("agent session write failed: {error}");
+            }
+        }
+        // Written or not, it is not tried again on every tick.
+        self.logged_retry = Some(held);
+    }
+
+    /// Take the log's record of a held request as what the panel now knows,
+    /// once it moved onto `session`'s log.
+    pub(crate) fn adopt_logged_retry(&mut self) {
+        self.logged_retry = Some(self.session.as_ref().and_then(Session::pending_retry));
+    }
+
     /// The run's first message is in the log: record after it that the run
     /// started, with the goal or loop it belongs to, so a run cut off from
     /// here is known as such.
@@ -112,14 +145,37 @@ impl AgentPanel {
 
     /// A session just opened: when its log shows a run cut off or paused, or
     /// a goal or loop still going, the panel waits at a pause and asks on a
-    /// card whether to carry the work on.
+    /// card whether to carry the work on. A run that ended on a request a
+    /// failure card asked about — termide closed while the card was up, or
+    /// over a wait — brings that same card back, so the choice the user never
+    /// made is asked again. Nothing runs by itself either way.
     pub(crate) fn restore_unfinished(&mut self) {
         self.restored = None;
         self.adopt_logged_autorun();
+        self.adopt_logged_retry();
         let Some(mark) = self.session.as_ref().map(Session::unfinished_run) else {
             return;
         };
         let autorun = self.logged_autorun.clone();
+        // A request a card asked about is asked again first, ahead of any
+        // carry-on: it is the nearer decision, and a limit wants its retry,
+        // wait or switch rather than a judge over work that never ran. The
+        // goal or loop it belonged to comes back with it, waiting on the card.
+        if let Some(failure) = self.session.as_ref().and_then(Session::pending_retry) {
+            // The run's own line stays where it was left, so the transcript
+            // reads the same as it did before termide closed.
+            if let Some(mark) = mark {
+                self.mark_run_end(mark);
+            }
+            self.restore_autorun_tasks(&autorun);
+            // The request stands where it stood: ready for `/continue`, its
+            // waits counting from the first try again.
+            self.retry_attempts = 0;
+            self.retry_ready = true;
+            let error = self.logged_error();
+            self.offer_failure(failure, &error);
+            return;
+        }
         let restored = match mark {
             Some(_) if self.runtime.can_pause() => Restored::Resume,
             Some(_) if self.external => Restored::Prompt,
@@ -132,6 +188,15 @@ impl AgentPanel {
             }
             self.mark_run_end(mark);
         }
+        self.restore_autorun_tasks(&autorun);
+        self.paused = true;
+        self.restored = Some(restored);
+        self.ask_carry_on(mark, &autorun);
+    }
+
+    /// Take the log's `/goal` and `/loop` back as the panel's tasks, their
+    /// clocks starting afresh, as they do on any reopen.
+    fn restore_autorun_tasks(&mut self, autorun: &Autorun) {
         if let Some(goal) = autorun.goal.clone() {
             self.goal_task = Some(GoalTask {
                 goal: goal.goal,
@@ -156,9 +221,24 @@ impl AgentPanel {
                 iterations: repeat.iterations,
             });
         }
-        self.paused = true;
-        self.restored = Some(restored);
-        self.ask_carry_on(mark, &autorun);
+    }
+
+    /// The text of the error the log's last reply failed on, for a failure
+    /// card raised at a reopen; empty when the log holds none.
+    fn logged_error(&self) -> String {
+        self.session
+            .as_ref()
+            .and_then(|session| {
+                session
+                    .context_messages()
+                    .into_iter()
+                    .rev()
+                    .find_map(|message| match message {
+                        Message::Assistant(reply) => reply.error_message,
+                        _ => None,
+                    })
+            })
+            .unwrap_or_default()
     }
 
     /// The calls a cut-off run left without a result may have run in part:
