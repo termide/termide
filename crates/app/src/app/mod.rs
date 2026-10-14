@@ -112,6 +112,17 @@ pub struct App {
     project_drag: Option<mouse::project_drag::ProjectDrag>,
 }
 
+/// Keep the windows external agents report in `<config>/ai/acp-windows.json`,
+/// for sizing what a new session of one is told of a conversation it joins.
+fn remember_agent_windows() {
+    if let Ok(dir) = termide_config::get_config_dir() {
+        termide_agent_acp::remember_windows_in(
+            dir.join(termide_agent_core::GLOBAL_AGENT_DIR)
+                .join("acp-windows.json"),
+        );
+    }
+}
+
 impl App {
     /// Create a new application
     pub fn new() -> Self {
@@ -152,6 +163,7 @@ impl App {
             min_log_level,
         );
         log::info!("Application started");
+        remember_agent_windows();
 
         // Initialize unified watcher for filesystem and git events
         match termide_watcher::create_watcher() {
@@ -243,6 +255,7 @@ impl App {
             min_log_level,
         );
         log::info!("Application started");
+        remember_agent_windows();
 
         // Initialize unified watcher for filesystem and git events
         match termide_watcher::create_watcher() {

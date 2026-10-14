@@ -300,7 +300,12 @@ impl AgentPanel {
                         None
                     }
                     Message::Assistant(assistant) => {
-                        if assistant.usage.total() > 0 {
+                        // An external agent's usage is what its whole turn
+                        // spent, not how full its context is: that comes
+                        // with its `usage_update`.
+                        if assistant.usage.total() > 0
+                            && assistant.provider != termide_agent_core::ACP_PROVIDER
+                        {
                             self.context_tokens = assistant.usage.total();
                         }
                         // What the cache served is counted apart from what is
@@ -517,6 +522,7 @@ impl AgentPanel {
                 kept,
                 tokens_before,
                 tokens_after,
+                call,
             } => {
                 // The next reply's usage would correct the figure only once
                 // the next turn finishes.
@@ -527,7 +533,13 @@ impl AgentPanel {
                     NoticeKind::Info,
                 );
                 if let Some(session) = &mut self.session {
-                    if let Err(error) = session.append_compaction(&summary, tokens_before, kept) {
+                    if let Err(error) = session.append_compaction_with(
+                        &summary,
+                        tokens_before,
+                        kept,
+                        Some(tokens_after),
+                        Some(call),
+                    ) {
                         log::warn!("agent session write failed: {error}");
                     }
                 }
@@ -537,12 +549,51 @@ impl AgentPanel {
                     self.context_stale = true;
                 }
             }
-            AgentEvent::CompactionFailed { error } => {
+            AgentEvent::CompactionFailed {
+                error,
+                tokens_before,
+                call,
+                reply,
+            } => {
                 self.end_compaction();
                 self.notice(
                     termide_i18n::t().agent_notice_compaction_failed_fmt(&error.to_string()),
                     NoticeKind::Warn,
                 );
+                // A refused summary call goes into the log, so what the
+                // model answered can be looked at afterwards; nothing to
+                // keep when no call was made.
+                if let (Some(call), Some(session)) = (call, &mut self.session) {
+                    if let Err(error) =
+                        session.append_compaction_failed(&error, tokens_before, call, &reply)
+                    {
+                        log::warn!("agent session write failed: {error}");
+                    }
+                }
+            }
+            AgentEvent::Fitted {
+                budget,
+                keep_tail,
+                steps,
+                tokens_before,
+                tokens_after,
+                ..
+            } => {
+                self.context_tokens = tokens_after;
+                self.notice(
+                    termide_i18n::t().agent_notice_fitted_fmt(tokens_before, tokens_after),
+                    NoticeKind::Info,
+                );
+                if let Some(session) = &mut self.session {
+                    if let Err(error) =
+                        session.append_fitted(budget, keep_tail, steps, tokens_before)
+                    {
+                        log::warn!("agent session write failed: {error}");
+                    }
+                }
+                if self.toolset_off != self.context_off {
+                    self.context_stale = true;
+                }
             }
             AgentEvent::ExternalSession { agent, session_id } => {
                 if let Some(session) = &mut self.session {

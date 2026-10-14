@@ -24,7 +24,7 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
-use termide_agent_core::recap;
+use termide_agent_core::{chars_for_tokens, handoff, recap};
 use termide_agent_core::{
     companion_tools, parse_verdict, GoalPrompt, HandoffPrompt, IntentLog, ModelSpec, Provider,
     ReviewerSetup, SessionView, ThinkingLevel,
@@ -40,7 +40,9 @@ use termide_agent_core::{
 use termide_agent_mcp::{McpServer, SERVER_NAME};
 
 mod provider;
+mod windows;
 pub use provider::{match_model, AcpProvider};
+pub use windows::remember_windows_in;
 
 /// How the calls of termide's tools reach the transcript from Claude Code:
 /// named after the MCP server that serves them.
@@ -214,8 +216,13 @@ struct Shared {
     /// The conversation so far, until the handshake knows whether the
     /// agent resumed it or is to be told a recap of it.
     history: Mutex<Vec<Message>>,
-    /// The recap that goes before the first request, see [`recap`].
-    recap: Mutex<Option<String>>,
+    /// The conversation a new session of the agent is still to be told,
+    /// before its first request: as a record cut down to half its window
+    /// ([`handoff`]) when that is known, else as a recap of the decisions
+    /// ([`recap`]). Made when the request goes, once the model is settled.
+    untold: Mutex<Option<Vec<Message>>>,
+    /// Where the windows agents report are remembered, see [`windows`].
+    windows: OnceLock<PathBuf>,
     /// Set while `session/load` replays the conversation, which the panel
     /// already shows and the log already holds.
     replaying: AtomicBool,
@@ -483,7 +490,8 @@ impl AcpRuntime {
             },
             session_provider: OnceLock::new(),
             history: Mutex::new(setup.history),
-            recap: Mutex::new(None),
+            untold: Mutex::new(None),
+            windows: windows::windows_file().map_or_else(OnceLock::new, OnceLock::from),
             replaying: AtomicBool::new(false),
             steering: AtomicBool::new(false),
             turn_running: AtomicBool::new(false),
@@ -988,6 +996,86 @@ impl Shared {
         self.kick();
     }
 
+    /// The key the agent's window is remembered under: its adapter and the
+    /// model in use.
+    fn window_key(&self) -> String {
+        windows::key(
+            self.flavor,
+            &self.name,
+            self.current_model
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .as_deref()
+                .unwrap_or("default"),
+        )
+    }
+
+    /// The agent's context window as far as it is known before it reports
+    /// one in this session: reported, else remembered from an earlier run,
+    /// else told from the model's name; the user's limit applies.
+    fn known_window(&self) -> Option<u64> {
+        let reported = self
+            .context
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .map(|(_, size)| size);
+        let window = reported
+            .or_else(|| {
+                let path = self.windows.get()?;
+                windows::remembered(path, &self.window_key())
+            })
+            .or_else(|| {
+                let model = self
+                    .current_model
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone();
+                // The model's label names its context when the id does not
+                // (`default` is "Opus … 1M context" on some accounts).
+                let label = model.as_ref().map(|id| {
+                    let name = self
+                        .models
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .iter()
+                        .find(|m| &m.id == id)
+                        .map(|m| m.name.clone())
+                        .unwrap_or_default();
+                    format!("{id} {name}")
+                });
+                windows::inferred(self.flavor, label.as_deref())
+            })?;
+        Some(match self.context_limit.load(Ordering::Acquire) {
+            0 => window,
+            limit => window.min(limit),
+        })
+    }
+
+    /// What a new session is told of the conversation before its first
+    /// request, once: the record within half the agent's window when that
+    /// is known, else — or when even cut down it would not fit — the
+    /// decisions within the same room or [`RECAP_LIMIT`].
+    fn take_recap(&self) -> Option<String> {
+        let history = self
+            .untold
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()?;
+        let budget = self
+            .known_window()
+            .map(|window| chars_for_tokens(window / 2));
+        let told = budget.and_then(|budget| handoff(&history, budget));
+        if let Some(text) = &told {
+            log::info!(
+                "acp {}: the conversation goes as a record of {} characters",
+                self.name,
+                text.chars().count()
+            );
+            return told;
+        }
+        recap(&history, budget.unwrap_or(RECAP_LIMIT))
+    }
+
     /// Open the session the conversation goes on in: the agent's own, when
     /// the log names one of this agent's and the agent can take it up again
     /// — through `session/resume`, else `session/load`, whose replay of what
@@ -1040,8 +1128,8 @@ impl Shared {
                 agent: self.name.clone(),
                 session_id: id.to_string(),
             });
-            *self.recap.lock().unwrap_or_else(PoisonError::into_inner) =
-                recap(&history, RECAP_LIMIT);
+            *self.untold.lock().unwrap_or_else(PoisonError::into_inner) =
+                Some(history).filter(|history| !history.is_empty());
         }
         Ok(value)
     }
@@ -1442,12 +1530,7 @@ impl Shared {
         let mut prompt = Vec::new();
         // Kept out of the log, like the plan note: the log holds the
         // conversation itself.
-        if let Some(recap) = self
-            .recap
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        {
+        if let Some(recap) = self.take_recap() {
             prompt.push(json!({ "type": "text", "text": recap }));
         }
         for note in [self.plan_switch_note(), self.tools_note()]
@@ -1495,12 +1578,7 @@ impl Shared {
             return prompt;
         }
         let mut blocks = Vec::new();
-        if let Some(recap) = self
-            .recap
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        {
+        if let Some(recap) = self.take_recap() {
             blocks.push(json!({ "type": "text", "text": recap }));
         }
         blocks.push(json!({ "type": "text", "text": RETRY_NOTE }));
@@ -2461,6 +2539,11 @@ impl Shared {
             "usage_update" => {
                 if let (Some(used), Some(size)) = (update["used"].as_u64(), update["size"].as_u64())
                 {
+                    // Kept as the agent states it; the user's limit is
+                    // applied where it is read.
+                    if let Some(path) = self.windows.get() {
+                        windows::remember(path, &self.window_key(), size);
+                    }
                     let size = match self.context_limit.load(Ordering::Acquire) {
                         0 => size,
                         limit => size.min(limit),
@@ -5541,6 +5624,59 @@ mod tests {
             assert_eq!(opened(&events), ["fake:fresh"]);
             assert_eq!(prompt.len(), 2);
         }
+    }
+
+    #[test]
+    fn with_its_window_known_a_new_session_is_told_the_whole_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, seen) =
+            session_agent(dir.path().to_path_buf(), json!({}), false, None, earlier());
+        // Remembered from an earlier run of the agent on this model.
+        let windows = dir.path().join("acp-windows.json");
+        windows::remember(
+            &windows,
+            &windows::key(AcpFlavor::Generic, "fake", "default"),
+            200_000,
+        );
+        runtime.shared.windows.set(windows).unwrap();
+        let (_, prompt) = run_prompt(&runtime, &seen, "next");
+        let told = prompt[0]["text"].as_str().unwrap();
+        assert!(told.contains("follows as a record"), "{told}");
+        assert!(told.contains("<user>\nearlier request\n</user>"));
+        assert!(told.contains("<assistant>\nearlier answer\n</assistant>"));
+        assert_eq!(prompt[1]["text"], "next");
+    }
+
+    #[test]
+    fn a_window_the_agent_reports_is_remembered_for_its_next_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, _) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::ClaudeCode,
+            None,
+            ModeHandle::new(Mode::default()),
+        );
+        let windows = dir.path().join("acp-windows.json");
+        runtime.shared.windows.set(windows.clone()).unwrap();
+        *runtime.shared.current_model.lock().unwrap() = Some("opus".into());
+        // Not reported yet: told from the model's name.
+        assert_eq!(runtime.shared.known_window(), Some(200_000));
+        runtime
+            .shared
+            .on_update(&json!({ "sessionUpdate": "usage_update", "used": 975, "size": 1_000_000 }));
+        assert_eq!(
+            windows::remembered(
+                &windows,
+                &windows::key(AcpFlavor::ClaudeCode, "any", "opus")
+            ),
+            Some(1_000_000)
+        );
+        // The user's limit applies to what is known.
+        runtime
+            .shared
+            .context_limit
+            .store(300_000, Ordering::Release);
+        assert_eq!(runtime.shared.known_window(), Some(300_000));
     }
 
     #[test]

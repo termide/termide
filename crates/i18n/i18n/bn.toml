@@ -1117,6 +1117,7 @@ agent_notice_cannot_undo_fmt = "ফেরানো যাচ্ছে না: {e
 agent_notice_cannot_write_prompt_fmt = "সিস্টেম প্রম্পট লেখা যাচ্ছে না: {error}"
 agent_notice_retry_fmt = "পুনরায় চেষ্টা {attempt}/{max}, {delay_ms} ms পরে: {error}"
 agent_notice_compacted_fmt = "{tokens} টোকেন সংক্ষেপ করা হয়েছে, শেষ {kept}টি বার্তা রাখা হয়েছে"
+agent_notice_fitted_fmt = "সারাংশ ছাড়াই প্রসঙ্গ ছোট করা হয়েছে: {before} → {after} টোকেন"
 agent_notice_handoff_written_fmt = "হ্যান্ডঅফ {path}-এ লেখা হয়েছে"
 agent_notice_no_command_fmt = "{name} নামে কোনো কমান্ড নেই; উপলব্ধ: {available}"
 agent_notice_slash_shadowed_fmt = "/{name} {runs} চালায় এবং একই নামের {hidden} লুকিয়ে রাখে"

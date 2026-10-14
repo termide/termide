@@ -992,7 +992,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         let failed = loop {
             let events = runtime.drain();
-            if let Some(AgentEvent::CompactionFailed { error }) = events
+            if let Some(AgentEvent::CompactionFailed { error, .. }) = events
                 .into_iter()
                 .find(|e| matches!(e, AgentEvent::CompactionFailed { .. }))
             {

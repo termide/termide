@@ -3,17 +3,19 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Mutex};
 use std::time::{Duration, Instant};
+use termide_agent_core::FitStep;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::style::Modifier;
 use ratatui::text::Line;
 use termide_agent_core::{
     now_millis, permission_channel, question_channel, suggestion_channel, Agent, AgentEvent,
-    AssistantContent, AssistantMessage, Autorun, CancelToken, EntryKind, GoalRecord, LastRun,
-    LimitPolicy, LoopRecord, Message, PermissionAnswer, PermissionPrompter, QuestionAnswer,
-    QuestionReply, Request, ShellOutput, ShellRunner, StopReason, StreamEvent, Suggestion,
-    SuggestionReply, ThinkingLevel, Timing, ToolCall, ToolContext, ToolDecision, ToolResultMessage,
-    ToolUpdate, Usage, UserMessage, MODEL_OPTION,
+    AssistantContent, AssistantMessage, Autorun, CancelToken, CompactionCall, CompactionReason,
+    EntryKind, GoalRecord, LastRun, LimitPolicy, LoopRecord, Message, PermissionAnswer,
+    PermissionPrompter, QuestionAnswer, QuestionReply, Request, ShellOutput, ShellRunner,
+    StopReason, StreamEvent, Suggestion, SuggestionReply, ThinkingLevel, Timing, ToolCall,
+    ToolContext, ToolDecision, ToolResultMessage, ToolUpdate, Usage, UserMessage, ACP_PROVIDER,
+    MODEL_OPTION,
 };
 use termide_core::{ConfirmAction, LinkTarget, PanelConfig, SegmentKind};
 use termide_ui::{ChoiceAction, ChoiceForm};
@@ -1463,6 +1465,7 @@ fn a_compaction_between_runs_shows_its_progress_and_the_new_context() {
         kept: 2,
         tokens_before: 90_000,
         tokens_after: 3_000,
+        call: summary_call(),
     });
     assert_eq!(panel.context_tokens, 3_000);
     assert!(panel.activity.is_none());
@@ -1637,6 +1640,147 @@ fn arrow_navigation_brings_the_selected_block_into_view() {
     panel.handle_key(chord(KeyCode::Down, KeyModifiers::NONE));
     let _ = render_text(&mut panel, 40, 10);
     assert!(panel.top > 0, "the answer below is scrolled into view");
+}
+
+/// How a summary call went, for the compaction events of the tests.
+fn summary_call() -> CompactionCall {
+    CompactionCall {
+        reason: CompactionReason::Threshold,
+        stop_reason: StopReason::Stop,
+        duration_ms: 1_500,
+        usage: Usage::default(),
+        thinking_chars: 0,
+        tool_calls: Vec::new(),
+        input_cut: Vec::new(),
+    }
+}
+
+#[test]
+fn a_compaction_and_a_refused_summary_call_are_logged_with_how_the_call_went() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![reply("ok")])
+    });
+    panel.apply(AgentEvent::Compacted {
+        summary: "the gist".into(),
+        kept: 2,
+        tokens_before: 90_000,
+        tokens_after: 3_000,
+        call: summary_call(),
+    });
+    // The model went on with the work instead of summarising it.
+    let refused = CompactionCall {
+        stop_reason: StopReason::ToolUse,
+        tool_calls: vec!["bash".into()],
+        thinking_chars: 1_200,
+        ..summary_call()
+    };
+    panel.apply(AgentEvent::CompactionFailed {
+        error: "the model returned a degenerate summary".into(),
+        tokens_before: 95_000,
+        call: Some(refused.clone()),
+        reply: "Looking at the loop:".into(),
+    });
+    // With no call made, there is nothing to look at afterwards.
+    panel.apply(AgentEvent::CompactionFailed {
+        error: "too few messages to compact".into(),
+        tokens_before: 10,
+        call: None,
+        reply: String::new(),
+    });
+    let logged = Session::open(panel.session.as_ref().unwrap().path()).unwrap();
+    let kinds: Vec<&EntryKind> = logged
+        .branch()
+        .into_iter()
+        .map(|e| &e.kind)
+        .filter(|k| {
+            matches!(
+                k,
+                EntryKind::Compaction { .. } | EntryKind::CompactionFailed { .. }
+            )
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            &EntryKind::Compaction {
+                summary: "the gist".into(),
+                tokens_before: 90_000,
+                keep_last: 2,
+                tokens_after: Some(3_000),
+                call: Some(summary_call()),
+            },
+            &EntryKind::CompactionFailed {
+                error: "the model returned a degenerate summary".into(),
+                tokens_before: 95_000,
+                call: refused,
+                reply: "Looking at the loop:".into(),
+            },
+        ]
+    );
+    // A refused call changes nothing the context is rebuilt from.
+    assert!(logged
+        .context_messages()
+        .first()
+        .is_some_and(|m| matches!(m, Message::User(u) if u.plain_text().contains("the gist"))));
+}
+
+#[test]
+fn a_context_cut_down_without_a_summary_is_logged_for_replay() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![reply("ok")])
+    });
+    panel.apply(AgentEvent::Fitted {
+        reason: CompactionReason::Threshold,
+        budget: 250_000,
+        keep_tail: 10_000,
+        steps: vec![
+            (FitStep::Reasoning, 400_000),
+            (FitStep::ReadOutputs, 90_000),
+        ],
+        tokens_before: 247_000,
+        tokens_after: 98_000,
+    });
+    assert_eq!(panel.context_tokens, 98_000);
+    let logged = Session::open(panel.session.as_ref().unwrap().path()).unwrap();
+    assert!(logged.branch().iter().any(|e| e.kind
+        == EntryKind::Fitted {
+            budget: 250_000,
+            keep_tail: 10_000,
+            steps: vec![
+                (FitStep::Reasoning, 400_000),
+                (FitStep::ReadOutputs, 90_000)
+            ],
+            tokens_before: 247_000,
+        }));
+}
+
+#[test]
+fn an_external_agents_turn_usage_does_not_fill_the_context_bar() {
+    let mut panel = panel(vec![]);
+    let mut own = reply("built-in");
+    own.usage = Usage {
+        input: 900,
+        output: 100,
+        cache_read: 0,
+        cache_write: 0,
+    };
+    panel.apply(AgentEvent::MessageEnd(Message::Assistant(own)));
+    assert_eq!(panel.context_tokens, 1_000);
+    // What a whole Claude Code turn spent, over every call and cache read.
+    let mut external = reply("external");
+    external.provider = ACP_PROVIDER.into();
+    external.usage = Usage {
+        input: 62,
+        output: 19_189,
+        cache_read: 1_397_173,
+        cache_write: 79_138,
+    };
+    panel.apply(AgentEvent::MessageEnd(Message::Assistant(external)));
+    assert_eq!(panel.context_tokens, 1_000);
 }
 
 #[test]
@@ -4860,6 +5004,7 @@ fn switching_off_mid_session_refuses_until_a_compaction_takes_it_out() {
         kept: 1,
         tokens_before: 1000,
         tokens_after: 200,
+        call: summary_call(),
     });
     assert!(panel.context_stale);
     panel.tick();

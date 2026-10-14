@@ -9,7 +9,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::message::{AssistantContent, Message, ToolResultContent, UserContent, UserMessage};
+use crate::acp::ACP_PROVIDER;
+use crate::message::{
+    AssistantContent, Message, StopReason, ToolResultContent, Usage, UserContent, UserMessage,
+};
 
 /// A field left out of `[ai.compaction]` keeps its default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,6 +47,36 @@ pub enum CompactionReason {
     Threshold,
     Overflow,
     Manual,
+}
+
+/// The most of a rejected summary call's text the session log keeps.
+pub const REJECTED_REPLY_CHARS: usize = 4_000;
+
+/// How a summary call went, kept in the session log so a compaction can be
+/// judged afterwards: why it ran, how the model stopped, how long it took,
+/// what it cost and what the reply held besides the summary text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompactionCall {
+    pub reason: CompactionReason,
+    pub stop_reason: StopReason,
+    pub duration_ms: u64,
+    #[serde(default)]
+    pub usage: Usage,
+    /// Characters of reasoning in the reply, which the summary leaves out.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub thinking_chars: usize,
+    /// Tools the reply called although the call offered none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<String>,
+    /// What was cut from the history to fit it into the call, see
+    /// [`crate::fit::fit`]: each step with the characters it freed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_cut: Vec<(crate::fit::FitStep, usize)>,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if signature
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 /// The seed of `ai/system/compact.md`: instructions of the summarisation
@@ -133,7 +166,7 @@ pub fn estimate_tokens(messages: &[Message]) -> u64 {
     (chars / 4) as u64
 }
 
-fn message_chars(message: &Message) -> usize {
+pub(crate) fn message_chars(message: &Message) -> usize {
     match message {
         Message::User(user) => user
             .content
@@ -166,7 +199,9 @@ fn message_chars(message: &Message) -> usize {
 }
 
 /// Best available size of the current context: the last reported usage plus
-/// an estimate for everything appended after that message.
+/// an estimate for everything appended after that message. An external
+/// agent's usage is not a context size — it is what its whole turn spent,
+/// over every call and cache read — so its messages count by the estimate.
 #[must_use]
 pub fn context_tokens(messages: &[Message]) -> u64 {
     let last_usage = messages
@@ -174,7 +209,9 @@ pub fn context_tokens(messages: &[Message]) -> u64 {
         .enumerate()
         .rev()
         .find_map(|(index, m)| match m {
-            Message::Assistant(a) if a.usage.total() > 0 => Some((index, a.usage.total())),
+            Message::Assistant(a) if a.usage.total() > 0 && a.provider != ACP_PROVIDER => {
+                Some((index, a.usage.total()))
+            }
             _ => None,
         });
     match last_usage {
@@ -285,6 +322,35 @@ mod tests {
         };
         assert!(!should_compact(&messages, 1600, &huge_reserve));
         assert!(should_compact(&messages, 1400, &huge_reserve));
+    }
+
+    #[test]
+    fn an_external_agents_usage_is_not_taken_for_the_context_size() {
+        let mut own = text_reply("built-in");
+        own.usage = Usage {
+            input: 900,
+            output: 100,
+            cache_read: 0,
+            cache_write: 0,
+        };
+        // What a whole Claude Code turn spent, cache reads included.
+        let mut external = text_reply(&"z".repeat(400));
+        external.provider = ACP_PROVIDER.into();
+        external.usage = Usage {
+            input: 62,
+            output: 19_189,
+            cache_read: 1_397_173,
+            cache_write: 79_138,
+        };
+        let messages = vec![
+            user("q"),
+            Message::Assistant(own),
+            user(&"x".repeat(400)),
+            Message::Assistant(external),
+        ];
+        assert_eq!(context_tokens(&messages), 1000 + 100 + 100);
+        // With no usage of its own anywhere, all of it is estimated.
+        assert_eq!(context_tokens(&messages[2..]), 200);
     }
 
     #[test]

@@ -119,7 +119,9 @@ fn main() {
                     eprintln!("[session write failed: {error}]");
                 }
             }
-            AgentEvent::CompactionFailed { error } => eprintln!("\n[compaction failed: {error}]"),
+            AgentEvent::CompactionFailed { error, .. } => {
+                eprintln!("\n[compaction failed: {error}]")
+            }
             AgentEvent::AgentEnd => println!("\n[done] session: {}", session.path().display()),
             _ => {}
         },

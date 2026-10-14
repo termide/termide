@@ -18,8 +18,9 @@ use std::sync::{Mutex, OnceLock};
 use serde::{Deserialize, Serialize};
 
 use crate::acp::ACP_PROVIDER;
-use crate::compaction::CompactionPrompts;
+use crate::compaction::{CompactionCall, CompactionPrompts};
 use crate::context::file_timestamp;
+use crate::fit::{fit, FitStep};
 use crate::message::{now_millis, Message, StopReason};
 use crate::permissions::Mode;
 use crate::provider::ThinkingLevel;
@@ -90,6 +91,34 @@ pub enum EntryKind {
         summary: String,
         tokens_before: u64,
         keep_last: usize,
+        /// The estimated context right after; absent from older logs.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tokens_after: Option<u64>,
+        /// How the summary call went; absent from older logs.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call: Option<CompactionCall>,
+    },
+    /// A compaction whose summary call was made and refused: the context
+    /// went on as it was. `reply` is the refused text, cut short. Changes
+    /// nothing on the branch; it is there to tell afterwards what happened.
+    CompactionFailed {
+        error: String,
+        tokens_before: u64,
+        call: CompactionCall,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        reply: String,
+    },
+    /// The context was cut down by kinds of content to `budget` characters,
+    /// the recent ones within `keep_tail` kept whole, with no summary: see
+    /// [`crate::fit::fit`], which replays it from the same inputs. `steps`
+    /// and `tokens_before` record what it did, for judging it afterwards.
+    Fitted {
+        budget: usize,
+        keep_tail: usize,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        steps: Vec<(FitStep, usize)>,
+        #[serde(default)]
+        tokens_before: u64,
     },
     /// A name the user gave this conversation. The last one on the branch
     /// wins, so renaming is just another entry.
@@ -752,7 +781,8 @@ impl Session {
                 | EntryKind::AgentOption { .. }
                 | EntryKind::RunStart
                 | EntryKind::RunEnd { .. }
-                | EntryKind::Autorun { .. } => {}
+                | EntryKind::Autorun { .. }
+                | EntryKind::CompactionFailed { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
                 } => {
@@ -762,6 +792,9 @@ impl Session {
                     messages.extend(tail);
                 }
                 EntryKind::Pruned => messages = prune_to_decisions(&messages),
+                EntryKind::Fitted {
+                    budget, keep_tail, ..
+                } => messages = fit(&messages, *budget, *keep_tail).messages,
             }
         }
         messages
@@ -794,7 +827,8 @@ impl Session {
                 | EntryKind::AgentOption { .. }
                 | EntryKind::RunStart
                 | EntryKind::RunEnd { .. }
-                | EntryKind::Autorun { .. } => {}
+                | EntryKind::Autorun { .. }
+                | EntryKind::CompactionFailed { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
                 } => {
@@ -806,6 +840,34 @@ impl Session {
                         timing: None,
                     }];
                     messages.extend(tail);
+                }
+                EntryKind::Fitted {
+                    budget, keep_tail, ..
+                } => {
+                    let plain: Vec<Message> = messages
+                        .iter()
+                        .map(|logged| logged.message.clone())
+                        .collect();
+                    let fitted = fit(&plain, *budget, *keep_tail);
+                    // The note on what was left out takes the time of the
+                    // first message it stands for.
+                    let first = messages.first().map_or(entry.timestamp, |l| l.timestamp);
+                    messages = fitted
+                        .messages
+                        .into_iter()
+                        .zip(fitted.origin)
+                        .map(|(message, origin)| match origin {
+                            Some(index) => LoggedMessage {
+                                message,
+                                ..messages[index].clone()
+                            },
+                            None => LoggedMessage {
+                                message,
+                                timestamp: first,
+                                timing: None,
+                            },
+                        })
+                        .collect();
                 }
                 EntryKind::Pruned => {
                     messages = prune_by(&messages, |logged| &logged.message)
@@ -849,10 +911,60 @@ impl Session {
         tokens_before: u64,
         keep_last: usize,
     ) -> std::io::Result<String> {
+        self.append_compaction_with(summary, tokens_before, keep_last, None, None)
+    }
+
+    /// [`Session::append_compaction`] with the context size after it and
+    /// how the summary call went.
+    pub fn append_compaction_with(
+        &mut self,
+        summary: &str,
+        tokens_before: u64,
+        keep_last: usize,
+        tokens_after: Option<u64>,
+        call: Option<CompactionCall>,
+    ) -> std::io::Result<String> {
         self.append(EntryKind::Compaction {
             summary: summary.to_string(),
             tokens_before,
             keep_last,
+            tokens_after,
+            call,
+        })
+    }
+
+    /// Record that the context was cut down by kinds of content to
+    /// `budget` characters, keeping `keep_tail` whole, see
+    /// [`EntryKind::Fitted`].
+    pub fn append_fitted(
+        &mut self,
+        budget: usize,
+        keep_tail: usize,
+        steps: Vec<(FitStep, usize)>,
+        tokens_before: u64,
+    ) -> std::io::Result<String> {
+        self.append(EntryKind::Fitted {
+            budget,
+            keep_tail,
+            steps,
+            tokens_before,
+        })
+    }
+
+    /// Record a summary call that was made and refused, with the text it
+    /// was refused for; the context is unchanged by it.
+    pub fn append_compaction_failed(
+        &mut self,
+        error: &str,
+        tokens_before: u64,
+        call: CompactionCall,
+        reply: &str,
+    ) -> std::io::Result<String> {
+        self.append(EntryKind::CompactionFailed {
+            error: error.to_string(),
+            tokens_before,
+            call,
+            reply: reply.to_string(),
         })
     }
 
@@ -892,7 +1004,9 @@ impl Session {
                 | EntryKind::AgentOption { .. }
                 | EntryKind::RunStart
                 | EntryKind::RunEnd { .. }
-                | EntryKind::Autorun { .. } => None,
+                | EntryKind::Autorun { .. }
+                | EntryKind::CompactionFailed { .. }
+                | EntryKind::Fitted { .. } => None,
             })
     }
 
@@ -1004,6 +1118,7 @@ impl Session {
                 }
                 EntryKind::Rewind
                 | EntryKind::Compaction { .. }
+                | EntryKind::Fitted { .. }
                 | EntryKind::Pruned
                 | EntryKind::AgentChange { .. }
                 | EntryKind::ConnectionChange { .. } => return None,
@@ -1023,7 +1138,8 @@ impl Session {
                 | EntryKind::AgentOption { .. }
                 | EntryKind::RunStart
                 | EntryKind::RunEnd { .. }
-                | EntryKind::Autorun { .. } => {}
+                | EntryKind::Autorun { .. }
+                | EntryKind::CompactionFailed { .. } => {}
             }
         }
         None
@@ -1263,7 +1379,9 @@ impl From<&Session> for SessionSummary {
             | EntryKind::AgentOption { .. }
             | EntryKind::RunStart
             | EntryKind::RunEnd { .. }
-            | EntryKind::Autorun { .. } => None,
+            | EntryKind::Autorun { .. }
+            | EntryKind::CompactionFailed { .. }
+            | EntryKind::Fitted { .. } => None,
         });
         let first_prompt = messages.clone().find_map(|m| match m {
             Message::User(user) => Some(user.plain_text()),
@@ -1690,6 +1808,106 @@ mod tests {
         let headerless = dir.path().join("bad.jsonl");
         std::fs::write(&headerless, "{\"id\":\"x\",\"parent_id\":null,\"timestamp\":1,\"type\":\"model_change\",\"provider\":\"p\",\"model\":\"m\"}\n").unwrap();
         assert!(Session::open(&headerless).is_err());
+    }
+
+    #[test]
+    fn a_compactions_details_are_optional_and_a_refused_call_changes_nothing() {
+        // A line written before the details existed still reads.
+        let old: EntryKind = serde_json::from_str(
+            r#"{"type":"compaction","summary":"s","tokens_before":5,"keep_last":1}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            old,
+            EntryKind::Compaction {
+                summary: "s".into(),
+                tokens_before: 5,
+                keep_last: 1,
+                tokens_after: None,
+                call: None,
+            }
+        );
+        // Without details it is written as before.
+        assert_eq!(
+            serde_json::to_string(&old).unwrap(),
+            r#"{"type":"compaction","summary":"s","tokens_before":5,"keep_last":1}"#
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
+        session.append_external_session("claude", "s1").unwrap();
+        session
+            .append_message(&Message::User(UserMessage::text("one")))
+            .unwrap();
+        session.append_message(&agent_reply("answer")).unwrap();
+        let before = session.context_messages();
+        let call = CompactionCall {
+            reason: crate::compaction::CompactionReason::Threshold,
+            stop_reason: StopReason::ToolUse,
+            duration_ms: 198_000,
+            usage: crate::message::Usage::default(),
+            thinking_chars: 0,
+            tool_calls: vec!["bash".into()],
+            input_cut: Vec::new(),
+        };
+        session
+            .append_compaction_failed("degenerate", 247_861, call.clone(), "Looking:")
+            .unwrap();
+        let path = session.path().to_path_buf();
+        drop(session);
+        let session = Session::open(&path).unwrap();
+        assert_eq!(session.context_messages(), before);
+        assert!(session.external_session().is_some());
+        assert!(session.branch().iter().any(|e| e.kind
+            == EntryKind::CompactionFailed {
+                error: "degenerate".into(),
+                tokens_before: 247_861,
+                call: call.clone(),
+                reply: "Looking:".into(),
+            }));
+    }
+
+    #[test]
+    fn a_fitted_entry_replays_the_cut_on_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
+        session.append_external_session("claude", "s1").unwrap();
+        for i in 0..10 {
+            session
+                .append_message(&Message::User(UserMessage::text(format!(
+                    "request {i} {}",
+                    "x".repeat(100)
+                ))))
+                .unwrap();
+            session
+                .append_message(&agent_reply(&format!("answer {i}")))
+                .unwrap();
+        }
+        let whole = session.context_messages();
+        let expected = crate::fit::fit(&whole, 600, 50);
+        assert!(expected.changed());
+        session
+            .append_fitted(600, 50, expected.steps.clone(), 1_000)
+            .unwrap();
+        let path = session.path().to_path_buf();
+        drop(session);
+        let session = Session::open(&path).unwrap();
+        assert_eq!(session.context_messages(), expected.messages);
+        // The external agent's session holds what was there before.
+        assert_eq!(session.external_session(), None);
+        let timed = session.context_messages_with_times(&CompactionPrompts::default());
+        let plain: Vec<Message> = timed.iter().map(|l| l.message.clone()).collect();
+        assert_eq!(plain, expected.messages);
+        // The note takes the time of the first message; the rest keep theirs.
+        let all = Session::open(&path).unwrap();
+        let first = all
+            .branch()
+            .into_iter()
+            .find(|e| matches!(e.kind, EntryKind::Message { .. }))
+            .unwrap()
+            .timestamp;
+        assert_eq!(timed[0].timestamp, first);
+        assert!(timed.windows(2).all(|w| w[0].timestamp <= w[1].timestamp));
     }
 
     #[test]

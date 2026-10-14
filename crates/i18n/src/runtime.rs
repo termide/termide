@@ -1405,6 +1405,16 @@ impl Translation for RuntimeTranslation {
         )
     }
 
+    fn agent_notice_fitted_fmt(&self, before: u64, after: u64) -> String {
+        self.format(
+            "agent_notice_fitted_fmt",
+            &[
+                ("before", &before.to_string()),
+                ("after", &after.to_string()),
+            ],
+        )
+    }
+
     fn agent_notice_handoff_written_fmt(&self, path: &str) -> String {
         self.format("agent_notice_handoff_written_fmt", &[("path", path)])
     }

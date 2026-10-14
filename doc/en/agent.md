@@ -1574,11 +1574,22 @@ does), and the agent knows the whole conversation, its tool calls included.
 When it cannot — the agent offers neither or has lost the session, the
 session was forked, moved to another directory, compacted or rewound since,
 or it began with another agent — the agent opens a new session and its first
-request is preceded by a recap of the conversation: the requests, the
-questions asked with their answers, the skills loaded and the answers that
-ended each run, word for word, the newest kept when the history is long. File
-contents and command output are left out of the recap, so the agent re-reads
-what it needs. The recap is not written to the log.
+request is preceded by the conversation. When the agent's context window is
+known, it gets the whole conversation as a record — the requests, the
+answers, the reasoning, the tool calls and their output — within half that
+window, cut down as far as needed in this order: the reasoning, then the
+output of calls that only read (the call brings it back), then the output of
+other commands down to its start and end, then long call arguments such as a
+file's content, then the exploration of the oldest part down to its
+decisions, then the oldest messages; the latest messages and your requests
+are kept whole. The window is the one the agent reported last for that
+model, remembered across runs in `ai/acp-windows.json` of the configuration
+level; before Claude Code has reported one, it is told from the model's
+name (200 K tokens, or 1 M for a model with `1m` in its name). When the
+window is not known, the agent gets a recap of the decisions only: the
+requests, the questions asked with their answers, the skills loaded and the
+answers that ended each run, word for word, the newest kept when the history
+is long. Neither is written to the log.
 
 ### The system prompt
 
@@ -1672,6 +1683,15 @@ enabled = true              # compact automatically near the window
 reserve_tokens = 16384      # start when the context passes the window minus this
 keep_recent_tokens = 4096   # recent messages kept verbatim (at most a quarter of the window)
 ```
+
+What is summarised has to fit the window itself: a history already past it
+is cut down for the summarising call the way a conversation is for an agent
+that joins it (see [External agents](#external-agents)), its latest part
+kept whole. A summary the model does not give — the call fails, the reply is
+next to empty, or the model calls a tool instead of summarising — leaves the
+context to be cut down the same way to half the window, with no model call,
+the recent messages within `keep_recent_tokens` kept whole; the session log
+records it, so a reopened session comes back the same.
 
 [Plan mode](#plan-mode) uses `plan.md`: its body is appended to the system
 prompt while the mode is on, and `request:` in its front matter is the

@@ -790,7 +790,39 @@ prompt. The summary message ends with an instruction to continue the task. An
 overflow error from the provider triggers one compaction and one retry. The transcript becomes `[summary user message] +
 tail`; the session log records a `compaction` entry with `keep_last`, so
 reopening rebuilds the same context. Re-reading touched files is left to the
-model.
+model. The entry also keeps the estimated size after and how the summary call
+went (`CompactionCall`: reason, stop reason, duration, usage, reasoning
+characters, tools called); a call that was made and refused leaves a
+`compaction_failed` entry with the same details and the refused text (4 K
+characters at most), which changes nothing on the branch. Both are there for
+judging a compaction afterwards, since the app log is gone within a day. An
+external agent's usage is what its whole turn spent, cache reads included,
+not a context size, so the threshold check and the context bar leave it out:
+the check estimates its messages, the bar takes the agent's `usage_update`.
+
+Fitting without a summary (`crates/agent-core/src/fit.rs`): a summary can
+fail in ways a length check does not catch — a live session got a line of
+narration for one, the model going on with the work. `fit` cuts a history to
+a character budget by kinds, in order of how cheaply each is lost:
+reasoning; the output of read-only calls (`is_read_only_call`), stubbed with
+its length; other output, cut to its first and last 600 characters; long
+string arguments; the exploration of the oldest part down to its decisions
+(`prune_by` over the shortest prefix that suffices, found by bisection, so
+a long history is not reduced wholesale); the oldest messages, with a note.
+Steps 1–4 run on the part before the kept tail first and on the tail only if
+that is not enough; question and skill calls and the user's messages are
+never shortened; calls keep their results. Budgets are in characters at 2.5
+a token (`chars_for_tokens`), measured at 2.65 on a code-heavy Russian
+session, so they err small. It serves three places: the summarising call's
+input, cut to the window less the reserve (what was cut goes into
+`CompactionCall::input_cut`); the fallback when a summary is refused —
+which now includes a reply that calls a tool — cutting the context to half
+the window and logging a `fitted` entry whose `budget` and `keep_tail` let
+`context_messages` replay it (`Fitted::origin` maps each message back for
+the timestamps; the note takes the first left-out message's time, so the
+result is deterministic); and the handover to an external agent above. It
+still rewrites old messages, so a provider's prompt cache is lost as with
+a summary; it runs where a compaction would, never step by step.
 
 Compaction prompts as files: no other agent lets the user edit the summary
 prompt — Claude Code and Codex build it in and take a focus from `/compact`,
@@ -1127,10 +1159,22 @@ what that session holds — no rewind, compaction, pruning, agent or connection
 change and no built-in answer since, and the same log in the same place, so a
 fork or a move drops it. The backend takes it up with `session/resume`, else
 `session/load` (its replay dropped, since the panel shows the log already);
-otherwise it opens a new session and sends a recap
-(`recap::recap`, the `prune_to_decisions` cut rendered as tagged text, newest
-kept within `RECAP_LIMIT`) as a text block before the first prompt, outside
-the log. Still hand-written JSON-RPC rather than the `agent-client-protocol`
+otherwise it opens a new session and, as a text block before the first
+prompt and outside the log, tells it the conversation. That text is made when
+the prompt goes, not at the handshake, so the model the panel applies is the
+one sized for. With the agent's window known, it is the whole conversation
+as a tagged record (`recap::handoff`) cut down by `fit::fit` to half the
+window: a large first prompt is a fair price for a handover the agent does
+not have to rebuild with `recall` and re-reads, while the other half is
+left for the work so the agent does not compact at once. Without one, it is
+the decisions-only recap (`recap::recap`, the `prune_to_decisions` cut,
+newest kept within `RECAP_LIMIT`). An agent reports its window only in
+`usage_update`, after a turn — Claude Code's adapter knows it from the start
+but does not say — so each reported `size` is kept per adapter and model in
+`<config>/ai/acp-windows.json` (`windows.rs`; the application names the
+file at start) and read next time; failing that, Claude Code's window is
+told from the model's id and label the way its adapter does (`1m` in them is
+1 M tokens, else 200 K). The user's `context_window_limit` caps it. Still hand-written JSON-RPC rather than the `agent-client-protocol`
 crate: the surface used is small, and the crate would bring tokio.
 
 ## 8. Provider

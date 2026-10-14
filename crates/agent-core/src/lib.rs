@@ -28,6 +28,7 @@ pub mod commands;
 pub mod compaction;
 pub mod context;
 pub mod failure;
+pub mod fit;
 pub mod goal;
 pub mod handoff;
 pub mod hooks;
@@ -66,12 +67,13 @@ pub use classifier::{
     ModelClassifier, ReviewerSetup, SessionView, SpentMeter, Verdict, SEED_CLASSIFY,
 };
 pub use commands::{CommandScript, COMMANDS_DIR};
-pub use compaction::{CompactionPolicy, CompactionPrompts, CompactionReason};
+pub use compaction::{CompactionCall, CompactionPolicy, CompactionPrompts, CompactionReason};
 pub use context::{
     build_system_prompt, civil_date, discover_context_files, ContextFile, PromptOptions,
     SEED_TEMPLATE,
 };
 pub use failure::{parse_reset, Failure, FailureKind, LimitPolicy};
+pub use fit::{chars_for_tokens, fit, FitStep, Fitted};
 pub use goal::{parse_verdict, GoalOutcome, GoalPrompt, GoalVerdict, SEED_GOAL};
 pub use handoff::{HandoffPrompt, SEED_HANDOFF};
 pub use hooks::{HookConfig, HookEvent, HOOKS_FILE};
@@ -103,7 +105,7 @@ pub use provider::{
 };
 pub use prune::{prune_by, prune_to_decisions};
 pub use recall::{RecallPrompt, SEED_RECALL};
-pub use recap::{recap, RECAP_LIMIT};
+pub use recap::{handoff, recap, RECAP_LIMIT};
 pub use refusals::{Refusals, SEED_PERMISSIONS};
 pub use runtime::{
     AgentCommand, AgentRuntime, Backend, BackendModel, BackendOption, BackendSetup, HostTools,

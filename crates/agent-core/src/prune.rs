@@ -17,7 +17,7 @@ use crate::message::{AssistantContent, AssistantMessage, Message, Usage};
 
 /// Tools whose calls and results survive the pruning: a question records a
 /// decision, a skill the instructions the work follows.
-const KEPT_TOOLS: [&str; 2] = ["question", "skill"];
+pub(crate) const KEPT_TOOLS: [&str; 2] = ["question", "skill"];
 
 /// `messages` with the exploration left out. Every call kept keeps its
 /// result and every result kept its call, so the history stays valid for
