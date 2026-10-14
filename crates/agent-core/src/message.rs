@@ -93,6 +93,9 @@ impl Usage {
 /// tokens its own model calls spent: a subagent's run.
 const SPENT_KEY: &str = "usage";
 
+/// Where a delegated task's result notes the log of the delegate's session.
+pub const SUBAGENT_SESSION_KEY: &str = "subagent_session";
+
 /// A block inside a user message.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]

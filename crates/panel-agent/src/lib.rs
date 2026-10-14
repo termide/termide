@@ -6,6 +6,7 @@
 //! [`Transcript`] from `tick()`, so it never blocks the UI thread. Every
 //! transcript change also goes to the JSONL [`Session`] when one is attached.
 
+mod delegation;
 mod events;
 mod export;
 mod failure;
@@ -61,6 +62,7 @@ use crate::runtime::{
 use crate::session_ops::discard_if_empty;
 use crate::toolset::{served_skills, Blocked, TOOLSET_ACTION};
 
+pub use delegation::{DelegateEnd, DelegateUpdate, Delegation};
 pub use runtime::local_minute;
 pub use transcript::{FoldMode, Item, NoticeKind, Transcript};
 
@@ -923,6 +925,8 @@ pub struct AgentPanel {
     /// first, shown in the state strip until the agent takes them. Kept in
     /// step with the runtime's steering count (`QueueUpdate`).
     queued_texts: VecDeque<String>,
+    /// The task another agent delegated to this panel, while it runs.
+    delegation: Option<Delegation>,
     queued: (usize, usize),
     /// Tokens of the last reported context, for the status chip.
     context_tokens: u64,
@@ -1195,6 +1199,7 @@ impl AgentPanel {
             autorun_stops: Vec::new(),
             run_buttons: Vec::new(),
             queued_texts: VecDeque::new(),
+            delegation: None,
             queued: (0, 0),
             context_tokens: 0,
             activity: None,
@@ -1476,6 +1481,16 @@ impl Panel for AgentPanel {
     }
 
     fn handle_status_action(&mut self, action: &str) -> Vec<PanelEvent> {
+        // While another agent's task runs here, the session, its agent, model
+        // and mode are that agent's: only what reads them is offered.
+        if self.is_delegate()
+            && !matches!(
+                action,
+                SAVE_CHAT_ACTION | SHOW_PROMPT_ACTION | SESSION_INFO_ACTION
+            )
+        {
+            return Vec::new();
+        }
         let t = termide_i18n::t();
         match action {
             RENAME_ACTION => vec![PanelEvent::ShowInput {
@@ -1657,6 +1672,16 @@ impl Panel for AgentPanel {
     }
 
     fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
+        // A paste would type into an input that takes nothing while another
+        // agent's task runs here.
+        if self.is_delegate()
+            && matches!(
+                cmd,
+                PanelCommand::Paste | PanelCommand::PasteText { .. } | PanelCommand::Cut
+            )
+        {
+            return CommandResult::Handled(false);
+        }
         match cmd {
             PanelCommand::Paste if !self.chat_focus => match self.paste_clipboard() {
                 true => {

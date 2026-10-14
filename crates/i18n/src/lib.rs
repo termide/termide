@@ -864,6 +864,8 @@ pub trait Translation: Send + Sync {
     /// Agent panel state strip: a failed request waiting to be tried again.
     fn agent_state_retry_at_fmt(&self, reason: &str, time: &str, left: &str) -> String;
     fn agent_notice_cannot_start_fmt(&self, error: &str) -> String;
+    fn agent_input_placeholder_delegate_fmt(&self, agent: &str, task: &str) -> String;
+    fn agent_notice_taken_over_fmt(&self, agent: &str) -> String;
     fn agent_notice_cannot_check_goal_fmt(&self, error: &str) -> String;
     fn agent_notice_cannot_handoff_fmt(&self, error: &str) -> String;
     fn agent_notice_cannot_write_handoff_fmt(&self, error: &str) -> String;
@@ -1103,6 +1105,10 @@ pub trait Translation: Send + Sync {
     fn settings_agent_on_limit_ask(&self) -> &str;
     fn settings_agent_on_limit_wait(&self) -> &str;
     fn settings_agent_on_limit_stop(&self) -> &str;
+    fn settings_agent_subagent_run(&self) -> &str;
+    fn settings_agent_subagent_run_hidden(&self) -> &str;
+    fn settings_agent_subagent_run_existing_panel(&self) -> &str;
+    fn settings_agent_subagent_run_panel(&self) -> &str;
     /// Settings modal: AI tab, web tools field labels.
     fn settings_web_backend(&self) -> &str;
     /// AI menu: the row that shows or hides the agents' web browser window.

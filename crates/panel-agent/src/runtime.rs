@@ -379,7 +379,7 @@ pub(crate) fn push_history(transcript: &mut Transcript, logged: &LoggedMessage) 
                     Item::User {
                         text: user.plain_text(),
                         at,
-                        command: user.command.clone(),
+                        command: transcript::user_headline(user),
                     }
                 });
             transcript.push(item);

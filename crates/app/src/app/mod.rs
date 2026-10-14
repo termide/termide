@@ -1090,6 +1090,8 @@ impl App {
                     log::error!("Error processing panel events: {}", e);
                 }
             }
+            // Delegated tasks waiting for an agent panel.
+            self.serve_delegations();
             self.tick_parked_projects();
             self.vault_tick();
         } else {

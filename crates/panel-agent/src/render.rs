@@ -920,12 +920,28 @@ impl AgentPanel {
         } else {
             ("", None, t.agent_input_placeholder())
         };
+        // A task another agent runs here: the input takes nothing and says
+        // whose it is, and how to stop it or take it over.
+        let (label, prompt_style, placeholder) = match self.delegate_placeholder() {
+            Some(text) => (
+                "& ",
+                Some(
+                    Style::default()
+                        .fg(colors.info)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                text,
+            ),
+            None => (label, prompt_style, placeholder.to_string()),
+        };
         self.input.set_label(0, label);
         self.input.set_prompt_style(prompt_style);
-        self.input.set_placeholder(Some(placeholder.to_string()));
+        self.input.set_placeholder(Some(placeholder));
         // The bar's top border is the divider from the content above and
         // brightens while the input is focused; the agent's name lives in the
-        // panel title, not here.
+        // panel title, not here. An input that takes nothing — another
+        // agent's task runs here — shows no cursor, and its placeholder.
+        let focused = focused && !self.is_delegate();
         self.input.render(area, buf, &colors, focused);
     }
 

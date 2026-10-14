@@ -784,6 +784,11 @@ pub enum PanelEvent {
     /// runs on.
     ForkAgentSession { session: PathBuf, cwd: PathBuf },
 
+    /// Open the agent session logged at the path: the panel already showing
+    /// it comes to the front, else a new agent panel opens on it. Emitted by
+    /// the agent panel for a delegated task's session.
+    OpenAgentSession(PathBuf),
+
     /// Let the user pick another working directory for a fresh agent panel
     /// working in `cwd`, on the session log at `session`. On a pick the app
     /// moves the log to the new directory's sessions and reopens the panel

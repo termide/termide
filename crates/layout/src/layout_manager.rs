@@ -80,6 +80,25 @@ impl LayoutManager {
         group.replace_panel(idx, panel)
     }
 
+    /// Put `panel` in place of the one at `position` in the order of
+    /// [`iter_all_panels_mut`](Self::iter_all_panels_mut), keeping the
+    /// layout and the focus; the panel it replaces comes back. `None` when
+    /// there is no panel there.
+    pub fn replace_panel_at(
+        &mut self,
+        position: usize,
+        panel: Box<dyn Panel>,
+    ) -> Option<Box<dyn Panel>> {
+        let mut before = 0;
+        for group in &mut self.panel_groups {
+            if position < before + group.len() {
+                return group.replace_panel(position - before, panel);
+            }
+            before += group.len();
+        }
+        None
+    }
+
     /// Find panel by name, expand it in its group, return mutable reference.
     /// Does NOT change focus. Used for reusing existing panels.
     pub fn find_and_expand_panel_by_name(&mut self, name: &str) -> Option<&mut Box<dyn Panel>> {
@@ -431,6 +450,29 @@ mod tests {
 
     fn panel(name: &'static str) -> Box<dyn Panel> {
         Box::new(MockPanel::new(name))
+    }
+
+    #[test]
+    fn a_panel_is_replaced_where_it_stands_across_groups() {
+        let mut lm = LayoutManager::new();
+        let config = make_config(80);
+        for name in ["a", "b", "c"] {
+            lm.add_panel(panel(name), &config, 200);
+        }
+        let focus = lm.active_panel_position();
+        let names = |lm: &mut LayoutManager| {
+            lm.iter_all_panels_mut()
+                .map(|p| p.name())
+                .collect::<Vec<_>>()
+        };
+        let before = names(&mut lm);
+        let old = lm.replace_panel_at(1, panel("x")).unwrap();
+        assert_eq!(old.name(), before[1]);
+        let mut after = before.clone();
+        after[1] = "x";
+        assert_eq!(names(&mut lm), after);
+        assert_eq!(lm.active_panel_position(), focus);
+        assert!(lm.replace_panel_at(3, panel("y")).is_none());
     }
 
     #[test]

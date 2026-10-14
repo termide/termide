@@ -15,15 +15,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use termide_agent_core::ToolText;
 use termide_agent_core::{
     CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate, Usage,
 };
+use termide_agent_core::{ToolText, SUBAGENT_SESSION_KEY};
 
 use crate::args::required_str;
-
-/// Where a [`TaskTool`] result notes the log of the subagent's session.
-pub const SUBAGENT_SESSION_KEY: &str = "subagent_session";
 
 /// How a subagent's run ended: its final answer, or an error message, the
 /// tokens its model calls spent either way, and the log its session went to,

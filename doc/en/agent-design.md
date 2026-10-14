@@ -173,9 +173,35 @@ Code copy alike, a stopped run's included. The task goes in as a
 `MessageOrigin` of kind `task` from the delegating agent, whose name the
 `task` tool's closure carries (`SubagentTask`). The result's details name the
 log (`subagent_session`); `display_label` marks a delegate's session `&`.
-Not yet: the link from the `task` block, which needs a panel opened from the
-app as step 4 does, and a transcript that tells an agent's message from the
-user's.
+`o` on a `task` block opens that log through `PanelEvent::OpenAgentSession`,
+and a user block from another agent heads with `& <agent> · <kind>`, its text
+folded under it.
+
+Done of the panels: `SubagentPlace` (`hidden`, `existing_panel`, `panel`) in
+`[ai] subagent_run`, on the settings' AI tab and in `AGENT.md`; `ask` is not
+done yet. The `task` call (`agent_panel/in_panel.rs`) sends a
+`PanelDelegation` down a process-wide channel and waits up to ten seconds
+for the app's answer; only an app that serves the channel answers, so a
+headless run and the tests run hidden. On its tick the app takes the first
+agent panel that `takes_delegate` (banner, empty input, nothing running or
+asked) and is not the focused one, else for `panel` opens one with
+`add_panel_without_focus`. Rather than switching a free panel's agent,
+connection, cwd and mode one by one, each with its side effects, the app
+rebuilds it in place (`LayoutManager::replace_panel_at`) on a
+`Session::create_delegate` log that already names the connection, agent and
+mode — the panel is empty, nothing is lost, and the dropped one discards its
+empty log. The panel (`panel-agent/src/delegation.rs`) forwards every agent
+event to the waiting call, which shows them through the same
+`SubagentReport` as a hidden run, and ends the task (`DelegateEnd`) once
+nothing runs, is paused, waits to retry or holds a card; then it goes back to
+the banner on a fresh session. Its input, pastes, session keys and status
+actions take nothing while the task runs; `Esc` stops it, `Ctrl+T` takes it
+over, closing the panel ends it. A stop by the user or a take-over returns
+what the delegate said with a note; the parent's stop cancels the panel's
+run. External agents may be delegates in a panel; hidden, they are still
+refused. Not done: the reviewer of a delegate panel in `auto` sees the task
+alone, not the parent's user messages (the panel's runtime is built before
+the task arrives), and a task from a parked project's panel runs hidden.
 
 Not planned: automatic isolation. Two agents in one tree may edit the same
 file; rather than guessing when to isolate or how to merge, the first step

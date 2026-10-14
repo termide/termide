@@ -39,6 +39,7 @@ use termide_panel_agent::{
 use super::App;
 
 mod headless;
+mod in_panel;
 pub use headless::{run_agent_headless, run_recall, HeadlessOutput};
 
 impl App {
@@ -1364,6 +1365,21 @@ impl SubagentReport {
             session: None,
         }
     }
+
+    /// The delegating call's result when the user ended the task in its
+    /// panel: what the delegate said so far with `why`, else `why` as the
+    /// error.
+    fn ended_by_user(self, why: &str) -> SubagentOutcome {
+        let answer = match self.answer {
+            Some(text) => Ok(format!("{text}\n\n({why})")),
+            None => Err(why.to_string()),
+        };
+        SubagentOutcome {
+            answer,
+            spent: self.spent,
+            session: None,
+        }
+    }
 }
 
 /// The log of a delegated task's session, written as the task runs, so what
@@ -1480,11 +1496,6 @@ impl Subagents {
     ) -> Result<SubagentOutcome, String> {
         let name = task.agent;
         let definition = self.dirs.agent(name);
-        if definition.spec.acp.is_some() {
-            return Err(format!(
-                "{name} is an external agent and cannot be run as a subagent"
-            ));
-        }
         let (tools, skills, system_prompt) = self.toolset(name, &definition);
         let max_turns = definition.spec.max_turns.unwrap_or(SUBAGENT_MAX_TURNS);
 
@@ -1536,6 +1547,42 @@ impl Subagents {
             agent: caller.to_string(),
             call: task.call.to_string(),
         };
+
+        // In a panel, when the settings say so and one takes the task: the
+        // user watches it there and answers what it asks, so an external
+        // agent can be a delegate too.
+        let place = definition
+            .spec
+            .subagent_run
+            .unwrap_or(settings.subagent_run);
+        if place.in_panel() {
+            let connection = match &target {
+                SubagentTarget::Session => active.connection.clone(),
+                SubagentTarget::Model(name, _) | SubagentTarget::Cli(name, _) => name.clone(),
+            };
+            let request = in_panel::PanelDelegation {
+                place,
+                project_root: self.project_root.clone(),
+                cwd: self.cwd.clone(),
+                agent: name.to_string(),
+                connection,
+                mode: rules.mode,
+                lineage: lineage.clone(),
+                message: message.clone(),
+                cancel: CancelToken::new(),
+            };
+            if let Some(outcome) =
+                in_panel::run_in_panel(request, &self.cwd, max_turns, cancel, on_update)
+            {
+                return Ok(outcome);
+            }
+        }
+        // Out of sight an external agent has no one to answer what it asks.
+        if definition.spec.acp.is_some() {
+            return Err(format!(
+                "{name} is an external agent, which runs as a subagent only in a panel"
+            ));
+        }
 
         let (provider, requested, context_window, connection_name, kind) = match target {
             SubagentTarget::Cli(connection_name, connection) => {

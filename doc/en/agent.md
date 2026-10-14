@@ -24,6 +24,7 @@ reasoning = "high"                 # default; off | minimal | low | medium | hig
 fold_blocks = "immediately"        # immediately (default) | on-finish | never
 bell_on_attention = true           # default; ring the bell when a panel out of sight waits for you
 on_limit = "ask"                   # default; ask | wait | stop — see "When a run fails"
+subagent_run = "hidden"            # default; hidden | existing_panel | panel — see "Subagents"
 
 [ai.connections.local]
 provider = "openai_compatible"     # openai_compatible (default), anthropic_compatible, claude_code, codex, gemini_cli
@@ -389,6 +390,7 @@ you have named or sent even one message to is always kept.
 | `Shift+Tab` | Cycle the permission mode: ask → plan → edit → configured → auto → all |
 | `F2` | Rename this session (the same prompt as the `[≡]` menu); in the banner's list of sessions, rename the one under the cursor |
 | `Ctrl+S` | Save the chat as a Markdown file (your messages and the agent's answers under who and when, each day under its own heading); also the `[≡]` menu |
+| `Ctrl+T` | In a panel running another agent's task, take the task over (see [Subagents](#subagents)) |
 | `F3` | Open the session-info modal (model, agent, mode, directory, created/last-active times, messages, compactions, tokens, context, how much shell output was cleaned); also `/usage` and the `[≡]` menu |
 | `F4` | Pick a message to rewind the session to, as `Esc` does in the idle empty prompt |
 | `F5` | Fork this session (after a confirmation): its log is copied and the copy opens in a new agent panel, while this one goes on working at its own |
@@ -1453,7 +1455,8 @@ YAML list of `- name` lines under `tools:`),
 none. Skills and MCP servers' tools are not governed by
 it: they come with what you configured. `max_turns` is how many model calls
 a task delegated to the agent may take before it is cut off (fifty when
-absent; see [Subagents](#subagents)). `icon` is what the panel's header,
+absent; see [Subagents](#subagents)), and `subagent_run` where such a task
+runs — `hidden`, `existing_panel` or `panel`, over the `[ai]` setting. `icon` is what the panel's header,
 the agent picker and the agents menu show in place of 🤖 (with emoji icons
 on). Only its first character is kept, an emoji sequence counting as one, and
 invisible marks a copy may bring along — a zero-width space, a byte order
@@ -1483,7 +1486,8 @@ everything into the prompt. It runs in the session's current mode, unless its
 agent only reads), with no one to prompt, so it can only do what the
 rules and that mode already allow: anything that would otherwise ask is
 refused with a reason it reads. In `auto` the reviewer decides those calls
-instead. External agents (those with a `command`) cannot be delegates, and a
+instead. External agents (those with a `command`) can be delegates only in a
+panel (below), and a
 subagent gets no `task` tool of its own, so delegation does not nest. An agent whose `tools` list leaves out `task`
 cannot delegate. Besides its own tools, a delegate gets those of the MCP
 servers connected when its task starts — like the panel's agent, whatever
@@ -1501,7 +1505,30 @@ when it ends or is stopped: the task, what the delegate said and the tools it
 called. It is listed with the other sessions, marked `&` (`& find the config
 loader`), so you can open it to see how the delegate got its answer or go on
 talking to it, and `recall` finds what it did. While the task runs, its
-session is not offered.
+session is not offered. `o` on a `task` block opens it in a panel.
+
+Where a delegate runs is `subagent_run` under `[ai]` (in the settings,
+**Delegated tasks run**), and a delegate's `AGENT.md` may name its own:
+`hidden` (the default) runs it out of sight as above; `existing_panel` runs
+it in an agent panel already open that still shows its banner, has nothing
+typed and is not the one you are in — else hidden, so a delegation never
+changes your layout; `panel` does the same, but when no panel is free it
+opens a new one beside the others, without taking the focus. In a panel the
+task is an ordinary session of that panel, on the delegate's agent,
+connection and mode: you watch it work, and what it would have to ask is put
+to you on the usual cards instead of being refused — which is why an
+external agent can be a delegate there. The delegating panel's block shows
+its progress as for a hidden one. While the task runs, the panel belongs to
+the delegating agent: the input takes nothing and reads `& Delegate of
+<agent>: <task>`, and the session keys (`F2`, `F4`–`F8`), the chips and the
+menu's session entries do nothing; scrolling, the blocks, copying, `F3`,
+`Ctrl+S`, the cards, pause and stop still work. `Esc` stops the task: the
+delegating agent hears that you stopped it, with what was said so far.
+`Ctrl+T` takes the task over: it ends for the delegating agent with what the
+delegate had said, and the conversation is yours to go on with. Once the
+task is over, the panel goes back to its banner, free for the next one, and
+the task's session stays in the list. Closing the panel ends the task as
+well. Only the panels of the delegating panel's project take its tasks.
 
 A delegate runs on the connection the session's connection names under
 **Subagents** on its settings page (`subagents` in the file), or on the

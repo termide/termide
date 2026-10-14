@@ -209,7 +209,7 @@ impl App {
 
     /// Open a session log: focus the agent panel already showing it, else open
     /// a fresh one, so a session is never duplicated across panels.
-    fn ai_open_session(&mut self, path: PathBuf) -> Result<()> {
+    pub(in crate::app) fn ai_open_session(&mut self, path: PathBuf) -> Result<()> {
         self.state.close_menu();
         // Reuse an open agent panel for this session. `AgentPanel::session_path`
         // is the typed accessor; a localized downcast reads it without adding a

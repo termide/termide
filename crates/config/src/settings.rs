@@ -157,6 +157,13 @@ pub struct AiSettings {
     /// limit's reset (or back off) and try again, or `stop`.
     #[serde(default)]
     pub on_limit: termide_agent_core::LimitPolicy,
+
+    /// Where a task one agent delegates to another runs: `hidden` out of
+    /// sight, `existing_panel` in an empty agent panel already open (else
+    /// hidden), `panel` in one opened when none is free. A delegate's
+    /// `AGENT.md` may name its own.
+    #[serde(default)]
+    pub subagent_run: termide_agent_core::SubagentPlace,
 }
 
 /// One connection to a model: the wire protocol or CLI agent, where it
@@ -582,6 +589,7 @@ impl Default for AiSettings {
             recall: RecallSettings::default(),
             bell_on_attention: agent_defaults::bell_on_attention(),
             on_limit: termide_agent_core::LimitPolicy::default(),
+            subagent_run: termide_agent_core::SubagentPlace::default(),
         }
     }
 }
