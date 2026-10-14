@@ -172,8 +172,7 @@ impl AgentPanel {
             // waits counting from the first try again.
             self.retry_attempts = 0;
             self.retry_ready = true;
-            let error = self.logged_error();
-            self.offer_failure(failure, &error);
+            self.offer_failure(failure);
             return;
         }
         let restored = match mark {
@@ -221,24 +220,6 @@ impl AgentPanel {
                 iterations: repeat.iterations,
             });
         }
-    }
-
-    /// The text of the error the log's last reply failed on, for a failure
-    /// card raised at a reopen; empty when the log holds none.
-    fn logged_error(&self) -> String {
-        self.session
-            .as_ref()
-            .and_then(|session| {
-                session
-                    .context_messages()
-                    .into_iter()
-                    .rev()
-                    .find_map(|message| match message {
-                        Message::Assistant(reply) => reply.error_message,
-                        _ => None,
-                    })
-            })
-            .unwrap_or_default()
     }
 
     /// The calls a cut-off run left without a result may have run in part:

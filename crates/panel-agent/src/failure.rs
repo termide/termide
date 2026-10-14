@@ -1,7 +1,8 @@
 //! What the panel does when a run stops on a failure: try again at once,
 //! wait for a limit's reset (or back off) and try again, restart an
 //! external agent that died, or carry on with another agent — asked on a
-//! card, or done unasked as `[ai] on_limit` says.
+//! card, or done unasked as `[ai] on_limit` says — at once, or once a card
+//! left unanswered runs out of time.
 
 use std::sync::PoisonError;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -12,7 +13,7 @@ use termide_core::PanelEvent;
 use termide_ui::ChoiceForm;
 
 use crate::pending::Pending;
-use crate::{transcript, AgentPanel, NoticeKind, FAILOVER_ACTION};
+use crate::{transcript, AgentPanel, NoticeKind};
 
 /// The state strip's mark for a request waiting to be tried again.
 pub(crate) const WAIT_GLYPH: &str = "↻";
@@ -29,7 +30,9 @@ pub(crate) struct RetryWait {
     pub(crate) restart: bool,
 }
 
-/// A row of the card shown after a failure.
+/// A row of the card shown after a failure. Switching the agent or the
+/// connection is not among them: the status strip does that, and the card is
+/// still up afterwards to be answered with [`RetryNow`](Self::RetryNow).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FailureChoice {
     RetryNow,
@@ -39,8 +42,6 @@ pub(crate) enum FailureChoice {
     Restart,
     /// Compact the context, then try again (the built-in loop).
     Compact,
-    /// Pick another agent and try the request there.
-    SwitchAgent,
 }
 
 pub(crate) fn unix_now() -> u64 {
@@ -87,10 +88,10 @@ fn title(kind: FailureKind) -> String {
 }
 
 impl AgentPanel {
-    /// A run ended on `failure` (`error` its text). Returns whether the
-    /// request is still in hand — a retry, a wait or a card — so a goal or
-    /// loop it belongs to is kept rather than stopped.
-    pub(crate) fn on_run_failed(&mut self, failure: Failure, error: &str) -> bool {
+    /// A run ended on `failure`. Returns whether the request is still in
+    /// hand — a retry, a wait or a card — so a goal or loop it belongs to is
+    /// kept rather than stopped.
+    pub(crate) fn on_run_failed(&mut self, failure: Failure) -> bool {
         // An agent that died is started anew once per request, unasked —
         // from the next tick, once the runtime has let go of the run.
         if failure.kind == FailureKind::AgentDied && self.external && !self.restarted {
@@ -113,14 +114,17 @@ impl AgentPanel {
                 LimitPolicy::Ask | LimitPolicy::AskElseWait => {}
             }
         }
-        self.offer_failure(failure, error);
+        self.offer_failure(failure);
         true
     }
 
-    /// The card after a failure: what happened, and what can be done. Also
-    /// raised at a reopen for a request the log left held; see
-    /// [`crate::unfinished`].
-    pub(crate) fn offer_failure(&mut self, failure: Failure, error: &str) {
+    /// The card after a failure: what can be done about it. The error's own
+    /// text is not repeated here — the failed reply above the card carries
+    /// it, and the title says what stopped the run — so the detail holds
+    /// only what the moment adds: when the limit resets, and when the
+    /// request goes again unanswered. Also raised at a reopen for a request
+    /// the log left held; see [`crate::unfinished`].
+    pub(crate) fn offer_failure(&mut self, failure: Failure) {
         let t = termide_i18n::t();
         let now = unix_now();
         // Unanswered, the card does what a wait would: tries again at the
@@ -132,7 +136,7 @@ impl AgentPanel {
         } else {
             None
         };
-        let (labels, choices, detail) = self.failure_rows(failure, error, now, auto_at);
+        let (labels, choices, detail) = self.failure_rows(failure, now, auto_at);
         self.failure_card_shown = Some(now);
         let form = ChoiceForm::new(title(failure.kind), labels)
             .with_detail(detail)
@@ -141,7 +145,6 @@ impl AgentPanel {
             form,
             choices,
             failure,
-            error: error.trim().to_string(),
             auto_at,
         });
         // The choice is now the user's to make: keep it across a close.
@@ -156,7 +159,6 @@ impl AgentPanel {
     fn failure_rows(
         &self,
         failure: Failure,
-        error: &str,
         now: u64,
         auto_at: Option<u64>,
     ) -> (Vec<String>, Vec<FailureChoice>, String) {
@@ -195,28 +197,31 @@ impl AgentPanel {
                 FailureChoice::Compact,
             ));
         }
-        if self.catalog.list().len() > 1 {
-            rows.push((
-                t.agent_failure_switch_agent().to_string(),
-                FailureChoice::SwitchAgent,
-            ));
-        }
-        let mut detail = error.trim().to_string();
+        let mut detail = String::new();
+        let line = |detail: &mut String, text: &str| {
+            if !detail.is_empty() {
+                detail.push('\n');
+            }
+            detail.push_str(text);
+        };
         if let Some(at) = failure.resets_at {
-            detail.push('\n');
-            detail.push_str(&if ahead.is_some() {
-                t.agent_failure_resets_fmt(&clock(at), &left_until(at))
-            } else {
-                t.agent_failure_reset_passed_fmt(&clock(at))
-            });
+            line(
+                &mut detail,
+                &if ahead.is_some() {
+                    t.agent_failure_resets_fmt(&clock(at), &left_until(at))
+                } else {
+                    t.agent_failure_reset_passed_fmt(&clock(at))
+                },
+            );
         }
         if let Some(at) = auto_at {
-            detail.push('\n');
-            detail.push_str(&t.agent_failure_auto_retry_fmt(&clock(at), &left_until(at)));
+            line(
+                &mut detail,
+                &t.agent_failure_auto_retry_fmt(&clock(at), &left_until(at)),
+            );
         }
         if failure.kind == FailureKind::Auth {
-            detail.push('\n');
-            detail.push_str(t.agent_failure_auth_hint());
+            line(&mut detail, t.agent_failure_auth_hint());
         }
         let (labels, choices): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
         (labels, choices, detail)
@@ -236,17 +241,14 @@ impl AgentPanel {
             return false;
         }
         let Some(Pending::Failure {
-            failure,
-            error,
-            auto_at,
-            ..
+            failure, auto_at, ..
         }) = &self.pending
         else {
             return false;
         };
-        let (failure, error, auto_at) = (*failure, error.clone(), *auto_at);
+        let (failure, auto_at) = (*failure, *auto_at);
         self.failure_card_shown = Some(now);
-        let (labels, fresh, detail) = self.failure_rows(failure, &error, now, auto_at);
+        let (labels, fresh, detail) = self.failure_rows(failure, now, auto_at);
         let Some(Pending::Failure { form, choices, .. }) = &mut self.pending else {
             return false;
         };
@@ -308,13 +310,6 @@ impl AgentPanel {
                         NoticeKind::Warn,
                     ),
                 }
-            }
-            FailureChoice::SwitchAgent => {
-                let mut picker = self.agent_picker();
-                if let PanelEvent::ShowSelect { on_select, .. } = &mut picker {
-                    *on_select = termide_core::SelectAction::Custom(FAILOVER_ACTION.to_string());
-                }
-                return vec![picker, PanelEvent::NeedsRedraw];
             }
         }
         vec![PanelEvent::NeedsRedraw]
@@ -430,19 +425,6 @@ impl AgentPanel {
         self.loop_task = task;
         self.retry_attempts = attempts;
         self.retry_now()
-    }
-
-    /// The agent was switched from the failure card: the request goes to it.
-    pub(crate) fn retry_on_switched_agent(&mut self, name: &str) -> bool {
-        let (goal, task) = (self.goal_task.take(), self.loop_task.take());
-        let switched = self.switch_agent(name);
-        self.goal_task = goal;
-        self.loop_task = task;
-        if switched {
-            self.retry_attempts = 0;
-            self.retry_now();
-        }
-        switched
     }
 
     /// The wait is over: try again, once the panel is free.

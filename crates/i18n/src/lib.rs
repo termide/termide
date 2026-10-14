@@ -814,7 +814,6 @@ pub trait Translation: Send + Sync {
     fn agent_failure_keep_trying(&self) -> &str;
     fn agent_failure_restart(&self) -> &str;
     fn agent_failure_compact(&self) -> &str;
-    fn agent_failure_switch_agent(&self) -> &str;
     fn agent_failure_stop(&self) -> &str;
     fn agent_failure_auth_hint(&self) -> &str;
     fn agent_notice_agent_restarting(&self) -> &str;

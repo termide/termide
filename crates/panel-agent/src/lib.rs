@@ -111,9 +111,6 @@ const SHOW_PROMPT_ACTION: &str = "agent_show_prompt";
 const SESSION_INFO_ACTION: &str = "agent_session_info";
 /// Status chip and context-menu action that opens the agent picker.
 const AGENT_ACTION: &str = "agent_agent";
-/// The agent picker opened from a failure's card: the failed request is
-/// tried again on the agent picked.
-const FAILOVER_ACTION: &str = "agent_failover";
 /// Banner action that picks another working directory for a fresh session.
 const CWD_ACTION: &str = "agent_cwd";
 /// Context-menu action that opens the prompt-template picker.
@@ -842,9 +839,10 @@ pub struct AgentPanel {
     run_start: Option<Instant>,
     /// The current run hit an error or was aborted, so its closing line is `✗`.
     run_failed: bool,
-    /// The failure the current run's last reply reported, with its text,
-    /// for what follows at the run's end.
-    last_failure: Option<(Failure, String)>,
+    /// The failure the current run's last reply reported, for what follows
+    /// at the run's end. Its text needs no keeping: the failed reply itself
+    /// stands in the transcript and the log.
+    last_failure: Option<Failure>,
     /// What to do when a run stops on a limit or an outage.
     on_limit: LimitPolicy,
     /// A failed request waiting to be tried again.
@@ -1740,13 +1738,6 @@ impl Panel for AgentPanel {
                 let choice = self.agent_choices.get(index).cloned();
                 self.agent_choices.clear();
                 CommandResult::Handled(choice.is_some_and(|name| self.switch_agent(&name)))
-            }
-            PanelCommand::SelectionMade { action, index } if action == FAILOVER_ACTION => {
-                let choice = self.agent_choices.get(index).cloned();
-                self.agent_choices.clear();
-                CommandResult::Handled(
-                    choice.is_some_and(|name| self.retry_on_switched_agent(&name)),
-                )
             }
             PanelCommand::SelectionMade { action, index }
                 if (action == REASONING_ACTION || action == OPTION_VALUE_ACTION)

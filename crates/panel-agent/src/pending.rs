@@ -78,9 +78,6 @@ pub(crate) enum Pending {
         /// What each row does, in their order.
         choices: Vec<FailureChoice>,
         failure: Failure,
-        /// The error's text, as it was reported; the card's detail is rebuilt
-        /// from it as time goes by.
-        error: String,
         /// When the request is tried again if the card is left unanswered,
         /// Unix seconds (`[ai] on_limit = "ask_else_wait"`).
         auto_at: Option<u64>,

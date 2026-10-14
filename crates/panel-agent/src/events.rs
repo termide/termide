@@ -151,9 +151,9 @@ impl AgentPanel {
                 // A failed request is tried again, waited on or asked about;
                 // one that went through ends the tries.
                 let held = match failure {
-                    Some((failure, error)) => {
+                    Some(failure) => {
                         self.retry_ready = true;
-                        self.on_run_failed(failure, &error)
+                        self.on_run_failed(failure)
                     }
                     None => {
                         if !self.run_failed {
@@ -353,11 +353,7 @@ impl AgentPanel {
                         }
                         // What a failure was, for the run's end; a refusal
                         // carries no error and is no failure to retry.
-                        self.last_failure = error.as_ref().and_then(|error| {
-                            assistant
-                                .classify_failure()
-                                .map(|failure| (failure, error.clone()))
-                        });
+                        self.last_failure = assistant.classify_failure();
                         // The answer always carries the wall-clock time; a
                         // reasoning block, if any, carries the prefill/generation
                         // indicators (else the answer does). A tool-only turn

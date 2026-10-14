@@ -586,7 +586,6 @@ agent_failure_retry_now = "এখনই আবার চেষ্টা কর�
 agent_failure_keep_trying = "সফল না হওয়া পর্যন্ত চেষ্টা চালিয়ে যান"
 agent_failure_restart = "এজেন্ট পুনরায় চালু করে আবার চেষ্টা করুন"
 agent_failure_compact = "কনটেক্সট সংক্ষেপ করে আবার চেষ্টা করুন"
-agent_failure_switch_agent = "অন্য এজেন্টের সাথে চালিয়ে যান…"
 agent_failure_stop = "থামুন"
 agent_failure_auth_hint = "এজেন্টের অ্যাকাউন্টে সাইন ইন করুন (Claude Code: টার্মিনালে `claude /login`), তারপর আবার চেষ্টা করুন।"
 agent_notice_agent_restarting = "এজেন্ট থেমে গেছে; আবার চেষ্টার জন্য পুনরায় চালু হচ্ছে"

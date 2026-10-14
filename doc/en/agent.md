@@ -534,7 +534,10 @@ minute away — three tries at most, and only while the model has not started
 answering, so nothing is written twice. A limit that resets later ends the run
 at once rather than hang it silently.
 
-Then a card asks what to do, with the error and, when known, the reset time:
+Then a card asks what to do. It does not repeat the error — the failed reply
+above it carries that, and its title says what stopped the run — so it holds
+only what the moment adds: when the limit resets, and when the request goes
+again unanswered:
 
 - **Wait until 21:50 and try again** — for a limit with a known reset.
 - **Try again now.**
@@ -543,9 +546,16 @@ Then a card asks what to do, with the error and, when known, the reset time:
   5 minutes (30 for a limit).
 - **Compact the context and try again** — a full context, built-in agent only.
 - **Restart the agent and try again** — an external agent that stopped.
-- **Continue with another agent…** — picks an agent and tries the request
-  there; the new agent gets the conversation as on any switch.
 - **Stop** (`Esc`) — gives the request up, and a `/loop` or `/goal` with it.
+
+The card switches nothing itself: the status strip's agent and connection
+chips stay clickable while it is up, so you can move the session to another
+endpoint — past a subscription limit, which only another endpoint gets round —
+and then answer the card, still open, with **Try again now**. The request is
+tried there with the backoff its earlier tries have grown.
+
+Under `ask_else_wait` the detail names one more moment: when the request is
+tried again unanswered. Any answer, `Esc` included, takes it back.
 
 The card keeps up with the clock while it stands open: its reset time counts
 down, and once the reset has gone by its **Wait until…** row goes with it —

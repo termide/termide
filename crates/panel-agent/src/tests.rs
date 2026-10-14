@@ -8764,9 +8764,8 @@ fn a_failed_run_offers_what_fits_and_tries_again_on_the_same_request() {
     assert!(rows[0].starts_with("Wait until"), "{rows:?}");
     assert!(rows.iter().any(|row| row == "Try again now"), "{rows:?}");
     assert!(
-        rows.iter()
-            .any(|row| row.starts_with("Continue with another agent")),
-        "two agents are defined: {rows:?}"
+        !rows.iter().any(|row| row.contains("another agent")),
+        "the card switches nothing: the status strip does: {rows:?}"
     );
     let now = rows.iter().position(|row| row == "Try again now").unwrap();
     panel.apply_form_action(ChoiceAction::Chosen(now));
@@ -9364,7 +9363,11 @@ fn a_limit_asked_about_comes_back_on_reopen() {
     let (rows, detail) = failure_card(&panel);
     assert!(rows[0].starts_with("Wait until"), "{rows:?}");
     assert!(rows.iter().any(|row| row == "Try again now"), "{rows:?}");
-    assert!(detail.contains("session limit"), "{detail}");
+    assert!(detail.contains("Resets at"), "{detail}");
+    assert!(
+        !detail.contains("session limit"),
+        "the error's text stands in the transcript above: {detail}"
+    );
     assert!(panel.retry_ready, "`/continue` takes it too");
     assert!(!panel.paused, "a failed request is not a pause");
     // Nothing runs by itself.
@@ -9825,7 +9828,6 @@ fn another_session_takes_the_failure_card_with_it() {
     assert!(!panel.retry_ready);
     assert!(panel.retry_wait.is_none());
 }
-
 /// When the card that is up tries again by itself, if it does.
 fn auto_at(panel: &AgentPanel) -> Option<u64> {
     match &panel.pending {

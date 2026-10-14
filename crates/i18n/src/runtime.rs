@@ -630,7 +630,6 @@ impl Translation for RuntimeTranslation {
         agent_failure_keep_trying,
         agent_failure_restart,
         agent_failure_compact,
-        agent_failure_switch_agent,
         agent_failure_stop,
         agent_failure_auth_hint,
         agent_notice_agent_restarting,
