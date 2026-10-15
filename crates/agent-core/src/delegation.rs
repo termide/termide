@@ -13,6 +13,8 @@ pub enum SubagentPlace {
     /// what would need the user is refused.
     #[default]
     Hidden,
+    /// Ask the user each time: one card for the tasks handed over together.
+    Ask,
     /// In an agent panel already open and still empty, else out of sight:
     /// a task never changes the layout.
     ExistingPanel,
@@ -21,13 +23,14 @@ pub enum SubagentPlace {
 }
 
 impl SubagentPlace {
-    pub const ALL: [SubagentPlace; 3] = [Self::Hidden, Self::ExistingPanel, Self::Panel];
+    pub const ALL: [SubagentPlace; 4] = [Self::Hidden, Self::Ask, Self::ExistingPanel, Self::Panel];
 
     /// The value as the config file writes it.
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
             Self::Hidden => "hidden",
+            Self::Ask => "ask",
             Self::ExistingPanel => "existing_panel",
             Self::Panel => "panel",
         }
@@ -36,7 +39,7 @@ impl SubagentPlace {
     /// Whether the task may run in a panel at all.
     #[must_use]
     pub fn in_panel(self) -> bool {
-        self != Self::Hidden
+        matches!(self, Self::ExistingPanel | Self::Panel)
     }
 
     /// Whether a panel may be opened for the task when no empty one is.

@@ -61,6 +61,9 @@ pub struct QuestionEnvelope {
 pub struct UserAsker {
     tx: Sender<QuestionEnvelope>,
     cancel: CancelToken,
+    /// Who asks, when it is not the panel's own agent: a delegate's
+    /// questions reach its parent's panel headed with its name.
+    on_behalf_of: Option<String>,
 }
 
 impl std::fmt::Debug for UserAsker {
@@ -73,14 +76,26 @@ impl std::fmt::Debug for UserAsker {
 #[must_use]
 pub fn question_channel(cancel: CancelToken) -> (UserAsker, Receiver<QuestionEnvelope>) {
     let (tx, rx) = mpsc::channel();
-    (UserAsker { tx, cancel }, rx)
+    (
+        UserAsker {
+            tx,
+            cancel,
+            on_behalf_of: None,
+        },
+        rx,
+    )
 }
 
 impl UserAsker {
     /// Put `questions` to the user and wait for the reply. A stopped run, or
     /// a panel that went away, counts as declined.
     #[must_use]
-    pub fn ask(&self, questions: Vec<Question>) -> QuestionReply {
+    pub fn ask(&self, mut questions: Vec<Question>) -> QuestionReply {
+        if let Some(agent) = &self.on_behalf_of {
+            for question in &mut questions {
+                question.question = format!("& {agent} · {}", question.question);
+            }
+        }
         let (reply, answer) = mpsc::channel();
         let envelope = QuestionEnvelope { questions, reply };
         if self.tx.send(envelope).is_err() {
@@ -95,6 +110,17 @@ impl UserAsker {
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return QuestionReply::Declined,
             }
+        }
+    }
+
+    /// This asker for the delegate `agent`: its questions reach the same
+    /// user, each headed `& <agent> · ` so they never read as the panel's
+    /// own agent's.
+    #[must_use]
+    pub fn for_delegate(&self, agent: &str) -> Self {
+        Self {
+            on_behalf_of: Some(agent.to_string()),
+            ..self.clone()
         }
     }
 }
@@ -133,6 +159,17 @@ mod tests {
             worker.join().unwrap(),
             QuestionReply::Answered(vec![answer])
         );
+    }
+
+    #[test]
+    fn a_delegates_question_says_who_asks() {
+        let (asker, rx) = question_channel(CancelToken::new());
+        let asker = asker.for_delegate("search");
+        let worker = std::thread::spawn(move || asker.ask(vec![question()]));
+        let envelope = rx.recv().unwrap();
+        assert_eq!(envelope.questions[0].question, "& search · Which crates?");
+        envelope.reply.send(QuestionReply::Declined).unwrap();
+        assert_eq!(worker.join().unwrap(), QuestionReply::Declined);
     }
 
     #[test]

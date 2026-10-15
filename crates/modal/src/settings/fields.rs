@@ -648,6 +648,7 @@ fn subagent_run_label(place: SubagentPlace) -> String {
     let t = i18n::t();
     match place {
         SubagentPlace::Hidden => t.settings_agent_subagent_run_hidden(),
+        SubagentPlace::Ask => t.settings_agent_subagent_run_ask(),
         SubagentPlace::ExistingPanel => t.settings_agent_subagent_run_existing_panel(),
         SubagentPlace::Panel => t.settings_agent_subagent_run_panel(),
     }
@@ -1051,7 +1052,7 @@ mod enum_option_tests {
         let mut config = Config::default();
         let field = AI_SUBAGENT_RUN_FIELD;
         let options = enum_options(&config, SettingsTab::Ai, field).unwrap();
-        assert_eq!(options.values, ["hidden", "existing_panel", "panel"]);
+        assert_eq!(options.values, ["hidden", "ask", "existing_panel", "panel"]);
         assert_eq!(options.current, Some(0));
         assert_eq!(
             get_field_value(&config, SettingsTab::Ai, field),

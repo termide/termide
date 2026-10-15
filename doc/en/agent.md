@@ -24,7 +24,7 @@ reasoning = "high"                 # default; off | minimal | low | medium | hig
 fold_blocks = "immediately"        # immediately (default) | on-finish | never
 bell_on_attention = true           # default; ring the bell when a panel out of sight waits for you
 on_limit = "ask"                   # default; ask | wait | stop — see "When a run fails"
-subagent_run = "hidden"            # default; hidden | existing_panel | panel — see "Subagents"
+subagent_run = "hidden"            # default; hidden | ask | existing_panel | panel — see "Subagents"
 
 [ai.connections.local]
 provider = "openai_compatible"     # openai_compatible (default), anthropic_compatible, claude_code, codex, gemini_cli
@@ -1456,7 +1456,7 @@ none. Skills and MCP servers' tools are not governed by
 it: they come with what you configured. `max_turns` is how many model calls
 a task delegated to the agent may take before it is cut off (fifty when
 absent; see [Subagents](#subagents)), and `subagent_run` where such a task
-runs — `hidden`, `existing_panel` or `panel`, over the `[ai]` setting. `icon` is what the panel's header,
+runs — `hidden`, `ask`, `existing_panel` or `panel`, over the `[ai]` setting. `icon` is what the panel's header,
 the agent picker and the agents menu show in place of 🤖 (with emoji icons
 on). Only its first character is kept, an emoji sequence counting as one, and
 invisible marks a copy may bring along — a zero-width space, a byte order
@@ -1486,7 +1486,9 @@ everything into the prompt. It runs in the session's current mode, unless its
 agent only reads), with no one to prompt, so it can only do what the
 rules and that mode already allow: anything that would otherwise ask is
 refused with a reason it reads. In `auto` the reviewer decides those calls
-instead. External agents (those with a `command`) can be delegates only in a
+instead. What it wants to know it may still ask: its `question` cards come to
+the panel that delegated the task, headed `& <delegate> ·`, as long as that
+panel has you to ask. External agents (those with a `command`) can be delegates only in a
 panel (below), and a
 subagent gets no `task` tool of its own, so delegation does not nest. An agent whose `tools` list leaves out `task`
 cannot delegate. Besides its own tools, a delegate gets those of the MCP
@@ -1509,7 +1511,11 @@ session is not offered. `o` on a `task` block opens it in a panel.
 
 Where a delegate runs is `subagent_run` under `[ai]` (in the settings,
 **Delegated tasks run**), and a delegate's `AGENT.md` may name its own:
-`hidden` (the default) runs it out of sight as above; `existing_panel` runs
+`hidden` (the default) runs it out of sight as above; `ask` puts the choice to
+you on a card — one card for the tasks handed over together, listing them,
+with **Hidden**, **In a panel** and, for several, **One by one**, which asks
+for each task (dismissed, or with nobody to ask, the task runs hidden);
+`existing_panel` runs
 it in an agent panel already open that still shows its banner, has nothing
 typed and is not the one you are in — else hidden, so a delegation never
 changes your layout; `panel` does the same, but when no panel is free it

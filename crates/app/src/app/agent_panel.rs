@@ -15,8 +15,8 @@ use termide_agent_core::{
     HostTools, IntentLog, Message, MessageOrigin, ModeHandle, ModelChoice, ModelSpec, OriginKind,
     PermissionAnswer, PermissionHooks, PermissionRules, PersistScope, PlanGuard, PromptOptions,
     Provider, Refusals, ReviewerSetup, Session, SessionParent, SessionSummary, ShellOutput,
-    ShellRunner, StreamEvent, ThinkingLevel, Tool, ToolCall, ToolContext, ToolRegistry, ToolUpdate,
-    Usage, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
+    ShellRunner, StreamEvent, SubagentPlace, ThinkingLevel, Tool, ToolCall, ToolContext,
+    ToolRegistry, ToolUpdate, Usage, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
 };
 use termide_agent_hooks::CommandHooks;
 use termide_agent_mcp::{Connections, TokenStore};
@@ -38,6 +38,7 @@ use termide_panel_agent::{
 
 use super::App;
 
+mod ask_place;
 mod headless;
 mod in_panel;
 pub use headless::{run_agent_headless, run_recall, HeadlessOutput};
@@ -1102,6 +1103,8 @@ struct Subagents {
     compaction: CompactionPolicy,
     /// What the subagent's model reads when a call is refused.
     refusals: Refusals,
+    /// The card that asks where delegated tasks run, for `ask`.
+    asks: ask_place::PlaceAsks,
 }
 
 /// The mode a subagent runs in: its own, else the delegating agent's. Plan
@@ -1445,14 +1448,19 @@ struct DelegateRun<'a> {
 
 impl Subagents {
     /// The tools, the skills and the system prompt the agent `name` runs
-    /// with as a subagent: no `task` (delegation does not nest), and no
-    /// `question` or `suggest_command` (nobody watches it).
+    /// with as a subagent: no `task` (delegation does not nest), no
+    /// `suggest_command` (nobody watches it run), and `question` only when
+    /// its parent has a user to put the questions to (`asks`).
     fn toolset(
         &self,
         name: &str,
         definition: &termide_agent_core::AgentDefinition,
+        asks: bool,
     ) -> (ToolRegistry, Vec<termide_agent_core::SkillInfo>, String) {
         let mut tools = base_tools(&self.dirs, Some(&self.web), Some(&self.recall));
+        if asks {
+            tools.insert(Arc::new(QuestionTool));
+        }
         restrict_tools(&mut tools, &definition.spec.tools, name);
         let skills = self.dirs.skills();
         if !skills.is_empty() {
@@ -1496,7 +1504,10 @@ impl Subagents {
     ) -> Result<SubagentOutcome, String> {
         let name = task.agent;
         let definition = self.dirs.agent(name);
-        let (tools, skills, system_prompt) = self.toolset(name, &definition);
+        // What the delegate wants to know goes to the user its parent's
+        // panel asks, headed with the delegate's name.
+        let asker = ctx.asker.as_ref().map(|asker| asker.for_delegate(name));
+        let (tools, skills, system_prompt) = self.toolset(name, &definition, asker.is_some());
         let max_turns = definition.spec.max_turns.unwrap_or(SUBAGENT_MAX_TURNS);
 
         let active = self
@@ -1551,10 +1562,16 @@ impl Subagents {
         // In a panel, when the settings say so and one takes the task: the
         // user watches it there and answers what it asks, so an external
         // agent can be a delegate too.
-        let place = definition
+        let place = match definition
             .spec
             .subagent_run
-            .unwrap_or(settings.subagent_run);
+            .unwrap_or(settings.subagent_run)
+        {
+            SubagentPlace::Ask => self
+                .asks
+                .place(name, task.prompt, ctx.asker.as_ref(), cancel),
+            place => place,
+        };
         if place.in_panel() {
             let connection = match &target {
                 SubagentTarget::Session => active.connection.clone(),
@@ -1608,6 +1625,7 @@ impl Subagents {
                     skills,
                     hooks,
                     rules,
+                    asker,
                 };
                 return self
                     .run_cli(run, message, log, &budget, cancel, on_update)
@@ -1668,6 +1686,9 @@ impl Subagents {
             .with_system_prompt(system_prompt)
             .with_compaction(self.compaction)
             .with_delegated_intent(parent);
+        if let Some(asker) = asker {
+            agent = agent.with_asker(asker);
+        }
 
         let mut hooks = hooks;
         let mut report = SubagentReport::new(max_turns);
@@ -1753,7 +1774,10 @@ impl Subagents {
             host_tools: Some(HostTools {
                 tools: run.tools,
                 hooks: Box::new(run.hooks),
-                context: ToolContext::new(self.cwd.clone()),
+                context: ToolContext {
+                    asker: run.asker,
+                    ..ToolContext::new(self.cwd.clone())
+                },
                 skills: run.skills,
             }),
             resume: None,
@@ -1903,6 +1927,8 @@ struct CliSubagent {
     skills: Vec<termide_agent_core::SkillInfo>,
     hooks: ChainedHooks,
     rules: PermissionRules,
+    /// Puts its questions to the user of its parent's panel.
+    asker: Option<termide_agent_core::UserAsker>,
 }
 
 /// How often a subagent on a CLI agent is looked at while it runs.
@@ -1959,6 +1985,7 @@ fn agent_setup(
         reasoning: settings.reasoning,
         compaction: settings.compaction,
         refusals: catalog.dirs.refusals(),
+        asks: Default::default(),
     }));
     let compaction_prompts = catalog.dirs.compaction_prompts();
     let plan_prompt = catalog.dirs.plan_prompt();
@@ -3479,6 +3506,7 @@ mod tests {
             reasoning: ThinkingLevel::Off,
             compaction: settings.compaction,
             refusals: Refusals::default(),
+            asks: Default::default(),
         };
         let cancel = CancelToken::new();
         let stopper = {
@@ -3634,11 +3662,28 @@ done"#;
             reasoning: ThinkingLevel::Off,
             compaction: settings.compaction,
             refusals: Refusals::default(),
+            asks: Default::default(),
         };
         let definition = catalog.dirs.agent("search");
-        let (tools, _, prompt) = subagents.toolset("search", &definition);
+        let (tools, _, prompt) = subagents.toolset("search", &definition, false);
         assert_eq!(tools.names(), ["read", "docs__lookup"]);
         assert!(!prompt.contains("docs__lookup"));
+        // A delegate asks its parent's user only when there is one, and
+        // only if its `tools` list keeps `question`.
+        let everything = catalog.dirs.agent(DEFAULT_AGENT);
+        let asks = |asks| {
+            subagents
+                .toolset(DEFAULT_AGENT, &everything, asks)
+                .0
+                .get("question")
+                .is_some()
+        };
+        assert!(asks(true) && !asks(false));
+        assert!(subagents
+            .toolset("search", &definition, true)
+            .0
+            .get("question")
+            .is_none());
     }
 
     #[test]
@@ -3668,6 +3713,7 @@ done"#;
             reasoning: ThinkingLevel::Off,
             compaction: settings.compaction,
             refusals: Refusals::default(),
+            asks: Default::default(),
         }));
 
         assert_eq!(catalog.resolve("search").unwrap().tools.names(), ["read"]);

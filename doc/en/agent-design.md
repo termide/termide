@@ -178,8 +178,8 @@ and a user block from another agent heads with `& <agent> · <kind>`, its text
 folded under it.
 
 Done of the panels: `SubagentPlace` (`hidden`, `existing_panel`, `panel`) in
-`[ai] subagent_run`, on the settings' AI tab and in `AGENT.md`; `ask` is not
-done yet. The `task` call (`agent_panel/in_panel.rs`) sends a
+`[ai] subagent_run`, on the settings' AI tab and in `AGENT.md`; `ask` came
+after (below). The `task` call (`agent_panel/in_panel.rs`) sends a
 `PanelDelegation` down a process-wide channel and waits up to ten seconds
 for the app's answer; only an app that serves the channel answers, so a
 headless run and the tests run hidden. On its tick the app takes the first
@@ -202,6 +202,19 @@ run. External agents may be delegates in a panel; hidden, they are still
 refused. Not done: the reviewer of a delegate panel in `auto` sees the task
 alone, not the parent's user messages (the panel's runtime is built before
 the task arrives), and a task from a parked project's panel runs hidden.
+
+Done after: `ask` (`agent_panel/ask_place.rs`). Parallel delegations start
+on calls of their own within a moment of each other, so the first waits
+150 ms for the rest and asks one card listing them all — hidden, in a panel
+(`panel`) or, for several, one by one, each then asking alone; dismissed, in
+the user's own words or with no asker, hidden. A delegate's question to its
+parent, as planned, could not be the parent's to answer: the parent's model
+waits inside its `task` call and cannot read it. So a hidden delegate gets
+`question` (when its parent has an asker, and its `tools` list keeps it) and
+its cards reach the parent panel's user, each headed `& <delegate> ·`
+(`UserAsker::for_delegate`); permission requests are still refused, a panel
+being the place for those. A parent that answers its delegates in its own
+turn needs the peer messaging still to come.
 
 Not planned: automatic isolation. Two agents in one tree may edit the same
 file; rather than guessing when to isolate or how to merge, the first step

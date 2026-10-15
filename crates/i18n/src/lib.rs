@@ -866,6 +866,7 @@ pub trait Translation: Send + Sync {
     fn agent_notice_cannot_start_fmt(&self, error: &str) -> String;
     fn agent_input_placeholder_delegate_fmt(&self, agent: &str, task: &str) -> String;
     fn agent_notice_taken_over_fmt(&self, agent: &str) -> String;
+    fn agent_delegate_ask_question_fmt(&self, tasks: &str) -> String;
     fn agent_notice_cannot_check_goal_fmt(&self, error: &str) -> String;
     fn agent_notice_cannot_handoff_fmt(&self, error: &str) -> String;
     fn agent_notice_cannot_write_handoff_fmt(&self, error: &str) -> String;
@@ -1109,6 +1110,12 @@ pub trait Translation: Send + Sync {
     fn settings_agent_subagent_run_hidden(&self) -> &str;
     fn settings_agent_subagent_run_existing_panel(&self) -> &str;
     fn settings_agent_subagent_run_panel(&self) -> &str;
+    fn settings_agent_subagent_run_ask(&self) -> &str;
+    fn agent_delegate_ask_header(&self) -> &str;
+    fn agent_delegate_ask_hidden_desc(&self) -> &str;
+    fn agent_delegate_ask_panel_desc(&self) -> &str;
+    fn agent_delegate_ask_one_by_one(&self) -> &str;
+    fn agent_delegate_ask_one_by_one_desc(&self) -> &str;
     /// Settings modal: AI tab, web tools field labels.
     fn settings_web_backend(&self) -> &str;
     /// AI menu: the row that shows or hides the agents' web browser window.

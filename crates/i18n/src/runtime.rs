@@ -148,7 +148,7 @@ impl Translation for RuntimeTranslation {
         }
     }
 
-    // Generate 399 trivial `fn name(&self) -> &str` wrappers over get_string("name").
+    // Generate 405 trivial `fn name(&self) -> &str` wrappers over get_string("name").
     i18n_get_string_methods! {
         agent_input_placeholder,
         agent_input_placeholder_shell,
@@ -727,6 +727,12 @@ impl Translation for RuntimeTranslation {
         settings_agent_subagent_run_hidden,
         settings_agent_subagent_run_existing_panel,
         settings_agent_subagent_run_panel,
+        settings_agent_subagent_run_ask,
+        agent_delegate_ask_header,
+        agent_delegate_ask_hidden_desc,
+        agent_delegate_ask_panel_desc,
+        agent_delegate_ask_one_by_one,
+        agent_delegate_ask_one_by_one_desc,
         settings_ai_add_connection,
         settings_ai_delete_connection,
         settings_ai_connection_back,
@@ -1177,6 +1183,10 @@ impl Translation for RuntimeTranslation {
 
     fn agent_notice_taken_over_fmt(&self, agent: &str) -> String {
         self.format("agent_notice_taken_over_fmt", &[("agent", agent)])
+    }
+
+    fn agent_delegate_ask_question_fmt(&self, tasks: &str) -> String {
+        self.format("agent_delegate_ask_question_fmt", &[("tasks", tasks)])
     }
 
     fn agent_notice_cannot_check_goal_fmt(&self, error: &str) -> String {
