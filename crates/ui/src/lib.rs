@@ -488,12 +488,16 @@ impl TextInput {
         self.cursor_pos += s.chars().count();
     }
 
-    /// Paste text from clipboard (filters control characters)
+    /// Paste text from the clipboard or a terminal paste: the field is one
+    /// line, so a line break inside it becomes a space, one at either end
+    /// (a copied line's own) is dropped, and so are other control characters.
     pub fn paste(&mut self, text: &str) {
-        // Filter out control characters except for basic whitespace
         let filtered: String = text
+            .trim_matches(['\r', '\n'])
+            .replace("\r\n", "\n")
             .chars()
-            .filter(|c| !c.is_control() || *c == ' ')
+            .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+            .filter(|c| !c.is_control())
             .collect();
         if !filtered.is_empty() {
             self.insert_str(&filtered);
@@ -803,6 +807,16 @@ mod tests {
         input.insert('и');
         assert_eq!(input.text(), "при");
         assert_eq!(input.cursor_pos(), 3);
+    }
+
+    #[test]
+    fn a_paste_keeps_to_one_line() {
+        let mut input = TextInput::new();
+        // A copied line's own break goes; one inside turns into a space.
+        input.paste("one\r\ntwo\nthree\n");
+        assert_eq!(input.text(), "one two three");
+        input.paste("\t!");
+        assert_eq!(input.text(), "one two three!");
     }
 
     #[test]

@@ -908,7 +908,7 @@ mod tests {
     fn a_bracketed_paste_lands_in_the_input() {
         let mut modal = levels();
         modal.focus = FocusArea::Choice;
-        assert!(modal.handle_paste("/tmp/\nb"));
+        assert!(modal.handle_paste("/tmp/b\n"));
         assert_eq!(modal.value(), "a.zip/tmp/b");
         assert_eq!(modal.focus, FocusArea::Input);
     }
