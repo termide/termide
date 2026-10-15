@@ -6840,7 +6840,7 @@ fn an_external_agent_replaces_the_loop_and_hides_its_knobs() {
         .collect();
     assert!(!texts.iter().any(|t| t.starts_with("Mode")), "{texts:?}");
     assert!(!texts.iter().any(|t| t.starts_with("Model")), "{texts:?}");
-    assert!(texts.contains(&" (acp)".to_string()));
+    assert!(!texts.iter().any(|t| t.contains("acp")), "{texts:?}");
     // The earlier conversation is shown, and handed to the agent, which has
     // no session of its own to resume yet.
     let items = panel.transcript().items();
