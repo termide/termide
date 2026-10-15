@@ -34,6 +34,7 @@ model = "Qwen3.8-Flash-Next-oQ4e-mtp"  # left out: the provider's first model
 # context_window_fallback = 32000  # used only when the server does not report a window
 # prefill_progress = true          # ask a llama.cpp server for its prompt-processing progress
 # reasoning_param = "enable_thinking"  # auto (default) | reasoning_effort | enable_thinking | none
+# send_reasoning = "on"        # send the model's reasoning back: auto (default) | on | off
 # max_concurrent_requests = 1      # requests served at once across termide; default 0: no limit
 # reviewer = "small"               # the connection whose model reviews in `auto`; default: [ai.auto_reviewer]
 
@@ -49,8 +50,8 @@ provider = "codex"                 # a CLI agent needs nothing else
 
 A connection carries `provider`, `base_url`, `model`, `api_key_env`,
 `context_window_fallback`, `subagents` (see [Subagents](#subagents)),
-`reviewer` (see [Auto mode](#auto-mode)), `max_concurrent_requests` and, for `openai_compatible`, `prefill_progress` and
-`reasoning_param`; what it leaves out takes that field's default.
+`reviewer` (see [Auto mode](#auto-mode)), `max_concurrent_requests` and, for `openai_compatible`, `prefill_progress`,
+`reasoning_param` and `send_reasoning`; what it leaves out takes that field's default.
 `max_concurrent_requests` caps how many requests the connection serves at
 once across the whole termide process — the agents of every panel, their
 subagents, the `auto` reviewer and the other side calls on it; the rest wait
@@ -90,13 +91,27 @@ servers, which may reject a field they do not know; a model that is sent nothing
 no **Reasoning** chip. The older `prefer_reasoning = true | false` still
 reads, as `high` or `off`.
 
+`send_reasoning` decides whether an OpenAI-compatible connection sends
+the model's reasoning back with its earlier answers: as `reasoning_content`
+on each of them and, where the level goes in `enable_thinking`, with
+`chat_template_kwargs.preserve_thinking`, without which the Qwen 3.6 chat
+template drops it. Reasoning models such as Qwen 3.6 lose track of their own
+plan and answer worse when it is gone, and the prompt cache keeps more of a
+history that does not change between requests. The default, `auto`, sends it
+where the level goes in `enable_thinking` — a local server, or one set to
+`reasoning_param = "enable_thinking"` — and nowhere else, since some APIs
+(DeepSeek's) reject the field; `on` and `off` decide for themselves. The
+history sent back grows by the reasoning; when it outgrows the window, the
+reasoning is the first thing to go.
+
 The settings modal (the gear, or the command palette) has all of it under
 **AI**. **Connections** comes first: each row names a connection with its
 provider and model, the one new sessions start on marked `●`. `Enter` or a
 click opens a connection on a page of its own — name, provider, base URL, API
 key variable, model, context window (for a CLI agent, **Context window
 limit**, see below), **Prefill progress (llama.cpp)** and
-**Reasoning parameter** (for an OpenAI-compatible one), **Requests at once** (not for a CLI agent), **Subagents**, **Auto mode reviewer** and **Use by default** (new sessions start
+**Reasoning parameter** and **Send reasoning back** (for an
+OpenAI-compatible one), **Requests at once** (not for a CLI agent), **Subagents**, **Auto mode reviewer** and **Use by default** (new sessions start
 on it) — and **[ Back to list ]**, `Esc` or `Backspace` returns to the list;
 **+ Add connection** adds an OpenAI-compatible one, and
 **[ Delete connection ]** on the page, or `Del` on its row, removes one.
@@ -1706,8 +1721,11 @@ templates and MCP servers are its own affair.
 An agent may go on after its answer by itself — Claude Code does when a
 command it moved to the background (to take a message typed while it ran)
 finishes. What it then does counts as a run of its own: the run clock ticks,
-the session cannot be switched or deleted meanwhile, and `Esc` stops it. The
-run ends once the agent has no call open and stays quiet — 5 seconds after
+the session cannot be switched or deleted meanwhile, and `Esc` stops it. A
+command of termide's tools the agent moved to the background keeps such a run
+on after the answer to your message, as long as it runs, so the clock shows
+it is not done; `Esc` stops the command too. The run ends once the agent has
+no call open, termide runs none for it, and it stays quiet — 5 seconds after
 its answer text, 30 after anything else; a message you type meanwhile ends it
 and goes as the next request.
 

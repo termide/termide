@@ -20,8 +20,11 @@ pub struct Compat {
     pub max_tokens_field: String,
     /// How the server is asked for reasoning.
     pub reasoning: ReasoningParam,
-    /// Echo previous `reasoning_content` back in assistant messages. Off by
-    /// default: DeepSeek rejects it, most servers ignore it.
+    /// Echo previous `reasoning_content` back in assistant messages and, with
+    /// [`ReasoningParam::EnableThinking`], ask the chat template to keep it
+    /// (`chat_template_kwargs.preserve_thinking`, Qwen 3.6 and later), so a
+    /// model reads its earlier reasoning. Off by default: DeepSeek's API
+    /// rejects the field, most servers ignore it.
     pub send_reasoning: bool,
     /// Ask for prompt-processing progress while streaming (llama.cpp's
     /// `return_progress`). Off by default: OpenAI rejects unknown fields.
@@ -166,15 +169,25 @@ impl OpenAiCompatProvider {
                     body.insert("reasoning_effort".into(), json!(effort));
                 }
                 ReasoningParam::EnableThinking => {
-                    body.insert(
-                        "chat_template_kwargs".into(),
-                        json!({ "enable_thinking": level != ThinkingLevel::Off }),
-                    );
+                    let mut kwargs = json!({ "enable_thinking": level != ThinkingLevel::Off });
+                    if self.compat.send_reasoning {
+                        kwargs["preserve_thinking"] = json!(true);
+                    }
+                    body.insert("chat_template_kwargs".into(), kwargs);
                 }
             }
         }
         for (key, value) in &self.compat.extra_body {
-            body.insert(key.clone(), value.clone());
+            // An object merges into the one already there, so extra
+            // `chat_template_kwargs` keep `enable_thinking`.
+            match (body.get_mut(key), value) {
+                (Some(Value::Object(current)), Value::Object(extra)) => {
+                    current.extend(extra.iter().map(|(k, v)| (k.clone(), v.clone())));
+                }
+                _ => {
+                    body.insert(key.clone(), value.clone());
+                }
+            }
         }
         Value::Object(body)
     }
@@ -787,6 +800,50 @@ mod tests {
         );
         let silent = OpenAiCompatProvider::new("p", "http://x/v1");
         assert!(silent.thinking_levels("qwen").is_empty());
+    }
+
+    #[test]
+    fn a_chat_template_keeps_the_reasoning_sent_back() {
+        let mut compat = Compat {
+            reasoning: ReasoningParam::EnableThinking,
+            send_reasoning: true,
+            ..Compat::default()
+        };
+        compat.extra_body.insert(
+            "chat_template_kwargs".into(),
+            json!({ "clear_thinking": false }),
+        );
+        let provider = OpenAiCompatProvider::new("p", "http://x/v1").with_compat(compat);
+        let messages = vec![
+            Message::User(UserMessage::text("hi")),
+            Message::Assistant(AssistantMessage {
+                content: vec![
+                    AssistantContent::thinking("plan"),
+                    AssistantContent::Text { text: "ok".into() },
+                ],
+                stop_reason: StopReason::Stop,
+                usage: Usage::default(),
+                provider: "p".into(),
+                model: "m".into(),
+                error_message: None,
+                failure: None,
+                timestamp: 0,
+            }),
+            Message::User(UserMessage::text("go on")),
+        ];
+        let body = provider.build_body(&Request {
+            model: &model(),
+            system_prompt: "",
+            messages: &messages,
+            tools: &[],
+            thinking: ThinkingLevel::High,
+        });
+        // The extra kwargs merge in rather than replace the switch.
+        assert_eq!(
+            body["chat_template_kwargs"],
+            json!({ "enable_thinking": true, "preserve_thinking": true, "clear_thinking": false })
+        );
+        assert_eq!(body["messages"][1]["reasoning_content"], "plan");
     }
 
     #[test]

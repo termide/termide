@@ -2433,10 +2433,14 @@ fn build_provider(connection: &Connection, api_key: Option<String>) -> Arc<dyn P
             Arc::new(
                 OpenAiCompatProvider::new("agent", settings.base_url.clone())
                     .with_api_key(api_key)
-                    .with_compat(Compat {
-                        reasoning: reasoning_param(settings),
-                        prefill_progress: settings.prefill_progress,
-                        ..Compat::default()
+                    .with_compat({
+                        let reasoning = reasoning_param(settings);
+                        Compat {
+                            reasoning,
+                            send_reasoning: sends_reasoning(settings, reasoning),
+                            prefill_progress: settings.prefill_progress,
+                            ..Compat::default()
+                        }
                     }),
             )
         }
@@ -2471,6 +2475,19 @@ fn reasoning_param(connection: &Connection) -> ReasoningParam {
                 ReasoningParam::None
             }
         }
+    }
+}
+
+/// Whether a connection sends the model's reasoning back with its earlier
+/// answers. Left to `auto`, it does where the reasoning goes in the chat
+/// template's `enable_thinking` switch: the templates of Qwen, GLM and their
+/// kin take `reasoning_content`, and Qwen 3.6 answers worse without it,
+/// while a hosted API may reject the field (DeepSeek's does).
+fn sends_reasoning(connection: &Connection, reasoning: ReasoningParam) -> bool {
+    match connection.send_reasoning {
+        termide_config::SendReasoning::On => true,
+        termide_config::SendReasoning::Off => false,
+        termide_config::SendReasoning::Auto => reasoning == ReasoningParam::EnableThinking,
     }
 }
 
@@ -2779,6 +2796,23 @@ mod tests {
             ),
             ReasoningParam::None
         );
+    }
+
+    #[test]
+    fn reasoning_goes_back_where_the_chat_template_switch_takes_it() {
+        use termide_config::SendReasoning::{Auto, Off, On};
+        let sends = |preserve, reasoning| {
+            let connection = Connection {
+                send_reasoning: preserve,
+                ..Connection::default()
+            };
+            sends_reasoning(&connection, reasoning)
+        };
+        assert!(sends(Auto, ReasoningParam::EnableThinking));
+        assert!(!sends(Auto, ReasoningParam::Effort));
+        assert!(!sends(Auto, ReasoningParam::None));
+        assert!(sends(On, ReasoningParam::None));
+        assert!(!sends(Off, ReasoningParam::EnableThinking));
     }
 
     /// The applied `[ai]` settings are one per process: the tests that read

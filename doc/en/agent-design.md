@@ -1359,7 +1359,13 @@ Reasoning between turns: Anthropic requires thinking blocks to be echoed with
 their signature; DeepSeek rejects an echoed `reasoning_content`; vLLM and Qwen
 accept it for the current turn. Decision: keep thinking in the transcript for
 the UI and the session, do not send it back by default; `send_reasoning` opts
-in for OpenAI. The Anthropic provider keeps each block's signature and hands
+in for OpenAI. A connection's `send_reasoning` sets it, `auto` turning it
+on where the level goes in `enable_thinking`, and with that switch it also
+sends `chat_template_kwargs.preserve_thinking`: Qwen 3.6 answers worse without
+its earlier reasoning, and its template drops it unless asked
+([#62](https://github.com/termide/termide/issues/62)). `extra_body` merges an
+object into the one the body already has, so extra `chat_template_kwargs`
+keep `enable_thinking`. The Anthropic provider keeps each block's signature and hands
 back only the model's own blocks of the turn in progress (after the last user
 message), which a tool round needs: dropping the earlier ones is removing a
 leading run, which the API allows, so a compacted history or a rebuilt system

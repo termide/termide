@@ -1091,6 +1091,9 @@ pub trait Translation: Send + Sync {
     /// its prompt-processing progress.
     fn settings_ai_connection_prefill_progress(&self) -> &str;
     fn settings_ai_connection_reasoning_param(&self) -> &str;
+    /// Settings modal: whether an OpenAI-compatible connection sends the
+    /// model's reasoning back with its earlier answers.
+    fn settings_ai_connection_send_reasoning(&self) -> &str;
     /// Settings modal: the connection the agents a connection's sessions
     /// delegate to with `task` run on.
     fn settings_ai_connection_subagents(&self) -> &str;
