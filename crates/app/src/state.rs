@@ -517,7 +517,8 @@ impl AppState {
                 .into_iter()
                 .map(|s| {
                     let is_project = s.path.starts_with(&self.project_root);
-                    (s.name, s.description, is_project, None)
+                    let description = termide_panel_agent::user_skill_description(&s);
+                    (s.name, description, is_project, None)
                 })
                 .collect(),
             AiSection::Prompts => dirs

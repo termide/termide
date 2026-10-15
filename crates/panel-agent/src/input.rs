@@ -7,6 +7,7 @@ use termide_core::{KeyChord, LinkTarget, Panel, PanelEvent};
 use termide_ui::textarea::TextArea;
 use termide_ui::{ChoiceAction, CompletionAction, CompletionItem, CompletionList, FieldEdit};
 
+use crate::slash::user_skill_description;
 use crate::{
     select, transcript, AgentPanel, BannerHit, FoldMode, Item, NoticeKind, Paste, RunButton,
     CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND, FORK_COMMAND, GOAL_COMMAND, HANDOFF_COMMAND,
@@ -730,13 +731,15 @@ impl AgentPanel {
         }
         // A skill whose name something else takes is offered as `skill:<name>`,
         // found by either spelling.
+        // One kept to the user says so: the model never loads it itself.
         for (reach, skill) in self.slash_skills() {
             if reach.starts_with(prefix) || skill.name.starts_with(prefix) {
+                let description = user_skill_description(&skill);
                 items.push(
                     CompletionItem::new(reach.clone())
                         .with_label(format!("/{reach}"))
                         .with_hint(skill.argument_hint)
-                        .with_description(skill.description),
+                        .with_description(description),
                 );
             }
         }

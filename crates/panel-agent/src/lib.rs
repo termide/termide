@@ -66,6 +66,7 @@ use crate::toolset::{served_skills, Blocked, TOOLSET_ACTION};
 pub use delegation::{DelegateEnd, DelegateUpdate, Delegation};
 pub use peers::PeerState;
 pub use runtime::local_minute;
+pub use slash::user_skill_description;
 pub use transcript::{FoldMode, Item, NoticeKind, Transcript};
 
 /// A duration in whole milliseconds, saturated to fit a `u32`.

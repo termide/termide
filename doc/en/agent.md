@@ -1918,7 +1918,8 @@ higher level hides the lower one.
 
 A skill whose front matter says `disable-model-invocation: true` is yours
 alone: it stays out of the prompt, the `skill` tool and the toolset, and you
-send it as `/name`. Use it for a workflow that should start only when you
+send it as `/name`, where the `/` list and AI → Skills mark it
+*(manual only)*. Use it for a workflow that should start only when you
 ask, such as a release or a triage pass.
 
 Only the names and descriptions go into the prompt, one line per skill under

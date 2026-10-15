@@ -15,6 +15,21 @@ use termide_agent_core::{CommandScript, PromptTemplate, SkillInfo};
 /// The prefix that names a skill whatever else shares its name.
 pub(crate) const SKILL_PREFIX: &str = "skill:";
 
+/// A skill's description as the `/` list and the AI menu show it: marked when
+/// the skill is kept to the user (`disable-model-invocation`), since the
+/// model never loads such a skill itself.
+#[must_use]
+pub fn user_skill_description(skill: &SkillInfo) -> String {
+    let t = termide_i18n::t();
+    if skill.model_invocable {
+        skill.description.clone()
+    } else if skill.description.is_empty() {
+        t.agent_user_skill().to_string()
+    } else {
+        t.agent_user_skill_fmt(&skill.description)
+    }
+}
+
 /// What defines a `/name`, in precedence order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum SlashKind {
@@ -174,6 +189,19 @@ mod tests {
             model_invocable: true,
             path: PathBuf::from(name),
         }
+    }
+
+    #[test]
+    fn a_skill_kept_to_the_user_is_marked() {
+        let mut described = skill("triage");
+        described.description = "Triage issues".into();
+        assert_eq!(user_skill_description(&described), "Triage issues");
+        described.model_invocable = false;
+        let marked = user_skill_description(&described);
+        assert!(marked.contains("Triage issues") && marked != "Triage issues");
+        let mut bare = skill("wait-what");
+        bare.model_invocable = false;
+        assert!(!user_skill_description(&bare).is_empty());
     }
 
     #[test]

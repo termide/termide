@@ -182,6 +182,7 @@ impl Translation for RuntimeTranslation {
         agent_cwd_title,
         agent_banner_sessions,
         agent_project_command,
+        agent_user_skill,
         agent_hint_loop,
         agent_hint_goal,
         agent_model_request_dropped,
@@ -1943,6 +1944,10 @@ impl Translation for RuntimeTranslation {
 
     fn agent_project_command_fmt(&self, description: &str) -> String {
         self.format("agent_project_command_fmt", &[("description", description)])
+    }
+
+    fn agent_user_skill_fmt(&self, description: &str) -> String {
+        self.format("agent_user_skill_fmt", &[("description", description)])
     }
 
     fn agent_running_command_fmt(&self, name: &str) -> String {

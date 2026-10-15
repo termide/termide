@@ -745,6 +745,8 @@ pub trait Translation: Send + Sync {
     fn agent_cwd_title(&self) -> &str;
     fn agent_banner_sessions(&self) -> &str;
     fn agent_project_command(&self) -> &str;
+    /// A skill kept to the user (`disable-model-invocation`), with no description.
+    fn agent_user_skill(&self) -> &str;
     fn agent_hint_loop(&self) -> &str;
     fn agent_hint_goal(&self) -> &str;
     fn agent_model_request_dropped(&self) -> &str;
@@ -782,6 +784,8 @@ pub trait Translation: Send + Sync {
     fn agent_paste_chars_fmt(&self, count: usize) -> String;
     fn agent_paste_image_fmt(&self, width: u32, height: u32) -> String;
     fn agent_project_command_fmt(&self, description: &str) -> String;
+    /// The description of a skill kept to the user, marked as such.
+    fn agent_user_skill_fmt(&self, description: &str) -> String;
     fn agent_running_command_fmt(&self, name: &str) -> String;
     fn agent_notice_external_failed_fmt(&self, error: &str) -> String;
     fn agent_queued_fmt(&self, count: usize) -> String;
