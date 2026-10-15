@@ -50,6 +50,10 @@ pub struct Delegation {
     cancel: CancelToken,
     /// The run was stopped here.
     stopped: bool,
+    /// The panel the task came from, which the answer goes back to.
+    by_panel: Option<u64>,
+    /// The id of the `task` call that handed it over.
+    call: Option<String>,
 }
 
 impl Delegation {
@@ -73,7 +77,17 @@ impl Delegation {
             updates,
             cancel,
             stopped: false,
+            by_panel: None,
+            call: None,
         }
+    }
+
+    /// The task as the `task` call `call` handed it over, so the panel
+    /// that made it can find this one.
+    #[must_use]
+    pub fn with_call(mut self, call: impl Into<String>) -> Self {
+        self.call = Some(call.into());
+        self
     }
 }
 
@@ -98,9 +112,27 @@ impl AgentPanel {
         self.delegation.is_some()
     }
 
+    /// Whether the panel runs the task the `task` call `call` of the panel
+    /// `by` handed over.
+    #[must_use]
+    pub fn runs_task(&self, by: u64, call: &str) -> bool {
+        self.delegation.as_ref().is_some_and(|delegation| {
+            delegation.by_panel == Some(by) && delegation.call.as_deref() == Some(call)
+        })
+    }
+
+    /// The panel whose task this one runs, when it says.
+    #[must_use]
+    pub fn delegated_by(&self) -> Option<u64> {
+        self.delegation
+            .as_ref()
+            .and_then(|delegation| delegation.by_panel)
+    }
+
     /// Run `message`, another agent's task, as this panel's next request.
-    pub fn start_delegation(&mut self, message: UserMessage, delegation: Delegation) {
+    pub fn start_delegation(&mut self, message: UserMessage, mut delegation: Delegation) {
         self.chat_focus = false;
+        delegation.by_panel = message.origin.as_ref().and_then(|origin| origin.panel);
         self.delegation = Some(delegation);
         self.send_message(message);
     }

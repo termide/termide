@@ -2066,6 +2066,7 @@ fn agent_setup(
 
     AgentPanelSetup {
         inherited_intent: None,
+        panel_id: None,
         cwd,
         agent,
         catalog: Arc::new(catalog),

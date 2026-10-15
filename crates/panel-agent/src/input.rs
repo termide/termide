@@ -1626,13 +1626,21 @@ impl AgentPanel {
                     return vec![PanelEvent::NeedsRedraw];
                 }
                 // A running subagent's row selects its block and brings it
-                // into view.
+                // into view; a task running in a panel of its own brings
+                // that panel forward.
                 if let Some(&(_, index)) = self.task_rows.iter().find(|(y, _)| *y == event.row) {
                     self.chat_focus = true;
                     self.follow = false;
                     self.selected = index;
                     self.scroll_selected_into_view();
-                    return vec![PanelEvent::NeedsRedraw];
+                    let mut events = vec![PanelEvent::NeedsRedraw];
+                    if let Some(Item::Tool { call, .. }) = self.transcript.items().get(index) {
+                        events.push(PanelEvent::FocusDelegate {
+                            panel: self.panel_id,
+                            call: call.id.clone(),
+                        });
+                    }
+                    return events;
                 }
                 // Under the banner the notices take no clicks: the banner's
                 // own rows did above.

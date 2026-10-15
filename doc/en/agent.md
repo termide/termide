@@ -1556,7 +1556,9 @@ to you on the usual cards instead of being refused — which is why an
 external agent can be a delegate there. In `auto` the reviewer judges its
 calls by what you asked the delegating agent and the task, as for a hidden
 delegate (not yet for an external agent). The delegating panel's block shows
-its progress as for a hidden one. While the task runs, the panel belongs to
+its progress as for a hidden one, and a click on the task's row above that
+panel's input brings the delegate's panel forward. A panel taken for a task
+keeps its number. While the task runs, the panel belongs to
 the delegating agent: the input takes nothing and reads `& Delegate of
 <agent>: <task>`, and the session keys (`F2`, `F4`–`F8`), the chips and the
 menu's session entries do nothing; scrolling, the blocks, copying, `F3`,
@@ -1600,7 +1602,8 @@ transcript heads it `& <agent> · <kind>`, the model reads it framed with the
 sender's name and panel, so it knows where to answer, and the `auto`
 reviewer does not take it for a request of yours. An answer comes back the
 same way, as a message of its own, not as the call's result. A panel running
-another agent's task takes no messages. `send_message` acts outside the
+another agent's task takes no messages, and sends none to the panel that
+handed it the task: its answer goes back as its final message. `send_message` acts outside the
 panel, so it asks as such tools do: in `ask` mode you confirm each message,
 in plan mode none goes; `agents` only reads. Agents may pass ten messages to
 one another without you; the next is refused and the agent told to finish

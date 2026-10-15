@@ -210,7 +210,15 @@ impl App {
         if free.is_none() && !request.place.opens_panel() {
             return None;
         }
-        let (mut panel, session) = self.delegate_panel(request)?;
+        // A panel rebuilt in place keeps its number.
+        let keep = free.and_then(|position| {
+            self.layout_manager
+                .iter_all_panels_mut()
+                .nth(position)
+                .and_then(|panel| panel.as_any().downcast_ref::<AgentPanel>())
+                .map(AgentPanel::panel_id)
+        });
+        let (mut panel, session) = self.delegate_panel(request, keep)?;
         let (updates, task_updates) = mpsc::channel();
         panel.start_delegation(
             request.message.clone(),
@@ -219,7 +227,8 @@ impl App {
                 &request.message.plain_text(),
                 updates,
                 request.cancel.clone(),
-            ),
+            )
+            .with_call(request.lineage.call.clone()),
         );
         match free {
             Some(position) => {
@@ -238,7 +247,11 @@ impl App {
     /// A panel for `request`, on a session of its own that names where the
     /// task came from and starts on the delegate's connection, agent and
     /// mode; with the log's path.
-    fn delegate_panel(&self, request: &PanelDelegation) -> Option<(AgentPanel, Option<PathBuf>)> {
+    fn delegate_panel(
+        &self,
+        request: &PanelDelegation,
+        panel_id: Option<u64>,
+    ) -> Option<(AgentPanel, Option<PathBuf>)> {
         let dir = session_dir_of(&request.cwd)?;
         let mut session =
             match Session::create_delegate(&dir, &request.cwd, request.lineage.clone()) {
@@ -265,6 +278,7 @@ impl App {
             Some(session),
         );
         setup.inherited_intent = Some(request.intent.clone());
+        setup.panel_id = panel_id;
         let panel = AgentPanel::new(setup);
         Some((panel, Some(path)))
     }
