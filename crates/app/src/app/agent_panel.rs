@@ -43,6 +43,7 @@ mod headless;
 mod in_panel;
 mod peers;
 pub use headless::{run_agent_headless, run_recall, HeadlessOutput};
+pub(super) use peers::same_dir;
 
 impl App {
     /// Open a new agent panel. Like a new terminal, each call opens another

@@ -386,6 +386,81 @@ impl App {
         }
     }
 
+    /// Run `act` on the project at `root` as if it were current: on screen
+    /// as it is, parked with its layout and root standing in for the
+    /// current ones until `act` returns. So an agent of a parked project
+    /// reaches its own panels — takes one for a task, messages one — and
+    /// what `act` adds shows when the user enters the project. Why not, when
+    /// `root` is not loaded: a project not entered yet runs no agents.
+    pub(super) fn in_project<R>(
+        &mut self,
+        root: &Path,
+        act: impl FnOnce(&mut App) -> R,
+    ) -> Result<R, String> {
+        if super::agent_panel::same_dir(root, &self.project_root) {
+            return Ok(act(self));
+        }
+        let Some((parked_root, parked)) = self
+            .open_projects
+            .parked_mut()
+            .find(|(parked_root, _)| super::agent_panel::same_dir(parked_root, root))
+        else {
+            return Err(format!(
+                "{} is not open in this window; its panels are out of reach",
+                display_root(root)
+            ));
+        };
+        let parked_root = parked_root.to_path_buf();
+        let layout = std::mem::replace(&mut parked.layout, LayoutManager::new());
+        let home_layout = std::mem::replace(&mut self.layout_manager, layout);
+        let home_root = std::mem::replace(&mut self.project_root, parked_root.clone());
+        let home_state_root = std::mem::replace(&mut self.state.project_root, parked_root.clone());
+        let result = act(self);
+        let layout = std::mem::replace(&mut self.layout_manager, home_layout);
+        self.project_root = home_root;
+        self.state.project_root = home_state_root;
+        if let Some((_, parked)) = self
+            .open_projects
+            .parked_mut()
+            .find(|(root, _)| *root == parked_root)
+        {
+            parked.layout = layout;
+        }
+        Ok(result)
+    }
+
+    /// The agent settings of the project [`Self::in_project`] works on: the
+    /// current ones on screen; for a parked project, its own as entering it
+    /// would load them — the global layer with the project's file on top —
+    /// so a panel set up there runs as one the user opens there. Read from
+    /// disk, so only when a panel is set up.
+    pub(super) fn project_ai_settings(&self) -> termide_config::AiSettings {
+        if self.project_root == self.open_projects.current() {
+            return self.state.config.ai.clone();
+        }
+        match termide_config::Config::with_project_overlay(
+            &self.state.global_baseline,
+            &self.project_root,
+        ) {
+            Ok((config, _)) => config.ai,
+            Err(e) => {
+                log::warn!(
+                    "Could not load the settings of {}: {e}; using the global ones",
+                    display_root(&self.project_root)
+                );
+                self.state.global_baseline.ai.clone()
+            }
+        }
+    }
+
+    /// The roots of the parked projects.
+    pub(super) fn parked_roots(&self) -> Vec<PathBuf> {
+        self.open_projects
+            .parked()
+            .map(|(root, _)| root.to_path_buf())
+            .collect()
+    }
+
     /// The open projects' roots in the order the menus list them.
     pub(super) fn listed_open_roots(&self) -> Vec<PathBuf> {
         self.open_projects.roots().map(Path::to_path_buf).collect()

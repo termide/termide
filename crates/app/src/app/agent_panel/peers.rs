@@ -48,6 +48,8 @@ enum Request {
     },
     /// A background task's answer, for the panel that handed it over.
     Report {
+        /// The project of both panels.
+        project_root: PathBuf,
         to: u64,
         /// The delegate, and the panel it ran in.
         agent: String,
@@ -128,8 +130,9 @@ pub(super) fn peer_tools(caller: &str, project_root: &Path) -> [Arc<dyn Tool>; 2
 /// Hand the answer of a background task the delegate `agent` ran in
 /// `panel` to the panel `to` that handed it over; the app delivers it on
 /// its tick. Nobody waits for it: one that cannot be delivered is logged.
-pub(super) fn report(to: u64, agent: &str, panel: u64, text: String) {
+pub(super) fn report(project_root: &Path, to: u64, agent: &str, panel: u64, text: String) {
     let request = Request::Report {
+        project_root: project_root.to_path_buf(),
         to,
         agent: agent.to_string(),
         panel,
@@ -141,7 +144,7 @@ pub(super) fn report(to: u64, agent: &str, panel: u64, text: String) {
 }
 
 /// Whether `a` and `b` name one directory.
-pub(super) fn same_dir(a: &Path, b: &Path) -> bool {
+pub(in crate::app) fn same_dir(a: &Path, b: &Path) -> bool {
     a == b
         || dunce::canonicalize(a)
             .ok()
@@ -166,7 +169,10 @@ impl App {
                     project_root,
                     reply,
                 } => {
-                    let _ = reply.send(self.list_peers(from, &project_root));
+                    let listed = self
+                        .in_project(&project_root, |app| app.list_peers(from))
+                        .and_then(|listed| listed);
+                    let _ = reply.send(listed);
                 }
                 Request::Send {
                     from,
@@ -186,18 +192,26 @@ impl App {
                         kind,
                         text,
                     };
-                    let result = self.send_to_peer(message, &project_root);
+                    let result = self
+                        .in_project(&project_root, |app| app.send_to_peer(message))
+                        .and_then(|sent| sent);
                     if result.is_ok() {
                         self.state.needs_redraw = true;
                     }
                     let _ = reply.send(result);
                 }
                 Request::Report {
+                    project_root,
                     to,
                     agent,
                     panel,
                     text,
-                } => match self.report_to_panel(to, agent, panel, text) {
+                } => match self
+                    .in_project(&project_root, |app| {
+                        app.report_to_panel(to, agent, panel, text)
+                    })
+                    .and_then(|delivered| delivered)
+                {
                     Ok(()) => self.state.needs_redraw = true,
                     Err(error) => log::warn!("a background task's answer was lost: {error}"),
                 },
@@ -205,23 +219,15 @@ impl App {
         }
     }
 
-    /// The agent panels of this project.
+    /// The agent panels of the current project, or of the one
+    /// [`App::in_project`] stands in for it.
     fn agent_panels(&mut self) -> impl Iterator<Item = &mut AgentPanel> {
         self.layout_manager
             .iter_all_panels_mut()
             .filter_map(|panel| panel.as_any_mut().downcast_mut::<AgentPanel>())
     }
 
-    fn list_peers(
-        &mut self,
-        from: Option<u64>,
-        project_root: &Path,
-    ) -> Result<Vec<PeerInfo>, String> {
-        if !same_dir(project_root, &self.project_root) {
-            return Err(
-                "this project is not the one on screen; its panels are out of reach".into(),
-            );
-        }
+    fn list_peers(&mut self, from: Option<u64>) -> Result<Vec<PeerInfo>, String> {
         Ok(self
             .agent_panels()
             .map(|panel| PeerInfo {
@@ -265,12 +271,7 @@ impl App {
         }))
     }
 
-    fn send_to_peer(&mut self, message: Outgoing, project_root: &Path) -> Result<String, String> {
-        if !same_dir(project_root, &self.project_root) {
-            return Err(
-                "this project is not the one on screen; its panels are out of reach".into(),
-            );
-        }
+    fn send_to_peer(&mut self, message: Outgoing) -> Result<String, String> {
         if Some(message.to) == message.from {
             return Err(format!("panel {} is this one", message.to));
         }
