@@ -28,6 +28,10 @@ use crate::text::terms;
 pub const OUTPUT_INDEX_BYTES: usize = 4 * 1024;
 /// A tool call's arguments are indexed up to this many bytes.
 const CALL_INDEX_BYTES: usize = 2 * 1024;
+/// This tool's own calls and results are not indexed: a call repeats the
+/// words of a question, its result the snippets of other entries, and both
+/// would come back as hits for the next search on the same subject.
+const RECALL: &str = "recall";
 
 /// What a session document is, which sets its weight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,15 +49,15 @@ pub enum DocKind {
 
 impl DocKind {
     /// How much a match here counts: summaries and handoff briefs are
-    /// distilled and count most, reasoning and tool output are long and
-    /// noisy and count least.
+    /// distilled and count most; tool calls (an edit's or a script's body
+    /// names a subject in passing) and reasoning count half; tool output is
+    /// long and noisy and counts least.
     #[must_use]
     pub fn weight(self) -> f64 {
         match self {
             Self::Compaction | Self::Handoff => 1.5,
             Self::User | Self::AgentMessage | Self::Assistant => 1.0,
-            Self::ToolCall => 0.8,
-            Self::Thinking => 0.5,
+            Self::ToolCall | Self::Thinking => 0.5,
             Self::ToolOutput => 0.3,
         }
     }
@@ -401,6 +405,7 @@ fn parse(
                                     Vec::new(),
                                 );
                             }
+                            AssistantContent::ToolCall(call) if call.name == RECALL => {}
                             AssistantContent::ToolCall(call) => {
                                 let paths: Vec<String> = ["path", "file_path"]
                                     .iter()
@@ -426,6 +431,7 @@ fn parse(
                         }
                     }
                 }
+                Message::ToolResult(result) if result.tool_name == RECALL => {}
                 Message::ToolResult(result) => {
                     let text = result.plain_text();
                     let (paths, commits, call_doc) = calls
@@ -970,6 +976,52 @@ pub(crate) mod tests {
         let (found, _) = search(dir.path(), &narrowed, 10, &CancelToken::new());
         assert_eq!(found.len(), 1, "only the edit names the path: {found:?}");
         assert_eq!(found[0].label, "tool call");
+    }
+
+    #[test]
+    fn recalls_own_calls_are_not_indexed_and_a_tool_call_yields_to_a_reply() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), dir.path()).unwrap();
+        let recall = ToolCall {
+            id: "r1".into(),
+            name: RECALL.into(),
+            arguments: serde_json::json!({ "queries": ["walrus cache"] }),
+            extra_content: None,
+        };
+        let edit = ToolCall {
+            id: "e1".into(),
+            name: "edit".into(),
+            arguments: serde_json::json!({ "path": "src/a.rs", "new_string": "walrus cache" }),
+            extra_content: None,
+        };
+        session
+            .append_message(&reply(vec![AssistantContent::ToolCall(recall.clone())]))
+            .unwrap();
+        session
+            .append_message(&Message::ToolResult(ToolResultMessage::text(
+                &recall,
+                "1. session:old#e1 · walrus cache",
+            )))
+            .unwrap();
+        session
+            .append_message(&reply(vec![AssistantContent::ToolCall(edit)]))
+            .unwrap();
+        let answer = session
+            .append_message(&reply(vec![text("walrus cache")]))
+            .unwrap();
+
+        let (found, _) = search(
+            dir.path(),
+            &query(&[query_words("walrus cache")], None),
+            10,
+            &CancelToken::new(),
+        );
+        assert_eq!(found.len(), 2, "only the edit and the reply: {found:?}");
+        assert_eq!(
+            found[0].reference,
+            format!("session:{}#{answer}", session.id())
+        );
+        assert_eq!(found[1].label, "tool call");
     }
 
     #[test]

@@ -1014,11 +1014,13 @@ as well as one of code.
   the directories under it), along each log's live branch — what `/undo` or a
   rewind took back is left out, what a compaction summarised is still found.
   Your messages, the agent's answers, compaction summaries and handoff briefs
-  count most, tool calls less, reasoning and tool output least (only the first
-  4 KB of an output is searched). A session on Claude Code, Codex or Gemini
-  CLI logs its tool calls and their output too, as the built-in agent's does.
-  Of the session the panel is in only what a
-  compaction took out of the context is searched: the rest is there already. A `git commit` a session ran is
+  count most, tool calls and reasoning half as much, tool output least (only
+  the first 4 KB of an output is searched); `recall`'s own calls and results
+  are not searched, as they only repeat a question and other entries. A
+  session on Claude Code, Codex or Gemini CLI logs its tool calls and their
+  output too, as the built-in agent's does. Of the session the panel is in,
+  whichever agent runs it, only what a compaction took out of the context is
+  searched: the rest is there already. A `git commit` a session ran is
   linked to its commit.
 - **Git**: commits whose message holds a word of the query, and commits that
   added or removed an identifier it names (`git log -S`), in every repository

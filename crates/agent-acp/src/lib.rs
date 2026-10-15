@@ -170,6 +170,8 @@ struct Shared {
     system_prompt: String,
     /// termide's tools, until the handshake serves them.
     host_tools: Mutex<Option<HostTools>>,
+    /// The panel's session log, for the calls' [`SessionView`].
+    session_log: Option<String>,
     /// The server of termide's tools, alive as long as the agent.
     mcp_server: Mutex<Option<McpServer>>,
     /// Calls of termide's tools the agent closed while the server still ran
@@ -452,6 +454,10 @@ impl AcpRuntime {
             commands: Mutex::new(Vec::new()),
             flavor,
             system_prompt: setup.system_prompt,
+            session_log: setup
+                .host_tools
+                .as_ref()
+                .and_then(|host| host.session_id.clone()),
             // Codex and Gemini CLI keep their own tools: of termide's they
             // are served those they have no counterpart of (the project's
             // memory and skills, the panel's cards), and those of its MCP
@@ -1695,7 +1701,7 @@ impl Shared {
             .cloned()
             .unwrap_or_else(|| Arc::new(NoModel) as Arc<dyn Provider>);
         SessionView {
-            id: None,
+            id: self.session_log.clone(),
             intent: self.intent.clone(),
             provider,
             model: ModelSpec {
@@ -3724,6 +3730,7 @@ mod tests {
             hooks: Box::new(termide_agent_core::NoHooks),
             context: ToolContext::new(PathBuf::new()),
             skills: Vec::new(),
+            session_id: None,
         };
         let (runtime, seen) = recording_agent(
             dir.path().to_path_buf(),
@@ -4074,6 +4081,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_calls_name_the_panels_session_log_so_recall_leaves_its_context_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = HostTools {
+            session_id: Some("log-7".into()),
+            ..echo_host()
+        };
+        let (runtime, _seen) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::ClaudeCode,
+            Some(host),
+            ModeHandle::new(Mode::default()),
+        );
+        assert_eq!(runtime.shared.session_view().id.as_deref(), Some("log-7"));
+        let (bare, _seen) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::ClaudeCode,
+            None,
+            ModeHandle::new(Mode::default()),
+        );
+        assert_eq!(bare.shared.session_view().id, None);
+    }
+
     /// termide's tools, as the panel offers them to every agent.
     fn echo_host() -> HostTools {
         let mut tools = termide_agent_core::ToolRegistry::new();
@@ -4091,6 +4121,7 @@ mod tests {
                 model_invocable: true,
                 path: PathBuf::new(),
             }],
+            session_id: None,
         }
     }
 

@@ -178,6 +178,10 @@ pub struct HostTools {
     /// own tools and prompt, which does not list them (see
     /// [`crate::companion_tools`]).
     pub skills: Vec<SkillInfo>,
+    /// The panel's session log the agent's conversation is written to, so
+    /// `recall` leaves out what is still in the agent's context; `None` for
+    /// a run that keeps no log (a subagent).
+    pub session_id: Option<String>,
 }
 
 /// A call the agent stopped waiting on that termide still runs for it:
