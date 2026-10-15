@@ -722,6 +722,7 @@ mod tests {
                 name: name.to_string(),
                 description: String::new(),
                 input_schema: serde_json::json!({ "type": "object" }),
+                read_only: false,
             };
             Arc::new(McpTool::new(server, info, Arc::new(Silent)))
         };

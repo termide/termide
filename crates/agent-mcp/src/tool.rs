@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use termide_agent_core::{CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate};
+use termide_agent_core::{
+    CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolTraits, ToolUpdate,
+};
 
 use crate::client::{McpToolInfo, McpTransport};
 
@@ -70,6 +72,13 @@ impl Tool for McpTool {
             self.info.input_schema.clone()
         } else {
             json!({ "type": "object", "properties": {} })
+        }
+    }
+
+    fn traits(&self) -> ToolTraits {
+        ToolTraits {
+            mcp: true,
+            read_only: self.info.read_only,
         }
     }
 

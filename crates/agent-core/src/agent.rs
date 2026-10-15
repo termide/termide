@@ -227,7 +227,7 @@ pub fn judge_tool_call(
             "The run was cancelled before this tool ran.",
         ));
     }
-    if tools.get(&call.name).is_none() {
+    let Some(tool) = tools.get(&call.name) else {
         log::warn!("model requested unknown tool `{}`", call.name);
         return Judgment::Done(ToolResultMessage::error(
             call,
@@ -237,7 +237,11 @@ pub fn judge_tool_call(
                 tools.names().join(", ")
             ),
         ));
-    }
+    };
+    let ctx = &ToolContext {
+        tool: tool.traits(),
+        ..ctx.clone()
+    };
     let decision = hooks.before_tool_call(call, ctx);
     let permission = hooks.take_permission().map(Box::new);
     let effective = match decision {
@@ -1223,6 +1227,7 @@ impl Agent {
             }),
             withdrawn: None,
             panel: self.panel,
+            tool: crate::ToolTraits::default(),
         }
     }
 
@@ -2424,6 +2429,65 @@ mod tests {
         assert!(result.plain_text().contains("Unknown tool `nope`"));
         assert!(result.plain_text().contains("echo"));
         assert_eq!(agent.messages().len(), 4);
+    }
+
+    /// The hooks judge a call knowing what its tool says of itself.
+    #[test]
+    fn hooks_see_the_traits_of_the_called_tool() {
+        struct Marked;
+        impl crate::Tool for Marked {
+            fn name(&self) -> &str {
+                "srv__look"
+            }
+            fn description(&self) -> &str {
+                "Look"
+            }
+            fn parameters(&self) -> Value {
+                json!({ "type": "object" })
+            }
+            fn traits(&self) -> crate::ToolTraits {
+                crate::ToolTraits {
+                    mcp: true,
+                    read_only: true,
+                }
+            }
+            fn execute(
+                &self,
+                call: &ToolCall,
+                _ctx: &ToolContext,
+                _on_update: &mut dyn FnMut(ToolUpdate),
+                _cancel: &CancelToken,
+            ) -> ToolResultMessage {
+                ToolResultMessage::text(call, "seen")
+            }
+        }
+        struct Seen(Vec<crate::ToolTraits>);
+        impl Hooks for Seen {
+            fn before_tool_call(&mut self, _call: &ToolCall, ctx: &ToolContext) -> ToolDecision {
+                self.0.push(ctx.tool);
+                ToolDecision::Allow
+            }
+        }
+
+        let mut tools = registry_with(Arc::new(EchoTool::default()));
+        tools.insert(Arc::new(Marked));
+        let mut seen = Seen(Vec::new());
+        let ctx = ToolContext::new("/");
+        let cancel = CancelToken::new();
+        for name in ["srv__look", "echo"] {
+            let call = ToolCall {
+                id: "c".into(),
+                name: name.into(),
+                arguments: json!({}),
+                extra_content: None,
+            };
+            judge_tool_call(&tools, &call, &mut seen, &ctx, &cancel);
+        }
+        let marked = crate::ToolTraits {
+            mcp: true,
+            read_only: true,
+        };
+        assert_eq!(seen.0, [marked, crate::ToolTraits::default()]);
     }
 
     #[test]

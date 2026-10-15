@@ -54,6 +54,9 @@ pub struct McpToolInfo {
     pub name: String,
     pub description: String,
     pub input_schema: Value,
+    /// The server's `annotations.readOnlyHint`: it says the tool changes
+    /// nothing. Absent means no.
+    pub read_only: bool,
 }
 
 /// What it takes to be a server termide can talk to: send a request and get
@@ -127,6 +130,7 @@ pub trait McpTransport: Send + Sync {
                         .get("inputSchema")
                         .cloned()
                         .unwrap_or_else(|| json!({ "type": "object", "properties": {} })),
+                    read_only: tool["annotations"]["readOnlyHint"].as_bool() == Some(true),
                 });
             }
             match result["nextCursor"].as_str() {
@@ -463,7 +467,8 @@ mod tests {
                             reply(
                                 &mut out,
                                 json!({ "jsonrpc": "2.0", "id": id, "result": {
-                                "tools": [{ "name": "echo", "description": "Echo", "inputSchema": { "type": "object" } }],
+                                "tools": [{ "name": "echo", "description": "Echo", "inputSchema": { "type": "object" },
+                                    "annotations": { "readOnlyHint": true } }],
                                 "nextCursor": "p2" } }),
                             );
                         } else {
@@ -516,6 +521,9 @@ mod tests {
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(names, ["echo", "fail"]);
         assert_eq!(tools[1].input_schema["type"], "object");
+        // Only a tool the server marks read-only is taken as one.
+        assert!(tools[0].read_only);
+        assert!(!tools[1].read_only);
 
         let cancel = CancelToken::new();
         let (text, is_error) = client

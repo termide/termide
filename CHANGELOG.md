@@ -5,6 +5,11 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **MCP tools work in plan mode, on your word.** Plan mode no longer refuses every MCP tool: one its server marks read-only (`readOnlyHint`) runs, one a configured rule or your answer for the session allows runs, and any other asks, with "Allow always" on offer — so the agent can read a ticket from a tracker's MCP server while it plans. A `deny` rule and a tool switched off in the tools menu still keep one out.
+
 ## [0.41.0] - 2026-10-12
 
 [0.41.0]: https://github.com/termide/termide/releases/tag/0.41.0

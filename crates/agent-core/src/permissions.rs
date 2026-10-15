@@ -186,7 +186,9 @@ fn not_read_only(call: &ToolCall) -> Option<String> {
 /// [`Mode::Plan`]. It sits first in the hook chain, ahead of command hooks,
 /// so nothing — not even a hook's approval — lets a change through in plan
 /// mode; in every other mode it does nothing. A delegation to another agent
-/// goes through: the subagent runs in plan mode under a guard of its own.
+/// goes through: the subagent runs in plan mode under a guard of its own. So
+/// does an MCP tool: only its server and the user know what it changes, so
+/// the permission rules decide it, and ask when they do not.
 pub struct PlanGuard {
     mode: ModeHandle,
     /// What the model reads for a refusal.
@@ -214,8 +216,8 @@ impl PlanGuard {
 }
 
 impl Hooks for PlanGuard {
-    fn before_tool_call(&mut self, call: &ToolCall, _ctx: &ToolContext) -> ToolDecision {
-        if self.mode.get() != Mode::Plan || call.name == "task" {
+    fn before_tool_call(&mut self, call: &ToolCall, ctx: &ToolContext) -> ToolDecision {
+        if self.mode.get() != Mode::Plan || call.name == "task" || ctx.tool.mcp {
             return ToolDecision::Allow;
         }
         let Some(what) = not_read_only(call) else {
@@ -752,7 +754,7 @@ impl PermissionHooks {
             return self.judge_command(&subject, ctx).decision;
         }
 
-        if let Some(decision) = self.rule(&call.name, &subject) {
+        if let Some(decision) = self.rule_for(call, &subject, ctx) {
             return decision;
         }
         let inside = inside_project(call, ctx);
@@ -775,6 +777,11 @@ impl PermissionHooks {
             // A query reads the web; a fetched URL can carry data out, so the
             // reviewer sees it.
             (Mode::Auto, "web_search") => Decision::Allow,
+            // An MCP tool its server declares read-only passes plan mode; any
+            // other asks, since only the user can tell whether it changes
+            // something.
+            (Mode::Plan, _) if ctx.tool.mcp && ctx.tool.read_only => Decision::Allow,
+            (Mode::Plan, _) if ctx.tool.mcp => Decision::Ask,
             // Plan mode asks before reading outside the project and refuses
             // what could change something.
             (Mode::Plan, "read") => Decision::Ask,
@@ -785,6 +792,20 @@ impl PermissionHooks {
 }
 
 impl PermissionHooks {
+    /// The strictest decision among the rules that count in the mode for
+    /// `call`, whose subject is `text`. An MCP tool in plan mode is held to
+    /// the configured rules in full, its `allow`s included: plan mode lets
+    /// it through only on the user's word, and a rule is that word given
+    /// ahead of time.
+    fn rule_for(&self, call: &ToolCall, text: &str, ctx: &ToolContext) -> Option<Decision> {
+        if self.mode.get() == Mode::Plan && ctx.tool.mcp {
+            let configured = self.rules.evaluate(&call.name, text);
+            let session = self.rules.evaluate_session(&call.name, text);
+            return configured.into_iter().chain(session).max();
+        }
+        self.rule(&call.name, text)
+    }
+
     /// The strictest decision among the rules that count in the mode for
     /// `tool` and `text`.
     fn rule(&self, tool: &str, text: &str) -> Option<Decision> {
@@ -974,7 +995,7 @@ impl PermissionHooks {
                 } else {
                     (
                         Vec::new(),
-                        self.rule(&call.name, &subject) == Some(Decision::Ask),
+                        self.rule_for(call, &subject, ctx) == Some(Decision::Ask),
                     )
                 };
                 if let Some(judged) = self.review(call, ctx, forced, &parts) {
@@ -989,7 +1010,11 @@ impl PermissionHooks {
                 let bundle = parts.len() > 1;
                 let destructive = parts.iter().any(|p| destructive_command(&p.text));
                 let delegating = parts.iter().any(|p| delegating_command(&p.text));
-                let can_persist = matches!(self.mode.get(), Mode::Configured | Mode::Auto)
+                // In plan mode an MCP tool counts its configured `allow`, so
+                // a lasting answer about one is worth keeping there too.
+                let mode = self.mode.get();
+                let can_persist = (matches!(mode, Mode::Configured | Mode::Auto)
+                    || (mode == Mode::Plan && ctx.tool.mcp))
                     && self.persist.is_some()
                     && !bundle
                     && !destructive
@@ -3556,6 +3581,66 @@ mod tests {
         };
         assert_eq!(decide(Mode::Plan), Decision::Allow);
         assert_eq!(decide(Mode::Ask), Decision::Ask);
+    }
+
+    fn mcp_ctx(read_only: bool) -> ToolContext {
+        ToolContext {
+            tool: crate::ToolTraits {
+                mcp: true,
+                read_only,
+            },
+            ..ctx()
+        }
+    }
+
+    /// Plan mode leaves an MCP tool to the user: the guard lets it by, a
+    /// tool its server marks read-only passes, any other asks — with "allow
+    /// always" on offer — unless a configured rule says otherwise.
+    #[test]
+    fn plan_mode_asks_about_an_mcp_tool() {
+        let ticket = call("kanban__get_ticket", json!({ "id": "42" }));
+        let mut guard = PlanGuard::new(ModeHandle::new(Mode::Plan));
+        assert!(matches!(
+            guard.before_tool_call(&ticket, &mcp_ctx(false)),
+            ToolDecision::Allow
+        ));
+        // A tool that is not MCP's is still refused by the guard.
+        assert!(matches!(
+            guard.before_tool_call(&ticket, &ctx()),
+            ToolDecision::Block { .. }
+        ));
+
+        let plan = || PermissionRules {
+            mode: Mode::Plan,
+            ..PermissionRules::default()
+        };
+        let (hooks_, _) = hooks(plan(), vec![]);
+        assert_eq!(hooks_.decide(&ticket, &mcp_ctx(true)), Decision::Allow);
+        assert_eq!(hooks_.decide(&ticket, &mcp_ctx(false)), Decision::Ask);
+        assert_eq!(hooks_.decide(&ticket, &ctx()), Decision::Deny);
+
+        // The configured rules count in full for an MCP tool in plan mode,
+        // the `allow`s too; a `deny` beats the server's read-only claim.
+        let configured = |text: &str| PermissionRules {
+            mode: Mode::Plan,
+            ..rules(text)
+        };
+        let (hooks_, _) = hooks(
+            configured("[kanban__get_ticket]\n\"*\" = \"allow\""),
+            vec![],
+        );
+        assert_eq!(hooks_.decide(&ticket, &mcp_ctx(false)), Decision::Allow);
+        let (hooks_, _) = hooks(configured("[kanban__get_ticket]\n\"*\" = \"deny\""), vec![]);
+        assert_eq!(hooks_.decide(&ticket, &mcp_ctx(true)), Decision::Deny);
+
+        // Asked in plan mode, the user may answer for good.
+        let (hooks_, asked) = hooks(plan(), vec![PermissionAnswer::AllowOnce]);
+        let mut hooks_ = hooks_.with_persist(Box::new(|_, _, _, _| {}));
+        assert!(matches!(
+            hooks_.before_tool_call(&ticket, &mcp_ctx(false)),
+            ToolDecision::Allow
+        ));
+        assert!(asked.lock().unwrap()[0].can_persist);
     }
 
     #[test]
