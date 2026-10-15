@@ -398,7 +398,7 @@ you have named or sent even one message to is always kept.
 |---|---|
 | `Enter` | Send. While the agent works, the text is queued for the next turn instead and waits in the state strip above the input |
 | `Shift+Enter`, `Alt+Enter`, `Ctrl+J` | New line in the input |
-| `Esc` | Stop the running task; with nothing running, clear the input; with the input empty too, pick a message to rewind to (see [Rewinding to a message](#rewinding-to-a-message)). `Esc` never closes the agent panel |
+| `Esc` | Clear the input when something is typed (even while a task runs); with the input empty, stop the running task; with nothing running either, pick a message to rewind to (see [Rewinding to a message](#rewinding-to-a-message)). `Esc` never closes the agent panel |
 | `Ctrl+O` | Expand or collapse every block, and new blocks after them |
 | `Tab` | Move focus between the input and the chat; in the chat, `↑`/`↓` pick a block, `Space`/`Enter` fold or unfold it, `→`/`←` unfold or fold it as in the file manager's tree, `o` opens it in its own panel, and any other character goes back to the input and is typed there; on a fresh session's banner, `↑`/`↓` pick a recent session and `Enter` opens it |
 | Click an unfocused panel | Only focus the panel: the click selects no block, opens no session and places no cursor; click again where you meant to |

@@ -1338,6 +1338,10 @@ impl AgentPanel {
                     self.shell_mode = false;
                     self.clear_input();
                     self.after_edit();
+                } else if !self.input_area().is_empty() {
+                    // Typed text goes first, even mid-run: the next Esc stops.
+                    self.clear_input();
+                    self.after_edit();
                 } else if self.is_busy() {
                     self.abort();
                 } else if self.goal_task.take().is_some() {
@@ -1350,9 +1354,6 @@ impl AgentPanel {
                         termide_i18n::t().agent_notice_loop_stopped(),
                         NoticeKind::Info,
                     );
-                } else if !self.input_area().is_empty() {
-                    self.clear_input();
-                    self.after_edit();
                 } else {
                     let points = self.rewind_points();
                     if points.is_empty() {

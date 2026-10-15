@@ -2880,6 +2880,19 @@ fn shift_enter_adds_a_line_and_esc_clears() {
         .is_empty());
 }
 
+/// Mid-run, the first Esc clears what is typed; only the next one stops.
+#[test]
+fn esc_clears_the_typed_prompt_before_stopping_a_run() {
+    let mut panel = panel(vec![]);
+    panel.busy = true;
+    type_text(&mut panel, "next request");
+    panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(panel.input_text().is_empty());
+    assert!(panel.stop_requested.is_none());
+    panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(panel.stop_requested.is_some());
+}
+
 #[test]
 fn a_large_paste_is_held_as_a_placeholder_and_expanded() {
     let mut panel = panel(vec![]);
