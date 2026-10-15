@@ -5921,6 +5921,7 @@ impl AgentCatalog for Skilled {
                 name: name.into(),
                 description: format!("{name} skill"),
                 argument_hint: String::new(),
+                model_invocable: true,
                 path: self.0.path().join(name).join("SKILL.md"),
             })
             .collect()

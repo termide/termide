@@ -467,12 +467,14 @@ mod tests {
                 name: "deploy".into(),
                 description: "Ship a release".into(),
                 argument_hint: "<version>".into(),
+                model_invocable: true,
                 path: dir.path().join("SKILL.md"),
             },
             crate::layers::SkillInfo {
                 name: "notes".into(),
                 description: String::new(),
                 argument_hint: String::new(),
+                model_invocable: true,
                 path: dir.path().join("SKILL.md"),
             },
         ];

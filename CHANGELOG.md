@@ -5,6 +5,12 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Skills kept to the user.** A skill with `disable-model-invocation: true` in its front matter stays out of the system prompt, the `skill` tool and the toolset count; it is still sent as `/name`. Skill packs written for Claude Code, such as mattpocock/skills, keep their user-invoked workflows from being started by the model.
+- **Skills from `~/.agents/skills/`.** The user's cross-agent skills directory, where `npx skills add -g` and Codex, pi and others keep skills, is read as the lowest skill level.
+
 ## [0.41.0] - 2026-10-12
 
 [0.41.0]: https://github.com/termide/termide/releases/tag/0.41.0

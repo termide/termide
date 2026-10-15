@@ -122,6 +122,7 @@ mod tests {
             name: "deploy".into(),
             description: "Ship it".into(),
             argument_hint: String::new(),
+            model_invocable: true,
             path: skill.join("SKILL.md"),
         }]);
 
@@ -159,6 +160,7 @@ mod tests {
                 name: name.into(),
                 description: String::new(),
                 argument_hint: String::new(),
+                model_invocable: true,
                 path: skill.join("SKILL.md"),
             }
         };

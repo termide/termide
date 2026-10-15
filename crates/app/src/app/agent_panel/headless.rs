@@ -62,7 +62,8 @@ pub fn run_agent_headless(
     if let Some(global) = &global {
         let _ = ensure_global_layout(global);
     }
-    let dirs = AgentDirs::new(cwd, Some(project_root), global.as_deref());
+    let dirs = AgentDirs::new(cwd, Some(project_root), global.as_deref())
+        .with_home(dirs::home_dir().as_deref());
     let name = agent_name.unwrap_or(DEFAULT_AGENT);
     if agent_name.is_some_and(|n| n != DEFAULT_AGENT && !dirs.agents().iter().any(|a| a == n)) {
         eprintln!("termide: no agent named {name}");
@@ -78,7 +79,7 @@ pub fn run_agent_headless(
     let recall = recall_tool(settings, &dirs, project_root, cwd);
     let mut tools = base_tools(&dirs, Some(&web), Some(&recall));
     restrict_tools(&mut tools, &definition.spec.tools, name);
-    let skills = dirs.skills();
+    let skills = dirs.model_skills();
     if !skills.is_empty() {
         tools.insert(Arc::new(SkillTool::new(skills.clone())));
     }
@@ -276,7 +277,8 @@ pub fn run_recall(settings: &AiSettings, project_root: &Path, query: &str, json:
     let global = termide_config::get_config_dir()
         .ok()
         .map(|dir| dir.join(GLOBAL_AGENT_DIR));
-    let dirs = AgentDirs::new(project_root, Some(project_root), global.as_deref());
+    let dirs = AgentDirs::new(project_root, Some(project_root), global.as_deref())
+        .with_home(dirs::home_dir().as_deref());
     let tool = recall_tool(settings, &dirs, project_root, project_root);
     // The default connection answers in the session's place, as a panel's
     // model would: not one that drives a CLI agent, and with its first

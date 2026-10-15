@@ -3995,6 +3995,7 @@ mod tests {
                 name: "review".into(),
                 description: "Review a change".into(),
                 argument_hint: "<path>".into(),
+                model_invocable: true,
                 path: PathBuf::new(),
             }],
         }

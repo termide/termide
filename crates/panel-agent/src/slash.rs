@@ -171,6 +171,7 @@ mod tests {
             name: name.into(),
             description: String::new(),
             argument_hint: String::new(),
+            model_invocable: true,
             path: PathBuf::from(name),
         }
     }

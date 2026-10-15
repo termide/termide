@@ -611,7 +611,9 @@ description: Cut a release: version bump, changelog, tag, packages
 1. Run `scripts/check.sh` …
 ```
 
-技能从 `ai` 目录三个层级的 `skills/` 中读取，也从面板目录和项目根目录中的 `.agents/skills/` 读取——这是其他代理共用的目录，因此为 Claude Code、Codex 或 pi 编写的技能无需修改即可使用。较高层级的同名技能会遮蔽较低层级的。
+技能从 `ai` 目录三个层级的 `skills/` 中读取，也从面板目录和项目根目录中的 `.agents/skills/` 读取——这是其他代理共用的目录，因此为 Claude Code、Codex 或 pi 编写的技能无需修改即可使用；最后还会读取 `~/.agents/skills/`，这些代理和 `npx skills add -g` 把用户自己的技能放在那里。较高层级的同名技能会遮蔽较低层级的。
+
+front matter 中写有 `disable-model-invocation: true` 的技能只属于你：它不进入提示词、`skill` 工具和工具集，由你用 `/name` 发送。适合只应在你要求时才开始的流程，例如发布或分拣问题。
 
 进入提示词的只有名称和描述，在 `{{skills}}` 下每个技能一行；指令本身在模型用 `skill` 工具加载技能时才进入对话，该工具返回 `SKILL.md` 的文本，并列出它旁边的文件供模型 `read`。加载技能从不需要权限。只有至少存在一个技能时才会有该工具，并且它不受代理 `tools` 列表的限制。
 

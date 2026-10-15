@@ -1912,7 +1912,14 @@ description: Cut a release: version bump, changelog, tag, packages
 Skills are read from `skills/` at the three levels of the `ai` directory and
 also from `.agents/skills/` in the panel's directory and in the project root,
 the directory other agents share, so a skill written for Claude Code, Codex
-or pi works unchanged. The same name at a higher level hides the lower one.
+or pi works unchanged, and last from `~/.agents/skills/`, where those agents
+and `npx skills add -g` keep the skills of the user's own. The same name at a
+higher level hides the lower one.
+
+A skill whose front matter says `disable-model-invocation: true` is yours
+alone: it stays out of the prompt, the `skill` tool and the toolset, and you
+send it as `/name`. Use it for a workflow that should start only when you
+ask, such as a release or a triage pass.
 
 Only the names and descriptions go into the prompt, one line per skill under
 `{{skills}}`; the instructions themselves enter the conversation when the

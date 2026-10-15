@@ -429,7 +429,8 @@ impl FsCatalog {
     }
 
     fn with_global(cwd: &Path, project_root: &Path, global_agent_dir: Option<PathBuf>) -> Self {
-        let dirs = AgentDirs::new(cwd, Some(project_root), global_agent_dir.as_deref());
+        let dirs = AgentDirs::new(cwd, Some(project_root), global_agent_dir.as_deref())
+            .with_home(dirs::home_dir().as_deref());
         // OAuth sign-ins are the user's, kept beside the user's own agent
         // files rather than in any project.
         let mcp = match &global_agent_dir {
@@ -579,7 +580,7 @@ impl AgentCatalog for FsCatalog {
         restrict_tools(&mut tools, &definition.spec.tools, name);
         // Skills are instructions, not a capability, so an agent's `tools`
         // list does not govern them: the tool comes with the skills.
-        let all_skills = self.dirs.skills();
+        let all_skills = self.dirs.model_skills();
         let skill_names: Vec<String> = all_skills.iter().map(|skill| skill.name.clone()).collect();
         let skills: Vec<_> = all_skills
             .into_iter()
@@ -1484,7 +1485,7 @@ impl Subagents {
             tools.insert(Arc::new(QuestionTool));
         }
         restrict_tools(&mut tools, &definition.spec.tools, name);
-        let skills = self.dirs.skills();
+        let skills = self.dirs.model_skills();
         if !skills.is_empty() {
             tools.insert(Arc::new(SkillTool::new(skills.clone())));
         }

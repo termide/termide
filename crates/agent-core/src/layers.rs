@@ -153,6 +153,10 @@ pub struct SkillInfo {
     /// What to pass as the skill's arguments (`argument-hint`), empty when
     /// it takes none.
     pub argument_hint: String,
+    /// Whether the model is told about the skill and may load it; `false`
+    /// when the front matter says `disable-model-invocation: true`, leaving
+    /// the skill to the user's `/name`.
+    pub model_invocable: bool,
     pub path: PathBuf,
 }
 
@@ -1068,11 +1072,38 @@ impl AgentDirs {
                     name,
                     description: fields.get("description").cloned().unwrap_or_default(),
                     argument_hint: fields.get("argument-hint").cloned().unwrap_or_default(),
+                    model_invocable: !fields
+                        .get("disable-model-invocation")
+                        .is_some_and(|v| v.eq_ignore_ascii_case("true")),
                     path,
                 });
             }
         }
         skills.into_values().collect()
+    }
+
+    /// The skills the model may load: [`Self::skills`] without those whose
+    /// front matter keeps them to the user (`disable-model-invocation`).
+    #[must_use]
+    pub fn model_skills(&self) -> Vec<SkillInfo> {
+        self.skills()
+            .into_iter()
+            .filter(|skill| skill.model_invocable)
+            .collect()
+    }
+
+    /// Adds the user's own cross-agent skills, `.agents/skills` under
+    /// `home`, as the lowest skill level: where `npx skills add -g` and
+    /// other agents put the skills they share.
+    #[must_use]
+    pub fn with_home(mut self, home: Option<&Path>) -> Self {
+        if let Some(home) = home {
+            let dir = home.join(SHARED_SKILLS_DIR);
+            if !self.skill_roots.contains(&dir) {
+                self.skill_roots.push(dir);
+            }
+        }
+        self
     }
 
     /// Roots in priority order.
@@ -1816,10 +1847,51 @@ mod tests {
         assert_eq!(skills[2].argument_hint, "<path>");
         assert_eq!(skills[0].argument_hint, "");
 
+        assert!(skills.iter().all(|s| s.model_invocable));
+        assert_eq!(dirs.model_skills(), skills);
+
         let (fields, body) = split_front_matter("---\nname: x\n---\nbody\n");
         assert_eq!(fields["name"], "x");
         assert_eq!(body, "body\n");
         assert_eq!(split_front_matter("plain").1, "plain");
+    }
+
+    #[test]
+    fn user_only_skills_and_home_skills() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("proj");
+        let home = tmp.path().join("home");
+        let write = |dir: &Path, body: &str| {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(dir.join(SKILL_FILE), body).unwrap();
+        };
+        write(
+            &project.join(".agents/skills/triage"),
+            "---\nname: triage\ndescription: Triage\ndisable-model-invocation: true\n---\n",
+        );
+        write(
+            &home.join(".agents/skills/tdd"),
+            "---\nname: tdd\ndescription: TDD\ndisable-model-invocation: false\n---\n",
+        );
+        write(
+            &home.join(".agents/skills/triage"),
+            "---\nname: triage\ndescription: hidden\n---\n",
+        );
+
+        let without_home = AgentDirs::new(&project, Some(&project), None);
+        let names = |skills: Vec<SkillInfo>| -> Vec<String> {
+            skills.into_iter().map(|s| s.name).collect()
+        };
+        assert_eq!(names(without_home.skills()), ["triage"]);
+
+        let dirs = AgentDirs::new(&project, Some(&project), None).with_home(Some(&home));
+        let skills = dirs.skills();
+        assert_eq!(names(skills.clone()), ["tdd", "triage"]);
+        // The project's triage hides the home one, and keeps it to the user.
+        assert_eq!(skills[1].description, "Triage");
+        assert!(!skills[1].model_invocable);
+        assert!(skills[0].model_invocable);
+        assert_eq!(names(dirs.model_skills()), ["tdd"]);
     }
 
     #[test]

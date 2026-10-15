@@ -438,6 +438,7 @@ impl AppState {
             Some(&self.project_root),
             global.as_deref(),
         )
+        .with_home(dirs::home_dir().as_deref())
     }
 
     /// The session-log directory for this project (`<config>/ai/sessions/<key>`).
