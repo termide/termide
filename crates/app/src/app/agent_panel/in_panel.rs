@@ -159,6 +159,7 @@ pub(super) fn start_in_background(
         );
     }
     let agent = request.agent.clone();
+    let project_root = request.project_root.clone();
     let prompt = request.message.plain_text();
     let stop = request.cancel.clone();
     let (reply, answer) = mpsc::channel();
@@ -189,7 +190,7 @@ pub(super) fn start_in_background(
                 &mut |_| {},
             );
             let text = background_report(&prompt, panel, &outcome);
-            super::peers::report(report_to, &thread_agent, panel, text);
+            super::peers::report(&project_root, report_to, &thread_agent, panel, text);
         })
         .map_err(|error| format!("cannot follow the task: {error}"))?;
     Ok(format!(
@@ -274,6 +275,11 @@ impl App {
     pub(in crate::app) fn serve_delegations(&mut self) {
         SERVED.store(true, Ordering::Release);
         self.reset_released_panels();
+        // A task ends in a parked project as well, and its panel is set up
+        // anew there.
+        for root in self.parked_roots() {
+            let _ = self.in_project(&root, App::reset_released_panels);
+        }
         let requests: Vec<Request> = port()
             .1
             .lock()
@@ -281,7 +287,11 @@ impl App {
             .try_iter()
             .collect();
         for (request, reply) in requests {
-            let task = self.place_delegation(&request);
+            // An agent of a parked project takes a panel there: the user
+            // finds it on entering the project.
+            let task = self
+                .in_project(&request.project_root, |app| app.place_delegation(&request))
+                .and_then(|task| task);
             if task.is_ok() {
                 self.state.needs_redraw = true;
             }
@@ -295,11 +305,6 @@ impl App {
     fn place_delegation(&mut self, request: &PanelDelegation) -> Result<PanelTask, String> {
         if request.cancel.is_cancelled() {
             return Err("the task was stopped".into());
-        }
-        if !super::peers::same_dir(&request.project_root, &self.project_root) {
-            return Err(
-                "this project is not the one on screen; its panels are out of reach".into(),
-            );
         }
         // A background task's answer starts the delegating agent anew, so
         // it counts among the messages agents pass one another.
@@ -393,7 +398,7 @@ impl App {
         if released.is_empty() {
             return;
         }
-        let settings = self.state.config.ai.clone();
+        let settings = self.project_ai_settings();
         for (position, id, cwd) in released {
             let cwd = homes()
                 .lock()
@@ -434,7 +439,7 @@ impl App {
             log::warn!("delegate session write failed: {error}");
         }
         let path = session.path().to_path_buf();
-        let settings = self.state.config.ai.clone();
+        let settings = self.project_ai_settings();
         let mut setup = agent_setup(
             &settings,
             request.cwd.clone(),

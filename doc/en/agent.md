@@ -1609,7 +1609,9 @@ task is over, the panel goes back to its banner, set up as a panel you open
 before it was taken, and free for the next task; the task's session stays in
 the list. Closing the panel ends the task as
 well; it asks first, naming the agent waiting for the task, even when
-nothing is running at that moment. Only the panels of the delegating panel's project take its tasks.
+nothing is running at that moment. Only the panels of the delegating panel's project take its tasks,
+also while that project is open in the background: the task's panel is
+there when you switch to it.
 
 A delegate runs on the connection the session's connection names under
 **Subagents** on its settings page (`subagents` in the file), or on the
@@ -1648,7 +1650,8 @@ task over in the background: a headless run has nowhere to take the answer.
 ### Talking to other panels
 
 The panel's own agent, and Claude Code on termide's tools, can write to the
-agents of the other agent panels open in the project. **agents** lists them —
+agents of the other agent panels open in the project, on screen or in the
+background. **agents** lists them —
 each panel's number, its agent, what it is doing (free, idle, working,
 waiting for you, running another agent's task) and where it works — and
 **send_message** sends one of them a message: `info` to tell it something,
