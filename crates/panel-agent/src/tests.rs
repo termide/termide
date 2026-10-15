@@ -3926,6 +3926,181 @@ fn tab_walks_the_banner_sessions_and_enter_opens_one() {
     assert!(!panel.chat_focus);
 }
 
+/// A panel in a fresh session whose banner lists sessions with these first
+/// prompts, newest last in `prompts`, and their paths in the same order.
+fn panel_with_recent_sessions(
+    dir: &std::path::Path,
+    prompts: &[&str],
+) -> (AgentPanel, Vec<std::path::PathBuf>) {
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.to_path_buf()),
+        ..setup(prompts.iter().map(|_| reply("done")).collect())
+    });
+    let mut paths = Vec::new();
+    for prompt in prompts {
+        paths.push(panel.session_path().unwrap().to_path_buf());
+        type_text(&mut panel, prompt);
+        panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+        settle(&mut panel);
+        panel.handle_status_action(NEW_SESSION_ACTION);
+    }
+    (panel, paths)
+}
+
+fn ctrl_f() -> KeyChord {
+    chord(KeyCode::Char('f'), KeyModifiers::CONTROL)
+}
+
+#[test]
+fn ctrl_f_searches_the_banner_sessions_in_the_prompt_box() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut panel, paths) = panel_with_recent_sessions(
+        dir.path(),
+        &["fix login bug", "write docs", "refactor login form"],
+    );
+    let t = termide_i18n::t();
+    type_text(&mut panel, "my draft");
+
+    // Ctrl+F sets the draft aside: the prompt box holds the query, its
+    // border says so and counts the matches, and the banner shows the list
+    // alone.
+    panel.handle_key(ctrl_f());
+    assert!(panel.session_search_on());
+    assert_eq!(panel.input_text(), "");
+    let all = render_text(&mut panel, 80, 24).join("\n");
+    assert!(all.contains(t.agent_session_search_title()), "{all}");
+    assert!(all.contains(" 3/3 "), "{all}");
+    assert!(
+        !panel
+            .banner_hits
+            .iter()
+            .any(|(_, hit)| matches!(hit, BannerHit::Action(_))),
+        "the fields make way for the list"
+    );
+
+    // Typing filters the list by title; the cursor shows from the query and
+    // the arrows walk the matches.
+    type_text(&mut panel, "login");
+    assert_eq!(panel.recent_sessions.len(), 2);
+    let all = render_text(&mut panel, 80, 24).join("\n");
+    assert!(all.contains(" 2/3 "), "{all}");
+    assert!(!all.contains("write docs"), "{all}");
+    let colors = ThemeColors::default();
+    let buf = render_buf(&mut panel, 80, 24);
+    assert!((0..24).any(|y| (0..80).any(|x| buf[(x, y)].bg == colors.fg)));
+    panel.handle_key(chord(KeyCode::Down, KeyModifiers::NONE));
+    assert_eq!(panel.recent_selected, 1);
+    let picked = panel.recent_sessions[1].path.clone();
+    assert!(picked == paths[0] || picked == paths[2]);
+
+    // Enter opens it and the search ends; the prompt starts empty, as on any
+    // switch of session.
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(panel.session_path(), Some(picked.as_path()));
+    assert!(!panel.session_search_on());
+    assert_eq!(panel.input_text(), "");
+}
+
+#[test]
+fn esc_ends_the_session_search_at_once_with_the_draft_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut panel, _) = panel_with_recent_sessions(dir.path(), &["alpha", "beta"]);
+    let t = termide_i18n::t();
+    type_text(&mut panel, "draft");
+    panel.handle_key(ctrl_f());
+
+    // Nothing matches: the banner says so and Enter opens nothing.
+    type_text(&mut panel, "zzz");
+    assert!(panel.recent_sessions.is_empty());
+    let all = render_text(&mut panel, 80, 24).join("\n");
+    assert!(all.contains(t.agent_session_search_empty()), "{all}");
+    let before = panel.session_path().map(Path::to_path_buf);
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(panel.session_path().map(Path::to_path_buf), before);
+
+    // Esc ends the search at once, query or not: the full list and the
+    // draft come back.
+    panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(!panel.session_search_on());
+    assert_eq!(panel.recent_sessions.len(), 2);
+    assert_eq!(panel.input_text(), "draft");
+    let all = render_text(&mut panel, 80, 24).join("\n");
+    assert!(!all.contains(t.agent_session_search_title()), "{all}");
+
+    // From the list, too; Tab moves between the query and the list, and a
+    // character typed in the list lands in the query.
+    panel.handle_key(ctrl_f());
+    panel.handle_key(chord(KeyCode::Tab, KeyModifiers::NONE));
+    assert!(panel.chat_focus);
+    type_text(&mut panel, "b");
+    assert!(!panel.chat_focus);
+    assert_eq!(panel.input_text(), "b");
+    assert_eq!(panel.recent_sessions.len(), 1);
+    panel.handle_key(chord(KeyCode::Tab, KeyModifiers::NONE));
+    panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(!panel.session_search_on());
+    assert!(!panel.chat_focus);
+    assert_eq!(panel.input_text(), "draft");
+}
+
+#[test]
+fn the_session_query_is_not_a_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut panel, _) = panel_with_recent_sessions(dir.path(), &["alpha"]);
+    panel.handle_key(ctrl_f());
+    // `$` and `/` are letters of the query, not shell mode or a command.
+    type_text(&mut panel, "$/");
+    assert_eq!(panel.input_text(), "$/");
+    assert!(!panel.shell_mode);
+    assert!(panel.completion.is_none());
+    // A paste lands in it on one line, and the list follows.
+    panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    panel.handle_key(ctrl_f());
+    panel.handle_command(PanelCommand::PasteText {
+        text: "al\nzz".into(),
+    });
+    assert_eq!(panel.input_text(), "al zz");
+    assert!(panel.recent_sessions.is_empty());
+}
+
+#[test]
+fn ctrl_f_without_sessions_to_search_does_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![])
+    });
+    type_text(&mut panel, "draft");
+    panel.handle_key(ctrl_f());
+    assert!(!panel.session_search_on());
+    assert_eq!(panel.input_text(), "draft");
+}
+
+#[test]
+fn f8_in_a_session_search_deletes_the_match_under_the_cursor() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut panel, paths) = panel_with_recent_sessions(dir.path(), &["alpha", "beta"]);
+    panel.handle_key(ctrl_f());
+    type_text(&mut panel, "alp");
+    let events = panel.handle_key(chord(KeyCode::F(8), KeyModifiers::NONE));
+    let [PanelEvent::ShowConfirm {
+        message,
+        on_confirm: ConfirmAction::Custom(action),
+    }] = events.as_slice()
+    else {
+        panic!("expected a confirmation, got {events:?}");
+    };
+    assert!(message.contains("alpha"), "{message}");
+    panel.handle_command(PanelCommand::Confirmed {
+        action: action.clone(),
+    });
+    assert!(!paths[0].exists());
+    // The search goes on, now matching nothing.
+    assert!(panel.session_search_on());
+    assert!(panel.recent_sessions.is_empty());
+    assert_eq!(panel.recent_all.len(), 1);
+}
+
 #[test]
 fn the_banner_leaves_out_sessions_open_in_other_panels() {
     let dir = tempfile::tempdir().unwrap();

@@ -20,6 +20,7 @@ mod rewind;
 mod runtime;
 mod select;
 mod session_ops;
+mod session_search;
 mod slash;
 mod strip;
 mod submit;
@@ -652,6 +653,15 @@ pub struct AgentPanel {
     /// welcome banner of a fresh session offers to open. Read when the panel
     /// opens or switches session, not per frame; empty otherwise.
     recent_sessions: Vec<SessionSummary>,
+    /// All the sessions the banner offers; `recent_sessions` is the part of
+    /// them the session search matches, or all of them without a search.
+    recent_all: Vec<SessionSummary>,
+    /// The matched positions of each title in `recent_sessions` while the
+    /// session search is on, parallel to it; empty otherwise.
+    recent_hits: Vec<Vec<usize>>,
+    /// The banner's session search (`Ctrl+F`), holding what the prompt box
+    /// had before the query took it.
+    session_search: Option<session_search::SessionSearch>,
     /// The recent session the keyboard cursor is on while the chat focus is
     /// in the banner's list, an index into `recent_sessions`.
     recent_selected: usize,
@@ -1117,6 +1127,9 @@ impl AgentPanel {
             session_dir: setup.session_dir,
             session_choices: Vec::new(),
             recent_sessions: Vec::new(),
+            recent_all: Vec::new(),
+            recent_hits: Vec::new(),
+            session_search: None,
             recent_selected: 0,
             banner_top: 0,
             banner_rows: 0,
@@ -1732,6 +1745,28 @@ impl Panel for AgentPanel {
             return CommandResult::Handled(false);
         }
         match cmd {
+            // The session search's query takes a paste as plain text, on one
+            // line, and the list follows it.
+            PanelCommand::Paste if self.session_search_on() => {
+                match termide_ui::clipboard::paste().filter(|text| !text.is_empty()) {
+                    Some(text) => {
+                        self.search_paste(&text);
+                        CommandResult::Handled(true)
+                    }
+                    None => CommandResult::Handled(false),
+                }
+            }
+            PanelCommand::PasteText { text } if self.session_search_on() => {
+                self.search_paste(&text);
+                CommandResult::NeedsRedraw(true)
+            }
+            PanelCommand::Cut if self.session_search_on() => {
+                let cut = !self.chat_focus && self.cut_input_selection();
+                if cut {
+                    self.after_search_edit();
+                }
+                CommandResult::Handled(cut)
+            }
             PanelCommand::Paste if !self.chat_focus => match self.paste_clipboard() {
                 true => {
                     self.after_edit();

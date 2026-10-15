@@ -370,7 +370,10 @@ impl AgentPanel {
             .max()
             .unwrap_or(0) as u16;
         let gap = 3u16;
-        let show_logo = area.width >= logo_w + gap + 22;
+        // A session search shows the list alone: the fields and the logo
+        // beside them make way for its matches.
+        let searching = self.session_search_on();
+        let show_logo = area.width >= logo_w + gap + 22 && !searching;
         let info_x = area.x + 2 + if show_logo { logo_w + gap } else { 0 };
         let info_w = (area.x + area.width).saturating_sub(info_x + 1);
         // The list of sessions starts below the logo, so it takes the logo's
@@ -453,10 +456,12 @@ impl AgentPanel {
         // The document, row by row: what each row shows, at which column and
         // width, and what a click on it does.
         let mut doc: Vec<(Line<'static>, u16, u16, Option<BannerHit>)> = Vec::new();
-        for (line, hit) in fields {
-            doc.push((line, info_x, info_w, hit));
+        if !searching {
+            for (line, hit) in fields {
+                doc.push((line, info_x, info_w, hit));
+            }
         }
-        if !notices.is_empty() {
+        if !notices.is_empty() && !searching {
             doc.push((
                 transcript::separator(text_w + 1, colors),
                 area.x,
@@ -470,8 +475,10 @@ impl AgentPanel {
         // This directory's other sessions, newest first, one click (or
         // Tab, the arrows and Enter) away. The sessions go under the heading
         // rather than beside it, so their titles get the full width.
-        if !self.recent_sessions.is_empty() {
-            doc.push((Line::from(""), list_x, list_w, None));
+        if !self.recent_sessions.is_empty() || searching {
+            if !searching {
+                doc.push((Line::from(""), list_x, list_w, None));
+            }
             doc.push((
                 Line::styled(t.agent_banner_sessions().to_string(), dim),
                 list_x,
@@ -479,15 +486,37 @@ impl AgentPanel {
                 None,
             ));
         }
+        if searching && self.recent_sessions.is_empty() {
+            doc.push((
+                Line::styled(t.agent_session_search_empty().to_string(), dim),
+                list_x,
+                list_w,
+                None,
+            ));
+        }
         let list_start = doc.len();
+        // A search's matched letters stand out in the title: bold and
+        // underlined, over the title's own accent.
+        let hit_style = link.add_modifier(Modifier::UNDERLINED);
         for (index, summary) in self.recent_sessions.iter().enumerate() {
             // Only the title is in the accent colour; the date before it is
             // dim.
-            let line = Line::from(vec![
-                Span::styled(format!("{}  ", local_minute(summary.modified)), dim),
-                Span::styled(truncate_title(&summary.display_label()), link),
-            ]);
-            doc.push((line, list_x, list_w, Some(BannerHit::Session(index))));
+            let mut spans = vec![Span::styled(
+                format!("{}  ", local_minute(summary.modified)),
+                dim,
+            )];
+            spans.extend(termide_ui::fuzzy::highlight(
+                &truncate_title(&summary.display_label()),
+                self.recent_hit(index),
+                link,
+                hit_style,
+            ));
+            doc.push((
+                Line::from(spans),
+                list_x,
+                list_w,
+                Some(BannerHit::Session(index)),
+            ));
         }
         // A blank row above the banner only when the whole document fits
         // anyway, so a short panel spends none of its rows on it.
@@ -507,7 +536,9 @@ impl AgentPanel {
         self.banner_rows = total;
         self.banner_top = self.banner_top.min(total.saturating_sub(height));
 
-        let cursor_shown = self.chat_focus && panel_focused;
+        // A search shows its cursor while the query has the keyboard too: the
+        // arrows move it from there.
+        let cursor_shown = (self.chat_focus || searching) && panel_focused;
         let top = self.banner_top;
         for screen_row in 0..height.min(total - top) {
             let row = top + screen_row;
@@ -646,6 +677,18 @@ impl AgentPanel {
                 text,
             ),
             None => (label, prompt_style, placeholder.to_string()),
+        };
+        // The session search titles the box's border, so the query reads as
+        // one, and counts its matches at the other end.
+        let (label, prompt_style, placeholder) = if self.session_search_on() {
+            self.input.set_border_slots(
+                format!(" {} ", t.agent_session_search_title()),
+                format!(" {}/{} ", self.recent_sessions.len(), self.recent_all.len()),
+            );
+            ("", None, t.agent_session_search_placeholder().to_string())
+        } else {
+            self.input.set_border_slots(String::new(), String::new());
+            (label, prompt_style, placeholder)
         };
         self.input.set_label(0, label);
         self.input.set_prompt_style(prompt_style);

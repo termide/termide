@@ -53,6 +53,9 @@ impl AgentPanel {
             self.notice(termide_i18n::t().agent_notice_busy(), NoticeKind::Warn);
             return false;
         }
+        // A search in the banner's list ends with the banner it searched,
+        // and the prompt box gets its own text back.
+        self.end_session_search();
         // What the session being left has going is written before it goes.
         self.sync_autorun();
         let session = session.or_else(|| {
@@ -226,6 +229,7 @@ impl AgentPanel {
     /// agent switch — keeping what is typed in the prompt box, its large
     /// pastes and its cursor: the switch changes who answers, not the request.
     pub(crate) fn rebuild_keeping_prompt(&mut self) -> bool {
+        self.end_session_search();
         let prompt = self.input.multiline(0).cloned();
         let pastes = std::mem::take(&mut self.pastes);
         let paste_seq = self.paste_seq;
@@ -294,7 +298,7 @@ impl AgentPanel {
 
     fn load_recent_sessions(&mut self) {
         self.recent_generation = Session::open_generation();
-        self.recent_sessions = if self.is_fresh() {
+        self.recent_all = if self.is_fresh() {
             let current = self.session.as_ref().map(Session::path);
             self.session_list()
                 .into_iter()
@@ -307,6 +311,11 @@ impl AgentPanel {
         } else {
             Vec::new()
         };
+        // With nothing left to search, the search ends.
+        if self.recent_all.is_empty() {
+            self.end_session_search();
+        }
+        self.apply_session_filter();
     }
 
     /// Whether the welcome banner is up and lists recent sessions, so `Tab`

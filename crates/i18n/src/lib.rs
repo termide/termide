@@ -318,6 +318,7 @@ pub trait Translation: Send + Sync {
     fn help_desc_agent_rewind(&self) -> &str;
     fn help_desc_agent_fork(&self) -> &str;
     fn help_desc_agent_switch(&self) -> &str;
+    fn help_desc_agent_search_sessions(&self) -> &str;
     fn help_desc_agent_new(&self) -> &str;
     fn help_desc_agent_delete(&self) -> &str;
     fn help_section_viewers(&self) -> &str;
@@ -755,6 +756,11 @@ pub trait Translation: Send + Sync {
     fn agent_banner_cwd(&self) -> &str;
     fn agent_cwd_title(&self) -> &str;
     fn agent_banner_sessions(&self) -> &str;
+    /// The prompt box's border title while it searches the banner's sessions.
+    fn agent_session_search_title(&self) -> &str;
+    fn agent_session_search_placeholder(&self) -> &str;
+    /// The banner's list when the session search matches nothing.
+    fn agent_session_search_empty(&self) -> &str;
     fn agent_project_command(&self) -> &str;
     /// A skill kept to the user (`disable-model-invocation`), with no description.
     fn agent_user_skill(&self) -> &str;

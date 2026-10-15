@@ -1112,7 +1112,7 @@ impl AgentPanel {
         // same prompt as the `[≡]` menu's Rename. In the banner's list of
         // recent sessions it renames the one under the cursor instead.
         if key.code == KeyCode::F(2) && !ctrl && !alt && !shift {
-            if self.chat_focus && self.recent_list_shown() {
+            if self.recent_list_targeted() {
                 return self.ask_rename_recent_session();
             }
             return self.handle_status_action(RENAME_ACTION);
@@ -1140,10 +1140,21 @@ impl AgentPanel {
         // In the banner's list of recent sessions F8 deletes the one under the
         // cursor instead: the fresh session itself has nothing to delete.
         if key.code == KeyCode::F(8) && !ctrl && !alt && !shift {
-            if self.chat_focus && self.recent_list_shown() {
+            if self.recent_list_targeted() {
                 return self.ask_delete_recent_session();
             }
             return self.ask_delete_session();
+        }
+        // Ctrl+F searches the banner's list of sessions by title, the prompt
+        // box taking the query; in a search it brings the keyboard back to
+        // the query.
+        if ctrl && !alt && !shift && key.code == KeyCode::Char('f') {
+            if self.session_search_on() {
+                self.chat_focus = false;
+            } else if !self.start_session_search() {
+                return vec![];
+            }
+            return vec![PanelEvent::NeedsRedraw];
         }
 
         // The completion list gets the navigation keys while it is open, except
@@ -1203,6 +1214,7 @@ impl AgentPanel {
             let page = self.viewport_height().max(1) as isize;
             match key.code {
                 KeyCode::Delete => return self.ask_delete_recent_session(),
+                KeyCode::Esc if self.session_search_on() => self.end_session_search(),
                 KeyCode::Tab | KeyCode::Esc => self.chat_focus = false,
                 KeyCode::Up if !ctrl => self.move_recent_selection(-1),
                 KeyCode::Down if !ctrl => self.move_recent_selection(1),
@@ -1220,6 +1232,11 @@ impl AgentPanel {
                 _ => return vec![],
             }
             return vec![PanelEvent::NeedsRedraw];
+        }
+        // The session search's query has the keyboard.
+        if self.session_search_on() {
+            self.chat_focus = false;
+            return self.search_key(key);
         }
         if self.chat_focus {
             let count = self.transcript.items().len();

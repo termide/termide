@@ -306,7 +306,16 @@ from the keyboard, `Tab` moves into the list, the arrows, `PgUp`/`PgDn` and
 `Home`/`End` walk it, scrolling the banner to keep the cursor in view (back
 on the first session the banner shows from its top), `Enter` opens the
 session under the cursor, `F2` renames it, `F8` or `Delete` deletes it after a
-confirmation, and `Tab` or `Esc` goes back to the prompt. Each MCP server
+confirmation, and `Tab` or `Esc` goes back to the prompt. `Ctrl+F` searches
+the list: the prompt box takes the query, its border titled **Search
+sessions** and counting the matches, and what you had typed waits. The list
+keeps only the sessions whose titles match — fuzzy, best first, in the same
+syntax as the [command palette](ui.md#command-palette) — with the matched
+letters underlined, and the fields make way for it. The arrows and
+`PgUp`/`PgDn` move the cursor straight from the query, `Enter` opens the
+session under it, `Tab` moves between the query and the list, `F2` and `F8`
+act on the session under the cursor, and `Esc` ends the search at once,
+bringing back the whole list and what you had typed. Each MCP server
 keeps one line past the rule, rewritten as it changes: its tools and how many of them
 are on, connecting, needs sign-in. The banner gives way to the conversation as
 soon as you send your first message, and those lines stay at the top of it;
@@ -410,6 +419,7 @@ you have named or sent even one message to is always kept.
 | `F4` | Pick a message to rewind the session to, as `Esc` does in the idle empty prompt |
 | `F5` | Fork this session (after a confirmation): its log is copied and the copy opens in a new agent panel, while this one goes on working at its own |
 | `F6` | Switch session — open the picker of this directory's sessions |
+| `Ctrl+F` | On a fresh session's banner, search its list of sessions by title in the prompt box; `Esc` ends the search |
 | `F7` | Start a new session (the used one is kept in the list) |
 | `F8` | Delete this session (after a confirmation) and start a fresh one; in the banner's list of sessions, delete the one under the cursor |
 | `/name args` + `Enter` | Send the prompt template `name` with `args` filled in, run the command script `name` or send the skill `name` (`/skill:name` when the name is taken); `/compact [focus]` summarises the session, `/undo` takes the last request back, `/new` starts a fresh session, `/fork` copies this one into a new panel, `/clear` starts one after discarding the current session, and `/rename [name]` (or `/name`) renames it; `/pause` stops the run after the current step and `/continue` resumes it (or, before the step ends, cancels the pause, and after a failed run tries its request again); `/loop [interval] <prompt>` re-runs a prompt on an interval (or back-to-back), `/loop` alone shows the active loop, `/loop stop` (or `Esc`) ends it; `/goal <what to achieve>` works autonomously toward a goal until a judge says it is reached, `/goal` alone shows the active goal, `/goal stop` (or `Esc`) ends it; `/handoff` briefs the unfinished work, then offers to save it to `HANDOFF.md` or start a new session from it; `/usage` opens the session-info modal and `/prompt` opens the assembled system prompt; `/mcp` lists the MCP servers, `/mcp reload [server]` reads their configuration again (for one server, or all), and `/mcp login <server>` and `/mcp logout <server>` sign in to one and out of it (see [MCP servers](#mcp-servers)) |
