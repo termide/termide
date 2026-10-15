@@ -890,11 +890,28 @@ impl Modal for EditableSelectModal {
 
         Ok(None)
     }
+
+    /// A paste goes into the input, as typing does: focus returns to it
+    /// from the choice row, a checkbox or the buttons.
+    fn handle_paste(&mut self, text: &str) -> bool {
+        self.suggestion_input.input_mut().paste(text);
+        self.focus = FocusArea::Input;
+        true
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bracketed_paste_lands_in_the_input() {
+        let mut modal = levels();
+        modal.focus = FocusArea::Choice;
+        assert!(modal.handle_paste("/tmp/\nb"));
+        assert_eq!(modal.value(), "a.zip/tmp/b");
+        assert_eq!(modal.focus, FocusArea::Input);
+    }
 
     #[test]
     fn conditional_checkbox_is_hidden_until_primary_is_checked() {

@@ -193,14 +193,10 @@ impl App {
         Ok(())
     }
 
-    /// Handle paste event in modal window
-    /// Returns true if modal handled the paste, false to pass to panel
+    /// Hand a bracketed paste to the open modal; `false` when none is open
+    /// and the paste belongs to the active panel.
     pub(super) fn handle_modal_paste(&mut self, text: &str) -> bool {
-        if let Some(modal) = self.state.get_active_modal_mut() {
-            modal.handle_paste(text)
-        } else {
-            false
-        }
+        paste_into_modal(self.state.get_active_modal_mut(), text)
     }
 
     /// Handle mouse event in modal window
@@ -1032,9 +1028,35 @@ fn quit_is_confirmed(value: &dyn std::any::Any) -> bool {
     value.downcast_ref::<bool>().copied().unwrap_or(false)
 }
 
+/// Give a paste to the open modal, if any. An open modal takes the paste
+/// even when it has no field to put it in: the panel beneath it is not the
+/// one the user is typing in, so the paste must never reach it.
+fn paste_into_modal(modal: Option<&mut termide_modal::ActiveModal>, text: &str) -> bool {
+    match modal {
+        Some(modal) => {
+            modal.handle_paste(text);
+            true
+        }
+        None => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::quit_is_confirmed;
+    use super::{paste_into_modal, quit_is_confirmed};
+    use termide_modal::{ActiveModal, ConfirmModal};
+
+    #[test]
+    fn an_open_modal_swallows_a_paste_it_has_no_field_for() {
+        let mut modal = ActiveModal::Confirm(Box::new(ConfirmModal::new("Delete", "Sure?")));
+        assert!(!modal.handle_paste("rm -rf"));
+        assert!(paste_into_modal(Some(&mut modal), "rm -rf"));
+    }
+
+    #[test]
+    fn without_a_modal_a_paste_goes_to_the_panel() {
+        assert!(!paste_into_modal(None, "text"));
+    }
 
     #[test]
     fn only_an_accepted_confirmation_quits() {

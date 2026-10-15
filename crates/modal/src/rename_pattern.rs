@@ -354,4 +354,26 @@ impl Modal for RenamePatternModal {
             Ok(None)
         }
     }
+
+    /// A paste goes into the pattern, as typing does: focus returns to the
+    /// field and the preview follows on the next draw.
+    fn handle_paste(&mut self, text: &str) -> bool {
+        self.input_handler.paste(text);
+        self.focus = FocusArea::Input;
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_bracketed_paste_lands_in_the_pattern() {
+        let mut modal = RenamePatternModal::new("Rename", "a.txt", "x", None, None);
+        modal.focus = FocusArea::Buttons;
+        assert!(modal.handle_paste("-$0\n"));
+        assert_eq!(modal.input_handler.text(), "x-$0");
+        assert_eq!(modal.focus, FocusArea::Input);
+    }
 }

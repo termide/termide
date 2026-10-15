@@ -930,7 +930,8 @@ impl App {
                     self.event_handler.set_tick_rate(Duration::from_millis(
                         termide_config::constants::EVENT_HANDLER_INTERVAL_MS,
                     ));
-                    // Handle bracketed paste - check modal first, then send to active panel
+                    // A bracketed paste goes to the open modal, which keeps it
+                    // from the panel beneath; with none open, to the active panel.
                     if !self.handle_modal_paste(&text) {
                         self.handle_paste_event(text)?;
                     }
