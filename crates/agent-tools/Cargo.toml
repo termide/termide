@@ -13,6 +13,7 @@ serde_json.workspace = true
 similar.workspace = true
 
 termide-agent-core = { path = "../agent-core" }
+termide-clipboard = { path = "../clipboard" }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

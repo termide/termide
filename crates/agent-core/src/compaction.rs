@@ -193,6 +193,7 @@ pub(crate) fn message_chars(message: &Message) -> usize {
             .iter()
             .map(|block| match block {
                 ToolResultContent::Text { text } => text.chars().count(),
+                ToolResultContent::Image { .. } => crate::message::IMAGE_ESTIMATE_CHARS,
             })
             .sum(),
     }

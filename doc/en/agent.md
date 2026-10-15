@@ -781,6 +781,19 @@ larger than 1568 pixels on its longer side is scaled down first. On macOS use
 only text. Over SSH the clipboard read is the remote machine's. The model has
 to read images — an external agent gets them only when it says it takes them.
 
+The agent can look at pictures itself, too: `read` on a PNG, JPEG, GIF or
+WebP file returns the picture, scaled down the same way, instead of refusing
+a binary file. A screenshot it took, a page or figure it rendered, a chart it
+plotted — it sees what it made and can correct it. Anthropic models get the
+picture inside the tool result; an OpenAI-compatible model gets it in a user
+message right after the run of tool results, since a tool message there
+carries text only; Claude Code, Codex and other external agents calling
+termide's `read` get it as an MCP image. A picture counts as about 1,500
+tokens of context; fitting an overfull context drops it with the other
+`read` outputs, right after the model's reasoning. As with
+pasted pictures, the model has to read images: a text-only model's server
+refuses the request.
+
 **Model** asks the endpoint for the models it serves and lists them, the
 current one marked `●`; the last entry lets you type an id instead, which is
 also what you get when the endpoint cannot list its models. The switch takes

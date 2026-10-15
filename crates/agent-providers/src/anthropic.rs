@@ -295,6 +295,14 @@ impl Provider for AnthropicProvider {
     }
 }
 
+/// An image block, as a user message and a tool result both carry it.
+fn image_block((media_type, data): (&str, &str)) -> Value {
+    json!({
+        "type": "image",
+        "source": { "type": "base64", "media_type": media_type, "data": data },
+    })
+}
+
 /// Turn the transcript into Anthropic messages: assistant blocks as they are,
 /// and tool results gathered into the user turn that must carry them, with
 /// consecutive results merged so each assistant tool-use turn is answered by
@@ -319,22 +327,26 @@ fn convert_messages(messages: &[Message], replay_model: Option<&str>) -> Vec<Val
     for (index, message) in messages.iter().enumerate() {
         match message {
             Message::ToolResult(result) => {
+                // Plain text stays a string; a result with images needs the
+                // list of blocks, which `tool_result` takes images in.
+                let content = if result.images().next().is_none() {
+                    json!(result.plain_text())
+                } else {
+                    let mut blocks = vec![json!({ "type": "text", "text": result.plain_text() })];
+                    blocks.extend(result.images().map(image_block));
+                    Value::Array(blocks)
+                };
                 pending_results.push(json!({
                     "type": "tool_result",
                     "tool_use_id": result.tool_call_id,
-                    "content": result.plain_text(),
+                    "content": content,
                     "is_error": result.is_error,
                 }));
             }
             Message::User(user) => {
                 flush(&mut out, &mut pending_results);
                 let mut content = vec![json!({ "type": "text", "text": user.model_text() })];
-                content.extend(user.images().map(|(media_type, data)| {
-                    json!({
-                        "type": "image",
-                        "source": { "type": "base64", "media_type": media_type, "data": data },
-                    })
-                }));
+                content.extend(user.images().map(image_block));
                 out.push(json!({ "role": "user", "content": content }));
             }
             Message::Assistant(assistant) => {
@@ -1175,6 +1187,31 @@ mod tests {
                 { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "QUJD" } },
             ])
         );
+    }
+
+    #[test]
+    fn a_tool_result_with_an_image_goes_as_blocks() {
+        let call = ToolCall {
+            id: "u1".into(),
+            name: "read".into(),
+            arguments: json!({}),
+            extra_content: None,
+        };
+        let shot = ToolResultMessage::text(&call, "Image shot.png")
+            .with_images(vec![("image/png".into(), "QUJD".into())]);
+        let wire = convert_messages(&[Message::ToolResult(shot)], None);
+        assert_eq!(
+            wire[0]["content"][0]["content"],
+            json!([
+                { "type": "text", "text": "Image shot.png" },
+                { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "QUJD" } },
+            ])
+        );
+        let plain = convert_messages(
+            &[Message::ToolResult(ToolResultMessage::text(&call, "one"))],
+            None,
+        );
+        assert_eq!(plain[0]["content"][0]["content"], "one");
     }
 
     #[test]

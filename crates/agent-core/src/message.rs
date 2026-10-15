@@ -170,7 +170,16 @@ impl AssistantContent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolResultContent {
-    Text { text: String },
+    Text {
+        text: String,
+    },
+    /// A picture the tool returns for the model to look at: an image file
+    /// `read` was pointed at. `data` is the encoded file in base64,
+    /// `media_type` its MIME type, as in [`UserContent::Image`].
+    Image {
+        media_type: String,
+        data: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -606,15 +615,38 @@ impl ToolResultMessage {
             .filter(|usage: &Usage| usage.total() > 0)
     }
 
-    /// Concatenated text blocks.
+    /// The result with `images` after its text, as `(media_type, base64
+    /// data)`.
+    #[must_use]
+    pub fn with_images(mut self, images: Vec<(String, String)>) -> Self {
+        self.content.extend(
+            images
+                .into_iter()
+                .map(|(media_type, data)| ToolResultContent::Image { media_type, data }),
+        );
+        self
+    }
+
+    /// Concatenated text blocks; images are left out.
     #[must_use]
     pub fn plain_text(&self) -> String {
         self.content
             .iter()
-            .map(|block| match block {
-                ToolResultContent::Text { text } => text.as_str(),
+            .filter_map(|block| match block {
+                ToolResultContent::Text { text } => Some(text.as_str()),
+                ToolResultContent::Image { .. } => None,
             })
             .collect()
+    }
+
+    /// The returned images, as `(media_type, base64 data)`.
+    pub fn images(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.content.iter().filter_map(|block| match block {
+            ToolResultContent::Image { media_type, data } => {
+                Some((media_type.as_str(), data.as_str()))
+            }
+            ToolResultContent::Text { .. } => None,
+        })
     }
 }
 
