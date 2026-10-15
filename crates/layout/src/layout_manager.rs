@@ -99,6 +99,34 @@ impl LayoutManager {
         None
     }
 
+    /// Remove the panel at `position` — counted across all groups, as
+    /// [`Self::iter_all_panels_mut`] does — dropping its group when it was
+    /// the last one there; the focus stays on the group it was on.
+    pub fn remove_panel_at(
+        &mut self,
+        position: usize,
+        available_width: u16,
+    ) -> Option<Box<dyn Panel>> {
+        let mut before = 0;
+        let group_idx = self.panel_groups.iter().position(|group| {
+            let here = position < before + group.len();
+            if !here {
+                before += group.len();
+            }
+            here
+        })?;
+        let panel = self.panel_groups[group_idx].remove_panel(position - before)?;
+        if self.panel_groups[group_idx].is_empty() {
+            self.panel_groups.remove(group_idx);
+            if self.focus > group_idx {
+                self.focus -= 1;
+            }
+            self.focus = self.focus.min(self.panel_groups.len().saturating_sub(1));
+            self.redistribute_widths_proportionally(available_width);
+        }
+        Some(panel)
+    }
+
     /// Find panel by name, expand it in its group, return mutable reference.
     /// Does NOT change focus. Used for reusing existing panels.
     pub fn find_and_expand_panel_by_name(&mut self, name: &str) -> Option<&mut Box<dyn Panel>> {
@@ -707,6 +735,24 @@ mod tests {
         lm.focus = 1;
         lm.close_active_panel(400).unwrap();
         assert_eq!(lm.group_count(), 1);
+        assert_eq!(lm.focus, 0);
+    }
+
+    #[test]
+    fn removing_a_panel_by_position_keeps_the_focus_on_its_group() {
+        let mut lm = LayoutManager::new();
+        let config = make_config(40);
+        lm.add_panel(panel("a"), &config, 400);
+        lm.add_panel(panel("b"), &config, 400);
+        lm.add_panel(panel("c"), &config, 400);
+        lm.focus = 2;
+        // The only panel of the first group: its group goes, the focus
+        // follows "c" to its new index.
+        assert_eq!(lm.remove_panel_at(0, 400).unwrap().name(), "a");
+        assert_eq!(lm.group_count(), 2);
+        assert_eq!(lm.focus, 1);
+        assert!(lm.remove_panel_at(5, 400).is_none());
+        assert_eq!(lm.remove_panel_at(1, 400).unwrap().name(), "c");
         assert_eq!(lm.focus, 0);
     }
 

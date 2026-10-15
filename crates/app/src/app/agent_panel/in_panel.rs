@@ -88,9 +88,10 @@ fn port() -> &'static (Sender<Request>, Mutex<Receiver<Request>>) {
 static SERVED: AtomicBool = AtomicBool::new(false);
 
 /// Where each panel taken for a task worked before, by its number: once the
-/// task is over it is set up there anew.
-fn homes() -> &'static Mutex<HashMap<u64, PathBuf>> {
-    static HOMES: OnceLock<Mutex<HashMap<u64, PathBuf>>> = OnceLock::new();
+/// task is over it is set up there anew. `None` for a panel opened for the
+/// task, which is closed once the task is over.
+fn homes() -> &'static Mutex<HashMap<u64, Option<PathBuf>>> {
+    static HOMES: OnceLock<Mutex<HashMap<u64, Option<PathBuf>>>> = OnceLock::new();
     HOMES.get_or_init(Mutex::default)
 }
 
@@ -217,7 +218,7 @@ fn background_report(prompt: &str, panel: u64, outcome: &SubagentOutcome) -> Str
     };
     let head = format!(
         "The background task you handed to panel {panel} is over (\"{task}{ellipsis}\"); \
-         the panel is free again, so do not reply to it."
+         the panel no longer runs it, so do not reply to it."
     );
     match &outcome.answer {
         Ok(answer) => format!("{head}\n\nIts answer:\n\n{answer}"),
@@ -359,7 +360,7 @@ impl App {
             )
             .with_call(request.lineage.call.clone()),
         );
-        let home = taken.map_or_else(|| request.cwd.clone(), |(_, cwd)| cwd);
+        let home = taken.map(|(_, cwd)| cwd);
         let panel_id = panel.panel_id();
         homes()
             .lock()
@@ -380,9 +381,11 @@ impl App {
         })
     }
 
-    /// Set up anew the panels a delegated task left: the default agent, on
-    /// the default connection and mode, where the panel worked before it was
-    /// taken — as a panel the user opens — keeping its place and number.
+    /// Deal with the panels a delegated task left. One opened for the task
+    /// is closed; one taken from the free ones is set up anew: the default
+    /// agent, on the default connection and mode, where the panel worked
+    /// before it was taken — as a panel the user opens — keeping its place
+    /// and number.
     fn reset_released_panels(&mut self) {
         let released: Vec<(usize, u64, PathBuf)> = self
             .layout_manager
@@ -399,12 +402,22 @@ impl App {
             return;
         }
         let settings = self.project_ai_settings();
-        for (position, id, cwd) in released {
-            let cwd = homes()
+        // From the last, so a closed panel leaves the positions before it
+        // as they were.
+        for (position, id, cwd) in released.into_iter().rev() {
+            let home = homes()
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .remove(&id)
-                .unwrap_or(cwd);
+                .remove(&id);
+            let cwd = match home {
+                Some(None) => {
+                    let width = self.state.terminal.width;
+                    self.layout_manager.remove_panel_at(position, width);
+                    continue;
+                }
+                Some(Some(home)) => home,
+                None => cwd,
+            };
             let mut setup = agent_setup(&settings, cwd, &self.project_root, DEFAULT_AGENT, None);
             setup.panel_id = Some(id);
             self.layout_manager
