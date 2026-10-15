@@ -14,9 +14,9 @@
 use std::sync::mpsc::Sender;
 
 use termide_agent_core::{AgentEvent, CancelToken, UserMessage};
-use termide_core::PanelEvent;
+use termide_core::{ConfirmAction, PanelEvent};
 
-use crate::{AgentPanel, NoticeKind};
+use crate::{AgentPanel, NoticeKind, TAKE_OVER_ACTION};
 
 /// What the panel reports to the agent that delegated its task.
 #[derive(Debug, Clone)]
@@ -190,6 +190,25 @@ impl AgentPanel {
         self.inherited_intent = None;
         self.switch_session(None);
         true
+    }
+
+    /// What closing the panel asks while it runs another agent's task.
+    pub(crate) fn delegate_close_confirmation(&self) -> Option<String> {
+        self.delegation
+            .as_ref()
+            .map(|delegation| termide_i18n::t().agent_close_confirm_delegate_fmt(&delegation.from))
+    }
+
+    /// `Ctrl+T`: ask before taking the task over; the answer comes back as
+    /// `PanelCommand::Confirmed(TAKE_OVER_ACTION)`.
+    pub(crate) fn ask_take_over(&self) -> Vec<PanelEvent> {
+        let Some(delegation) = &self.delegation else {
+            return Vec::new();
+        };
+        vec![PanelEvent::ShowConfirm {
+            message: termide_i18n::t().agent_take_over_confirm_fmt(&delegation.from),
+            on_confirm: ConfirmAction::Custom(TAKE_OVER_ACTION.to_string()),
+        }]
     }
 
     /// Take the panel over from the delegating agent: the task ends for it

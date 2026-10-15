@@ -1193,6 +1193,14 @@ impl Translation for RuntimeTranslation {
         self.format("agent_notice_taken_over_fmt", &[("agent", agent)])
     }
 
+    fn agent_close_confirm_delegate_fmt(&self, agent: &str) -> String {
+        self.format("agent_close_confirm_delegate_fmt", &[("agent", agent)])
+    }
+
+    fn agent_take_over_confirm_fmt(&self, agent: &str) -> String {
+        self.format("agent_take_over_confirm_fmt", &[("agent", agent)])
+    }
+
     fn agent_delegate_ask_question_fmt(&self, tasks: &str) -> String {
         self.format("agent_delegate_ask_question_fmt", &[("tasks", tasks)])
     }

@@ -869,6 +869,8 @@ pub trait Translation: Send + Sync {
     fn agent_notice_cannot_start_fmt(&self, error: &str) -> String;
     fn agent_input_placeholder_delegate_fmt(&self, agent: &str, task: &str) -> String;
     fn agent_notice_taken_over_fmt(&self, agent: &str) -> String;
+    fn agent_close_confirm_delegate_fmt(&self, agent: &str) -> String;
+    fn agent_take_over_confirm_fmt(&self, agent: &str) -> String;
     fn agent_delegate_ask_question_fmt(&self, tasks: &str) -> String;
     fn agent_notice_cannot_check_goal_fmt(&self, error: &str) -> String;
     fn agent_notice_cannot_handoff_fmt(&self, error: &str) -> String;

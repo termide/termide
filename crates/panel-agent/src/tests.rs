@@ -10037,7 +10037,21 @@ fn ctrl_t_takes_a_delegated_task_over() {
         delegated_task(),
         Delegation::new("lead", "find the loader", updates, CancelToken::new()),
     );
-    panel.handle_key(chord(KeyCode::Char('t'), KeyModifiers::CONTROL));
+    // Closing asks with the task named, whatever the panel is doing.
+    assert!(panel
+        .needs_close_confirmation()
+        .is_some_and(|text| text.contains("runs a task for lead")));
+    // Ctrl+T asks first; the task stays the agent's until the answer.
+    let asked = panel.handle_key(chord(KeyCode::Char('t'), KeyModifiers::CONTROL));
+    assert!(asked.iter().any(|event| matches!(
+        event,
+        PanelEvent::ShowConfirm { on_confirm: ConfirmAction::Custom(action), .. }
+            if action == TAKE_OVER_ACTION
+    )));
+    assert!(panel.is_delegate());
+    panel.handle_command(PanelCommand::Confirmed {
+        action: TAKE_OVER_ACTION.to_string(),
+    });
     assert!(!panel.is_delegate());
     assert!(matches!(
         received.try_iter().last(),
