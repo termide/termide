@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **A command Claude Code moved to the background stays in sight.** To take a message typed while a long command of termide's tools ran, Claude Code moves the command to the background and answers; the run then ended, though the command went on, and nothing showed it. The agent's own run now goes on while termide still runs a call for it: the clock ticks until the command ends and the agent has taken it up, the state strip pins a row for the command (`$ Running cargo test …` with its own clock; a click brings its block into view), and `Esc` stops the command too.
 - **`recall` on Claude Code, Codex and Gemini CLI leaves out the session it is called from.** The panel's session log was not passed to an external agent's calls of termide's tools, so its own question and the steps after it came back as the first results; now, as on the built-in agent, only what a compaction took out of the context is searched.
+- **`recall` results carry less noise.** Its own earlier calls and results are no longer searched (they repeated old questions and the snippets of other entries, and a deleted session lived on in them), and a tool call — an edit's or a script's body naming a subject in passing — counts half as much as an answer, down from 0.8.
 
 ## [0.41.0] - 2026-10-12
 
