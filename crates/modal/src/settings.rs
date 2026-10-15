@@ -437,12 +437,12 @@ impl Modal for SettingsModal {
         }
 
         // Outside a field being edited nothing is typed, so the zones match
-        // the layout-normalized key: `Ctrl+Ы` applies as `Ctrl+S` does.
-        let key = chord.canonical;
+        // the layout-normalized key: `Ctrl+Ы` applies as `Ctrl+S` does. The
+        // content picks per row, since the LSP server form is typed into.
         match self.focus {
-            FocusArea::Sidebar => self.handle_sidebar_key(key),
-            FocusArea::Content => self.handle_content_key(key),
-            FocusArea::Buttons => self.handle_buttons_key(key),
+            FocusArea::Sidebar => self.handle_sidebar_key(chord.canonical),
+            FocusArea::Content => self.handle_content_key(chord),
+            FocusArea::Buttons => self.handle_buttons_key(chord.canonical),
         }
     }
 

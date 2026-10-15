@@ -267,12 +267,17 @@ impl SettingsModal {
 
     pub(super) fn handle_content_key(
         &mut self,
-        key: KeyEvent,
+        chord: termide_core::KeyChord,
     ) -> Result<Option<ModalResult<SettingsResult>>> {
-        // LSP server edit form mode
+        // The LSP server form is all text fields: they get the key as the
+        // keyboard sent it, so `ф` and `+` type themselves rather than their
+        // Latin, unshifted twins; the field grammar normalizes Ctrl chords.
         if self.active_tab == SettingsTab::Lsp && self.lsp_mode == LspMode::ServerEdit {
-            return self.handle_lsp_edit_key(key);
+            return self.handle_lsp_edit_key(chord.raw);
         }
+        // Elsewhere nothing is typed, so the rows match the
+        // layout-normalized key: `Ctrl+Ы` applies as `Ctrl+S` does.
+        let key = chord.canonical;
         // An open dropdown owns the keyboard until it closes.
         if self.handle_enum_picker_key(key) {
             return Ok(None);
@@ -1429,5 +1434,37 @@ mod wheel_tests {
         let sidebar = modal.last_sidebar_area.expect("sidebar drawn");
         wheel(&mut modal, screen, sidebar, true);
         assert_eq!(modal.active_tab, SettingsTab::General);
+    }
+}
+
+#[cfg(test)]
+mod lsp_form_tests {
+    use super::*;
+    use crate::Modal;
+    use crossterm::event::KeyEvent;
+    use termide_config::Config;
+
+    /// A key as a Russian layout sends it: `raw` is what was typed,
+    /// `canonical` its Latin, unshifted twin.
+    fn typed(modal: &mut SettingsModal, raw: char, canonical: char) {
+        let chord = termide_core::KeyChord {
+            raw: KeyEvent::new(KeyCode::Char(raw), KeyModifiers::NONE),
+            canonical: KeyEvent::new(KeyCode::Char(canonical), KeyModifiers::NONE),
+        };
+        modal.handle_key(chord).unwrap();
+    }
+
+    #[test]
+    fn the_server_form_types_what_the_keyboard_sends() {
+        let config = Config::default();
+        let mut modal = SettingsModal::new(config.clone(), config, false);
+        modal.active_tab = SettingsTab::Lsp;
+        modal.focus = FocusArea::Content;
+        modal.lsp_mode = LspMode::ServerEdit;
+        modal.lsp_edit_cursor = 1;
+        typed(&mut modal, 'ф', 'a');
+        typed(&mut modal, '+', '=');
+        assert_eq!(modal.lsp_edit_fields[1].text(), "ф+");
+        assert_eq!(modal.lsp_mode, LspMode::ServerEdit);
     }
 }
