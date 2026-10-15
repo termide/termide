@@ -200,6 +200,31 @@ impl<P> OpenProjects<P> {
             .collect()
     }
 
+    /// Whether the project at `root` is open but not loaded yet.
+    pub fn is_pending(&self, root: &Path) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| entry.root == root && matches!(entry.slot, Slot::Pending))
+    }
+
+    /// When the project at `root` was last current, for
+    /// [`Self::set_last_used`] to put back.
+    pub fn last_used(&self, root: &Path) -> Option<u64> {
+        self.entries
+            .iter()
+            .find(|entry| entry.root == root)
+            .map(|entry| entry.last_used)
+    }
+
+    /// Put back when the project at `root` was last current: a visit the
+    /// user did not make — a load in the background — does not count in
+    /// [`Self::by_recent_use`].
+    pub fn set_last_used(&mut self, root: &Path, last_used: u64) {
+        if let Some(entry) = self.entries.iter_mut().find(|entry| entry.root == root) {
+            entry.last_used = last_used;
+        }
+    }
+
     /// The parked projects, in the order the menus list them.
     pub fn parked(&self) -> impl Iterator<Item = (&Path, &P)> {
         self.entries
@@ -335,5 +360,32 @@ mod tests {
 
         assert_eq!(open.close(Path::new("/c")), None);
         assert_eq!(roots(&open), vec!["/a", "/b"]);
+    }
+
+    /// A pending project loaded in the background is entered and left at
+    /// once; put back, its recency says the user never went there.
+    #[test]
+    fn a_visit_put_back_leaves_the_recent_order_as_it_was() {
+        let mut open = OpenProjects::new(PathBuf::from("/a"));
+        open.switch(PathBuf::from("/b"), "panels of a");
+        open.switch(PathBuf::from("/a"), "panels of b");
+        assert!(open.open_pending(PathBuf::from("/c")));
+        assert!(open.is_pending(Path::new("/c")));
+        assert!(!open.is_pending(Path::new("/b")));
+        assert_eq!(recent(&open), vec!["/a", "/b", "/c"]);
+
+        let recency = ["/c", "/a"].map(|root| open.last_used(Path::new(root)));
+        assert_eq!(open.switch(PathBuf::from("/c"), "panels of a"), None);
+        assert_eq!(
+            open.switch(PathBuf::from("/a"), "panels of c"),
+            Some("panels of a")
+        );
+        assert!(!open.is_pending(Path::new("/c")), "loaded and parked");
+        assert_eq!(recent(&open), vec!["/a", "/c", "/b"]);
+
+        for (root, last_used) in ["/c", "/a"].into_iter().zip(recency) {
+            open.set_last_used(Path::new(root), last_used.unwrap());
+        }
+        assert_eq!(recent(&open), vec!["/a", "/b", "/c"]);
     }
 }

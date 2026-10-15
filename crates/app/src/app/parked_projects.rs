@@ -83,6 +83,30 @@ pub(super) fn project_root_of(path: PathBuf) -> PathBuf {
     dunce::canonicalize(&path).unwrap_or(path)
 }
 
+/// Whether an agent panel in the saved layout of the project at `root` left a
+/// failed request waiting to be tried again (see
+/// `Session::pending_retry`).
+fn holds_a_retry(root: &Path) -> bool {
+    let Ok(layout) = termide_project::ProjectLayout::load(root) else {
+        return false;
+    };
+    layout
+        .panel_groups
+        .iter()
+        .flat_map(|group| &group.panels)
+        .filter_map(|panel| match panel {
+            termide_project::PanelState::Agent {
+                session: Some(path),
+                ..
+            } => Some(path),
+            _ => None,
+        })
+        .any(|path| {
+            termide_agent_core::session::Session::pending_retry_at(path)
+                .is_ok_and(|failure| failure.is_some())
+        })
+}
+
 /// `root` as the menus and messages name it.
 fn display_root(root: &Path) -> String {
     termide_core::util::shorten_home_path(&root.display().to_string())
@@ -282,7 +306,46 @@ impl App {
             .collect();
         self.open_projects.arrange(&order);
         log::info!("Reopened {} projects of the last run", opened);
+        self.load_projects_holding_a_retry();
         self.sync_open_projects();
+    }
+
+    /// Load in the background the reopened projects whose agent left a
+    /// failed request waiting to be tried again — on a wait, or on a card
+    /// that tries again by itself. A project not loaded has no panels to
+    /// tick, so the try would wait for the user to enter it; loaded and
+    /// parked, it goes at its time like in any project left this run.
+    fn load_projects_holding_a_retry(&mut self) {
+        let home = self.project_root.clone();
+        let waiting: Vec<PathBuf> = self
+            .open_projects
+            .roots()
+            .filter(|root| self.open_projects.is_pending(root) && holds_a_retry(root))
+            .map(Path::to_path_buf)
+            .collect();
+        for root in waiting {
+            // Entered and left at once, through the switch the user makes,
+            // so the project loads as it would on entering it. The visit
+            // does not count as one the user made.
+            let recency = [&root, &home].map(|root| self.open_projects.last_used(root));
+            if let Err(e) = self.switch_to_project(root.clone()) {
+                log::warn!("Could not load {} in the background: {e}", root.display());
+                continue;
+            }
+            if let Err(e) = self.switch_to_project(home.clone()) {
+                log::error!("Could not return to {}: {e}", home.display());
+                return;
+            }
+            for (root, last_used) in [&root, &home].into_iter().zip(recency) {
+                if let Some(last_used) = last_used {
+                    self.open_projects.set_last_used(root, last_used);
+                }
+            }
+            log::info!(
+                "Loaded {} in the background: an agent request in it waits to be tried again",
+                root.display()
+            );
+        }
     }
 
     /// Tick the panels of the parked projects. What they raise waits for

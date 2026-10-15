@@ -597,7 +597,9 @@ reopen whose reset has already passed gives about half a minute first. A
 sign-in, a refused request and a full context always ask.
 
 Waits go by the wall clock as well, so a reset that passes while the machine
-sleeps is tried as soon as it wakes.
+sleeps is tried as soon as it wakes. Projects of the last run whose agent left
+a request waiting are loaded in the background on reopen, so their tries go at
+their time without entering them first.
 
 The closing line is one kind of annotation — a line that marks a moment in the
 conversation rather than holding content. The others are the panel's notices:

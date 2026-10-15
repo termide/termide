@@ -333,6 +333,19 @@ fn read_file(path: &Path) -> std::io::Result<(SessionHeader, Vec<Entry>)> {
     Ok((header, entries))
 }
 
+/// The failed request `branch` last left held, when nothing took it back:
+/// see [`EntryKind::Retry`].
+fn last_retry<'a>(branch: impl IntoIterator<Item = &'a Entry>) -> Option<Failure> {
+    branch
+        .into_iter()
+        .filter_map(|entry| match &entry.kind {
+            EntryKind::Retry { failure } => Some(*failure),
+            _ => None,
+        })
+        .last()
+        .flatten()
+}
+
 /// The entries from the root to `leaf`, oldest first; `path` names the log
 /// in the warning about a dangling parent.
 fn branch_of<'a>(entries: &'a [Entry], leaf: Option<&str>, path: &Path) -> Vec<&'a Entry> {
@@ -1215,14 +1228,19 @@ impl Session {
     /// nothing has taken it back: see [`EntryKind::Retry`].
     #[must_use]
     pub fn pending_retry(&self) -> Option<Failure> {
-        self.branch()
-            .into_iter()
-            .rev()
-            .find_map(|entry| match &entry.kind {
-                EntryKind::Retry { failure } => Some(*failure),
-                _ => None,
-            })
-            .flatten()
+        last_retry(self.branch())
+    }
+
+    /// [`Self::pending_retry`] of the log at `path`, read without opening it
+    /// the way [`Self::read_branch`] reads: so the log of a panel not loaded
+    /// yet can tell whether a request in it waits to be tried again.
+    ///
+    /// # Errors
+    ///
+    /// When the file cannot be read or has no header.
+    pub fn pending_retry_at(path: &Path) -> std::io::Result<Option<Failure>> {
+        let (_, branch) = Self::read_branch(path)?;
+        Ok(last_retry(&branch))
     }
 
     /// How the current branch's last run ended, see [`Self::unfinished_run`].
@@ -1590,6 +1608,8 @@ mod tests {
         assert!(SessionSummary::from(&session).unfinished);
         drop(session);
 
+        // Read without opening, as a project not loaded yet is asked.
+        assert_eq!(Session::pending_retry_at(&path).unwrap(), Some(failure));
         let reopened = Session::open(&path).unwrap();
         assert_eq!(reopened.pending_retry(), Some(failure));
         // The run itself ended: the held request is a choice, not a run.
@@ -1599,6 +1619,7 @@ mod tests {
         let mut session = Session::open(&path).unwrap();
         session.append_retry(None).unwrap();
         assert_eq!(session.pending_retry(), None);
+        assert_eq!(Session::pending_retry_at(&path).unwrap(), None);
         assert!(!SessionSummary::from(&session).unfinished);
     }
 
