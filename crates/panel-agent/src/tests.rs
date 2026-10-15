@@ -212,6 +212,7 @@ impl AgentCatalog for Agents {
 
 fn setup_with(provider: Arc<Scripted>) -> AgentPanelSetup {
     AgentPanelSetup {
+        inherited_intent: None,
         cwd: PathBuf::from("/tmp"),
         agent: "default".into(),
         catalog: Arc::new(Agents),

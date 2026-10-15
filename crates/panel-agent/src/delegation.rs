@@ -154,7 +154,8 @@ impl AgentPanel {
         };
         let _ = delegation.updates.send(DelegateUpdate::Ended(end));
         // The task's session stays in the list; the panel is free for the
-        // next one.
+        // next one, judged by nothing the delegating agent was asked.
+        self.inherited_intent = None;
         self.switch_session(None);
         true
     }
@@ -168,6 +169,9 @@ impl AgentPanel {
         let _ = delegation
             .updates
             .send(DelegateUpdate::Ended(DelegateEnd::TakenOver));
+        // The running agent keeps it for this conversation; a rebuilt one
+        // starts from the user's words here alone.
+        self.inherited_intent = None;
         self.notice(
             termide_i18n::t().agent_notice_taken_over_fmt(&delegation.from),
             NoticeKind::Info,

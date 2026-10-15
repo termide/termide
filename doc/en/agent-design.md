@@ -199,9 +199,14 @@ actions take nothing while the task runs; `Esc` stops it, `Ctrl+T` takes it
 over, closing the panel ends it. A stop by the user or a take-over returns
 what the delegate said with a note; the parent's stop cancels the panel's
 run. External agents may be delegates in a panel; hidden, they are still
-refused. Not done: the reviewer of a delegate panel in `auto` sees the task
-alone, not the parent's user messages (the panel's runtime is built before
-the task arrives), and a task from a parked project's panel runs hidden.
+refused. A task from a parked project's panel runs hidden. The reviewer of a delegate
+panel in `auto` first saw the task alone; now the `task` call sends the
+parent's `IntentLog::delegated` with the request, the app puts it in the
+new panel's setup (`inherited_intent`), and termide's loop starts its log
+from it (`Agent::with_inherited_intent`) without counting its prompts as
+delegated, so what the user writes after a take-over stays theirs. The panel
+keeps it for rebuilds while the task is its own. An external delegate's
+reviewer still sees the task alone.
 
 Done after: `ask` (`agent_panel/ask_place.rs`). Parallel delegations start
 on calls of their own within a moment of each other, so the first waits
@@ -236,7 +241,15 @@ running a delegated task refuses messages. Codex and Gemini CLI get only
 Not planned: automatic isolation. Two agents in one tree may edit the same
 file; rather than guessing when to isolate or how to merge, the first step
 is to detect it exactly — an edit of a file another live session changed
-since this one read it is refused with the reason. A git worktree per
+since this one read it is refused with the reason. Done
+(`agent-core/src/conflicts.rs`): `ConflictGuard`, in every panel's chain
+after the plan guard (before anyone is asked) and in a hidden delegate's,
+which runs under its parent's panel number. A process-wide ledger orders
+every successful `read`, `edit` and `write` by panel; an `edit` or `write`
+of a file whose last change is another panel's and later than this panel's
+last read of it, or that this panel never read, is blocked. Paths are keyed
+canonically (a new file by its directory). Changes through `bash` or from
+outside are not seen. A git worktree per
 delegate may come later only as an explicit choice (`isolation =
 "worktree"`), its result the branch and a diff summary, merged by the
 parent or the user.

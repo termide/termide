@@ -1524,7 +1524,9 @@ opens a new one beside the others, without taking the focus. In a panel the
 task is an ordinary session of that panel, on the delegate's agent,
 connection and mode: you watch it work, and what it would have to ask is put
 to you on the usual cards instead of being refused — which is why an
-external agent can be a delegate there. The delegating panel's block shows
+external agent can be a delegate there. In `auto` the reviewer judges its
+calls by what you asked the delegating agent and the task, as for a hidden
+delegate (not yet for an external agent). The delegating panel's block shows
 its progress as for a hidden one. While the task runs, the panel belongs to
 the delegating agent: the input takes nothing and reads `& Delegate of
 <agent>: <task>`, and the session keys (`F2`, `F4`–`F8`), the chips and the
@@ -1575,6 +1577,14 @@ in plan mode none goes; `agents` only reads. Agents may pass ten messages to
 one another without you; the next is refused and the agent told to finish
 and tell you where things stand, and anything you write starts the count
 again. Codex and Gemini CLI, on tools of their own, do not have these two.
+
+Agents in different panels may work on the same files. So that one does not
+undo another's change unseen, termide notes which panel read and changed
+which file, in order: an `edit` or `write` of a file another panel changed
+after this one last read it — or that this one never read — is refused, and
+the agent is told to read the file again first. A delegate's reads and
+changes count as its parent panel's. Changes made outside the agents' tools
+(a `bash` command, your editor) are not tracked.
 
 ### External agents
 

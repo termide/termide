@@ -1548,7 +1548,13 @@ impl Subagents {
         .with_refusals(self.refusals.clone());
         // The guard goes first, as in the panel's own chain: in plan mode a
         // session answer must not let a change through.
-        let hooks = ChainedHooks::new(vec![Box::new(plan_guard), Box::new(permissions)]);
+        // A delegate's reads and changes count as its parent panel's: a
+        // change on a file another panel changed since waits for a read.
+        let hooks = ChainedHooks::new(vec![
+            Box::new(plan_guard),
+            Box::new(termide_agent_core::ConflictGuard::new()),
+            Box::new(permissions),
+        ]);
 
         // The task reaches the delegate as its parent's words, never the
         // user's, and its log names where it came from.
@@ -1594,6 +1600,11 @@ impl Subagents {
                 lineage: lineage.clone(),
                 message: message.clone(),
                 cancel: CancelToken::new(),
+                intent: ctx
+                    .session
+                    .as_ref()
+                    .map(|session| IntentLog::delegated(&session.intent))
+                    .unwrap_or_default(),
             };
             if let Some(outcome) =
                 in_panel::run_in_panel(request, &self.cwd, max_turns, cancel, on_update)
@@ -1633,6 +1644,7 @@ impl Subagents {
                     hooks,
                     rules,
                     asker,
+                    panel: ctx.panel,
                 };
                 return self
                     .run_cli(run, message, log, &budget, cancel, on_update)
@@ -1695,6 +1707,9 @@ impl Subagents {
             .with_delegated_intent(parent);
         if let Some(asker) = asker {
             agent = agent.with_asker(asker);
+        }
+        if let Some(panel) = ctx.panel {
+            agent = agent.with_panel(panel);
         }
 
         let mut hooks = hooks;
@@ -1783,6 +1798,7 @@ impl Subagents {
                 hooks: Box::new(run.hooks),
                 context: ToolContext {
                     asker: run.asker,
+                    panel: run.panel,
                     ..ToolContext::new(self.cwd.clone())
                 },
                 skills: run.skills,
@@ -1936,6 +1952,8 @@ struct CliSubagent {
     rules: PermissionRules,
     /// Puts its questions to the user of its parent's panel.
     asker: Option<termide_agent_core::UserAsker>,
+    /// Its parent's panel, whose reads and changes its own count as.
+    panel: Option<u64>,
 }
 
 /// How often a subagent on a CLI agent is looked at while it runs.
@@ -2047,6 +2065,7 @@ fn agent_setup(
     let connection_dirs = catalog.dirs.clone();
 
     AgentPanelSetup {
+        inherited_intent: None,
         cwd,
         agent,
         catalog: Arc::new(catalog),

@@ -26,6 +26,7 @@ pub mod checkpoints;
 pub mod classifier;
 pub mod commands;
 pub mod compaction;
+pub mod conflicts;
 pub mod context;
 pub mod delegation;
 pub mod failure;
@@ -69,6 +70,7 @@ pub use classifier::{
 };
 pub use commands::{CommandScript, COMMANDS_DIR};
 pub use compaction::{CompactionCall, CompactionPolicy, CompactionPrompts, CompactionReason};
+pub use conflicts::ConflictGuard;
 pub use context::{
     build_system_prompt, civil_date, discover_context_files, ContextFile, PromptOptions,
     SEED_TEMPLATE,

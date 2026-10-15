@@ -197,6 +197,10 @@ const UNDO_ACTION: &str = "agent_undo";
 /// The panel keeps these so it can rebuild its agent when the user switches
 /// to another session.
 pub struct AgentPanelSetup {
+    /// What the user asked the agent that delegates this panel's first task,
+    /// for the `auto` reviewer to judge the task's calls against; see
+    /// [`termide_agent_core::Agent::with_inherited_intent`].
+    pub inherited_intent: Option<termide_agent_core::IntentLog>,
     pub cwd: PathBuf,
     /// Name of the agent definition in use.
     pub agent: String,
@@ -929,6 +933,9 @@ pub struct AgentPanel {
     queued_texts: VecDeque<String>,
     /// The task another agent delegated to this panel, while it runs.
     delegation: Option<Delegation>,
+    /// What the user asked the delegating agent, while its task is this
+    /// panel's: a rebuilt agent keeps judging by it.
+    inherited_intent: Option<termide_agent_core::IntentLog>,
     /// The panel's number, which other agents address it by.
     panel_id: u64,
     /// How many messages agents passed one another, without the user, to
@@ -1065,6 +1072,7 @@ impl AgentPanel {
             setup.shell_run.clone(),
             served_skills(setup.catalog.as_ref(), &offered_skills, &context_off),
             panel_id,
+            setup.inherited_intent.as_ref(),
         );
         // Learn the context window from the provider in the background and
         // adopt the active model's real `max_model_len`; the configured window
@@ -1212,6 +1220,7 @@ impl AgentPanel {
             run_buttons: Vec::new(),
             queued_texts: VecDeque::new(),
             delegation: None,
+            inherited_intent: setup.inherited_intent.clone(),
             panel_id,
             agent_hops: 0,
             queued: (0, 0),

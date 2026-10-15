@@ -202,6 +202,7 @@ pub(crate) fn spawn_runtime(
     shell_run: Option<ShellRunner>,
     skills: Vec<SkillInfo>,
     panel: u64,
+    inherited_intent: Option<&termide_agent_core::IntentLog>,
 ) -> Spawned {
     let cancel = CancelToken::new();
     let (prompter, permission_rx) = permission_channel(cancel.clone());
@@ -241,6 +242,9 @@ pub(crate) fn spawn_runtime(
                 blocked: Arc::clone(blocked),
             }),
             Box::new(PlanGuard::new(mode.clone()).with_refusals(refusals)),
+            // A change on a file another panel changed since this one read
+            // it waits for a read, before anyone is asked about it.
+            Box::new(termide_agent_core::ConflictGuard::new()),
         ];
         if let Some(store) = checkpoints {
             chain.push(Box::new(CheckpointHooks::new(store)));
@@ -343,6 +347,9 @@ pub(crate) fn spawn_runtime(
     .with_panel(panel)
     .with_asker(asker)
     .with_suggester(suggester);
+    if let Some(intent) = inherited_intent {
+        agent = agent.with_inherited_intent(intent);
+    }
     if let Some(run) = shell_run {
         // A command the user confirms on the card runs through this, in the
         // middle of the call that asked.

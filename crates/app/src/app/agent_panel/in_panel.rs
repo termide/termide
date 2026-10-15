@@ -21,8 +21,8 @@ use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use termide_agent_core::{
-    AgentEvent, CancelToken, Message, Mode, Session, SessionParent, SubagentPlace, ToolUpdate,
-    UserMessage,
+    AgentEvent, CancelToken, IntentLog, Message, Mode, Session, SessionParent, SubagentPlace,
+    ToolUpdate, UserMessage,
 };
 use termide_agent_tools::SubagentOutcome;
 use termide_panel_agent::{AgentPanel, DelegateEnd, DelegateUpdate, Delegation};
@@ -48,6 +48,9 @@ pub(super) struct PanelDelegation {
     pub message: UserMessage,
     /// Cancelled when the delegating call stops waiting.
     pub cancel: CancelToken,
+    /// What the user asked the delegating agent, for the `auto` reviewer of
+    /// the task's calls.
+    pub intent: IntentLog,
 }
 
 /// A request with where the app answers it: the task under way, or `None`
@@ -254,13 +257,15 @@ impl App {
         }
         let path = session.path().to_path_buf();
         let settings = self.state.config.ai.clone();
-        let panel = AgentPanel::new(agent_setup(
+        let mut setup = agent_setup(
             &settings,
             request.cwd.clone(),
             &self.project_root,
             &request.agent,
             Some(session),
-        ));
+        );
+        setup.inherited_intent = Some(request.intent.clone());
+        let panel = AgentPanel::new(setup);
         Some((panel, Some(path)))
     }
 }
@@ -386,6 +391,7 @@ mod tests {
             },
             message: UserMessage::text("find it"),
             cancel: CancelToken::new(),
+            intent: IntentLog::default(),
         };
         assert!(run_in_panel(
             request,
