@@ -9375,6 +9375,8 @@ fn delegated_task() -> UserMessage {
         session: "p1".into(),
         agent: "lead".into(),
         kind: termide_agent_core::OriginKind::Task,
+        panel: None,
+        hops: 0,
     })
 }
 
@@ -9491,4 +9493,51 @@ fn a_task_its_agent_stopped_waiting_for_ends_stopped() {
         received.try_iter().last(),
         Some(DelegateUpdate::Ended(DelegateEnd::Stopped))
     ));
+}
+
+fn from_peer(kind: termide_agent_core::OriginKind, hops: u32) -> UserMessage {
+    UserMessage::text("the config loader moved").with_origin(termide_agent_core::MessageOrigin {
+        session: String::new(),
+        agent: "reviewer".into(),
+        kind,
+        panel: Some(7),
+        hops,
+    })
+}
+
+#[test]
+fn another_agents_message_starts_a_turn_and_counts_its_hops() {
+    let mut panel = panel(vec![reply("noted"), reply("ok")]);
+    assert_eq!(panel.peer_state(), PeerState::Free);
+    panel
+        .deliver(from_peer(termide_agent_core::OriginKind::Info, 3))
+        .unwrap();
+    assert_eq!(panel.peer_state(), PeerState::Working);
+    assert_eq!(panel.agent_hops(), 3);
+    settle(&mut panel);
+    assert_eq!(panel.peer_state(), PeerState::Idle);
+    assert!(panel.transcript().items().iter().any(|item| matches!(
+        item,
+        Item::User { command: Some(head), .. } if head == "& reviewer · info"
+    )));
+    // The user writing starts the count again.
+    type_text(&mut panel, "thanks");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(panel.agent_hops(), 0);
+    settle(&mut panel);
+}
+
+#[test]
+fn a_panel_running_another_agents_task_takes_no_messages() {
+    let mut panel = panel(vec![reply("found it")]);
+    let (updates, _received) = mpsc::channel();
+    panel.start_delegation(
+        delegated_task(),
+        Delegation::new("lead", "find the loader", updates, CancelToken::new()),
+    );
+    assert_eq!(panel.peer_state(), PeerState::Delegate);
+    let refused = panel
+        .deliver(from_peer(termide_agent_core::OriginKind::Question, 1))
+        .unwrap_err();
+    assert!(refused.contains("another agent's task"), "{refused}");
 }

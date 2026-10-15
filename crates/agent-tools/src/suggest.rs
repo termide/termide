@@ -191,6 +191,7 @@ mod tests {
             })),
             session: None,
             withdrawn: None,
+            panel: None,
         }
     }
 
@@ -209,6 +210,7 @@ mod tests {
             shell_run: None,
             session: None,
             withdrawn: None,
+            panel: None,
         }
     }
 
@@ -264,6 +266,7 @@ mod tests {
             })),
             session: None,
             withdrawn: None,
+            panel: None,
         };
         let answerer = std::thread::spawn(move || {
             let envelope = rx.recv().unwrap();
@@ -352,6 +355,7 @@ mod tests {
             })),
             session: None,
             withdrawn: None,
+            panel: None,
         };
         let answerer = std::thread::spawn(move || {
             let envelope = rx.recv().unwrap();
@@ -393,6 +397,7 @@ mod tests {
             })),
             session: None,
             withdrawn: None,
+            panel: None,
         };
         let result = SuggestCommandTool.execute(
             &call(json!({ "command": "gh issue comment 59" })),
@@ -422,6 +427,7 @@ mod tests {
             shell_run: Some(ShellRunner::new(|_, _| Err("no shell".to_string()))),
             session: None,
             withdrawn: None,
+            panel: None,
         };
         let result = SuggestCommandTool.execute(
             &call(json!({ "command": "ls" })),

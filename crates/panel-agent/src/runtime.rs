@@ -201,6 +201,7 @@ pub(crate) fn spawn_runtime(
     blocked: &Blocked,
     shell_run: Option<ShellRunner>,
     skills: Vec<SkillInfo>,
+    panel: u64,
 ) -> Spawned {
     let cancel = CancelToken::new();
     let (prompter, permission_rx) = permission_channel(cancel.clone());
@@ -297,6 +298,7 @@ pub(crate) fn spawn_runtime(
                     asker: Some(asker.clone()),
                     suggester: Some(suggester.clone()),
                     shell_run: shell_run.clone(),
+                    panel: Some(panel),
                     ..ToolContext::new(cwd)
                 },
                 skills,
@@ -338,6 +340,7 @@ pub(crate) fn spawn_runtime(
     .with_loop_prompt(loop_prompt.clone())
     .with_messages(messages)
     .with_session_id(session.map(|s| s.id().to_string()))
+    .with_panel(panel)
     .with_asker(asker)
     .with_suggester(suggester);
     if let Some(run) = shell_run {

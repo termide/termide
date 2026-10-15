@@ -214,7 +214,24 @@ waits inside its `task` call and cannot read it. So a hidden delegate gets
 its cards reach the parent panel's user, each headed `& <delegate> ·`
 (`UserAsker::for_delegate`); permission requests are still refused, a panel
 being the place for those. A parent that answers its delegates in its own
-turn needs the peer messaging still to come.
+turn needs the peer messaging below.
+
+Done after that: peer messaging (`agent-tools/src/peers.rs`,
+`agent_panel/peers.rs`, `panel-agent/src/peers.rs`). The panel's own agent —
+and Claude Code on termide's tools, which gets the same registry — has
+`agents` (read-only by the rules) and `send_message` (`info`, `question`,
+`reply`; asks as any non-read-only tool, so `ask` mode confirms each message
+and plan mode blocks it). Every panel has a number from a process-wide
+counter; `ToolContext::panel` carries it to the tools, from termide's loop
+(`Agent::with_panel`) and from the host tools an external agent calls, so the
+sender is known without a session id. The calls go down a channel the app
+serves on its tick, like the delegations; the app delivers the message as a
+`MessageOrigin` with the sender's panel (the frame's `panel="…"`, for the
+answer) and a hop count: the sender panel's count plus one, refused past ten.
+A panel takes the count of the message that starts its run (the highest,
+while steered ones join it) and zero from anything the user sends. A panel
+running a delegated task refuses messages. Codex and Gemini CLI get only
+`COMPANION_TOOLS`, which leave these two out for now.
 
 Not planned: automatic isolation. Two agents in one tree may edit the same
 file; rather than guessing when to isolate or how to merge, the first step

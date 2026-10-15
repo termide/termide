@@ -35,6 +35,9 @@ pub struct ToolContext {
     /// asked on its behalf is withdrawn with it. `None` for a call of
     /// termide's own loop, whose questions end with the run.
     pub withdrawn: Option<CancelToken>,
+    /// The agent panel the call comes from, by its number; `None` outside
+    /// one (a subagent, a headless run).
+    pub panel: Option<u64>,
 }
 
 impl ToolContext {
@@ -48,6 +51,7 @@ impl ToolContext {
             shell_run: None,
             session: None,
             withdrawn: None,
+            panel: None,
         }
     }
 }

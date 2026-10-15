@@ -816,7 +816,8 @@ session log on a dead branch.
 The agent's built-in tools are listed below, plus those its MCP servers
 provide (see [MCP servers](#mcp-servers)). The panel's own agent, and Claude
 Code on termide's tools, also have **question** and **suggest_command**,
-described after the list.
+described after the list, and **agents** and **send_message** (see
+[Talking to other panels](#talking-to-other-panels)).
 
 Calls the model asks for in one reply that change nothing — `read`, `recall`,
 `fetch`, `web_search`, `skill`, a look-only `bash` command such as `rg` or
@@ -1554,6 +1555,27 @@ CLI delegate on their own anyway. The choice follows a renamed connection, and
 a deleted one, or one turned into Codex or Gemini CLI, hands its delegates back
 to their own connection.
 
+### Talking to other panels
+
+The panel's own agent, and Claude Code on termide's tools, can write to the
+agents of the other agent panels open in the project. **agents** lists them —
+each panel's number, its agent, what it is doing (free, idle, working,
+waiting for you, running another agent's task) and where it works — and
+**send_message** sends one of them a message: `info` to tell it something,
+`question` to ask it something, `reply` to answer a message it got. The
+message reaches the other agent at once — an idle one starts a turn on it, a
+busy one reads it at its next step — as that agent's words, never yours: the
+transcript heads it `& <agent> · <kind>`, the model reads it framed with the
+sender's name and panel, so it knows where to answer, and the `auto`
+reviewer does not take it for a request of yours. An answer comes back the
+same way, as a message of its own, not as the call's result. A panel running
+another agent's task takes no messages. `send_message` acts outside the
+panel, so it asks as such tools do: in `ask` mode you confirm each message,
+in plan mode none goes; `agents` only reads. Agents may pass ten messages to
+one another without you; the next is refused and the agent told to finish
+and tell you where things stand, and anything you write starts the count
+again. Codex and Gemini CLI, on tools of their own, do not have these two.
+
 ### External agents
 
 An agent may be another program altogether: put a `command` in the front
@@ -1801,7 +1823,8 @@ to change how the answer is drawn or cited.
 
 What the model is told about each built-in tool is a file too:
 `tools/<name>.md` for `read`, `edit`, `write`, `bash`, `question`,
-`suggest_command`, `task`, `skill`, `fetch`, `web_search` and `recall`, seeded
+`suggest_command`, `task`, `skill`, `fetch`, `web_search`, `recall`, `agents`
+and `send_message`, seeded
 and kept current like the `system/` files, and read from the configuration
 level only. The body is the description the model sees with the tool;
 `snippet:` in the front matter is its line in the system prompt's tool list

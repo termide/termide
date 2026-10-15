@@ -134,6 +134,7 @@ impl AgentPanel {
                 &self.offered_skills,
                 &self.context_off,
             ),
+            self.panel_id,
         );
         // Dropping the old runtime cancels it and asks its worker to stop.
         self.runtime = runtime;

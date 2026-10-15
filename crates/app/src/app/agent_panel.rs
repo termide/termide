@@ -41,6 +41,7 @@ use super::App;
 mod ask_place;
 mod headless;
 mod in_panel;
+mod peers;
 pub use headless::{run_agent_headless, run_recall, HeadlessOutput};
 
 impl App {
@@ -535,6 +536,10 @@ impl AgentCatalog for FsCatalog {
         if backend.is_none() {
             tools.insert(Arc::new(QuestionTool));
             tools.insert(Arc::new(SuggestCommandTool));
+            // The agents of the other panels are there to write to.
+            for tool in peers::peer_tools(name, &self.project_root) {
+                tools.insert(tool);
+            }
         }
         // The `task` tool lets this agent hand work to the others, and its
         // `tools` list can leave it out like any other capability; only when
@@ -1552,6 +1557,8 @@ impl Subagents {
             session: parent_session.clone().unwrap_or_default(),
             agent: caller.to_string(),
             kind: OriginKind::Task,
+            panel: ctx.panel,
+            hops: 0,
         });
         let lineage = SessionParent {
             session: parent_session,
@@ -2597,6 +2604,9 @@ mod tests {
             run,
         )));
         tools.insert(Arc::new(SkillTool::new(Vec::new())));
+        for tool in peers::peer_tools(DEFAULT_AGENT, tmp.path()) {
+            tools.insert(tool);
+        }
 
         let mut names: Vec<&str> = tools.iter().map(|tool| tool.name()).collect();
         names.sort_unstable();
@@ -2977,6 +2987,8 @@ mod tests {
             session: "p1".into(),
             agent: "lead".into(),
             kind: OriginKind::Task,
+            panel: None,
+            hops: 0,
         });
         let answer = drive.run(&cli, &|| false, task.clone(), &mut log, &mut |update| {
             let ToolUpdate::Output(text) = update;
@@ -3765,7 +3777,8 @@ done"#;
 
         let default = catalog.resolve(DEFAULT_AGENT).unwrap();
         // The built-in four, plus the two that speak to the user watching the
-        // panel: `question` and `suggest_command`.
+        // panel, `question` and `suggest_command`, and the two that speak to
+        // the agents of the other panels.
         assert_eq!(
             default.tools.names(),
             [
@@ -3774,7 +3787,9 @@ done"#;
                 "write",
                 "bash",
                 "question",
-                "suggest_command"
+                "suggest_command",
+                "agents",
+                "send_message"
             ]
         );
         assert!(default

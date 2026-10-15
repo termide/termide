@@ -561,6 +561,8 @@ pub struct Agent {
     /// The id of the session log this loop's conversation is written to,
     /// when there is one; tools see it in [`SessionView::id`].
     session_id: Option<String>,
+    /// The agent panel the loop runs in, by its number.
+    panel: Option<u64>,
 }
 
 impl Agent {
@@ -592,6 +594,7 @@ impl Agent {
             intent_seeded: false,
             delegated: false,
             session_id: None,
+            panel: None,
         }
     }
 
@@ -625,6 +628,14 @@ impl Agent {
     #[must_use]
     pub fn with_session_id(mut self, id: Option<String>) -> Self {
         self.session_id = id;
+        self
+    }
+
+    /// The agent panel the loop runs in, by its number: its tools tell
+    /// which panel a call comes from.
+    #[must_use]
+    pub fn with_panel(mut self, panel: u64) -> Self {
+        self.panel = Some(panel);
         self
     }
 
@@ -1200,6 +1211,7 @@ impl Agent {
                 model: self.model.clone(),
             }),
             withdrawn: None,
+            panel: self.panel,
         }
     }
 

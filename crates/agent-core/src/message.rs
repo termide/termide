@@ -212,6 +212,20 @@ pub struct MessageOrigin {
     /// The sending agent's name.
     pub agent: String,
     pub kind: OriginKind,
+    /// The agent panel it was sent from, by its number: where an answer
+    /// goes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panel: Option<u64>,
+    /// How many messages agents have passed one another since the user last
+    /// wrote, this one included: a chain that runs on without them is cut
+    /// off.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub hops: u32,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 /// What a message between agents is.
@@ -347,8 +361,12 @@ impl UserMessage {
         let text = self.plain_text();
         match &self.origin {
             Some(origin) => format!(
-                "<agent-message from=\"{}\"{} kind=\"{}\">\n{}\n</agent-message>",
+                "<agent-message from=\"{}\"{}{} kind=\"{}\">\n{}\n</agent-message>",
                 attribute(&origin.agent),
+                origin
+                    .panel
+                    .map(|panel| format!(" panel=\"{panel}\""))
+                    .unwrap_or_default(),
                 if origin.session.is_empty() {
                     String::new()
                 } else {
@@ -765,6 +783,8 @@ mod tests {
             session: "s1".into(),
             agent: "reviewer".into(),
             kind,
+            panel: None,
+            hops: 0,
         })
     }
 

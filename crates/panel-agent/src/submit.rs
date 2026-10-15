@@ -406,6 +406,7 @@ impl AgentPanel {
     /// Send `message`: as the next request, or queued for the running one.
     pub(crate) fn send_message(&mut self, message: UserMessage) -> Vec<PanelEvent> {
         self.follow = true;
+        self.count_hops(&message);
         if self.is_busy() {
             // The message waits in the state strip until the agent takes it,
             // then shows as a user block.

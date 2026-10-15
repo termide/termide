@@ -12,6 +12,7 @@ mod export;
 mod failure;
 mod input;
 mod mcp;
+mod peers;
 mod pending;
 mod pickers;
 mod render;
@@ -63,6 +64,7 @@ use crate::session_ops::discard_if_empty;
 use crate::toolset::{served_skills, Blocked, TOOLSET_ACTION};
 
 pub use delegation::{DelegateEnd, DelegateUpdate, Delegation};
+pub use peers::PeerState;
 pub use runtime::local_minute;
 pub use transcript::{FoldMode, Item, NoticeKind, Transcript};
 
@@ -927,6 +929,11 @@ pub struct AgentPanel {
     queued_texts: VecDeque<String>,
     /// The task another agent delegated to this panel, while it runs.
     delegation: Option<Delegation>,
+    /// The panel's number, which other agents address it by.
+    panel_id: u64,
+    /// How many messages agents passed one another, without the user, to
+    /// get the panel's current run going; see [`MessageOrigin::hops`].
+    agent_hops: u32,
     queued: (usize, usize),
     /// Tokens of the last reported context, for the status chip.
     context_tokens: u64,
@@ -961,6 +968,10 @@ pub struct AgentPanel {
 impl AgentPanel {
     #[must_use]
     pub fn new(mut setup: AgentPanelSetup) -> Self {
+        // Numbered from 1 in the order panels open, for other agents to
+        // address it by.
+        static PANELS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let panel_id = PANELS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let session = setup.session.or_else(|| {
             start_session(
                 setup.session_dir.as_deref(),
@@ -1053,6 +1064,7 @@ impl AgentPanel {
             &blocked,
             setup.shell_run.clone(),
             served_skills(setup.catalog.as_ref(), &offered_skills, &context_off),
+            panel_id,
         );
         // Learn the context window from the provider in the background and
         // adopt the active model's real `max_model_len`; the configured window
@@ -1200,6 +1212,8 @@ impl AgentPanel {
             run_buttons: Vec::new(),
             queued_texts: VecDeque::new(),
             delegation: None,
+            panel_id,
+            agent_hops: 0,
             queued: (0, 0),
             context_tokens: 0,
             activity: None,

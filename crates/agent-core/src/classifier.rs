@@ -607,6 +607,8 @@ mod tests {
                 session: "s1".into(),
                 agent: "planner".into(),
                 kind,
+                panel: None,
+                hops: 0,
             })
         };
         let log = IntentLog::new();

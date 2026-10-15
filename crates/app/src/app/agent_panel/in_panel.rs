@@ -186,14 +186,9 @@ impl App {
     /// else opened beside the others when its place allows. `None` when no
     /// panel takes it.
     fn place_delegation(&mut self, request: &PanelDelegation) -> Option<PanelTask> {
-        let same = |a: &Path, b: &Path| {
-            a == b
-                || dunce::canonicalize(a)
-                    .ok()
-                    .zip(dunce::canonicalize(b).ok())
-                    .is_some_and(|(a, b)| a == b)
-        };
-        if request.cancel.is_cancelled() || !same(&request.project_root, &self.project_root) {
+        if request.cancel.is_cancelled()
+            || !super::peers::same_dir(&request.project_root, &self.project_root)
+        {
             return None;
         }
         let focused = self.layout_manager.active_panel_position();
