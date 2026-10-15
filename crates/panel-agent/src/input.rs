@@ -369,6 +369,41 @@ impl AgentPanel {
         }
     }
 
+    /// A paste, copy or cut while an answer to a question is being typed:
+    /// it is the answer's, not the prompt's. `None` when no answer is typed or
+    /// the command is no clipboard one.
+    pub(crate) fn answer_clipboard(
+        &mut self,
+        cmd: &termide_core::PanelCommand<'_>,
+    ) -> Option<termide_core::CommandResult> {
+        use termide_core::{CommandResult, PanelCommand};
+        let form = self
+            .pending
+            .as_mut()
+            .map(|pending| pending.form_mut())
+            .filter(|form| form.is_typing())?;
+        let done = match cmd {
+            PanelCommand::Paste => {
+                termide_ui::clipboard::paste_text_or_paths().is_some_and(|text| form.paste(&text))
+            }
+            PanelCommand::PasteText { text } => form.paste(text),
+            PanelCommand::Copy | PanelCommand::Cut => {
+                let text = if matches!(cmd, PanelCommand::Cut) {
+                    form.cut_selection()
+                } else {
+                    form.selected_text()
+                };
+                text.map(|text| self.copy_text(&text)).is_some()
+            }
+            _ => return None,
+        };
+        Some(if done {
+            CommandResult::NeedsRedraw(true)
+        } else {
+            CommandResult::Handled(false)
+        })
+    }
+
     /// Paste the clipboard into the prompt; a large paste is held as a
     /// placeholder rather than flooding the input.
     pub(crate) fn paste_clipboard(&mut self) -> bool {
@@ -1066,7 +1101,10 @@ impl AgentPanel {
         // A pending question takes the keys first: the arrows, Enter, a
         // digit or Esc answer it; only scrolling passes by.
         if let Some(pending) = &mut self.pending {
-            let action = if ctrl || alt {
+            // A typed answer takes its editing chords (`Ctrl+arrows`,
+            // `Ctrl+A`, `Ctrl+Z`) as any field does.
+            let typing = pending.form().is_typing();
+            let action = if alt || (ctrl && !typing) {
                 ChoiceAction::NotHandled
             } else {
                 pending.form_mut().handle_key(key)
@@ -1490,6 +1528,22 @@ impl AgentPanel {
                     }
                     RunButton::Stop => self.abort(),
                 }
+                return vec![PanelEvent::NeedsRedraw];
+            }
+        }
+        // An answer being typed to a question takes its own presses and
+        // drags, as the prompt does: placing the cursor, selecting.
+        if let Some(pending) = &mut self.pending {
+            let form = pending.form_mut();
+            let (x, y) = (event.column, event.row);
+            let taken = match event.kind {
+                MouseEventKind::Down(MouseButton::Left) => form.mouse_press(x, y),
+                MouseEventKind::Drag(MouseButton::Left) => form.mouse_drag(x, y),
+                MouseEventKind::Up(MouseButton::Left) => form.mouse_release(),
+                _ => false,
+            };
+            if taken {
+                self.form_clicks.reset();
                 return vec![PanelEvent::NeedsRedraw];
             }
         }

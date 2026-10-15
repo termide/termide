@@ -4456,6 +4456,94 @@ fn the_models_questions_are_answered_one_card_at_a_time() {
 }
 
 #[test]
+fn a_paste_while_an_answer_is_typed_goes_into_the_answer() {
+    let mut panel = panel(vec![]);
+    let worker = ask_in_worker(
+        &mut panel,
+        vec![question("Which approach?", &["Channel", "Slot"], false)],
+    );
+    // Before the answer row is chosen a paste still goes to the prompt.
+    panel.handle_command(PanelCommand::PasteText { text: "p".into() });
+    assert_eq!(panel.input_text(), "p");
+    panel.handle_key(chord(KeyCode::Char('3'), KeyModifiers::NONE));
+    type_text(&mut panel, "use ");
+    panel.handle_command(PanelCommand::PasteText {
+        text: "a\nchannel".into(),
+    });
+    // Ctrl chords edit the answer: a word back, then a word selected.
+    panel.handle_key(chord(KeyCode::Left, KeyModifiers::CONTROL));
+    panel.handle_key(chord(
+        KeyCode::Right,
+        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+    ));
+    assert_eq!(
+        panel
+            .pending
+            .as_ref()
+            .unwrap()
+            .form()
+            .selected_text()
+            .as_deref(),
+        Some("channel")
+    );
+    assert_eq!(panel.input_text(), "p");
+    panel.handle_key(chord(KeyCode::End, KeyModifiers::NONE));
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(
+        worker.join().unwrap(),
+        QuestionReply::Answered(vec![QuestionAnswer {
+            chosen: vec![],
+            custom: Some("use a channel".into()),
+        }])
+    );
+}
+
+#[test]
+fn the_mouse_places_the_cursor_and_selects_in_a_typed_answer() {
+    let mut panel = panel(vec![]);
+    let worker = ask_in_worker(
+        &mut panel,
+        vec![question("Which approach?", &["Channel", "Slot"], false)],
+    );
+    panel.handle_key(chord(KeyCode::Char('3'), KeyModifiers::NONE));
+    panel.handle_command(PanelCommand::PasteText {
+        text: "hello world".into(),
+    });
+    let rows = render_text(&mut panel, 60, 16);
+    let row = rows
+        .iter()
+        .position(|r| r.contains(": hello world"))
+        .expect("the answer is drawn") as u16;
+    let column = rows[row as usize]
+        .chars()
+        .collect::<Vec<_>>()
+        .windows(5)
+        .position(|w| w.iter().collect::<String>() == "world")
+        .unwrap() as u16;
+    let at = |kind, column| MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    };
+    let area = Rect::new(0, 0, 60, 16);
+    // Pressed twice, as a double click: the answer stays as typed.
+    for _ in 0..2 {
+        panel.handle_mouse(at(MouseEventKind::Down(MouseButton::Left), column), area);
+        panel.handle_mouse(at(MouseEventKind::Up(MouseButton::Left), column), area);
+    }
+    panel.handle_mouse(at(MouseEventKind::Down(MouseButton::Left), column), area);
+    panel.handle_mouse(at(MouseEventKind::Drag(MouseButton::Left), 59), area);
+    panel.handle_mouse(at(MouseEventKind::Up(MouseButton::Left), 59), area);
+    let form = panel.pending.as_ref().unwrap().form();
+    assert_eq!(form.typed(), Some("hello world"));
+    assert_eq!(form.selected_text().as_deref(), Some("world"));
+    panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    let _ = worker.join().unwrap();
+}
+
+#[test]
 fn the_arrows_step_back_to_an_answered_question_and_its_answer_shows() {
     let mut panel = panel(vec![]);
     let worker = ask_in_worker(

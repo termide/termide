@@ -1744,6 +1744,11 @@ impl Panel for AgentPanel {
         {
             return CommandResult::Handled(false);
         }
+        // An answer being typed to a question takes the clipboard, not the
+        // prompt below it.
+        if let Some(result) = self.answer_clipboard(&cmd) {
+            return result;
+        }
         match cmd {
             // The session search's query takes a paste as plain text, on one
             // line, and the list follows it.

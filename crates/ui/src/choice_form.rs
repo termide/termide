@@ -28,7 +28,7 @@ use ratatui::style::{Modifier, Style};
 use termide_core::ThemeColors;
 use unicode_width::UnicodeWidthChar;
 
-use crate::TextInput;
+use crate::{edit_text_input, FieldEdit, TextInput};
 
 /// A collapsed detail block shows at most this many lines before it is folded
 /// with an ellipsis; the same cap the input bar grows to.
@@ -101,6 +101,11 @@ pub struct ChoiceForm {
     /// The row each drawn line below `rows_top` belongs to, from the last
     /// render: a long option wraps onto several lines.
     line_rows: Vec<usize>,
+    /// Screen cell `(x, y)` of each character of the answer being typed and
+    /// of the end past it, from the last render, for clicks and drags.
+    typed_drawn: Vec<(u16, u16)>,
+    /// A press in the typed answer is being dragged to select.
+    dragging: bool,
 }
 
 impl ChoiceForm {
@@ -125,6 +130,8 @@ impl ChoiceForm {
             detail_drawn: None,
             rows_top: None,
             line_rows: Vec::new(),
+            typed_drawn: Vec::new(),
+            dragging: false,
         }
     }
 
@@ -269,6 +276,47 @@ impl ChoiceForm {
         self.typing.as_ref().map(TextInput::text)
     }
 
+    /// Whether an answer is being typed: a paste, a copy or a cut is then the
+    /// answer's, not the host's.
+    #[must_use]
+    pub fn is_typing(&self) -> bool {
+        self.typing.is_some()
+    }
+
+    /// Paste `text` into the answer being typed, its line breaks turned into
+    /// spaces, since the answer is one line. Returns whether it went in.
+    pub fn paste(&mut self, text: &str) -> bool {
+        let Some(input) = &mut self.typing else {
+            return false;
+        };
+        let line = text
+            .split(['\r', '\n'])
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if line.is_empty() {
+            return false;
+        }
+        input.paste(&line);
+        true
+    }
+
+    /// The selected part of the answer being typed, if any.
+    #[must_use]
+    pub fn selected_text(&self) -> Option<String> {
+        self.typing
+            .as_ref()
+            .and_then(TextInput::selected_text)
+            .map(str::to_string)
+    }
+
+    /// Take the selected part out of the answer being typed, returning it.
+    pub fn cut_selection(&mut self) -> Option<String> {
+        let text = self.selected_text()?;
+        self.typing.as_mut()?.delete_selection();
+        Some(text)
+    }
+
     fn rows(&self) -> Vec<Row> {
         let mut rows: Vec<Row> = (0..self.options.len()).map(Row::Option).collect();
         if self.custom.is_some() {
@@ -315,9 +363,34 @@ impl ChoiceForm {
         lines
     }
 
+    /// The number and, in a multi-select form, the checkbox before a row's
+    /// label.
+    fn row_prefix(&self, index: usize, row: &Row) -> String {
+        let checkbox = |on: bool| if on { "[✓] " } else { "[ ] " };
+        let mark = match row {
+            Row::Option(option) if self.is_multi() => checkbox(self.checked[*option]),
+            Row::Custom if self.is_multi() => checkbox(self.custom_answer.is_some()),
+            _ => "",
+        };
+        format!(" {}. {mark}", index + 1)
+    }
+
+    /// Where each character of the answer being typed, and the end past it,
+    /// falls among the custom row's lines: `(line, column)`. `None` unless an
+    /// answer is being typed.
+    fn typed_cells(&self, inner: usize) -> Option<(usize, Vec<(usize, usize)>)> {
+        let input = self.typing.as_ref()?;
+        let rows = self.rows();
+        let index = rows.iter().position(|row| matches!(row, Row::Custom))?;
+        let prefix = self.row_prefix(index, &Row::Custom);
+        let label = self.custom.as_deref().unwrap_or("");
+        Some((index, typed_layout(&prefix, label, input.text(), inner).1))
+    }
+
     /// The lines of row `index` at `inner` columns: its number, checkbox and
     /// label, then its description, wrapped under the label. Each line is the
     /// text drawn in the row's style and the description part drawn after it.
+    /// An answer being typed keeps its spaces and wraps by the character.
     fn row_lines(&self, index: usize, row: &Row, inner: usize) -> Vec<(String, String)> {
         let label = match row {
             Row::Option(option) => self.options[*option].as_str(),
@@ -325,31 +398,23 @@ impl ChoiceForm {
             Row::Submit => self.submit.as_deref().unwrap_or(""),
             Row::Cancel => self.cancel.as_deref().unwrap_or(""),
         };
-        // A multi-select form's picks show their checkbox before the label.
-        let checkbox = |on: bool| if on { "[✓] " } else { "[ ] " };
-        let mark = match row {
-            Row::Option(option) if self.is_multi() => checkbox(self.checked[*option]),
-            Row::Custom if self.is_multi() => checkbox(self.custom_answer.is_some()),
-            _ => "",
-        };
-        let body = match (row, &self.typing, &self.custom_answer) {
-            (Row::Custom, Some(input), _) => {
-                // The caret sits where the cursor is, not always at the end.
-                let text = input.text();
-                let at = text
-                    .char_indices()
-                    .nth(input.cursor_pos())
-                    .map_or(text.len(), |(i, _)| i);
-                format!("{label}: {}▏{}", &text[..at], &text[at..])
-            }
-            (Row::Custom, None, Some(kept)) => format!("{label}: {kept}"),
+        let prefix = self.row_prefix(index, row);
+        if let (Row::Custom, Some(input)) = (row, &self.typing) {
+            // Laid out cell by cell, so its spaces and the cursor stay put.
+            let (lines, _) = typed_layout(&prefix, label, input.text(), inner);
+            return lines
+                .into_iter()
+                .map(|line| (line, String::new()))
+                .collect();
+        }
+        let body = match (row, &self.custom_answer) {
+            (Row::Custom, Some(kept)) => format!("{label}: {kept}"),
             _ => label.to_string(),
         };
         let description = match row {
             Row::Option(option) => self.descriptions.get(*option).map_or("", |d| d.trim()),
             _ => "",
         };
-        let prefix = format!(" {}. {mark}", index + 1);
         let indent = width_of(&prefix);
         let room = inner.saturating_sub(indent).max(1);
 
@@ -478,39 +543,13 @@ impl ChoiceForm {
                     self.typing = None;
                     ChoiceAction::Handled
                 }
-                KeyCode::Backspace => {
-                    input.backspace();
-                    ChoiceAction::Handled
-                }
-                KeyCode::Delete => {
-                    input.delete();
-                    ChoiceAction::Handled
-                }
-                KeyCode::Left => {
-                    input.move_left();
-                    ChoiceAction::Handled
-                }
-                KeyCode::Right => {
-                    input.move_right();
-                    ChoiceAction::Handled
-                }
-                KeyCode::Home => {
-                    input.move_home();
-                    ChoiceAction::Handled
-                }
-                KeyCode::End => {
-                    input.move_end();
-                    ChoiceAction::Handled
-                }
-                KeyCode::Char(c)
-                    if !key
-                        .modifiers
-                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
-                {
-                    input.insert(c);
-                    ChoiceAction::Handled
-                }
-                _ => ChoiceAction::NotHandled,
+                // The rest edits the line as any field does: word moves,
+                // a selection, the clipboard, undo.
+                _ if key.modifiers.contains(KeyModifiers::ALT) => ChoiceAction::NotHandled,
+                _ => match edit_text_input(input, key) {
+                    FieldEdit::NotHandled => ChoiceAction::NotHandled,
+                    FieldEdit::Edited | FieldEdit::Navigated => ChoiceAction::Handled,
+                },
             };
         }
         match key.code {
@@ -639,7 +678,14 @@ impl ChoiceForm {
 
         self.rows_top = Some(y);
         self.line_rows.clear();
+        // Where the typed answer's lines land, to draw its cursor and
+        // selection over them.
+        let typed = self.typed_cells(inner);
+        let mut typed_top = None;
         'rows: for (index, row) in self.rows().iter().enumerate() {
+            if typed.as_ref().is_some_and(|(at, _)| *at == index) {
+                typed_top = Some(y);
+            }
             let selected = index == self.selected;
             let style = match (selected, focused) {
                 (true, true) => Style::default()
@@ -667,6 +713,24 @@ impl ChoiceForm {
                 y += 1;
             }
         }
+        self.typed_drawn.clear();
+        if let (Some((_, cells)), Some(top), Some(input)) = (typed, typed_top, &self.typing) {
+            // The cursor and the selection show inverted, as in other fields.
+            let selection = input.selection_range();
+            for (i, (line, col)) in cells.into_iter().enumerate() {
+                let (cy, cx) = (top + line as u16, area.x + 1 + col as u16);
+                if cy >= y || cx >= right {
+                    break;
+                }
+                self.typed_drawn.push((cx, cy));
+                let at_cursor = i == input.cursor_pos();
+                let selected = selection.is_some_and(|(s, e)| i >= s && i < e);
+                if focused && (at_cursor || selected) {
+                    let cell = &mut buf[(cx, cy)];
+                    cell.set_style(cell.style().add_modifier(Modifier::REVERSED));
+                }
+            }
+        }
         self.drawn = Some(area);
     }
 
@@ -684,6 +748,70 @@ impl ChoiceForm {
             }
             None => self.contains(x, y),
         }
+    }
+
+    /// The character of the typed answer a pointer at `(x, y)` stands on,
+    /// from the last render: on its line, the one drawn there or the nearest
+    /// before it, the first on the line left of the text. Off the answer's
+    /// lines `None`, or with `clamp` its start (above) or end (below).
+    fn typed_position(&self, x: u16, y: u16, clamp: bool) -> Option<usize> {
+        let cells = &self.typed_drawn;
+        let (first, last) = (cells.first()?.1, cells.last()?.1);
+        if y < first {
+            return clamp.then_some(0);
+        }
+        if y > last {
+            return clamp.then_some(cells.len() - 1);
+        }
+        let on_line = || cells.iter().enumerate().filter(|(_, (_, cy))| *cy == y);
+        let (start, _) = on_line().next()?;
+        let (at, &(cx, _)) = on_line()
+            .take_while(|(_, (cx, _))| *cx <= x)
+            .last()
+            .unwrap_or((start, &cells[start]));
+        // Past the end of a wrapped line: before the next line's first one.
+        let line_end = on_line().next_back().map(|(i, _)| i);
+        Some(if Some(at) == line_end && x > cx && y < last {
+            at + 1
+        } else {
+            at
+        })
+    }
+
+    /// A press while an answer is typed: on the answer it places the cursor
+    /// and starts a selection a drag extends. Returns whether it landed there.
+    pub fn mouse_press(&mut self, x: u16, y: u16) -> bool {
+        if !self.contains(x, y) {
+            return false;
+        }
+        let Some(pos) = self.typed_position(x, y, false) else {
+            return false;
+        };
+        let Some(input) = &mut self.typing else {
+            return false;
+        };
+        input.set_cursor_with_selection_start(pos);
+        self.dragging = true;
+        true
+    }
+
+    /// A drag that began with [`ChoiceForm::mouse_press`]: the selection
+    /// follows the pointer, held at the answer's start above it and its end
+    /// below. Returns whether a drag was on.
+    pub fn mouse_drag(&mut self, x: u16, y: u16) -> bool {
+        if !self.dragging {
+            return false;
+        }
+        let pos = self.typed_position(x, y, true);
+        if let (Some(input), Some(pos)) = (&mut self.typing, pos) {
+            input.extend_selection_to(pos);
+        }
+        true
+    }
+
+    /// The button let go: a drag ends. Returns whether one was on.
+    pub fn mouse_release(&mut self) -> bool {
+        std::mem::take(&mut self.dragging)
     }
 
     /// A double click: confirm the row under `(x, y)`, the same as choosing it
@@ -786,6 +914,53 @@ fn hard_break(word: &str, width: usize) -> Vec<String> {
     out
 }
 
+/// Lay out the custom row while its answer is typed: `prefix`, then
+/// `label: `, then `text` as it is (spaces kept), wrapped by the character to
+/// `inner` columns, later lines indented under the label. Returns the lines
+/// and, for each character of `text` and the end past it, its
+/// `(line, column)`; the end always gets a cell of its own for the cursor.
+fn typed_layout(
+    prefix: &str,
+    label: &str,
+    text: &str,
+    inner: usize,
+) -> (Vec<String>, Vec<(usize, usize)>) {
+    let indent = width_of(prefix);
+    let room = inner.saturating_sub(indent).max(1);
+    let mut lines = vec![prefix.to_string()];
+    let mut cells = Vec::with_capacity(text.chars().count() + 1);
+    let mut used = 0usize;
+    let head = format!("{label}: ");
+    let chars = head
+        .chars()
+        .map(|c| (c, false))
+        .chain(text.chars().map(|c| (c, true)));
+    // A character that is no glyph of its own still takes a cell here, so
+    // the cursor on it shows.
+    let step = |lines: &mut Vec<String>, used: &mut usize, w: usize| {
+        if *used > 0 && *used + w > room {
+            lines.push(" ".repeat(indent));
+            *used = 0;
+        }
+        let at = (lines.len() - 1, indent + *used);
+        *used += w;
+        at
+    };
+    for (c, tracked) in chars {
+        let (shown, w) = match c.width().unwrap_or(0) {
+            0 => (' ', 1),
+            w => (c, w),
+        };
+        let at = step(&mut lines, &mut used, w);
+        lines.last_mut().expect("a line").push(shown);
+        if tracked {
+            cells.push(at);
+        }
+    }
+    cells.push(step(&mut lines, &mut used, 1));
+    (lines, cells)
+}
+
 /// Display width of `s` in terminal columns.
 fn width_of(s: &str) -> usize {
     s.chars().map(|c| c.width().unwrap_or(0)).sum()
@@ -861,14 +1036,95 @@ mod tests {
         typing.handle_key(KeyEvent::from(KeyCode::Enter));
         assert_eq!(typing.typed(), Some("my words"));
         assert_eq!(typing.handle_key(left), ChoiceAction::Handled);
-        // The drawn caret follows the cursor.
+        // The cursor is drawn where it stands, on the last letter.
         let lines = typing.row_lines(3, &Row::Custom, 80);
-        assert!(lines[0].0.contains("my word▏s"), "{lines:?}");
+        assert_eq!(lines[0].0, " 4. Other: my words", "{lines:?}");
+        let (_, cells) = typing.typed_cells(80).unwrap();
+        assert_eq!(cells[typing.typing.as_ref().unwrap().cursor_pos()], (0, 18));
 
         let multi = ChoiceForm::new("Pick", vec!["a".into(), "b".into(), "c".into()])
             .with_multi("Submit")
             .with_checked(&[0, 2]);
         assert!(multi.is_checked(0) && !multi.is_checked(1) && multi.is_checked(2));
+    }
+
+    #[test]
+    fn a_typed_answer_keeps_its_spaces_and_shows_the_cursor_inverted() {
+        let mut form = form().with_custom("Other");
+        form.handle_key(KeyEvent::from(KeyCode::Char('4')));
+        for c in "a  b".chars() {
+            form.handle_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+        form.handle_key(KeyEvent::from(KeyCode::Left));
+        form.handle_key(KeyEvent::from(KeyCode::Left));
+        let area = Rect::new(0, 0, 40, form.height(40));
+        let mut buf = Buffer::empty(area);
+        form.render(area, &mut buf, &ThemeColors::default(), true);
+        let row = (0..40).map(|x| buf[(x, 6)].symbol()).collect::<String>();
+        assert!(row.contains(" 4. Other: a  b"), "{row:?}");
+        // The cursor stands on the second space: column 1 + " 4. Other: a ".
+        let at = 1 + " 4. Other: a ".len() as u16;
+        assert!(buf[(at, 6)].modifier.contains(Modifier::REVERSED));
+        assert!(!buf[(at - 1, 6)].modifier.contains(Modifier::REVERSED));
+    }
+
+    #[test]
+    fn a_typed_answer_takes_selection_and_pastes() {
+        let mut form = form().with_custom("Other");
+        assert!(!form.is_typing() && !form.paste("x"));
+        form.handle_key(KeyEvent::from(KeyCode::Char('4')));
+        assert!(form.is_typing());
+        assert!(form.paste("one\ntwo"));
+        assert_eq!(form.typed(), Some("one two"));
+        form.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
+        form.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
+        assert_eq!(form.selected_text().as_deref(), Some("wo"));
+        assert_eq!(form.cut_selection().as_deref(), Some("wo"));
+        assert_eq!(form.typed(), Some("one t"));
+        form.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
+        form.handle_key(KeyEvent::from(KeyCode::Char('_')));
+        assert_eq!(form.typed(), Some("one _t"));
+    }
+
+    #[test]
+    fn a_press_places_the_cursor_in_a_typed_answer_and_a_drag_selects() {
+        let mut form = form().with_custom("Other");
+        form.handle_key(KeyEvent::from(KeyCode::Char('4')));
+        form.paste("hello world");
+        // Off the answer, or before it is drawn, a press is not the answer's.
+        assert!(!form.mouse_press(5, 6));
+        let area = Rect::new(0, 0, 40, form.height(40));
+        let mut buf = Buffer::empty(area);
+        form.render(area, &mut buf, &ThemeColors::default(), true);
+        assert!(!form.mouse_press(5, 3));
+        // " 4. Other: " takes columns 1..=11: "w" is at 1 + 11 + 6.
+        let text_x = 1 + " 4. Other: ".len() as u16;
+        assert!(form.mouse_press(text_x + 6, 6));
+        assert_eq!(form.typing.as_ref().unwrap().cursor_pos(), 6);
+        assert_eq!(form.selected_text(), None);
+        // Past the end of the text the drag holds at its end.
+        assert!(form.mouse_drag(38, 6));
+        assert_eq!(form.selected_text().as_deref(), Some("world"));
+        // Above the answer it goes to its start.
+        assert!(form.mouse_drag(text_x, 1));
+        assert_eq!(form.selected_text().as_deref(), Some("hello "));
+        assert!(form.mouse_release());
+        assert!(!form.mouse_drag(text_x + 2, 6));
+        // A press on the label lands at the answer's start.
+        assert!(form.mouse_press(3, 6));
+        assert_eq!(form.typing.as_ref().unwrap().cursor_pos(), 0);
+    }
+
+    #[test]
+    fn a_long_typed_answer_wraps_by_the_character_with_room_for_the_cursor() {
+        let (lines, cells) = typed_layout(" 1. ", "O", "abcdef", 10);
+        // Six columns after the prefix: "O: abc", then "def" and the cursor.
+        assert_eq!(lines, vec![" 1. O: abc", "    def"]);
+        assert_eq!(cells[3], (1, 4));
+        assert_eq!(cells[6], (1, 7));
+        let (lines, cells) = typed_layout(" 1. ", "O", "abc", 10);
+        assert_eq!(lines, vec![" 1. O: abc", "    "]);
+        assert_eq!(cells[3], (1, 4));
     }
 
     #[test]
