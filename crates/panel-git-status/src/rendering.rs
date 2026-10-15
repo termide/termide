@@ -4,8 +4,6 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::Widget,
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -45,6 +43,45 @@ fn expand_dropdown(x: u16, max_width: u16, max_right: u16, items: &[String]) -> 
     }
 }
 
+/// Draw `filter` as a focused single-line field in the one-row `area`: the
+/// cursor and the selection inverse-video, scrolled to keep the cursor in view.
+fn render_filter_field(
+    buf: &mut Buffer,
+    area: Rect,
+    filter: &mut termide_ui::TextInput,
+    theme: &ThemeColors,
+) {
+    use unicode_width::UnicodeWidthChar;
+
+    if area.width == 0 {
+        return;
+    }
+    let scroll = filter.follow_scroll(area.width);
+    let base = Style::default().fg(theme.fg).bg(theme.bg);
+    let invert = Style::default().fg(theme.bg).bg(theme.fg);
+    let cursor = filter.cursor_pos();
+    let selection = filter.selection_range();
+    let end = area.x + area.width;
+    let mut x = area.x;
+    for (i, c) in filter.text().chars().enumerate().skip(scroll) {
+        let w = UnicodeWidthChar::width(c).unwrap_or(1).max(1) as u16;
+        if x + w > end {
+            break;
+        }
+        let selected = selection.is_some_and(|(s, e)| i >= s && i < e);
+        let style = if i == cursor || selected {
+            invert
+        } else {
+            base
+        };
+        buf.set_string(x, area.y, c.to_string(), style);
+        x += w;
+    }
+    if cursor >= filter.text().chars().count() && x < end {
+        buf[(x, area.y)].set_symbol(" ").set_style(invert);
+    }
+}
+
 /// Render a selector dropdown with a filter input row on top, shared by the
 /// repo and branch selectors.
 ///
@@ -63,7 +100,7 @@ fn render_filtered_dropdown(
     dropdown_y: u16,
     max_dropdown_height: usize,
     items: &[String],
-    filter: &str,
+    filter: &mut termide_ui::TextInput,
     cursor: usize,
     selected_pos: Option<usize>,
 ) -> (Rect, usize) {
@@ -112,27 +149,26 @@ fn render_filtered_dropdown(
 
     let inner_width = dropdown_width.saturating_sub(2) as usize;
 
-    // Filter row (row 1 inside border)
-    let filter_text = format!(" Filter: {}", filter);
-    let padding_len = inner_width.saturating_sub(filter_text.width() + 1);
-    let filter_style = Style::default().fg(theme.fg);
-    let cursor_style = Style::default()
-        .fg(theme.bg)
-        .bg(theme.fg)
-        .add_modifier(Modifier::BOLD);
-    let filter_line = Line::from(vec![
-        Span::styled(filter_text, filter_style),
-        Span::styled("█", cursor_style),
-        Span::styled(" ".repeat(padding_len), filter_style),
-    ]);
-    ratatui::widgets::Paragraph::new(filter_line).render(
+    // Filter row (row 1 inside border): the label, then the field.
+    let label = " Filter: ";
+    let label_width = (label.width() as u16).min(inner_width as u16);
+    buf.set_stringn(
+        dropdown_x + 1,
+        dropdown_y + 1,
+        label,
+        label_width as usize,
+        Style::default().fg(theme.fg),
+    );
+    render_filter_field(
+        buf,
         Rect {
-            x: dropdown_x + 1,
+            x: dropdown_x + 1 + label_width,
             y: dropdown_y + 1,
-            width: inner_width as u16,
+            width: (inner_width as u16).saturating_sub(label_width + 1),
             height: 1,
         },
-        buf,
+        filter,
+        theme,
     );
 
     // Separator row (row 2 inside border)
@@ -464,7 +500,7 @@ impl GitStatusPanel {
                     dropdown_y,
                     max_dropdown_height,
                     &filtered_repos,
-                    &self.repo_filter,
+                    &mut self.repo_filter,
                     self.dropdown_cursor,
                     selected_pos,
                 );
@@ -530,7 +566,7 @@ impl GitStatusPanel {
                     dropdown_y,
                     max_dropdown_height,
                     &filtered_branches,
-                    &self.branch_filter,
+                    &mut self.branch_filter,
                     self.dropdown_cursor,
                     selected_pos,
                 );

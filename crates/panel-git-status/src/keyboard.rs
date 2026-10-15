@@ -14,70 +14,11 @@ impl GitStatusPanel {
     pub(crate) fn on_key(&mut self, chord: KeyChord) -> Vec<PanelEvent> {
         let key = chord.raw;
 
-        // Repo dropdown filter: intercept printable keys while the dropdown is
-        // open so typing narrows the list instead of triggering hotkeys.
-        if self.repo_dropdown_open {
-            match key.code {
-                KeyCode::Char(c)
-                    if !key
-                        .modifiers
-                        .contains(crossterm::event::KeyModifiers::CONTROL)
-                        && !key.modifiers.contains(crossterm::event::KeyModifiers::ALT) =>
-                {
-                    self.show_repo_filter = true;
-                    self.repo_filter.push(c);
-                    self.dropdown_cursor = 0;
-                    return vec![];
-                }
-                KeyCode::Backspace if self.show_repo_filter && !self.repo_filter.is_empty() => {
-                    self.repo_filter.pop();
-                    if self.repo_filter.is_empty() {
-                        self.show_repo_filter = false;
-                    }
-                    self.dropdown_cursor = 0;
-                    return vec![];
-                }
-                KeyCode::Esc if self.show_repo_filter && !self.repo_filter.is_empty() => {
-                    self.repo_filter.clear();
-                    self.show_repo_filter = false;
-                    self.dropdown_cursor = 0;
-                    return vec![];
-                }
-                _ => {}
-            }
-        }
-
-        // Branch dropdown filter: intercept printable keys while the dropdown is
-        // open so typing narrows the list instead of triggering hotkeys.
-        if self.branch_dropdown_open {
-            match key.code {
-                KeyCode::Char(c)
-                    if !key
-                        .modifiers
-                        .contains(crossterm::event::KeyModifiers::CONTROL)
-                        && !key.modifiers.contains(crossterm::event::KeyModifiers::ALT) =>
-                {
-                    self.show_branch_filter = true;
-                    self.branch_filter.push(c);
-                    self.dropdown_cursor = 0;
-                    return vec![];
-                }
-                KeyCode::Backspace if self.show_branch_filter && !self.branch_filter.is_empty() => {
-                    self.branch_filter.pop();
-                    if self.branch_filter.is_empty() {
-                        self.show_branch_filter = false;
-                    }
-                    self.dropdown_cursor = 0;
-                    return vec![];
-                }
-                KeyCode::Esc if self.show_branch_filter && !self.branch_filter.is_empty() => {
-                    self.branch_filter.clear();
-                    self.show_branch_filter = false;
-                    self.dropdown_cursor = 0;
-                    return vec![];
-                }
-                _ => {}
-            }
+        // An open repo or branch dropdown has a filter field: typing narrows
+        // the list instead of triggering hotkeys, and the field edits like any
+        // other.
+        if self.handle_filter_key(key) {
+            return vec![];
         }
 
         // Configurable actions via HotkeyTable

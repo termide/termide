@@ -18,7 +18,9 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
 use termide_i18n as i18n;
 use termide_theme::Theme;
 
-use crate::{centered_rect_with_size, Modal, ModalResult};
+use crate::base::render_text_input;
+use crate::input_keys::{handle_input_key, InputKeyResult};
+use crate::{centered_rect_with_size, Modal, ModalResult, TextInputHandler};
 
 /// A column offered to the row editor.
 #[derive(Debug, Clone)]
@@ -45,8 +47,8 @@ pub struct DbRowEditResult {
 #[derive(Debug, Clone)]
 struct Field {
     name: String,
-    text: String,
-    caret: usize,
+    /// The value, edited like any other text field.
+    input: TextInputHandler,
     is_null: bool,
     nullable: bool,
     read_only: bool,
@@ -59,7 +61,21 @@ impl Field {
         if self.is_null != self.original_null {
             return true;
         }
-        !self.is_null && self.text != self.original_text
+        !self.is_null && self.input.text() != self.original_text
+    }
+
+    /// Give an editing key to the field. A read-only field still moves its
+    /// cursor and selects, so its value can be copied, but keeps its text.
+    fn edit(&mut self, key: crossterm::event::KeyEvent) {
+        if self.read_only {
+            let before = self.input.clone();
+            if handle_input_key(&mut self.input, key) == InputKeyResult::TextModified {
+                self.input = before;
+            }
+        } else if handle_input_key(&mut self.input, key) == InputKeyResult::TextModified {
+            // Editing a NULL field starts a real value.
+            self.is_null = false;
+        }
     }
 }
 
@@ -99,9 +115,8 @@ impl DbRowEditModal {
                 let text = c.value.unwrap_or_default();
                 Field {
                     name: c.name,
-                    caret: text.chars().count(),
-                    original_text: text.clone(),
-                    text,
+                    input: TextInputHandler::with_text(text.clone()),
+                    original_text: text,
                     is_null,
                     original_null: is_null,
                     nullable: c.nullable,
@@ -139,7 +154,7 @@ impl DbRowEditModal {
                     let value = if f.is_null {
                         None
                     } else {
-                        Some(f.text.clone())
+                        Some(f.input.text().to_string())
                     };
                     (f.name.clone(), value)
                 })
@@ -171,14 +186,6 @@ impl DbRowEditModal {
         let idx = self.focus;
         self.fields.get_mut(idx).filter(|f| !f.read_only)
     }
-}
-
-/// Byte offset of character `index` in `text` (its length when past the end).
-fn char_index_to_byte(text: &str, index: usize) -> usize {
-    text.char_indices()
-        .nth(index)
-        .map(|(byte, _)| byte)
-        .unwrap_or(text.len())
 }
 
 impl Modal for DbRowEditModal {
@@ -242,16 +249,18 @@ impl Modal for DbRowEditModal {
             .unwrap_or(0)
             .min(24);
 
+        let on_buttons = self.on_buttons();
+        let focus = self.focus;
         for (idx, field) in self
             .fields
-            .iter()
+            .iter_mut()
             .enumerate()
             .skip(self.scroll)
             .take(self.visible_rows)
         {
             let row_y = y;
             y += 1;
-            let is_focused = !self.on_buttons() && self.focus == idx;
+            let is_focused = !on_buttons && focus == idx;
 
             let mut spans = Vec::new();
             let label = format!("{:<width$} ", field.name, width = name_width);
@@ -273,22 +282,34 @@ impl Modal for DbRowEditModal {
             } else {
                 base
             };
-            let shown = if field.is_null {
-                t.db_edit_null_value().to_string()
-            } else {
-                field.text.clone()
-            };
-            spans.push(Span::styled(shown, value_style));
+            // A focused value is drawn as an input, its cursor showing where
+            // an edit lands; NULL shows as its placeholder.
+            let as_input = is_focused && !field.is_null;
+            let prefix_width = spans.iter().map(|s| s.width()).sum::<usize>() as u16;
+            if !as_input {
+                let shown = if field.is_null {
+                    t.db_edit_null_value().to_string()
+                } else {
+                    field.input.text().to_string()
+                };
+                spans.push(Span::styled(shown, value_style));
+            }
 
-            Paragraph::new(Line::from(spans)).render(
-                Rect {
-                    x: inner.x,
-                    y: row_y,
-                    width: inner.width,
-                    height: 1,
-                },
-                buf,
-            );
+            let row_area = Rect {
+                x: inner.x,
+                y: row_y,
+                width: inner.width,
+                height: 1,
+            };
+            Paragraph::new(Line::from(spans)).render(row_area, buf);
+            if as_input {
+                let value_area = Rect {
+                    x: row_area.x + prefix_width.min(row_area.width),
+                    width: row_area.width.saturating_sub(prefix_width + 1),
+                    ..row_area
+                };
+                render_text_input(buf, value_area, &mut field.input, true, theme);
+            }
         }
 
         // Buttons.
@@ -374,65 +395,31 @@ impl Modal for DbRowEditModal {
                     _ => false,
                 };
                 if !toggled {
-                    if let Some(field) = self.focused_field_mut() {
-                        let byte = char_index_to_byte(&field.text, field.caret);
-                        field.text.insert(byte, ' ');
-                        field.caret += 1;
+                    if let Some(field) = self.fields.get_mut(self.focus) {
+                        field.edit(key);
                     }
                 }
             }
-            KeyCode::Char(c) if !self.on_buttons() => {
-                if let Some(field) = self.focused_field_mut() {
-                    // Typing into a NULL field starts a real value.
-                    field.is_null = false;
-                    let byte = char_index_to_byte(&field.text, field.caret);
-                    field.text.insert(byte, c);
-                    field.caret += 1;
-                }
-            }
-            KeyCode::Backspace if !self.on_buttons() => {
-                if let Some(field) = self.focused_field_mut() {
-                    if field.caret > 0 {
-                        let start = char_index_to_byte(&field.text, field.caret - 1);
-                        let end = char_index_to_byte(&field.text, field.caret);
-                        field.text.replace_range(start..end, "");
-                        field.caret -= 1;
-                    }
-                }
-            }
-            KeyCode::Delete if !self.on_buttons() => {
-                if let Some(field) = self.focused_field_mut() {
-                    let len = field.text.chars().count();
-                    if field.caret < len {
-                        let start = char_index_to_byte(&field.text, field.caret);
-                        let end = char_index_to_byte(&field.text, field.caret + 1);
-                        field.text.replace_range(start..end, "");
-                    }
-                }
-            }
-            KeyCode::Left => {
-                if let Some(field) = self.focused_field_mut() {
-                    field.caret = field.caret.saturating_sub(1);
-                }
-            }
-            KeyCode::Right => {
-                if let Some(field) = self.focused_field_mut() {
-                    field.caret = (field.caret + 1).min(field.text.chars().count());
-                }
-            }
-            KeyCode::Home => {
-                if let Some(field) = self.focused_field_mut() {
-                    field.caret = 0;
-                }
-            }
-            KeyCode::End => {
-                if let Some(field) = self.focused_field_mut() {
-                    field.caret = field.text.chars().count();
+            // Everything else in a field edits it.
+            _ if !self.on_buttons() => {
+                if let Some(field) = self.fields.get_mut(self.focus) {
+                    field.edit(key);
                 }
             }
             _ => {}
         }
         Ok(None)
+    }
+
+    fn handle_paste(&mut self, text: &str) -> bool {
+        match self.focused_field_mut() {
+            Some(field) => {
+                field.input.paste(text);
+                field.is_null = false;
+                true
+            }
+            None => false,
+        }
     }
 
     fn handle_mouse(
@@ -542,7 +529,7 @@ mod tests {
         let mut modal = DbRowEditModal::new("row", columns(), None);
         modal.focus = 0; // id, part of the key
         press(&mut modal, KeyCode::Char('9'));
-        assert_eq!(modal.fields[0].text, "1");
+        assert_eq!(modal.fields[0].input.text(), "1");
         assert!(!modal.fields[0].changed());
     }
 
@@ -576,5 +563,61 @@ mod tests {
             press(&mut modal, KeyCode::Esc),
             Some(ModalResult::Cancelled)
         ));
+    }
+
+    fn press_with(modal: &mut DbRowEditModal, code: KeyCode, modifiers: KeyModifiers) {
+        modal
+            .handle_key(KeyChord::identity(KeyEvent::new(code, modifiers)))
+            .unwrap();
+    }
+
+    #[test]
+    fn a_field_edits_at_its_cursor() {
+        let mut modal = DbRowEditModal::new("row", columns(), None);
+        modal.focus = 1; // name: "alpha"
+        press(&mut modal, KeyCode::Home);
+        press(&mut modal, KeyCode::Right);
+        press(&mut modal, KeyCode::Char('X'));
+        assert_eq!(modal.fields[1].input.text(), "aXlpha");
+    }
+
+    #[test]
+    fn a_selection_is_deleted_as_one() {
+        let mut modal = DbRowEditModal::new("row", columns(), None);
+        modal.focus = 1; // name: "alpha"
+        press_with(&mut modal, KeyCode::Left, KeyModifiers::SHIFT);
+        press_with(&mut modal, KeyCode::Left, KeyModifiers::SHIFT);
+        press(&mut modal, KeyCode::Backspace);
+        assert_eq!(modal.fields[1].input.text(), "alp");
+    }
+
+    #[test]
+    fn ctrl_v_does_not_type_a_v() {
+        let mut modal = DbRowEditModal::new("row", columns(), None);
+        modal.focus = 1; // name: "alpha"
+                         // Reading the clipboard only; whatever it holds is what lands.
+        let clip = termide_ui::clipboard::paste_text_or_paths().unwrap_or_default();
+        press_with(&mut modal, KeyCode::Char('v'), KeyModifiers::CONTROL);
+        assert_eq!(modal.fields[1].input.text(), format!("alpha{clip}"));
+    }
+
+    #[test]
+    fn a_read_only_field_selects_but_keeps_its_text() {
+        let mut modal = DbRowEditModal::new("row", columns(), None);
+        modal.focus = 0; // id, part of the key
+        press_with(&mut modal, KeyCode::Left, KeyModifiers::SHIFT);
+        assert_eq!(modal.fields[0].input.selected_text(), Some("1"));
+        press(&mut modal, KeyCode::Backspace);
+        assert_eq!(modal.fields[0].input.text(), "1");
+        assert!(!modal.handle_paste("9"));
+    }
+
+    #[test]
+    fn a_paste_lands_at_the_cursor_and_ends_null() {
+        let mut modal = DbRowEditModal::new("row", columns(), None);
+        modal.focus = 2; // note, NULL
+        assert!(modal.handle_paste("pasted"));
+        assert!(!modal.fields[2].is_null);
+        assert_eq!(modal.fields[2].input.text(), "pasted");
     }
 }

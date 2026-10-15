@@ -168,8 +168,8 @@ pub struct DbPanel {
     modal_request: Option<(PendingAction, ActiveModal)>,
 }
 
-/// An in-place cell edit: what is being typed, where the caret sits, and which
-/// cell it belongs to.
+/// An in-place cell edit: the text being typed — edited like any other text
+/// field, cursor and selection included — and which cell it belongs to.
 ///
 /// NULL is deliberately not representable here — a cell editor is a text field,
 /// and clearing it writes an empty value. Setting NULL is the row editor's job,
@@ -179,10 +179,8 @@ pub(crate) struct CellEdit {
     /// Row index within the loaded page, so a reload can invalidate the edit.
     pub(crate) row: usize,
     pub(crate) col: usize,
-    /// Text as typed so far.
-    pub(crate) text: String,
-    /// Caret position in characters (never bytes — values are UTF-8).
-    pub(crate) caret: usize,
+    /// Text as typed so far, with its cursor and selection.
+    pub(crate) input: termide_ui::TextInput,
     /// Text the edit started from, to tell "saved" from "nothing changed".
     pub(crate) original: String,
     /// True while the UPDATE is in flight: the cell stays open but read-only so
@@ -193,7 +191,7 @@ pub(crate) struct CellEdit {
 impl CellEdit {
     /// Whether the text differs from what the cell held when editing started.
     pub(crate) fn is_dirty(&self) -> bool {
-        self.text != self.original
+        self.input.text() != self.original
     }
 }
 
@@ -1081,6 +1079,20 @@ impl Panel for DbPanel {
             // Global clipboard: copy the current cell value (previously the
             // per-panel `copy_cell` keybinding). The whole-row copy stays a
             // panel keybinding (`copy_row`).
+            // An open cell editor owns the clipboard: copy, cut and paste act
+            // on its text, not on the grid.
+            PanelCommand::Copy if self.edit.is_some() => {
+                CommandResult::Handled(self.edit_clipboard('c'))
+            }
+            PanelCommand::Cut if self.edit.is_some() => {
+                CommandResult::Handled(self.edit_clipboard('x'))
+            }
+            PanelCommand::Paste if self.edit.is_some() => {
+                CommandResult::Handled(self.edit_clipboard('v'))
+            }
+            PanelCommand::PasteText { text } if self.edit.is_some() => {
+                CommandResult::Handled(self.edit_paste(&text))
+            }
             PanelCommand::Copy => {
                 if let Some(text) = self.copy_text(false) {
                     let _ = termide_clipboard::copy(&text);
@@ -1250,9 +1262,73 @@ mod tests {
         press(&mut panel, KeyCode::Enter);
 
         let edit = panel.edit.as_ref().expect("editor should be open");
-        assert_eq!(edit.text, "alpha");
-        assert_eq!(edit.caret, "alpha".chars().count());
+        assert_eq!(edit.input.text(), "alpha");
+        assert_eq!(edit.input.cursor_pos(), "alpha".chars().count());
         assert!(!edit.is_dirty());
+    }
+
+    fn press_with(panel: &mut DbPanel, code: KeyCode, modifiers: KeyModifiers) {
+        panel.handle_key_impl(KeyChord::identity(KeyEvent::new(code, modifiers)));
+    }
+
+    fn edit_text(panel: &DbPanel) -> &str {
+        panel
+            .edit
+            .as_ref()
+            .expect("editor should be open")
+            .input
+            .text()
+    }
+
+    #[test]
+    fn the_cell_editor_edits_at_its_cursor_and_deletes_a_selection() {
+        let (_dir, url) = fixture();
+        let mut panel = open_table(&url, "keyed");
+        panel.cursor_col = 1; // name: "alpha"
+        press(&mut panel, KeyCode::Enter);
+        press(&mut panel, KeyCode::Home);
+        press(&mut panel, KeyCode::Right);
+        press(&mut panel, KeyCode::Char('X'));
+        assert_eq!(edit_text(&panel), "aXlpha");
+
+        press(&mut panel, KeyCode::End);
+        press_with(&mut panel, KeyCode::Left, KeyModifiers::SHIFT);
+        press_with(&mut panel, KeyCode::Left, KeyModifiers::SHIFT);
+        press(&mut panel, KeyCode::Backspace);
+        assert_eq!(edit_text(&panel), "aXlp");
+    }
+
+    #[test]
+    fn ctrl_v_in_the_cell_editor_does_not_type_a_v() {
+        let (_dir, url) = fixture();
+        let mut panel = open_table(&url, "keyed");
+        panel.cursor_col = 1; // name: "alpha"
+        press(&mut panel, KeyCode::Enter);
+        // Reading the clipboard only; whatever it holds is what lands.
+        let clip = termide_ui::clipboard::paste_text_or_paths().unwrap_or_default();
+        press_with(&mut panel, KeyCode::Char('v'), KeyModifiers::CONTROL);
+        assert_eq!(edit_text(&panel), format!("alpha{clip}"));
+    }
+
+    /// While the cell editor is open the clipboard commands are its, not the
+    /// grid's: with nothing selected `Copy` does nothing (and writes nothing),
+    /// and a paste lands at the editor's cursor.
+    #[test]
+    fn the_clipboard_commands_act_on_an_open_cell_editor() {
+        let (_dir, url) = fixture();
+        let mut panel = open_table(&url, "keyed");
+        panel.cursor_col = 1; // name: "alpha"
+        press(&mut panel, KeyCode::Enter);
+        assert!(matches!(
+            panel.handle_command(PanelCommand::Copy),
+            CommandResult::Handled(false)
+        ));
+        press(&mut panel, KeyCode::Home);
+        assert!(matches!(
+            panel.handle_command(PanelCommand::PasteText { text: "my ".into() }),
+            CommandResult::Handled(true)
+        ));
+        assert_eq!(edit_text(&panel), "my alpha");
     }
 
     /// Escape must leave both the cell and the database untouched.

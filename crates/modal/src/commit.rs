@@ -13,7 +13,6 @@ use ratatui::{
 use crate::base::{button_style, render_modal_block};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use termide_clipboard as clipboard;
 use termide_core::ThemeColors;
 use termide_i18n as i18n;
 use termide_theme::Theme;
@@ -154,7 +153,7 @@ impl CommitModal {
                         x,
                         y,
                         ch.to_string(),
-                        Style::default().fg(theme.fg).bg(theme.bg),
+                        Style::default().fg(theme.bg).bg(theme.fg),
                     );
                 } else if is_selected {
                     buf.set_string(
@@ -301,93 +300,6 @@ impl Modal for CommitModal {
                     KeyCode::Enter => {
                         self.textarea.insert_newline();
                     }
-                    KeyCode::Char(c) => {
-                        if key.modifiers.contains(KeyModifiers::CONTROL) {
-                            match c {
-                                'a' => self.textarea.select_all(),
-                                'z' => {
-                                    self.textarea.undo();
-                                }
-                                'y' => {
-                                    self.textarea.redo();
-                                }
-                                'c' => {
-                                    // Copy
-                                    if let Some(text) = self.textarea.selected_text() {
-                                        let _ = clipboard::copy(&text);
-                                    }
-                                }
-                                'x' => {
-                                    // Cut
-                                    if let Some(text) = self.textarea.selected_text() {
-                                        let _ = clipboard::copy(&text);
-                                        self.textarea.delete_selection();
-                                    }
-                                }
-                                'v' => {
-                                    // Paste
-                                    if let Some(text) = clipboard::paste_text_or_paths() {
-                                        self.textarea.insert_str(&text);
-                                    }
-                                }
-                                _ => {}
-                            }
-                        } else {
-                            self.textarea.insert(c);
-                        }
-                    }
-                    KeyCode::Backspace => {
-                        self.textarea.backspace();
-                    }
-                    KeyCode::Delete => {
-                        self.textarea.delete();
-                    }
-                    KeyCode::Left => {
-                        if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            self.textarea.move_left_with_selection();
-                        } else {
-                            self.textarea.move_left();
-                        }
-                    }
-                    KeyCode::Right => {
-                        if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            self.textarea.move_right_with_selection();
-                        } else {
-                            self.textarea.move_right();
-                        }
-                    }
-                    KeyCode::Up => {
-                        if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            self.textarea.move_up_with_selection();
-                        } else {
-                            self.textarea.move_up();
-                        }
-                    }
-                    KeyCode::Down => {
-                        if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            self.textarea.move_down_with_selection();
-                        } else {
-                            self.textarea.move_down();
-                        }
-                    }
-                    KeyCode::Home => {
-                        if key.modifiers.contains(KeyModifiers::CONTROL) {
-                            self.textarea.move_to_start();
-                        } else if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            self.textarea.move_home_with_selection();
-                        } else {
-                            self.textarea.move_home();
-                        }
-                    }
-                    KeyCode::End => {
-                        if key.modifiers.contains(KeyModifiers::CONTROL) {
-                            self.textarea.move_to_end();
-                        } else if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            self.textarea.move_end_with_selection();
-                        } else {
-                            self.textarea.move_end();
-                        }
-                    }
                     KeyCode::PageUp => {
                         let page_size = self.visible_height.max(1);
                         // Move cursor up by page_size lines
@@ -403,7 +315,10 @@ impl Modal for CommitModal {
                         let new_row = (cursor.row + page_size).min(max_row);
                         self.textarea.set_cursor(new_row, cursor.col);
                     }
-                    _ => {}
+                    // Everything else edits the message like any other field.
+                    _ => {
+                        termide_ui::edit_text_area(&mut self.textarea, key);
+                    }
                 }
             }
             FocusArea::Buttons => {
@@ -433,7 +348,7 @@ impl Modal for CommitModal {
                             return Ok(Some(ModalResult::Cancelled));
                         }
                     }
-                    KeyCode::Char(c) => {
+                    KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                         // Switch back to textarea and insert
                         self.focus = FocusArea::Textarea;
                         self.textarea.insert(c);
@@ -534,5 +449,93 @@ impl Modal for CommitModal {
         }
 
         Ok(None)
+    }
+
+    fn handle_paste(&mut self, text: &str) -> bool {
+        self.focus = FocusArea::Textarea;
+        self.scroll_follows_cursor = true;
+        self.textarea
+            .insert_str(&text.replace("\r\n", "\n").replace('\r', "\n"));
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::KeyEvent;
+
+    fn modal() -> CommitModal {
+        CommitModal::new(1, "repo".into(), "main".into())
+    }
+
+    fn press(modal: &mut CommitModal, code: KeyCode, modifiers: KeyModifiers) {
+        modal
+            .handle_key(termide_core::KeyChord::identity(KeyEvent::new(
+                code, modifiers,
+            )))
+            .unwrap();
+    }
+
+    fn type_text(modal: &mut CommitModal, text: &str) {
+        for ch in text.chars() {
+            press(modal, KeyCode::Char(ch), KeyModifiers::NONE);
+        }
+    }
+
+    #[test]
+    fn the_message_edits_at_its_cursor_and_moves_by_words() {
+        let mut modal = modal();
+        type_text(&mut modal, "fix bug");
+        press(&mut modal, KeyCode::Left, KeyModifiers::CONTROL);
+        type_text(&mut modal, "the ");
+        assert_eq!(modal.textarea.text(), "fix the bug");
+    }
+
+    #[test]
+    fn a_selection_is_deleted_as_one() {
+        let mut modal = modal();
+        type_text(&mut modal, "fix bugs");
+        press(&mut modal, KeyCode::Left, KeyModifiers::SHIFT);
+        press(&mut modal, KeyCode::Backspace, KeyModifiers::NONE);
+        assert_eq!(modal.textarea.text(), "fix bug");
+    }
+
+    #[test]
+    fn ctrl_shift_z_redoes() {
+        let mut modal = modal();
+        type_text(&mut modal, "a");
+        press(&mut modal, KeyCode::Char('z'), KeyModifiers::CONTROL);
+        assert_eq!(modal.textarea.text(), "");
+        press(
+            &mut modal,
+            KeyCode::Char('z'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        );
+        assert_eq!(modal.textarea.text(), "a");
+    }
+
+    #[test]
+    fn ctrl_v_does_not_type_a_v_even_from_the_buttons() {
+        let mut modal = modal();
+        type_text(&mut modal, "x");
+        // Reading the clipboard only; whatever it holds is what lands.
+        let clip = termide_ui::clipboard::paste_text_or_paths().unwrap_or_default();
+        press(&mut modal, KeyCode::Char('v'), KeyModifiers::CONTROL);
+        assert_eq!(modal.textarea.text(), format!("x{clip}"));
+
+        press(&mut modal, KeyCode::Tab, KeyModifiers::NONE);
+        let before = modal.textarea.text();
+        press(&mut modal, KeyCode::Char('v'), KeyModifiers::CONTROL);
+        assert_eq!(modal.textarea.text(), before);
+    }
+
+    #[test]
+    fn enter_breaks_the_line_and_a_paste_keeps_its_lines() {
+        let mut modal = modal();
+        type_text(&mut modal, "title");
+        press(&mut modal, KeyCode::Enter, KeyModifiers::NONE);
+        assert!(modal.handle_paste("body\r\nmore"));
+        assert_eq!(modal.textarea.text(), "title\nbody\nmore");
     }
 }

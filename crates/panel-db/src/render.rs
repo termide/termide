@@ -244,7 +244,7 @@ impl DbPanel {
                 if x >= max_x {
                     break;
                 }
-                let editing = self.edit.as_ref().filter(|e| e.row == abs && e.col == j);
+                let editing = self.edit.as_mut().filter(|e| e.row == abs && e.col == j);
                 let value = row.get(j);
                 let (text, is_null) = match value {
                     Some(v) if v.is_null() => ("NULL".to_string(), true),
@@ -440,11 +440,11 @@ fn pad(s: &str, w: usize) -> String {
 
 /// Draw an open cell editor into its grid slot.
 ///
-/// The visible window scrolls with the caret so a value longer than the column
-/// stays editable, and the caret cell is inverse-video — the whole-slot
-/// highlight used for a selected cell would swallow it. While the write is in
-/// flight the text is dimmed and no caret is drawn: the editor is read-only
-/// until the server answers.
+/// The visible window scrolls with the cursor so a value longer than the column
+/// stays editable; the cursor cell and the selection are inverse-video, as in
+/// any other text field — the whole-slot highlight used for a selected cell
+/// would swallow them. While the write is in flight the text is dimmed and no
+/// cursor is drawn: the editor is read-only until the server answers.
 #[allow(clippy::too_many_arguments)]
 fn render_cell_editor(
     buf: &mut Buffer,
@@ -452,33 +452,57 @@ fn render_cell_editor(
     y: u16,
     max_x: u16,
     width: usize,
-    edit: &crate::CellEdit,
+    edit: &mut crate::CellEdit,
     row_style: Style,
     theme: &ThemeColors,
 ) -> u16 {
-    let chars: Vec<char> = edit.text.chars().collect();
-    // Keep the caret inside the window, biased to show text before it.
-    let start = edit.caret.saturating_sub(width.saturating_sub(1));
-    let visible: String = chars.iter().skip(start).take(width).collect();
+    use unicode_width::UnicodeWidthChar;
 
     let base = if edit.saving {
         row_style.fg(theme.disabled)
     } else {
         row_style.fg(theme.fg).bg(theme.selection_bg)
     };
-    let mut cursor_x = x;
-    cursor_x = put(buf, cursor_x, y, max_x, " ", base);
-    let text_start = cursor_x;
-    cursor_x = put(buf, cursor_x, y, max_x, &pad(&visible, width), base);
-    cursor_x = put(buf, cursor_x, y, max_x, " ", base);
+    let marked = base.add_modifier(Modifier::REVERSED);
+    let scroll = edit
+        .input
+        .follow_scroll(width.min(usize::from(u16::MAX)) as u16);
 
-    if !edit.saving {
-        let caret_col = text_start + (edit.caret - start) as u16;
-        if caret_col < max_x && caret_col < text_start + width as u16 {
-            if let Some(cell) = buf.cell_mut((caret_col, y)) {
-                cell.set_style(base.add_modifier(Modifier::REVERSED));
-            }
+    let mut next_x = put(buf, x, y, max_x, " ", base);
+    let text_start = next_x;
+    next_x = put(buf, next_x, y, max_x, &" ".repeat(width), base);
+    let text_end = (text_start as usize + width).min(max_x as usize) as u16;
+
+    let cursor = edit.input.cursor_pos();
+    let selection = edit.input.selection_range();
+    let show_marks = !edit.saving;
+    let mut col = text_start;
+    let mut shown = scroll;
+    for (i, c) in edit.input.text().chars().enumerate().skip(scroll) {
+        let w = UnicodeWidthChar::width(c).unwrap_or(1).max(1) as u16;
+        if col + w > text_end {
+            break;
+        }
+        let selected = selection.is_some_and(|(start, end)| i >= start && i < end);
+        let style = if show_marks && (i == cursor || selected) {
+            marked
+        } else {
+            base
+        };
+        buf.set_string(col, y, c.to_string(), style);
+        col += w;
+        shown = i + 1;
+    }
+    // A cursor past the last character sits on the blank after it.
+    if show_marks
+        && cursor >= shown
+        && cursor == edit.input.text().chars().count()
+        && col < text_end
+    {
+        if let Some(cell) = buf.cell_mut((col, y)) {
+            cell.set_style(marked);
         }
     }
-    cursor_x
+
+    put(buf, next_x, y, max_x, " ", base)
 }

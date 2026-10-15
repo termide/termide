@@ -104,11 +104,11 @@ pub struct GitStatusPanel {
     /// Scroll offset in dropdown
     dropdown_scroll: usize,
     /// Branch filter text (hidden filter row in dropdown)
-    branch_filter: String,
+    branch_filter: termide_ui::TextInput,
     /// Whether the branch filter row is visible (shown after first keystroke)
     show_branch_filter: bool,
     /// Repo filter text (hidden filter row in dropdown)
-    repo_filter: String,
+    repo_filter: termide_ui::TextInput,
     /// Whether the repo filter row is visible (shown after first keystroke)
     show_repo_filter: bool,
     /// Stash button area (for dropdown anchoring)
@@ -214,9 +214,9 @@ impl GitStatusPanel {
             repo_dropdown_area: None,
             branch_dropdown_area: None,
             dropdown_scroll: 0,
-            branch_filter: String::new(),
+            branch_filter: termide_ui::TextInput::new(),
             show_branch_filter: false,
-            repo_filter: String::new(),
+            repo_filter: termide_ui::TextInput::new(),
             show_repo_filter: false,
             stash_button_area: None,
             click_tracker: IndexClickTracker::new(),
@@ -515,6 +515,11 @@ impl Panel for GitStatusPanel {
             PanelCommand::SetFsWatchRoot { root, .. } => {
                 self.watched_root = root;
                 CommandResult::None
+            }
+            // A paste while a selector dropdown is open goes to its filter.
+            PanelCommand::PasteText { text } if self.open_filter().is_some() => {
+                self.paste_into_filter(&text);
+                CommandResult::Handled(true)
             }
             _ => CommandResult::None,
         }

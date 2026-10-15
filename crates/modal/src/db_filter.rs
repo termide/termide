@@ -1,12 +1,13 @@
 //! Multi-column filter modal for the database viewer.
 //!
 //! One row per column — column name, an operator selectbox, and a value. Within
-//! a row, ←/→ switch focus between the operator and the value; ↑/↓ move between
+//! a row, ←/→ switch focus between the operator and the value (← from the start
+//! of the value, as the value edits like any other field); ↑/↓ move between
 //! rows. Enter on the operator opens a standard dropdown to pick it. Bottom
 //! buttons: Apply / Clear filters / Cancel.
 
 use anyhow::Result;
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -14,8 +15,9 @@ use unicode_width::UnicodeWidthStr;
 
 use termide_theme::Theme;
 
-use crate::base::render_modal_block;
-use crate::{centered_rect_with_size, Modal, ModalResult};
+use crate::base::{render_input_field, render_modal_block, render_text_input};
+use crate::input_keys::{handle_input_key, InputKeyResult};
+use crate::{centered_rect_with_size, Modal, ModalResult, TextInputHandler};
 
 /// A column the modal can filter on.
 pub struct DbFilterColumn {
@@ -48,7 +50,7 @@ struct Row {
     operators: Vec<String>,
     /// 0 = no condition; otherwise `operators[op_sel - 1]`.
     op_sel: usize,
-    value: String,
+    value: TextInputHandler,
 }
 
 impl Row {
@@ -71,6 +73,19 @@ impl Row {
     }
     fn needs_value(&self) -> bool {
         !matches!(self.op_label(), "—" | "is null" | "is not null")
+    }
+    /// Whether the operator takes no value at all, so the field is blank and
+    /// does not edit. "—" still shows what is typed (typing picks an
+    /// operator).
+    fn hides_value(&self) -> bool {
+        matches!(self.op_label(), "is null" | "is not null")
+    }
+    /// Typing a value implies a condition: pick a default operator if none is
+    /// set yet.
+    fn imply_condition(&mut self) {
+        if self.op_sel == 0 && !self.operators.is_empty() {
+            self.op_sel = 1;
+        }
     }
 }
 
@@ -107,7 +122,7 @@ impl DbFilterModal {
                 name: c.name,
                 op_sel: c.op.map_or(0, |i| i + 1),
                 operators: c.operators,
-                value: c.value,
+                value: TextInputHandler::with_text(c.value),
             })
             .collect();
         Self {
@@ -134,7 +149,7 @@ impl DbFilterModal {
                 column: r.name.clone(),
                 op: r.op_label().to_string(),
                 value: if r.needs_value() {
-                    r.value.clone()
+                    r.value.text().to_string()
                 } else {
                     String::new()
                 },
@@ -184,10 +199,11 @@ impl Modal for DbFilterModal {
 
         let start = self.scroll.min(self.rows.len());
         let end = (start + visible).min(self.rows.len());
+        let buttons_focused = self.buttons_focused();
         for (line, i) in (start..end).enumerate() {
-            let r = &self.rows[i];
+            let r = &mut self.rows[i];
             let y = inner.y + line as u16;
-            let row_focused = !self.buttons_focused() && i == self.focus;
+            let row_focused = !buttons_focused && i == self.focus;
             let blanks = " ".repeat(inner.width as usize);
             buf.set_stringn(inner.x, y, &blanks, inner.width as usize, base);
             buf.set_stringn(inner.x, y, pad(&r.name, name_w), name_w, base);
@@ -206,22 +222,26 @@ impl Modal for DbFilterModal {
             let chip = format!("[{} {}]", r.op_label(), arrow);
             buf.set_stringn(op_x, y, &chip, OP_CHIP_W, op_style);
 
-            // Value field — always shown (so focus is visible) with a trailing
-            // cursor when focused; only meaningful when the operator needs one.
+            // Value field — drawn like any input, its cursor showing focus;
+            // only meaningful when the operator needs one.
             let val_focused = row_focused && self.field == Field::Value;
-            let val_style = if val_focused { focused } else { base };
-            let vw = inner.width.saturating_sub(val_x - inner.x) as usize;
-            let value_w = vw.min(28);
-            // Only null-check operators have no value; "—" still shows what you
-            // type (typing auto-selects an operator).
-            let hide_value = matches!(r.op_label(), "is null" | "is not null");
-            let shown = if hide_value { "" } else { r.value.as_str() };
-            let txt = if val_focused {
-                format!("{shown}_")
+            let vw = inner.width.saturating_sub(val_x - inner.x);
+            let value_area = Rect::new(val_x, y, vw.min(28), 1);
+            if r.hides_value() {
+                render_input_field(
+                    buf,
+                    value_area.x,
+                    y,
+                    value_area.width,
+                    "",
+                    0,
+                    None,
+                    val_focused,
+                    theme,
+                );
             } else {
-                shown.to_string()
-            };
-            buf.set_stringn(val_x, y, pad(&txt, value_w), value_w, val_style);
+                render_text_input(buf, value_area, &mut r.value, val_focused, theme);
+            }
         }
 
         // --- buttons ---
@@ -289,6 +309,10 @@ impl Modal for DbFilterModal {
             return Ok(None);
         }
 
+        if !self.buttons_focused() && self.field == Field::Value && self.edit_value(chord.raw) {
+            return Ok(None);
+        }
+
         match chord.raw.code {
             KeyCode::Esc => return Ok(Some(ModalResult::Cancelled)),
             KeyCode::Up => self.focus = self.focus.saturating_sub(1),
@@ -332,27 +356,6 @@ impl Modal for DbFilterModal {
                     return Ok(Some(self.collect()));
                 }
             }
-            KeyCode::Char(c) => {
-                if !self.buttons_focused() && self.field == Field::Value {
-                    if let Some(r) = self.rows.get_mut(self.focus) {
-                        // Typing a value implies a condition: pick a default
-                        // operator if none is set yet.
-                        if r.op_sel == 0 && !r.operators.is_empty() {
-                            r.op_sel = 1;
-                        }
-                        if !matches!(r.op_label(), "is null" | "is not null") {
-                            r.value.push(c);
-                        }
-                    }
-                }
-            }
-            KeyCode::Backspace => {
-                if !self.buttons_focused() && self.field == Field::Value {
-                    if let Some(r) = self.rows.get_mut(self.focus) {
-                        r.value.pop();
-                    }
-                }
-            }
             _ => {}
         }
         Ok(None)
@@ -361,11 +364,46 @@ impl Modal for DbFilterModal {
     fn handle_paste(&mut self, text: &str) -> bool {
         if !self.op_open && !self.buttons_focused() && self.field == Field::Value {
             if let Some(r) = self.rows.get_mut(self.focus) {
-                r.value.push_str(text);
+                r.imply_condition();
+                if !r.hides_value() {
+                    r.value.paste(text);
+                }
                 return true;
             }
         }
         false
+    }
+}
+
+impl DbFilterModal {
+    /// Give `key` to the focused value field; `false` when it is the modal's
+    /// to handle — `Enter`, `Tab`, `Esc`, `↑`/`↓`, and `←` from the start of
+    /// the value, which goes back to the operator.
+    fn edit_value(&mut self, key: KeyEvent) -> bool {
+        if matches!(
+            key.code,
+            KeyCode::Enter
+                | KeyCode::Tab
+                | KeyCode::BackTab
+                | KeyCode::Esc
+                | KeyCode::Up
+                | KeyCode::Down
+        ) {
+            return false;
+        }
+        let Some(r) = self.rows.get_mut(self.focus) else {
+            return false;
+        };
+        let typing =
+            matches!(key.code, KeyCode::Char(_)) && !key.modifiers.contains(KeyModifiers::CONTROL);
+        if typing {
+            r.imply_condition();
+        }
+        if r.hides_value() {
+            // Nothing to edit; `←` still goes back to the operator.
+            return key.code != KeyCode::Left;
+        }
+        handle_input_key(&mut r.value, key) != InputKeyResult::NotHandled
     }
 }
 
@@ -376,5 +414,91 @@ fn pad(s: &str, w: usize) -> String {
         s.chars().take(w).collect()
     } else {
         format!("{s}{}", " ".repeat(w - sw))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn modal() -> DbFilterModal {
+        DbFilterModal::new(vec![DbFilterColumn {
+            name: "name".into(),
+            operators: vec!["=".into(), "is null".into()],
+            op: None,
+            value: String::new(),
+        }])
+    }
+
+    fn press(modal: &mut DbFilterModal, code: KeyCode, modifiers: KeyModifiers) {
+        let key = KeyEvent::new(code, modifiers);
+        modal
+            .handle_key(termide_core::KeyChord::identity(key))
+            .unwrap();
+    }
+
+    fn type_text(modal: &mut DbFilterModal, text: &str) {
+        for ch in text.chars() {
+            press(modal, KeyCode::Char(ch), KeyModifiers::NONE);
+        }
+    }
+
+    /// The modal with the value field of its one row focused.
+    fn in_value() -> DbFilterModal {
+        let mut modal = modal();
+        press(&mut modal, KeyCode::Right, KeyModifiers::NONE);
+        assert_eq!(modal.field, Field::Value);
+        modal
+    }
+
+    #[test]
+    fn the_value_edits_at_its_cursor_and_typing_picks_an_operator() {
+        let mut modal = in_value();
+        type_text(&mut modal, "alce");
+        press(&mut modal, KeyCode::Left, KeyModifiers::NONE);
+        press(&mut modal, KeyCode::Left, KeyModifiers::NONE);
+        type_text(&mut modal, "i");
+        assert_eq!(modal.rows[0].value.text(), "alice");
+        assert_eq!(modal.rows[0].op_label(), "=");
+    }
+
+    #[test]
+    fn a_selection_in_the_value_is_deleted_as_one() {
+        let mut modal = in_value();
+        type_text(&mut modal, "bobby");
+        press(&mut modal, KeyCode::Left, KeyModifiers::SHIFT);
+        press(&mut modal, KeyCode::Left, KeyModifiers::SHIFT);
+        press(&mut modal, KeyCode::Backspace, KeyModifiers::NONE);
+        assert_eq!(modal.rows[0].value.text(), "bob");
+    }
+
+    #[test]
+    fn ctrl_v_does_not_type_a_v() {
+        let mut modal = in_value();
+        type_text(&mut modal, "x");
+        // Reading the clipboard only; whatever it holds is what lands.
+        let clip = termide_ui::clipboard::paste_text_or_paths().unwrap_or_default();
+        press(&mut modal, KeyCode::Char('v'), KeyModifiers::CONTROL);
+        assert_eq!(modal.rows[0].value.text(), format!("x{clip}"));
+    }
+
+    #[test]
+    fn left_from_the_start_of_the_value_goes_back_to_the_operator() {
+        let mut modal = in_value();
+        type_text(&mut modal, "ab");
+        press(&mut modal, KeyCode::Left, KeyModifiers::NONE);
+        press(&mut modal, KeyCode::Left, KeyModifiers::NONE);
+        assert_eq!(modal.field, Field::Value, "still walking the value");
+        press(&mut modal, KeyCode::Left, KeyModifiers::NONE);
+        assert_eq!(modal.field, Field::Operator);
+    }
+
+    #[test]
+    fn a_paste_lands_at_the_cursor() {
+        let mut modal = in_value();
+        type_text(&mut modal, "ad");
+        press(&mut modal, KeyCode::Left, KeyModifiers::NONE);
+        assert!(modal.handle_paste("bc"));
+        assert_eq!(modal.rows[0].value.text(), "abcd");
     }
 }

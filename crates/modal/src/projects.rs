@@ -7,7 +7,7 @@
 //! inverted, as in the agent's session list.
 
 use anyhow::Result;
-use crossterm::event::{KeyCode, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -16,13 +16,17 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 
-use crate::base::render_modal_block;
+use crate::base::{render_modal_block, render_text_input};
+use crate::input_keys::{handle_input_key, InputKeyResult};
 use std::path::{Path, PathBuf};
 
 use termide_theme::Theme;
 use termide_ui::str_display_width;
 
-use crate::{calculate_modal_width, centered_rect_with_size, Modal, ModalResult, ModalWidthConfig};
+use crate::{
+    calculate_modal_width, centered_rect_with_size, Modal, ModalResult, ModalWidthConfig,
+    TextInputHandler,
+};
 
 /// Marks the current project.
 pub const CURRENT_MARK: &str = "●";
@@ -114,7 +118,8 @@ pub struct ProjectsModal {
     /// First row shown.
     scroll_offset: usize,
     last_list_area: Option<Rect>,
-    filter: String,
+    /// The filter field; edits like any other text field.
+    filter: TextInputHandler,
     filtered_indices: Vec<usize>,
 }
 
@@ -134,7 +139,7 @@ impl ProjectsModal {
             cursor: 0,
             scroll_offset: 0,
             last_list_area: None,
-            filter: String::new(),
+            filter: TextInputHandler::new(),
             filtered_indices,
         }
     }
@@ -191,7 +196,7 @@ impl ProjectsModal {
     fn apply_filter(&mut self) {
         // Fuzzy on the path, best match first; an empty filter keeps the
         // list's own order.
-        let mut query = termide_ui::fuzzy::Query::fuzzy_path(&self.filter);
+        let mut query = termide_ui::fuzzy::Query::fuzzy_path(self.filter.text());
         self.filtered_indices = termide_ui::fuzzy::rank(
             self.items
                 .iter()
@@ -296,34 +301,27 @@ impl Modal for ProjectsModal {
 
         let inner = render_modal_block(modal_area, buf, &self.title, theme);
 
-        // --- Filter input row ---
+        // --- Filter input row (row 0 is blank padding) ---
         let filter_label = "  Filter: ";
-        let filter_text = format!("{}{}", filter_label, self.filter);
-        // Pad to full inner width, reserving 1 cell for the block cursor
-        let padding_len =
-            (inner.width as usize).saturating_sub(str_display_width(&filter_text) + 1);
-        let padding = " ".repeat(padding_len);
-
-        let filter_style = Style::default().fg(theme.fg);
-        let cursor_style = Style::default()
-            .fg(theme.bg)
-            .bg(theme.fg)
-            .add_modifier(Modifier::BOLD);
-
-        let filter_line = Line::from(vec![
-            Span::styled(filter_text, filter_style),
-            Span::styled("█", cursor_style),
-            Span::styled(padding, filter_style),
-        ]);
-
-        // Render filter row on inner.y + 1 (row 0 is blank padding)
-        let filter_area = Rect {
-            x: inner.x,
+        let label_width = (str_display_width(filter_label) as u16).min(inner.width);
+        Paragraph::new(filter_label)
+            .style(Style::default().fg(theme.fg))
+            .render(
+                Rect {
+                    x: inner.x,
+                    y: inner.y + 1,
+                    width: label_width,
+                    height: 1,
+                },
+                buf,
+            );
+        let field_area = Rect {
+            x: inner.x + label_width,
             y: inner.y + 1,
-            width: inner.width,
+            width: inner.width.saturating_sub(label_width + 1),
             height: 1,
         };
-        Paragraph::new(filter_line).render(filter_area, buf);
+        render_text_input(buf, field_area, &mut self.filter, true, theme);
 
         // --- Separator row ---
         let sep_y = inner.y + 2;
@@ -399,6 +397,7 @@ impl Modal for ProjectsModal {
         chord: termide_core::KeyChord,
     ) -> Result<Option<ModalResult<Self::Result>>> {
         let key = chord.raw;
+        let list_jump = KeyModifiers::CONTROL | KeyModifiers::ALT;
         match key.code {
             KeyCode::Esc => Ok(Some(ModalResult::Cancelled)),
 
@@ -411,11 +410,14 @@ impl Modal for ProjectsModal {
                 self.cursor_down();
                 Ok(None)
             }
-            KeyCode::Home => {
+            // `Home`/`End` belong to the filter field; with `Ctrl` they jump
+            // to the first and the last project (`Alt` too, the project-move
+            // chord the app lets through on a filtered list).
+            KeyCode::Home if key.modifiers.intersects(list_jump) => {
                 self.cursor_home();
                 Ok(None)
             }
-            KeyCode::End => {
+            KeyCode::End if key.modifiers.intersects(list_jump) => {
                 self.cursor_end();
                 Ok(None)
             }
@@ -447,20 +449,20 @@ impl Modal for ProjectsModal {
                 }
             })),
 
-            // Filter text input
-            KeyCode::Backspace => {
-                self.filter.pop();
-                self.apply_filter();
+            // Everything else edits the filter.
+            _ => {
+                if handle_input_key(&mut self.filter, key) == InputKeyResult::TextModified {
+                    self.apply_filter();
+                }
                 Ok(None)
             }
-            KeyCode::Char(ch) => {
-                self.filter.push(ch);
-                self.apply_filter();
-                Ok(None)
-            }
-
-            _ => Ok(None),
         }
+    }
+
+    fn handle_paste(&mut self, text: &str) -> bool {
+        self.filter.paste(text);
+        self.apply_filter();
+        true
     }
 
     fn handle_mouse(
@@ -516,7 +518,7 @@ impl Modal for ProjectsModal {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossterm::event::{KeyEvent, KeyModifiers};
+    use crossterm::event::KeyEvent;
     use std::path::Path;
     use termide_core::KeyChord;
 
@@ -532,9 +534,86 @@ mod tests {
     }
 
     fn press(modal: &mut ProjectsModal, code: KeyCode) -> Option<ModalResult<ProjectAction>> {
+        press_with(modal, code, KeyModifiers::NONE)
+    }
+
+    fn press_with(
+        modal: &mut ProjectsModal,
+        code: KeyCode,
+        modifiers: KeyModifiers,
+    ) -> Option<ModalResult<ProjectAction>> {
         modal
-            .handle_key(KeyChord::identity(KeyEvent::new(code, KeyModifiers::NONE)))
+            .handle_key(KeyChord::identity(KeyEvent::new(code, modifiers)))
             .unwrap()
+    }
+
+    fn type_text(modal: &mut ProjectsModal, text: &str) {
+        for ch in text.chars() {
+            press(modal, KeyCode::Char(ch));
+        }
+    }
+
+    fn shown(modal: &ProjectsModal) -> Vec<&str> {
+        modal
+            .filtered_indices
+            .iter()
+            .map(|&i| modal.items[i].display_path.as_str())
+            .collect()
+    }
+
+    fn three() -> ProjectsModal {
+        ProjectsModal::new(
+            "Projects",
+            vec![
+                item("/alpha", true, true),
+                item("/beta", false, true),
+                item("/gamma", false, false),
+            ],
+        )
+    }
+
+    #[test]
+    fn the_filter_edits_at_its_cursor_and_refilters() {
+        let mut modal = three();
+        type_text(&mut modal, "gmma");
+        for _ in 0..3 {
+            press(&mut modal, KeyCode::Left);
+        }
+        type_text(&mut modal, "a");
+        assert_eq!(modal.filter.text(), "gamma");
+        assert_eq!(shown(&modal), ["/gamma"]);
+    }
+
+    #[test]
+    fn a_selection_in_the_filter_is_deleted_as_one() {
+        let mut modal = three();
+        type_text(&mut modal, "betaxx");
+        press_with(&mut modal, KeyCode::Left, KeyModifiers::SHIFT);
+        press_with(&mut modal, KeyCode::Left, KeyModifiers::SHIFT);
+        press(&mut modal, KeyCode::Backspace);
+        assert_eq!(modal.filter.text(), "beta");
+        assert_eq!(shown(&modal), ["/beta"]);
+    }
+
+    #[test]
+    fn ctrl_v_does_not_type_a_v() {
+        let mut modal = three();
+        type_text(&mut modal, "be");
+        // Reading the clipboard only; whatever it holds is what lands.
+        let clip = termide_ui::clipboard::paste_text_or_paths().unwrap_or_default();
+        press_with(&mut modal, KeyCode::Char('v'), KeyModifiers::CONTROL);
+        assert_eq!(modal.filter.text(), format!("be{clip}"));
+    }
+
+    #[test]
+    fn ctrl_home_and_end_jump_the_list_and_a_paste_filters() {
+        let mut modal = three();
+        press_with(&mut modal, KeyCode::End, KeyModifiers::CONTROL);
+        assert_eq!(modal.cursor, 2);
+        press_with(&mut modal, KeyCode::Home, KeyModifiers::CONTROL);
+        assert_eq!(modal.cursor, 0);
+        assert!(modal.handle_paste("gamma"));
+        assert_eq!(shown(&modal), ["/gamma"]);
     }
 
     #[test]

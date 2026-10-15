@@ -1,7 +1,7 @@
 //! Command Palette modal — fuzzy-searchable list of all app commands.
 
 use anyhow::Result;
-use crossterm::event::{KeyCode, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -11,11 +11,15 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use crate::base::render_modal_block;
+use crate::base::{render_modal_block, render_text_input};
+use crate::input_keys::{handle_input_key, InputKeyResult};
 use termide_theme::Theme;
 use termide_ui::fuzzy::{highlight, rank, Query};
 
-use crate::{calculate_modal_width, centered_rect_with_size, Modal, ModalResult, ModalWidthConfig};
+use crate::{
+    calculate_modal_width, centered_rect_with_size, Modal, ModalResult, ModalWidthConfig,
+    TextInputHandler,
+};
 
 /// A single entry in the command palette.
 #[derive(Debug, Clone)]
@@ -35,7 +39,8 @@ pub struct CommandEntry {
 #[derive(Debug)]
 pub struct CommandPaletteModal {
     entries: Vec<CommandEntry>,
-    filter: String,
+    /// The filter field; edits like any other text field.
+    filter: TextInputHandler,
     filtered_indices: Vec<usize>,
     cursor: usize,
     scroll_offset: usize,
@@ -54,7 +59,7 @@ impl CommandPaletteModal {
         let filtered_indices = (0..entries.len()).collect();
         Self {
             entries,
-            filter: String::new(),
+            filter: TextInputHandler::new(),
             filtered_indices,
             cursor: 0,
             scroll_offset: 0,
@@ -65,7 +70,7 @@ impl CommandPaletteModal {
     /// Recompute `filtered_indices` from the current filter value: every
     /// entry whose label, category or keybinding matches, best match first.
     fn apply_filter(&mut self) {
-        let mut query = Query::fuzzy(&self.filter);
+        let mut query = Query::fuzzy(self.filter.text());
         self.filtered_indices = rank(
             self.entries
                 .iter()
@@ -155,29 +160,23 @@ impl Modal for CommandPaletteModal {
 
         // --- Filter input ---
         let filter_label = "  Filter: ";
-        let filter_text = format!("{}{}", filter_label, self.filter);
-        let padding_len = (inner.width as usize).saturating_sub(filter_text.width() + 1);
-        let padding = " ".repeat(padding_len);
-
-        let filter_style = Style::default().fg(theme.fg);
-        let cursor_style = Style::default()
-            .fg(theme.bg)
-            .bg(theme.fg)
-            .add_modifier(Modifier::BOLD);
-
-        let filter_line = Line::from(vec![
-            Span::styled(filter_text, filter_style),
-            Span::styled("█", cursor_style),
-            Span::styled(padding, filter_style),
-        ]);
-
-        let filter_area = Rect {
+        let label_width = (filter_label.width() as u16).min(inner.width);
+        let label_area = Rect {
             x: inner.x,
             y: inner.y + 1,
-            width: inner.width,
+            width: label_width,
             height: 1,
         };
-        ratatui::widgets::Paragraph::new(filter_line).render(filter_area, buf);
+        ratatui::widgets::Paragraph::new(filter_label)
+            .style(Style::default().fg(theme.fg))
+            .render(label_area, buf);
+        let field_area = Rect {
+            x: inner.x + label_width,
+            y: inner.y + 1,
+            width: inner.width.saturating_sub(label_width + 1),
+            height: 1,
+        };
+        render_text_input(buf, field_area, &mut self.filter, true, theme);
 
         // --- Separator ---
         let sep_y = inner.y + 2;
@@ -212,7 +211,7 @@ impl Modal for CommandPaletteModal {
             .unwrap_or(0);
         let right_cols_w = if max_cat_w > 0 { max_cat_w + 2 } else { 0 }
             + if max_kb_w > 0 { max_kb_w + 2 } else { 0 };
-        let mut query = Query::fuzzy(&self.filter);
+        let mut query = Query::fuzzy(self.filter.text());
 
         for (pos, &entry_idx) in self
             .filtered_indices
@@ -306,54 +305,34 @@ impl Modal for CommandPaletteModal {
     ) -> Result<Option<ModalResult<Self::Result>>> {
         let key = chord.raw;
         match key.code {
-            KeyCode::Esc => Ok(Some(ModalResult::Cancelled)),
-
+            KeyCode::Esc => return Ok(Some(ModalResult::Cancelled)),
             KeyCode::Enter => {
-                if let Some(&idx) = self.filtered_indices.get(self.cursor) {
-                    Ok(Some(ModalResult::Confirmed(idx)))
-                } else {
-                    Ok(None)
+                return Ok(self
+                    .filtered_indices
+                    .get(self.cursor)
+                    .map(|&idx| ModalResult::Confirmed(idx)));
+            }
+            KeyCode::Up => self.cursor_up(),
+            KeyCode::Down => self.cursor_down(),
+            KeyCode::PageUp => self.cursor_page_up(),
+            KeyCode::PageDown => self.cursor_page_down(),
+            // `Home`/`End` belong to the filter field; with `Ctrl` they jump
+            // to the first and the last command.
+            KeyCode::Home if key.modifiers.contains(KeyModifiers::CONTROL) => self.cursor_home(),
+            KeyCode::End if key.modifiers.contains(KeyModifiers::CONTROL) => self.cursor_end(),
+            _ => {
+                if handle_input_key(&mut self.filter, key) == InputKeyResult::TextModified {
+                    self.apply_filter();
                 }
             }
-
-            KeyCode::Up => {
-                self.cursor_up();
-                Ok(None)
-            }
-            KeyCode::Down => {
-                self.cursor_down();
-                Ok(None)
-            }
-            KeyCode::Home => {
-                self.cursor_home();
-                Ok(None)
-            }
-            KeyCode::End => {
-                self.cursor_end();
-                Ok(None)
-            }
-            KeyCode::PageUp => {
-                self.cursor_page_up();
-                Ok(None)
-            }
-            KeyCode::PageDown => {
-                self.cursor_page_down();
-                Ok(None)
-            }
-
-            KeyCode::Backspace => {
-                self.filter.pop();
-                self.apply_filter();
-                Ok(None)
-            }
-            KeyCode::Char(ch) => {
-                self.filter.push(ch);
-                self.apply_filter();
-                Ok(None)
-            }
-
-            _ => Ok(None),
         }
+        Ok(None)
+    }
+
+    fn handle_paste(&mut self, text: &str) -> bool {
+        self.filter.paste(text);
+        self.apply_filter();
+        true
     }
 
     fn handle_mouse(
@@ -408,7 +387,7 @@ impl Modal for CommandPaletteModal {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossterm::event::{KeyEvent, KeyModifiers};
+    use crossterm::event::KeyEvent;
 
     fn entry(label: &str, category: &'static str, keybinding: &str) -> CommandEntry {
         CommandEntry {
@@ -485,5 +464,65 @@ mod tests {
             .map(|(x, y)| buf[(x, y)].clone())
             .expect("the Quit row is drawn");
         assert!(cell.modifier.contains(Modifier::UNDERLINED));
+    }
+
+    fn press(modal: &mut CommandPaletteModal, code: KeyCode, modifiers: KeyModifiers) {
+        let key = KeyEvent::new(code, modifiers);
+        modal
+            .handle_key(termide_core::KeyChord::identity(key))
+            .unwrap();
+    }
+
+    #[test]
+    fn the_filter_edits_at_its_cursor_and_refilters() {
+        let mut modal = palette();
+        type_text(&mut modal, "qit");
+        press(&mut modal, KeyCode::Left, KeyModifiers::NONE);
+        press(&mut modal, KeyCode::Left, KeyModifiers::NONE);
+        type_text(&mut modal, "u");
+        assert_eq!(modal.filter.text(), "quit");
+        assert_eq!(labels(&modal), ["Quit"]);
+    }
+
+    #[test]
+    fn a_selection_in_the_filter_is_deleted_as_one() {
+        let mut modal = palette();
+        type_text(&mut modal, "gitlog");
+        press(&mut modal, KeyCode::Left, KeyModifiers::SHIFT);
+        press(&mut modal, KeyCode::Left, KeyModifiers::SHIFT);
+        press(&mut modal, KeyCode::Left, KeyModifiers::SHIFT);
+        press(&mut modal, KeyCode::Backspace, KeyModifiers::NONE);
+        assert_eq!(modal.filter.text(), "git");
+        assert!(labels(&modal).contains(&"Open Git Status"));
+    }
+
+    #[test]
+    fn ctrl_v_does_not_type_a_v() {
+        let mut modal = palette();
+        type_text(&mut modal, "git");
+        // Reading the clipboard only; whatever it holds is what lands.
+        let clip = termide_ui::clipboard::paste_text_or_paths().unwrap_or_default();
+        press(&mut modal, KeyCode::Char('v'), KeyModifiers::CONTROL);
+        assert_eq!(modal.filter.text(), format!("git{clip}"));
+    }
+
+    #[test]
+    fn up_and_down_still_move_the_list_and_ctrl_home_end_jump() {
+        let mut modal = palette();
+        press(&mut modal, KeyCode::Down, KeyModifiers::NONE);
+        assert_eq!(modal.cursor, 1);
+        press(&mut modal, KeyCode::End, KeyModifiers::CONTROL);
+        assert_eq!(modal.cursor, 3);
+        press(&mut modal, KeyCode::Up, KeyModifiers::NONE);
+        assert_eq!(modal.cursor, 2);
+        press(&mut modal, KeyCode::Home, KeyModifiers::CONTROL);
+        assert_eq!(modal.cursor, 0);
+    }
+
+    #[test]
+    fn a_bracketed_paste_lands_in_the_filter() {
+        let mut modal = palette();
+        assert!(modal.handle_paste("quit"));
+        assert_eq!(labels(&modal), ["Quit"]);
     }
 }

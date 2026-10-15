@@ -14,7 +14,6 @@ ratatui.workspace = true
 unicode-width.workspace = true
 
 # Workspace crates
-termide-clipboard = { path = "../clipboard" }
 termide-core = { path = "../core" }
 termide-ui = { path = "../ui" }
 termide-theme = { path = "../theme" }

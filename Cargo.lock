@@ -5345,7 +5345,6 @@ dependencies = [
  "chrono",
  "crossterm",
  "ratatui",
- "termide-clipboard",
  "termide-config",
  "termide-core",
  "termide-i18n",
