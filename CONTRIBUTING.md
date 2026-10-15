@@ -338,6 +338,7 @@ Use the [Feature Request template](.github/ISSUE_TEMPLATE/feature_request.md) wh
 
 - **GitHub Issues** - For bug reports, feature requests, and technical discussions
 - **Pull Requests** - For code review and implementation discussions
+- **Telegram** - [@termide_news](https://t.me/termide_news): release announcements and open discussion
 
 **Languages:** We welcome communication in both **English** and **Russian**.
 
@@ -439,6 +440,6 @@ By contributing to TermIDE, you agree that your contributions will be licensed u
 
 Every contribution, no matter how small, makes TermIDE better. We appreciate your time and effort in helping improve this project.
 
-If you have questions or need help, don't hesitate to ask in GitHub Issues or Discussions. We're here to help!
+If you have questions or need help, don't hesitate to ask in GitHub Issues or Discussions, or in the [@termide_news](https://t.me/termide_news) Telegram channel. We're here to help!
 
 Happy coding! 🚀

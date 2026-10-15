@@ -8,7 +8,7 @@
 
 An all-in-one terminal workspace for your workstation and your servers: code editor with LSP, dual-pane file manager with SFTP/FTP, terminal, git, database viewer and a coding agent — one zero-config static binary written in Rust.
 
-**[Website](https://termide.github.io)** | **[Documentation](doc/en/README.md)** | **[Releases](https://github.com/termide/termide/releases)** | **[Screenshots](https://termide.github.io/#screenshots)**
+**[Website](https://termide.github.io)** | **[Documentation](doc/en/README.md)** | **[Releases](https://github.com/termide/termide/releases)** | **[Screenshots](https://termide.github.io/#screenshots)** | **[Telegram](https://t.me/termide_news)**
 
 <p align="center"><img src="assets/screenshots/termide.gif" alt="TermIDE — editor, file manager, terminal and viewers in one TUI" width="900"></p>
 
@@ -564,7 +564,7 @@ The codebase is a Cargo workspace of modular crates; `rust-toolchain.toml` pins 
 
 ## Contributing
 
-Issues and pull requests are welcome. Run `git config core.hooksPath .githooks` once per clone: the pre-commit hook runs the same `fmt`, `clippy` and test checks as CI.
+Issues and pull requests are welcome; announcements and discussion live in the [@termide_news](https://t.me/termide_news) Telegram channel. Run `git config core.hooksPath .githooks` once per clone: the pre-commit hook runs the same `fmt`, `clippy` and test checks as CI.
 
 ## License
 

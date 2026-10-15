@@ -8,7 +8,7 @@
 
 一站式终端工作台，适用于你的工作站和服务器：带 LSP 的代码编辑器、支持 SFTP/FTP 的双栏文件管理器、终端、git、数据库查看器和编程智能体 —— 全部集成在一个零配置、使用 Rust 编写的静态二进制文件中。
 
-**[网站](https://termide.github.io)** | **[文档](doc/zh/README.md)** | **[版本发布](https://github.com/termide/termide/releases)** | **[截图](https://termide.github.io/zh/#screenshots)**
+**[网站](https://termide.github.io)** | **[文档](doc/zh/README.md)** | **[版本发布](https://github.com/termide/termide/releases)** | **[截图](https://termide.github.io/zh/#screenshots)** | **[Telegram](https://t.me/termide_news)**
 
 <p align="center"><img src="assets/screenshots/termide.gif" alt="TermIDE — 编辑器、文件管理器、终端和查看器合为一个 TUI" width="900"></p>
 
@@ -551,7 +551,7 @@ mode = "report"  # terminal（默认）、background 或 report
 
 ## 贡献
 
-欢迎提交 issue 和 pull request。每个克隆执行一次 `git config core.hooksPath .githooks`：pre-commit 钩子会运行与 CI 相同的 `fmt`、`clippy` 和测试检查。
+欢迎提交 issue 和 pull request；公告和讨论在 Telegram 频道 [@termide_news](https://t.me/termide_news)。每个克隆执行一次 `git config core.hooksPath .githooks`：pre-commit 钩子会运行与 CI 相同的 `fmt`、`clippy` 和测试检查。
 
 ## 许可证
 

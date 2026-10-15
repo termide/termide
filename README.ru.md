@@ -8,7 +8,7 @@
 
 Терминальное рабочее место «всё в одном» для рабочей машины и серверов: редактор кода с LSP, двухпанельный файловый менеджер с SFTP/FTP, терминал, git, просмотр баз данных и агент для кода — в одном статическом бинарнике на Rust без настройки.
 
-**[Сайт](https://termide.github.io)** | **[Документация](doc/ru/README.md)** | **[Релизы](https://github.com/termide/termide/releases)** | **[Скриншоты](https://termide.github.io/ru/#screenshots)**
+**[Сайт](https://termide.github.io)** | **[Документация](doc/ru/README.md)** | **[Релизы](https://github.com/termide/termide/releases)** | **[Скриншоты](https://termide.github.io/ru/#screenshots)** | **[Telegram](https://t.me/termide_news)**
 
 <p align="center"><img src="assets/screenshots/termide.gif" alt="TermIDE — редактор, файловый менеджер, терминал и просмотрщики в одном TUI" width="900"></p>
 
@@ -565,7 +565,7 @@ mode = "report"  # terminal (по умолчанию), background или report
 
 ## Вклад
 
-Issues и pull requests приветствуются. Один раз на клон выполните `git config core.hooksPath .githooks`: pre-commit hook запускает те же проверки `fmt`, `clippy` и тестов, что и CI.
+Issues и pull requests приветствуются; анонсы и обсуждения — в Telegram-канале [@termide_news](https://t.me/termide_news). Один раз на клон выполните `git config core.hooksPath .githooks`: pre-commit hook запускает те же проверки `fmt`, `clippy` и тестов, что и CI.
 
 ## Лицензия
 
