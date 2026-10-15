@@ -9061,8 +9061,14 @@ fn a_run_cut_off_by_closing_is_asked_about_when_reopened() {
         panel.transcript().items().last(),
         Some(Item::RunEnd { cut: true, .. })
     ));
-    // Nothing runs on its own.
-    panel.tick();
+    // Nothing runs on its own; the card rings the bell.
+    let events = panel.tick();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, PanelEvent::RequestAttention)),
+        "the carry-on card rings"
+    );
     assert!(!panel.is_busy());
 
     // Continue on the card resumes the run.
@@ -9502,6 +9508,69 @@ fn an_external_agent_cut_off_is_told_to_carry_on() {
         .iter()
         .any(|i| matches!(i, Item::Assistant { text, .. } if text == "from outside")));
     assert_eq!(panel.session.as_ref().unwrap().last_run(), LastRun::Ended);
+}
+
+/// An external agent logs a call only with its result. Closed while a long
+/// call ran, the panel leaves the call in the log with a result saying it was
+/// cut off, so the reopened panel shows it and asks to carry the run on.
+#[test]
+fn an_external_agent_closed_in_a_call_leaves_it_logged_cut_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = Session::create(dir.path(), Path::new("/tmp")).unwrap();
+    session.append_agent_change("outside").unwrap();
+    let path = session.path().to_path_buf();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        session: Some(session),
+        ..setup(vec![])
+    });
+    assert!(panel.external);
+    let call = ToolCall {
+        id: "c1".into(),
+        name: "bash".into(),
+        arguments: serde_json::json!({ "command": "./deploy.sh" }),
+        extra_content: None,
+    };
+    panel.apply(AgentEvent::AgentStart);
+    panel.apply(AgentEvent::MessageEnd(Message::User(UserMessage::text(
+        "deploy",
+    ))));
+    // The text closed before the call, as the external agent logs it.
+    panel.apply(AgentEvent::MessageEnd(Message::Assistant(
+        AssistantMessage {
+            provider: ACP_PROVIDER.into(),
+            stop_reason: StopReason::ToolUse,
+            ..reply("Running the deploy.")
+        },
+    )));
+    panel.apply(AgentEvent::ToolExecutionStart { call: call.clone() });
+    assert!(panel.is_busy());
+    drop(panel);
+
+    let panel = reopen(&path, dir.path(), vec![]);
+    assert_eq!(panel.restored, Some(Restored::Prompt));
+    carry_on_card(&panel);
+    let logged = panel.session.as_ref().unwrap().context_messages();
+    let calls: Vec<&ToolCall> = logged
+        .iter()
+        .filter_map(|m| match m {
+            Message::Assistant(a) => Some(a),
+            _ => None,
+        })
+        .flat_map(AssistantMessage::tool_calls)
+        .collect();
+    assert_eq!(calls, [&call]);
+    assert!(matches!(
+        logged.last(),
+        Some(Message::ToolResult(r)) if r.tool_call_id == "c1"
+            && r.plain_text().contains("may have run in part")
+    ));
+    // The transcript shows the call with its result, not still running.
+    assert!(panel
+        .transcript()
+        .items()
+        .iter()
+        .any(|i| matches!(i, Item::Tool { call, result: Some(_), .. } if call.id == "c1")));
 }
 
 #[test]

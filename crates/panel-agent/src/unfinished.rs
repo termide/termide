@@ -5,11 +5,13 @@
 //! carries it on, Drop it (or `[■]`) gives it up, and Decide later leaves the
 //! panel waiting at the pause.
 
+use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use termide_agent_core::{
-    now_millis, unanswered_calls, Agent, Autorun, Failure, GoalRecord, LastRun, LoggedMessage,
-    LoopRecord, Message, RunMark, Session, ToolResultMessage,
+    now_millis, unanswered_calls, Agent, AssistantContent, AssistantMessage, Autorun, Failure,
+    GoalRecord, LastRun, LoggedMessage, LoopRecord, Message, RunMark, Session, StopReason,
+    ToolCall, ToolResultMessage, Usage, ACP_PROVIDER,
 };
 use termide_ui::ChoiceForm;
 
@@ -143,6 +145,77 @@ impl AgentPanel {
         }
     }
 
+    /// The panel closes — or termide quits — on a run under way: the calls
+    /// running now go into the log, each with a result saying it was cut
+    /// off, so a reopened session shows what was cut off and asks to carry
+    /// it on. An external agent logs a call only with its result: without
+    /// this a run cut off in a long call leaves no trace of the call. The
+    /// run's end stays unwritten, as for a run cut off any other way.
+    pub(crate) fn log_cut_off_calls(&mut self) {
+        // Nothing of a run whose first message is not logged yet.
+        if !self.is_busy() || self.run_start_due {
+            return;
+        }
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        let mut context = session.context_messages();
+        let running: Vec<ToolCall> = {
+            let logged: HashSet<&str> = context
+                .iter()
+                .filter_map(|message| match message {
+                    Message::Assistant(reply) => Some(reply),
+                    _ => None,
+                })
+                .flat_map(|reply| reply.tool_calls().map(|call| call.id.as_str()))
+                .collect();
+            self.transcript
+                .items()
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Tool {
+                        call, result: None, ..
+                    } if self.tool_starts.contains_key(&call.id)
+                        && !logged.contains(call.id.as_str()) =>
+                    {
+                        Some(call.clone())
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        if !running.is_empty() {
+            let message = Message::Assistant(AssistantMessage {
+                content: running
+                    .into_iter()
+                    .map(AssistantContent::ToolCall)
+                    .collect(),
+                stop_reason: StopReason::ToolUse,
+                usage: Usage::default(),
+                provider: if self.external {
+                    ACP_PROVIDER.to_string()
+                } else {
+                    self.model.provider.clone()
+                },
+                model: self.model.id.clone(),
+                error_message: None,
+                failure: None,
+                timestamp: now_millis(),
+            });
+            if let Err(error) = session.append_message(&message) {
+                log::warn!("agent session write failed: {error}");
+                return;
+            }
+            context.push(message);
+        }
+        for call in unanswered_calls(&context) {
+            let result = Message::ToolResult(ToolResultMessage::error(&call, CUT_OFF_CALL));
+            if let Err(error) = session.append_message(&result) {
+                log::warn!("agent session write failed: {error}");
+            }
+        }
+    }
+
     /// A session just opened: when its log shows a run cut off or paused, or
     /// a goal or loop still going, the panel waits at a pause and asks on a
     /// card whether to carry the work on. A run that ended on a request a
@@ -182,7 +255,7 @@ impl AgentPanel {
             _ => return,
         };
         if let Some(mark) = mark {
-            if mark.state == LastRun::CutOff && restored == Restored::Resume {
+            if mark.state == LastRun::CutOff {
                 self.close_cut_off_calls();
             }
             self.mark_run_end(mark);
@@ -244,6 +317,11 @@ impl AgentPanel {
                     timing: None,
                 },
             );
+            // An external agent keeps its own context, which its resume
+            // brings back.
+            if !self.runtime.can_pause() {
+                continue;
+            }
             let delivered = self.runtime.update(Box::new(move |agent: &mut Agent| {
                 agent.append_context(message);
             }));
@@ -318,9 +396,9 @@ impl AgentPanel {
         .with_detail(detail.join("\n"))
         .with_cancel(t.agent_unfinished_later());
         self.pending = Some(Pending::Unfinished { form });
-        // Highlighted until seen, without the bell: nothing is waiting on a
-        // run, only on the user's word.
-        self.raise_attention(false);
+        // Highlighted until seen, with the bell: the work stands still until
+        // the user says, as at a restored failure card.
+        self.raise_attention(true);
     }
 
     /// `/continue` on a pause taken up from the log that `resume` does not

@@ -83,10 +83,11 @@ pub(super) fn project_root_of(path: PathBuf) -> PathBuf {
     dunce::canonicalize(&path).unwrap_or(path)
 }
 
-/// Whether an agent panel in the saved layout of the project at `root` left a
-/// failed request waiting to be tried again (see
-/// `Session::pending_retry`).
-fn holds_a_retry(root: &Path) -> bool {
+/// Whether an agent panel in the saved layout of the project at `root` left
+/// work waiting on the user or on a clock: a run cut off or paused, a goal or
+/// loop going, a failed request waiting to be tried again — what the session
+/// lists mark `⏸` (see `SessionSummary::unfinished`).
+fn holds_agent_work(root: &Path) -> bool {
     let Ok(layout) = termide_project::ProjectLayout::load(root) else {
         return false;
     };
@@ -102,8 +103,9 @@ fn holds_a_retry(root: &Path) -> bool {
             _ => None,
         })
         .any(|path| {
-            termide_agent_core::session::Session::pending_retry_at(path)
-                .is_ok_and(|failure| failure.is_some())
+            termide_agent_core::session::Session::open(path).is_ok_and(|session| {
+                termide_agent_core::session::SessionSummary::from(&session).unfinished
+            })
         })
 }
 
@@ -306,21 +308,23 @@ impl App {
             .collect();
         self.open_projects.arrange(&order);
         log::info!("Reopened {} projects of the last run", opened);
-        self.load_projects_holding_a_retry();
+        self.load_projects_holding_agent_work();
         self.sync_open_projects();
     }
 
-    /// Load in the background the reopened projects whose agent left a
-    /// failed request waiting to be tried again — on a wait, or on a card
-    /// that tries again by itself. A project not loaded has no panels to
-    /// tick, so the try would wait for the user to enter it; loaded and
-    /// parked, it goes at its time like in any project left this run.
-    fn load_projects_holding_a_retry(&mut self) {
+    /// Load in the background the reopened projects whose agent left work
+    /// unfinished: a failed request waiting to be tried again — on a wait, or
+    /// on a card that tries again by itself — or a run, goal or loop that asks
+    /// whether to carry on. A project not loaded has no panels to tick, so
+    /// the try would wait for the user to enter it, and the card would ring
+    /// no bell and mark no project; loaded and parked, it goes like in any
+    /// project left this run.
+    fn load_projects_holding_agent_work(&mut self) {
         let home = self.project_root.clone();
         let waiting: Vec<PathBuf> = self
             .open_projects
             .roots()
-            .filter(|root| self.open_projects.is_pending(root) && holds_a_retry(root))
+            .filter(|root| self.open_projects.is_pending(root) && holds_agent_work(root))
             .map(Path::to_path_buf)
             .collect();
         for root in waiting {
@@ -342,7 +346,7 @@ impl App {
                 }
             }
             log::info!(
-                "Loaded {} in the background: an agent request in it waits to be tried again",
+                "Loaded {} in the background: an agent in it left work unfinished",
                 root.display()
             );
         }

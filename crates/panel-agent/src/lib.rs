@@ -1340,8 +1340,10 @@ impl AgentPanel {
 
 impl Drop for AgentPanel {
     /// Closing the panel discards its session when it was never used, so an
-    /// empty session leaves nothing behind in the list or on disk.
+    /// empty session leaves nothing behind in the list or on disk. A run
+    /// under way leaves its running calls in the log, cut off.
     fn drop(&mut self) {
+        self.log_cut_off_calls();
         self.sync_autorun();
         if let Some(session) = self.session.take() {
             discard_if_empty(session);

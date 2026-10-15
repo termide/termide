@@ -512,12 +512,14 @@ are not run again — each gets a result saying termide closed while it ran or
 before it started and that it may have run in part, so the model checks
 before repeating it. A goal is judged and a loop runs again once what is left
 of its wait has passed. Claude Code, Codex and Gemini CLI, which cannot be
-resumed between steps, are told to carry on where they stopped. **Drop it**
+resumed between steps, are told to carry on where they stopped; the calls they
+had running when termide closed stay in the transcript with that same result.
+**Drop it**
 (or `[■]`) gives the work up; **Decide later** leaves the panel waiting at the
 pause, and a new request takes over, as it does over any pause. A goal or loop
 keeps its count of turns across the reopen, so its cap still holds. Sessions
 left so are marked `⏸` in the session lists, and a panel that reopens one is
-highlighted until seen.
+highlighted until seen and rings the bell, as a panel waiting for you does.
 
 ### When a run fails
 

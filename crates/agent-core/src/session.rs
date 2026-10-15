@@ -1281,7 +1281,8 @@ impl Session {
 
     /// The branch's last run, when it did not end: paused, or cut off — it
     /// started and never ended, and its last message leaves work to do (a
-    /// request or results the model has not answered, calls not run). One
+    /// request or results the model has not answered, calls not run, a reply
+    /// that stopped to wait on calls). One
     /// whose last reply finished, or failed, is as good as ended: only its
     /// end was not written. A log written before runs were recorded holds
     /// none.
@@ -1311,8 +1312,12 @@ impl Session {
                     _ => None,
                 })?;
                 let open = match last.0 {
+                    // A reply that waits on calls: its own, or — from an
+                    // external agent, which logs a call only with its result —
+                    // the text it closed before a call that was still running.
                     Message::Assistant(reply) => {
-                        reply.tool_calls().next().is_some()
+                        (reply.tool_calls().next().is_some()
+                            || matches!(reply.stop_reason, StopReason::ToolUse))
                             && !matches!(reply.stop_reason, StopReason::Error | StopReason::Aborted)
                     }
                     Message::User(_) | Message::ToolResult(_) => true,
@@ -1618,6 +1623,28 @@ mod tests {
         session.append_message(&agent_reply("answer")).unwrap();
         assert_eq!(session.last_run(), LastRun::Ended);
         assert!(!SessionSummary::from(&session).unfinished);
+    }
+
+    /// The external agent closes its text before a call and logs the call
+    /// only with its result: a run cut off while that call ran ends on the
+    /// text, which waits on the call, so the run is still open.
+    #[test]
+    fn a_run_cut_off_in_an_external_agents_call_stays_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
+        session
+            .append_message(&Message::User(UserMessage::text("deploy")))
+            .unwrap();
+        session.append_run_start().unwrap();
+        session
+            .append_message(&Message::Assistant(AssistantMessage {
+                provider: ACP_PROVIDER.into(),
+                stop_reason: StopReason::ToolUse,
+                ..text_reply("Running the script.")
+            }))
+            .unwrap();
+        assert_eq!(session.last_run(), LastRun::CutOff);
+        assert!(SessionSummary::from(&session).unfinished);
     }
 
     /// A held request survives a reopen and is taken back when it is
