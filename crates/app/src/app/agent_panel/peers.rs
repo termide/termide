@@ -212,11 +212,21 @@ impl App {
             return Err(format!("panel {} is this one", message.to));
         }
         let from = message.from;
-        let hops = next_hops(
-            self.agent_panels()
-                .find(|panel| Some(panel.panel_id()) == from)
-                .map_or(0, |panel| panel.agent_hops()),
-        )?;
+        let sender = self
+            .agent_panels()
+            .find(|panel| Some(panel.panel_id()) == from)
+            .map(|panel| (panel.agent_hops(), panel.delegated_by()));
+        // A task's answer goes back as the delegate's last message; one sent
+        // as well would reach the delegating agent twice.
+        if let Some((_, Some(by))) = sender {
+            if by == message.to {
+                return Err(format!(
+                    "you run a task panel {by} handed you: your answer goes back to it as \
+                     your final message, so do not message it"
+                ));
+            }
+        }
+        let hops = next_hops(sender.map_or(0, |(hops, _)| hops))?;
         let Some(target) = self
             .agent_panels()
             .find(|panel| panel.panel_id() == message.to)

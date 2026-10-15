@@ -213,6 +213,7 @@ impl AgentCatalog for Agents {
 fn setup_with(provider: Arc<Scripted>) -> AgentPanelSetup {
     AgentPanelSetup {
         inherited_intent: None,
+        panel_id: None,
         cwd: PathBuf::from("/tmp"),
         agent: "default".into(),
         catalog: Arc::new(Agents),
@@ -10116,4 +10117,70 @@ fn a_panel_running_another_agents_task_takes_no_messages() {
         .deliver(from_peer(termide_agent_core::OriginKind::Question, 1))
         .unwrap_err();
     assert!(refused.contains("another agent's task"), "{refused}");
+}
+
+#[test]
+fn a_panel_rebuilt_in_place_keeps_its_number() {
+    let panel = AgentPanel::new(AgentPanelSetup {
+        panel_id: Some(42),
+        ..setup(vec![])
+    });
+    assert_eq!(panel.panel_id(), 42);
+    assert_ne!(AgentPanel::new(setup(vec![])).panel_id(), 42);
+}
+
+#[test]
+fn a_delegate_panel_knows_the_task_and_the_panel_it_came_from() {
+    let mut panel = panel(vec![reply("found it")]);
+    let (updates, _received) = mpsc::channel();
+    let mut task = delegated_task();
+    task.origin.as_mut().unwrap().panel = Some(6);
+    panel.start_delegation(
+        task,
+        Delegation::new("lead", "find the loader", updates, CancelToken::new()).with_call("call-9"),
+    );
+    assert_eq!(panel.delegated_by(), Some(6));
+    assert!(panel.runs_task(6, "call-9"));
+    assert!(!panel.runs_task(5, "call-9") && !panel.runs_task(6, "call-1"));
+    settle_delegate(&mut panel);
+    assert!(!panel.runs_task(6, "call-9"));
+}
+
+#[test]
+fn clicking_a_running_tasks_row_asks_for_its_panel() {
+    let mut panel = panel(vec![]);
+    panel.transcript.push(Item::Tool {
+        call: ToolCall {
+            id: "call-9".into(),
+            name: "task".into(),
+            arguments: serde_json::json!({ "agent": "search", "prompt": "find the loader" }),
+            extra_content: None,
+        },
+        result: None,
+        live: Some("working".into()),
+        at: String::new(),
+        duration_ms: None,
+        waited_ms: None,
+        waiting: false,
+    });
+    let rows = render_text(&mut panel, 80, 20);
+    // The strip's row, below the block that stands for the call.
+    let y = rows
+        .iter()
+        .rposition(|row| row.contains("search · find the loader") && row.starts_with('&'))
+        .expect("the task's row") as u16;
+    let events = panel.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 2,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        },
+        ratatui::layout::Rect::new(0, 0, 80, 20),
+    );
+    let own = panel.panel_id();
+    assert!(events.iter().any(|event| matches!(
+        event,
+        PanelEvent::FocusDelegate { panel, call } if *panel == own && call == "call-9"
+    )));
 }

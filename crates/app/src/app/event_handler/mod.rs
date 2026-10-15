@@ -439,6 +439,18 @@ impl App {
             PanelEvent::OpenAgentSession(path) => {
                 self.ai_open_session(path)?;
             }
+
+            PanelEvent::FocusDelegate { panel, call } => {
+                let found = self.layout_manager.focus_panel_where(|candidate| {
+                    candidate
+                        .as_any()
+                        .downcast_ref::<termide_panel_agent::AgentPanel>()
+                        .is_some_and(|agent| agent.runs_task(panel, &call))
+                });
+                if found {
+                    self.state.needs_redraw = true;
+                }
+            }
         }
         Ok(())
     }

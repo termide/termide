@@ -789,6 +789,12 @@ pub enum PanelEvent {
     /// the agent panel for a delegated task's session.
     OpenAgentSession(PathBuf),
 
+    /// Bring forward the agent panel running the task that the `task` call
+    /// `call` of the agent panel `panel` handed over, if a panel runs it.
+    /// Emitted by the agent panel when its row for a running task is
+    /// clicked; a task running hidden has no panel, and nothing moves.
+    FocusDelegate { panel: u64, call: String },
+
     /// Let the user pick another working directory for a fresh agent panel
     /// working in `cwd`, on the session log at `session`. On a pick the app
     /// moves the log to the new directory's sessions and reopens the panel

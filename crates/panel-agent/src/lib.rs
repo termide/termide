@@ -201,6 +201,9 @@ pub struct AgentPanelSetup {
     /// for the `auto` reviewer to judge the task's calls against; see
     /// [`termide_agent_core::Agent::with_inherited_intent`].
     pub inherited_intent: Option<termide_agent_core::IntentLog>,
+    /// The number of the panel this one takes the place of, which it keeps;
+    /// `None` gives it a number of its own.
+    pub panel_id: Option<u64>,
     pub cwd: PathBuf,
     /// Name of the agent definition in use.
     pub agent: String,
@@ -982,7 +985,9 @@ impl AgentPanel {
         // Numbered from 1 in the order panels open, for other agents to
         // address it by.
         static PANELS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        let panel_id = PANELS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let panel_id = setup
+            .panel_id
+            .unwrap_or_else(|| PANELS.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
         let session = setup.session.or_else(|| {
             start_session(
                 setup.session_dir.as_deref(),
