@@ -865,3 +865,80 @@ impl Panel for Editor {
             .and_then(|p| p.parent().map(|parent| parent.to_path_buf()))
     }
 }
+
+#[cfg(test)]
+mod hover_key_tests {
+    //! Issue #63: `show_hover` (Ctrl+K) asked the server and built the popup,
+    //! but the popup was only drawn at the mouse pointer, so a keyboard-only
+    //! user never saw it.
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use termide_core::{KeyChord, Panel};
+
+    fn config() -> Config {
+        let mut c = Config::default();
+        c.normalize();
+        c
+    }
+
+    fn editor(vim: bool) -> Editor {
+        let mut e = Editor::with_config(crate::config::EditorConfig {
+            vim_mode: vim,
+            ..Default::default()
+        });
+        e.hotkeys = build_editor_hotkey_table(&config());
+        e
+    }
+
+    fn ctrl_k() -> KeyChord {
+        KeyChord::identity(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL))
+    }
+
+    /// A hover the way gopls answers it: a Markdown signature and doc.
+    fn gopls_hover() -> lsp_types::Hover {
+        lsp_types::Hover {
+            contents: lsp_types::HoverContents::Markup(lsp_types::MarkupContent {
+                kind: lsp_types::MarkupKind::Markdown,
+                value: "```go\nfunc println(args ...Type)\n```\n\n---\n\n\
+                        The println built-in function formats its arguments."
+                    .into(),
+            }),
+            range: None,
+        }
+    }
+
+    #[test]
+    fn ctrl_k_requests_hover() {
+        let mut e = editor(false);
+        e.handle_key(ctrl_k());
+        assert!(e.lsp.pending_hover_request.is_some());
+    }
+
+    #[test]
+    fn ctrl_k_requests_hover_in_vim_normal_mode() {
+        let mut e = editor(true);
+        e.handle_key(ctrl_k());
+        assert!(e.lsp.pending_hover_request.is_some());
+    }
+
+    #[test]
+    fn keyboard_hover_is_drawn_without_a_mouse_position() {
+        let mut e = editor(false);
+        e.buffer = termide_buffer::TextBuffer::from_text(
+            "package main\n\nfunc main() {\n\tprintln(1)\n}\n",
+        );
+        e.handle_key(ctrl_k());
+        // The server's answer, as `poll_hover` would install it.
+        e.lsp.hover_popup = crate::hover_popup::HoverPopup::from_hover(gopls_hover());
+        assert!(e.lsp.hover_popup.is_some());
+        assert!(e.lsp.last_mouse_position.is_none());
+
+        let area = Rect::new(0, 0, 100, 30);
+        let mut buf = Buffer::empty(area);
+        e.render_content(area, &mut buf, &Theme::default(), &config(), true, None);
+        assert!(
+            e.lsp.hover_popup_rect.is_some(),
+            "hover popup was not drawn"
+        );
+    }
+}

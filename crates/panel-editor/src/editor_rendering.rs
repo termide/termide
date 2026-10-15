@@ -397,11 +397,16 @@ impl Editor {
             popup.render(buf, area, cursor_x, cursor_y, theme);
         }
 
-        // Render hover popup if active
+        // Render hover popup if active: at the cursor when asked for from the
+        // keyboard, at the mouse pointer when it came from hovering.
         if let Some(ref popup) = self.lsp.hover_popup {
-            // Use stored mouse position for popup placement
-            if let Some((mouse_x, mouse_y)) = self.lsp.last_mouse_position {
-                self.lsp.hover_popup_rect = popup.render(buf, area, mouse_x, mouse_y, theme);
+            let at = if self.lsp.hover_at_cursor {
+                anchor
+            } else {
+                self.lsp.last_mouse_position
+            };
+            if let Some((x, y)) = at {
+                self.lsp.hover_popup_rect = popup.render(buf, area, x, y, theme);
             } else {
                 self.lsp.hover_popup_rect = None;
             }

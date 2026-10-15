@@ -162,6 +162,10 @@ pub struct LspState {
     /// Last known mouse screen position (for tracking movement)
     pub last_mouse_position: Option<(u16, u16)>,
 
+    /// The hover was asked for from the keyboard (`show_hover`), so its popup
+    /// opens at the text cursor rather than at the mouse pointer.
+    pub hover_at_cursor: bool,
+
     /// Active color preview popup (shown while Ctrl+click is held on a hex color)
     pub color_preview: Option<ColorPreview>,
 }
@@ -205,6 +209,7 @@ impl LspState {
             hover_timer: None,
             hover_scheduled_position: None,
             last_mouse_position: None,
+            hover_at_cursor: false,
             color_preview: None,
         }
     }
@@ -256,6 +261,7 @@ impl LspState {
             self.hover_timer = Some(std::time::Instant::now());
             self.hover_scheduled_position = Some((line, col));
             self.last_mouse_position = Some((screen_x, screen_y));
+            self.hover_at_cursor = false;
         }
     }
 

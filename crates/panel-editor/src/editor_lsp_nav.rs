@@ -32,6 +32,9 @@ impl Editor {
         self.close_hover_popup();
         // Store cursor position for hover request
         self.lsp.pending_hover_request = Some((self.cursor.line, self.cursor.column));
+        // Asked for from the keyboard: the popup opens at the cursor, and must
+        // not wait for a mouse position the user may never give.
+        self.lsp.hover_at_cursor = true;
     }
 
     /// Poll for hover response and show popup if available.
