@@ -1845,6 +1845,7 @@ impl Subagents {
                     ..ToolContext::new(self.cwd.clone())
                 },
                 skills: run.skills,
+                session_id: None,
             }),
             resume: None,
             history: Vec::new(),

@@ -306,6 +306,7 @@ pub(crate) fn spawn_runtime(
                     ..ToolContext::new(cwd)
                 },
                 skills,
+                session_id: session.map(|s| s.id().to_string()),
             }),
             // The conversation goes on in the agent's own session when it
             // still holds it, else the agent is told a recap of it.
