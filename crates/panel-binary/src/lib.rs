@@ -563,6 +563,16 @@ impl Panel for BinaryPanel {
     }
 
     fn handle_mouse(&mut self, event: MouseEvent, _panel_area: Rect) -> Vec<PanelEvent> {
+        // Route what the find bar owns to it: a press on it, and a drag
+        // started there, which keeps selecting past its edges.
+        if let Some(bar) = self.find_bar.as_mut() {
+            if bar.mouse_hits(event) {
+                if let Some(action) = bar.handle_mouse(event) {
+                    return self.handle_find_action(action);
+                }
+                return vec![PanelEvent::NeedsRedraw];
+            }
+        }
         match event.kind {
             MouseEventKind::ScrollUp => self.scroll_rows(-1),
             MouseEventKind::ScrollDown => self.scroll_rows(1),
@@ -649,5 +659,52 @@ mod tests {
         assert!(p.is_editable(), "clicking Edit enables editing");
         p.handle_status_action("toggle_edit");
         assert!(!p.is_editable(), "clicking Edit again returns to view-only");
+    }
+
+    #[test]
+    fn a_click_in_the_find_bar_places_its_cursor_and_a_drag_selects() {
+        use termide_modal::find_bar::FindField;
+        termide_ui::clipboard::use_fake_clipboard("");
+        let mut p = panel_with(0, 60, 12);
+        p.open_find();
+        let bar = p.find_bar.as_mut().unwrap();
+        bar.set_text(FindField::Find, "needle".into());
+        let area = Rect::new(0, 8, 60, bar.height());
+        let mut buf = Buffer::empty(Rect::new(0, 0, 60, 12));
+        bar.render(area, &mut buf, &Theme::default(), true);
+        let (row, start) = (area.y..area.bottom())
+            .find_map(|y| {
+                let cells: Vec<String> =
+                    (0..60).map(|x| buf[(x, y)].symbol().to_string()).collect();
+                (0..cells.len() - 6)
+                    .find(|&x| cells[x..x + 6].concat() == "needle")
+                    .map(|x| (y, x as u16))
+            })
+            .expect("the find field is drawn");
+        let at = |kind, column, row| MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        };
+        let panel_area = Rect::new(0, 0, 60, 12);
+        p.handle_mouse(
+            at(MouseEventKind::Down(MouseButton::Left), start + 1, row),
+            panel_area,
+        );
+        // Up over the hex rows the drag keeps selecting in the field.
+        p.handle_mouse(
+            at(MouseEventKind::Drag(MouseButton::Left), start + 4, 2),
+            panel_area,
+        );
+        assert_eq!(
+            p.find_bar.as_ref().unwrap().selected_text().as_deref(),
+            Some("eed")
+        );
+        assert!(p.drag_from.is_none(), "no byte selection started");
+        p.handle_mouse(
+            at(MouseEventKind::Up(MouseButton::Left), start + 4, 2),
+            panel_area,
+        );
     }
 }

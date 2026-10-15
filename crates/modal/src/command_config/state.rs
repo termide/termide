@@ -2,6 +2,7 @@
 //! hotkey validation, and confirmation logic.
 
 use crate::{ModalResult, TextInputHandler};
+use ratatui::layout::Rect;
 use termide_config::commands::{CommandMetadata, CommandMode};
 use termide_config::constants::{
     MODAL_MAX_WIDTH_PERCENTAGE_DEFAULT, MODAL_MIN_WIDTH_WIDE, MODAL_PADDING_WITH_DOUBLE_BORDER,
@@ -40,6 +41,11 @@ impl CommandConfigModal {
             last_mode_area: None,
             last_hotkey_area: None,
             last_checkbox_area: None,
+            last_group_text_area: None,
+            last_command_text_area: None,
+            last_display_name_text_area: None,
+            last_hotkey_text_area: None,
+            dragging: None,
         }
     }
 
@@ -110,6 +116,11 @@ impl CommandConfigModal {
             last_mode_area: None,
             last_hotkey_area: None,
             last_checkbox_area: None,
+            last_group_text_area: None,
+            last_command_text_area: None,
+            last_display_name_text_area: None,
+            last_hotkey_text_area: None,
+            dragging: None,
         }
     }
 
@@ -195,6 +206,22 @@ impl CommandConfigModal {
         height = height.min(screen_height);
 
         (width, height)
+    }
+
+    /// A text field's input and the row its text was last drawn in.
+    pub(super) fn text_field_mut(
+        &mut self,
+        field: FocusArea,
+    ) -> (&mut TextInputHandler, Option<Rect>) {
+        match field {
+            FocusArea::Group => (self.group_suggestion.input_mut(), self.last_group_text_area),
+            FocusArea::Command => (&mut self.command_input, self.last_command_text_area),
+            FocusArea::DisplayName => (
+                &mut self.display_name_input,
+                self.last_display_name_text_area,
+            ),
+            _ => (&mut self.hotkey_input, self.last_hotkey_text_area),
+        }
     }
 
     pub(super) fn next_focus(&mut self) {
@@ -506,5 +533,52 @@ mod tests {
         );
         modal.command_input.set_text("cargo build");
         assert!(modal.try_confirm().is_none());
+    }
+
+    #[test]
+    fn a_click_places_the_cursor_and_a_drag_selects_in_each_field() {
+        use crate::base::test_mouse::{drag, press, release};
+        use ratatui::buffer::Buffer;
+        setup_i18n();
+        let mut modal = edit_modal(false);
+        modal.command_input.set_text("cargo build");
+        modal.display_name_input.set_text("Build all");
+        modal.hotkey_input.set_text("Ctrl+F5");
+        let area = Rect::new(0, 0, 100, 40);
+        modal.render(
+            area,
+            &mut Buffer::empty(area),
+            &termide_theme::Theme::default(),
+        );
+
+        let cases = [
+            (FocusArea::Command, "build"),
+            (FocusArea::DisplayName, "d all"),
+            (FocusArea::Hotkey, "+F5"),
+            (FocusArea::Group, "v"),
+        ];
+        for (field, selected) in cases {
+            let (_, text) = modal.text_field_mut(field);
+            let text = text.expect("the field is drawn");
+            let start = match field {
+                FocusArea::Command => 6,
+                FocusArea::DisplayName => 4,
+                FocusArea::Hotkey => 4,
+                _ => 2,
+            };
+            modal
+                .handle_mouse(press(text.x + start, text.y), area)
+                .unwrap();
+            assert_eq!(modal.focus, field);
+            assert!(!modal.group_suggestion.is_expanded());
+            // Past the right side, on another row, the drag still selects to
+            // the end of this field's text.
+            modal
+                .handle_mouse(drag(text.right() + 4, text.y + 5), area)
+                .unwrap();
+            let (input, _) = modal.text_field_mut(field);
+            assert_eq!(input.selected_text(), Some(selected), "{field:?}");
+            modal.handle_mouse(release(0, 0), area).unwrap();
+        }
     }
 }

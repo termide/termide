@@ -1748,4 +1748,57 @@ mod title_tests {
         term.handle_command(PanelCommand::Paste);
         assert_eq!(query(&term), "needle");
     }
+
+    /// A drag that began in the find bar's field keeps selecting there when
+    /// the pointer leaves the bar upwards, instead of selecting terminal text.
+    #[test]
+    fn a_drag_from_the_find_bar_stays_in_it_above_the_bar() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use termide_modal::find_bar::FindField;
+        termide_ui::clipboard::use_fake_clipboard("");
+        let Ok(mut term) = Terminal::new_with_cwd(24, 80, None) else {
+            return; // No PTY available.
+        };
+        term.open_find_bar();
+        let panel_area = Rect::new(0, 0, 80, 24);
+        let bar = term.find_bar.as_mut().unwrap();
+        bar.set_text(FindField::Find, "needle".into());
+        // Where the panel draws it: the last inner rows, above the border.
+        let bar_area = Rect::new(1, 23 - bar.height(), 78, bar.height());
+        let mut buf = Buffer::empty(panel_area);
+        bar.render(bar_area, &mut buf, &termide_theme::Theme::default(), true);
+        let (row, start) = (bar_area.y..bar_area.bottom())
+            .find_map(|y| {
+                let cells: Vec<String> =
+                    (0..80).map(|x| buf[(x, y)].symbol().to_string()).collect();
+                (0..cells.len() - 6)
+                    .find(|&x| cells[x..x + 6].concat() == "needle")
+                    .map(|x| (y, x as u16))
+            })
+            .expect("the find field is drawn");
+        let at = |kind, column, row| MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        };
+        term.on_mouse(
+            at(MouseEventKind::Down(MouseButton::Left), start + 1, row),
+            panel_area,
+        );
+        term.on_mouse(
+            at(MouseEventKind::Drag(MouseButton::Left), start + 4, 5),
+            panel_area,
+        );
+        assert_eq!(
+            term.find_bar.as_ref().unwrap().selected_text().as_deref(),
+            Some("eed")
+        );
+        assert!(!term.selection_drag_active, "no terminal selection began");
+        term.on_mouse(
+            at(MouseEventKind::Up(MouseButton::Left), start + 4, 5),
+            panel_area,
+        );
+        assert!(term.read_screen().selection_start.is_none());
+    }
 }

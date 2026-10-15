@@ -122,7 +122,9 @@ impl Terminal {
 
         // The find bar is docked at the bottom (its own titled border is the
         // divider). A click in that region is routed to the bar (toggles /
-        // Prev / Next); the grid above keeps its own coordinates.
+        // Prev / Next), and so is a drag that began in its field, wherever
+        // the pointer goes, and the release that ends it; the grid above
+        // keeps its own coordinates.
         let bar_offset = self.find_bar.as_ref().map(|b| b.height()).unwrap_or(0);
         if bar_offset > 0 {
             // `panel_area` includes the border; the inner bottom row is at
@@ -130,7 +132,12 @@ impl Terminal {
             // separator occupy the last `bar_offset` inner rows.
             let inner_bottom = panel_area.y + panel_area.height.saturating_sub(1); // border row
             let bar_top = inner_bottom.saturating_sub(bar_offset);
-            if mouse.row >= bar_top && mouse.row < inner_bottom {
+            let over_bar = mouse.row >= bar_top && mouse.row < inner_bottom;
+            let owned = self
+                .find_bar
+                .as_ref()
+                .is_some_and(|bar| bar.mouse_hits(mouse));
+            if over_bar || owned {
                 if let Some(mut bar) = self.find_bar.take() {
                     let action = bar.handle_mouse(mouse);
                     self.find_bar = Some(bar);

@@ -19,7 +19,7 @@ use ratatui::{
     widgets::{List, ListItem, Widget},
 };
 
-use crate::base::{render_input_field_scrolled, render_modal_block};
+use crate::base::{drag_field, press_field, render_modal_block, render_text_input};
 use crate::input_keys::handle_input_key;
 use std::path::{Path, PathBuf};
 use unicode_width::UnicodeWidthStr;
@@ -63,6 +63,10 @@ struct RowEdit {
     /// Cursor to return to when a create is cancelled.
     prev_cursor: usize,
     input: TextInputHandler,
+    /// The field as last drawn in its row, for the mouse.
+    area: Option<Rect>,
+    /// A press landed in the field and the button is still down.
+    dragging: bool,
 }
 
 /// Button order in the bottom row.
@@ -382,6 +386,8 @@ impl DirectoryPickerModal {
             parent,
             prev_cursor,
             input: TextInputHandler::new(),
+            area: None,
+            dragging: false,
         });
     }
 
@@ -401,6 +407,8 @@ impl DirectoryPickerModal {
             parent: parent.to_path_buf(),
             prev_cursor: self.cursor,
             input: TextInputHandler::with_text(entry.name.clone()),
+            area: None,
+            dragging: false,
         });
     }
 
@@ -745,20 +753,11 @@ impl Modal for DirectoryPickerModal {
         list.render(list_area, buf);
         self.last_list_area = Some(list_area);
 
-        if let (Some((x, y, width)), Some(edit)) = (field_at, self.edit.as_mut()) {
-            let scroll = edit.input.follow_scroll(width);
-            render_input_field_scrolled(
-                buf,
-                x,
-                y,
-                width,
-                edit.input.text(),
-                edit.input.cursor_pos(),
-                edit.input.selection_range(),
-                true,
-                theme,
-                scroll,
-            );
+        if let Some(edit) = self.edit.as_mut() {
+            edit.area = field_at.map(|(x, y, width)| Rect::new(x, y, width, 1));
+            if let Some(area) = edit.area {
+                render_text_input(buf, area, &mut edit.input, true, theme);
+            }
         }
 
         // Separator before buttons
@@ -921,8 +920,19 @@ impl Modal for DirectoryPickerModal {
     ) -> Result<Option<ModalResult<Self::Result>>> {
         use crate::{check_mouse_click, MouseClickResult};
 
-        // A name being typed keeps its row; Enter or Esc ends it first.
-        if self.edit.is_some() {
+        // A name being typed keeps its row; Enter or Esc ends it first. A
+        // press in its field places the cursor, a drag from there selects.
+        if let Some(edit) = self.edit.as_mut() {
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    edit.dragging = press_field(&mut edit.input, edit.area, &mouse);
+                }
+                MouseEventKind::Drag(MouseButton::Left) if edit.dragging => {
+                    drag_field(&mut edit.input, edit.area, &mouse);
+                }
+                MouseEventKind::Up(MouseButton::Left) => edit.dragging = false,
+                _ => {}
+            }
             return Ok(None);
         }
 
@@ -1165,6 +1175,34 @@ mod tests {
         modal
             .handle_key(termide_core::KeyChord::identity(key))
             .unwrap();
+    }
+
+    #[test]
+    fn a_click_places_the_cursor_and_a_drag_selects_in_the_rename_field() {
+        use crate::base::test_mouse::{drag, press as down, release};
+        let root = scratch("mouse");
+        let mut modal = DirectoryPickerModal::new(root.clone(), String::new(), String::new());
+        modal.cursor = 2; // `target`
+        modal.start_rename();
+        let area = Rect::new(0, 0, 100, 40);
+        modal.render(area, &mut Buffer::empty(area), &Theme::default());
+        let field = modal.edit.as_ref().and_then(|e| e.area).expect("drawn");
+        modal
+            .handle_mouse(down(field.x + 2, field.y), area)
+            .unwrap();
+        let input = &modal.edit.as_ref().unwrap().input;
+        assert_eq!(input.cursor_pos(), 2);
+        // Down over the next rows the drag keeps selecting in the field.
+        modal
+            .handle_mouse(drag(field.x + 5, field.y + 2), area)
+            .unwrap();
+        assert_eq!(
+            modal.edit.as_ref().unwrap().input.selected_text(),
+            Some("rge")
+        );
+        modal.handle_mouse(release(field.x, field.y), area).unwrap();
+        assert!(modal.edit.is_some(), "still renaming");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

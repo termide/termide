@@ -52,6 +52,8 @@ pub struct CommitModal {
     visible_height: usize,
     /// Whether scroll should follow cursor (false after mouse scroll).
     scroll_follows_cursor: bool,
+    /// A press landed in the message and the button is still down.
+    dragging: bool,
 }
 
 impl CommitModal {
@@ -69,7 +71,23 @@ impl CommitModal {
             last_buttons_area: None,
             visible_height: 3,
             scroll_follows_cursor: true,
+            dragging: false,
         }
+    }
+
+    /// The message position under screen cell `(column, row)` of the
+    /// message drawn in `area`, `row` inside it: below the last line it is
+    /// the end of the text, left of the text its line's start.
+    fn message_position(&self, area: Rect, column: u16, row: u16) -> (usize, usize) {
+        let drawn_row = usize::from(row.saturating_sub(area.y));
+        let last = self.textarea.line_count().saturating_sub(1);
+        if self.textarea.scroll_offset() + drawn_row > last {
+            return (last, usize::MAX);
+        }
+        let pos = self
+            .textarea
+            .position_at_drawn_row(drawn_row, usize::from(column.saturating_sub(area.x)));
+        (pos.row, pos.col)
     }
 
     /// Calculate modal size based on terminal size.
@@ -395,9 +413,25 @@ impl Modal for CommitModal {
             }
         }
 
-        // Only handle left click for the rest
-        if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
-            return Ok(None);
+        match mouse.kind {
+            // A drag from a press in the message extends its selection; past
+            // the message's edges it stops at the nearest row and column.
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let (true, Some(area)) = (self.dragging, self.last_textarea_area) {
+                    let row = mouse
+                        .row
+                        .clamp(area.y, area.y + area.height.saturating_sub(1));
+                    let (row, col) = self.message_position(area, mouse.column, row);
+                    self.textarea.extend_selection_to(row, col);
+                }
+                return Ok(None);
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.dragging = false;
+                return Ok(None);
+            }
+            MouseEventKind::Down(MouseButton::Left) => {}
+            _ => return Ok(None),
         }
 
         // Check textarea click
@@ -409,9 +443,9 @@ impl Modal for CommitModal {
             {
                 self.focus = FocusArea::Textarea;
                 self.scroll_follows_cursor = true; // Click means follow cursor again
-                let row = (mouse.row - textarea_area.y) as usize + self.textarea.scroll_offset();
-                let col = (mouse.column - textarea_area.x) as usize;
-                self.textarea.set_cursor(row, col);
+                let (row, col) = self.message_position(textarea_area, mouse.column, mouse.row);
+                self.textarea.place_cursor(row, col);
+                self.dragging = true;
                 return Ok(None);
             }
         }
@@ -538,5 +572,40 @@ mod tests {
         press(&mut modal, KeyCode::Enter, KeyModifiers::NONE);
         assert!(modal.handle_paste("body\r\nmore"));
         assert_eq!(modal.textarea.text(), "title\nbody\nmore");
+    }
+
+    #[test]
+    fn a_click_places_the_cursor_and_a_drag_selects_in_the_message() {
+        use crate::base::test_mouse::{drag, press as down, release};
+        let mut modal = modal();
+        assert!(modal.handle_paste("fix: the bug\nbody text"));
+        let area = Rect::new(0, 0, 100, 40);
+        modal.render(area, &mut Buffer::empty(area), &Theme::default());
+        let text = modal.last_textarea_area.unwrap();
+        modal.handle_mouse(down(text.x + 5, text.y), area).unwrap();
+        let cursor = modal.textarea.cursor();
+        assert_eq!((cursor.row, cursor.col), (0, 5));
+        modal
+            .handle_mouse(drag(text.x + 4, text.y + 1), area)
+            .unwrap();
+        assert_eq!(
+            modal.textarea.selected_text().as_deref(),
+            Some("the bug\nbody")
+        );
+        // Below the text, even below the field, the drag selects to its end.
+        modal
+            .handle_mouse(drag(text.x, text.bottom() + 5), area)
+            .unwrap();
+        assert_eq!(
+            modal.textarea.selected_text().as_deref(),
+            Some("the bug\nbody text")
+        );
+        modal.handle_mouse(release(0, 0), area).unwrap();
+        modal.handle_mouse(drag(text.x, text.y), area).unwrap();
+        assert_eq!(
+            modal.textarea.selected_text().as_deref(),
+            Some("the bug\nbody text"),
+            "after the release a drag selects nothing"
+        );
     }
 }

@@ -100,4 +100,12 @@ pub struct CommandConfigModal {
     last_mode_area: Option<Rect>,
     last_hotkey_area: Option<Rect>,
     last_checkbox_area: Option<Rect>,
+    /// The text of the group, command, display name and hotkey fields as last
+    /// drawn, for the mouse.
+    last_group_text_area: Option<Rect>,
+    last_command_text_area: Option<Rect>,
+    last_display_name_text_area: Option<Rect>,
+    last_hotkey_text_area: Option<Rect>,
+    /// The field a press landed in while the button is still down.
+    dragging: Option<FocusArea>,
 }

@@ -9,21 +9,22 @@ use ratatui::{
 };
 use termide_theme::Theme;
 
-use crate::base::render_input_field;
+use crate::base::render_text_input;
 use crate::TextInputHandler;
 
 use super::{CommandConfigModal, FocusArea};
 
 impl CommandConfigModal {
-    /// Render a labeled input field (3 rows: top padding, label+bordered input, bottom padding).
+    /// Render a labeled input field (3 rows: top padding, label+bordered
+    /// input, bottom padding); returns the row its text is drawn in.
     pub(super) fn render_labeled_input_field(
         buf: &mut Buffer,
         area: Rect,
         label: &str,
-        input: &TextInputHandler,
+        input: &mut TextInputHandler,
         is_focused: bool,
         theme: &Theme,
-    ) {
+    ) -> Rect {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(15), Constraint::Min(1)])
@@ -54,27 +55,23 @@ impl CommandConfigModal {
         let input_inner = input_block.inner(chunks[1]);
         input_block.render(chunks[1], buf);
 
-        render_input_field(
-            buf,
-            input_inner.x,
-            input_inner.y,
-            input_inner.width,
-            input.text(),
-            input.cursor_pos(),
-            input.selection_range(),
-            is_focused,
-            theme,
-        );
+        let text_area = Rect {
+            height: input_inner.height.min(1),
+            ..input_inner
+        };
+        render_text_input(buf, text_area, input, is_focused, theme);
+        text_area
     }
 
-    /// Render group input field with dropdown indicator (create mode).
+    /// Render group input field with dropdown indicator; returns the row its
+    /// text is drawn in, left of the indicator.
     pub(super) fn render_group_field(
-        &self,
+        &mut self,
         buf: &mut Buffer,
         area: Rect,
         label: &str,
         theme: &Theme,
-    ) {
+    ) -> Rect {
         let is_focused = self.focus == FocusArea::Group;
         let has_groups = !self.group_suggestion.suggestions().is_empty();
 
@@ -117,15 +114,16 @@ impl CommandConfigModal {
         let indicator_width = if has_groups { 2u16 } else { 0u16 };
         let text_width = input_inner.width.saturating_sub(indicator_width);
 
-        let input = self.group_suggestion.input();
-        render_input_field(
-            buf,
+        let text_area = Rect::new(
             input_inner.x,
             input_inner.y,
             text_width,
-            input.text(),
-            input.cursor_pos(),
-            input.selection_range(),
+            input_inner.height.min(1),
+        );
+        render_text_input(
+            buf,
+            text_area,
+            self.group_suggestion.input_mut(),
             is_focused,
             theme,
         );
@@ -144,5 +142,6 @@ impl CommandConfigModal {
                 Style::default().fg(theme.disabled),
             );
         }
+        text_area
     }
 }

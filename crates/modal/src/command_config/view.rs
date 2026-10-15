@@ -16,7 +16,7 @@ use termide_i18n as i18n;
 use termide_theme::Theme;
 use termide_ui::SuggestionAction;
 
-use crate::base::{button_style, render_modal_block};
+use crate::base::{button_style, drag_field, press_field, render_modal_block};
 use crate::input_keys::{handle_input_key, InputKeyResult};
 use crate::{centered_rect_with_size, Modal, ModalResult};
 
@@ -84,12 +84,12 @@ impl Modal for CommandConfigModal {
 
         if self.is_create() {
             // 1. Group field
-            self.render_group_field(
+            self.last_group_text_area = Some(self.render_group_field(
                 buf,
                 chunks[chunk_idx],
                 t.command_config_label_group(),
                 theme,
-            );
+            ));
             let group_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Length(15), Constraint::Min(1)])
@@ -142,14 +142,14 @@ impl Modal for CommandConfigModal {
             }
 
             // 2. Display name field (пункт меню)
-            Self::render_labeled_input_field(
+            self.last_display_name_text_area = Some(Self::render_labeled_input_field(
                 buf,
                 chunks[chunk_idx],
                 t.command_config_label_display_name(),
-                &self.display_name_input,
+                &mut self.display_name_input,
                 self.focus == FocusArea::DisplayName,
                 theme,
-            );
+            ));
             let dn_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Length(15), Constraint::Min(1)])
@@ -158,14 +158,14 @@ impl Modal for CommandConfigModal {
             chunk_idx += 1;
 
             // 3. Command field
-            Self::render_labeled_input_field(
+            self.last_command_text_area = Some(Self::render_labeled_input_field(
                 buf,
                 chunks[chunk_idx],
                 t.command_config_label_command(),
-                &self.command_input,
+                &mut self.command_input,
                 self.focus == FocusArea::Command,
                 theme,
-            );
+            ));
             let cmd_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Length(15), Constraint::Min(1)])
@@ -174,12 +174,12 @@ impl Modal for CommandConfigModal {
             chunk_idx += 1;
         } else {
             // 1. Group field
-            self.render_group_field(
+            self.last_group_text_area = Some(self.render_group_field(
                 buf,
                 chunks[chunk_idx],
                 t.command_config_label_group(),
                 theme,
-            );
+            ));
             let group_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Length(15), Constraint::Min(1)])
@@ -231,14 +231,14 @@ impl Modal for CommandConfigModal {
             }
 
             // 2. Display name field
-            Self::render_labeled_input_field(
+            self.last_display_name_text_area = Some(Self::render_labeled_input_field(
                 buf,
                 chunks[chunk_idx],
                 t.command_config_label_display_name(),
-                &self.display_name_input,
+                &mut self.display_name_input,
                 self.focus == FocusArea::DisplayName,
                 theme,
-            );
+            ));
             let dn_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Length(15), Constraint::Min(1)])
@@ -247,14 +247,14 @@ impl Modal for CommandConfigModal {
             chunk_idx += 1;
 
             // 3. Command field
-            Self::render_labeled_input_field(
+            self.last_command_text_area = Some(Self::render_labeled_input_field(
                 buf,
                 chunks[chunk_idx],
                 t.command_config_label_command(),
-                &self.command_input,
+                &mut self.command_input,
                 self.focus == FocusArea::Command,
                 theme,
-            );
+            ));
             let cmd_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Length(15), Constraint::Min(1)])
@@ -335,14 +335,14 @@ impl Modal for CommandConfigModal {
         }
 
         // 4. Hotkey field
-        Self::render_labeled_input_field(
+        self.last_hotkey_text_area = Some(Self::render_labeled_input_field(
             buf,
             chunks[chunk_idx],
             t.command_config_label_hotkey(),
-            &self.hotkey_input,
+            &mut self.hotkey_input,
             self.focus == FocusArea::Hotkey,
             theme,
-        );
+        ));
         let hk_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(15), Constraint::Min(1)])
@@ -581,9 +581,39 @@ impl Modal for CommandConfigModal {
         let col = mouse.column;
         let row = mouse.row;
 
-        use crossterm::event::MouseButton;
-        if mouse.kind != crossterm::event::MouseEventKind::Down(MouseButton::Left) {
-            return Ok(None);
+        use crossterm::event::{MouseButton, MouseEventKind};
+        match mouse.kind {
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(field) = self.dragging {
+                    let (input, area) = self.text_field_mut(field);
+                    drag_field(input, area, &mouse);
+                }
+                return Ok(None);
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.dragging = None;
+                return Ok(None);
+            }
+            MouseEventKind::Down(MouseButton::Left) => {}
+            _ => return Ok(None),
+        }
+
+        // A press in a field's text focuses it and places the cursor there.
+        for field in [
+            FocusArea::Group,
+            FocusArea::Command,
+            FocusArea::DisplayName,
+            FocusArea::Hotkey,
+        ] {
+            let (input, area) = self.text_field_mut(field);
+            if press_field(input, area, &mouse) {
+                if field != FocusArea::Group {
+                    self.group_suggestion.collapse();
+                }
+                self.focus = field;
+                self.dragging = Some(field);
+                return Ok(None);
+            }
         }
 
         if let Some(area) = self.last_group_field_area {

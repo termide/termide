@@ -214,6 +214,71 @@ pub fn field_char_at(input: &crate::TextInputHandler, area: Rect, column: u16) -
     input.char_at_column(column.checked_sub(area.x).map(usize::from))
 }
 
+/// A left press inside `area`, the one-row field [`render_text_input`] last
+/// drew for `input`, places its cursor on the character under the pointer and
+/// anchors a selection there. Returns whether the press landed in the field,
+/// so the caller focuses it and remembers that a drag now belongs to it.
+pub fn press_field(
+    input: &mut crate::TextInputHandler,
+    area: Option<Rect>,
+    mouse: &crossterm::event::MouseEvent,
+) -> bool {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let Some(area) = area else {
+        return false;
+    };
+    if mouse.kind != MouseEventKind::Down(MouseButton::Left)
+        || !area.contains((mouse.column, mouse.row).into())
+    {
+        return false;
+    }
+    let pos = field_char_at(input, area, mouse.column);
+    input.set_cursor_with_selection_start(pos);
+    true
+}
+
+/// A left drag that began with a [`press_field`] on the field in `area`:
+/// extends the selection to the character under the pointer, whatever row it
+/// is on. Past either side of the field it keeps going to the text's start or
+/// end, scrolling the field along.
+pub fn drag_field(
+    input: &mut crate::TextInputHandler,
+    area: Option<Rect>,
+    mouse: &crossterm::event::MouseEvent,
+) {
+    if let Some(area) = area {
+        let pos = field_char_at(input, area, mouse.column);
+        input.extend_selection_to(pos);
+    }
+}
+
+/// Left-button mouse events for tests.
+#[cfg(test)]
+pub(crate) mod test_mouse {
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+    fn event(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    pub(crate) fn press(column: u16, row: u16) -> MouseEvent {
+        event(MouseEventKind::Down(MouseButton::Left), column, row)
+    }
+
+    pub(crate) fn drag(column: u16, row: u16) -> MouseEvent {
+        event(MouseEventKind::Drag(MouseButton::Left), column, row)
+    }
+
+    pub(crate) fn release(column: u16, row: u16) -> MouseEvent {
+        event(MouseEventKind::Up(MouseButton::Left), column, row)
+    }
+}
+
 /// Result of checking mouse click position in a modal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseClickResult {

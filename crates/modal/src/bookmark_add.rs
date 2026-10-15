@@ -12,7 +12,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph, Widget},
 };
 
-use crate::base::{button_style, render_input_field, render_modal_block};
+use crate::base::{button_style, drag_field, press_field, render_modal_block, render_text_input};
 use crate::input_keys::{handle_input_key, InputKeyResult};
 
 use termide_config::constants::{
@@ -61,6 +61,13 @@ pub struct BookmarkAddModal {
     last_group_field_area: Option<Rect>,
     last_group_dropdown_area: Option<Rect>,
     last_checkbox_area: Option<Rect>,
+    /// The text of the group, description and path fields as last drawn,
+    /// for the mouse.
+    last_group_text_area: Option<Rect>,
+    last_description_area: Option<Rect>,
+    last_path_area: Option<Rect>,
+    /// The field a press landed in while the button is still down.
+    dragging: Option<FocusArea>,
 }
 
 impl BookmarkAddModal {
@@ -79,6 +86,10 @@ impl BookmarkAddModal {
             last_group_field_area: None,
             last_group_dropdown_area: None,
             last_checkbox_area: None,
+            last_group_text_area: None,
+            last_description_area: None,
+            last_path_area: None,
+            dragging: None,
         }
     }
 
@@ -147,6 +158,15 @@ impl BookmarkAddModal {
         }
     }
 
+    /// A text field's input and the row its text was last drawn in.
+    fn field_mut(&mut self, field: FocusArea) -> (&mut TextInputHandler, Option<Rect>) {
+        match field {
+            FocusArea::Group => (self.group_suggestion.input_mut(), self.last_group_text_area),
+            FocusArea::Description => (&mut self.description_input, self.last_description_area),
+            _ => (&mut self.path_input, self.last_path_area),
+        }
+    }
+
     /// Move to next focus area
     fn next_focus(&mut self) {
         self.focus = match self.focus {
@@ -175,16 +195,15 @@ impl BookmarkAddModal {
         }
     }
 
-    /// Render a labeled input field
+    /// Render a labeled input field; returns the row its text is drawn in.
     fn render_labeled_input_field(
-        &self,
         buf: &mut Buffer,
         area: Rect,
         label: &str,
-        input: &TextInputHandler,
+        input: &mut TextInputHandler,
         is_focused: bool,
         theme: &Theme,
-    ) {
+    ) -> Rect {
         // Split into label and input
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
@@ -218,21 +237,23 @@ impl BookmarkAddModal {
         input_block.render(chunks[1], buf);
 
         // Render input content with cursor and selection
-        render_input_field(
-            buf,
-            input_inner.x,
-            input_inner.y,
-            input_inner.width,
-            input.text(),
-            input.cursor_pos(),
-            input.selection_range(),
-            is_focused,
-            theme,
-        );
+        let text_area = Rect {
+            height: input_inner.height.min(1),
+            ..input_inner
+        };
+        render_text_input(buf, text_area, input, is_focused, theme);
+        text_area
     }
 
-    /// Render the group input field with dropdown toggle indicator
-    fn render_group_field(&self, buf: &mut Buffer, area: Rect, label: &str, theme: &Theme) {
+    /// Render the group input field with dropdown toggle indicator; returns
+    /// the row its text is drawn in, left of the indicator.
+    fn render_group_field(
+        &mut self,
+        buf: &mut Buffer,
+        area: Rect,
+        label: &str,
+        theme: &Theme,
+    ) -> Rect {
         let is_focused = self.focus == FocusArea::Group;
         let has_groups = !self.group_suggestion.suggestions().is_empty();
 
@@ -288,15 +309,16 @@ impl BookmarkAddModal {
         let text_width = input_inner.width.saturating_sub(indicator_width);
 
         // Render input content with cursor and selection
-        let input = self.group_suggestion.input();
-        render_input_field(
-            buf,
+        let text_area = Rect::new(
             input_inner.x,
             input_inner.y,
             text_width,
-            input.text(),
-            input.cursor_pos(),
-            input.selection_range(),
+            input_inner.height.min(1),
+        );
+        render_text_input(
+            buf,
+            text_area,
+            self.group_suggestion.input_mut(),
             is_focused,
             theme,
         );
@@ -311,6 +333,7 @@ impl BookmarkAddModal {
                 Style::default().fg(theme.disabled),
             );
         }
+        text_area
     }
 }
 
@@ -327,9 +350,9 @@ impl Modal for BookmarkAddModal {
         let inner = render_modal_block(modal_area, buf, t.bookmarks_add_title(), theme);
 
         // Calculate layout
-        let suggestions = self.group_suggestion.suggestions();
-        let dropdown_height = if self.group_suggestion.is_expanded() && !suggestions.is_empty() {
-            suggestions.len().min(5) as u16 + 1
+        let suggestions_len = self.group_suggestion.suggestions().len();
+        let dropdown_height = if self.group_suggestion.is_expanded() && suggestions_len > 0 {
+            suggestions_len.min(5) as u16 + 1
         } else {
             0
         };
@@ -356,7 +379,9 @@ impl Modal for BookmarkAddModal {
         let mut chunk_idx = 0;
 
         // Render Group field with dropdown indicator
-        self.render_group_field(buf, chunks[chunk_idx], t.bookmarks_add_group(), theme);
+        let group_text =
+            self.render_group_field(buf, chunks[chunk_idx], t.bookmarks_add_group(), theme);
+        self.last_group_text_area = Some(group_text);
         let group_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(15), Constraint::Min(1)])
@@ -372,6 +397,7 @@ impl Modal for BookmarkAddModal {
                 .split(chunks[chunk_idx]);
 
             self.last_group_dropdown_area = Some(dropdown_chunks[1]);
+            let suggestions = self.group_suggestion.suggestions();
 
             let selected_idx = self.group_suggestion.selected_index();
             let items: Vec<ListItem> = suggestions
@@ -412,25 +438,25 @@ impl Modal for BookmarkAddModal {
         }
 
         // Render Description field
-        self.render_labeled_input_field(
+        self.last_description_area = Some(Self::render_labeled_input_field(
             buf,
             chunks[chunk_idx],
             t.bookmarks_add_description(),
-            &self.description_input,
+            &mut self.description_input,
             self.focus == FocusArea::Description,
             theme,
-        );
+        ));
         chunk_idx += 1;
 
         // Render Path field
-        self.render_labeled_input_field(
+        self.last_path_area = Some(Self::render_labeled_input_field(
             buf,
             chunks[chunk_idx],
             t.bookmarks_add_path(),
-            &self.path_input,
+            &mut self.path_input,
             self.focus == FocusArea::Path,
             theme,
-        );
+        ));
         chunk_idx += 1;
 
         // Render project checkbox (aligned with input fields)
@@ -661,14 +687,38 @@ impl Modal for BookmarkAddModal {
         mouse: crossterm::event::MouseEvent,
         _modal_area: Rect,
     ) -> Result<Option<ModalResult<Self::Result>>> {
-        use crossterm::event::MouseEventKind;
+        use crossterm::event::{MouseButton, MouseEventKind};
 
-        // Only handle left button press
-        if mouse.kind != MouseEventKind::Down(crossterm::event::MouseButton::Left) {
-            return Ok(None);
+        match mouse.kind {
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(field) = self.dragging {
+                    let (input, area) = self.field_mut(field);
+                    drag_field(input, area, &mouse);
+                }
+                return Ok(None);
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.dragging = None;
+                return Ok(None);
+            }
+            MouseEventKind::Down(MouseButton::Left) => {}
+            _ => return Ok(None),
         }
 
-        // Check if click is on group field (toggle dropdown)
+        // A press in a field's text focuses it and places the cursor there.
+        for field in [FocusArea::Group, FocusArea::Description, FocusArea::Path] {
+            let (input, area) = self.field_mut(field);
+            if press_field(input, area, &mouse) {
+                self.focus = field;
+                if field != FocusArea::Group {
+                    self.group_suggestion.collapse();
+                }
+                self.dragging = Some(field);
+                return Ok(None);
+            }
+        }
+
+        // Check if click is on the rest of the group field (toggle dropdown)
         if let Some(group_area) = self.last_group_field_area {
             if mouse.row >= group_area.y
                 && mouse.row < group_area.y + group_area.height
@@ -803,5 +853,70 @@ impl Modal for BookmarkAddModal {
             }
             FocusArea::ProjectCheckbox | FocusArea::Buttons => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::base::test_mouse::{drag, press, release};
+
+    fn rendered() -> (BookmarkAddModal, Rect) {
+        let mut modal = BookmarkAddModal::new(Some("/home/user/src".into()), vec!["work".into()])
+            .with_values("/home/user/src", Some("my sources"), Some("work"), false);
+        let area = Rect::new(0, 0, 100, 30);
+        modal.render(area, &mut Buffer::empty(area), &Theme::default());
+        (modal, area)
+    }
+
+    #[test]
+    fn a_click_places_the_cursor_and_a_drag_selects_in_each_field() {
+        let (mut modal, area) = rendered();
+
+        let path = modal.last_path_area.unwrap();
+        modal.handle_mouse(press(path.x + 1, path.y), area).unwrap();
+        assert_eq!(modal.focus, FocusArea::Path);
+        assert_eq!(modal.path_input.cursor_pos(), 1);
+        // Leaving the field upwards keeps selecting in it.
+        modal
+            .handle_mouse(drag(path.x + 5, path.y - 4), area)
+            .unwrap();
+        assert_eq!(modal.path_input.selected_text(), Some("home"));
+        modal
+            .handle_mouse(release(path.x + 5, path.y), area)
+            .unwrap();
+
+        let desc = modal.last_description_area.unwrap();
+        modal.handle_mouse(press(desc.x + 3, desc.y), area).unwrap();
+        assert_eq!(modal.focus, FocusArea::Description);
+        modal
+            .handle_mouse(drag(desc.right() + 3, desc.y), area)
+            .unwrap();
+        assert_eq!(modal.description_input.selected_text(), Some("sources"));
+        modal.handle_mouse(release(desc.x, desc.y), area).unwrap();
+
+        let group = modal.last_group_text_area.unwrap();
+        modal
+            .handle_mouse(press(group.x + 1, group.y), area)
+            .unwrap();
+        assert_eq!(modal.focus, FocusArea::Group);
+        assert!(
+            !modal.group_suggestion.is_expanded(),
+            "a press in the text does not open the list"
+        );
+        modal
+            .handle_mouse(drag(group.x + 3, group.y), area)
+            .unwrap();
+        assert_eq!(modal.group_suggestion.input().selected_text(), Some("or"));
+    }
+
+    #[test]
+    fn a_click_on_the_group_arrow_still_opens_the_list() {
+        let (mut modal, area) = rendered();
+        let field = modal.last_group_field_area.unwrap();
+        modal
+            .handle_mouse(press(field.right() - 2, field.y + 1), area)
+            .unwrap();
+        assert!(modal.group_suggestion.is_expanded());
     }
 }

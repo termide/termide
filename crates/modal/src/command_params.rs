@@ -11,11 +11,11 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Widget},
+    widgets::{Paragraph, Widget},
 };
 use std::collections::HashMap;
 
-use crate::base::{button_style, render_input_field, render_modal_block};
+use crate::base::{button_style, drag_field, press_field, render_modal_block, render_text_input};
 use crate::input_keys::{handle_input_key, InputKeyResult};
 use termide_config::commands::{CommandParam, CommandParamType};
 use termide_config::constants::{
@@ -61,6 +61,10 @@ pub struct CommandParamsModal {
     selected_button: usize, // 0 = Run, 1 = Cancel
     last_buttons_area: Option<Rect>,
     last_field_areas: Vec<Rect>,
+    /// Each text or number field's text as last drawn, for the mouse.
+    last_text_areas: Vec<Option<Rect>>,
+    /// The field a press landed in while the button is still down.
+    dragging: Option<usize>,
 }
 
 impl CommandParamsModal {
@@ -112,6 +116,8 @@ impl CommandParamsModal {
             selected_button: 0,
             last_buttons_area: None,
             last_field_areas: Vec::new(),
+            last_text_areas: Vec::new(),
+            dragging: None,
         }
     }
 
@@ -172,6 +178,14 @@ impl CommandParamsModal {
         };
     }
 
+    /// The input of parameter `i` when it is a text or number field.
+    fn text_input_mut(&mut self, i: usize) -> Option<&mut TextInputHandler> {
+        match self.values.get_mut(i)? {
+            ParamValue::Text { input } | ParamValue::Number { input } => Some(input),
+            ParamValue::Bool { .. } | ParamValue::Select { .. } => None,
+        }
+    }
+
     fn try_confirm(&self) -> Option<ModalResult<CommandParamsResult>> {
         let mut values = HashMap::new();
         for (param, value) in self.params.iter().zip(self.values.iter()) {
@@ -217,7 +231,8 @@ impl Modal for CommandParamsModal {
         self.last_field_areas.clear();
         let mut chunk_idx = 0;
 
-        for (i, (param, value)) in self.params.iter().zip(self.values.iter()).enumerate() {
+        let mut text_areas = vec![None; self.params.len()];
+        for (i, (param, value)) in self.params.iter().zip(self.values.iter_mut()).enumerate() {
             let is_focused = self.focus == FocusArea::Field(i);
 
             // Label row
@@ -236,51 +251,17 @@ impl Modal for CommandParamsModal {
             self.last_field_areas.push(field_area);
 
             match value {
-                ParamValue::Text { input } => {
-                    let border_style = if is_focused {
-                        Style::default().fg(theme.accented_fg)
-                    } else {
-                        Style::default().fg(theme.disabled)
+                ParamValue::Text { input } | ParamValue::Number { input } => {
+                    // The one-row input is drawn inset by a column, in line
+                    // with the checkbox and select rows; a bordered box does
+                    // not fit in it.
+                    let text_area = Rect {
+                        x: field_area.x + 1,
+                        width: field_area.width.saturating_sub(2),
+                        ..field_area
                     };
-                    let block = Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(border_style);
-                    let inner = block.inner(field_area);
-                    block.render(field_area, buf);
-                    render_input_field(
-                        buf,
-                        inner.x,
-                        inner.y,
-                        inner.width,
-                        input.text(),
-                        input.cursor_pos(),
-                        input.selection_range(),
-                        is_focused,
-                        theme,
-                    );
-                }
-                ParamValue::Number { input } => {
-                    let border_style = if is_focused {
-                        Style::default().fg(theme.accented_fg)
-                    } else {
-                        Style::default().fg(theme.disabled)
-                    };
-                    let block = Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(border_style);
-                    let inner = block.inner(field_area);
-                    block.render(field_area, buf);
-                    render_input_field(
-                        buf,
-                        inner.x,
-                        inner.y,
-                        inner.width,
-                        input.text(),
-                        input.cursor_pos(),
-                        input.selection_range(),
-                        is_focused,
-                        theme,
-                    );
+                    render_text_input(buf, text_area, input, is_focused, theme);
+                    text_areas[i] = Some(text_area);
                 }
                 ParamValue::Bool { checked } => {
                     let checkbox = termide_ui::checkbox(*checked);
@@ -315,6 +296,8 @@ impl Modal for CommandParamsModal {
             }
             chunk_idx += 1;
         }
+
+        self.last_text_areas = text_areas;
 
         // Skip spacer
         chunk_idx += 1;
@@ -432,8 +415,34 @@ impl Modal for CommandParamsModal {
     ) -> Result<Option<ModalResult<Self::Result>>> {
         use crossterm::event::{MouseButton, MouseEventKind};
 
-        if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
-            return Ok(None);
+        match mouse.kind {
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(i) = self.dragging {
+                    let area = self.last_text_areas.get(i).copied().flatten();
+                    if let Some(input) = self.text_input_mut(i) {
+                        drag_field(input, area, &mouse);
+                    }
+                }
+                return Ok(None);
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.dragging = None;
+                return Ok(None);
+            }
+            MouseEventKind::Down(MouseButton::Left) => {}
+            _ => return Ok(None),
+        }
+
+        // A press in a text field's text focuses it and places the cursor.
+        for i in 0..self.last_text_areas.len() {
+            let area = self.last_text_areas[i];
+            if let Some(input) = self.text_input_mut(i) {
+                if press_field(input, area, &mouse) {
+                    self.focus = FocusArea::Field(i);
+                    self.dragging = Some(i);
+                    return Ok(None);
+                }
+            }
         }
 
         // Check field clicks
@@ -490,5 +499,74 @@ impl Modal for CommandParamsModal {
             },
             FocusArea::Buttons => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn text_param(name: &str, default: &str) -> CommandParam {
+        CommandParam {
+            name: name.to_string(),
+            label: name.to_string(),
+            param_type: CommandParamType::Text,
+            options: Vec::new(),
+            default: Some(default.to_string()),
+        }
+    }
+
+    fn rendered() -> (CommandParamsModal, Rect) {
+        let mut modal = CommandParamsModal::new(
+            "deploy".into(),
+            vec![text_param("Target", "staging"), text_param("Tag", "v1.2.3")],
+        );
+        let area = Rect::new(0, 0, 80, 20);
+        modal.render(area, &mut Buffer::empty(area), &Theme::default());
+        (modal, area)
+    }
+
+    fn text(modal: &CommandParamsModal, i: usize) -> &TextInputHandler {
+        match &modal.values[i] {
+            ParamValue::Text { input } | ParamValue::Number { input } => input,
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn each_text_field_is_drawn_on_its_own_row() {
+        let (mut modal, area) = rendered();
+        let mut buf = Buffer::empty(area);
+        modal.render(area, &mut buf, &Theme::default());
+        for (i, value) in ["staging", "v1.2.3"].into_iter().enumerate() {
+            let field = modal.last_text_areas[i].unwrap();
+            assert_eq!(field.y, modal.last_field_areas[i].y);
+            let row: String = (field.x..field.right())
+                .map(|x| buf[(x, field.y)].symbol().to_string())
+                .collect();
+            assert!(row.starts_with(value), "{row:?}");
+        }
+    }
+
+    #[test]
+    fn a_click_places_the_cursor_and_a_drag_selects_in_a_text_field() {
+        use crate::base::test_mouse::{drag, press, release};
+        let (mut modal, area) = rendered();
+        let field = modal.last_text_areas[1].unwrap();
+        modal
+            .handle_mouse(press(field.x + 1, field.y), area)
+            .unwrap();
+        assert_eq!(modal.focus, FocusArea::Field(1));
+        assert_eq!(text(&modal, 1).cursor_pos(), 1);
+        // Upwards, over the first field, the drag keeps selecting in this one.
+        let first = modal.last_text_areas[0].unwrap();
+        modal
+            .handle_mouse(drag(first.x + 4, first.y), area)
+            .unwrap();
+        assert_eq!(text(&modal, 1).selected_text(), Some("1.2"));
+        assert!(!text(&modal, 0).has_selection());
+        modal.handle_mouse(release(first.x, first.y), area).unwrap();
+        modal.handle_mouse(drag(field.x, field.y), area).unwrap();
+        assert_eq!(text(&modal, 1).selected_text(), Some("1.2"));
     }
 }
