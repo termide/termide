@@ -1183,7 +1183,8 @@ for the current panel only.
 - **plan** reads and uses the web, and refuses anything that could change
   something; the agent answers with a plan. See below.
 - **edit** also edits and creates files inside the project without asking;
-  commands, MCP tools and files outside the project ask. The configured
+  commands, MCP tools (but those their server marks read-only) and files
+  outside the project ask. The configured
   `allow` rules do not count.
 - **configured** follows the configured rules and your answers in this
   session, asks about the rest, and offers "allow always".
@@ -1203,7 +1204,7 @@ for the current panel only.
 | edit outside it | ? | ✗ | ? | rules / ? | rules / R | ✓ |
 | look-only command | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | other command | ? | ✗ | ? | rules / ? | rules / R | ✓ |
-| MCP tool | ? | rules / ? ¹ | ? | rules / ? | rules / R | ✓ |
+| MCP tool | ? | rules / ? ¹ | ? ² | rules / ? | rules / R | ✓ |
 
 ✓ runs, ? asks, ✗ is refused, R goes to the reviewer, "rules / ?" follows a
 matching rule and asks without one. Whatever the mode, a rule's `deny` refuses and its `ask` asks:
@@ -1212,6 +1213,7 @@ answers for the session count in every mode but `all`.
 
 ¹ In `plan` an MCP tool counts the configured `allow` rules too, and one its
 server marks read-only (`readOnlyHint`) runs without asking.
+² In `edit` too an MCP tool its server marks read-only runs without asking.
 
 The look-only commands are a short list that only look at things (`ls`,
 `cat`, `rg`, `git status`, `git log`, `find`, `cd`, and similar); a
@@ -1247,7 +1249,9 @@ answer for the session allows runs, and any other asks, with "Allow always"
 on offer. A tool switched off for the session in the tools menu stays off,
 and a `deny` rule refuses it even when its server calls it read-only.
 `task` runs too: the subagent is held to plan mode whatever its `AGENT.md`
-says, so it only reads.
+says, so it only reads. `suggest_command` puts its card up with only **Copy**
+and **Don't run**. `send_message` is refused: the panel it reaches is not in
+plan mode, and could make the change this one may not.
 
 The default instructions have the agent work the task through with you
 before it writes the plan. It explores first and finds out the facts itself,

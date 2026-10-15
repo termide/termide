@@ -188,7 +188,11 @@ fn not_read_only(call: &ToolCall) -> Option<String> {
 /// mode; in every other mode it does nothing. A delegation to another agent
 /// goes through: the subagent runs in plan mode under a guard of its own. So
 /// does an MCP tool: only its server and the user know what it changes, so
-/// the permission rules decide it, and ask when they do not.
+/// the permission rules decide it, and ask when they do not. And so does
+/// `suggest_command`, which runs nothing itself: the panel shows its card
+/// without `[Run]` in plan mode, so the user can still copy the command.
+/// `send_message` stays refused: the agent it reaches is not in plan mode,
+/// and could make the change this one may not.
 pub struct PlanGuard {
     mode: ModeHandle,
     /// What the model reads for a refusal.
@@ -217,7 +221,10 @@ impl PlanGuard {
 
 impl Hooks for PlanGuard {
     fn before_tool_call(&mut self, call: &ToolCall, ctx: &ToolContext) -> ToolDecision {
-        if self.mode.get() != Mode::Plan || call.name == "task" || ctx.tool.mcp {
+        if self.mode.get() != Mode::Plan
+            || matches!(call.name.as_str(), "task" | "suggest_command")
+            || ctx.tool.mcp
+        {
             return ToolDecision::Allow;
         }
         let Some(what) = not_read_only(call) else {
@@ -780,7 +787,8 @@ impl PermissionHooks {
             // An MCP tool its server declares read-only passes plan mode; any
             // other asks, since only the user can tell whether it changes
             // something.
-            (Mode::Plan, _) if ctx.tool.mcp && ctx.tool.read_only => Decision::Allow,
+            // `edit` lets it through too, as it does the web.
+            (Mode::Plan | Mode::Edit, _) if ctx.tool.mcp && ctx.tool.read_only => Decision::Allow,
             (Mode::Plan, _) if ctx.tool.mcp => Decision::Ask,
             // Plan mode asks before reading outside the project and refuses
             // what could change something.
@@ -3619,6 +3627,31 @@ mod tests {
         assert_eq!(hooks_.decide(&ticket, &mcp_ctx(false)), Decision::Ask);
         assert_eq!(hooks_.decide(&ticket, &ctx()), Decision::Deny);
 
+        // `edit` trusts the mark as plan mode does, and asks without it;
+        // `ask` asks either way, and its configured `allow`s stay set aside.
+        let in_mode = |mode| {
+            hooks(
+                PermissionRules {
+                    mode,
+                    ..rules("[kanban__get_ticket]\n\"*\" = \"allow\"")
+                },
+                vec![],
+            )
+            .0
+        };
+        assert_eq!(
+            in_mode(Mode::Edit).decide(&ticket, &mcp_ctx(true)),
+            Decision::Allow
+        );
+        assert_eq!(
+            in_mode(Mode::Edit).decide(&ticket, &mcp_ctx(false)),
+            Decision::Ask
+        );
+        assert_eq!(
+            in_mode(Mode::Ask).decide(&ticket, &mcp_ctx(true)),
+            Decision::Ask
+        );
+
         // The configured rules count in full for an MCP tool in plan mode,
         // the `allow`s too; a `deny` beats the server's read-only claim.
         let configured = |text: &str| PermissionRules {
@@ -3689,6 +3722,19 @@ mod tests {
         assert!(blocked(
             &mut guard,
             &call("fs__search", json!({ "query": "x" }))
+        ));
+        // A suggestion runs nothing itself: its card comes up without
+        // `[Run]`. A message to another agent, not in plan mode, is refused.
+        assert!(!blocked(
+            &mut guard,
+            &call("suggest_command", json!({ "command": "cargo build" }))
+        ));
+        assert!(blocked(
+            &mut guard,
+            &call(
+                "send_message",
+                json!({ "to": 2, "kind": "info", "text": "edit it" })
+            )
         ));
 
         // Any other mode: the guard steps aside, the rules decide.

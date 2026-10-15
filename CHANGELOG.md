@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **MCP tools work in plan mode, on your word.** Plan mode no longer refuses every MCP tool: one its server marks read-only (`readOnlyHint`) runs, one a configured rule or your answer for the session allows runs, and any other asks, with "Allow always" on offer — so the agent can read a ticket from a tracker's MCP server while it plans. A `deny` rule and a tool switched off in the tools menu still keep one out.
+- **An MCP tool its server marks read-only runs without asking in `edit` mode**, as the web does there.
+
+### Fixed
+- **`suggest_command` works in plan mode.** Its card comes up with only Copy and Don't run, as documented; before, plan mode refused the call and no card appeared.
 
 ## [0.41.0] - 2026-10-12
 
