@@ -38,6 +38,19 @@ pub struct ToolContext {
     /// The agent panel the call comes from, by its number; `None` outside
     /// one (a subagent, a headless run).
     pub panel: Option<u64>,
+    /// What the tool the call is for says of itself; filled from the
+    /// registry by [`crate::judge_tool_call`] before the hooks judge it.
+    pub tool: ToolTraits,
+}
+
+/// What a tool says of itself that the permission hooks weigh.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ToolTraits {
+    /// The tool comes from an MCP server, not from termide.
+    pub mcp: bool,
+    /// The tool's author declares that it changes nothing (MCP's
+    /// `readOnlyHint`). A claim of the server's, not a check of termide's.
+    pub read_only: bool,
 }
 
 impl ToolContext {
@@ -52,6 +65,7 @@ impl ToolContext {
             session: None,
             withdrawn: None,
             panel: None,
+            tool: ToolTraits::default(),
         }
     }
 }
@@ -104,6 +118,12 @@ pub trait Tool: Send + Sync {
         on_update: &mut dyn FnMut(ToolUpdate),
         cancel: &CancelToken,
     ) -> ToolResultMessage;
+
+    /// What the tool says of itself to the permission hooks; nothing by
+    /// default.
+    fn traits(&self) -> ToolTraits {
+        ToolTraits::default()
+    }
 
     /// The schema entry handed to the provider.
     fn spec(&self) -> ToolSpec {
