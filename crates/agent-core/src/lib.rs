@@ -26,7 +26,9 @@ pub mod checkpoints;
 pub mod classifier;
 pub mod commands;
 pub mod compaction;
+pub mod conflicts;
 pub mod context;
+pub mod delegation;
 pub mod failure;
 pub mod fit;
 pub mod goal;
@@ -68,10 +70,12 @@ pub use classifier::{
 };
 pub use commands::{CommandScript, COMMANDS_DIR};
 pub use compaction::{CompactionCall, CompactionPolicy, CompactionPrompts, CompactionReason};
+pub use conflicts::ConflictGuard;
 pub use context::{
     build_system_prompt, civil_date, discover_context_files, ContextFile, PromptOptions,
     SEED_TEMPLATE,
 };
+pub use delegation::SubagentPlace;
 pub use failure::{parse_reset, Failure, FailureKind, LimitPolicy};
 pub use fit::{chars_for_tokens, fit, FitStep, Fitted};
 pub use goal::{parse_verdict, GoalOutcome, GoalPrompt, GoalVerdict, SEED_GOAL};
@@ -90,8 +94,9 @@ pub use mcp::{
     McpSignIn, McpStatus, McpTarget, MCP_FILE, MCP_JSON_FILE,
 };
 pub use message::{
-    now_millis, AssistantContent, AssistantMessage, Message, StopReason, ToolCall,
-    ToolResultContent, ToolResultMessage, Usage, UserContent, UserMessage,
+    now_millis, AssistantContent, AssistantMessage, Message, MessageOrigin, OriginKind, StopReason,
+    ToolCall, ToolResultContent, ToolResultMessage, Usage, UserContent, UserMessage,
+    SUBAGENT_SESSION_KEY,
 };
 pub use permissions::{
     is_read_only_call, permission_channel, shell_parts, subject_of, AskedPart, AutoDenyPrompter,
@@ -113,7 +118,7 @@ pub use runtime::{
 };
 pub use session::{
     Autorun, Entry, EntryKind, ExternalSessionRef, GoalRecord, LastRun, LoggedMessage, LoopRecord,
-    RunMark, Session, SessionHeader, SessionModel, SessionSummary, Timing,
+    RunMark, Session, SessionHeader, SessionModel, SessionParent, SessionSummary, Timing,
 };
 pub use shell::{ShellOutput, ShellRunner};
 pub use suggest::{

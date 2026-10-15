@@ -291,7 +291,7 @@ impl AgentPanel {
                             .unwrap_or_else(|| Item::User {
                                 text: user.plain_text(),
                                 at: now_hms(),
-                                command: user.command.clone(),
+                                command: transcript::user_headline(user),
                             });
                         self.transcript.push(item);
                         None
@@ -711,6 +711,7 @@ impl AgentPanel {
             }
         }
         for event in self.runtime.drain() {
+            self.forward_to_delegator(&event);
             self.apply(event);
             changed = true;
         }
@@ -842,6 +843,7 @@ impl AgentPanel {
             changed = true;
         }
         changed |= self.settle_restored();
+        changed |= self.settle_delegation();
         // A goal or loop started, stepped or stopped is written to the log,
         // so a session reopened later offers to carry it on — between runs,
         // so nothing comes between a request's start and its message.

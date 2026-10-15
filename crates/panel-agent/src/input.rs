@@ -1,7 +1,7 @@
 //! Input handling: keys, mouse, pastes and the clipboard, the prompt's
 //! history, completion of slash commands and `@` mentions, and scrolling.
 
-use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use termide_agent_core::{now_millis, CommandScript, ToolResultMessage, UserMessage};
 use termide_core::{KeyChord, LinkTarget, Panel, PanelEvent};
 use termide_ui::textarea::TextArea;
@@ -25,6 +25,16 @@ pub(crate) fn full_log_path(result: &ToolResultMessage) -> Option<std::path::Pat
         .details
         .as_ref()?
         .get("full_output_path")?
+        .as_str()
+        .map(std::path::PathBuf::from)
+}
+
+/// The log of the delegate's session a `task` result names.
+pub(crate) fn delegate_session(result: &ToolResultMessage) -> Option<std::path::PathBuf> {
+    result
+        .details
+        .as_ref()?
+        .get(termide_agent_core::SUBAGENT_SESSION_KEY)?
         .as_str()
         .map(std::path::PathBuf::from)
 }
@@ -437,7 +447,16 @@ impl AgentPanel {
         if self.history_pos.is_some() || self.queued_texts.is_empty() {
             return false;
         }
-        let taken = self.runtime.take_queued();
+        // Another agent's message is not the user's to edit: in the input it
+        // would go out as their words, so it goes back to wait its turn.
+        let (taken, agents): (Vec<_>, Vec<_>) = self
+            .runtime
+            .take_queued()
+            .into_iter()
+            .partition(|message| message.origin.is_none());
+        for message in agents {
+            self.runtime.steer(message);
+        }
         // What the agent already holds stays in the strip: it was sent
         // first, so it leads.
         let lens = self.runtime.queue_lens();
@@ -570,6 +589,12 @@ impl AgentPanel {
             Item::Tool {
                 call, result, live, ..
             } => {
+                // A delegated task's block opens the delegate's session.
+                if let Some(path) = result.as_ref().and_then(delegate_session) {
+                    if path.exists() {
+                        return vec![PanelEvent::OpenAgentSession(path)];
+                    }
+                }
                 if let Some(path) = result.as_ref().and_then(full_log_path) {
                     if path.exists() {
                         return vec![PanelEvent::ViewFile(path)];
@@ -998,6 +1023,27 @@ impl AgentPanel {
     }
 
     /// The body of [`Panel::handle_key`].
+    /// A key while another agent's task runs here: `Ctrl+T` takes the panel
+    /// over, `Esc` stops the run; scrolling, the chat's blocks, copying, the
+    /// summary and saving the chat go on as usual (`None`). Anything else —
+    /// typing, the session's keys, the mode — takes nothing.
+    fn delegate_key(&mut self, key: KeyEvent) -> Option<Vec<PanelEvent>> {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        let passes = match key.code {
+            KeyCode::Char('t') if ctrl && !alt => return Some(self.take_over()),
+            KeyCode::Char('s' | 'c' | 'o') if ctrl && !alt => true,
+            KeyCode::F(3) => true,
+            KeyCode::F(_) => false,
+            _ if self.chat_focus => true,
+            KeyCode::Esc => self.is_busy(),
+            KeyCode::Tab | KeyCode::PageUp | KeyCode::PageDown => true,
+            KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End => ctrl,
+            _ => false,
+        };
+        (!passes).then(Vec::new)
+    }
+
     pub(crate) fn on_key(&mut self, chord: KeyChord) -> Vec<PanelEvent> {
         // A shortcut — a Ctrl/Alt chord, or any key while the chat has focus
         // and nothing is being typed — matches on the canonical form, so it
@@ -1044,6 +1090,14 @@ impl AgentPanel {
         // it and goes on.
         if let Some(events) = self.rewind_picker_key(key) {
             return events;
+        }
+
+        // While another agent's task runs here, the input and the keys that
+        // act on the session take nothing; see `delegate_key`.
+        if self.is_delegate() {
+            if let Some(events) = self.delegate_key(key) {
+                return events;
+            }
         }
 
         // Ctrl+S saves the chat as Markdown, wherever the focus sits in the

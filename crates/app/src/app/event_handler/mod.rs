@@ -435,6 +435,10 @@ impl App {
             PanelEvent::ChangeAgentCwd { session, cwd } => {
                 self.ask_agent_cwd(session, cwd);
             }
+
+            PanelEvent::OpenAgentSession(path) => {
+                self.ai_open_session(path)?;
+            }
         }
         Ok(())
     }

@@ -115,6 +115,7 @@ mod tests {
             command: None,
             ran: None,
             ran_failed: false,
+            origin: None,
         })
     }
 

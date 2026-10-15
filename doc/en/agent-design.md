@@ -88,6 +88,172 @@ token), and the parent's cancel aborts the sub-run. Not done yet: parallel
 delegation (the loop runs one tool at a time) and streaming the sub-run as a
 foldable sub-transcript rather than the plain text it reports.
 
+### Linked panels (planned)
+
+Considered: two shapes of agents working together across panels — a
+delegate run in a panel of its own instead of headless (hierarchy), and
+panels sending each other messages (peers). Decision: one protocol for both,
+built hierarchy first; peer messaging comes later on the same protocol.
+
+Where a delegate runs is a setting, `subagent_run` = `hidden` (the default,
+today's headless run), `ask`, `existing_panel` or `panel`, in `[ai]` with
+an `AGENT.md` able to name its own. `existing_panel` takes a banner panel
+already open (chosen as below) and runs hidden when there is none, so a
+delegate never changes the layout; `panel` opens one instead. `ask` puts
+one card per batch of delegations (all hidden, all in panels, one by one),
+not one card per task. `termide --prompt` has
+no panels and always runs hidden; in plan mode a delegate in a panel is held
+to plan mode as a hidden one is.
+
+Choosing the panel: the first agent panel that shows the banner (an empty
+session), has an empty input and does not hold the focus — a panel the user
+just opened to type in is never taken. Its agent, connection, cwd and mode
+are switched to the delegate's, which is cheap on an empty session. With no
+such panel, `panel` opens a new one where `handle_open_agent` puts one and
+`existing_panel` runs the task hidden. One task, one
+session: when the task ends the panel goes back to the banner, found or
+opened alike (closing an opened one would move the layout under the user),
+and the delegate's session stays in the banner's list, marked as a delegate.
+The next task looks for a banner panel again rather than writing on.
+
+Who owns the panel: the delegating agent, while the task runs. The input is
+off — typed text, `$` and `/` alike, since all of them speak as the user —
+and shows instead whose delegate it is and the task. What stays on: the
+permission and question cards (the reason to run in a panel at all: the
+delegate asks the user instead of being refused, which also lets external
+agents be delegates), stop and pause. Stop ends the task for the parent as
+an error, "stopped by the user". A *take over* action ends the task for the
+parent with "taken over by the user" and what the delegate has said so far,
+cuts the link and leaves the panel as an ordinary session, not reset to the
+banner. So the reset rule needs no guess about whether the user stepped in:
+only an explicit take-over keeps the panel.
+
+The protocol: a message between agents is a `UserMessage` with an `origin`
+(the sending session's id, the agent's name and a kind — `task`, `reply`,
+`info`, `question`), the way `ran` marks a shell command's output today. The
+model reads it wrapped (`<agent-message from="…" kind="…">`). An agent's
+words never carry the user's authority: the reviewer files them as
+`IntentEntry::Delegated`, as it does a task prompt now; they cannot answer a
+permission card, grant an `allow always`, expand a `/` command or change the
+mode. They are information, a reply or a request — no more. One gain for
+hidden delegates too: a delegate's `question` goes to its parent, which
+answers it or asks the user through its own `question`, instead of the
+delegate's request being refused. Hidden and panel runs then differ only in
+how the messages travel and whether the run is seen.
+
+Done of it: the message itself. `UserMessage::origin` (`MessageOrigin`,
+`OriginKind`) is in the log; `framed_text` frames it for the model, built-in
+loop and ACP agent alike, a closing tag inside the text defused and the
+attributes kept from breaking the tag. The reviewer's log files a task as
+`IntentEntry::Delegated` and the rest as `IntentEntry::Agent` ("message from
+another agent, not written by the user"), which a delegate's reviewer
+inherits but which never counts as a request to judge a call against.
+Queued messages merge only while they are the user's words
+(`UserMessage::take_merged`): an agent's message, and a hand-run command's
+output — which a merge used to strip of its `ran`, turning the output into
+the user's words for the reviewer — go one by one with their marks. Taking
+the queue back into the input leaves agents' messages queued. Recall indexes
+them as `agent message`. Nothing sends one yet.
+
+Logs: every delegate writes a session log, hidden ones included (before,
+nothing wrote a hidden run's events, and only its answer survived, in the
+parent's log). The header names the parent session and the `task` call. The
+banner's list shows such sessions with a mark; the parent's `task` block
+opens the delegate's transcript in a panel, where the conversation can go on
+as an ordinary session.
+
+Done of it: `SessionHeader::parent` (`SessionParent`: the delegating
+session's id when its agent runs on termide's loop — an external agent's
+calls come without one —, the agent's name and the `task` call's id).
+`Subagents` keeps the panel's session directory and starts a log with
+`Session::create_delegate`, held exclusively while the task runs so no panel
+opens it; it records the connection, model and agent as a panel's log does,
+then every finished message of the run, on termide's loop and on a Claude
+Code copy alike, a stopped run's included. The task goes in as a
+`MessageOrigin` of kind `task` from the delegating agent, whose name the
+`task` tool's closure carries (`SubagentTask`). The result's details name the
+log (`subagent_session`); `display_label` marks a delegate's session `&`.
+`o` on a `task` block opens that log through `PanelEvent::OpenAgentSession`,
+and a user block from another agent heads with `& <agent> · <kind>`, its text
+folded under it.
+
+Done of the panels: `SubagentPlace` (`hidden`, `existing_panel`, `panel`) in
+`[ai] subagent_run`, on the settings' AI tab and in `AGENT.md`; `ask` came
+after (below). The `task` call (`agent_panel/in_panel.rs`) sends a
+`PanelDelegation` down a process-wide channel and waits up to ten seconds
+for the app's answer; only an app that serves the channel answers, so a
+headless run and the tests run hidden. On its tick the app takes the first
+agent panel that `takes_delegate` (banner, empty input, nothing running or
+asked) and is not the focused one, else for `panel` opens one with
+`add_panel_without_focus`. Rather than switching a free panel's agent,
+connection, cwd and mode one by one, each with its side effects, the app
+rebuilds it in place (`LayoutManager::replace_panel_at`) on a
+`Session::create_delegate` log that already names the connection, agent and
+mode — the panel is empty, nothing is lost, and the dropped one discards its
+empty log. The panel (`panel-agent/src/delegation.rs`) forwards every agent
+event to the waiting call, which shows them through the same
+`SubagentReport` as a hidden run, and ends the task (`DelegateEnd`) once
+nothing runs, is paused, waits to retry or holds a card; then it goes back to
+the banner on a fresh session. Its input, pastes, session keys and status
+actions take nothing while the task runs; `Esc` stops it, `Ctrl+T` takes it
+over, closing the panel ends it. A stop by the user or a take-over returns
+what the delegate said with a note; the parent's stop cancels the panel's
+run. External agents may be delegates in a panel; hidden, they are still
+refused. A task from a parked project's panel runs hidden. The reviewer of a delegate
+panel in `auto` first saw the task alone; now the `task` call sends the
+parent's `IntentLog::delegated` with the request, the app puts it in the
+new panel's setup (`inherited_intent`), and termide's loop starts its log
+from it (`Agent::with_inherited_intent`) without counting its prompts as
+delegated, so what the user writes after a take-over stays theirs. The panel
+keeps it for rebuilds while the task is its own. An external delegate's
+reviewer still sees the task alone.
+
+Done after: `ask` (`agent_panel/ask_place.rs`). Parallel delegations start
+on calls of their own within a moment of each other, so the first waits
+150 ms for the rest and asks one card listing them all — hidden, in a panel
+(`panel`) or, for several, one by one, each then asking alone; dismissed, in
+the user's own words or with no asker, hidden. A delegate's question to its
+parent, as planned, could not be the parent's to answer: the parent's model
+waits inside its `task` call and cannot read it. So a hidden delegate gets
+`question` (when its parent has an asker, and its `tools` list keeps it) and
+its cards reach the parent panel's user, each headed `& <delegate> ·`
+(`UserAsker::for_delegate`); permission requests are still refused, a panel
+being the place for those. A parent that answers its delegates in its own
+turn needs the peer messaging below.
+
+Done after that: peer messaging (`agent-tools/src/peers.rs`,
+`agent_panel/peers.rs`, `panel-agent/src/peers.rs`). The panel's own agent —
+and Claude Code on termide's tools, which gets the same registry — has
+`agents` (read-only by the rules) and `send_message` (`info`, `question`,
+`reply`; asks as any non-read-only tool, so `ask` mode confirms each message
+and plan mode blocks it). Every panel has a number from a process-wide
+counter; `ToolContext::panel` carries it to the tools, from termide's loop
+(`Agent::with_panel`) and from the host tools an external agent calls, so the
+sender is known without a session id. The calls go down a channel the app
+serves on its tick, like the delegations; the app delivers the message as a
+`MessageOrigin` with the sender's panel (the frame's `panel="…"`, for the
+answer) and a hop count: the sender panel's count plus one, refused past ten.
+A panel takes the count of the message that starts its run (the highest,
+while steered ones join it) and zero from anything the user sends. A panel
+running a delegated task refuses messages. Codex and Gemini CLI get only
+`COMPANION_TOOLS`, which leave these two out for now.
+
+Not planned: automatic isolation. Two agents in one tree may edit the same
+file; rather than guessing when to isolate or how to merge, the first step
+is to detect it exactly — an edit of a file another live session changed
+since this one read it is refused with the reason. Done
+(`agent-core/src/conflicts.rs`): `ConflictGuard`, in every panel's chain
+after the plan guard (before anyone is asked) and in a hidden delegate's,
+which runs under its parent's panel number. A process-wide ledger orders
+every successful `read`, `edit` and `write` by panel; an `edit` or `write`
+of a file whose last change is another panel's and later than this panel's
+last read of it, or that this panel never read, is blocked. Paths are keyed
+canonically (a new file by its directory). Changes through `bash` or from
+outside are not seen. A git worktree per
+delegate may come later only as an explicit choice (`isolation =
+"worktree"`), its result the branch and a diff summary, merged by the
+parent or the user.
+
 ## 3b. Web tools
 
 Most requests that reach outside the checkout are searches, and `curl` fails

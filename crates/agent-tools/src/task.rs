@@ -11,39 +11,53 @@
 //! that builds and runs the named agent, so this crate stays free of the
 //! provider and the catalog.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use termide_agent_core::ToolText;
 use termide_agent_core::{
     CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate, Usage,
 };
+use termide_agent_core::{ToolText, SUBAGENT_SESSION_KEY};
 
 use crate::args::required_str;
 
-/// How a subagent's run ended: its final answer, or an error message, and
-/// the tokens its model calls spent either way.
+/// How a subagent's run ended: its final answer, or an error message, the
+/// tokens its model calls spent either way, and the log its session went to,
+/// when it had one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubagentOutcome {
     pub answer: Result<String, String>,
     pub spent: Usage,
+    pub session: Option<PathBuf>,
 }
 
 impl From<Result<String, String>> for SubagentOutcome {
-    /// An outcome that spent nothing.
+    /// An outcome that spent nothing and left no log.
     fn from(answer: Result<String, String>) -> Self {
         Self {
             answer,
             spent: Usage::default(),
+            session: None,
         }
     }
 }
 
-/// Runs the named agent on `prompt` to completion. Progress is forwarded
+/// A task handed to a subagent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentTask<'a> {
+    /// The agent to run.
+    pub agent: &'a str,
+    pub prompt: &'a str,
+    /// The id of the delegating `task` call.
+    pub call: &'a str,
+}
+
+/// Runs the named agent on the task to completion. Progress is forwarded
 /// through `on_update`; the context is the delegating call's, whose session
 /// the subagent's reviewer judges against.
 pub type SubagentRun = Arc<
-    dyn Fn(&str, &str, &ToolContext, &CancelToken, &mut dyn FnMut(ToolUpdate)) -> SubagentOutcome
+    dyn Fn(&SubagentTask, &ToolContext, &CancelToken, &mut dyn FnMut(ToolUpdate)) -> SubagentOutcome
         + Send
         + Sync,
 >;
@@ -143,14 +157,25 @@ impl Tool for TaskTool {
                 format!("no agent named {agent}; available: {}", names.join(", ")),
             );
         }
-        let outcome = (self.run)(agent, prompt, ctx, cancel, on_update);
-        // What the subagent spent rides in the details, for the panel's
-        // totals; the model reads the answer alone.
-        match outcome.answer {
+        let task = SubagentTask {
+            agent,
+            prompt,
+            call: &call.id,
+        };
+        let outcome = (self.run)(&task, ctx, cancel, on_update);
+        // What the subagent spent and where its session went ride in the
+        // details, for the panel; the model reads the answer alone.
+        let result = match outcome.answer {
             Ok(report) => ToolResultMessage::text(call, report),
             Err(message) => ToolResultMessage::error(call, message),
-        }
-        .with_spent(outcome.spent)
+        };
+        let result = match outcome.session {
+            Some(path) => result.with_details(json!({
+                SUBAGENT_SESSION_KEY: path.to_string_lossy(),
+            })),
+            None => result,
+        };
+        result.with_spent(outcome.spent)
     }
 }
 
@@ -181,11 +206,13 @@ mod tests {
     fn it_lists_agents_delegates_and_reports_errors() {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         let seen_run = Arc::clone(&seen);
-        let run: SubagentRun = Arc::new(move |agent: &str, prompt: &str, _ctx, _c, _u| {
-            seen_run
-                .lock()
-                .unwrap()
-                .push((agent.to_string(), prompt.to_string()));
+        let run: SubagentRun = Arc::new(move |task: &SubagentTask, _ctx, _c, _u| {
+            let agent = task.agent;
+            seen_run.lock().unwrap().push((
+                agent.to_string(),
+                task.prompt.to_string(),
+                task.call.to_string(),
+            ));
             let spent = Usage {
                 input: 7,
                 output: 3,
@@ -196,7 +223,12 @@ mod tests {
             } else {
                 Err("the run failed".into())
             };
-            SubagentOutcome { answer, spent }
+            let session = (agent == "reviewer").then(|| PathBuf::from("/logs/s.jsonl"));
+            SubagentOutcome {
+                answer,
+                spent,
+                session,
+            }
         });
         let tool = TaskTool::new(
             vec![
@@ -219,9 +251,18 @@ mod tests {
         assert!(!ok.is_error);
         assert_eq!(ok.plain_text(), "looks fine");
         assert_eq!(ok.spent().map(|spent| spent.output), Some(3));
+        // The log beside what was spent.
+        assert_eq!(
+            ok.details.as_ref().unwrap()[SUBAGENT_SESSION_KEY],
+            "/logs/s.jsonl"
+        );
         assert_eq!(
             *seen.lock().unwrap(),
-            vec![("reviewer".to_string(), "check the diff".to_string())]
+            vec![(
+                "reviewer".to_string(),
+                "check the diff".to_string(),
+                "t".to_string()
+            )]
         );
 
         let failed = run_with(&tool, json!({ "agent": "writer", "prompt": "x" }));

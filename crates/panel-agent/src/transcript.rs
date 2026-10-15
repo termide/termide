@@ -143,6 +143,16 @@ pub(crate) fn is_user_command(call: &ToolCall) -> bool {
     call.id == USER_COMMAND_ID
 }
 
+/// What heads a user block: the `/name args` that produced it, or — for
+/// another agent's message — who sent it and what it is (`& lead · task`),
+/// so it never reads as the user's words; its text folds under it.
+pub(crate) fn user_headline(user: &UserMessage) -> Option<String> {
+    match &user.origin {
+        Some(origin) => Some(format!("& {} · {}", origin.agent, origin.kind.as_str())),
+        None => user.command.clone(),
+    }
+}
+
 /// The block of a command the user ran by hand: a `bash` call with what it
 /// printed, as the agent's own shell calls show. `None` for any message that
 /// is not one.

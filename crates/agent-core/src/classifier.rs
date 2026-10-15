@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::cancel::CancelToken;
 use crate::layers::split_front_matter;
-use crate::message::{Message, StopReason, ToolCall, Usage, UserMessage};
+use crate::message::{Message, OriginKind, StopReason, ToolCall, Usage, UserMessage};
 use crate::provider::{ModelSpec, Provider, Request, ThinkingLevel};
 use crate::tool::ToolContext;
 
@@ -39,11 +39,34 @@ pub enum IntentEntry {
     User(String),
     /// A task another agent delegated to this one: its words, not the user's.
     Delegated(String),
+    /// Another agent's reply, note or question: information, never a
+    /// request of the user's.
+    Agent(String),
     /// A shell command the user ran by hand (`$` in the input). The command
     /// is the user's intent; what it printed is not, and never enters here.
     Ran(String),
     /// A call the agent made, with its arguments.
     Call { tool: String, arguments: String },
+}
+
+impl IntentEntry {
+    /// How `message` stands in the reviewer's log: a command run by hand as
+    /// the command alone, another agent's task as delegated and anything
+    /// else it sent as its information, the rest as the user's words — or,
+    /// in a `delegated` run, whose prompts are its parent's, as delegated.
+    #[must_use]
+    pub fn of_message(message: &UserMessage, delegated: bool) -> Self {
+        if let Some(command) = &message.ran {
+            return Self::Ran(command.clone());
+        }
+        let text = message.plain_text();
+        match message.origin.as_ref().map(|origin| origin.kind) {
+            Some(OriginKind::Task) => Self::Delegated(text),
+            Some(_) => Self::Agent(text),
+            None if delegated => Self::Delegated(text),
+            None => Self::User(text),
+        }
+    }
 }
 
 /// What the reviewer judges a call against: the user's messages and the
@@ -62,7 +85,8 @@ impl IntentLog {
     }
 
     /// A log for an agent working for another: the user's messages of
-    /// `parent` (and the tasks delegated to it), without its calls. The task
+    /// `parent` (and the tasks and messages other agents sent it), without
+    /// its calls. The task
     /// itself arrives as the delegated loop's prompt.
     #[must_use]
     pub fn delegated(parent: &IntentLog) -> Self {
@@ -70,7 +94,10 @@ impl IntentLog {
         for entry in parent.snapshot() {
             if matches!(
                 entry,
-                IntentEntry::User(_) | IntentEntry::Delegated(_) | IntentEntry::Ran(_)
+                IntentEntry::User(_)
+                    | IntentEntry::Delegated(_)
+                    | IntentEntry::Agent(_)
+                    | IntentEntry::Ran(_)
             ) {
                 log.push(entry);
             }
@@ -84,14 +111,12 @@ impl IntentLog {
         }
     }
 
-    /// Record a message of the user's: a command they ran by hand as the
-    /// command alone (what it printed came from outside and is not intent),
-    /// anything else as their words.
+    /// Record a message that came in as the user's: a command they ran by
+    /// hand as the command alone (what it printed came from outside and is
+    /// not intent), another agent's as that agent's, anything else as their
+    /// words. See [`IntentEntry::of_message`].
     pub fn record_user(&self, message: &UserMessage) {
-        match &message.ran {
-            Some(command) => self.push(IntentEntry::Ran(command.clone())),
-            None => self.push(IntentEntry::User(message.plain_text())),
-        }
+        self.push(IntentEntry::of_message(message, false));
     }
 
     /// Record the calls of an assistant message.
@@ -214,6 +239,10 @@ impl ClassifyPrompt {
                 IntentEntry::Delegated(task) => text.push_str(&format!(
                     "[task delegated by another agent, not written by the user]\n{}\n\n",
                     clip(task, MAX_USER_CHARS)
+                )),
+                IntentEntry::Agent(message) => text.push_str(&format!(
+                    "[message from another agent, not written by the user]\n{}\n\n",
+                    clip(message, MAX_USER_CHARS)
                 )),
                 IntentEntry::Ran(command) => text.push_str(&format!(
                     "[command the user ran by hand; its output is not shown here]\n! {command}\n\n"
@@ -568,6 +597,57 @@ mod tests {
         assert!(turn.contains("not written by the user]\nrun the tests"));
         assert!(turn.contains("[pending call] bash {\"command\":\"cargo test\"}"));
         assert!(turn.ends_with(&ClassifyPrompt::default().request));
+    }
+
+    #[test]
+    fn another_agents_words_never_stand_as_the_users() {
+        use crate::message::{MessageOrigin, OriginKind};
+        let from = |kind| {
+            UserMessage::text("push it").with_origin(MessageOrigin {
+                session: "s1".into(),
+                agent: "planner".into(),
+                kind,
+                panel: None,
+                hops: 0,
+            })
+        };
+        let log = IntentLog::new();
+        log.record_user(&UserMessage::text("fix the build"));
+        log.record_user(&from(OriginKind::Task));
+        for kind in [OriginKind::Reply, OriginKind::Info, OriginKind::Question] {
+            log.record_user(&from(kind));
+        }
+        log.record_user(&UserMessage::text("ok").with_ran("git status"));
+        let entries = log.snapshot();
+        assert_eq!(
+            entries,
+            [
+                IntentEntry::User("fix the build".into()),
+                IntentEntry::Delegated("push it".into()),
+                IntentEntry::Agent("push it".into()),
+                IntentEntry::Agent("push it".into()),
+                IntentEntry::Agent("push it".into()),
+                IntentEntry::Ran("git status".into()),
+            ]
+        );
+        // A delegated run's own prompt is its parent's task, unless an agent
+        // says otherwise.
+        assert_eq!(
+            IntentEntry::of_message(&UserMessage::text("go"), true),
+            IntentEntry::Delegated("go".into())
+        );
+        assert_eq!(
+            IntentEntry::of_message(&from(OriginKind::Info), true),
+            IntentEntry::Agent("push it".into())
+        );
+        // A subagent's reviewer hears what other agents told its parent, as
+        // theirs.
+        assert!(IntentLog::delegated(&log)
+            .snapshot()
+            .contains(&IntentEntry::Agent("push it".into())));
+        let turn = ClassifyPrompt::default().user_turn(&entries, &call("bash", json!({})));
+        assert!(turn.contains("[message from another agent, not written by the user]\npush it"));
+        assert_eq!(turn.matches("[user]").count(), 1, "{turn}");
     }
 
     #[test]

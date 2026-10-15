@@ -38,7 +38,7 @@ pub use settings::{
     DEFAULT_CONTEXT_WINDOW_FALLBACK,
 };
 /// The type of `[ai] reasoning`.
-pub use termide_agent_core::{LimitPolicy, ThinkingLevel};
+pub use termide_agent_core::{LimitPolicy, SubagentPlace, ThinkingLevel};
 pub use xdg::{get_config_dir, get_data_dir};
 
 use anyhow::Result;
@@ -824,6 +824,12 @@ mod layered_load_tests {
         assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
         assert_eq!(loaded.effective.ai.on_limit, LimitPolicy::Wait);
         assert_eq!(Config::default().ai.on_limit, LimitPolicy::Ask);
+        let (loaded, _dir) = layered("[ai]\nsubagent_run = \"existing_panel\"\n", None);
+        assert_eq!(
+            loaded.effective.ai.subagent_run,
+            SubagentPlace::ExistingPanel
+        );
+        assert_eq!(Config::default().ai.subagent_run, SubagentPlace::Hidden);
     }
 
     #[test]

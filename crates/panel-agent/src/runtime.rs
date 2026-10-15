@@ -201,6 +201,8 @@ pub(crate) fn spawn_runtime(
     blocked: &Blocked,
     shell_run: Option<ShellRunner>,
     skills: Vec<SkillInfo>,
+    panel: u64,
+    inherited_intent: Option<&termide_agent_core::IntentLog>,
 ) -> Spawned {
     let cancel = CancelToken::new();
     let (prompter, permission_rx) = permission_channel(cancel.clone());
@@ -240,6 +242,9 @@ pub(crate) fn spawn_runtime(
                 blocked: Arc::clone(blocked),
             }),
             Box::new(PlanGuard::new(mode.clone()).with_refusals(refusals)),
+            // A change on a file another panel changed since this one read
+            // it waits for a read, before anyone is asked about it.
+            Box::new(termide_agent_core::ConflictGuard::new()),
         ];
         if let Some(store) = checkpoints {
             chain.push(Box::new(CheckpointHooks::new(store)));
@@ -297,6 +302,7 @@ pub(crate) fn spawn_runtime(
                     asker: Some(asker.clone()),
                     suggester: Some(suggester.clone()),
                     shell_run: shell_run.clone(),
+                    panel: Some(panel),
                     ..ToolContext::new(cwd)
                 },
                 skills,
@@ -338,8 +344,12 @@ pub(crate) fn spawn_runtime(
     .with_loop_prompt(loop_prompt.clone())
     .with_messages(messages)
     .with_session_id(session.map(|s| s.id().to_string()))
+    .with_panel(panel)
     .with_asker(asker)
     .with_suggester(suggester);
+    if let Some(intent) = inherited_intent {
+        agent = agent.with_inherited_intent(intent);
+    }
     if let Some(run) = shell_run {
         // A command the user confirms on the card runs through this, in the
         // middle of the call that asked.
@@ -379,7 +389,7 @@ pub(crate) fn push_history(transcript: &mut Transcript, logged: &LoggedMessage) 
                     Item::User {
                         text: user.plain_text(),
                         at,
-                        command: user.command.clone(),
+                        command: transcript::user_headline(user),
                     }
                 });
             transcript.push(item);

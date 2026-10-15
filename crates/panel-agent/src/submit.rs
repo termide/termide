@@ -397,10 +397,16 @@ impl AgentPanel {
         command: Option<String>,
         pictures: Vec<(String, String)>,
     ) -> Vec<PanelEvent> {
-        self.follow = true;
         let message = UserMessage::text(text)
             .with_command(command)
             .with_images(pictures);
+        self.send_message(message)
+    }
+
+    /// Send `message`: as the next request, or queued for the running one.
+    pub(crate) fn send_message(&mut self, message: UserMessage) -> Vec<PanelEvent> {
+        self.follow = true;
+        self.count_hops(&message);
         if self.is_busy() {
             // The message waits in the state strip until the agent takes it,
             // then shows as a user block.
@@ -859,6 +865,7 @@ impl AgentPanel {
         // ticks it while it lasts; the stopped answer then says it was
         // cancelled, so no notice stays behind.
         if self.is_busy() && self.stop_requested.is_none() {
+            self.note_delegate_stopped();
             self.runtime.abort();
             self.stop_requested = Some(Instant::now());
         }

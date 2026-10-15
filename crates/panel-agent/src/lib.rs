@@ -6,11 +6,13 @@
 //! [`Transcript`] from `tick()`, so it never blocks the UI thread. Every
 //! transcript change also goes to the JSONL [`Session`] when one is attached.
 
+mod delegation;
 mod events;
 mod export;
 mod failure;
 mod input;
 mod mcp;
+mod peers;
 mod pending;
 mod pickers;
 mod render;
@@ -61,6 +63,8 @@ use crate::runtime::{
 use crate::session_ops::discard_if_empty;
 use crate::toolset::{served_skills, Blocked, TOOLSET_ACTION};
 
+pub use delegation::{DelegateEnd, DelegateUpdate, Delegation};
+pub use peers::PeerState;
 pub use runtime::local_minute;
 pub use transcript::{FoldMode, Item, NoticeKind, Transcript};
 
@@ -193,6 +197,10 @@ const UNDO_ACTION: &str = "agent_undo";
 /// The panel keeps these so it can rebuild its agent when the user switches
 /// to another session.
 pub struct AgentPanelSetup {
+    /// What the user asked the agent that delegates this panel's first task,
+    /// for the `auto` reviewer to judge the task's calls against; see
+    /// [`termide_agent_core::Agent::with_inherited_intent`].
+    pub inherited_intent: Option<termide_agent_core::IntentLog>,
     pub cwd: PathBuf,
     /// Name of the agent definition in use.
     pub agent: String,
@@ -927,6 +935,16 @@ pub struct AgentPanel {
     /// first, shown in the state strip until the agent takes them. Kept in
     /// step with the runtime's steering count (`QueueUpdate`).
     queued_texts: VecDeque<String>,
+    /// The task another agent delegated to this panel, while it runs.
+    delegation: Option<Delegation>,
+    /// What the user asked the delegating agent, while its task is this
+    /// panel's: a rebuilt agent keeps judging by it.
+    inherited_intent: Option<termide_agent_core::IntentLog>,
+    /// The panel's number, which other agents address it by.
+    panel_id: u64,
+    /// How many messages agents passed one another, without the user, to
+    /// get the panel's current run going; see [`MessageOrigin::hops`].
+    agent_hops: u32,
     queued: (usize, usize),
     /// Tokens of the last reported context, for the status chip.
     context_tokens: u64,
@@ -961,6 +979,10 @@ pub struct AgentPanel {
 impl AgentPanel {
     #[must_use]
     pub fn new(mut setup: AgentPanelSetup) -> Self {
+        // Numbered from 1 in the order panels open, for other agents to
+        // address it by.
+        static PANELS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let panel_id = PANELS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let session = setup.session.or_else(|| {
             start_session(
                 setup.session_dir.as_deref(),
@@ -1053,6 +1075,8 @@ impl AgentPanel {
             &blocked,
             setup.shell_run.clone(),
             served_skills(setup.catalog.as_ref(), &offered_skills, &context_off),
+            panel_id,
+            setup.inherited_intent.as_ref(),
         );
         // Learn the context window from the provider in the background and
         // adopt the active model's real `max_model_len`; the configured window
@@ -1200,6 +1224,10 @@ impl AgentPanel {
             autorun_stops: Vec::new(),
             run_buttons: Vec::new(),
             queued_texts: VecDeque::new(),
+            delegation: None,
+            inherited_intent: setup.inherited_intent.clone(),
+            panel_id,
+            agent_hops: 0,
             queued: (0, 0),
             context_tokens: 0,
             activity: None,
@@ -1481,6 +1509,16 @@ impl Panel for AgentPanel {
     }
 
     fn handle_status_action(&mut self, action: &str) -> Vec<PanelEvent> {
+        // While another agent's task runs here, the session, its agent, model
+        // and mode are that agent's: only what reads them is offered.
+        if self.is_delegate()
+            && !matches!(
+                action,
+                SAVE_CHAT_ACTION | SHOW_PROMPT_ACTION | SESSION_INFO_ACTION
+            )
+        {
+            return Vec::new();
+        }
         let t = termide_i18n::t();
         match action {
             RENAME_ACTION => vec![PanelEvent::ShowInput {
@@ -1662,6 +1700,16 @@ impl Panel for AgentPanel {
     }
 
     fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
+        // A paste would type into an input that takes nothing while another
+        // agent's task runs here.
+        if self.is_delegate()
+            && matches!(
+                cmd,
+                PanelCommand::Paste | PanelCommand::PasteText { .. } | PanelCommand::Cut
+            )
+        {
+            return CommandResult::Handled(false);
+        }
         match cmd {
             PanelCommand::Paste if !self.chat_focus => match self.paste_clipboard() {
                 true => {

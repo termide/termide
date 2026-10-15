@@ -161,8 +161,9 @@ fn not_read_only(call: &ToolCall) -> Option<String> {
     match call.name.as_str() {
         // The web tools read the web; nothing on this machine changes. A
         // question to the user changes nothing either, nor does `recall`,
-        // which only reads the project's history and code.
-        "read" | "skill" | "fetch" | "web_search" | "question" | "recall" => None,
+        // which only reads the project's history and code, or `agents`,
+        // which lists the panels.
+        "read" | "skill" | "fetch" | "web_search" | "question" | "recall" | "agents" => None,
         "bash" => {
             let parsed = split_shell(call.arguments["command"].as_str().unwrap_or(""));
             if parsed.has_substitution {

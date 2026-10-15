@@ -154,9 +154,7 @@ impl QueueHandle {
 
 fn take(queue: &mut VecDeque<UserMessage>, mode: QueueMode) -> Vec<UserMessage> {
     match mode {
-        QueueMode::Merged => UserMessage::merge(queue.drain(..).collect())
-            .into_iter()
-            .collect(),
+        QueueMode::Merged => UserMessage::take_merged(queue).into_iter().collect(),
         QueueMode::OneAtATime => queue.pop_front().into_iter().collect(),
         QueueMode::All => queue.drain(..).collect(),
     }
@@ -563,6 +561,8 @@ pub struct Agent {
     /// The id of the session log this loop's conversation is written to,
     /// when there is one; tools see it in [`SessionView::id`].
     session_id: Option<String>,
+    /// The agent panel the loop runs in, by its number.
+    panel: Option<u64>,
 }
 
 impl Agent {
@@ -594,6 +594,7 @@ impl Agent {
             intent_seeded: false,
             delegated: false,
             session_id: None,
+            panel: None,
         }
     }
 
@@ -605,6 +606,17 @@ impl Agent {
         self.intent = intent;
         self.intent_seeded = true;
         self.delegated = true;
+        self
+    }
+
+    /// Start the reviewer's log from `intent`, what the user asked the
+    /// agent that handed this loop its task, run in a panel of its own: the
+    /// prompts keep counting as what they are — the task as the delegating
+    /// agent's, what the user writes after as the user's.
+    #[must_use]
+    pub fn with_inherited_intent(mut self, intent: &IntentLog) -> Self {
+        self.intent = intent.clone();
+        self.intent_seeded = true;
         self
     }
 
@@ -627,6 +639,14 @@ impl Agent {
     #[must_use]
     pub fn with_session_id(mut self, id: Option<String>) -> Self {
         self.session_id = id;
+        self
+    }
+
+    /// The agent panel the loop runs in, by its number: its tools tell
+    /// which panel a call comes from.
+    #[must_use]
+    pub fn with_panel(mut self, panel: u64) -> Self {
+        self.panel = Some(panel);
         self
     }
 
@@ -1202,6 +1222,7 @@ impl Agent {
                 model: self.model.clone(),
             }),
             withdrawn: None,
+            panel: self.panel,
         }
     }
 
@@ -1528,19 +1549,11 @@ impl Agent {
     fn record_intent(&self, message: &Message) {
         match message {
             Message::User(user) => {
-                if let Some(command) = &user.ran {
-                    self.intent.push(IntentEntry::Ran(command.clone()));
+                if user.ran.is_none() && self.compaction_prompts.is_summary(&user.plain_text()) {
                     return;
                 }
-                let text = user.plain_text();
-                if self.compaction_prompts.is_summary(&text) {
-                    return;
-                }
-                self.intent.push(if self.delegated {
-                    IntentEntry::Delegated(text)
-                } else {
-                    IntentEntry::User(text)
-                });
+                self.intent
+                    .push(IntentEntry::of_message(user, self.delegated));
             }
             Message::Assistant(assistant) => self.intent.push_calls(assistant.tool_calls()),
             Message::ToolResult(_) => {}
@@ -2091,6 +2104,58 @@ mod tests {
             [
                 IntentEntry::User("fix the build".into()),
                 IntentEntry::Delegated("run tests".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_task_run_in_a_panel_keeps_the_parents_request_and_the_users_words() {
+        use crate::message::{MessageOrigin, OriginKind};
+        let echo = Arc::new(EchoTool::default());
+        let parent = IntentLog::new();
+        parent.push(IntentEntry::User("fix the build".into()));
+        let (agent, _) = agent(
+            ScriptedProvider::new(vec![
+                tool_reply(
+                    vec![("1", "echo", json!({"text": "x"}))],
+                    StopReason::ToolUse,
+                ),
+                text_reply("done"),
+                tool_reply(
+                    vec![("2", "echo", json!({"text": "y"}))],
+                    StopReason::ToolUse,
+                ),
+                text_reply("done too"),
+            ]),
+            registry_with(echo),
+        );
+        let mut agent = agent.with_inherited_intent(&IntentLog::delegated(&parent));
+        let mut probe = IntentProbe::default();
+        let task = UserMessage::text("run tests").with_origin(MessageOrigin {
+            session: String::new(),
+            agent: "lead".into(),
+            kind: OriginKind::Task,
+            panel: None,
+            hops: 0,
+        });
+        agent.run(task, &mut probe, &CancelToken::new(), &mut |_| {});
+        // The user, having taken the task over, writes as the user.
+        agent.run(
+            UserMessage::text("now the docs"),
+            &mut probe,
+            &CancelToken::new(),
+            &mut |_| {},
+        );
+        let last = probe.seen.last().unwrap();
+        assert_eq!(
+            last.iter()
+                .filter(|entry| !matches!(entry, IntentEntry::Call { .. }))
+                .cloned()
+                .collect::<Vec<_>>(),
+            [
+                IntentEntry::User("fix the build".into()),
+                IntentEntry::Delegated("run tests".into()),
+                IntentEntry::User("now the docs".into()),
             ]
         );
     }

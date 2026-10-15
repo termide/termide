@@ -576,9 +576,10 @@ impl SettingsModal {
                     Field(10), // on a limit or an outage
                     Spacer,
                     Header(t.settings_header_permissions()),
-                    Field(7), // permission mode for new sessions
-                    Field(8), // auto mode reviewer
-                    Field(9), // its model
+                    Field(7),  // permission mode for new sessions
+                    Field(8),  // auto mode reviewer
+                    Field(9),  // its model
+                    Field(11), // where delegated tasks run
                     Spacer,
                     Header(t.settings_header_transcript()),
                     Field(2), // autofold
