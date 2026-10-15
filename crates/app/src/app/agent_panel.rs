@@ -198,7 +198,15 @@ impl App {
                     })
                     .ok()
             });
-        let Some(panel) = restore_agent_panel(&settings, new_cwd.clone(), moved, agent, setup)
+        // Rebuilt in place, the panel keeps its number: other agents address
+        // it by that.
+        let number = self
+            .layout_manager
+            .active_panel()
+            .and_then(|panel| panel.as_any().downcast_ref::<AgentPanel>())
+            .map(AgentPanel::panel_id);
+        let Some(panel) =
+            restore_numbered_agent_panel(&settings, new_cwd.clone(), moved, agent, setup, number)
         else {
             return Ok(());
         };
@@ -283,6 +291,19 @@ pub(crate) fn restore_agent_panel(
     agent: Option<String>,
     setup: AgentSetupState,
 ) -> Option<AgentPanel> {
+    restore_numbered_agent_panel(settings, cwd, session, agent, setup, None)
+}
+
+/// [`restore_agent_panel`] for a panel taking the place of the one numbered
+/// `panel_id`, whose number it keeps; `None` gives it a number of its own.
+fn restore_numbered_agent_panel(
+    settings: &AiSettings,
+    cwd: PathBuf,
+    session: Option<PathBuf>,
+    agent: Option<String>,
+    setup: AgentSetupState,
+    panel_id: Option<u64>,
+) -> Option<AgentPanel> {
     if usable_connection(settings).is_none() {
         log::warn!("agent panel not restored: no [ai.connections] entry to run on");
         return None;
@@ -310,13 +331,9 @@ pub(crate) fn restore_agent_panel(
     // current project; the layout restore runs off the App, so read it from
     // the same source.
     let project_root = std::env::current_dir().unwrap_or_else(|_| cwd.clone());
-    Some(AgentPanel::new(agent_setup(
-        settings,
-        cwd,
-        &project_root,
-        agent,
-        session,
-    )))
+    let mut panel_setup = agent_setup(settings, cwd, &project_root, agent, session);
+    panel_setup.panel_id = panel_id;
+    Some(AgentPanel::new(panel_setup))
 }
 
 /// A fresh session log for `cwd` in `dir` that starts on `setup`: the saved

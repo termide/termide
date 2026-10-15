@@ -77,6 +77,8 @@ fn millis(duration: Duration) -> u32 {
 const RENAME_ACTION: &str = "agent_rename";
 /// Context-menu action that deletes the session (behind a confirmation).
 const DELETE_SESSION_ACTION: &str = "agent_delete_session";
+/// The confirmation of `Ctrl+T`, taking another agent's task over.
+const TAKE_OVER_ACTION: &str = "agent_take_over";
 /// Confirmation action that forks the session into a new panel (also `F5`).
 const FORK_SESSION_ACTION: &str = "agent_fork_session";
 /// Confirmation action that deletes the recent session picked in the banner.
@@ -1677,6 +1679,10 @@ impl Panel for AgentPanel {
     /// can be carried on when the session is opened again, but the user
     /// should know it stops.
     fn needs_close_confirmation(&self) -> Option<String> {
+        // Another agent waits for the task this panel runs, busy or not.
+        if let Some(text) = self.delegate_close_confirmation() {
+            return Some(text);
+        }
         self.work_under_way()
             .then(|| termide_i18n::t().agent_close_confirm_working().to_string())
     }
@@ -1867,6 +1873,11 @@ impl Panel for AgentPanel {
             }
             PanelCommand::InputSubmitted { action, text } if action == RENAME_RECENT_ACTION => {
                 let events = self.perform_rename_recent_session(&text);
+                self.pending_events.extend(events);
+                CommandResult::Handled(true)
+            }
+            PanelCommand::Confirmed { action } if action == TAKE_OVER_ACTION => {
+                let events = self.take_over();
                 self.pending_events.extend(events);
                 CommandResult::Handled(true)
             }

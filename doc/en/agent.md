@@ -390,7 +390,7 @@ you have named or sent even one message to is always kept.
 | `Shift+Tab` | Cycle the permission mode: ask → plan → edit → configured → auto → all |
 | `F2` | Rename this session (the same prompt as the `[≡]` menu); in the banner's list of sessions, rename the one under the cursor |
 | `Ctrl+S` | Save the chat as a Markdown file (your messages and the agent's answers under who and when, each day under its own heading); also the `[≡]` menu |
-| `Ctrl+T` | In a panel running another agent's task, take the task over (see [Subagents](#subagents)) |
+| `Ctrl+T` | In a panel running another agent's task, take the task over, after a confirmation (see [Subagents](#subagents)) |
 | `F3` | Open the session-info modal (model, agent, mode, directory, created/last-active times, messages, compactions, tokens, context, how much shell output was cleaned); also `/usage` and the `[≡]` menu |
 | `F4` | Pick a message to rewind the session to, as `Esc` does in the idle empty prompt |
 | `F5` | Fork this session (after a confirmation): its log is copied and the copy opens in a new agent panel, while this one goes on working at its own |
@@ -1566,11 +1566,13 @@ the delegating agent: the input takes nothing and reads `& Delegate of
 menu's session entries do nothing; scrolling, the blocks, copying, `F3`,
 `Ctrl+S`, the cards, pause and stop still work. `Esc` stops the task: the
 delegating agent hears that you stopped it, with what was said so far.
-`Ctrl+T` takes the task over: it ends for the delegating agent with what the
-delegate had said, and the conversation is yours to go on with. Once the
+`Ctrl+T` takes the task over, after a confirmation: it ends for the
+delegating agent with what the delegate had said, and the conversation is
+yours to go on with. Once the
 task is over, the panel goes back to its banner, free for the next one, and
 the task's session stays in the list. Closing the panel ends the task as
-well. Only the panels of the delegating panel's project take its tasks.
+well; it asks first, naming the agent waiting for the task, even when
+nothing is running at that moment. Only the panels of the delegating panel's project take its tasks.
 
 A delegate runs on the connection the session's connection names under
 **Subagents** on its settings page (`subagents` in the file), or on the

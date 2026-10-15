@@ -1031,7 +1031,7 @@ impl AgentPanel {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let passes = match key.code {
-            KeyCode::Char('t') if ctrl && !alt => return Some(self.take_over()),
+            KeyCode::Char('t') if ctrl && !alt => return Some(self.ask_take_over()),
             KeyCode::Char('s' | 'c' | 'o') if ctrl && !alt => true,
             KeyCode::F(3) => true,
             KeyCode::F(_) => false,
