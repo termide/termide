@@ -14,6 +14,7 @@
 //! The channel answers only while an app serves it: a headless run and the
 //! tests have no panels, and their tasks run hidden.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -27,7 +28,7 @@ use termide_agent_core::{
 use termide_agent_tools::SubagentOutcome;
 use termide_panel_agent::{AgentPanel, DelegateEnd, DelegateUpdate, Delegation};
 
-use super::{agent_setup, session_dir_of, SubagentReport};
+use super::{agent_setup, session_dir_of, SubagentReport, DEFAULT_AGENT};
 use crate::app::App;
 
 /// A delegated task to run in an agent panel.
@@ -75,6 +76,13 @@ fn port() -> &'static (Sender<Request>, Mutex<Receiver<Request>>) {
 
 /// Set once an app takes the requests.
 static SERVED: AtomicBool = AtomicBool::new(false);
+
+/// Where each panel taken for a task worked before, by its number: once the
+/// task is over it is set up there anew.
+fn homes() -> &'static Mutex<HashMap<u64, PathBuf>> {
+    static HOMES: OnceLock<Mutex<HashMap<u64, PathBuf>>> = OnceLock::new();
+    HOMES.get_or_init(Mutex::default)
+}
 
 /// How long a `task` call waits for the app to place its task before it
 /// runs the task hidden: the app answers on its next tick.
@@ -170,6 +178,7 @@ impl App {
     /// from the first call on, `task` calls ask for panels.
     pub(in crate::app) fn serve_delegations(&mut self) {
         SERVED.store(true, Ordering::Release);
+        self.reset_released_panels();
         let requests: Vec<Request> = port()
             .1
             .lock()
@@ -210,14 +219,16 @@ impl App {
         if free.is_none() && !request.place.opens_panel() {
             return None;
         }
-        // A panel rebuilt in place keeps its number.
-        let keep = free.and_then(|position| {
+        // A panel rebuilt in place keeps its number, and where it worked,
+        // to go back to once the task is over.
+        let taken = free.and_then(|position| {
             self.layout_manager
                 .iter_all_panels_mut()
                 .nth(position)
                 .and_then(|panel| panel.as_any().downcast_ref::<AgentPanel>())
-                .map(AgentPanel::panel_id)
+                .map(|panel| (panel.panel_id(), panel.cwd().to_path_buf()))
         });
+        let keep = taken.as_ref().map(|(id, _)| *id);
         let (mut panel, session) = self.delegate_panel(request, keep)?;
         let (updates, task_updates) = mpsc::channel();
         panel.start_delegation(
@@ -230,6 +241,11 @@ impl App {
             )
             .with_call(request.lineage.call.clone()),
         );
+        let home = taken.map_or_else(|| request.cwd.clone(), |(_, cwd)| cwd);
+        homes()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(panel.panel_id(), home);
         match free {
             Some(position) => {
                 self.layout_manager
@@ -242,6 +258,40 @@ impl App {
             updates: task_updates,
             session,
         })
+    }
+
+    /// Set up anew the panels a delegated task left: the default agent, on
+    /// the default connection and mode, where the panel worked before it was
+    /// taken — as a panel the user opens — keeping its place and number.
+    fn reset_released_panels(&mut self) {
+        let released: Vec<(usize, u64, PathBuf)> = self
+            .layout_manager
+            .iter_all_panels_mut()
+            .enumerate()
+            .filter_map(|(position, panel)| {
+                let agent = panel.as_any_mut().downcast_mut::<AgentPanel>()?;
+                agent
+                    .take_released()
+                    .then(|| (position, agent.panel_id(), agent.cwd().to_path_buf()))
+            })
+            .collect();
+        if released.is_empty() {
+            return;
+        }
+        let settings = self.state.config.ai.clone();
+        for (position, id, cwd) in released {
+            let cwd = homes()
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(&id)
+                .unwrap_or(cwd);
+            let mut setup = agent_setup(&settings, cwd, &self.project_root, DEFAULT_AGENT, None);
+            setup.panel_id = Some(id);
+            self.layout_manager
+                .replace_panel_at(position, Box::new(AgentPanel::new(setup)));
+        }
+        self.state.needs_redraw = true;
+        self.auto_save_layout();
     }
 
     /// A panel for `request`, on a session of its own that names where the

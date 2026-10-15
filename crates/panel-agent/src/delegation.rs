@@ -189,7 +189,17 @@ impl AgentPanel {
         // next one, judged by nothing the delegating agent was asked.
         self.inherited_intent = None;
         self.switch_session(None);
+        // On the delegate's agent, connection and mode until the app sets
+        // it up as the user would find a new one.
+        self.released = true;
         true
+    }
+
+    /// Whether a delegated task ended here since the last look, leaving the
+    /// panel free for the app to set up anew; looking clears it. A panel the
+    /// user took the task over in is theirs, and never released.
+    pub fn take_released(&mut self) -> bool {
+        std::mem::take(&mut self.released)
     }
 
     /// What closing the panel asks while it runs another agent's task.
