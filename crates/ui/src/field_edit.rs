@@ -8,7 +8,7 @@
 //! - Selection: `Shift+arrows`, `Shift+Home`/`End`, `Ctrl+Shift+arrows`,
 //!   `Ctrl+A`
 //! - Clipboard: `Ctrl+C`/`Ctrl+X`/`Ctrl+V`
-//! - Undo/redo: `Ctrl+Z`, `Ctrl+Y`, `Ctrl+Shift+Z`
+//! - Undo: `Ctrl+Z`; redo: `Ctrl+Y`, `Ctrl+Shift+Z`, as in the editor
 //!
 //! A `Ctrl` chord is matched on its layout-normalized form, so `Ctrl+Ф` is
 //! `Ctrl+A` on a Russian layout; typed text keeps the key as it came.
@@ -75,8 +75,9 @@ pub fn edit_text_input(input: &mut TextInput, key: KeyEvent) -> FieldEdit {
             }
             None => FieldEdit::NotHandled,
         },
-        KeyCode::Char('z') if ctrl && shift => changed(input.redo()),
-        KeyCode::Char('z') | KeyCode::Char('y') if ctrl => changed(input.undo()),
+        KeyCode::Char('z' | 'Z') if ctrl && shift => changed(input.redo()),
+        KeyCode::Char('y' | 'Y') if ctrl => changed(input.redo()),
+        KeyCode::Char('z' | 'Z') if ctrl => changed(input.undo()),
         KeyCode::Backspace => changed(input.backspace()),
         KeyCode::Delete => changed(input.delete()),
         KeyCode::Left if ctrl && shift => {
@@ -151,8 +152,9 @@ pub fn edit_text_area(area: &mut TextArea, key: KeyEvent) -> FieldEdit {
             }
             None => FieldEdit::NotHandled,
         },
-        KeyCode::Char('z') if ctrl && shift => changed(area.redo()),
-        KeyCode::Char('z') | KeyCode::Char('y') if ctrl => changed(area.undo()),
+        KeyCode::Char('z' | 'Z') if ctrl && shift => changed(area.redo()),
+        KeyCode::Char('y' | 'Y') if ctrl => changed(area.redo()),
+        KeyCode::Char('z' | 'Z') if ctrl => changed(area.undo()),
         KeyCode::Backspace => changed(area.backspace()),
         KeyCode::Delete => changed(area.delete()),
         KeyCode::Left if ctrl && shift => moved(area.move_word_left_with_selection()),
@@ -266,5 +268,32 @@ mod tests {
         let typed = KeyEvent::new(KeyCode::Char('ф'), KeyModifiers::NONE);
         assert_eq!(edit_text_input(&mut input, typed), FieldEdit::Edited);
         assert_eq!(input.text(), "ф");
+    }
+
+    #[test]
+    fn ctrl_z_undoes_and_ctrl_y_or_ctrl_shift_z_redoes() {
+        let mut input = TextInput::new();
+        let key = |code, modifiers| KeyEvent::new(code, modifiers);
+        let ctrl = KeyModifiers::CONTROL;
+        let ctrl_shift = KeyModifiers::CONTROL | KeyModifiers::SHIFT;
+        edit_text_input(&mut input, key(KeyCode::Char('a'), KeyModifiers::NONE));
+        edit_text_input(&mut input, key(KeyCode::Char('z'), ctrl));
+        assert_eq!(input.text(), "");
+        edit_text_input(&mut input, key(KeyCode::Char('y'), ctrl));
+        assert_eq!(input.text(), "a");
+        edit_text_input(&mut input, key(KeyCode::Char('z'), ctrl));
+        // Some terminals send the shifted letter itself.
+        edit_text_input(&mut input, key(KeyCode::Char('Z'), ctrl_shift));
+        assert_eq!(input.text(), "a");
+    }
+
+    #[test]
+    fn ctrl_v_pastes_at_the_cursor() {
+        crate::clipboard::use_fake_clipboard("XY");
+        let mut input = TextInput::with_text("ab");
+        input.move_left();
+        let paste = KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL);
+        assert_eq!(edit_text_input(&mut input, paste), FieldEdit::Edited);
+        assert_eq!(input.text(), "aXYb");
     }
 }

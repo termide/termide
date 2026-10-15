@@ -519,8 +519,9 @@ mod tests {
     fn ctrl_v_does_not_type_a_v_even_from_the_buttons() {
         let mut modal = modal();
         type_text(&mut modal, "x");
-        // Reading the clipboard only; whatever it holds is what lands.
-        let clip = termide_ui::clipboard::paste_text_or_paths().unwrap_or_default();
+        // A stand-in clipboard, so the user's is never read or written.
+        termide_ui::clipboard::use_fake_clipboard("PASTE");
+        let clip = "PASTE";
         press(&mut modal, KeyCode::Char('v'), KeyModifiers::CONTROL);
         assert_eq!(modal.textarea.text(), format!("x{clip}"));
 

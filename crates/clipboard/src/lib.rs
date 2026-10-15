@@ -27,6 +27,37 @@ use arboard::SetExtApple;
 #[cfg(windows)]
 use arboard::SetExtWindows;
 
+thread_local! {
+    /// A stand-in for the system clipboard on this thread, set by
+    /// [`use_fake_clipboard`]: tests read and write it instead of the user's.
+    static FAKE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Make this thread's clipboard calls use a private stand-in holding `text`
+/// rather than the system clipboard, for tests: they stay fast and
+/// deterministic and never touch what the user copied. Text copies and pastes
+/// go to the stand-in; a paste of files finds none.
+#[doc(hidden)]
+pub fn use_fake_clipboard(text: &str) {
+    FAKE.with(|fake| *fake.borrow_mut() = Some(text.to_string()));
+}
+
+/// The stand-in's text, when this thread uses one.
+fn fake_text() -> Option<String> {
+    FAKE.with(|fake| fake.borrow().clone())
+}
+
+/// Put `text` in the stand-in, when this thread uses one; whether it does.
+fn fake_copy(text: &str) -> bool {
+    FAKE.with(|fake| match fake.borrow_mut().as_mut() {
+        Some(held) => {
+            *held = text.to_string();
+            true
+        }
+        None => false,
+    })
+}
+
 /// Global clipboard instance that persists for the application lifetime.
 /// `None` when clipboard is unavailable (e.g. headless servers).
 static CLIPBOARD: OnceLock<Option<Mutex<Clipboard>>> = OnceLock::new();
@@ -251,6 +282,9 @@ pub fn copy(text: &str) -> Result<(), String> {
     if text.is_empty() {
         return Err("Cannot copy empty text".to_string());
     }
+    if fake_copy(text) {
+        return Ok(());
+    }
 
     // Without a display server arboard cannot reach the clipboard — go
     // straight to OSC 52 which the terminal emulator handles locally.
@@ -344,6 +378,9 @@ fn copy_arboard(text: &str) -> Result<(), String> {
 pub fn copy_files(paths: &[PathBuf]) -> Result<(), String> {
     if paths.is_empty() {
         return Err("Cannot copy empty file list".to_string());
+    }
+    if fake_copy(&paths_to_text(paths)) {
+        return Ok(());
     }
 
     if !has_display_server() {
@@ -447,6 +484,9 @@ fn add_text_flavor(text: &str) -> Result<(), String> {
 /// Returns `None` when the clipboard holds no files. Text consumers that want
 /// a path string out of a file copy should use [`paste_paths`] instead.
 pub fn paste_files() -> Option<Vec<PathBuf>> {
+    if fake_text().is_some() {
+        return None;
+    }
     let mut clipboard = get_clipboard().ok()?.lock().ok()?;
 
     #[cfg(target_os = "linux")]
@@ -537,6 +577,9 @@ pub fn paste_text_or_paths() -> Option<String> {
 /// async terminal response handling. Paste in SSH sessions relies on the terminal
 /// emulator's bracketed paste (Ctrl+V in the terminal sends the text directly).
 pub fn paste() -> Option<String> {
+    if let Some(text) = fake_text() {
+        return Some(text);
+    }
     let mut clipboard = get_clipboard().ok()?.lock().ok()?;
 
     #[cfg(target_os = "linux")]

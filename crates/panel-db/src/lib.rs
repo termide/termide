@@ -1304,8 +1304,9 @@ mod tests {
         let mut panel = open_table(&url, "keyed");
         panel.cursor_col = 1; // name: "alpha"
         press(&mut panel, KeyCode::Enter);
-        // Reading the clipboard only; whatever it holds is what lands.
-        let clip = termide_ui::clipboard::paste_text_or_paths().unwrap_or_default();
+        // A stand-in clipboard, so the user's is never read or written.
+        termide_ui::clipboard::use_fake_clipboard("PASTE");
+        let clip = "PASTE";
         press_with(&mut panel, KeyCode::Char('v'), KeyModifiers::CONTROL);
         assert_eq!(edit_text(&panel), format!("alpha{clip}"));
     }

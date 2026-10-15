@@ -94,6 +94,9 @@ pub fn picture_from_data(media_type: &str, data: &str) -> Option<Picture> {
 /// browser or an editor — or `None` when it holds none.
 #[must_use]
 pub fn paste_picture() -> Option<Picture> {
+    if crate::fake_text().is_some() {
+        return None;
+    }
     let mut clipboard = crate::get_clipboard().ok()?.lock().ok()?;
     let data = clipboard.get_image().ok()?;
     let width = u32::try_from(data.width).ok()?;

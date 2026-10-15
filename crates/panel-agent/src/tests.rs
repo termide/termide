@@ -1975,12 +1975,11 @@ fn shift_arrows_select_the_prompt_and_ctrl_a_takes_it_all() {
     );
 }
 
-/// The one test that reaches the real system clipboard, so it is also the
-/// one that pays for opening it (tens of seconds on some hosts). It puts
-/// the clipboard back as it found it.
+/// The prompt's cut and paste through the keys, on a stand-in clipboard so
+/// the user's is never touched.
 #[test]
 fn ctrl_x_cuts_the_prompt_selection_and_ctrl_v_puts_it_back() {
-    let before = termide_ui::clipboard::paste();
+    termide_ui::clipboard::use_fake_clipboard("");
     let mut panel = panel(vec![]);
     type_text(&mut panel, "fix the flaky test");
     select_back(&mut panel, 5);
@@ -1993,16 +1992,9 @@ fn ctrl_x_cuts_the_prompt_selection_and_ctrl_v_puts_it_back() {
     let events = panel.handle_key(chord(KeyCode::Char('x'), KeyModifiers::CONTROL));
     assert!(events.is_empty(), "nothing selected, nothing cut");
 
-    // A machine without a display (CI) copies over OSC 52, which cannot be
-    // read back, so the paste half runs only where the clipboard reads.
-    if termide_ui::clipboard::paste().is_some() {
-        let events = panel.handle_key(chord(KeyCode::Char('v'), KeyModifiers::CONTROL));
-        assert!(events.iter().any(|e| matches!(e, PanelEvent::NeedsRedraw)));
-        assert_eq!(panel.input_text(), "fix the flaky test");
-    }
-    if let Some(text) = before {
-        let _ = termide_ui::clipboard::copy(&text);
-    }
+    let events = panel.handle_key(chord(KeyCode::Char('v'), KeyModifiers::CONTROL));
+    assert!(events.iter().any(|e| matches!(e, PanelEvent::NeedsRedraw)));
+    assert_eq!(panel.input_text(), "fix the flaky test");
 }
 
 /// The routing of the clipboard commands, kept off the real clipboard: what
@@ -8668,6 +8660,7 @@ fn a_suggested_command_shows_on_a_card_with_the_exact_command() {
 
 #[test]
 fn a_suggested_command_denied_by_a_rule_withholds_run() {
+    termide_ui::clipboard::use_fake_clipboard("");
     let mut panel = panel(vec![]);
     panel.rules.add("bash", "git push*", Decision::Deny);
     let worker = suggest_in_worker(&mut panel, "git push origin main", "publish");
@@ -8769,6 +8762,7 @@ fn a_second_suggestion_while_a_card_is_up_declines() {
 
 #[test]
 fn plan_mode_withholds_run_from_a_suggestion() {
+    termide_ui::clipboard::use_fake_clipboard("");
     let mut panel = panel(vec![]);
     panel.mode.set(Mode::Plan);
     let worker = suggest_in_worker(&mut panel, "touch new.rs", "create it");
