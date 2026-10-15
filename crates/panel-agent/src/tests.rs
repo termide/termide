@@ -6841,7 +6841,7 @@ fn an_external_agent_replaces_the_loop_and_hides_its_knobs() {
         .collect();
     assert!(!texts.iter().any(|t| t.starts_with("Mode")), "{texts:?}");
     assert!(!texts.iter().any(|t| t.starts_with("Model")), "{texts:?}");
-    assert!(texts.contains(&" (acp)".to_string()));
+    assert!(!texts.iter().any(|t| t.contains("acp")), "{texts:?}");
     // The earlier conversation is shown, and handed to the agent, which has
     // no session of its own to resume yet.
     let items = panel.transcript().items();
@@ -10076,6 +10076,8 @@ fn a_delegated_task_runs_with_the_input_off_and_reports_to_its_agent() {
     );
 
     settle_delegate(&mut panel);
+    // Free again, once, for the app to set up anew.
+    assert!(panel.take_released() && !panel.take_released());
     let updates: Vec<DelegateUpdate> = received.try_iter().collect();
     assert!(updates.iter().any(|update| matches!(
         update,
@@ -10129,6 +10131,7 @@ fn ctrl_t_takes_a_delegated_task_over() {
     ));
     // The conversation is the user's now: it stays, and the input works.
     settle(&mut panel);
+    assert!(!panel.take_released());
     assert!(!panel.banner_shown());
     // The task heads its block as the agent's, not the user's words.
     assert!(panel.transcript().items().iter().any(|item| matches!(

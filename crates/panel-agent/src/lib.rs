@@ -943,6 +943,9 @@ pub struct AgentPanel {
     queued_texts: VecDeque<String>,
     /// The task another agent delegated to this panel, while it runs.
     delegation: Option<Delegation>,
+    /// A delegated task ended here and the panel is free again, for the app
+    /// to set up anew as a panel opened by the user is.
+    released: bool,
     /// What the user asked the delegating agent, while its task is this
     /// panel's: a rebuilt agent keeps judging by it.
     inherited_intent: Option<termide_agent_core::IntentLog>,
@@ -1233,6 +1236,7 @@ impl AgentPanel {
             run_buttons: Vec::new(),
             queued_texts: VecDeque::new(),
             delegation: None,
+            released: false,
             inherited_intent: setup.inherited_intent.clone(),
             panel_id,
             agent_hops: 0,

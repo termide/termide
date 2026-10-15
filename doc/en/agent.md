@@ -1569,8 +1569,10 @@ delegating agent hears that you stopped it, with what was said so far.
 `Ctrl+T` takes the task over, after a confirmation: it ends for the
 delegating agent with what the delegate had said, and the conversation is
 yours to go on with. Once the
-task is over, the panel goes back to its banner, free for the next one, and
-the task's session stays in the list. Closing the panel ends the task as
+task is over, the panel goes back to its banner, set up as a panel you open
+— the default agent, connection and mode — in the directory it worked in
+before it was taken, and free for the next task; the task's session stays in
+the list. Closing the panel ends the task as
 well; it asks first, naming the agent waiting for the task, even when
 nothing is running at that moment. Only the panels of the delegating panel's project take its tasks.
 

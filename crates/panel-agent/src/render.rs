@@ -1255,8 +1255,8 @@ impl AgentPanel {
         ];
         if self.external {
             // An external agent has its own model and permission model, unless
-            // termide judges its calls or maps its modes.
-            segments.push(StatusSegment::new(" (acp)", SegmentKind::Label));
+            // termide judges its calls or maps its modes; the connection chip
+            // names the program, the chips it lacks say the rest.
             if self.runtime.follows_mode() {
                 segments.extend([
                     sep(),

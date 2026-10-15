@@ -194,7 +194,10 @@ empty log. The panel (`panel-agent/src/delegation.rs`) forwards every agent
 event to the waiting call, which shows them through the same
 `SubagentReport` as a hidden run, and ends the task (`DelegateEnd`) once
 nothing runs, is paused, waits to retry or holds a card; then it goes back to
-the banner on a fresh session. Its input, pastes, session keys and status
+the banner on a fresh session, and the app, which notices the panel released
+on its next tick, rebuilds it in place as a panel the user opens — default
+agent, connection and mode, the directory it had before it was taken, its
+number kept. A panel the user took a task over in stays as it is. Its input, pastes, session keys and status
 actions take nothing while the task runs; `Esc` stops it, `Ctrl+T` takes it
 over, closing the panel ends it. A stop by the user or a take-over returns
 what the delegate said with a note; the parent's stop cancels the panel's
