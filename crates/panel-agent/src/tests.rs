@@ -267,6 +267,17 @@ fn chord(code: KeyCode, modifiers: KeyModifiers) -> KeyChord {
     }
 }
 
+/// The screen row of the state strip's row standing for `target`, as last
+/// drawn.
+fn strip_row(panel: &AgentPanel, target: crate::strip::StripTarget) -> u16 {
+    panel
+        .strip_hits
+        .iter()
+        .find(|(_, t, _)| *t == target)
+        .map(|(y, ..)| *y)
+        .unwrap_or_else(|| panic!("the strip shows {target:?}"))
+}
+
 fn strip_text(lines: &[Line<'_>]) -> Vec<String> {
     lines
         .iter()
@@ -290,10 +301,13 @@ fn the_state_strip_shows_queued_messages_until_the_agent_takes_them() {
         .all(|i| !matches!(i, Item::Notice { .. } | Item::User { .. })));
     let lines = strip_text(&panel.state_lines(40));
     assert!(lines[0].starts_with('╌'));
-    assert!(lines[1].starts_with("› first") && lines[1].ends_with("queued"));
+    assert!(lines[1].starts_with("› Queued  first"), "{lines:?}");
     assert!(!lines[1].contains("second line"));
-    assert_eq!(lines[2], "› two");
-    assert!(lines[4].contains("2 more queued"), "{lines:?}");
+    assert!(lines[2].starts_with("› Queued  two"), "{lines:?}");
+    // How long each has waited at the right edge; nothing to call off yet.
+    let unit = termide_i18n::t().time_unit_secs();
+    assert!(lines[2].trim_end().ends_with(unit), "{lines:?}");
+    assert!(lines[4].starts_with("› 2 more queued"), "{lines:?}");
     assert!(lines.iter().all(|l| termide_ui::str_display_width(l) <= 40));
     // The agent takes the two oldest; the strip follows its count.
     panel.apply(AgentEvent::QueueUpdate {
@@ -301,7 +315,7 @@ fn the_state_strip_shows_queued_messages_until_the_agent_takes_them() {
         follow_up: 0,
     });
     let lines = strip_text(&panel.state_lines(40));
-    assert!(lines[1].starts_with("› three"), "{lines:?}");
+    assert!(lines[1].starts_with("› Queued  three"), "{lines:?}");
     assert_eq!(lines.len(), 4);
     panel.apply(AgentEvent::QueueUpdate {
         steering: 0,
@@ -318,7 +332,7 @@ fn the_state_strip_sits_between_the_transcript_and_the_input() {
     let rows = render_text(&mut panel, 40, 12);
     let at = rows
         .iter()
-        .position(|r| r.starts_with("› waiting its turn"))
+        .position(|r| r.starts_with("› Queued  waiting its turn"))
         .expect("queued row");
     assert!(rows[at - 1].starts_with('╌'), "{rows:?}");
     // The input bar's titled border follows the strip directly.
@@ -337,7 +351,15 @@ fn a_pending_pause_lives_in_the_state_strip_and_a_pause_in_the_transcript() {
     panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
     let t = termide_i18n::t();
     let lines = strip_text(&panel.state_lines(60));
-    assert!(lines[1].contains(t.agent_notice_will_pause()), "{lines:?}");
+    assert!(
+        lines[1].starts_with(&format!(
+            "‖ {}  {}",
+            t.agent_strip_pause(),
+            t.agent_strip_after_step()
+        )),
+        "{lines:?}"
+    );
+    assert!(lines[1].trim_end().ends_with('✕'), "{lines:?}");
     panel.apply(AgentEvent::Paused);
     panel.apply(AgentEvent::AgentEnd);
     // Once the pause takes effect the strip clears: the transcript's `‖`
@@ -448,7 +470,7 @@ fn the_prompt_border_carries_the_run_controls() {
     // The strip's pending-pause line withdraws it too.
     click(&mut panel, "[‖]");
     let _ = render_text(&mut panel, width, height);
-    let row = panel.pause_row.expect("the strip shows the pending pause");
+    let row = strip_row(&panel, crate::strip::StripTarget::Pause);
     panel.handle_mouse(
         MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
@@ -2690,7 +2712,7 @@ fn bare_goal_and_loop_report_rather_than_stop() {
 /// next run.
 fn looping_panel() -> AgentPanel {
     let mut panel = panel(vec![reply("built")]);
-    assert!(panel.autorun_rows().is_empty());
+    assert!(panel.strip_rows(80).is_empty());
     type_text(&mut panel, "/loop 5m check the build");
     panel.submit();
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -2714,10 +2736,10 @@ fn an_active_goal_and_loop_show_in_the_state_strip() {
     type_text(&mut panel, "/goal do the thing");
     panel.submit();
 
-    let rows = panel.autorun_rows();
+    let rows = panel.strip_rows(80);
     assert_eq!(rows.len(), 2, "{rows:?}");
     let colors = ThemeColors::default();
-    let lines = crate::render::autorun_strip(&rows, 80, &colors);
+    let lines = crate::strip::strip_lines(&rows, 80, &colors);
     let text = |line: &Line| {
         line.spans
             .iter()
@@ -2726,7 +2748,7 @@ fn an_active_goal_and_loop_show_in_the_state_strip() {
     };
     let goal = text(&lines[0]);
     assert!(
-        goal.starts_with("◎ Heading for the goal do the thing"),
+        goal.starts_with("◎ Heading for the goal  do the thing"),
         "{goal}"
     );
     assert_eq!(
@@ -2735,41 +2757,37 @@ fn an_active_goal_and_loop_show_in_the_state_strip() {
         "label in accent"
     );
     assert_eq!(
-        lines[0].spans[1].style.fg,
+        lines[0].spans[2].style.fg,
         Some(colors.disabled),
         "goal dim"
     );
     let stop = lines[0].spans.last().unwrap();
     assert_eq!(
         (stop.content.as_ref(), stop.style.fg),
-        ("✕", Some(colors.info))
+        (" ✕", Some(colors.info))
     );
     // No turn count and no cap: only how long the goal has run, then `✕`.
     assert!(!goal.contains('/'), "{goal}");
     let unit = termide_i18n::t().time_unit_secs();
     assert!(goal.trim_end().ends_with(&format!("{unit} ✕")), "{goal}");
+    // The loop's period and count to the left, its time at the right.
     let looped = text(&lines[1]);
     assert!(
-        looped.starts_with("↺ Repeating every 5m check the build"),
+        looped.starts_with(&format!(
+            "↺ Repeating every 5m · 1/{LOOP_MAX_ITERATIONS} · next in"
+        )),
         "{looped}"
     );
-    assert_eq!(
-        lines[1].spans[0].style.fg,
-        Some(colors.info),
-        "label in accent"
-    );
-    assert!(looped.contains("next run in"), "{looped}");
+    assert!(looped.contains("  check the build"), "{looped}");
     assert!(
-        looped
-            .trim_end()
-            .ends_with(&format!("1/{LOOP_MAX_ITERATIONS} ✕")),
+        looped.trim_end().ends_with(&format!("{unit} ✕")),
         "{looped}"
     );
     for line in &lines {
         let text = text(line);
         assert!(termide_ui::str_display_width(&text) <= 80);
         // The button sits where a click looks for it.
-        let column = crate::render::autorun_stop_column(80) as usize;
+        let column = crate::strip::strip_stop_column(80) as usize;
         assert_eq!(text.chars().nth(column), Some('✕'), "{text:?}");
     }
 
@@ -2777,7 +2795,7 @@ fn an_active_goal_and_loop_show_in_the_state_strip() {
     panel.submit();
     type_text(&mut panel, "/loop stop");
     panel.submit();
-    assert!(panel.autorun_rows().is_empty());
+    assert!(panel.strip_rows(80).is_empty());
 }
 
 /// A click on the `✕` of a goal or loop row stops just that one.
@@ -2789,16 +2807,12 @@ fn the_strip_stop_button_ends_a_goal_or_loop() {
     let (width, height) = (80, 30);
     let click_stop = |panel: &mut AgentPanel, kind: crate::render::Autorun| {
         let _ = render_text(panel, width, height);
-        let (at, _) = *panel
-            .autorun_stops
-            .iter()
-            .find(|(_, k)| *k == kind)
-            .expect("the row shows its stop button");
+        let row = strip_row(panel, crate::strip::StripTarget::Autorun(kind));
         panel.handle_mouse(
             MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
-                column: at.x,
-                row: at.y,
+                column: panel.strip_stop_x,
+                row,
                 modifiers: KeyModifiers::NONE,
             },
             Rect::new(0, 0, width, height),
@@ -2806,11 +2820,10 @@ fn the_strip_stop_button_ends_a_goal_or_loop() {
     };
     // A click on the row away from `✕` brings the loop's run into view.
     let _ = render_text(&mut panel, width, height);
-    let (at, _) = *panel
-        .autorun_stops
-        .iter()
-        .find(|(_, k)| *k == crate::render::Autorun::Loop)
-        .unwrap();
+    let row = strip_row(
+        &panel,
+        crate::strip::StripTarget::Autorun(crate::render::Autorun::Loop),
+    );
     let block = panel
         .autorun_block(crate::render::Autorun::Loop)
         .expect("the loop's run is in the transcript");
@@ -2818,7 +2831,7 @@ fn the_strip_stop_button_ends_a_goal_or_loop() {
         MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: 4,
-            row: at.y,
+            row,
             modifiers: KeyModifiers::NONE,
         },
         Rect::new(0, 0, width, height),
@@ -2832,7 +2845,7 @@ fn the_strip_stop_button_ends_a_goal_or_loop() {
     click_stop(&mut panel, crate::render::Autorun::Goal);
     assert!(panel.goal_task.is_none());
     let _ = render_text(&mut panel, width, height);
-    assert!(panel.autorun_stops.is_empty());
+    assert!(panel.strip_hits.is_empty());
 }
 
 fn roles(messages: &[Message]) -> Vec<&'static str> {
@@ -8974,36 +8987,44 @@ fn a_reset_already_past_offers_no_wait() {
 #[test]
 fn running_subagents_show_in_the_state_strip() {
     let colors = ThemeColors::default();
-    let row = |n: usize| {
-        (
-            "search".to_string(),
-            format!("find thing {n}"),
-            "· read src/lib.rs".to_string(),
-            65_000,
-        )
-    };
+    let mut panel = panel(vec![]);
+    for n in 1..=5 {
+        panel.transcript.push(Item::Tool {
+            call: ToolCall {
+                id: format!("call-{n}"),
+                name: "task".into(),
+                arguments: serde_json::json!({ "agent": "search", "prompt": format!("find thing {n}") }),
+                extra_content: None,
+            },
+            result: None,
+            live: Some("started\n· read src/lib.rs".into()),
+            at: String::new(),
+            duration_ms: None,
+            waited_ms: None,
+            waiting: false,
+        });
+    }
     let text = |line: &Line| {
         line.spans
             .iter()
             .map(|s| s.content.as_ref())
             .collect::<String>()
     };
-    let lines = crate::render::task_strip(&[row(1)], 80, &colors);
-    assert_eq!(lines.len(), 1);
+    let rows = panel.strip_rows(80);
+    let lines = crate::strip::strip_lines(&rows, 80, &colors);
+    assert_eq!(lines.len(), 4);
     let first = text(&lines[0]);
     let head = format!(
-        "& {} search · find thing 1",
+        "& {} · search  find thing 1",
         termide_i18n::t().agent_tool_task()
     );
     assert!(first.starts_with(&head), "{first}");
+    // Its last step, then the time; no spinner, and no `✕` yet.
     assert!(first.contains("· read src/lib.rs"), "{first}");
-    let clock = crate::transcript::fmt_dur(65_000);
-    assert!(first.trim_end().ends_with(&clock), "{first}");
+    let unit = termide_i18n::t().time_unit_secs();
+    assert!(first.trim_end().ends_with(unit), "{first}");
     assert!(termide_ui::str_display_width(&first) <= 80, "{first}");
-
-    let lines = crate::render::task_strip(&(1..=5).map(row).collect::<Vec<_>>(), 80, &colors);
-    assert_eq!(lines.len(), 4);
-    assert_eq!(text(&lines[3]), "& +2");
+    assert_eq!(text(&lines[3]).trim_end(), "& +2");
 }
 
 /// A session log in `dir` holding one request, as the panel would have left
@@ -9637,7 +9658,11 @@ fn a_goal_set_during_a_run_ends_with_a_stop_and_leaves_the_queue_alone() {
     type_text(&mut panel, "are you stuck?");
     panel.submit();
     assert_eq!(
-        panel.queued_texts.iter().collect::<Vec<_>>(),
+        panel
+            .queued_texts
+            .iter()
+            .map(|(text, _)| text)
+            .collect::<Vec<_>>(),
         ["are you stuck?"]
     );
     panel.abort();
@@ -9662,7 +9687,11 @@ fn stopping_withdraws_the_queued_loop_turn() {
     panel.abort();
     assert!(panel.loop_task.is_none());
     assert_eq!(
-        panel.queued_texts.iter().collect::<Vec<_>>(),
+        panel
+            .queued_texts
+            .iter()
+            .map(|(text, _)| text)
+            .collect::<Vec<_>>(),
         ["are you stuck?"]
     );
 }
@@ -10254,7 +10283,7 @@ fn clicking_a_running_tasks_row_asks_for_its_panel() {
     // The strip's row, below the block that stands for the call.
     let y = rows
         .iter()
-        .rposition(|row| row.contains("search · find the loader") && row.starts_with('&'))
+        .rposition(|row| row.contains("· search  find the loader") && row.starts_with('&'))
         .expect("the task's row") as u16;
     let events = panel.handle_mouse(
         MouseEvent {
@@ -10270,4 +10299,134 @@ fn clicking_a_running_tasks_row_asks_for_its_panel() {
         event,
         PanelEvent::FocusDelegate { panel, call } if *panel == own && call == "call-9"
     )));
+}
+
+/// A backend whose agent moved one command to the background, which
+/// termide still runs.
+struct Backgrounded;
+
+impl Backend for Backgrounded {
+    fn prompt(&self, _message: UserMessage) -> Result<(), PromptError> {
+        Err(PromptError::Stopped)
+    }
+    fn steer(&self, _message: UserMessage) {}
+    fn queue_lens(&self) -> (usize, usize) {
+        (0, 0)
+    }
+    fn abort(&self) {}
+    fn is_busy(&self) -> bool {
+        false
+    }
+    fn drain(&self) -> Vec<AgentEvent> {
+        Vec::new()
+    }
+    fn update(&self, _update: Box<dyn FnOnce(&mut Agent) + Send>) -> Result<(), PromptError> {
+        Err(PromptError::Unsupported)
+    }
+    fn compact(&self, _focus: Option<String>) -> Result<(), PromptError> {
+        Err(PromptError::Unsupported)
+    }
+    fn background_calls(&self) -> Vec<termide_agent_core::BackgroundCall> {
+        vec![termide_agent_core::BackgroundCall {
+            call: ToolCall {
+                id: "t1".into(),
+                name: "bash".into(),
+                arguments: serde_json::json!({ "command": "cargo test --workspace" }),
+                extra_content: None,
+            },
+            elapsed: std::time::Duration::from_secs(134),
+        }]
+    }
+    fn into_agent(self: Box<Self>) -> Option<Agent> {
+        None
+    }
+}
+
+#[test]
+fn a_command_moved_to_the_background_shows_in_the_state_strip() {
+    let mut panel = panel(vec![]);
+    let call = ToolCall {
+        id: "t1".into(),
+        name: "bash".into(),
+        arguments: serde_json::json!({ "command": "cargo test --workspace" }),
+        extra_content: None,
+    };
+    panel.transcript.push(Item::Tool {
+        call: call.clone(),
+        result: Some(ToolResultMessage::text(&call, "moved to the background")),
+        live: None,
+        at: String::new(),
+        duration_ms: Some(10),
+        waited_ms: None,
+        waiting: false,
+    });
+    // A block after it, so selecting it is seen.
+    let read = ToolCall {
+        id: "r1".into(),
+        name: "read".into(),
+        arguments: serde_json::json!({ "path": "a.rs" }),
+        extra_content: None,
+    };
+    panel.transcript.push(Item::Tool {
+        call: read.clone(),
+        result: Some(ToolResultMessage::text(&read, "text")),
+        live: None,
+        at: String::new(),
+        duration_ms: Some(10),
+        waited_ms: None,
+        waiting: false,
+    });
+    panel.selected = 1;
+    panel.runtime = Box::new(Backgrounded);
+    let rows = render_text(&mut panel, 80, 20);
+    let head = format!(
+        "$ {}  cargo test --workspace",
+        termide_i18n::t().agent_tool_bash()
+    );
+    let clock = crate::transcript::fmt_dur(134_000);
+    let y = rows
+        .iter()
+        .rposition(|row| row.starts_with(&head) && row.trim_end().ends_with(&clock))
+        .unwrap_or_else(|| panic!("the command's row: {rows:#?}")) as u16;
+    panel.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 2,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        },
+        ratatui::layout::Rect::new(0, 0, 80, 20),
+    );
+    assert_eq!(panel.selected, 0);
+    assert!(panel.chat_focus);
+}
+
+/// A retry waited for is a row like any other: the failure, when it goes,
+/// how long it has waited — and `✕` gives it up.
+#[test]
+fn the_strip_stop_button_gives_up_a_retry_wait() {
+    let mut panel = panel(vec![limited(), reply("done")]);
+    panel.on_limit = LimitPolicy::Wait;
+    panel.send("do it".to_string());
+    settle(&mut panel);
+    assert!(panel.retry_wait.is_some());
+    let (width, height) = (80, 30);
+    let rows = render_text(&mut panel, width, height);
+    let row = strip_row(&panel, crate::strip::StripTarget::RetryWait);
+    let line = &rows[row as usize];
+    assert!(
+        line.starts_with("↻ Usage limit reached  trying again at"),
+        "{line}"
+    );
+    assert!(line.trim_end().ends_with('✕'), "{line}");
+    panel.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: panel.strip_stop_x,
+            row,
+            modifiers: KeyModifiers::NONE,
+        },
+        Rect::new(0, 0, width, height),
+    );
+    assert!(panel.retry_wait.is_none());
 }

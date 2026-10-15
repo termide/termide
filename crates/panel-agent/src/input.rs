@@ -1597,53 +1597,13 @@ impl AgentPanel {
                     && event.column < area.x + area.width
                     && event.row >= area.y
                     && event.row < area.y + area.height;
-                // The state strip's pending-pause line withdraws the pause.
-                if self.pause_requested && self.pause_row == Some(event.row) {
-                    self.cancel_pause();
-                    return vec![PanelEvent::NeedsRedraw];
-                }
-                // A goal or loop row's `✕` stops it, as `/goal stop` and
-                // `/loop stop` do (one cell of slack either side).
-                if let Some(&(_, kind)) = self
-                    .autorun_stops
-                    .iter()
-                    .find(|(at, _)| at.y == event.row && event.column.abs_diff(at.x) <= 1)
+                // A row of the state strip: its `✕` (one cell of slack
+                // either side) calls it off, the rest of it shows it.
+                if let Some(&(_, target, stop)) =
+                    self.strip_hits.iter().find(|(y, ..)| *y == event.row)
                 {
-                    match kind {
-                        crate::render::Autorun::Goal => self.stop_goal(),
-                        crate::render::Autorun::Loop => self.stop_loop(),
-                    }
-                    self.settle_restored();
-                    return vec![PanelEvent::NeedsRedraw];
-                }
-                // Elsewhere on the row, its latest run comes into view.
-                if let Some(&(_, kind)) =
-                    self.autorun_stops.iter().find(|(at, _)| at.y == event.row)
-                {
-                    if let Some(index) = self.autorun_block(kind) {
-                        self.chat_focus = true;
-                        self.follow = false;
-                        self.selected = index;
-                        self.scroll_selected_into_view();
-                    }
-                    return vec![PanelEvent::NeedsRedraw];
-                }
-                // A running subagent's row selects its block and brings it
-                // into view; a task running in a panel of its own brings
-                // that panel forward.
-                if let Some(&(_, index)) = self.task_rows.iter().find(|(y, _)| *y == event.row) {
-                    self.chat_focus = true;
-                    self.follow = false;
-                    self.selected = index;
-                    self.scroll_selected_into_view();
-                    let mut events = vec![PanelEvent::NeedsRedraw];
-                    if let Some(Item::Tool { call, .. }) = self.transcript.items().get(index) {
-                        events.push(PanelEvent::FocusDelegate {
-                            panel: self.panel_id,
-                            call: call.id.clone(),
-                        });
-                    }
-                    return events;
+                    let on_stop = stop && event.column.abs_diff(self.strip_stop_x) <= 1;
+                    return self.click_strip(target, on_stop);
                 }
                 // Under the banner the notices take no clicks: the banner's
                 // own rows did above.

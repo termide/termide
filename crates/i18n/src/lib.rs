@@ -711,6 +711,17 @@ pub trait Translation: Send + Sync {
     fn agent_notice_goal_working(&self) -> &str;
     /// Agent panel state strip: the label of a message queued for the next turn.
     fn agent_state_queued(&self) -> &str;
+    /// Agent panel state strip: the label of a pause asked for, not reached yet.
+    fn agent_strip_pause(&self) -> &str;
+    /// Agent panel state strip: when a pause asked for takes effect.
+    fn agent_strip_after_step(&self) -> &str;
+    /// Agent panel state strip: a goal's judge deciding whether it is reached.
+    fn agent_strip_checking(&self) -> &str;
+    /// Agent panel state strip: when a failed request is tried again; the
+    /// failure is the row's label.
+    fn agent_strip_retry_at_fmt(&self, time: &str, left: &str) -> String;
+    /// Agent panel state strip: the wait for a loop's next run.
+    fn agent_strip_next_fmt(&self, wait: &str) -> String;
     /// Agent panel state strip: queued messages beyond the ones shown.
     fn agent_state_queued_more(&self, count: usize) -> String;
     fn agent_input_placeholder(&self) -> &str;

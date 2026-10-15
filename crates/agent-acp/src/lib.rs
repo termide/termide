@@ -32,10 +32,10 @@ use termide_agent_core::{
 use termide_agent_core::{
     expand_env, now_millis, AcpConfig, AcpFlavor, Agent, AgentCommand, AgentEvent,
     AssistantContent, AssistantMessage, Backend, BackendModel, BackendOption, BackendSetup,
-    CancelToken, ExternalSessionRef, Failure, FailureKind, Hooks, HostTools, Message, Mode,
-    ModeHandle, PermissionHooks, PlanPrompt, PromptError, StopReason, StreamEvent, ToolCall,
-    ToolContext, ToolDecision, ToolRegistry, ToolResultMessage, Usage, UserMessage, ACP_PROVIDER,
-    RECAP_LIMIT,
+    BackgroundCall, CancelToken, ExternalSessionRef, Failure, FailureKind, Hooks, HostTools,
+    Message, Mode, ModeHandle, PermissionHooks, PlanPrompt, PromptError, StopReason, StreamEvent,
+    ToolCall, ToolContext, ToolDecision, ToolRegistry, ToolResultMessage, Usage, UserMessage,
+    ACP_PROVIDER, RECAP_LIMIT,
 };
 use termide_agent_mcp::{McpServer, SERVER_NAME};
 
@@ -172,6 +172,9 @@ struct Shared {
     host_tools: Mutex<Option<HostTools>>,
     /// The server of termide's tools, alive as long as the agent.
     mcp_server: Mutex<Option<McpServer>>,
+    /// Calls of termide's tools the agent closed while the server still ran
+    /// them (see [`Backend::background_calls`]), as their blocks have them.
+    background: Mutex<Vec<ToolCall>>,
     /// Whether termide's MCP servers have all answered, which Codex and
     /// Gemini CLI wait on (for [`MCP_SETTLE`] at most) to open their session.
     mcp_settled: Mutex<bool>,
@@ -464,6 +467,7 @@ impl AcpRuntime {
                 }
             })),
             mcp_server: Mutex::new(None),
+            background: Mutex::new(Vec::new()),
             mcp_settled: Mutex::new(false),
             mcp_settled_changed: Condvar::new(),
             announced: Mutex::new(HashMap::new()),
@@ -655,6 +659,16 @@ impl Backend for AcpRuntime {
                 .shared
                 .notify("session/cancel", json!({ "sessionId": session_id }));
         }
+        // A call the agent moved to the background is no longer its turn's,
+        // so its cancel leaves it running: the stop takes it down here.
+        if let Some(server) = &*self
+            .shared
+            .mcp_server
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+        {
+            server.cancel_running();
+        }
         // No turn of ours answers the cancel: the agent's own run ends here.
         self.shared
             .finish_unsolicited(StopReason::Aborted, Some("aborted".to_string()));
@@ -662,6 +676,10 @@ impl Backend for AcpRuntime {
 
     fn is_busy(&self) -> bool {
         self.shared.busy.load(Ordering::Acquire)
+    }
+
+    fn background_calls(&self) -> Vec<BackgroundCall> {
+        self.shared.background_calls()
     }
 
     fn drain(&self) -> Vec<AgentEvent> {
@@ -1432,12 +1450,14 @@ impl Shared {
             // [`Self::requeue`]) may have arrived meanwhile: it runs now.
             self.run_queued();
             // Output that came after the turn's answer, before it was
-            // closed, is the agent going on by itself.
-            let late = self
-                .open_message
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .is_some()
+            // closed, is the agent going on by itself; so is a call it moved
+            // to the background, which it takes up again once it ends.
+            let late = self.serving_call()
+                || self
+                    .open_message
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .is_some()
                 || !self
                     .calls
                     .lock()
@@ -1994,8 +2014,52 @@ impl Shared {
         }
     }
 
+    /// The calls the agent moved to the background that the server still
+    /// runs, each matched to one running call; those it no longer runs are
+    /// dropped.
+    fn background_calls(&self) -> Vec<BackgroundCall> {
+        let mut running = self
+            .mcp_server
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(McpServer::running_calls)
+            .unwrap_or_default();
+        let mut calls = Vec::new();
+        self.background
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|call| {
+                let Some(at) = running
+                    .iter()
+                    .position(|r| r.name == call.name && r.arguments == call.arguments)
+                else {
+                    return false;
+                };
+                let elapsed = running.remove(at).elapsed;
+                calls.push(BackgroundCall {
+                    call: call.clone(),
+                    elapsed,
+                });
+                true
+            });
+        calls.sort_by(|a, b| b.elapsed.cmp(&a.elapsed));
+        calls
+    }
+
+    /// Whether termide's MCP server runs a call for the agent. Claude Code
+    /// closes a call it moved to the background, but the command goes on.
+    fn serving_call(&self) -> bool {
+        self.mcp_server
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(McpServer::is_running)
+    }
+
     /// Open a run for the agent working by itself, and watch for its end:
-    /// the agent quiet long enough with no call open.
+    /// the agent quiet long enough with no call open, its own or one
+    /// termide's MCP server still runs for it.
     fn begin_unsolicited(self: &Arc<Self>) {
         if self
             .busy
@@ -2021,6 +2085,16 @@ impl Shared {
                 *this.conn.lock().unwrap_or_else(PoisonError::into_inner),
                 Conn::Failed(_)
             );
+            // A call termide still runs for the agent counts as its work:
+            // the quiet is counted from its end, which the agent then takes up.
+            let serving = this.serving_call();
+            if serving {
+                *this
+                    .last_update
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = Instant::now();
+                this.last_was_text.store(false, Ordering::Release);
+            }
             let quiet = Duration::from_millis(if this.last_was_text.load(Ordering::Acquire) {
                 this.quiet_after_text_ms.load(Ordering::Acquire)
             } else {
@@ -2036,7 +2110,8 @@ impl Shared {
                     .announced
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
-                    .is_empty();
+                    .is_empty()
+                || serving;
             let silent = this
                 .last_update
                 .lock()
@@ -2759,11 +2834,29 @@ impl Shared {
         // leaves out, so its block draws as for the built-in agent.
         let host_details = host.and_then(|(name, arguments)| {
             call.name = name;
-            self.mcp_server
+            let server = self
+                .mcp_server
                 .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .as_ref()?
-                .take_details(&call.name, &arguments)
+                .unwrap_or_else(PoisonError::into_inner);
+            let server = server.as_ref()?;
+            // Closed while termide still runs it: the agent moved it to the
+            // background, and the panel shows it until it ends.
+            if server
+                .running_calls()
+                .iter()
+                .any(|running| running.name == call.name && running.arguments == arguments)
+            {
+                self.background
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(ToolCall {
+                        id: call.id.clone(),
+                        name: call.name.clone(),
+                        arguments: arguments.clone(),
+                        extra_content: None,
+                    });
+            }
+            server.take_details(&call.name, &arguments)
         });
         // Codex reports an MCP call's result as the MCP result, not as content.
         let mut text = content_text(&update["content"]);
@@ -5812,6 +5905,91 @@ mod tests {
                 "assistant:background done"
             ]
         );
+    }
+
+    /// Runs until `release` is set or the call is cancelled.
+    struct Held(Arc<AtomicBool>);
+
+    impl termide_agent_core::Tool for Held {
+        fn name(&self) -> &str {
+            "held"
+        }
+        fn description(&self) -> &str {
+            "Run until released"
+        }
+        fn parameters(&self) -> Value {
+            json!({ "type": "object" })
+        }
+        fn execute(
+            &self,
+            call: &ToolCall,
+            _ctx: &ToolContext,
+            _on_update: &mut dyn FnMut(termide_agent_core::ToolUpdate),
+            cancel: &CancelToken,
+        ) -> ToolResultMessage {
+            while !self.0.load(Ordering::Acquire) && !cancel.is_cancelled() {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            ToolResultMessage::text(call, "done")
+        }
+    }
+
+    /// Claude Code closes a call it moves to the background, but termide's
+    /// MCP server still runs it: the run lasts until it ends.
+    #[test]
+    fn a_call_termide_still_runs_keeps_the_agents_run_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = self_starting_agent(dir.path().to_path_buf(), "noted");
+        let release = Arc::new(AtomicBool::new(false));
+        let mut tools = termide_agent_core::ToolRegistry::new();
+        tools.insert(Arc::new(Held(Arc::clone(&release))));
+        let server = McpServer::start(
+            tools,
+            Box::new(termide_agent_core::NoHooks),
+            ToolContext::new(PathBuf::new()),
+        )
+        .unwrap();
+        let (url, auth) = (server.url(), format!("Bearer {}", server.token()));
+        *runtime.shared.mcp_server.lock().unwrap() = Some(server);
+        let call = std::thread::spawn(move || {
+            post_mcp(
+                &url,
+                &auth,
+                &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                         "params": { "name": "held", "arguments": {} } }),
+            )
+        });
+        while !runtime.shared.serving_call() {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        runtime.prompt(UserMessage::text("first")).unwrap();
+        events_until(&runtime, |e| matches!(e, AgentEvent::AgentEnd));
+        // Well past the quiet that would end it, the call holds the run.
+        std::thread::sleep(Duration::from_millis(1000));
+        assert!(runtime.is_busy());
+        assert!(!runtime
+            .drain()
+            .iter()
+            .any(|e| matches!(e, AgentEvent::AgentEnd)));
+        // Claude Code closes the call it moved to the background; termide
+        // still runs it, so it is the panel's to show.
+        runtime.shared.on_update(&json!({
+            "sessionUpdate": "tool_call", "toolCallId": "t1", "kind": "other",
+            "status": "pending", "title": "mcp__termide__held", "rawInput": {},
+        }));
+        runtime.shared.on_update(&json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed",
+            "content": [{ "type": "content", "content": { "type": "text", "text": "moved" } }],
+        }));
+        let background = runtime.background_calls();
+        assert_eq!(background.len(), 1, "{background:?}");
+        assert_eq!(background[0].call.id, "t1");
+        assert_eq!(background[0].call.name, "held");
+        release.store(true, Ordering::Release);
+        call.join().unwrap();
+        assert!(runtime.background_calls().is_empty());
+        events_until(&runtime, |e| matches!(e, AgentEvent::AgentEnd));
+        assert!(!runtime.is_busy());
     }
 
     #[test]

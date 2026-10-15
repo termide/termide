@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reasoning sent back to local models** ([#62](https://github.com/termide/termide/issues/62)). An OpenAI-compatible connection takes `send_reasoning` (`auto`, `on`, `off`; **Send reasoning back** on its settings page): it sends the model's reasoning back as `reasoning_content` with its earlier answers and, with `enable_thinking`, asks the chat template for `preserve_thinking`, without which Qwen 3.6 loses its earlier thoughts and answers worse. `auto` turns it on where the reasoning level goes in `enable_thinking`, local servers by default.
 - **Skills from `~/.agents/skills/`.** The user's cross-agent skills directory, where `npx skills add -g` and Codex, pi and others keep skills, is read as the lowest skill level.
 
+### Changed
+- **One look for every row of the state strip.** A retry waited for, a pause asked for, a queued message, `/goal`, `/loop`, a subagent and a background command now read the same way: glyph and what it is in the accent, dim facts and what it works on, and at the right edge how long it has gone on and `✕` where it can be called off. The loop shows how long it has run, its period, count and next run on the left; a queued message and a pending pause show how long they have waited. No row spins any more — the transcript's live line does — and a retry wait gets a `✕` that gives it up.
+
+### Fixed
+- **A command Claude Code moved to the background stays in sight.** To take a message typed while a long command of termide's tools ran, Claude Code moves the command to the background and answers; the run then ended, though the command went on, and nothing showed it. The agent's own run now goes on while termide still runs a call for it: the clock ticks until the command ends and the agent has taken it up, the state strip pins a row for the command (`$ Running cargo test …` with its own clock; a click brings its block into view), and `Esc` stops the command too.
+
 ## [0.41.0] - 2026-10-12
 
 [0.41.0]: https://github.com/termide/termide/releases/tag/0.41.0

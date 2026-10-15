@@ -21,6 +21,7 @@ mod runtime;
 mod select;
 mod session_ops;
 mod slash;
+mod strip;
 mod submit;
 mod toolset;
 mod transcript;
@@ -576,6 +577,9 @@ struct LoopTask {
     /// for the log: a reopen waits only what is left.
     due_ms: Option<u64>,
     iterations: usize,
+    /// When the loop was started (or taken up again from the log), for the
+    /// elapsed time in the state strip.
+    started: Instant,
 }
 
 /// A running `/goal`: work autonomously toward `goal`. After each work turn a
@@ -895,6 +899,8 @@ pub struct AgentPanel {
     /// A `/pause` was asked for and the run has not reached a step boundary
     /// yet; shown in the state strip.
     pause_requested: bool,
+    /// When the last pause was asked for, for the strip's clock.
+    pause_requested_at: Instant,
     /// When a stop was asked for, while the run has not ended yet: the stop
     /// control is red and the live line ticks how long the stop takes.
     stop_requested: Option<Instant>,
@@ -922,25 +928,22 @@ pub struct AgentPanel {
     /// running call had already waited before it: the wait is a pause of
     /// its own, shown on the call and kept out of its duration.
     permission_wait: Option<(Instant, u32)>,
-    /// The screen row of the state strip's pause line, a click target that
-    /// continues the run.
-    pause_row: Option<u16>,
     /// When each running subagent (by its `task` call's id) was first seen,
     /// for the state strip's clock.
     task_clocks: HashMap<String, Instant>,
-    /// The screen rows of the state strip's subagent lines and the block
-    /// each stands for: a click brings the block into view.
-    task_rows: Vec<(u16, usize)>,
-    /// Where the state strip's goal and loop rows show their stop button
-    /// (the row is its `y`), from the last render.
-    autorun_stops: Vec<(ratatui::layout::Position, render::Autorun)>,
+    /// The state strip's rows as last drawn: each one's screen row, what it
+    /// stands for and whether it has a `✕`; a click maps back to one.
+    strip_hits: Vec<(u16, strip::StripTarget, bool)>,
+    /// The column of the strip's `✕` buttons as last drawn.
+    strip_stop_x: u16,
     /// The run controls last put on the prompt's border, in order, so a
     /// click maps back to one.
     run_buttons: Vec<RunButton>,
     /// Texts of the steering messages sent while the agent works, oldest
     /// first, shown in the state strip until the agent takes them. Kept in
-    /// step with the runtime's steering count (`QueueUpdate`).
-    queued_texts: VecDeque<String>,
+    /// step with the runtime's steering count (`QueueUpdate`); each with
+    /// when it was sent, for the strip's clock.
+    queued_texts: VecDeque<(String, Instant)>,
     /// The task another agent delegated to this panel, while it runs.
     delegation: Option<Delegation>,
     /// A delegated task ended here and the panel is free again, for the app
@@ -1221,6 +1224,7 @@ impl AgentPanel {
             host_focused: true,
             run_paused: false,
             pause_requested: false,
+            pause_requested_at: Instant::now(),
             stop_requested: None,
             pause_start: None,
             resuming: false,
@@ -1229,10 +1233,9 @@ impl AgentPanel {
             logged_retry: None,
             run_start_due: false,
             permission_wait: None,
-            pause_row: None,
             task_clocks: HashMap::new(),
-            task_rows: Vec::new(),
-            autorun_stops: Vec::new(),
+            strip_hits: Vec::new(),
+            strip_stop_x: 0,
             run_buttons: Vec::new(),
             queued_texts: VecDeque::new(),
             delegation: None,

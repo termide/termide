@@ -350,6 +350,13 @@ impl Transcript {
             .collect()
     }
 
+    /// The index of the block of the call `id`.
+    pub(crate) fn index_of_call(&self, id: &str) -> Option<usize> {
+        self.items
+            .iter()
+            .rposition(|item| matches!(item, Item::Tool { call, .. } if call.id == id))
+    }
+
     #[must_use]
     pub fn items(&self) -> &[Item] {
         &self.items
@@ -1162,6 +1169,25 @@ fn shell_prefix(call: &ToolCall, state: ratatui::style::Color) -> Vec<Span<'stat
         Span::styled("$ ", accent),
         Span::styled(format!("{verb} "), accent),
     ]
+}
+
+/// A call's headline on one row, as its folded block opens it: the type
+/// glyph and action in the running accent, then the subject (a shell call's
+/// first command line).
+pub(crate) fn call_headline(
+    call: &ToolCall,
+    width: u16,
+    colors: &ThemeColors,
+) -> Vec<Span<'static>> {
+    match shell_command(call) {
+        Some(command) => {
+            let mut head = shell_prefix(call, colors.info);
+            let first = command.lines().next().unwrap_or("").to_string();
+            head.push(Span::styled(first, Style::default().fg(colors.disabled)));
+            head
+        }
+        None => tool_headline(call, None, width, colors.info, colors),
+    }
 }
 
 /// The `$ <command>` headline of an unfolded shell call, the fold `marker`

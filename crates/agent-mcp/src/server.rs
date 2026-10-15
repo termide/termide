@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, PoisonError, RwLock};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use termide_agent_core::{
@@ -63,15 +63,32 @@ struct Shared {
     /// What every call runs with: its directory and whom to ask.
     context: ToolContext,
     token: String,
-    /// The cancel token of each call in flight, by its JSON-RPC id, for
-    /// `notifications/cancelled`.
-    running: Mutex<HashMap<String, CancelToken>>,
+    /// Each call in flight, by its JSON-RPC id: its cancel token, for
+    /// `notifications/cancelled`, and what it is.
+    running: Mutex<HashMap<String, Running>>,
     /// The details of finished calls — for termide's UI, never sent to the
     /// agent — as name, arguments and details, oldest first.
     details: Mutex<VecDeque<(String, Value, Value)>>,
     stop: AtomicBool,
     /// [`KEEPALIVE`]; shorter in tests.
     keepalive: Duration,
+}
+
+/// A call in flight.
+struct Running {
+    cancel: CancelToken,
+    name: String,
+    arguments: Value,
+    started: Instant,
+}
+
+/// A call the server is running: its tool's name and arguments, and how long
+/// it has run.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunningCall {
+    pub name: String,
+    pub arguments: Value,
+    pub elapsed: Duration,
 }
 
 /// A running server; dropping it stops it.
@@ -185,6 +202,51 @@ impl McpServer {
             })?;
         kept.remove(index).map(|(.., details)| details)
     }
+
+    /// Whether a call is running. The agent may have stopped waiting on it:
+    /// Claude Code moves a long call to the background to take a message
+    /// typed meanwhile, and the call goes on here.
+    #[must_use]
+    pub fn is_running(&self) -> bool {
+        !self
+            .shared
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_empty()
+    }
+
+    /// The calls running now, the longest-running first.
+    #[must_use]
+    pub fn running_calls(&self) -> Vec<RunningCall> {
+        let mut calls: Vec<RunningCall> = self
+            .shared
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .map(|call| RunningCall {
+                name: call.name.clone(),
+                arguments: call.arguments.clone(),
+                elapsed: call.started.elapsed(),
+            })
+            .collect();
+        calls.sort_by(|a, b| b.elapsed.cmp(&a.elapsed));
+        calls
+    }
+
+    /// Cancel every call in flight, as the user's stop does.
+    pub fn cancel_running(&self) {
+        for call in self
+            .shared
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+        {
+            call.cancel.cancel();
+        }
+    }
 }
 
 impl Drop for McpServer {
@@ -198,14 +260,14 @@ impl Drop for McpServer {
                 .unwrap_or_else(PoisonError::into_inner),
         );
         self.shared.changed.notify_all();
-        for cancel in self
+        for call in self
             .shared
             .running
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .values()
         {
-            cancel.cancel();
+            call.cancel.cancel();
         }
         // Wake the accept loop so it sees the flag.
         let _ = TcpStream::connect(self.addr);
@@ -353,13 +415,13 @@ fn handle(shared: &Shared, message: &Value) -> Option<Value> {
     let Some(id) = message.get("id").cloned() else {
         if method == "notifications/cancelled" {
             let request = message["params"]["requestId"].to_string();
-            if let Some(cancel) = shared
+            if let Some(call) = shared
                 .running
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .get(&request)
             {
-                cancel.cancel();
+                call.cancel.cancel();
             }
         }
         return None;
@@ -542,7 +604,15 @@ fn call_tool(shared: &Shared, id: &Value, params: &Value, cancel: CancelToken) -
         .running
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .insert(key.clone(), cancel.clone());
+        .insert(
+            key.clone(),
+            Running {
+                cancel: cancel.clone(),
+                name: call.name.clone(),
+                arguments: call.arguments.clone(),
+                started: Instant::now(),
+            },
+        );
     let ctx = ToolContext {
         withdrawn: Some(cancel.clone()),
         ..shared.context.clone()
@@ -725,6 +795,39 @@ mod tests {
             None,
             "taken once"
         );
+    }
+
+    /// A call the agent stopped waiting on still shows as running, and the
+    /// user's stop takes it down.
+    #[test]
+    fn a_running_call_shows_until_it_is_cancelled() {
+        let done = Arc::new(AtomicBool::new(false));
+        let mut tools = ToolRegistry::new();
+        tools.insert(Arc::new(UntilCancelled(Arc::clone(&done))));
+        let server = McpServer::start(tools, Box::new(Guard), ToolContext::new("/tmp")).unwrap();
+        assert!(!server.is_running());
+        let _stream = post_streamed(
+            &server,
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                     "params": { "name": "wait", "arguments": {} } }),
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !server.is_running() {
+            assert!(std::time::Instant::now() < deadline, "the call never ran");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let calls = server.running_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            (calls[0].name.as_str(), &calls[0].arguments),
+            ("wait", &json!({}))
+        );
+        server.cancel_running();
+        while server.is_running() {
+            assert!(std::time::Instant::now() < deadline, "the call went on");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(done.load(Ordering::Acquire));
     }
 
     /// Says which of the context's people a call was given.

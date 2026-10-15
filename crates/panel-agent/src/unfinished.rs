@@ -291,6 +291,7 @@ impl AgentPanel {
                 next_at: None,
                 due_ms: repeat.due_ms,
                 iterations: repeat.iterations,
+                started: Instant::now(),
             });
         }
     }

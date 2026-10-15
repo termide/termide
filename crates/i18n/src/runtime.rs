@@ -596,6 +596,9 @@ impl Translation for RuntimeTranslation {
         agent_notice_busy,
         agent_notice_no_log_to_name,
         agent_notice_will_pause,
+        agent_strip_pause,
+        agent_strip_after_step,
+        agent_strip_checking,
         agent_notice_nothing_to_pause,
         agent_notice_already_running,
         agent_notice_nothing_to_continue,
@@ -1548,6 +1551,17 @@ impl Translation for RuntimeTranslation {
                 ("max", &max.to_string()),
             ],
         )
+    }
+
+    fn agent_strip_retry_at_fmt(&self, time: &str, left: &str) -> String {
+        self.format(
+            "agent_strip_retry_at_fmt",
+            &[("time", time), ("left", left)],
+        )
+    }
+
+    fn agent_strip_next_fmt(&self, wait: &str) -> String {
+        self.format("agent_strip_next_fmt", &[("wait", wait)])
     }
 
     fn agent_unfinished_loop_due_fmt(&self, wait: &str) -> String {

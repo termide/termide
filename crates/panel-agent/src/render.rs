@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use termide_config::constants::tick_frame;
 
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Position, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use termide_core::{RenderContext, SegmentKind, StatusSegment, ThemeColors};
@@ -31,124 +31,6 @@ const LABEL_COL: usize = 12;
 /// Queued messages the state strip shows before folding the rest into a count.
 pub(crate) const STATE_QUEUED_ROWS: usize = 3;
 
-/// The state strip's lines: a dim dashed rule, then a pause row (`pause`:
-/// its glyph and text, when a pause is pending or a retry waits) and a row
-/// per queued message (its first line, cut to the width), at most
-/// [`STATE_QUEUED_ROWS`] of them before a "… N more" row. Empty when there is nothing to show.
-pub(crate) fn state_strip<'a>(
-    queued: impl ExactSizeIterator<Item = &'a str>,
-    pause: Option<(&str, &str)>,
-    width: u16,
-    colors: &ThemeColors,
-) -> Vec<Line<'static>> {
-    let t = termide_i18n::t();
-    let dim = Style::default().fg(colors.disabled);
-    let total = queued.len();
-    if total == 0 && pause.is_none() {
-        return Vec::new();
-    }
-    let width = width as usize;
-    let cut = |text: &str, room: usize| termide_ui::path_utils::truncate_right(text, room);
-    let mut lines = vec![transcript::separator(width as u16, colors)];
-    if let Some((glyph, pause)) = pause {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{glyph} "),
-                Style::default()
-                    .fg(colors.warning)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(cut(pause, width.saturating_sub(2)), dim),
-        ]));
-    }
-    let label = format!(" {}", t.agent_state_queued());
-    let label_width = termide_ui::str_display_width(&label);
-    for (i, text) in queued.take(STATE_QUEUED_ROWS).enumerate() {
-        let first = text.trim().lines().next().unwrap_or("");
-        // The first row carries the "queued" label at the right edge, one
-        // column short of the scrollbar gutter, like a block's meta.
-        let room = width.saturating_sub(3 + if i == 0 { label_width } else { 0 });
-        let body = cut(first, room);
-        let mut spans = vec![
-            Span::styled("› ", Style::default().fg(colors.info)),
-            Span::styled(body.clone(), dim),
-        ];
-        if i == 0 {
-            let used = 2 + termide_ui::str_display_width(&body) + label_width;
-            spans.push(Span::raw(" ".repeat(width.saturating_sub(used + 1))));
-            spans.push(Span::styled(label.clone(), dim));
-        }
-        lines.push(Line::from(spans));
-    }
-    if total > STATE_QUEUED_ROWS {
-        lines.push(Line::styled(
-            format!("  {}", t.agent_state_queued_more(total - STATE_QUEUED_ROWS)),
-            dim,
-        ));
-    }
-    lines
-}
-
-/// The state strip's subagent rows, one per running `task` call
-/// (`(agent, prompt, progress, elapsed ms)`), at most [`STATE_QUEUED_ROWS`]
-/// before a `+N` row: `& Delegating to agent · prompt` on the left (worded as
-/// the call's block in the transcript) and, at the right edge,
-/// what the subagent did last (or its wait for a slot), a spinner and its
-/// time. A block scrolled out of view stays in sight here while it runs.
-pub(crate) fn task_strip(
-    tasks: &[(String, String, String, u32)],
-    width: u16,
-    colors: &ThemeColors,
-) -> Vec<Line<'static>> {
-    let t = termide_i18n::t();
-    let dim = Style::default().fg(colors.disabled);
-    let accent = Style::default().fg(colors.info);
-    let width = width as usize;
-    let cut = |text: &str, room: usize| termide_ui::path_utils::truncate_right(text, room);
-    let mut lines = Vec::new();
-    for (agent, prompt, progress, ms) in tasks.iter().take(STATE_QUEUED_ROWS) {
-        let frame = tick_frame(Duration::from_millis(u64::from(*ms)));
-        let clock = format!(" {frame} {}", transcript::fmt_dur(*ms));
-        // What it does now takes at most a third of the row, so the task
-        // itself stays readable.
-        let progress = cut(progress, width / 3);
-        let right = if progress.is_empty() {
-            clock.clone()
-        } else {
-            format!(" {progress}{clock}")
-        };
-        let right_width = termide_ui::str_display_width(&right);
-        // Worded as the call's block in the transcript, `& Delegating to
-        // agent · prompt`, so the row is known for the block it stands for.
-        let head = format!("& {} ", t.agent_tool_task());
-        let head_width = termide_ui::str_display_width(&head);
-        let room = width.saturating_sub(1 + head_width + right_width);
-        let body = cut(&format!("{agent} · {prompt}"), room);
-        let used = head_width + termide_ui::str_display_width(&body) + right_width;
-        let mut spans = vec![
-            Span::styled(head, accent.add_modifier(Modifier::BOLD)),
-            Span::styled(body, dim),
-            Span::raw(" ".repeat(width.saturating_sub(used + 1))),
-        ];
-        if !progress.is_empty() {
-            spans.push(Span::styled(format!(" {progress}"), dim));
-        }
-        spans.push(Span::styled(
-            format!(" {frame}"),
-            accent.add_modifier(Modifier::BOLD),
-        ));
-        spans.push(Span::styled(format!(" {}", transcript::fmt_dur(*ms)), dim));
-        lines.push(Line::from(spans));
-    }
-    if tasks.len() > STATE_QUEUED_ROWS {
-        lines.push(Line::styled(
-            format!("& +{}", tasks.len() - STATE_QUEUED_ROWS),
-            dim,
-        ));
-    }
-    lines
-}
-
 /// Which of the self-running tasks a state-strip row stands for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Autorun {
@@ -156,77 +38,9 @@ pub(crate) enum Autorun {
     Loop,
 }
 
-/// One state-strip row of an active `/goal` or `/loop`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AutorunRow {
-    pub kind: Autorun,
-    pub glyph: &'static str,
-    /// What it does, as a verb (`Heading for the goal`), in the accent.
-    pub label: String,
-    /// What it works on: the goal, or the loop's prompt.
-    pub body: String,
-    /// Its state at the right edge, dim: elapsed time, run count, the wait.
-    pub state: String,
-}
-
-/// The stop button at the right end of an autorun row.
-pub(crate) const AUTORUN_STOP: &str = "✕";
-
-/// The state strip's rows for what goes on by itself between requests (an
-/// active `/goal` or `/loop`): `glyph label` in the accent and the goal or
-/// prompt, dim, on the left; at the right edge its state, dim, and the stop
-/// button in the accent. The state takes at most half the row, so the goal stays
-/// readable. The button sits two cells in from the edge (see
-/// [`autorun_stop_column`]).
-pub(crate) fn autorun_strip(
-    rows: &[AutorunRow],
-    width: u16,
-    colors: &ThemeColors,
-) -> Vec<Line<'static>> {
-    let dim = Style::default().fg(colors.disabled);
-    let accent = Style::default()
-        .fg(colors.info)
-        .add_modifier(Modifier::BOLD);
-    let width = width as usize;
-    let cut = |text: &str, room: usize| termide_ui::path_utils::truncate_right(text, room);
-    // ` ✕` after the state, then the row's last cell left blank.
-    let stop_width = 1 + termide_ui::str_display_width(AUTORUN_STOP);
-    rows.iter()
-        .map(|row| {
-            let state = if row.state.is_empty() {
-                String::new()
-            } else {
-                format!(" {}", cut(&row.state, width / 2))
-            };
-            let state_width = termide_ui::str_display_width(&state);
-            let head = format!("{} {} ", row.glyph, row.label);
-            let head_width = termide_ui::str_display_width(&head);
-            let body = cut(
-                &row.body,
-                width.saturating_sub(1 + head_width + state_width + stop_width),
-            );
-            let used = head_width + termide_ui::str_display_width(&body) + state_width + stop_width;
-            Line::from(vec![
-                Span::styled(head, accent),
-                Span::styled(body, dim),
-                Span::raw(" ".repeat(width.saturating_sub(used + 1))),
-                Span::styled(state, dim),
-                Span::raw(" "),
-                Span::styled(AUTORUN_STOP, accent),
-            ])
-        })
-        .collect()
-}
-
-/// The column of an autorun row's stop button, from the strip's left edge,
-/// for a strip `width` cells wide.
-pub(crate) fn autorun_stop_column(width: u16) -> u16 {
-    width.saturating_sub(2)
-}
-
 /// `text` with its first letter upper-cased, for a lower-case notice used as
 /// a label (`иду к цели` → `Иду к цели`).
-fn capitalized(text: &str) -> String {
+pub(crate) fn capitalized(text: &str) -> String {
     let mut chars = text.chars();
     match chars.next() {
         Some(first) => first.to_uppercase().chain(chars).collect(),
@@ -253,29 +67,6 @@ pub(crate) fn context_bar(percent: u64) -> String {
 }
 
 impl AgentPanel {
-    /// The state strip above the input: what holds right now rather than what
-    /// happened — a pause asked for but not reached yet, and the queued
-    /// messages. Empty when there is nothing to show. A pause that took
-    /// effect is the transcript's `‖` line, not a line here.
-    pub(crate) fn state_lines(&self, width: u16) -> Vec<Line<'static>> {
-        let wait = self.retry_wait_text();
-        let pause = match &wait {
-            Some(wait) => Some((crate::failure::WAIT_GLYPH, wait.as_str())),
-            None => self.pause_requested.then(|| {
-                (
-                    transcript::PAUSED_GLYPH,
-                    termide_i18n::t().agent_notice_will_pause(),
-                )
-            }),
-        };
-        state_strip(
-            self.queued_texts.iter().map(String::as_str),
-            pause,
-            width,
-            &self.colors,
-        )
-    }
-
     /// The active goal as a sentence (`Goal: … — turn 3`), for a bare
     /// `/goal`; `None` without one.
     pub(crate) fn goal_status(&self) -> Option<String> {
@@ -307,7 +98,7 @@ impl AgentPanel {
 
     /// What is left of the active loop's wait for its next run, rounded up
     /// to the second; `None` while a run is in flight or due.
-    fn loop_wait(&self) -> Option<String> {
+    pub(crate) fn loop_wait(&self) -> Option<String> {
         let at = self.loop_task.as_ref()?.next_at?;
         let left = at.saturating_duration_since(Instant::now());
         (!left.is_zero()).then(|| {
@@ -315,84 +106,6 @@ impl AgentPanel {
                 left.as_secs() + u64::from(left.subsec_nanos() > 0),
             ))
         })
-    }
-
-    /// The state strip's rows for an active goal and loop (see
-    /// [`autorun_strip`]): the goal with how long it has run, the loop's
-    /// command as typed with its run count — and the judge's check or the
-    /// wait for the next run before them.
-    pub(crate) fn autorun_rows(&self) -> Vec<AutorunRow> {
-        let t = termide_i18n::t();
-        let mut rows = Vec::new();
-        if let Some(task) = &self.goal_task {
-            let ms = u32::try_from(task.started.elapsed().as_millis()).unwrap_or(u32::MAX);
-            let elapsed = transcript::fmt_dur(ms);
-            let state = if task.judging {
-                format!("{} · {elapsed}", t.agent_notice_goal_checking())
-            } else {
-                elapsed
-            };
-            rows.push(AutorunRow {
-                kind: Autorun::Goal,
-                glyph: GOAL_GLYPH,
-                label: capitalized(t.agent_notice_goal_working()),
-                body: single_line(&task.goal),
-                state,
-            });
-        }
-        if let Some(task) = &self.loop_task {
-            let label = match task.interval {
-                Some(d) => t.agent_autorun_loop_every_fmt(&termide_i18n::duration(d)),
-                None => t.agent_autorun_loop().to_string(),
-            };
-            let count = format!("{}/{LOOP_MAX_ITERATIONS}", task.iterations);
-            let state = match self.loop_wait() {
-                Some(wait) => format!("{} · {count}", t.agent_unfinished_loop_due_fmt(&wait)),
-                None => count,
-            };
-            rows.push(AutorunRow {
-                kind: Autorun::Loop,
-                glyph: LOOP_GLYPH,
-                label: capitalized(&label),
-                body: single_line(&task.prompt),
-                state,
-            });
-        }
-        rows
-    }
-
-    /// The running subagents for the state strip: each one's block index and
-    /// `(agent, prompt's first line, its latest progress line, elapsed ms)`.
-    /// The clock of each starts when it is first seen, and is dropped once
-    /// the call has returned.
-    pub(crate) fn running_task_rows(&mut self) -> Vec<(usize, (String, String, String, u32))> {
-        let now = Instant::now();
-        let mut seen = Vec::new();
-        let mut rows = Vec::new();
-        for (index, call, live) in self.transcript.running_tasks() {
-            let start = *self.task_clocks.entry(call.id.clone()).or_insert(now);
-            seen.push(call.id.clone());
-            let arg = |key: &str| call.arguments[key].as_str().unwrap_or("").to_string();
-            let prompt = arg("prompt");
-            let prompt = prompt
-                .lines()
-                .find(|l| !l.trim().is_empty())
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            let progress = live
-                .unwrap_or("")
-                .lines()
-                .rev()
-                .find(|l| !l.trim().is_empty())
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            let ms = now.duration_since(start).as_millis() as u32;
-            rows.push((index, (arg("agent"), prompt, progress, ms)));
-        }
-        self.task_clocks.retain(|id, _| seen.contains(id));
-        rows
     }
 
     /// The streaming block's live meta line: the same right-aligned zone a
@@ -978,42 +691,11 @@ impl AgentPanel {
         // The state strip (a pending pause, queued messages) sits between the
         // transcript and the card, leaving the transcript at least one row.
         let text_width = area.width.saturating_sub(1).max(1);
-        let mut state = self.state_lines(text_width);
-        // An active goal or loop stays in sight while it goes on, between
-        // its runs as well as during them.
-        let autorun_rows = self.autorun_rows();
-        let autorun = autorun_strip(&autorun_rows, text_width, &self.colors);
-        let autorun_from = if autorun.is_empty() {
-            None
-        } else {
-            if state.is_empty() {
-                state.push(transcript::separator(text_width, &self.colors));
-            }
-            let from = state.len();
-            state.extend(autorun);
-            Some(from)
-        };
-        // The subagents still running, closest to the input, so a block
-        // scrolled out of view does not hide that one works.
-        let task_items = self.running_task_rows();
-        let task_lines = task_strip(
-            &task_items
-                .iter()
-                .map(|(_, row)| row.clone())
-                .collect::<Vec<_>>(),
-            text_width,
-            &self.colors,
-        );
-        let tasks_from = if task_lines.is_empty() {
-            None
-        } else {
-            if state.is_empty() {
-                state.push(transcript::separator(text_width, &self.colors));
-            }
-            let from = state.len();
-            state.extend(task_lines);
-            Some(from)
-        };
+        // Everything that goes on besides the transcript stays in sight
+        // here, closest to the input: a block scrolled out of view does not
+        // hide that it works.
+        let strip_rows = self.strip_rows(text_width);
+        let mut state = self.strip_with_rule(&strip_rows, text_width);
         let room = area
             .height
             .saturating_sub(bar_rows + form_rows + u16::from(has_separator) + 1);
@@ -1163,40 +845,14 @@ impl AgentPanel {
         for (row, line) in state.iter().enumerate() {
             buf.set_line(area.x, state_y + row as u16, line, text_width);
         }
-        // Each subagent row brings its block into view on a click.
-        self.task_rows = tasks_from
-            .map(|from| {
-                task_items
-                    .iter()
-                    .take(STATE_QUEUED_ROWS)
-                    .enumerate()
-                    .filter(|(i, _)| from + i < state.len())
-                    .map(|(i, (index, _))| (state_y + (from + i) as u16, *index))
-                    .collect()
-            })
-            .unwrap_or_default();
-        // Each goal or loop row stops it on a click on its `✕`, and brings
-        // its latest run into view on a click elsewhere on the row.
-        self.autorun_stops = autorun_from
-            .map(|from| {
-                autorun_rows
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| from + i < state.len())
-                    .map(|(i, row)| {
-                        let at = Position {
-                            x: area.x + autorun_stop_column(text_width),
-                            y: state_y + (from + i) as u16,
-                        };
-                        (at, row.kind)
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        // The strip's pending-pause line (after its rule) withdraws the pause
-        // on a click.
-        self.pause_row = (self.pause_requested && self.retry_wait.is_none() && state.len() > 1)
-            .then_some(state_y + 1);
+        // Each row answers a click, its `✕` apart (see `click_strip`).
+        self.strip_stop_x = area.x + crate::strip::strip_stop_column(text_width);
+        self.strip_hits = strip_rows
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| 1 + i < state.len())
+            .map(|(i, row)| (state_y + 1 + i as u16, row.target, row.stop))
+            .collect();
         if has_separator {
             let y = form_area.y - 1;
             let style = Style::default().fg(if ctx.is_focused {

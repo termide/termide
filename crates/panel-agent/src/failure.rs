@@ -26,6 +26,8 @@ pub(crate) struct RetryWait {
     /// The same moment on the wall clock, Unix seconds, for the display.
     pub(crate) wall: u64,
     pub(crate) failure: Failure,
+    /// When the wait began, for the strip's clock.
+    pub(crate) since: Instant,
     /// Start the external agent anew before the try.
     pub(crate) restart: bool,
 }
@@ -66,13 +68,13 @@ pub(crate) fn clock(wall: u64) -> String {
 }
 
 /// How long until `wall`, as the transcript writes durations.
-fn left_until(wall: u64) -> String {
+pub(crate) fn left_until(wall: u64) -> String {
     let secs = wall.saturating_sub(unix_now());
     transcript::fmt_dur(u32::try_from(secs.saturating_mul(1000)).unwrap_or(u32::MAX))
 }
 
 /// The card's title for a failure of `kind`.
-fn title(kind: FailureKind) -> String {
+pub(crate) fn title(kind: FailureKind) -> String {
     let t = termide_i18n::t();
     match kind {
         FailureKind::Transient => t.agent_failure_transient(),
@@ -102,6 +104,7 @@ impl AgentPanel {
             self.retry_wait = Some(RetryWait {
                 at: Instant::now(),
                 wall: unix_now(),
+                since: Instant::now(),
                 failure,
                 restart: true,
             });
@@ -342,6 +345,7 @@ impl AgentPanel {
         self.retry_wait = Some(RetryWait {
             at: Instant::now() + delay,
             wall,
+            since: Instant::now(),
             failure,
             restart: false,
         });

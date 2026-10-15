@@ -590,8 +590,8 @@ death brings the card.
 
 While a request waits to be tried again, the state strip above the input shows
 `↻` with the reason and when the next try goes, counting down; `[▶]` or
-`/continue` tries at once and `[■]` gives the wait up, as does sending a new
-request. `/continue` also tries a failed request again after the card was
+`/continue` tries at once and `[■]` or the row's `✕` gives the wait up, as
+does sending a new request. `/continue` also tries a failed request again after the card was
 dismissed.
 
 Closing termide while the card is up, or while a request waits, does not lose
@@ -631,20 +631,25 @@ closing line.
 
 What holds right now rather than what happened lives in the state strip, a few
 rows between the conversation and the input that appear only when there is
-something to show: a pending pause (`‖ will pause after the current step`) —
-once the pause takes effect the transcript's `‖` line takes over — and each
-message queued while the agent
-works (`› …`, its first line; after three, a count of the rest), an active
-goal (`◎ Heading for the goal …`, with how long it has run, and the judge's
-check while it runs) and loop (`↺ Repeating every 5m …`, with its run count
-and the countdown to its next run), for as long as either goes on, each with a
-`✕` that stops it — a click elsewhere on the row brings its latest run into
-view — and, closest to
-the input, each subagent still running (`& Delegating to agent · task`,
-worded as its block, with what it did last or its wait for a slot, a spinner
-and its time; after three, `& +N`), so one whose block has scrolled out of
-view still shows it works — a click on its row selects the block and brings
-it into view. Everything queued
+something to show. Every row reads the same way: its glyph and what it is in
+the accent, then, dim, short facts about its state and what it works on, and at
+the right edge how long it has gone on and, where it can be called off, `✕`;
+when a row is short, what it works on gives way first. No row spins: the
+transcript's live line shows that the agent works. In order: a retry waited
+for (`↻ Usage limit reached  trying again at 21:40 (in 3m12s)`) or a pause
+asked for (`‖ Pausing  after the current step`; once it takes effect the
+transcript's `‖` line takes over, and a click anywhere on the row withdraws
+it); each message queued while the agent works (`› Queued  …`, its first line
+and how long it has waited; after three, a count of the rest); an active goal
+(`◎ Heading for the goal · checking  …` while the judge decides) and loop
+(`↺ Repeating every 5m · 3/100 · next in 3m12s  …`), for as long as either
+goes on, with how long it has run — a click elsewhere on the row brings its
+latest run into view; and, closest to the input, each subagent still running
+(`& Delegating to · agent  task`, worded as its block, with what it did last
+or its wait for a slot before its time; after three, `& +N`) and each command
+the agent moved to the background (`$ Running  cargo test`), so one whose
+block has scrolled out of view still shows it works — a click on its row
+selects the block and brings it into view. Everything queued
 goes to the agent at once, as a single message with the pieces joined by a
 blank line — messages typed while the agent works are usually one thought
 added to — and leaves the strip then, showing up in the conversation as your
@@ -1724,10 +1729,12 @@ finishes. What it then does counts as a run of its own: the run clock ticks,
 the session cannot be switched or deleted meanwhile, and `Esc` stops it. A
 command of termide's tools the agent moved to the background keeps such a run
 on after the answer to your message, as long as it runs, so the clock shows
-it is not done; `Esc` stops the command too. The run ends once the agent has
-no call open, termide runs none for it, and it stays quiet — 5 seconds after
-its answer text, 30 after anything else; a message you type meanwhile ends it
-and goes as the next request.
+it is not done, and the state strip above the input pins a row for it — its
+headline as the block's, `$ Running cargo test`, with its own ticking clock;
+a click on the row brings the block into view. `Esc` stops the command too.
+The run ends once the agent has no call open, termide runs none for it, and
+it stays quiet — 5 seconds after its answer text, 30 after anything else; a
+message you type meanwhile ends it and goes as the next request.
 
 The session log records the agent's own session, so a reopened session, or a
 switch back to the agent, continues that session through ACP's

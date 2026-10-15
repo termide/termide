@@ -248,6 +248,7 @@ impl AgentPanel {
                     next_at: None,
                     due_ms: None,
                     iterations: 0,
+                    started: Instant::now(),
                 });
                 return self.loop_step();
             }
@@ -410,7 +411,8 @@ impl AgentPanel {
         if self.is_busy() {
             // The message waits in the state strip until the agent takes it,
             // then shows as a user block.
-            self.queued_texts.push_back(message.typed());
+            self.queued_texts
+                .push_back((message.typed(), Instant::now()));
             self.runtime.steer(message);
             self.set_queued(self.runtime.queue_lens());
         } else {
@@ -541,7 +543,8 @@ impl AgentPanel {
         let delivered = if self.is_busy() {
             // It waits in the state strip, as a steered message does, and
             // shows as its block once the agent takes it.
-            self.queued_texts.push_back(message.typed());
+            self.queued_texts
+                .push_back((message.typed(), Instant::now()));
             self.runtime.steer(message);
             self.set_queued(self.runtime.queue_lens());
             Ok(())
@@ -884,10 +887,17 @@ impl AgentPanel {
             }
             return;
         }
-        // What the agent already holds stays in the strip, leading.
+        // What the agent already holds stays in the strip, leading; the
+        // rest keep when they were sent.
+        let sent = self.queued_texts.clone();
         self.queued_texts.truncate(self.runtime.queue_lens().0);
         for message in taken.into_iter().filter(|message| !drop(message)) {
-            self.queued_texts.push_back(message.typed());
+            let text = message.typed();
+            let since = sent
+                .iter()
+                .find(|(queued, _)| *queued == text)
+                .map_or_else(Instant::now, |(_, since)| *since);
+            self.queued_texts.push_back((text, since));
             self.runtime.steer(message);
         }
         self.set_queued(self.runtime.queue_lens());
@@ -912,6 +922,7 @@ impl AgentPanel {
         // step boundary.
         self.runtime.pause();
         self.pause_requested = true;
+        self.pause_requested_at = Instant::now();
         true
     }
 
