@@ -590,6 +590,52 @@ impl InputBar {
         })
     }
 
+    /// Paste `text` into the focused field at its cursor, replacing any
+    /// selection: a single-line field joins the pasted lines with spaces, a
+    /// multi-line field keeps them. Returns whether the field changed — `false`
+    /// when a control holds the focus or there was nothing to paste.
+    pub fn paste(&mut self, text: &str) -> bool {
+        let Some(index) = self.focused_field() else {
+            return false;
+        };
+        match self.fields.get_mut(index) {
+            Some(FieldInput::Line(input)) => {
+                let line = text
+                    .split(['\r', '\n'])
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if line.is_empty() {
+                    return false;
+                }
+                let before = input.text().to_string();
+                input.paste(&line);
+                input.text() != before
+            }
+            Some(FieldInput::Multi(area)) => {
+                let text = text.replace("\r\n", "\n").replace('\r', "\n");
+                if text.is_empty() {
+                    return false;
+                }
+                area.insert_str(&text);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Take the focused field's selection out of it, returning the text;
+    /// `None` when a control holds the focus or nothing is selected.
+    pub fn cut_selection(&mut self) -> Option<String> {
+        let text = self.selected_text()?;
+        let index = self.focused_field()?;
+        match self.fields.get_mut(index)? {
+            FieldInput::Line(input) => input.delete_selection(),
+            FieldInput::Multi(area) => area.delete_selection(),
+        };
+        Some(text)
+    }
+
     /// Whether a click at `(col, row)` lands on one of the bar's controls
     /// (after [`InputBar::render`] recorded their areas).
     #[must_use]
@@ -1133,6 +1179,64 @@ mod tests {
             .with_control(Control::Button {
                 label: "Next".into(),
             })
+    }
+
+    fn ctrl(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn paste_joins_lines_in_a_single_line_field() {
+        let mut b = bar();
+        b.set_field_text(0, "ab");
+        assert!(b.paste("x\r\ny\nz"));
+        assert_eq!(b.field_text(0), "abx y z");
+        assert!(!b.paste("\n\r\n"), "only line breaks: nothing to paste");
+        assert_eq!(b.field_text(0), "abx y z");
+    }
+
+    #[test]
+    fn paste_replaces_the_selection_of_the_focused_field() {
+        let mut b = bar();
+        b.focus_field(1);
+        b.set_field_text(1, "old");
+        b.handle_key(ctrl('a'));
+        assert!(b.paste("new"));
+        assert_eq!(b.field_text(1), "new");
+        assert_eq!(b.field_text(0), "", "the unfocused field is untouched");
+    }
+
+    #[test]
+    fn paste_keeps_line_breaks_in_a_multiline_field() {
+        let mut b = InputBar::new(Vec::new()).with_multiline_field("› ");
+        assert!(b.paste("one\r\ntwo"));
+        assert_eq!(b.field_value(0), "one\ntwo");
+    }
+
+    #[test]
+    fn paste_and_cut_do_nothing_on_a_control() {
+        let mut b = bar();
+        b.set_field_text(0, "abc");
+        b.handle_key(ctrl('a'));
+        b.handle_key(key(KeyCode::Tab));
+        b.handle_key(key(KeyCode::Tab));
+        assert_eq!(b.focus(), Focus::Control(0));
+        assert!(!b.paste("x"));
+        assert_eq!(b.selected_text(), None);
+        assert_eq!(b.cut_selection(), None);
+        assert_eq!(b.field_text(0), "abc");
+    }
+
+    #[test]
+    fn cut_selection_takes_the_focused_selection_out() {
+        let mut b = bar();
+        b.set_field_text(0, "abc");
+        assert_eq!(b.cut_selection(), None, "nothing selected");
+        b.handle_key(ctrl('a'));
+        assert_eq!(b.selected_text().as_deref(), Some("abc"));
+        assert_eq!(b.cut_selection().as_deref(), Some("abc"));
+        assert_eq!(b.field_text(0), "");
+        assert!(!b.has_selection());
     }
 
     #[test]

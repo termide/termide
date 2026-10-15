@@ -19,7 +19,9 @@ use ratatui::{
 };
 use std::any::Any;
 
-use termide_core::{Panel, PanelEvent, RenderContext, WidthPreference};
+use termide_core::{
+    CommandResult, Panel, PanelCommand, PanelEvent, RenderContext, WidthPreference,
+};
 use termide_highlight::LineHighlighter;
 use termide_logger::LogLevel;
 use termide_panel_editor::{config::EditorConfig, Editor};
@@ -233,6 +235,23 @@ impl Panel for JournalPanel {
         termide_i18n::t().panel_journal().to_string()
     }
 
+    /// The clipboard commands — routed here before the find bar sees
+    /// `Ctrl+C/X/V` — and a terminal paste go to the editor's find bar while
+    /// it holds focus, so they edit the query; the log itself takes no text.
+    fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
+        let clipboard = matches!(
+            cmd,
+            PanelCommand::Copy
+                | PanelCommand::Cut
+                | PanelCommand::Paste
+                | PanelCommand::PasteText { .. }
+        );
+        if clipboard && self.editor.find_bar_has_focus() {
+            return self.editor.handle_command(cmd);
+        }
+        CommandResult::None
+    }
+
     fn prepare_render(&mut self, theme: &Theme, config: &std::sync::Arc<termide_config::Config>) {
         self.cached_theme = *theme;
         self.cached_config = (**config).clone();
@@ -439,5 +458,31 @@ mod tests {
         assert!(journal.editor.find_bar_has_focus());
         journal.handle_key(press(KeyCode::Char('1'), KeyModifiers::NONE));
         assert_eq!(journal.level_enabled, [true; LEVELS.len()]);
+    }
+
+    #[test]
+    fn a_terminal_paste_goes_into_the_focused_find_bar() {
+        termide_ui::clipboard::use_fake_clipboard("");
+        let mut journal = JournalPanel::default();
+        let mut config = termide_config::Config::default();
+        config.editor.keybindings.with_defaults();
+        let config = std::sync::Arc::new(config);
+        journal.prepare_render(&Theme::default(), &config);
+        // Closed bar: the read-only log takes no paste.
+        let result = journal.handle_command(PanelCommand::PasteText { text: "x".into() });
+        assert!(matches!(result, CommandResult::None));
+        journal.handle_key(press(KeyCode::Char('f'), KeyModifiers::CONTROL));
+        assert!(journal.editor.find_bar_has_focus());
+        assert!(journal.editor.get_search_match_info().is_none());
+        let before = journal.editor.buffer().line_count();
+        let result = journal.handle_command(PanelCommand::PasteText {
+            text: "error".into(),
+        });
+        assert!(matches!(result, CommandResult::Handled(true)));
+        assert!(
+            journal.editor.get_search_match_info().is_some(),
+            "the pasted query ran a search"
+        );
+        assert_eq!(journal.editor.buffer().line_count(), before);
     }
 }

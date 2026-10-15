@@ -1,6 +1,6 @@
 //! Inline find bar: ASCII / hex byte-sequence search and match navigation.
 
-use termide_core::PanelEvent;
+use termide_core::{CommandResult, PanelCommand, PanelEvent};
 use termide_modal::{FindBar, FindBarAction, FindBarBtn, FindBarConfig, FindField};
 
 use crate::BinaryPanel;
@@ -183,6 +183,29 @@ impl BinaryPanel {
         }
         vec![PanelEvent::NeedsRedraw]
     }
+
+    /// While the find bar is open it owns the keyboard, so the clipboard
+    /// commands — routed to the panel before the bar sees `Ctrl+C/X/V` — and
+    /// a terminal paste edit its query, and the search re-runs as typing
+    /// does. `None` leaves the command to the viewer: the bar is closed, or a
+    /// `Copy` found nothing selected in the query (the byte selection, if
+    /// any, is copied then).
+    pub(crate) fn find_bar_clipboard(&mut self, cmd: &PanelCommand<'_>) -> Option<CommandResult> {
+        let bar = self.find_bar.as_mut()?;
+        let action = match cmd {
+            PanelCommand::Copy => {
+                return bar.copy_selection().then_some(CommandResult::Handled(true))
+            }
+            PanelCommand::Cut => bar.cut_selection(),
+            PanelCommand::Paste => bar.paste_clipboard(),
+            PanelCommand::PasteText { text } => bar.paste(text),
+            _ => return None,
+        };
+        if let Some(action) = action {
+            self.handle_find_action(action);
+        }
+        Some(CommandResult::Handled(true))
+    }
 }
 
 #[cfg(test)]
@@ -232,5 +255,23 @@ mod tests {
         assert_eq!(p.match_at(52), Some(true));
         assert_eq!(p.match_at(53), None); // past it (len 3: 50,51,52)
         assert_eq!(p.match_at(0), None);
+    }
+
+    #[test]
+    fn a_terminal_paste_goes_into_the_open_find_bar_and_searches() {
+        termide_ui::clipboard::use_fake_clipboard("");
+        let mut p = panel_with(0, 80, 10);
+        // Without the bar the read-only viewer has nowhere to put it.
+        assert!(p
+            .find_bar_clipboard(&PanelCommand::PasteText { text: "x".into() })
+            .is_none());
+        p.open_find();
+        let result = p.find_bar_clipboard(&PanelCommand::PasteText {
+            text: "ab\ncd".into(),
+        });
+        assert!(matches!(result, Some(CommandResult::Handled(true))));
+        assert_eq!(p.find_bar.as_ref().unwrap().find_text(), "ab cd");
+        // Nothing selected in the query: Copy is left to the byte selection.
+        assert!(p.find_bar_clipboard(&PanelCommand::Copy).is_none());
     }
 }

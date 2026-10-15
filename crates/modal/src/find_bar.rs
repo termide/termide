@@ -356,6 +356,53 @@ impl FindBar {
             .map(|action| self.map(action))
     }
 
+    // === Clipboard ===
+    //
+    // The app routes Ctrl+C/X/V and a terminal's bracketed paste to the panel
+    // as commands before the bar ever sees the key, so a host whose bar holds
+    // focus forwards them here. An edit reports `QueryChanged`, as typing does.
+
+    /// Paste `text` (a bracketed paste, or the clipboard's text) into the
+    /// focused field; line breaks become spaces. `None` when a button holds
+    /// the focus or nothing changed.
+    pub fn paste(&mut self, text: &str) -> Option<FindBarAction> {
+        self.inner
+            .paste(text)
+            .then_some(FindBarAction::QueryChanged)
+    }
+
+    /// Paste the system clipboard's text (or copied files' paths) into the
+    /// focused field — `Ctrl+V`.
+    pub fn paste_clipboard(&mut self) -> Option<FindBarAction> {
+        let text = termide_ui::clipboard::paste_text_or_paths()?;
+        self.paste(&text)
+    }
+
+    /// The focused field's selected text, if any.
+    pub fn selected_text(&self) -> Option<String> {
+        self.inner.selected_text()
+    }
+
+    /// Copy the focused field's selection to the clipboard — `Ctrl+C`.
+    /// Whether there was one to copy.
+    pub fn copy_selection(&self) -> bool {
+        match self.selected_text() {
+            Some(text) => {
+                let _ = termide_ui::clipboard::copy(&text);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Move the focused field's selection to the clipboard — `Ctrl+X`. `None`
+    /// when nothing is selected.
+    pub fn cut_selection(&mut self) -> Option<FindBarAction> {
+        let text = self.inner.cut_selection()?;
+        let _ = termide_ui::clipboard::copy(&text);
+        Some(FindBarAction::QueryChanged)
+    }
+
     /// Map a generic [`InputBarAction`] to the search-specific action.
     fn map(&self, action: InputBarAction) -> FindBarAction {
         match action {
@@ -547,6 +594,29 @@ mod tests {
         bar.set_text(FindField::Replace, "thread".into());
         assert_eq!(bar.find_text(), "needle");
         assert_eq!(bar.replace_text(), "thread");
+    }
+
+    #[test]
+    fn clipboard_commands_edit_the_focused_field_and_report_a_change() {
+        termide_ui::clipboard::use_fake_clipboard("from clipboard");
+        let mut bar = content_bar();
+        bar.focus_field(FindField::Find);
+        assert_eq!(bar.paste("a\nb"), Some(FindBarAction::QueryChanged));
+        assert_eq!(bar.find_text(), "a b");
+        assert!(!bar.copy_selection(), "nothing selected");
+        assert_eq!(bar.cut_selection(), None);
+        bar.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+        assert!(bar.copy_selection());
+        assert_eq!(termide_ui::clipboard::paste().as_deref(), Some("a b"));
+        termide_ui::clipboard::use_fake_clipboard("new");
+        assert_eq!(bar.paste_clipboard(), Some(FindBarAction::QueryChanged));
+        assert_eq!(bar.find_text(), "new", "the selection was replaced");
+        bar.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+        assert_eq!(bar.cut_selection(), Some(FindBarAction::QueryChanged));
+        assert_eq!(bar.find_text(), "");
+        assert_eq!(bar.mask_text(), "", "other fields are untouched");
+        focus_button(&mut bar, 0);
+        assert_eq!(bar.paste("x"), None, "a button takes no paste");
     }
 
     #[test]

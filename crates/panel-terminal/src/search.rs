@@ -4,7 +4,7 @@
 //! state via descendant-module visibility.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use termide_core::{PanelEvent, Searchable};
+use termide_core::{CommandResult, PanelCommand, PanelEvent, Searchable};
 use termide_modal::{FindBar, FindBarAction, FindBarBtn, FindBarConfig, FindField};
 
 use super::terminal::{Cell, TerminalScreen};
@@ -214,6 +214,31 @@ impl Terminal {
         let action = bar.handle_key(key);
         self.find_bar = Some(bar);
         self.apply_find_bar_action(action)
+    }
+
+    /// While the find bar holds focus, the clipboard commands — routed to the
+    /// panel before the bar sees `Ctrl+C/X/V` — and a terminal paste edit the
+    /// bar's field instead of reaching the shell, and re-run the search as
+    /// typing does. `None` leaves the command to the terminal: the bar is
+    /// closed or not focused, or a `Copy` found nothing selected in the bar.
+    pub(super) fn find_bar_clipboard(&mut self, cmd: &PanelCommand<'_>) -> Option<CommandResult> {
+        if self.find_bar_focus_buffer {
+            return None;
+        }
+        let bar = self.find_bar.as_mut()?;
+        let action = match cmd {
+            PanelCommand::Copy => {
+                return bar.copy_selection().then_some(CommandResult::Handled(true))
+            }
+            PanelCommand::Cut => bar.cut_selection(),
+            PanelCommand::Paste => bar.paste_clipboard(),
+            PanelCommand::PasteText { text } => bar.paste(text),
+            _ => return None,
+        };
+        if action.is_some() {
+            self.apply_find_bar_action(action);
+        }
+        Some(CommandResult::Handled(true))
     }
 }
 

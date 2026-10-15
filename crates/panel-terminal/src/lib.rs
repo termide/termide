@@ -1358,6 +1358,9 @@ impl Panel for Terminal {
     }
 
     fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
+        if let Some(result) = self.find_bar_clipboard(&cmd) {
+            return result;
+        }
         match cmd {
             PanelCommand::Resize { rows, cols } => {
                 if self.resize(rows, cols).is_ok() {
@@ -1707,5 +1710,42 @@ mod title_tests {
             title.contains("subdir"),
             "title {title:?} did not follow the shell into subdir"
         );
+    }
+
+    /// With the find bar focused, a terminal paste and Ctrl+V edit the query
+    /// rather than going to the shell, and Ctrl+X cuts from it.
+    #[test]
+    fn clipboard_commands_edit_the_focused_find_bar() {
+        termide_ui::clipboard::use_fake_clipboard("needle");
+        let Ok(mut term) = Terminal::new_with_cwd(24, 80, None) else {
+            return; // No PTY available.
+        };
+        term.open_find_bar();
+        let query = |term: &Terminal| term.find_bar.as_ref().unwrap().find_text().to_string();
+
+        let result = term.handle_command(PanelCommand::PasteText {
+            text: "ab\ncd".into(),
+        });
+        assert!(matches!(result, CommandResult::Handled(true)));
+        assert_eq!(query(&term), "ab cd");
+
+        term.handle_find_bar_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('a'),
+            crossterm::event::KeyModifiers::CONTROL,
+        ));
+        assert!(matches!(
+            term.handle_command(PanelCommand::Copy),
+            CommandResult::Handled(true)
+        ));
+        assert_eq!(termide_ui::clipboard::paste().as_deref(), Some("ab cd"));
+        assert!(matches!(
+            term.handle_command(PanelCommand::Cut),
+            CommandResult::Handled(true)
+        ));
+        assert_eq!(query(&term), "");
+
+        termide_ui::clipboard::use_fake_clipboard("needle");
+        term.handle_command(PanelCommand::Paste);
+        assert_eq!(query(&term), "needle");
     }
 }

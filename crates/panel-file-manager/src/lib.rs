@@ -735,6 +735,9 @@ impl Panel for FileManager {
     }
 
     fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
+        if let Some(result) = self.search_bar_clipboard(&cmd) {
+            return result;
+        }
         match cmd {
             // Return git repository root (enables registration with watcher)
             PanelCommand::GetRepoRoot => CommandResult::RepoRoot(self.git_root.clone()),
@@ -836,10 +839,10 @@ impl Panel for FileManager {
             }
             // `Cmd+V` on macOS: the terminal emulator answers the key and
             // types the clipboard's text flavor in. Take it only when that
-            // text names real files, so a prose paste is not swallowed. With
-            // the search bar open the panel still declines — the bar reads
-            // typed keys and drops a bracketed paste either way, and spending
-            // the keystroke on a copy from under it would be worse.
+            // text names real files, so a prose paste is not swallowed. A
+            // focused search bar took the paste above; with the bar open but
+            // its results focused the panel still declines, since spending
+            // the keystroke on a copy from under the bar would be worse.
             PanelCommand::PasteText { text } => {
                 let paste_as_files = self.search_bar.is_none() && self.clipboard_paste_text(&text);
                 CommandResult::Handled(paste_as_files)
@@ -1408,7 +1411,7 @@ mod tests {
     /// With the search bar open the same keystroke is query text, so the
     /// panel must not spend it on a copy even when it names a real file.
     #[test]
-    fn a_pasted_path_is_left_to_the_open_search_bar() {
+    fn a_pasted_path_goes_into_the_open_search_bar() {
         let temp_dir = TempDir::new().unwrap();
         let dir = canonical_temp_path(&temp_dir);
         std::fs::write(dir.join("report.pdf"), "x").unwrap();
@@ -1419,12 +1422,51 @@ mod tests {
 
         fm.open_name_bar();
         let pasted = dir.join("report.pdf").display().to_string();
-        let result = fm.handle_command(PanelCommand::PasteText { text: pasted });
+        let result = fm.handle_command(PanelCommand::PasteText {
+            text: pasted.clone(),
+        });
         assert!(
-            matches!(result, CommandResult::Handled(false)),
+            matches!(result, CommandResult::Handled(true)),
             "the search bar owns the paste"
         );
+        assert_eq!(fm.search_bar.as_ref().unwrap().find_text(), pasted);
         assert!(fm.modal_request.is_none(), "no copy was offered");
+    }
+
+    /// While the bar's field is focused, Ctrl+C/X/V edit the query and the
+    /// search follows; they leave the file clipboard alone.
+    #[test]
+    fn clipboard_commands_edit_the_focused_search_bar() {
+        termide_ui::clipboard::use_fake_clipboard("report");
+        let temp_dir = TempDir::new().unwrap();
+        let dir = canonical_temp_path(&temp_dir);
+        std::fs::write(dir.join("report.pdf"), "x").unwrap();
+
+        let mut fm = FileManager::new_with_path(dir.clone());
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+        fm.open_name_bar();
+
+        let result = fm.handle_command(PanelCommand::Paste);
+        assert!(matches!(result, CommandResult::Handled(true)));
+        assert_eq!(fm.search_bar.as_ref().unwrap().find_text(), "report");
+        assert!(fm.file_search.is_some(), "the paste ran the search");
+        assert!(fm.modal_request.is_none(), "no file paste was offered");
+
+        fm.handle_search_bar_key(termide_core::KeyChord::identity(
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char('a'),
+                crossterm::event::KeyModifiers::CONTROL,
+            ),
+        ));
+        let result = fm.handle_command(PanelCommand::Cut);
+        assert!(matches!(result, CommandResult::Handled(true)));
+        assert_eq!(fm.search_bar.as_ref().unwrap().find_text(), "");
+        assert!(
+            fm.file_search.is_none(),
+            "an empty query clears the results"
+        );
+        assert_eq!(termide_ui::clipboard::paste().as_deref(), Some("report"));
     }
 
     /// Enter on an archive browses it like a directory; `..` at its root

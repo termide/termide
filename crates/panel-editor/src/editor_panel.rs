@@ -607,6 +607,9 @@ impl Panel for Editor {
     }
 
     fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
+        if let Some(result) = self.find_bar_clipboard(&cmd) {
+            return result;
+        }
         match cmd {
             PanelCommand::GetRepoRoot => {
                 let repo_root = self.get_or_compute_repo_root().cloned();

@@ -413,6 +413,36 @@ impl Editor {
         }
     }
 
+    /// While the find bar holds focus, the clipboard commands — routed to the
+    /// panel before the bar sees `Ctrl+C/X/V` — and a terminal paste edit the
+    /// bar's field, not the buffer, and re-run the search as typing does.
+    /// `None` leaves the command to the buffer: the bar is closed or not
+    /// focused, or a `Copy` found nothing selected in the bar.
+    pub(crate) fn find_bar_clipboard(
+        &mut self,
+        cmd: &termide_core::PanelCommand<'_>,
+    ) -> Option<termide_core::CommandResult> {
+        use termide_core::{CommandResult, PanelCommand};
+        if !self.find_bar_has_focus() {
+            return None;
+        }
+        let bar = self.find_bar.as_mut()?;
+        let action = match cmd {
+            PanelCommand::Copy => {
+                return bar.copy_selection().then_some(CommandResult::Handled(true))
+            }
+            PanelCommand::Cut => bar.cut_selection(),
+            PanelCommand::Paste => bar.paste_clipboard(),
+            PanelCommand::PasteText { text } => bar.paste(text),
+            _ => return None,
+        };
+        let field = bar.focused_field();
+        if action.is_some() {
+            self.apply_find_bar_action(action, field);
+        }
+        Some(CommandResult::Handled(true))
+    }
+
     /// Route a key to the inline bar while it is open. Returns panel events.
     pub(crate) fn handle_find_bar_key(
         &mut self,

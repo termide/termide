@@ -428,6 +428,9 @@ impl Panel for BinaryPanel {
     }
 
     fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
+        if let Some(result) = self.find_bar_clipboard(&cmd) {
+            return result;
+        }
         match cmd {
             // Report like the editor so the shared close-with-unsaved dialog
             // (Save / Don't save / Cancel) is reused for the hex editor too.

@@ -323,6 +323,42 @@ impl FileManager {
         }
     }
 
+    /// While the bar's input holds focus, the clipboard commands — routed to
+    /// the panel before the bar sees `Ctrl+C/X/V` — and a terminal paste edit
+    /// the focused field instead of copying or pasting files, and refresh the
+    /// search as typing does. A copy with nothing selected in the field does
+    /// nothing rather than copy the files under the bar. `None` leaves the
+    /// command to the file clipboard: the bar is closed or its results focused.
+    pub(crate) fn search_bar_clipboard(
+        &mut self,
+        cmd: &termide_core::PanelCommand<'_>,
+    ) -> Option<termide_core::CommandResult> {
+        use termide_core::{CommandResult, PanelCommand};
+        if self.bar_focus != BarFocus::Input {
+            return None;
+        }
+        let bar = self.search_bar.as_mut()?;
+        let action = match cmd {
+            PanelCommand::Copy => {
+                bar.copy_selection();
+                None
+            }
+            PanelCommand::Cut => bar.cut_selection(),
+            PanelCommand::Paste => bar.paste_clipboard(),
+            PanelCommand::PasteText { text } => bar.paste(text),
+            _ => return None,
+        };
+        if action.is_some() {
+            if bar.focused_field() == Some(FindField::Replace) {
+                self.sync_replace_preview();
+            } else {
+                self.rerun_search();
+            }
+            self.sync_bar_status();
+        }
+        Some(CommandResult::Handled(true))
+    }
+
     fn handle_bar_input_key(&mut self, key: crossterm::event::KeyEvent) -> Vec<PanelEvent> {
         use crossterm::event::KeyCode;
 
