@@ -1590,6 +1590,43 @@ impl Subagents {
             call: task.call.to_string(),
         };
 
+        let connection = match &target {
+            SubagentTarget::Session => active.connection.clone(),
+            SubagentTarget::Model(name, _) | SubagentTarget::Cli(name, _) => name.clone(),
+        };
+        let intent = ctx
+            .session
+            .as_ref()
+            .map(|session| IntentLog::delegated(&session.intent))
+            .unwrap_or_default();
+        // In the background the task always runs in a panel, whatever the
+        // settings say: the user sees the work no call waits on, and stops it
+        // by closing that panel. The call returns once a panel took it.
+        if task.background {
+            let Some(parent) = ctx.panel else {
+                return Err(
+                    "a background task reports to an agent panel, and this agent runs in none; \
+                     run it without `background`"
+                        .into(),
+                );
+            };
+            let request = in_panel::PanelDelegation {
+                place: SubagentPlace::Panel,
+                project_root: self.project_root.clone(),
+                cwd: self.cwd.clone(),
+                agent: name.to_string(),
+                connection,
+                mode: rules.mode,
+                lineage,
+                message,
+                cancel: CancelToken::new(),
+                intent,
+                report_to: Some(parent),
+            };
+            return in_panel::start_in_background(request, &self.cwd, max_turns)
+                .map(|started| Ok(started).into());
+        }
+
         // In a panel, when the settings say so and one takes the task: the
         // user watches it there and answers what it asks, so an external
         // agent can be a delegate too.
@@ -1604,10 +1641,6 @@ impl Subagents {
             place => place,
         };
         if place.in_panel() {
-            let connection = match &target {
-                SubagentTarget::Session => active.connection.clone(),
-                SubagentTarget::Model(name, _) | SubagentTarget::Cli(name, _) => name.clone(),
-            };
             let request = in_panel::PanelDelegation {
                 place,
                 project_root: self.project_root.clone(),
@@ -1618,11 +1651,8 @@ impl Subagents {
                 lineage: lineage.clone(),
                 message: message.clone(),
                 cancel: CancelToken::new(),
-                intent: ctx
-                    .session
-                    .as_ref()
-                    .map(|session| IntentLog::delegated(&session.intent))
-                    .unwrap_or_default(),
+                intent: intent.clone(),
+                report_to: None,
             };
             if let Some(outcome) =
                 in_panel::run_in_panel(request, &self.cwd, max_turns, cancel, on_update)
@@ -1714,15 +1744,10 @@ impl Subagents {
         );
         // The reviewer judges the subagent's calls against what the user asked
         // the delegating agent; the task itself counts as that agent's words.
-        let parent = ctx
-            .session
-            .as_ref()
-            .map(|session| IntentLog::delegated(&session.intent))
-            .unwrap_or_default();
         let mut agent = Agent::new(provider, tools, model, self.cwd.clone())
             .with_system_prompt(system_prompt)
             .with_compaction(self.compaction)
-            .with_delegated_intent(parent);
+            .with_delegated_intent(intent);
         if let Some(asker) = asker {
             agent = agent.with_asker(asker);
         }
@@ -3573,6 +3598,7 @@ mod tests {
                 agent: DEFAULT_AGENT,
                 prompt: "look around",
                 call: "c1",
+                background: false,
             },
             &ToolContext::new(tmp.path().to_path_buf()),
             &cancel,

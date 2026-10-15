@@ -51,6 +51,9 @@ pub struct SubagentTask<'a> {
     pub prompt: &'a str,
     /// The id of the delegating `task` call.
     pub call: &'a str,
+    /// Hand the task over and go on: the call returns once the task is
+    /// placed, and the delegate's answer comes later as a message of its own.
+    pub background: bool,
 }
 
 /// Runs the named agent on the task to completion. Progress is forwarded
@@ -121,6 +124,10 @@ impl Tool for TaskTool {
                 "prompt": {
                     "type": "string",
                     "description": "The task, complete in itself: the agent does not see this conversation"
+                },
+                "background": {
+                    "type": "boolean",
+                    "description": "Run it in a panel of its own and carry on without waiting; its answer comes later as a message"
                 }
             },
             "required": ["agent", "prompt"]
@@ -157,10 +164,15 @@ impl Tool for TaskTool {
                 format!("no agent named {agent}; available: {}", names.join(", ")),
             );
         }
+        let background = call
+            .arguments
+            .get("background")
+            .is_some_and(|value| value.as_bool() == Some(true) || value.as_str() == Some("true"));
         let task = SubagentTask {
             agent,
             prompt,
             call: &call.id,
+            background,
         };
         let outcome = (self.run)(&task, ctx, cancel, on_update);
         // What the subagent spent and where its session went ride in the
@@ -212,6 +224,7 @@ mod tests {
                 agent.to_string(),
                 task.prompt.to_string(),
                 task.call.to_string(),
+                task.background,
             ));
             let spent = Usage {
                 input: 7,
@@ -261,9 +274,16 @@ mod tests {
             vec![(
                 "reviewer".to_string(),
                 "check the diff".to_string(),
-                "t".to_string()
+                "t".to_string(),
+                false
             )]
         );
+        assert!(schema["properties"]["background"].is_object());
+        run_with(
+            &tool,
+            json!({ "agent": "reviewer", "prompt": "later", "background": true }),
+        );
+        assert!(seen.lock().unwrap().last().unwrap().3);
 
         let failed = run_with(&tool, json!({ "agent": "writer", "prompt": "x" }));
         assert!(failed.is_error);

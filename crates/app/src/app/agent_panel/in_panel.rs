@@ -11,6 +11,11 @@
 //! ([`DelegateUpdate`]), which shows it in its block as a hidden delegate's
 //! progress and returns the delegate's last words as its answer.
 //!
+//! A task handed over in the background ([`start_in_background`]) takes a
+//! panel the same way, but the call returns once it is placed: a thread of
+//! its own follows the task, and its answer goes to the delegating panel as
+//! a message of the delegate's.
+//!
 //! The channel answers only while an app serves it: a headless run and the
 //! tests have no panels, and their tasks run hidden.
 
@@ -52,17 +57,22 @@ pub(super) struct PanelDelegation {
     /// What the user asked the delegating agent, for the `auto` reviewer of
     /// the task's calls.
     pub intent: IntentLog,
+    /// For a task handed over in the background, the delegating panel its
+    /// answer goes to.
+    pub report_to: Option<u64>,
 }
 
-/// A request with where the app answers it: the task under way, or `None`
-/// when no panel took it.
-type Request = (PanelDelegation, Sender<Option<PanelTask>>);
+/// A request with where the app answers it: the task under way, or why no
+/// panel took it.
+type Request = (PanelDelegation, Sender<Result<PanelTask, String>>);
 
 /// A delegated task a panel took.
 pub(super) struct PanelTask {
     pub updates: Receiver<DelegateUpdate>,
     /// Its session's log.
     pub session: Option<PathBuf>,
+    /// The number of the panel that took it.
+    pub panel: u64,
 }
 
 /// The channel from the `task` calls to the app.
@@ -111,7 +121,7 @@ pub(super) fn run_in_panel(
     let started = Instant::now();
     let task = loop {
         match answer.recv_timeout(POLL) {
-            Ok(task) => break task?,
+            Ok(task) => break task.ok()?,
             Err(RecvTimeoutError::Timeout) if cancel.is_cancelled() => {
                 stop.cancel();
                 return Some(Err("the subagent was stopped".to_string()).into());
@@ -127,6 +137,91 @@ pub(super) fn run_in_panel(
     let mut outcome = follow(&task.updates, cwd, max_turns, cancel, &stop, on_update);
     outcome.session = task.session;
     Some(outcome)
+}
+
+/// Hand `request` to a panel and return at once: a thread of its own
+/// follows the task, and its answer goes to the panel `request.report_to`
+/// names as a message of the delegate's. What to tell the delegating agent,
+/// or why no panel took the task.
+pub(super) fn start_in_background(
+    request: PanelDelegation,
+    cwd: &Path,
+    max_turns: usize,
+) -> Result<String, String> {
+    let Some(report_to) = request.report_to else {
+        return Err("a background task needs an agent panel to report back to".into());
+    };
+    if !SERVED.load(Ordering::Acquire) {
+        return Err(
+            "no agent panels are open here to run a background task in; \
+                    run it without `background`"
+                .into(),
+        );
+    }
+    let agent = request.agent.clone();
+    let prompt = request.message.plain_text();
+    let stop = request.cancel.clone();
+    let (reply, answer) = mpsc::channel();
+    port()
+        .0
+        .send((request, reply))
+        .map_err(|_| "the panels cannot be reached".to_string())?;
+    let task = match answer.recv_timeout(REPLY_WAIT) {
+        Ok(task) => task?,
+        Err(_) => {
+            stop.cancel();
+            return Err("the panels did not answer; run the task without `background`".into());
+        }
+    };
+    let panel = task.panel;
+    let cwd = cwd.to_path_buf();
+    let thread_agent = agent.clone();
+    std::thread::Builder::new()
+        .name(format!("background-{agent}"))
+        .spawn(move || {
+            // Nobody waits on the call: only the panel ends the task.
+            let outcome = follow(
+                &task.updates,
+                &cwd,
+                max_turns,
+                &CancelToken::new(),
+                &stop,
+                &mut |_| {},
+            );
+            let text = background_report(&prompt, panel, &outcome);
+            super::peers::report(report_to, &thread_agent, panel, text);
+        })
+        .map_err(|error| format!("cannot follow the task: {error}"))?;
+    Ok(format!(
+        "{agent} took the task in panel {panel} and works on it there. Carry on: its answer \
+         comes to you later as a message of its own. Do not wait for it with tools, and do \
+         not hand the same task over again."
+    ))
+}
+
+/// The message a background task's answer reaches the delegating agent as:
+/// which task it answers, then the delegate's last words or what went wrong.
+fn background_report(prompt: &str, panel: u64, outcome: &SubagentOutcome) -> String {
+    let task: String = prompt
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .take(120)
+        .collect();
+    let ellipsis = if task.len() < prompt.trim_end().len() {
+        "…"
+    } else {
+        ""
+    };
+    let head = format!(
+        "The background task you handed to panel {panel} is over (\"{task}{ellipsis}\"); \
+         the panel is free again, so do not reply to it."
+    );
+    match &outcome.answer {
+        Ok(answer) => format!("{head}\n\nIts answer:\n\n{answer}"),
+        Err(error) => format!("{head}\n\nIt failed: {error}"),
+    }
 }
 
 /// Follow a task a panel runs, showing its progress through `on_update`,
@@ -187,7 +282,7 @@ impl App {
             .collect();
         for (request, reply) in requests {
             let task = self.place_delegation(&request);
-            if task.is_some() {
+            if task.is_ok() {
                 self.state.needs_redraw = true;
             }
             let _ = reply.send(task);
@@ -195,13 +290,29 @@ impl App {
     }
 
     /// Start `request` in a panel: rebuilt in place of the first free one,
-    /// else opened beside the others when its place allows. `None` when no
+    /// else opened beside the others when its place allows. Why not, when no
     /// panel takes it.
-    fn place_delegation(&mut self, request: &PanelDelegation) -> Option<PanelTask> {
-        if request.cancel.is_cancelled()
-            || !super::peers::same_dir(&request.project_root, &self.project_root)
-        {
-            return None;
+    fn place_delegation(&mut self, request: &PanelDelegation) -> Result<PanelTask, String> {
+        if request.cancel.is_cancelled() {
+            return Err("the task was stopped".into());
+        }
+        if !super::peers::same_dir(&request.project_root, &self.project_root) {
+            return Err(
+                "this project is not the one on screen; its panels are out of reach".into(),
+            );
+        }
+        // A background task's answer starts the delegating agent anew, so
+        // it counts among the messages agents pass one another.
+        if let Some(parent) = request.report_to {
+            let hops = self.agent_hops_of(parent);
+            if hops >= super::peers::MAX_HOPS {
+                return Err(format!(
+                    "the agents have passed {} messages to one another without the user: \
+                     hand nothing more over in the background, finish what you can and tell \
+                     the user where things stand",
+                    super::peers::MAX_HOPS
+                ));
+            }
         }
         let focused = self.layout_manager.active_panel_position();
         let free = self
@@ -217,7 +328,7 @@ impl App {
             })
             .map(|(position, _)| position);
         if free.is_none() && !request.place.opens_panel() {
-            return None;
+            return Err("no agent panel is free to take the task".into());
         }
         // A panel rebuilt in place keeps its number, and where it worked,
         // to go back to once the task is over.
@@ -229,7 +340,9 @@ impl App {
                 .map(|panel| (panel.panel_id(), panel.cwd().to_path_buf()))
         });
         let keep = taken.as_ref().map(|(id, _)| *id);
-        let (mut panel, session) = self.delegate_panel(request, keep)?;
+        let (mut panel, session) = self
+            .delegate_panel(request, keep)
+            .ok_or_else(|| "cannot start a session for the task".to_string())?;
         let (updates, task_updates) = mpsc::channel();
         panel.start_delegation(
             request.message.clone(),
@@ -242,6 +355,7 @@ impl App {
             .with_call(request.lineage.call.clone()),
         );
         let home = taken.map_or_else(|| request.cwd.clone(), |(_, cwd)| cwd);
+        let panel_id = panel.panel_id();
         homes()
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -254,9 +368,10 @@ impl App {
             None => self.add_panel_without_focus(Box::new(panel)),
         }
         self.auto_save_layout();
-        Some(PanelTask {
+        Ok(PanelTask {
             updates: task_updates,
             session,
+            panel: panel_id,
         })
     }
 
@@ -440,6 +555,49 @@ mod tests {
     }
 
     #[test]
+    fn a_background_answer_names_its_task_and_says_how_it_ended() {
+        let done = background_report(
+            "find the parser\nin src/",
+            3,
+            &Ok("in lex.rs".into()).into(),
+        );
+        assert!(
+            done.contains("panel 3") && done.contains("\"find the parser…\""),
+            "{done}"
+        );
+        assert!(done.ends_with("in lex.rs"), "{done}");
+        let failed = background_report(
+            "x",
+            4,
+            &Err("the subagent's panel was closed".into()).into(),
+        );
+        assert!(failed.contains("\"x\"") && failed.contains("It failed: the subagent's panel"));
+    }
+
+    #[test]
+    fn a_background_task_needs_a_panel_to_report_to() {
+        let request = PanelDelegation {
+            place: SubagentPlace::Panel,
+            project_root: PathBuf::from("/proj"),
+            cwd: PathBuf::from("/proj"),
+            agent: "search".into(),
+            connection: "local".into(),
+            mode: Mode::default(),
+            lineage: SessionParent {
+                session: None,
+                agent: "lead".into(),
+                call: "c1".into(),
+            },
+            message: UserMessage::text("find it"),
+            cancel: CancelToken::new(),
+            intent: IntentLog::default(),
+            report_to: None,
+        };
+        let error = start_in_background(request, Path::new("/proj"), 50).unwrap_err();
+        assert!(error.contains("report back"), "{error}");
+    }
+
+    #[test]
     fn without_an_app_to_serve_it_a_task_runs_hidden() {
         let request = PanelDelegation {
             place: SubagentPlace::Panel,
@@ -456,6 +614,7 @@ mod tests {
             message: UserMessage::text("find it"),
             cancel: CancelToken::new(),
             intent: IntentLog::default(),
+            report_to: None,
         };
         assert!(run_in_panel(
             request,

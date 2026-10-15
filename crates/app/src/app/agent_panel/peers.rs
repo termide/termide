@@ -46,6 +46,14 @@ enum Request {
         text: String,
         reply: Sender<Result<String, String>>,
     },
+    /// A background task's answer, for the panel that handed it over.
+    Report {
+        to: u64,
+        /// The delegate, and the panel it ran in.
+        agent: String,
+        panel: u64,
+        text: String,
+    },
 }
 
 fn port() -> &'static (Sender<Request>, Mutex<Receiver<Request>>) {
@@ -117,6 +125,21 @@ pub(super) fn peer_tools(caller: &str, project_root: &Path) -> [Arc<dyn Tool>; 2
     ]
 }
 
+/// Hand the answer of a background task the delegate `agent` ran in
+/// `panel` to the panel `to` that handed it over; the app delivers it on
+/// its tick. Nobody waits for it: one that cannot be delivered is logged.
+pub(super) fn report(to: u64, agent: &str, panel: u64, text: String) {
+    let request = Request::Report {
+        to,
+        agent: agent.to_string(),
+        panel,
+        text,
+    };
+    if !SERVED.load(Ordering::Acquire) || port().0.send(request).is_err() {
+        log::warn!("the answer of {agent}'s background task found no panel to go to");
+    }
+}
+
 /// Whether `a` and `b` name one directory.
 pub(super) fn same_dir(a: &Path, b: &Path) -> bool {
     a == b
@@ -169,6 +192,15 @@ impl App {
                     }
                     let _ = reply.send(result);
                 }
+                Request::Report {
+                    to,
+                    agent,
+                    panel,
+                    text,
+                } => match self.report_to_panel(to, agent, panel, text) {
+                    Ok(()) => self.state.needs_redraw = true,
+                    Err(error) => log::warn!("a background task's answer was lost: {error}"),
+                },
             }
         }
     }
@@ -200,6 +232,37 @@ impl App {
                 own: Some(panel.panel_id()) == from,
             })
             .collect())
+    }
+
+    /// How many messages agents passed one another to get the run of panel
+    /// `id` going; none for a panel that is not open.
+    pub(super) fn agent_hops_of(&mut self, id: u64) -> u32 {
+        self.agent_panels()
+            .find(|panel| panel.panel_id() == id)
+            .map_or(0, |panel| panel.agent_hops())
+    }
+
+    /// Deliver a background task's answer to the panel `to` that handed it
+    /// over, as the delegate's reply: one more message passed without the
+    /// user.
+    fn report_to_panel(
+        &mut self,
+        to: u64,
+        agent: String,
+        panel: u64,
+        text: String,
+    ) -> Result<(), String> {
+        let Some(target) = self.agent_panels().find(|p| p.panel_id() == to) else {
+            return Err(format!("panel {to} that handed it over is closed"));
+        };
+        let hops = target.agent_hops() + 1;
+        target.deliver(UserMessage::text(text).with_origin(MessageOrigin {
+            session: String::new(),
+            agent,
+            kind: OriginKind::Reply,
+            panel: Some(panel),
+            hops,
+        }))
     }
 
     fn send_to_peer(&mut self, message: Outgoing, project_root: &Path) -> Result<String, String> {
