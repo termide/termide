@@ -1,8 +1,12 @@
-//! `read`: a file as numbered lines, paged with `offset` and `limit`.
+//! `read`: a file as numbered lines, paged with `offset` and `limit`, or an
+//! image file as the picture itself, for a multimodal model to look at.
+
+use std::path::PathBuf;
 
 use serde_json::{json, Value};
 use termide_agent_core::ToolText;
 use termide_agent_core::{CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate};
+use termide_clipboard::{picture_from_path, picture_kind, Picture};
 
 use crate::args::{optional_u64, required_str, resolve_path};
 use crate::truncate::{READ_MAX_BYTES, READ_MAX_LINES};
@@ -46,15 +50,49 @@ impl Tool for ReadTool {
         _cancel: &CancelToken,
     ) -> ToolResultMessage {
         match read(call, ctx) {
-            Ok((text, details)) => ToolResultMessage::text(call, text).with_details(details),
+            Ok(Read::Text(text, details)) => {
+                ToolResultMessage::text(call, text).with_details(details)
+            }
+            Ok(Read::Picture(path, picture)) => ToolResultMessage::text(
+                call,
+                format!(
+                    "Image {} ({}, {}×{} as sent)",
+                    path.display(),
+                    picture.media_type,
+                    picture.width,
+                    picture.height
+                ),
+            )
+            .with_details(json!({
+                "path": path,
+                "image": [picture.width, picture.height],
+            }))
+            .with_images(vec![(picture.media_type, picture.data)]),
             Err(message) => ToolResultMessage::error(call, message),
         }
     }
 }
 
-fn read(call: &ToolCall, ctx: &ToolContext) -> Result<(String, Value), String> {
+/// What `read` found: text lines, or a picture for the model to look at.
+enum Read {
+    Text(String, Value),
+    Picture(PathBuf, Picture),
+}
+
+fn read(call: &ToolCall, ctx: &ToolContext) -> Result<Read, String> {
     let raw_path = required_str(call, "path")?;
     let path = resolve_path(ctx, raw_path)?;
+    // A file named as a picture that does not decode as one is read on as
+    // text, and refused below when it is binary.
+    if picture_kind(&path).is_some() && path.is_file() {
+        if let Some(picture) = picture_from_path(&path) {
+            return Ok(Read::Picture(path, picture));
+        }
+    }
+    read_text(call, path).map(|(text, details)| Read::Text(text, details))
+}
+
+fn read_text(call: &ToolCall, path: PathBuf) -> Result<(String, Value), String> {
     let offset = optional_u64(call, "offset")?.unwrap_or(1).max(1) as usize;
     let limit = optional_u64(call, "limit")?
         .map(|value| value.max(1) as usize)
@@ -202,6 +240,36 @@ mod tests {
             .plain_text()
             .contains("missing required argument `path`"));
         let _ = PathBuf::new();
+    }
+
+    #[test]
+    fn an_image_comes_back_as_a_picture() {
+        let dir = tempfile::tempdir().unwrap();
+        // A 1×1 PNG.
+        let png = [
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0xf0, 0x1f, 0x00, 0x05, 0x00, 0x01, 0xff, 0x89, 0x99,
+            0x3d, 0x1d, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+        ];
+        std::fs::write(dir.path().join("shot.png"), png).unwrap();
+        let result = run(dir.path(), json!({ "path": "shot.png" }));
+        assert!(!result.is_error, "{}", result.plain_text());
+        assert!(result.plain_text().contains("image/png, 1×1"));
+        let images: Vec<_> = result.images().collect();
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].0, "image/png");
+    }
+
+    #[test]
+    fn a_text_file_named_as_an_image_is_read_as_text() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("fake.png"), "not a picture\n").unwrap();
+        let result = run(dir.path(), json!({ "path": "fake.png" }));
+        assert!(!result.is_error);
+        assert_eq!(result.images().count(), 0);
+        assert_eq!(result.plain_text(), "     1\tnot a picture\n");
     }
 
     #[test]

@@ -122,9 +122,18 @@ impl OpenAiCompatProvider {
         if !request.system_prompt.is_empty() {
             messages.push(json!({ "role": "system", "content": request.system_prompt }));
         }
+        // A `tool` message carries text only, so the images of a run of tool
+        // results follow it in one user message: the results of a turn must
+        // come right after its calls, unbroken.
+        let mut tool_images: Vec<Value> = Vec::new();
         for message in request.messages {
+            match message {
+                Message::ToolResult(result) => tool_images.extend(result.images().map(image_part)),
+                _ => flush_tool_images(&mut messages, &mut tool_images),
+            }
             messages.push(self.convert(message));
         }
+        flush_tool_images(&mut messages, &mut tool_images);
 
         let mut body = Map::new();
         body.insert("model".into(), json!(request.model.id));
@@ -201,12 +210,7 @@ impl OpenAiCompatProvider {
             }
             Message::User(user) => {
                 let mut parts = vec![json!({ "type": "text", "text": user.model_text() })];
-                parts.extend(user.images().map(|(media_type, data)| {
-                    json!({
-                        "type": "image_url",
-                        "image_url": { "url": format!("data:{media_type};base64,{data}") },
-                    })
-                }));
+                parts.extend(user.images().map(image_part));
                 json!({ "role": "user", "content": parts })
             }
             Message::ToolResult(result) => json!({
@@ -431,6 +435,26 @@ fn failed_after_content(
     partial
 }
 
+/// An image as an OpenAI content part: a data URL.
+fn image_part((media_type, data): (&str, &str)) -> Value {
+    json!({
+        "type": "image_url",
+        "image_url": { "url": format!("data:{media_type};base64,{data}") },
+    })
+}
+
+/// Close a run of tool results with a user message carrying their images,
+/// when they returned any.
+fn flush_tool_images(messages: &mut Vec<Value>, images: &mut Vec<Value>) {
+    if images.is_empty() {
+        return;
+    }
+    let mut parts =
+        vec![json!({ "type": "text", "text": "The images the tool results above returned." })];
+    parts.append(images);
+    messages.push(json!({ "role": "user", "content": parts }));
+}
+
 fn build_agent(connect: Duration, read: Duration) -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout_connect(connect)
@@ -553,6 +577,41 @@ mod tests {
                 { "type": "image_url", "image_url": { "url": "data:image/png;base64,QUJD" } },
             ])
         );
+    }
+
+    #[test]
+    fn tool_result_images_follow_the_run_of_results_in_a_user_message() {
+        let provider = OpenAiCompatProvider::new("p", "http://x/v1/");
+        let call = |id: &str| ToolCall {
+            id: id.into(),
+            name: "read".into(),
+            arguments: json!({}),
+            extra_content: None,
+        };
+        let shot = ToolResultMessage::text(&call("c1"), "Image shot.png")
+            .with_images(vec![("image/png".into(), "QUJD".into())]);
+        let messages = vec![
+            Message::ToolResult(shot),
+            Message::ToolResult(ToolResultMessage::text(&call("c2"), "text")),
+            Message::User(UserMessage::text("next")),
+        ];
+        let request = Request {
+            model: &model(),
+            system_prompt: "",
+            messages: &messages,
+            tools: &[],
+            thinking: ThinkingLevel::Off,
+        };
+        let body = provider.build_body(&request);
+        let wire = body["messages"].as_array().unwrap();
+        let roles: Vec<&str> = wire.iter().map(|m| m["role"].as_str().unwrap()).collect();
+        assert_eq!(roles, ["tool", "tool", "user", "user"]);
+        assert_eq!(wire[0]["content"], "Image shot.png");
+        assert_eq!(
+            wire[2]["content"][1],
+            json!({ "type": "image_url", "image_url": { "url": "data:image/png;base64,QUJD" } })
+        );
+        assert_eq!(wire[3]["content"], "next");
     }
 
     fn model() -> ModelSpec {

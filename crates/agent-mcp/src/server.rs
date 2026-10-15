@@ -645,8 +645,12 @@ fn call_tool(shared: &Shared, id: &Value, params: &Value, cancel: CancelToken) -
         }
         kept.push_back((call.name.clone(), call.arguments.clone(), details));
     }
+    let mut content = vec![json!({ "type": "text", "text": result.plain_text() })];
+    content.extend(result.images().map(
+        |(media_type, data)| json!({ "type": "image", "mimeType": media_type, "data": data }),
+    ));
     json!({
-        "content": [{ "type": "text", "text": result.plain_text() }],
+        "content": content,
         "isError": result.is_error,
     })
 }
@@ -859,6 +863,54 @@ mod tests {
             );
             ToolResultMessage::text(call, text)
         }
+    }
+
+    struct Snapshot;
+
+    impl Tool for Snapshot {
+        fn name(&self) -> &str {
+            "snap"
+        }
+        fn description(&self) -> &str {
+            "Return a picture"
+        }
+        fn parameters(&self) -> Value {
+            json!({ "type": "object" })
+        }
+        fn execute(
+            &self,
+            call: &ToolCall,
+            _ctx: &ToolContext,
+            _on_update: &mut dyn FnMut(ToolUpdate),
+            _cancel: &CancelToken,
+        ) -> ToolResultMessage {
+            ToolResultMessage::text(call, "Image shot.png")
+                .with_images(vec![("image/png".into(), "QUJD".into())])
+        }
+    }
+
+    /// A picture a tool returns reaches an external agent as an MCP image
+    /// block after the text.
+    #[test]
+    fn an_image_goes_back_as_an_image_block() {
+        let mut tools = ToolRegistry::new();
+        tools.insert(Arc::new(Snapshot));
+        let server = McpServer::start(tools, Box::new(Guard), ToolContext::new("/work")).unwrap();
+        let token = server.token().to_string();
+        let (_, body) = post(
+            &server,
+            &token,
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                     "params": { "name": "snap", "arguments": {} } }),
+        );
+        let result = &serde_json::from_str::<Value>(&body).unwrap()["result"];
+        assert_eq!(
+            result["content"],
+            json!([
+                { "type": "text", "text": "Image shot.png" },
+                { "type": "image", "mimeType": "image/png", "data": "QUJD" },
+            ])
+        );
     }
 
     /// `question` and `suggest_command` served to an external agent reach

@@ -5014,6 +5014,7 @@ dependencies = [
  "similar",
  "tempfile",
  "termide-agent-core",
+ "termide-clipboard",
 ]
 
 [[package]]

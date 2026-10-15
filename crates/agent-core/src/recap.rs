@@ -98,7 +98,10 @@ fn record(messages: &[Message]) -> Option<String> {
                 let text: Vec<&str> = result
                     .content
                     .iter()
-                    .map(|ToolResultContent::Text { text }| text.as_str())
+                    .map(|block| match block {
+                        ToolResultContent::Text { text } => text.as_str(),
+                        ToolResultContent::Image { .. } => "[image]",
+                    })
                     .collect();
                 let error = if result.is_error {
                     " error=\"true\""

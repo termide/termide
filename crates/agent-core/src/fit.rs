@@ -333,7 +333,10 @@ fn shorten(message: &mut Message, step: FitStep, calls: &HashMap<String, ToolCal
             let text: String = result
                 .content
                 .iter()
-                .map(|ToolResultContent::Text { text }| text.as_str())
+                .filter_map(|block| match block {
+                    ToolResultContent::Text { text } => Some(text.as_str()),
+                    ToolResultContent::Image { .. } => None,
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
             let size = text.chars().count();
@@ -369,7 +372,10 @@ fn kept(tool: &str) -> bool {
 fn result_chars(content: &[ToolResultContent]) -> usize {
     content
         .iter()
-        .map(|ToolResultContent::Text { text }| text.chars().count())
+        .map(|block| match block {
+            ToolResultContent::Text { text } => text.chars().count(),
+            ToolResultContent::Image { .. } => crate::message::IMAGE_ESTIMATE_CHARS,
+        })
         .sum()
 }
 
