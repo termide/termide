@@ -95,10 +95,7 @@ pub struct CommandConfigModal {
     last_buttons_area: Option<Rect>,
     last_group_field_area: Option<Rect>,
     last_group_dropdown_area: Option<Rect>,
-    last_command_area: Option<Rect>,
-    last_display_name_area: Option<Rect>,
     last_mode_area: Option<Rect>,
-    last_hotkey_area: Option<Rect>,
     last_checkbox_area: Option<Rect>,
     /// The text of the group, command, display name and hotkey fields as last
     /// drawn, for the mouse.

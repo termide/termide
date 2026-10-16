@@ -150,11 +150,6 @@ impl Modal for CommandConfigModal {
                 self.focus == FocusArea::DisplayName,
                 theme,
             ));
-            let dn_chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Length(15), Constraint::Min(1)])
-                .split(chunks[chunk_idx]);
-            self.last_display_name_area = Some(dn_chunks[1]);
             chunk_idx += 1;
 
             // 3. Command field
@@ -166,11 +161,6 @@ impl Modal for CommandConfigModal {
                 self.focus == FocusArea::Command,
                 theme,
             ));
-            let cmd_chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Length(15), Constraint::Min(1)])
-                .split(chunks[chunk_idx]);
-            self.last_command_area = Some(cmd_chunks[1]);
             chunk_idx += 1;
         } else {
             // 1. Group field
@@ -239,11 +229,6 @@ impl Modal for CommandConfigModal {
                 self.focus == FocusArea::DisplayName,
                 theme,
             ));
-            let dn_chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Length(15), Constraint::Min(1)])
-                .split(chunks[chunk_idx]);
-            self.last_display_name_area = Some(dn_chunks[1]);
             chunk_idx += 1;
 
             // 3. Command field
@@ -255,11 +240,6 @@ impl Modal for CommandConfigModal {
                 self.focus == FocusArea::Command,
                 theme,
             ));
-            let cmd_chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Length(15), Constraint::Min(1)])
-                .split(chunks[chunk_idx]);
-            self.last_command_area = Some(cmd_chunks[1]);
             chunk_idx += 1;
         }
 
@@ -343,11 +323,6 @@ impl Modal for CommandConfigModal {
             self.focus == FocusArea::Hotkey,
             theme,
         ));
-        let hk_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(15), Constraint::Min(1)])
-            .split(chunks[chunk_idx]);
-        self.last_hotkey_area = Some(hk_chunks[1]);
         chunk_idx += 1;
 
         // Hotkey error hint
@@ -651,20 +626,6 @@ impl Modal for CommandConfigModal {
             }
         }
 
-        if self.is_create() {
-            if let Some(area) = self.last_command_area {
-                if col >= area.x
-                    && col < area.x + area.width
-                    && row >= area.y
-                    && row < area.y + area.height
-                {
-                    self.focus = FocusArea::Command;
-                    self.group_suggestion.collapse();
-                    return Ok(None);
-                }
-            }
-        }
-
         if let Some(area) = self.last_checkbox_area {
             if col >= area.x
                 && col < area.x + area.width
@@ -673,19 +634,6 @@ impl Modal for CommandConfigModal {
             {
                 self.focus = FocusArea::ProjectCheckbox;
                 self.is_project = !self.is_project;
-                return Ok(None);
-            }
-        }
-
-        // Display name
-        if let Some(area) = self.last_display_name_area {
-            if col >= area.x
-                && col < area.x + area.width
-                && row >= area.y
-                && row < area.y + area.height
-            {
-                self.focus = FocusArea::DisplayName;
-                self.group_suggestion.collapse();
                 return Ok(None);
             }
         }
@@ -714,18 +662,6 @@ impl Modal for CommandConfigModal {
                     }
                     x_offset += w + 1;
                 }
-                return Ok(None);
-            }
-        }
-
-        // Hotkey
-        if let Some(area) = self.last_hotkey_area {
-            if col >= area.x
-                && col < area.x + area.width
-                && row >= area.y
-                && row < area.y + area.height
-            {
-                self.focus = FocusArea::Hotkey;
                 return Ok(None);
             }
         }
