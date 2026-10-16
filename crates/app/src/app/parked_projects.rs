@@ -42,6 +42,11 @@ pub(super) struct ParkedProject {
 }
 
 impl ParkedProject {
+    /// Every panel of the parked project.
+    pub(super) fn panels_mut(&mut self) -> impl Iterator<Item = &mut Box<dyn Panel>> {
+        self.layout.iter_all_panels_mut()
+    }
+
     fn panels(&self) -> impl Iterator<Item = &Box<dyn Panel>> {
         self.layout
             .panel_groups

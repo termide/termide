@@ -1,10 +1,12 @@
 use anyhow::{Context, Result};
 use ropey::Rope;
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{Action, Cursor, History};
+use crate::line_marks::{shift_marks, LineEdit};
 use crate::LineEnding;
 
 /// Beyond this many undrained changes, resending the whole document is
@@ -48,6 +50,10 @@ pub struct TextBuffer {
     /// The recorded ranges no longer describe this document, so the next sync
     /// has to resend the whole text.
     lsp_needs_full_sync: bool,
+    /// Lines carrying a mark (a breakpoint), 0-based; they move with edits.
+    line_marks: BTreeSet<usize>,
+    /// Incremented whenever `line_marks` changes.
+    line_marks_version: u64,
 }
 
 impl TextBuffer {
@@ -62,6 +68,8 @@ impl TextBuffer {
             edit_version: 0,
             lsp_changes: Vec::new(),
             lsp_needs_full_sync: false,
+            line_marks: BTreeSet::new(),
+            line_marks_version: 0,
         }
     }
 
@@ -76,6 +84,8 @@ impl TextBuffer {
             edit_version: 0,
             lsp_changes: Vec::new(),
             lsp_needs_full_sync: false,
+            line_marks: BTreeSet::new(),
+            line_marks_version: 0,
         }
     }
 
@@ -90,6 +100,8 @@ impl TextBuffer {
             edit_version: 0,
             lsp_changes: Vec::new(),
             lsp_needs_full_sync: false,
+            line_marks: BTreeSet::new(),
+            line_marks_version: 0,
         }
     }
 
@@ -126,6 +138,8 @@ impl TextBuffer {
             edit_version: 0,
             lsp_changes: Vec::new(),
             lsp_needs_full_sync: false,
+            line_marks: BTreeSet::new(),
+            line_marks_version: 0,
         })
     }
 
@@ -303,11 +317,40 @@ impl TextBuffer {
         (line as u32, units as u32)
     }
 
-    /// Record that `chars` is about to be replaced with `text`.
+    /// Record that `chars` is about to be replaced with `text`: move the line
+    /// marks and queue the change for LSP.
     ///
     /// Must be called *before* the rope is modified: the range is stated in
     /// the pre-edit document, which is what a `didChange` content change
     /// means.
+    fn record_change(&mut self, chars: std::ops::Range<usize>, text: &str) {
+        if !self.line_marks.is_empty() {
+            self.shift_line_marks(chars.clone(), text);
+        }
+        self.record_lsp_change(chars, text);
+    }
+
+    fn shift_line_marks(&mut self, chars: std::ops::Range<usize>, text: &str) {
+        let at = |idx: usize| {
+            let idx = idx.min(self.rope.len_chars());
+            let line = self.rope.char_to_line(idx);
+            (line, self.rope.line_to_char(line) == idx)
+        };
+        let (start_line, start_at_line_start) = at(chars.start);
+        let (end_line, end_at_line_start) = at(chars.end);
+        let edit = LineEdit {
+            start_line,
+            start_at_line_start,
+            end_line,
+            end_at_line_start,
+            // Count breaks the way the rope does (CR, LS, PS... too).
+            inserted_breaks: ropey::str_utils::byte_to_line_idx(text, text.len()),
+        };
+        if shift_marks(&mut self.line_marks, edit) {
+            self.line_marks_version += 1;
+        }
+    }
+
     fn record_lsp_change(&mut self, chars: std::ops::Range<usize>, text: &str) {
         if self.lsp_needs_full_sync {
             return;
@@ -349,6 +392,48 @@ impl TextBuffer {
         Some(std::mem::take(&mut self.lsp_changes))
     }
 
+    /// Lines carrying a mark (0-based), kept on their text as it is edited.
+    pub fn line_marks(&self) -> &BTreeSet<usize> {
+        &self.line_marks
+    }
+
+    /// Whether `line` (0-based) carries a mark.
+    pub fn has_line_mark(&self, line: usize) -> bool {
+        self.line_marks.contains(&line)
+    }
+
+    /// Replace the marks; lines past the end of the text are dropped.
+    pub fn set_line_marks(&mut self, lines: impl IntoIterator<Item = usize>) {
+        let count = self.line_count();
+        let marks: BTreeSet<usize> = lines.into_iter().filter(|&l| l < count).collect();
+        if marks != self.line_marks {
+            self.line_marks = marks;
+            self.line_marks_version += 1;
+        }
+    }
+
+    /// Set the mark on `line` when it has none, remove it otherwise. Returns
+    /// whether the line carries a mark now.
+    pub fn toggle_line_mark(&mut self, line: usize) -> bool {
+        if line >= self.line_count() {
+            return false;
+        }
+        let set = if self.line_marks.remove(&line) {
+            false
+        } else {
+            self.line_marks.insert(line);
+            true
+        };
+        self.line_marks_version += 1;
+        set
+    }
+
+    /// Incremented whenever the marks change, by a toggle or by an edit that
+    /// moved them.
+    pub fn line_marks_version(&self) -> u64 {
+        self.line_marks_version
+    }
+
     /// Get all text
     pub fn text(&self) -> String {
         self.rope.to_string()
@@ -365,7 +450,7 @@ impl TextBuffer {
     /// Insert text at cursor position
     pub fn insert(&mut self, cursor: &Cursor, text: &str) -> Result<Cursor> {
         let char_idx = self.cursor_to_char_idx(cursor)?;
-        self.record_lsp_change(char_idx..char_idx, text);
+        self.record_change(char_idx..char_idx, text);
         self.rope.insert(char_idx, text);
         self.modified = true;
         self.edit_version += 1;
@@ -394,7 +479,7 @@ impl TextBuffer {
         let deleted_char = self.rope.char(char_idx).to_string();
 
         // Delete one character
-        self.record_lsp_change(char_idx..char_idx + 1, "");
+        self.record_change(char_idx..char_idx + 1, "");
         self.rope.remove(char_idx..char_idx + 1);
         self.modified = true;
         self.edit_version += 1;
@@ -433,7 +518,7 @@ impl TextBuffer {
         };
 
         // Delete character before cursor
-        self.record_lsp_change(char_idx - 1..char_idx, "");
+        self.record_change(char_idx - 1..char_idx, "");
         self.rope.remove(char_idx - 1..char_idx);
         self.modified = true;
         self.edit_version += 1;
@@ -457,7 +542,7 @@ impl TextBuffer {
             let deleted_text: String = self.rope.slice(start_idx..end_idx).to_string();
 
             // Delete text
-            self.record_lsp_change(start_idx..end_idx, "");
+            self.record_change(start_idx..end_idx, "");
             self.rope.remove(start_idx..end_idx);
             self.modified = true;
             self.edit_version += 1;
@@ -585,7 +670,7 @@ impl TextBuffer {
         match action {
             Action::Insert { position, text } => {
                 let char_idx = self.cursor_to_char_idx(position)?;
-                self.record_lsp_change(char_idx..char_idx, text);
+                self.record_change(char_idx..char_idx, text);
                 self.rope.insert(char_idx, text);
                 let new_cursor = self.advance_cursor(position, text);
                 Ok(new_cursor)
@@ -593,7 +678,7 @@ impl TextBuffer {
             Action::Delete { position, text } => {
                 let char_idx = self.cursor_to_char_idx(position)?;
                 let end_idx = char_idx + text.chars().count();
-                self.record_lsp_change(char_idx..end_idx, "");
+                self.record_change(char_idx..end_idx, "");
                 self.rope.remove(char_idx..end_idx);
                 Ok(*position)
             }
@@ -1000,5 +1085,34 @@ mod lsp_change_tests {
             cursor = buf.insert(&cursor, "x").unwrap();
         }
         assert!(buf.take_lsp_changes().is_none());
+    }
+
+    #[test]
+    fn a_line_mark_follows_its_line_through_edits_and_undo() {
+        let mut buf = TextBuffer::from_text("a\nb\nc\n");
+        assert!(buf.toggle_line_mark(1));
+        let v = buf.line_marks_version();
+
+        // A line inserted above pushes the mark down; undo brings it back.
+        buf.insert(&Cursor::at(0, 0), "new\n").unwrap();
+        assert!(buf.has_line_mark(2));
+        assert!(buf.line_marks_version() > v);
+        buf.undo().unwrap();
+        assert_eq!(buf.line_marks().iter().copied().collect::<Vec<_>>(), [1]);
+
+        // Deleting the marked line removes the mark.
+        buf.delete_range(&Cursor::at(1, 0), &Cursor::at(2, 0))
+            .unwrap();
+        assert!(buf.line_marks().is_empty());
+    }
+
+    #[test]
+    fn line_marks_past_the_end_are_dropped() {
+        let mut buf = TextBuffer::from_text("a\nb");
+        buf.set_line_marks([0, 1, 7]);
+        assert_eq!(buf.line_marks().iter().copied().collect::<Vec<_>>(), [0, 1]);
+        assert!(!buf.toggle_line_mark(9));
+        assert!(!buf.toggle_line_mark(1));
+        assert!(!buf.has_line_mark(1));
     }
 }

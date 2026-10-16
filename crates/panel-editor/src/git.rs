@@ -14,6 +14,18 @@ use termide_theme::Theme;
 pub struct LspMarkerInfo {
     pub marker: char,
     pub color: Color,
+    /// Background of the cell, for a marker that has to stand out.
+    pub bg: Option<Color>,
+}
+
+impl LspMarkerInfo {
+    pub fn style(&self) -> ratatui::style::Style {
+        let style = ratatui::style::Style::default().fg(self.color);
+        match self.bg {
+            Some(bg) => style.bg(bg),
+            None => style,
+        }
+    }
 }
 
 /// Virtual line representation for rendering.
@@ -213,33 +225,56 @@ pub fn get_line_number_git_style(
 /// - ▶/► (red) for ERROR
 /// - ▶/► (yellow) for WARNING
 /// - ' ' (space) for no diagnostic or INFO/HINT
+/// - ● (red) for a breakpoint, which takes the cell over a diagnostic: the
+///   diagnostic still shows on its virtual line
+/// - → on a highlighted cell for the line a debugger stopped at, over both
 ///
 /// On Windows U+25B6 ▶ is outside WGL4; U+25BA ► is used instead.
 pub fn get_lsp_marker(
     diagnostic_severity: Option<lsp_types::DiagnosticSeverity>,
+    breakpoint: bool,
+    execution: bool,
     theme: &Theme,
 ) -> LspMarkerInfo {
     const LSP_MARKER: char = if cfg!(windows) { '►' } else { '▶' };
+    if execution {
+        return LspMarkerInfo {
+            marker: '→',
+            color: if breakpoint { theme.error } else { theme.bg },
+            bg: Some(theme.warning),
+        };
+    }
+    if breakpoint {
+        return LspMarkerInfo {
+            marker: '●',
+            color: theme.error,
+            bg: None,
+        };
+    }
     if let Some(severity) = diagnostic_severity {
         use lsp_types::DiagnosticSeverity;
         match severity {
             DiagnosticSeverity::ERROR => LspMarkerInfo {
                 marker: LSP_MARKER,
                 color: theme.error,
+                bg: None,
             },
             DiagnosticSeverity::WARNING => LspMarkerInfo {
                 marker: LSP_MARKER,
                 color: theme.warning,
+                bg: None,
             },
             _ => LspMarkerInfo {
                 marker: ' ',
                 color: theme.disabled,
+                bg: None,
             },
         }
     } else {
         LspMarkerInfo {
             marker: ' ',
             color: theme.disabled,
+            bg: None,
         }
     }
 }

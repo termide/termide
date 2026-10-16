@@ -55,6 +55,10 @@ impl App {
                 self.event_execute_file(path)?;
             }
 
+            PanelEvent::StartDebug { file } => {
+                self.start_debug(file)?;
+            }
+
             PanelEvent::RunCommand { command, cwd } => {
                 self.event_run_command(command, cwd)?;
             }

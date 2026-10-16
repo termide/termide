@@ -529,6 +529,14 @@ impl HelpGenerator {
                 description: t.help_desc_code_action().to_string(),
             },
             HelpEntry {
+                keys: Self::format_keys(&kb.toggle_breakpoint),
+                description: t.help_desc_toggle_breakpoint().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.start_debug),
+                description: t.help_desc_start_debug().to_string(),
+            },
+            HelpEntry {
                 keys: "Ctrl+←/→".to_string(),
                 description: t.help_desc_word_nav().to_string(),
             },

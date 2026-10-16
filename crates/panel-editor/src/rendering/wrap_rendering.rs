@@ -251,7 +251,12 @@ fn render_empty_line(
     let diagnostic_severity = render_context.diagnostic_severity_at_line(line_idx);
     let (line_num_fg, line_num_bg) =
         git::get_line_number_git_style(line_idx, git_diff_cache, show_git_diff, theme);
-    let lsp_marker = git::get_lsp_marker(diagnostic_severity, theme);
+    let lsp_marker = git::get_lsp_marker(
+        diagnostic_severity,
+        render_context.has_breakpoint(line_idx),
+        render_context.is_execution_line(line_idx),
+        theme,
+    );
 
     // Render the line number with git bg color
     let mut line_num_style = Style::default().fg(line_num_fg);
@@ -272,7 +277,7 @@ fn render_empty_line(
     }
 
     // Render LSP marker (penultimate gutter cell) with its own color
-    let marker_style = Style::default().fg(lsp_marker.color);
+    let marker_style = lsp_marker.style();
     let x = area.x + digit_cells;
     let y = area.y + visual_row as u16;
     if let Some(cell) = buf.cell_mut((x, y)) {
@@ -341,7 +346,12 @@ fn render_visual_line<H: LineHighlighter>(
         let diagnostic_severity = render_context.diagnostic_severity_at_line(line_idx);
         let (line_num_fg, line_num_bg) =
             git::get_line_number_git_style(line_idx, git_diff_cache, show_git_diff, theme);
-        let lsp_marker = git::get_lsp_marker(diagnostic_severity, theme);
+        let lsp_marker = git::get_lsp_marker(
+            diagnostic_severity,
+            render_context.has_breakpoint(line_idx),
+            render_context.is_execution_line(line_idx),
+            theme,
+        );
 
         // Render the line number with git bg color
         let mut line_num_style = Style::default().fg(line_num_fg);
@@ -363,7 +373,7 @@ fn render_visual_line<H: LineHighlighter>(
         }
 
         // Render LSP marker (penultimate gutter cell) with its own color
-        let marker_style = Style::default().fg(lsp_marker.color);
+        let marker_style = lsp_marker.style();
         let x = area.x + digit_cells;
         let y = area.y + visual_row as u16;
         if let Some(cell) = buf.cell_mut((x, y)) {

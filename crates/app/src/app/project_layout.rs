@@ -108,6 +108,10 @@ impl App {
 
     /// Auto-save the project layout (ignores errors to not disrupt user experience)
     pub fn auto_save_layout(&mut self) {
+        // Breakpoints are kept apart from the layout, and saved in $EDITOR
+        // mode too.
+        self.sync_editor_breakpoints();
+        termide_debug::breakpoints::flush();
         if let Err(e) = self.save_layout() {
             // Log error but don't interrupt user workflow
             log::error!("Failed to auto-save project layout: {}", e);

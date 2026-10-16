@@ -41,6 +41,10 @@ pub(crate) fn build_editor_hotkey_table(config: &Config) -> HotkeyTable {
     t.insert("rename_symbol", &kb.rename_symbol);
     t.insert("code_action", &kb.code_action);
 
+    // Debugging
+    t.insert("toggle_breakpoint", &kb.toggle_breakpoint);
+    t.insert("start_debug", &kb.start_debug);
+
     // Viewer: swap this text file to the hex viewer (shared viewer binding).
     t.insert("viewer_toggle_hex", &config.viewer.keybindings.toggle_hex);
     // Viewer: toggle this editor between view (read-only) and edit.

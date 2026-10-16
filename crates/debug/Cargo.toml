@@ -1,0 +1,23 @@
+[package]
+name = "termide-debug"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Breakpoints and command-line debugger launches for termide"
+
+[dependencies]
+anyhow.workspace = true
+dunce.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+termide-config = { path = "../config" }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+libc.workspace = true

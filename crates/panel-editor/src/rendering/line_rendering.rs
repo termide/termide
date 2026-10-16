@@ -60,6 +60,8 @@ pub fn render_line_no_wrap<H: LineHighlighter>(
         git_diff_cache,
         show_git_diff,
         diagnostic_severity,
+        render_context.has_breakpoint(line_idx),
+        render_context.is_execution_line(line_idx),
         theme,
         line_number_width,
     );
@@ -137,13 +139,15 @@ fn render_line_gutter(
     git_diff_cache: &Option<GitDiffCache>,
     show_git_diff: bool,
     diagnostic_severity: Option<lsp_types::DiagnosticSeverity>,
+    breakpoint: bool,
+    execution: bool,
     theme: &Theme,
     line_number_width: u16,
 ) {
     // Get separate colors for line number and LSP marker
     let (line_num_fg, line_num_bg) =
         git::get_line_number_git_style(line_idx, git_diff_cache, show_git_diff, theme);
-    let lsp_marker = git::get_lsp_marker(diagnostic_severity, theme);
+    let lsp_marker = git::get_lsp_marker(diagnostic_severity, breakpoint, execution, theme);
 
     // Render the line number with git bg color — write digits directly to avoid format!()
     let mut line_num_style = Style::default().fg(line_num_fg);
@@ -164,7 +168,7 @@ fn render_line_gutter(
     }
 
     // Render LSP marker (penultimate gutter cell) with its own color
-    let marker_style = Style::default().fg(lsp_marker.color);
+    let marker_style = lsp_marker.style();
     let x = area.x + digit_cells;
     let y = area.y + row as u16;
     if let Some(cell) = buf.cell_mut((x, y)) {
@@ -898,6 +902,15 @@ mod tests {
     }
 
     fn gutter_text(line_idx: usize, line_number_width: u16) -> String {
+        gutter_with(line_idx, line_number_width, None, false)
+    }
+
+    fn gutter_with(
+        line_idx: usize,
+        line_number_width: u16,
+        severity: Option<lsp_types::DiagnosticSeverity>,
+        breakpoint: bool,
+    ) -> String {
         let area = Rect::new(0, 0, 20, 3);
         let mut buf = Buffer::empty(area);
         render_line_gutter(
@@ -907,7 +920,9 @@ mod tests {
             line_idx,
             &None,
             false,
-            None,
+            severity,
+            breakpoint,
+            false,
             &test_theme(),
             line_number_width,
         );
@@ -927,5 +942,25 @@ mod tests {
         // marker/separator cells stay to its right.
         assert_eq!(gutter_text(12_344, 7), "12345  ");
         assert_eq!(gutter_text(41, 7), "   42  ");
+    }
+
+    #[test]
+    fn a_breakpoint_takes_the_marker_cell_over_a_diagnostic() {
+        assert_eq!(gutter_with(41, 6, None, true), "  42● ");
+        let error = Some(lsp_types::DiagnosticSeverity::ERROR);
+        assert_eq!(gutter_with(41, 6, error, true), "  42● ");
+        assert_ne!(gutter_with(41, 6, error, false), "  42● ");
+    }
+
+    #[test]
+    fn the_line_a_debugger_stopped_at_is_marked_over_a_breakpoint() {
+        let theme = test_theme();
+        let mark = crate::git::get_lsp_marker(None, true, true, &theme);
+        assert_eq!(mark.marker, '→');
+        assert_eq!(mark.bg, Some(theme.warning));
+        assert_eq!(
+            mark.color, theme.error,
+            "the breakpoint stays visible in red"
+        );
     }
 }

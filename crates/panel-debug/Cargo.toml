@@ -1,0 +1,19 @@
+[package]
+name = "termide-panel-debug"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Debug session panel for termide"
+
+[dependencies]
+crossterm.workspace = true
+ratatui.workspace = true
+unicode-width.workspace = true
+
+termide-config = { path = "../config" }
+termide-core = { path = "../core" }
+termide-debug = { path = "../debug" }
+termide-i18n = { path = "../i18n" }
+termide-theme = { path = "../theme" }

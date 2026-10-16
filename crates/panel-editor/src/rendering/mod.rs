@@ -173,6 +173,10 @@ pub fn render_editor_content<H: LineHighlighter>(
         visible_lines,
         tab_size,
     );
+    render_context.breakpoint_lines = buffer.line_marks().clone();
+    render_context.execution_line = buffer
+        .file_path()
+        .and_then(termide_debug::execution::line_in);
 
     // Group diagnostics by line once per render — hot paths read this
     // instead of rebuilding the HashMap for every visible row.

@@ -135,6 +135,10 @@ pub struct EditorKeybindings {
     pub find_references: Option<KeyBinding>,
     pub rename_symbol: Option<KeyBinding>,
     pub code_action: Option<KeyBinding>,
+
+    // Debugging
+    pub toggle_breakpoint: Option<KeyBinding>,
+    pub start_debug: Option<KeyBinding>,
 }
 
 /// File manager keybindings (file_manager.keybindings section).
@@ -663,6 +667,11 @@ impl EditorKeybindings {
         // default to `Alt+Enter` — the classic "show intentions" key, which
         // terminals deliver reliably.
         set_default!(code_action, "Alt+Enter");
+
+        // Debugging. `F9` (VS Code's breakpoint key) is the menu here, so
+        // take JetBrains' `Ctrl+F8`; `F5` starts debugging as in VS Code.
+        set_default!(toggle_breakpoint, "Ctrl+F8");
+        set_default!(start_debug, "F5");
     }
 }
 

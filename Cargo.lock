@@ -5060,6 +5060,7 @@ dependencies = [
  "termide-clipboard",
  "termide-config",
  "termide-core",
+ "termide-debug",
  "termide-detach",
  "termide-fetch",
  "termide-file-ops",
@@ -5074,6 +5075,7 @@ dependencies = [
  "termide-panel-agent",
  "termide-panel-binary",
  "termide-panel-db",
+ "termide-panel-debug",
  "termide-panel-diagnostics",
  "termide-panel-editor",
  "termide-panel-file-manager",
@@ -5182,6 +5184,21 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "termide-debug"
+version = "0.42.0"
+dependencies = [
+ "anyhow",
+ "dunce",
+ "libc",
+ "log",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "termide-config",
+ "toml",
 ]
 
 [[package]]
@@ -5414,6 +5431,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "termide-panel-debug"
+version = "0.42.0"
+dependencies = [
+ "crossterm",
+ "ratatui",
+ "termide-config",
+ "termide-core",
+ "termide-debug",
+ "termide-i18n",
+ "termide-theme",
+ "unicode-width",
+]
+
+[[package]]
 name = "termide-panel-diagnostics"
 version = "0.42.0"
 dependencies = [
@@ -5446,6 +5477,7 @@ dependencies = [
  "termide-clipboard",
  "termide-config",
  "termide-core",
+ "termide-debug",
  "termide-git",
  "termide-highlight",
  "termide-i18n",

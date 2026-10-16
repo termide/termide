@@ -3,7 +3,7 @@
 //! This module provides the RenderContext struct that encapsulates all state
 //! needed for rendering the editor content area.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use lsp_types::{Diagnostic, DiagnosticSeverity};
 use termide_buffer::{Cursor, SearchState, Selection};
@@ -31,6 +31,12 @@ pub struct RenderContext {
 
     /// Tab stop interval: a TAB is drawn up to the next multiple of it.
     pub tab_size: usize,
+
+    /// Lines with a breakpoint, for the gutter marker.
+    pub breakpoint_lines: BTreeSet<usize>,
+
+    /// The line a debugger stopped at, in this file.
+    pub execution_line: Option<usize>,
 }
 
 impl RenderContext {
@@ -79,12 +85,24 @@ impl RenderContext {
             cursor_viewport_pos: None,
             diagnostic_line_severity,
             tab_size,
+            breakpoint_lines: BTreeSet::new(),
+            execution_line: None,
         }
     }
 
     /// Get diagnostic severity for a line (for gutter marker).
     pub fn diagnostic_severity_at_line(&self, line: usize) -> Option<DiagnosticSeverity> {
         self.diagnostic_line_severity.get(&line).copied()
+    }
+
+    /// Whether `line` carries a breakpoint.
+    pub fn has_breakpoint(&self, line: usize) -> bool {
+        self.breakpoint_lines.contains(&line)
+    }
+
+    /// Whether the debugger stopped at `line`.
+    pub fn is_execution_line(&self, line: usize) -> bool {
+        self.execution_line == Some(line)
     }
 }
 

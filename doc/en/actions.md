@@ -58,6 +58,9 @@ mode = "background"
 | `group` | no | Puts the command into a submenu with this name |
 | `key` | no | Hotkey that runs the command, e.g. `Ctrl+Shift+D`, see [Hotkeys](#hotkeys) |
 | `params` | no | Values asked for before the command runs, see [Parameters](#parameters) |
+| `debugger` | no | `lldb-dap`, `gdb-dap`, `debugpy`, `dlv-dap`, `lldb`, `gdb`, `dlv` or `pdb`: the command runs under this debugger, see [Debugging](#debugging) |
+| `build` | no | With `debugger`: a shell command run first; the debugger starts only if it succeeds |
+| `console` | no | With a debug adapter: `terminal` (the default) runs the program in a terminal panel, where it reads the keyboard; `panel` shows its output in the debug panel |
 
 An unknown `mode` falls back to `terminal`. If a file cannot be parsed, none of its commands appear; the reason is written to the log.
 
@@ -69,7 +72,7 @@ The `Commands` menu in the menu bar lists, from top to bottom:
 2. Project commands without a group, then project groups (bold).
 3. Global commands without a group, then global groups.
 
-Within each part, commands and groups are sorted by identifier and group name. A group opens a submenu with its commands; clicking the group header again closes it. A command's hotkey is shown in the shortcut column. When the terminal supports emoji, each label is prefixed with its mode: 💻 terminal, ⚙ background, 📋 report.
+Within each part, commands and groups are sorted by identifier and group name. A group opens a submenu with its commands; clicking the group header again closes it. A command's hotkey is shown in the shortcut column. When the terminal supports emoji, each label is prefixed with its mode: 💻 terminal, ⚙ background, 📋 report, 🐞 a command with a `debugger`.
 
 Keys on a selected command:
 
@@ -101,7 +104,7 @@ Saving from the form, renaming or deleting edits `commands.toml` in place: the o
 
 ## Execution modes
 
-Every command runs in the working directory of the focused panel (for example, the directory shown in a file manager or the current directory of a terminal), or in the project root if the panel has none.
+A command with a `debugger` runs in the project root, in the debug panel or a terminal panel, whatever its `mode`, see [Debugging](#debugging). Every other command runs in the working directory of the focused panel (for example, the directory shown in a file manager or the current directory of a terminal), or in the project root if the panel has none.
 
 | Mode | How it runs | Output |
 |------|-------------|--------|
@@ -172,6 +175,65 @@ The form is shown however the command is started: from the `Commands` menu, by i
 Commands with a hotkey are also listed in the command palette (`Ctrl+P`) as `Run command: <label>`.
 
 The form's `Hotkey:` field accepts `Ctrl`, `Alt` and `Shift` combined with a letter, a digit, `F1`–`F12` or a named key (`Enter`, `Tab`, `Space`, `Home`, `PageUp`, arrows and so on), and it rejects a hotkey that another command or a global TermIDE shortcut already uses (`Hotkey is already in use`). A hotkey written into the file by hand is not checked: if it matches a global shortcut, the shortcut wins and the command never runs from the keyboard. It takes effect the next time the `Commands` menu is opened or the file is saved from TermIDE.
+
+## Debugging
+
+A command with `debugger` debugs a program with the breakpoints placed in the editor (see [Breakpoints](editor.md#breakpoints-and-debugging)) set, and runs it to the first one. `command` is then what to debug. Two kinds of debugger are supported:
+
+- a **debug adapter**, driven by TermIDE over the Debug Adapter Protocol and shown in the [debug panel](#the-debug-panel): `lldb-dap`, `gdb-dap`, `debugpy`, `dlv-dap`;
+- a **command-line debugger** started in a new terminal panel, where you step, print and continue with its own commands: `lldb`, `gdb`, `dlv`, `pdb`.
+
+| `debugger` | `command` is | Runs as |
+|------------|--------------|---------|
+| `lldb-dap` | the program and its arguments | LLVM's `lldb-dap` (on macOS also found through `xcrun`; `lldb-vscode` in older LLVM): Rust, C, C++ |
+| `gdb-dap` | the program and its arguments | `gdb -i dap`, GDB 14 or later |
+| `debugpy` | the script and its arguments | `python3 -m debugpy.adapter`; needs `pip install debugpy` |
+| `dlv-dap` | the package to build and its arguments, e.g. `./cmd/app --flag` | `dlv dap`, Delve's adapter, reached over a local TCP port |
+| `lldb` | the program and its arguments | `lldb -s <script> -- <command>` |
+| `gdb` | the program and its arguments | `gdb -q -x <script> --args <command>` |
+| `dlv` | Delve's subcommand and its arguments, e.g. `debug ./cmd/app` | `dlv --init <script> <command>` |
+| `pdb` | the script and its arguments | `python3 -m pdb -c 'break <file>:<line>' … -c continue <command>` |
+
+```toml
+[debug-app]
+name = "Debug app"
+command = "target/debug/app --verbose"
+debugger = "lldb-dap"
+build = "cargo build"
+key = "Ctrl+Alt+D"
+```
+
+For a debug adapter, `command` is split into words as a shell would split it (quotes and backslashes work) but no shell runs it: variables, `~` and globs are not expanded. `build` runs first, its output going to the debug panel; the adapter starts only if it succeeds. A command-line debugger reads its breakpoints from a script — a `breakpoint set` or `break` for each, then `run` (lldb, gdb) or `continue` (Delve) — written to `termide-debug` in the system's temporary directory; breakpoints set while it runs reach it only on the next launch, so set them in the debugger itself meanwhile.
+
+Only breakpoints in files under the project root go in, each to the debugger for its language: Python files to debugpy and pdb, Go files to Delve and dlv-dap, the rest to lldb and gdb. Debug commands run in the project root, so a relative program path such as `target/debug/app` means the same wherever the focus is. Parameters work as for other commands; for a debug adapter they reach the build and the adapter as environment variables.
+
+`F5` in the editor (`start_debug`), or **Start debugging** in the command palette, starts debugging: with one launch available it starts at once, with several it offers them as a list. The launches are the debug commands of the project and the global file and, when the focused editor holds a Python or Go file, that file itself, which needs no command: a script runs under debugpy in the debug panel when debugpy is installed and under pdb in a terminal otherwise; the package in a Go file's directory runs under `dlv dap` in the debug panel when Delve is installed and under `dlv debug` in a terminal otherwise. With none, the status bar says so. While a debug session is active, `F5` continues the program instead.
+
+### The debug panel
+
+A launch through a debug adapter opens the debug panel (or reuses the open one). Its top line shows the session and where it stands — building, starting, running, stopped and why, exited with its code, or failed with the reason — and the keys. Below it are three sections:
+
+- **Call stack** — the frames of the thread that stopped, innermost first, each with its file and line. `Enter` or a click on a frame shows its variables and its line in an editor.
+- **Variables** — the scopes of the selected frame; the first one that is cheap to fetch opens by itself. `Enter`, `Space` or `→` opens a variable with members (fetched the first time), `←` closes it or goes to its parent; a second click on a row toggles it.
+- **Output** — the program's standard output and error, the adapter's messages, the build's output and evaluated expressions with their values. It follows new output; `↑`/`PgUp` scroll back and `Enter` returns to the end.
+
+| Key | Action |
+|-----|--------|
+| `c` / `F5` | Continue |
+| `n` | Step over |
+| `s` | Step into |
+| `o` | Step out |
+| `p` | Pause the running program |
+| `x` | Stop: end the session and the program |
+| `e` | Evaluate an expression in the selected frame |
+| `Tab` / `Shift+Tab` | Next / previous section |
+| `↑` `↓` `PgUp` `PgDn` `Home` `End` | Move in the section |
+
+When the program stops, the editor that has the file moves its cursor to the line, scrolling only as far as needed, and the gutter marks it with `→` on a highlighted cell; a file not open yet opens in a new editor, the focus staying on the panel. Breakpoints set or removed while the session runs reach the adapter at once. Closing the panel or starting another launch ends the session and its program.
+
+### The program's terminal
+
+By default (`console = "terminal"`) the program runs in a terminal panel of its own, opened beside the others: it reads the keyboard there — focus that panel to type to it — and its output, colours and full-screen interfaces show there as in any terminal, while the debug panel keeps the adapter's messages. debugpy and Delve ask TermIDE to start the program in that panel; lldb-dap starts it itself and is told the panel's terminal device through lldb's `target.input-path`, `output-path` and `error-path` settings, which every lldb-dap version takes. `Ctrl+C` in a terminal lldb-dap uses is not passed to the program: pause it with `p` in the debug panel. GDB's adapter has no such mode, so its programs always write to the debug panel and read nothing; so do the sessions an agent starts, whose output it reads from the session. `console = "panel"` asks for that for any adapter, for a program that does not read input.
 
 ## Tips
 

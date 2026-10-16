@@ -122,6 +122,8 @@ pub(super) fn kb_binding_names(section: usize) -> &'static [&'static str] {
             "goto_definition",
             "find_references",
             "rename_symbol",
+            "toggle_breakpoint",
+            "start_debug",
         ],
         2 => &[
             "rename",
@@ -269,7 +271,9 @@ pub(super) fn get_kb_value(config: &Config, section: usize, name: &str) -> Strin
             show_hover,
             goto_definition,
             find_references,
-            rename_symbol
+            rename_symbol,
+            toggle_breakpoint,
+            start_debug
         ),
         2 => kb_get!(
             config.file_manager.keybindings,
@@ -490,7 +494,9 @@ pub(super) fn set_kb_value(config: &mut Config, section: usize, name: &str, valu
             show_hover,
             goto_definition,
             find_references,
-            rename_symbol
+            rename_symbol,
+            toggle_breakpoint,
+            start_debug
         ),
         2 => kb_set!(
             config.file_manager.keybindings,
