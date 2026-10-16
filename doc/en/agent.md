@@ -1620,7 +1620,7 @@ its progress as for a hidden one, and a click on the task's row above that
 panel's input brings the delegate's panel forward. A panel taken for a task
 keeps its number. While the task runs, the panel belongs to
 the delegating agent: the input takes nothing and reads `& Delegate of
-<agent>: <task>`, and the session keys (`F2`, `F4`–`F8`), the chips and the
+<agent>: <task>` — a click on it brings the delegating panel back — and the session keys (`F2`, `F4`–`F8`), the chips and the
 menu's session entries do nothing; scrolling, the blocks, copying, `F3`,
 `Ctrl+S`, the cards, pause and stop still work. `Esc` stops the task: the
 delegating agent hears that you stopped it, with what was said so far.

@@ -795,6 +795,11 @@ pub enum PanelEvent {
     /// clicked; a task running hidden has no panel, and nothing moves.
     FocusDelegate { panel: u64, call: String },
 
+    /// Bring forward the agent panel with this number, if it is still open.
+    /// Emitted by a panel running another agent's task when its input, which
+    /// names the delegating agent, is clicked: focus goes back to that agent.
+    FocusAgentPanel(u64),
+
     /// Let the user pick another working directory for a fresh agent panel
     /// working in `cwd`, on the session log at `session`. On a pick the app
     /// moves the log to the new directory's sessions and reopens the panel

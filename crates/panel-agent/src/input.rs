@@ -1548,6 +1548,16 @@ impl AgentPanel {
             }
         }
         if self.pending.is_none() && self.press.is_none() && self.input.mouse_hits(event) {
+            // While another agent's task runs here the input takes nothing and
+            // names that agent instead: a click on it goes back to its panel.
+            if let Some(by) = self.delegated_by() {
+                return match event.kind {
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        vec![PanelEvent::FocusAgentPanel(by)]
+                    }
+                    _ => vec![],
+                };
+            }
             self.input.handle_mouse(event);
             match event.kind {
                 MouseEventKind::Up(_) => return vec![],

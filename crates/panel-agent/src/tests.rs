@@ -10541,6 +10541,47 @@ fn a_delegate_panel_knows_the_task_and_the_panel_it_came_from() {
 }
 
 #[test]
+fn clicking_a_delegates_input_goes_back_to_the_delegating_panel() {
+    let mut panel = panel(vec![reply("found it")]);
+    let (updates, _received) = mpsc::channel();
+    let mut task = delegated_task();
+    task.origin.as_mut().unwrap().panel = Some(6);
+    panel.start_delegation(
+        task,
+        Delegation::new("lead", "find the loader", updates, CancelToken::new()).with_call("call-9"),
+    );
+    render_text(&mut panel, 80, 20);
+    // The row under the input's top border, where the prompt would be.
+    let row = panel.input_area.y + 1;
+    let click = |panel: &mut AgentPanel, kind| {
+        panel.handle_mouse(
+            MouseEvent {
+                kind,
+                column: 4,
+                row,
+                modifiers: KeyModifiers::NONE,
+            },
+            ratatui::layout::Rect::new(0, 0, 80, 20),
+        )
+    };
+    let events = click(&mut panel, MouseEventKind::Down(MouseButton::Left));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, PanelEvent::FocusAgentPanel(6))),
+        "{events:?}"
+    );
+    assert!(click(&mut panel, MouseEventKind::Up(MouseButton::Left)).is_empty());
+    // Once the task is over the input is the user's again.
+    settle_delegate(&mut panel);
+    render_text(&mut panel, 80, 20);
+    let events = click(&mut panel, MouseEventKind::Down(MouseButton::Left));
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, PanelEvent::FocusAgentPanel(_))));
+}
+
+#[test]
 fn clicking_a_running_tasks_row_asks_for_its_panel() {
     let mut panel = panel(vec![]);
     panel.transcript.push(Item::Tool {

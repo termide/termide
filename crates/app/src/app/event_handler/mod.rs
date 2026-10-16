@@ -451,6 +451,17 @@ impl App {
                     self.state.needs_redraw = true;
                 }
             }
+            PanelEvent::FocusAgentPanel(id) => {
+                let found = self.layout_manager.focus_panel_where(|candidate| {
+                    candidate
+                        .as_any()
+                        .downcast_ref::<termide_panel_agent::AgentPanel>()
+                        .is_some_and(|agent| agent.panel_id() == id)
+                });
+                if found {
+                    self.state.needs_redraw = true;
+                }
+            }
         }
         Ok(())
     }
