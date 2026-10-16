@@ -1,8 +1,8 @@
 //! OpenAI-compatible streaming chat completions over blocking HTTP.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::io::{BufRead, BufReader};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use serde_json::{json, Map, Value};
@@ -85,8 +85,9 @@ pub struct OpenAiCompatProvider {
     pub read_timeout: Duration,
     pub connect_timeout: Duration,
     agent: ureq::Agent,
-    /// Optional fields this server refused, left out of its requests since.
-    refused: Mutex<BTreeSet<&'static str>>,
+    /// Optional fields this server refused, left out of its requests since;
+    /// shared by every provider on the same base URL in the process.
+    refused: Refusals,
 }
 
 impl OpenAiCompatProvider {
@@ -94,16 +95,17 @@ impl OpenAiCompatProvider {
     pub fn new(name: impl Into<String>, base_url: impl Into<String>) -> Self {
         let read_timeout = Duration::from_secs(120);
         let connect_timeout = Duration::from_secs(15);
+        let base_url = base_url.into().trim_end_matches('/').to_string();
         Self {
             name: name.into(),
-            base_url: base_url.into().trim_end_matches('/').to_string(),
+            refused: refusals_of(&base_url),
+            base_url,
             api_key: None,
             compat: Compat::default(),
             retry: RetryPolicy::default(),
             read_timeout,
             connect_timeout,
             agent: build_agent(connect_timeout, read_timeout),
-            refused: Mutex::new(BTreeSet::new()),
         }
     }
 
@@ -491,10 +493,8 @@ impl Provider for OpenAiCompatProvider {
                         // Only a field not refused before is news: one that
                         // `extra_body` puts back would otherwise go round.
                         let added = {
-                            let mut refused = self
-                                .refused
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                            let mut refused =
+                                self.refused.lock().unwrap_or_else(PoisonError::into_inner);
                             fields.iter().filter(|f| refused.insert(**f)).count()
                         };
                         if added == 0 {
@@ -517,9 +517,27 @@ impl OpenAiCompatProvider {
     fn refused_fields(&self) -> BTreeSet<&'static str> {
         self.refused
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap_or_else(PoisonError::into_inner)
             .clone()
     }
+}
+
+/// The fields a server refused, by the providers that talk to it.
+type Refusals = Arc<Mutex<BTreeSet<&'static str>>>;
+
+/// The refusals of the server at `base_url`, shared across the process: each
+/// session and side call builds its own provider, and a field one of them
+/// learned the server refuses is not tried again by the next. They live as
+/// long as the process, so an upgraded server is asked again after a restart.
+fn refusals_of(base_url: &str) -> Refusals {
+    static SHARED: Mutex<Option<HashMap<String, Refusals>>> = Mutex::new(None);
+    let mut shared = SHARED.lock().unwrap_or_else(PoisonError::into_inner);
+    Arc::clone(
+        shared
+            .get_or_insert_with(HashMap::new)
+            .entry(base_url.to_string())
+            .or_default(),
+    )
 }
 
 /// The optional fields of `body` that `failure` refuses: a 400 or 422 whose
@@ -1270,12 +1288,14 @@ data: [DONE]\n";
             ),
             sse(ok),
             sse(ok),
+            sse(ok),
         ]);
-        let provider = provider(&url).with_compat(Compat {
+        let compat = Compat {
             reasoning: ReasoningParam::EnableThinking,
             send_reasoning: true,
             ..Compat::default()
-        });
+        };
+        let provider = provider(&url).with_compat(compat.clone());
         let messages = vec![
             Message::User(UserMessage::text("hi")),
             Message::Assistant(AssistantMessage {
@@ -1300,6 +1320,11 @@ data: [DONE]\n";
         assert_eq!(first.plain_text(), "done", "{first:?}");
         let second = provider.stream(&request, &mut |_| {}, &CancelToken::new());
         assert_eq!(second.plain_text(), "done", "{second:?}");
+        // Another session's provider on the same server knows it already.
+        let next_session =
+            super::OpenAiCompatProvider::new("test", url.clone()).with_compat(compat);
+        let third = next_session.stream(&request, &mut |_| {}, &CancelToken::new());
+        assert_eq!(third.plain_text(), "done", "{third:?}");
 
         let bodies: Vec<Value> = bodies
             .lock()
@@ -1307,11 +1332,11 @@ data: [DONE]\n";
             .iter()
             .map(|b| serde_json::from_str(b).unwrap())
             .collect();
-        assert_eq!(bodies.len(), 4);
+        assert_eq!(bodies.len(), 5);
         assert!(bodies[0].get("chat_template_kwargs").is_some());
         assert!(bodies[1].get("chat_template_kwargs").is_none());
         assert_eq!(bodies[1]["messages"][1]["reasoning"], "plan");
-        // The third went out without either, the fourth from the start.
+        // The third went out without either, the rest from the start.
         for body in &bodies[2..] {
             assert!(body.get("chat_template_kwargs").is_none(), "{body}");
             assert!(body["messages"][1].get("reasoning").is_none(), "{body}");
