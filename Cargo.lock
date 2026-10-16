@@ -5325,11 +5325,13 @@ name = "termide-lsp"
 version = "0.42.0"
 dependencies = [
  "anyhow",
+ "dunce",
  "glob",
  "log",
  "lsp-types",
  "serde",
  "serde_json",
+ "tempfile",
  "url",
 ]
 

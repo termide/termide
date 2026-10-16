@@ -15,6 +15,7 @@
 
 mod protocol;
 mod server;
+mod workspace;
 
 pub use lsp_types::CompletionTriggerKind;
 pub use protocol::{JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
@@ -22,7 +23,7 @@ pub use server::{LspServer, LspServerConfig, ServerStatus};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, OnceLock};
+use std::sync::{mpsc, Mutex, OnceLock};
 
 use anyhow::{Context, Result};
 use lsp_types::{
@@ -58,6 +59,9 @@ pub struct LspManager {
     apply_edit_rx: mpsc::Receiver<WorkspaceEdit>,
     /// Sender for apply-edit requests (cloned to each server)
     apply_edit_tx: mpsc::Sender<WorkspaceEdit>,
+    /// Workspace roots the toolchain named, keyed by (language_id, package
+    /// root), so it is asked once per package rather than on every request.
+    workspace_roots: Mutex<HashMap<(String, PathBuf), PathBuf>>,
 }
 
 impl std::fmt::Debug for LspManager {
@@ -81,6 +85,7 @@ impl LspManager {
             diagnostics_tx,
             apply_edit_rx,
             apply_edit_tx,
+            workspace_roots: Mutex::new(HashMap::new()),
         }
     }
 
@@ -167,6 +172,26 @@ impl LspManager {
         }
     }
 
+    /// The root a server for `file_path` runs in: the nearest root marker,
+    /// widened to the workspace the toolchain puts that package in (see
+    /// [`workspace`]). Files without a marker use their own directory.
+    fn resolve_root(&self, lang: &str, file_path: &Path, markers: &[String]) -> PathBuf {
+        let Some(package_root) = Self::find_workspace_root(file_path, markers) else {
+            return file_path.parent().unwrap_or(Path::new("/")).to_path_buf();
+        };
+        let key = (lang.to_string(), package_root);
+        let mut cache = self
+            .workspace_roots
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(root) = cache.get(&key) {
+            return root.clone();
+        }
+        let root = workspace::workspace_root(lang, &key.1).unwrap_or_else(|| key.1.clone());
+        cache.insert(key, root.clone());
+        root
+    }
+
     /// Ensure a server is running for the given language and file
     pub fn ensure_server(&mut self, lang: &str, file_path: &Path) -> Result<()> {
         let server_config = self
@@ -176,8 +201,7 @@ impl LspManager {
             .context(format!("No LSP server configured for language: {}", lang))?
             .clone();
 
-        let workspace_root = Self::find_workspace_root(file_path, &server_config.root_markers)
-            .unwrap_or_else(|| file_path.parent().unwrap_or(Path::new("/")).to_path_buf());
+        let workspace_root = self.resolve_root(lang, file_path, &server_config.root_markers);
 
         let key = (lang.to_string(), workspace_root.clone());
 
@@ -202,8 +226,7 @@ impl LspManager {
     /// Get server for language and file (if running)
     fn get_server(&self, lang: &str, file_path: &Path) -> Option<&LspServer> {
         let server_config = self.config.servers.get(lang)?;
-        let workspace_root = Self::find_workspace_root(file_path, &server_config.root_markers)
-            .unwrap_or_else(|| file_path.parent().unwrap_or(Path::new("/")).to_path_buf());
+        let workspace_root = self.resolve_root(lang, file_path, &server_config.root_markers);
 
         let key = (lang.to_string(), workspace_root);
         self.servers.get(&key)

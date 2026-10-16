@@ -430,6 +430,15 @@ in use. An entry for a built-in language changes only the fields it sets, so
 for any other language adds a server for it. The key is the language id TermIDE
 detects for the file, such as `typescriptreact` for `.tsx`.
 
+A server starts in the nearest directory above the file that holds one of its
+`root_markers`, and one server runs per language and root. For Rust and Go that
+directory is widened to the workspace the toolchain puts the package in: the
+cargo workspace a crate is a member of (`cargo locate-project --workspace`), or
+the `go.work` that lists the module in a `use` directive. All members of a
+workspace then share one server. A standalone crate or module, one under a
+workspace without belonging to it, or a missing `cargo`/`go` keeps the nearest
+marker. The answer is remembered until TermIDE restarts.
+
 
 ### Find References
 

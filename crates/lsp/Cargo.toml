@@ -9,9 +9,13 @@ description = "Language Server Protocol integration for termide"
 
 [dependencies]
 anyhow.workspace = true
+dunce.workspace = true
 glob.workspace = true
 log.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 lsp-types = "0.97"
 url = "2"
+
+[dev-dependencies]
+tempfile.workspace = true
