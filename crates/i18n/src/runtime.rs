@@ -754,7 +754,6 @@ impl Translation for RuntimeTranslation {
         settings_ai_connection_hint_gemini_cli,
         settings_ai_connection_name,
         settings_ai_connection_default,
-        settings_ai_connection_prefill_progress,
         settings_ai_connection_subagents,
         settings_ai_connection_subagents_own,
         settings_ai_connection_context_limit,

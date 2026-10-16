@@ -822,7 +822,6 @@ settings_ai_connection_hint_codex = "Codex modeli kendi oturum açma yöntemiyle
 settings_ai_connection_hint_gemini_cli = "Gemini CLI modeli kendi oturum açma yöntemiyle sunar ve kendi sistem istemini ve araçlarını korur; termide izin modunu Gemini CLI'ın modlarına eşler ve Gemini CLI'ın sorduklarına karar verir. Konuşma döngüsü Gemini CLI'a aittir: kendi bağlam sıkıştırması, adımlar arasında duraklama yok, prefill veya üretim süresi yok."
 settings_ai_connection_name = "Ad"
 settings_ai_connection_default = "Varsayılan olarak kullan"
-settings_ai_connection_prefill_progress = "Prefill ilerlemesi (llama.cpp)"
 settings_ai_connection_subagents = "Alt ajanlar"
 settings_ai_connection_subagents_own = "bu bağlantı"
 settings_ai_connection_max_requests = "Aynı anda istek"

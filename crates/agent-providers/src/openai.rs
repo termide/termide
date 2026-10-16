@@ -42,7 +42,8 @@ pub struct Compat {
     /// Off by default: DeepSeek's API rejects the field, most servers ignore it.
     pub send_reasoning: bool,
     /// Ask for prompt-processing progress while streaming (llama.cpp's
-    /// `return_progress`). Off by default: OpenAI rejects unknown fields.
+    /// `return_progress`). Off by default: OpenAI rejects unknown fields;
+    /// the app turns it on for every server but the hosted APIs.
     pub prefill_progress: bool,
     /// Merged into every request body last; the escape hatch for anything
     /// not modelled here (`chat_template_kwargs`, `temperature`, ...).

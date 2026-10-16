@@ -822,7 +822,6 @@ settings_ai_connection_hint_codex = "Codex menyajikan model lewat login miliknya
 settings_ai_connection_hint_gemini_cli = "Gemini CLI menyajikan model lewat login miliknya sendiri dan memakai prompt sistem serta alatnya sendiri; termide memetakan mode izin ke mode Gemini CLI dan memutuskan apa yang ditanyakan Gemini CLI. Siklus percakapan tetap milik Gemini CLI: kompaksi konteksnya sendiri, tanpa jeda antarlangkah, tanpa waktu prefill atau generasi."
 settings_ai_connection_name = "Nama"
 settings_ai_connection_default = "Gunakan sebagai bawaan"
-settings_ai_connection_prefill_progress = "Kemajuan prefill (llama.cpp)"
 settings_ai_connection_subagents = "Subagen"
 settings_ai_connection_subagents_own = "koneksi ini"
 settings_ai_connection_max_requests = "Permintaan sekaligus"

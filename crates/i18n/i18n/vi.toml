@@ -822,7 +822,6 @@ settings_ai_connection_hint_codex = "Codex phục vụ mô hình qua đăng nh�
 settings_ai_connection_hint_gemini_cli = "Gemini CLI phục vụ mô hình qua đăng nhập riêng và giữ system prompt cùng công cụ riêng; termide ánh xạ chế độ quyền sang các chế độ của Gemini CLI và quyết định những gì Gemini CLI hỏi. Vòng hội thoại vẫn thuộc Gemini CLI: tự nén ngữ cảnh, không tạm dừng giữa các bước, không có thời gian prefill hay sinh."
 settings_ai_connection_name = "Tên"
 settings_ai_connection_default = "Dùng mặc định"
-settings_ai_connection_prefill_progress = "Tiến độ prefill (llama.cpp)"
 settings_ai_connection_subagents = "Tác tử con"
 settings_ai_connection_subagents_own = "kết nối này"
 settings_ai_connection_max_requests = "Số yêu cầu đồng thời"

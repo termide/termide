@@ -2466,7 +2466,7 @@ fn build_provider(connection: &Connection, api_key: Option<String>) -> Arc<dyn P
                         Compat {
                             reasoning,
                             send_reasoning: sends_reasoning(settings),
-                            prefill_progress: settings.prefill_progress,
+                            prefill_progress: prefill_progress(settings),
                             ..Compat::default()
                         }
                     }),
@@ -2493,6 +2493,14 @@ fn reasoning_param(connection: &Connection) -> ReasoningParam {
 /// turn: to every server but the hosted APIs, which keep reasoning their own
 /// way. A server that refuses the field is asked again without it.
 fn sends_reasoning(connection: &Connection) -> bool {
+    !is_hosted_api(&connection.base_url)
+}
+
+/// Whether a connection asks its server for prompt-processing progress
+/// (llama.cpp's `return_progress`, for a live prefill bar): every server but
+/// the hosted APIs, which have none to give. One that refuses the field is
+/// asked again without it; others ignore it.
+fn prefill_progress(connection: &Connection) -> bool {
     !is_hosted_api(&connection.base_url)
 }
 
@@ -2749,14 +2757,22 @@ mod tests {
                 base_url: base_url.into(),
                 ..Connection::default()
             };
-            (reasoning_param(&connection), sends_reasoning(&connection))
+            (
+                reasoning_param(&connection),
+                sends_reasoning(&connection),
+                prefill_progress(&connection),
+            )
         };
         for hosted in [
             "https://api.openai.com/v1",
             "https://openrouter.ai/api/v1",
             "https://generativelanguage.googleapis.com/v1beta/openai",
         ] {
-            assert_eq!(at(hosted), (ReasoningParam::Effort, false), "{hosted}");
+            assert_eq!(
+                at(hosted),
+                (ReasoningParam::Effort, false, false),
+                "{hosted}"
+            );
         }
         for server in [
             "http://127.0.0.1:10000/v1",
@@ -2769,7 +2785,7 @@ mod tests {
         ] {
             assert_eq!(
                 at(server),
-                (ReasoningParam::EnableThinking, true),
+                (ReasoningParam::EnableThinking, true, true),
                 "{server}"
             );
         }

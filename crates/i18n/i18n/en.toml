@@ -367,7 +367,6 @@ settings_ai_connection_hint_codex = "Codex serves the model through its own sign
 settings_ai_connection_hint_gemini_cli = "Gemini CLI serves the model through its own sign-in and keeps its own system prompt and tools; termide maps the permission mode onto Gemini CLI's modes and decides what Gemini CLI asks. The conversation loop stays Gemini CLI's: its own context compaction, no pause between steps, no prefill or generation timing."
 settings_ai_connection_name = "Name"
 settings_ai_connection_default = "Use by default"
-settings_ai_connection_prefill_progress = "Prefill progress (llama.cpp)"
 settings_ai_connection_subagents = "Subagents"
 settings_ai_connection_subagents_own = "this connection"
 settings_ai_connection_max_requests = "Requests at once"

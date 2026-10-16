@@ -821,7 +821,6 @@ settings_ai_connection_hint_codex = "Codex는 자체 로그인으로 모델을 �
 settings_ai_connection_hint_gemini_cli = "Gemini CLI는 자체 로그인으로 모델을 제공하며 자체 시스템 프롬프트와 도구를 유지합니다. termide는 권한 모드를 Gemini CLI의 모드에 대응시키고 Gemini CLI의 질문을 결정합니다. 대화 루프는 Gemini CLI의 것입니다: 자체 컨텍스트 압축, 단계 사이 일시 정지 없음, 프리필이나 생성 시간 측정 없음."
 settings_ai_connection_name = "이름"
 settings_ai_connection_default = "기본으로 사용"
-settings_ai_connection_prefill_progress = "프리필 진행률 (llama.cpp)"
 settings_ai_connection_subagents = "하위 에이전트"
 settings_ai_connection_subagents_own = "이 연결"
 settings_ai_connection_max_requests = "동시 요청 수"

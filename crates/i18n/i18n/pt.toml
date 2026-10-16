@@ -822,7 +822,6 @@ settings_ai_connection_hint_codex = "O Codex serve o modelo com seu próprio log
 settings_ai_connection_hint_gemini_cli = "O Gemini CLI serve o modelo com seu próprio login e mantém seu próprio prompt de sistema e ferramentas; o termide mapeia o modo de permissão para os modos do Gemini CLI e decide o que o Gemini CLI pergunta. O ciclo da conversa continua sendo do Gemini CLI: compactação de contexto própria, sem pausa entre etapas, sem tempos de prefill ou geração."
 settings_ai_connection_name = "Nome"
 settings_ai_connection_default = "Usar por padrão"
-settings_ai_connection_prefill_progress = "Progresso do prefill (llama.cpp)"
 settings_ai_connection_subagents = "Subagentes"
 settings_ai_connection_subagents_own = "esta conexão"
 settings_ai_connection_max_requests = "Pedidos simultâneos"

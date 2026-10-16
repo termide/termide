@@ -822,7 +822,6 @@ settings_ai_connection_hint_codex = "Codex নিজের সাইন-ইন �
 settings_ai_connection_hint_gemini_cli = "Gemini CLI নিজের সাইন-ইন দিয়ে মডেল চালায় এবং নিজের সিস্টেম প্রম্পট ও টুল রাখে; termide অনুমতি মোডকে Gemini CLI-এর মোডে মেলায় এবং Gemini CLI কী জিজ্ঞাসা করবে তা ঠিক করে। কথোপকথনের লুপ Gemini CLI-এরই থাকে: তার নিজস্ব কনটেক্সট সংক্ষেপণ, ধাপের মাঝে বিরতি নেই, prefill বা জেনারেশন টাইমিং নেই।"
 settings_ai_connection_name = "নাম"
 settings_ai_connection_default = "ডিফল্ট হিসেবে ব্যবহার করুন"
-settings_ai_connection_prefill_progress = "প্রিফিল অগ্রগতি (llama.cpp)"
 settings_ai_connection_subagents = "সাবএজেন্ট"
 settings_ai_connection_subagents_own = "এই সংযোগ"
 settings_ai_connection_max_requests = "একসাথে অনুরোধ"

@@ -32,7 +32,6 @@ base_url = "http://127.0.0.1:10000/v1"
 model = "Qwen3.8-Flash-Next-oQ4e-mtp"  # left out: the provider's first model
 # api_key_env = "OPENAI_API_KEY"   # name of the variable, never the key itself
 # context_window_fallback = 32000  # used only when the server does not report a window
-# prefill_progress = true          # ask a llama.cpp server for its prompt-processing progress
 # max_concurrent_requests = 1      # requests served at once across termide; default 0: no limit
 # reviewer = "small"               # the connection whose model reviews in `auto`; default: [ai.auto_reviewer]
 
@@ -48,7 +47,7 @@ provider = "codex"                 # a CLI agent needs nothing else
 
 A connection carries `provider`, `base_url`, `model`, `api_key_env`,
 `context_window_fallback`, `subagents` (see [Subagents](#subagents)),
-`reviewer` (see [Auto mode](#auto-mode)), `max_concurrent_requests` and, for `openai_compatible`, `prefill_progress`;
+`reviewer` (see [Auto mode](#auto-mode)), `max_concurrent_requests`;
 what it leaves out takes that field's default.
 `max_concurrent_requests` caps how many requests the connection serves at
 once across the whole termide process — the agents of every panel, their
@@ -61,10 +60,9 @@ what the server runs. The default, 0, sets no limit. It counts per connection
 name, so two connections to one server keep separate counts, and two termide
 processes do not share it. A CLI agent sends its requests itself, so it has
 none.
-`prefill_progress` sends `return_progress` with each request, which llama.cpp
-answers with its prompt-processing progress; it is off by default because
-servers that do not know the field (OpenAI's own API among them) may reject
-the request. Everything else in `[ai]` — the output limit, reasoning,
+Every server but the hosted APIs is asked for its prompt-processing progress
+(`return_progress`), which llama.cpp reports and others ignore; one that
+refuses the field is asked again without it. Everything else in `[ai]` — the output limit, reasoning,
 permissions, compaction and the rest — applies whichever connection a session
 runs on.
 
@@ -693,7 +691,7 @@ reasoning shows those on the answer instead.
 While a turn is still running, the same right-aligned meta zone shows the live
 figures: until the first token, a `⏫` prefill line with how long the model has
 been reading the prompt and an estimate of its size (`⏫ 14s (↑~48k)`), or, from
-a server that reports its progress (`prefill_progress`), a bar with the tokens
+a server that reports its progress (llama.cpp), a bar with the tokens
 read so far and the speed over those not served from its cache
 (`⏫ 14s ▰▰▰▰▱▱▱▱ (↑24k/48k, 1k tok/s)`), and before that, while the request
 waits for a slot of its connection (`max_concurrent_requests`), a `⏳` line

@@ -207,11 +207,6 @@ pub struct Connection {
     /// Gemini CLI has no such setting. Unset leaves the agent's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window_limit: Option<u64>,
-    /// Ask an `openai_compatible` server for its prompt-processing progress
-    /// (llama.cpp's `return_progress`), for a live prefill bar. Off by
-    /// default: servers that do not know the field may reject the request.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub prefill_progress: bool,
     /// The connection, by name, the agents this one delegates to with
     /// `task` run on; empty runs them on this one. A subagent runs the
     /// built-in loop, so it needs a model connection, not a CLI agent.
@@ -261,7 +256,6 @@ impl Default for Connection {
             api_key_env: String::new(),
             context_window_fallback: None,
             context_window_limit: None,
-            prefill_progress: false,
             subagents: String::new(),
             max_concurrent_requests: 0,
             reviewer: String::new(),
@@ -1443,6 +1437,7 @@ mod ai_settings_tests {
     fn a_connection_with_the_old_reasoning_keys_still_loads() {
         let text = "provider = \"openai_compatible\"\n\
                     model = \"qwen\"\n\
+                    prefill_progress = true\n\
                     reasoning_param = \"enable_thinking\"\n\
                     send_reasoning = \"on\"\n";
         let connection: Connection = toml::from_str(text).unwrap();
@@ -1450,6 +1445,7 @@ mod ai_settings_tests {
         let saved = toml::to_string(&connection).unwrap();
         assert!(!saved.contains("reasoning_param"), "{saved}");
         assert!(!saved.contains("send_reasoning"), "{saved}");
+        assert!(!saved.contains("prefill_progress"), "{saved}");
     }
 
     #[test]

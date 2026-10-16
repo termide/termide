@@ -374,7 +374,6 @@ settings_ai_connection_hint_codex = "Codex даёт доступ к модели
 settings_ai_connection_hint_gemini_cli = "Gemini CLI даёт доступ к модели по своему входу и оставляет свои системный промпт и инструменты; termide переводит режим разрешений в режимы Gemini CLI и решает то, о чём Gemini CLI спрашивает. Цикл разговора остаётся за Gemini CLI: своё сжатие контекста, нет паузы между шагами, нет замеров префила и генерации."
 settings_ai_connection_name = "Имя"
 settings_ai_connection_default = "Использовать по умолчанию"
-settings_ai_connection_prefill_progress = "Прогресс prefill (llama.cpp)"
 settings_ai_connection_subagents = "Подагенты"
 settings_ai_connection_subagents_own = "это подключение"
 settings_ai_connection_max_requests = "Запросов одновременно"

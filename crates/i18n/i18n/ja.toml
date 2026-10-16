@@ -821,7 +821,6 @@ settings_ai_connection_hint_codex = "Codex は自身のサインインでモデ�
 settings_ai_connection_hint_gemini_cli = "Gemini CLI は自身のサインインでモデルを提供し、独自のシステムプロンプトとツールを保ちます。termide は権限モードを Gemini CLI のモードに対応させ、Gemini CLI の問い合わせを判断します。会話ループは Gemini CLI のままです: 独自のコンテキスト圧縮、ステップ間の一時停止なし、プリフィルや生成時間の計測なし。"
 settings_ai_connection_name = "名前"
 settings_ai_connection_default = "既定で使用"
-settings_ai_connection_prefill_progress = "プリフィルの進捗（llama.cpp）"
 settings_ai_connection_subagents = "サブエージェント"
 settings_ai_connection_subagents_own = "この接続"
 settings_ai_connection_max_requests = "同時リクエスト数"
