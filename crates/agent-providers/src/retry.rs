@@ -14,6 +14,9 @@ use termide_agent_core::{
 pub struct Failure {
     pub message: String,
     pub class: Class,
+    /// The error response as it came, for a caller that looks into it (a
+    /// field the server names as refused); empty where there was none.
+    pub detail: String,
 }
 
 impl Failure {
@@ -23,6 +26,7 @@ impl Failure {
         Self {
             message: format!("HTTP {code}: {message}"),
             class: Class::from_http(code, body, retry_after),
+            detail: body.to_string(),
         }
     }
 
@@ -31,6 +35,7 @@ impl Failure {
         Self {
             message,
             class: Class::new(FailureKind::Transient),
+            detail: String::new(),
         }
     }
 
@@ -40,6 +45,7 @@ impl Failure {
         Self {
             message,
             class: Class::from_http(0, raw, None),
+            detail: raw.to_string(),
         }
     }
 }

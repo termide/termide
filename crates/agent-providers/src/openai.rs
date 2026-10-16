@@ -1,6 +1,8 @@
 //! OpenAI-compatible streaming chat completions over blocking HTTP.
 
+use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use serde_json::{json, Map, Value};
@@ -11,6 +13,18 @@ use termide_agent_core::{
 
 use crate::retry::{with_retries, Failure, RetryPolicy};
 use crate::sse::Accumulator;
+
+/// The fields termide adds to a request beyond the plain chat completion, any
+/// of which a server may refuse: the top-level ones and, on assistant
+/// messages, the reasoning sent back. A server that names one in a 400 or
+/// 422 gets the request again without it, and never again after.
+const OPTIONAL_FIELDS: [&str; 5] = [
+    "chat_template_kwargs",
+    "reasoning_effort",
+    "return_progress",
+    "reasoning_content",
+    "reasoning",
+];
 
 /// Vendor quirks, expressed as data.
 #[derive(Debug, Clone, PartialEq)]
@@ -71,6 +85,8 @@ pub struct OpenAiCompatProvider {
     pub read_timeout: Duration,
     pub connect_timeout: Duration,
     agent: ureq::Agent,
+    /// Optional fields this server refused, left out of its requests since.
+    refused: Mutex<BTreeSet<&'static str>>,
 }
 
 impl OpenAiCompatProvider {
@@ -87,6 +103,7 @@ impl OpenAiCompatProvider {
             read_timeout,
             connect_timeout,
             agent: build_agent(connect_timeout, read_timeout),
+            refused: Mutex::new(BTreeSet::new()),
         }
     }
 
@@ -211,6 +228,21 @@ impl OpenAiCompatProvider {
             if let Value::Object(map) = kwargs {
                 map.entry("preserve_thinking")
                     .or_insert_with(|| json!(true));
+            }
+        }
+        // What the server refused stays out; `extra_body`, the user's own,
+        // still goes as written.
+        let refused = self.refused_fields();
+        for field in &refused {
+            body.remove(*field);
+        }
+        if refused.contains("reasoning_content") || refused.contains("reasoning") {
+            if let Some(Value::Array(messages)) = body.get_mut("messages") {
+                for message in messages.iter_mut().filter_map(Value::as_object_mut) {
+                    for field in &refused {
+                        message.remove(*field);
+                    }
+                }
             }
         }
         for (key, value) in &self.compat.extra_body {
@@ -444,7 +476,7 @@ impl Provider for OpenAiCompatProvider {
         on_event: &mut dyn FnMut(StreamEvent),
         cancel: &CancelToken,
     ) -> AssistantMessage {
-        let body = self.build_body(request).to_string();
+        let mut body = self.build_body(request);
         let model = request.model.id.as_str();
         with_retries(
             &self.name,
@@ -452,9 +484,76 @@ impl Provider for OpenAiCompatProvider {
             self.retry,
             cancel,
             on_event,
-            |on_event| self.attempt(&body, model, on_event, cancel),
+            |on_event| loop {
+                match self.attempt(&body.to_string(), model, on_event, cancel) {
+                    Err(failure) => {
+                        let fields = refused_in(&failure, &body);
+                        // Only a field not refused before is news: one that
+                        // `extra_body` puts back would otherwise go round.
+                        let added = {
+                            let mut refused = self
+                                .refused
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                            fields.iter().filter(|f| refused.insert(**f)).count()
+                        };
+                        if added == 0 {
+                            return Err(failure);
+                        }
+                        log::warn!(
+                            "{model} refused {}; leaving it out from now on",
+                            fields.join(", ")
+                        );
+                        body = self.build_body(request);
+                    }
+                    reply => return reply,
+                }
+            },
         )
     }
+}
+
+impl OpenAiCompatProvider {
+    fn refused_fields(&self) -> BTreeSet<&'static str> {
+        self.refused
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
+/// The optional fields of `body` that `failure` refuses: a 400 or 422 whose
+/// error names them. Only fields the body carries count, so a rejection can
+/// not loop, and a name counts only as a whole word (`reasoning` is not
+/// named by `reasoning_effort`).
+fn refused_in(failure: &Failure, body: &Value) -> Vec<&'static str> {
+    let rejected = ["HTTP 400", "HTTP 422"]
+        .iter()
+        .any(|status| failure.message.starts_with(status));
+    if !rejected {
+        return Vec::new();
+    }
+    let carries = |field: &str| {
+        body.get(field).is_some()
+            || body["messages"]
+                .as_array()
+                .is_some_and(|messages| messages.iter().any(|m| m.get(field).is_some()))
+    };
+    OPTIONAL_FIELDS
+        .into_iter()
+        .filter(|field| carries(field))
+        .filter(|field| names_field(&failure.message, field) || names_field(&failure.detail, field))
+        .collect()
+}
+
+/// Whether `text` names `field` as a word of its own.
+fn names_field(text: &str, field: &str) -> bool {
+    let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    text.match_indices(field).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + field.len()..].chars().next();
+        !before.is_some_and(word) && !after.is_some_and(word)
+    })
 }
 
 fn failed_after_content(
@@ -1150,6 +1249,89 @@ data: [DONE]\n";
             e,
             StreamEvent::Retry { attempt: 1, max_attempts: 3, error, .. } if error.contains("overloaded")
         )));
+    }
+
+    /// A server that refuses a field termide adds gets the request again
+    /// without it, at once, and later requests leave it out from the start;
+    /// fields it took keep going.
+    #[test]
+    fn a_refused_field_is_dropped_and_stays_dropped() {
+        let ok = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n";
+        let (url, bodies) = serve(vec![
+            // OpenAI's wording for an unknown argument.
+            status(
+                400,
+                "{\"error\":{\"message\":\"Unrecognized request argument supplied: chat_template_kwargs\"}}",
+            ),
+            // vLLM's: the field only in the error's location.
+            status(
+                422,
+                "{\"object\":\"error\",\"message\":\"Extra inputs are not permitted\",\"detail\":[{\"loc\":[\"body\",\"messages\",1,\"reasoning\"]}]}",
+            ),
+            sse(ok),
+            sse(ok),
+        ]);
+        let provider = provider(&url).with_compat(Compat {
+            reasoning: ReasoningParam::EnableThinking,
+            send_reasoning: true,
+            ..Compat::default()
+        });
+        let messages = vec![
+            Message::User(UserMessage::text("hi")),
+            Message::Assistant(AssistantMessage {
+                content: vec![AssistantContent::thinking("plan")],
+                stop_reason: StopReason::Stop,
+                usage: Usage::default(),
+                provider: "p".into(),
+                model: "m".into(),
+                error_message: None,
+                failure: None,
+                timestamp: 0,
+            }),
+        ];
+        let request = Request {
+            model: &model(),
+            system_prompt: "",
+            messages: &messages,
+            tools: &[],
+            thinking: ThinkingLevel::High,
+        };
+        let first = provider.stream(&request, &mut |_| {}, &CancelToken::new());
+        assert_eq!(first.plain_text(), "done", "{first:?}");
+        let second = provider.stream(&request, &mut |_| {}, &CancelToken::new());
+        assert_eq!(second.plain_text(), "done", "{second:?}");
+
+        let bodies: Vec<Value> = bodies
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|b| serde_json::from_str(b).unwrap())
+            .collect();
+        assert_eq!(bodies.len(), 4);
+        assert!(bodies[0].get("chat_template_kwargs").is_some());
+        assert!(bodies[1].get("chat_template_kwargs").is_none());
+        assert_eq!(bodies[1]["messages"][1]["reasoning"], "plan");
+        // The third went out without either, the fourth from the start.
+        for body in &bodies[2..] {
+            assert!(body.get("chat_template_kwargs").is_none(), "{body}");
+            assert!(body["messages"][1].get("reasoning").is_none(), "{body}");
+            assert_eq!(body["messages"][1]["reasoning_content"], "plan");
+        }
+    }
+
+    #[test]
+    fn a_field_is_named_only_as_a_word_of_its_own() {
+        assert!(names_field("unknown field: reasoning", "reasoning"));
+        assert!(names_field("('body', 'reasoning')", "reasoning"));
+        assert!(!names_field(
+            "reasoning_effort is not supported",
+            "reasoning"
+        ));
+        assert!(!names_field("no reasoning_content here", "reasoning"));
+        assert!(names_field(
+            "no reasoning_content here",
+            "reasoning_content"
+        ));
     }
 
     #[test]
