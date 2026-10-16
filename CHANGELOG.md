@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **A queued message has a `✕`.** Its row in the agent's state strip, which already showed how long it has waited, now ends in a `✕` like the goal's and the loop's; a click on it takes the queue back into the input, as `↑` does.
+- **Only the current turn's reasoning goes back to the model, under both names.** With `send_reasoning` on, the reasoning of the answers since your last message — between the tool calls of the turn, where the model needs its train of thought — goes back as `reasoning_content` and as `reasoning`, the field Ollama's OpenAI layer reads ([ollama#18534](https://github.com/ollama/ollama/issues/18534)). The reasoning of earlier turns no longer does: it cost input tokens on every request for little the model used, and the Qwen and DeepSeek templates drop it themselves.
 
 ### Fixed
 - **Stopping the agent hands its queue back.** A message typed while the agent worked and still waiting when you stopped it stayed in the state strip after the stop with nothing to send it, until `↑` took it back or the next request carried it along; an external agent dropped it with the cancelled turn. The stop now puts the queue in the input, ahead of anything typed, for you to send or change.

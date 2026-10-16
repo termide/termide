@@ -127,12 +127,22 @@ impl OpenAiCompatProvider {
         // results follow it in one user message: the results of a turn must
         // come right after its calls, unbroken.
         let mut tool_images: Vec<Value> = Vec::new();
-        for message in request.messages {
+        // Reasoning goes back for the current turn only — the answers after
+        // the user's last message, between its tool calls — where the model
+        // needs its train of thought. Earlier turns' reasoning is dropped,
+        // as the Qwen and DeepSeek templates drop it themselves: it would
+        // cost input tokens on every request for little the model uses.
+        let turn_start = request
+            .messages
+            .iter()
+            .rposition(|message| matches!(message, Message::User(_)))
+            .map_or(0, |last_user| last_user + 1);
+        for (index, message) in request.messages.iter().enumerate() {
             match message {
                 Message::ToolResult(result) => tool_images.extend(result.images().map(image_part)),
                 _ => flush_tool_images(&mut messages, &mut tool_images),
             }
-            messages.push(self.convert(message));
+            messages.push(self.convert(message, index >= turn_start));
         }
         flush_tool_images(&mut messages, &mut tool_images);
 
@@ -218,7 +228,9 @@ impl OpenAiCompatProvider {
         Value::Object(body)
     }
 
-    fn convert(&self, message: &Message) -> Value {
+    /// One message in the wire shape; `in_turn` says an assistant message
+    /// belongs to the current turn, whose reasoning may go back.
+    fn convert(&self, message: &Message, in_turn: bool) -> Value {
         match message {
             // Plain text stays a string, which every compatible server takes;
             // only a message with images needs the list of parts.
@@ -268,7 +280,7 @@ impl OpenAiCompatProvider {
                 if !calls.is_empty() {
                     object.insert("tool_calls".into(), Value::Array(calls));
                 }
-                if self.compat.send_reasoning {
+                if self.compat.send_reasoning && in_turn {
                     let reasoning: String = assistant
                         .content
                         .iter()
@@ -277,8 +289,13 @@ impl OpenAiCompatProvider {
                             _ => None,
                         })
                         .collect();
+                    // Under both names: llama.cpp, vLLM and DeepSeek read
+                    // `reasoning_content`, Ollama's OpenAI layer only
+                    // `reasoning` (ollama/ollama#18534) — as both are read
+                    // from a stream.
                     if !reasoning.is_empty() {
                         object.insert("reasoning_content".into(), json!(reasoning));
+                        object.insert("reasoning".into(), json!(reasoning));
                     }
                 }
                 Value::Object(object)
@@ -583,10 +600,10 @@ mod tests {
     #[test]
     fn a_message_with_images_goes_as_parts() {
         let provider = OpenAiCompatProvider::new("p", "http://x/v1/");
-        let plain = provider.convert(&Message::User(UserMessage::text("hi")));
+        let plain = provider.convert(&Message::User(UserMessage::text("hi")), false);
         assert_eq!(plain, json!({ "role": "user", "content": "hi" }));
         let shot = UserMessage::text("see").with_images(vec![("image/png".into(), "QUJD".into())]);
-        let wire = provider.convert(&Message::User(shot));
+        let wire = provider.convert(&Message::User(shot), false);
         assert_eq!(
             wire["content"],
             json!([
@@ -906,6 +923,16 @@ mod tests {
                 timestamp: 0,
             }),
             Message::User(UserMessage::text("go on")),
+            Message::Assistant(AssistantMessage {
+                content: vec![AssistantContent::thinking("check")],
+                stop_reason: StopReason::Stop,
+                usage: Usage::default(),
+                provider: "p".into(),
+                model: "m".into(),
+                error_message: None,
+                failure: None,
+                timestamp: 0,
+            }),
         ];
         let body = provider.build_body(&Request {
             model: &model(),
@@ -919,7 +946,14 @@ mod tests {
             body["chat_template_kwargs"],
             json!({ "enable_thinking": true, "preserve_thinking": true, "clear_thinking": false })
         );
-        assert_eq!(body["messages"][1]["reasoning_content"], "plan");
+        // An earlier turn's reasoning stays behind: it would only cost tokens.
+        let earlier = &body["messages"][1];
+        assert_eq!(earlier["content"], "ok");
+        assert!(earlier.get("reasoning_content").is_none(), "{earlier}");
+        assert!(earlier.get("reasoning").is_none(), "{earlier}");
+        // The current turn's goes under both names, Ollama's among them.
+        assert_eq!(body["messages"][3]["reasoning_content"], "check");
+        assert_eq!(body["messages"][3]["reasoning"], "check");
     }
 
     /// The switch that sends reasoning back is the user's word, so it reaches
