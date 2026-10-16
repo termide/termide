@@ -16,7 +16,7 @@ use termide_i18n as i18n;
 use termide_theme::Theme;
 use termide_ui::SuggestionAction;
 
-use crate::base::{button_style, drag_field, press_field, render_modal_block};
+use crate::base::{button_style, drag_field, field_box, press_field_box, render_modal_block};
 use crate::input_keys::{handle_input_key, InputKeyResult};
 use crate::{centered_rect_with_size, Modal, ModalResult};
 
@@ -598,7 +598,10 @@ impl Modal for CommandConfigModal {
             _ => return Ok(None),
         }
 
-        // A press in a field's text focuses it and places the cursor there.
+        // A press on a text field's box, its border included, focuses it and
+        // places the cursor. The group's right end, where its arrow is,
+        // opens the list instead.
+        let has_groups = !self.group_suggestion.suggestions().is_empty();
         for field in [
             FocusArea::Group,
             FocusArea::Command,
@@ -606,7 +609,8 @@ impl Modal for CommandConfigModal {
             FocusArea::Hotkey,
         ] {
             let (input, area) = self.text_field_mut(field);
-            if press_field(input, area, &mouse) {
+            let frame = field_box(area, field != FocusArea::Group || !has_groups);
+            if press_field_box(input, area, frame, &mouse) {
                 if field != FocusArea::Group {
                     self.group_suggestion.collapse();
                 }

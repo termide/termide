@@ -10,7 +10,10 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Widget},
 };
 
-use crate::base::{button_style, field_char_at, render_input_field_scrolled, render_modal_block};
+use crate::base::{
+    button_style, field_box, field_char_at, press_field_box, render_input_field_scrolled,
+    render_modal_block,
+};
 use crate::input_keys::{handle_input_key, InputKeyResult};
 
 use termide_config::constants::MODAL_BUTTON_SPACING;
@@ -727,17 +730,12 @@ impl Modal for InputModal {
 
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                // Check if click is on input field
-                if let Some(input_area) = self.last_input_area {
-                    if mouse.column >= input_area.x
-                        && mouse.column < input_area.x + input_area.width
-                        && mouse.row == input_area.y
-                    {
-                        self.focus = FocusArea::Input;
-                        let char_pos = field_char_at(&self.input_handler, input_area, mouse.column);
-                        self.input_handler.mouse_press(char_pos);
-                        return Ok(None);
-                    }
+                // A press on the input field's box, its border included,
+                // places the cursor.
+                let frame = field_box(self.last_input_area, true);
+                if press_field_box(&mut self.input_handler, self.last_input_area, frame, &mouse) {
+                    self.focus = FocusArea::Input;
+                    return Ok(None);
                 }
 
                 // Check if click is on checkbox

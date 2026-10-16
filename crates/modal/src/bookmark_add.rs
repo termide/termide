@@ -12,7 +12,9 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph, Widget},
 };
 
-use crate::base::{button_style, drag_field, press_field, render_modal_block, render_text_input};
+use crate::base::{
+    button_style, drag_field, field_box, press_field_box, render_modal_block, render_text_input,
+};
 use crate::input_keys::{handle_input_key, InputKeyResult};
 
 use termide_config::constants::{
@@ -705,10 +707,14 @@ impl Modal for BookmarkAddModal {
             _ => return Ok(None),
         }
 
-        // A press in a field's text focuses it and places the cursor there.
+        // A press on a text field's box, its border included, focuses it and
+        // places the cursor. The group's right end, where its arrow is,
+        // opens the list instead.
+        let has_groups = !self.group_suggestion.suggestions().is_empty();
         for field in [FocusArea::Group, FocusArea::Description, FocusArea::Path] {
             let (input, area) = self.field_mut(field);
-            if press_field(input, area, &mouse) {
+            let frame = field_box(area, field != FocusArea::Group || !has_groups);
+            if press_field_box(input, area, frame, &mouse) {
                 self.focus = field;
                 if field != FocusArea::Group {
                     self.group_suggestion.collapse();
@@ -918,5 +924,37 @@ mod tests {
             .handle_mouse(press(field.right() - 2, field.y + 1), area)
             .unwrap();
         assert!(modal.group_suggestion.is_expanded());
+    }
+
+    /// A press on a field's border focuses it and places the cursor too; on
+    /// the group's right end it still opens the list.
+    #[test]
+    fn a_click_on_a_field_border_places_the_cursor() {
+        let (mut modal, area) = rendered();
+        let path = modal.last_path_area.unwrap();
+        // The top border, over the fourth character.
+        modal
+            .handle_mouse(press(path.x + 3, path.y - 1), area)
+            .unwrap();
+        assert_eq!(modal.focus, FocusArea::Path);
+        assert_eq!(modal.path_input.cursor_pos(), 3);
+        modal.handle_mouse(release(0, 0), area).unwrap();
+
+        // The left border of the description: its start.
+        let desc = modal.last_description_area.unwrap();
+        modal.handle_mouse(press(desc.x - 1, desc.y), area).unwrap();
+        assert_eq!(modal.focus, FocusArea::Description);
+        assert_eq!(modal.description_input.cursor_pos(), 0);
+        modal.handle_mouse(release(0, 0), area).unwrap();
+
+        // The group's bottom border under its text places the cursor and
+        // leaves the list shut.
+        let group = modal.last_group_text_area.unwrap();
+        modal
+            .handle_mouse(press(group.x + 2, group.y + 1), area)
+            .unwrap();
+        assert_eq!(modal.focus, FocusArea::Group);
+        assert_eq!(modal.group_suggestion.input().cursor_pos(), 2);
+        assert!(!modal.group_suggestion.is_expanded());
     }
 }

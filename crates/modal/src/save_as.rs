@@ -10,7 +10,9 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Widget},
 };
 
-use crate::base::{button_style, field_char_at, render_modal_block, render_text_input};
+use crate::base::{
+    button_style, field_box, field_char_at, press_field_box, render_modal_block, render_text_input,
+};
 use crate::input_keys::{handle_input_key, InputKeyResult};
 
 use termide_config::constants::MODAL_BUTTON_SPACING;
@@ -335,17 +337,12 @@ impl Modal for SaveAsModal {
             return Ok(None);
         }
 
-        // A click in the input field places the cursor and anchors a selection.
-        if let Some(input_area) = self.last_input_area {
-            if mouse.row == input_area.y
-                && mouse.column >= input_area.x
-                && mouse.column < input_area.x + input_area.width
-            {
-                self.focus = FocusArea::Input;
-                let pos = field_char_at(&self.input_handler, input_area, mouse.column);
-                self.input_handler.mouse_press(pos);
-                return Ok(None);
-            }
+        // A press on the input field's box, its border included, places the
+        // cursor and anchors a selection.
+        let frame = field_box(self.last_input_area, true);
+        if press_field_box(&mut self.input_handler, self.last_input_area, frame, &mouse) {
+            self.focus = FocusArea::Input;
+            return Ok(None);
         }
 
         let t = i18n::t();

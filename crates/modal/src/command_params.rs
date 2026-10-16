@@ -15,7 +15,9 @@ use ratatui::{
 };
 use std::collections::HashMap;
 
-use crate::base::{button_style, drag_field, press_field, render_modal_block, render_text_input};
+use crate::base::{
+    button_style, drag_field, press_field_box, render_modal_block, render_text_input,
+};
 use crate::input_keys::{handle_input_key, InputKeyResult};
 use termide_config::commands::{CommandParam, CommandParamType};
 use termide_config::constants::{
@@ -433,11 +435,13 @@ impl Modal for CommandParamsModal {
             _ => return Ok(None),
         }
 
-        // A press in a text field's text focuses it and places the cursor.
+        // A press on a text field's row, the inset beside its text included,
+        // focuses it and places the cursor.
         for i in 0..self.last_text_areas.len() {
             let area = self.last_text_areas[i];
+            let frame = self.last_field_areas.get(i).copied();
             if let Some(input) = self.text_input_mut(i) {
-                if press_field(input, area, &mouse) {
+                if press_field_box(input, area, frame, &mouse) {
                     self.focus = FocusArea::Field(i);
                     self.dragging = Some(i);
                     return Ok(None);

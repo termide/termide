@@ -218,25 +218,60 @@ pub fn field_char_at(input: &crate::TextInputHandler, area: Rect, column: u16) -
 /// drew for `input`, places its cursor on the character under the pointer and
 /// anchors a selection there; a quick second press selects the word there and
 /// a third the whole text (see
-/// [`TextInput::mouse_press`](termide_ui::TextInput::mouse_press)). Returns whether the press landed in the field,
-/// so the caller focuses it and remembers that a drag now belongs to it.
+/// [`TextInput::mouse_press`](termide_ui::TextInput::mouse_press)). Returns
+/// whether the press landed in the field, so the caller focuses it and
+/// remembers that a drag now belongs to it.
 pub fn press_field(
     input: &mut crate::TextInputHandler,
     area: Option<Rect>,
     mouse: &crossterm::event::MouseEvent,
 ) -> bool {
+    press_field_box(input, area, None, mouse)
+}
+
+/// [`press_field`] for a field whose text in `text` sits in a box `frame`
+/// drawn round it — its border, its padding: a press anywhere on the box
+/// counts as one on the text. On the rows above and below the text it lands
+/// on the text's row, left of the text at the start of what is shown, right
+/// of it at the end. Without a `frame` only the text counts.
+pub fn press_field_box(
+    input: &mut crate::TextInputHandler,
+    text: Option<Rect>,
+    frame: Option<Rect>,
+    mouse: &crossterm::event::MouseEvent,
+) -> bool {
     use crossterm::event::{MouseButton, MouseEventKind};
-    let Some(area) = area else {
+    let Some(text) = text else {
         return false;
     };
+    let point = (mouse.column, mouse.row).into();
     if mouse.kind != MouseEventKind::Down(MouseButton::Left)
-        || !area.contains((mouse.column, mouse.row).into())
+        || !(text.contains(point) || frame.is_some_and(|frame| frame.contains(point)))
     {
         return false;
     }
-    let pos = field_char_at(input, area, mouse.column);
+    let x = mouse
+        .column
+        .saturating_sub(text.x)
+        .min(text.width.saturating_sub(1));
+    let pos = input.char_at_column(Some(usize::from(x)));
     input.mouse_press(pos);
     true
+}
+
+/// The box a one-row field drawn in `text` has when a one-cell border goes
+/// all round it, for [`press_field_box`]. With `right_edge` false the box
+/// stops at the text's right end, leaving the cells past it — a dropdown
+/// arrow, the border beside it — to their own clicks.
+pub fn field_box(text: Option<Rect>, right_edge: bool) -> Option<Rect> {
+    text.map(|text| {
+        Rect::new(
+            text.x.saturating_sub(1),
+            text.y.saturating_sub(1),
+            text.width + if right_edge { 2 } else { 1 },
+            text.height + 2,
+        )
+    })
 }
 
 /// A left drag that began with a [`press_field`] on the field in `area`:
@@ -607,5 +642,42 @@ mod tests {
         // Cursor should trigger scroll adjustment
         nav.adjust_scroll();
         assert_eq!(nav.scroll_offset(), 11); // cursor(15) - max_visible(5) + 1 = 11
+    }
+
+    /// A press on a field's border lands on the text: above and below on the
+    /// column it points at, left of the text at the start of what is shown,
+    /// right of it at the end; outside the box it is not the field's.
+    #[test]
+    fn a_press_on_a_field_border_places_the_cursor() {
+        use super::test_mouse::press;
+        let text = Some(Rect::new(5, 5, 10, 1));
+        let frame = field_box(text, true);
+        assert_eq!(frame, Some(Rect::new(4, 4, 12, 3)));
+        let mut input = crate::TextInputHandler::with_text("hello");
+        // Each press lands on another character, so none reads as a double
+        // click.
+        let at = |input: &mut crate::TextInputHandler, column, row| {
+            press_field_box(input, text, frame, &press(column, row)).then(|| input.cursor_pos())
+        };
+        assert_eq!(at(&mut input, 4, 5), Some(0));
+        assert_eq!(at(&mut input, 7, 4), Some(2));
+        assert_eq!(at(&mut input, 8, 6), Some(3));
+        assert_eq!(at(&mut input, 15, 5), Some(5));
+        assert_eq!(at(&mut input, 3, 5), None);
+        assert_eq!(at(&mut input, 7, 7), None);
+        // Without a box only the text counts.
+        assert!(!press_field_box(&mut input, text, None, &press(4, 5)));
+
+        // Scrolled: the borders reach the first and last characters shown.
+        let mut long = crate::TextInputHandler::with_text("x".repeat(30));
+        long.follow_scroll(10);
+        let first = long.scroll();
+        assert!(first > 0);
+        assert_eq!(at(&mut long, 4, 5), Some(first));
+        assert_eq!(at(&mut long, 15, 6), Some(30));
+        // The box without its right edge leaves the right border alone.
+        let combo = field_box(text, false);
+        assert!(!press_field_box(&mut input, text, combo, &press(15, 5)));
+        assert!(press_field_box(&mut input, text, combo, &press(4, 6)));
     }
 }

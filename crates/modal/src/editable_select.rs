@@ -19,7 +19,9 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph, Widget},
 };
 
-use crate::base::{button_style, drag_field, press_field, render_modal_block, render_text_input};
+use crate::base::{
+    button_style, drag_field, press_field_box, render_modal_block, render_text_input,
+};
 use crate::input_keys::{handle_input_key, InputKeyResult};
 
 use termide_config::constants::{
@@ -789,10 +791,16 @@ impl Modal for EditableSelectModal {
             return Ok(None);
         }
 
-        // A press in the input's text places the cursor there.
-        if press_field(
+        // A press on the input's box, its border included, places the
+        // cursor; its right end, the arrow, opens the list below.
+        let frame = self.last_input_area.map(|area| Rect {
+            width: area.width.saturating_sub(3),
+            ..area
+        });
+        if press_field_box(
             self.suggestion_input.input_mut(),
             self.last_text_area,
+            frame,
             &mouse,
         ) {
             self.focus = FocusArea::Input;

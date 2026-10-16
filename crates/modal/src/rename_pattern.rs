@@ -12,7 +12,9 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Widget},
 };
 
-use crate::base::{button_style, drag_field, press_field, render_modal_block, render_text_input};
+use crate::base::{
+    button_style, drag_field, field_box, press_field_box, render_modal_block, render_text_input,
+};
 use crate::input_keys::{handle_input_key, InputKeyResult};
 
 use termide_i18n as i18n;
@@ -316,8 +318,10 @@ impl Modal for RenamePatternModal {
             _ => return Ok(None),
         }
 
-        // A press in the pattern field places the cursor there.
-        if press_field(&mut self.input_handler, self.last_input_area, &mouse) {
+        // A press on the pattern field's box, its border included, places
+        // the cursor.
+        let frame = field_box(self.last_input_area, true);
+        if press_field_box(&mut self.input_handler, self.last_input_area, frame, &mouse) {
             self.focus = FocusArea::Input;
             self.dragging = true;
             return Ok(None);
