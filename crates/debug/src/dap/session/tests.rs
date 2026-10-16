@@ -366,3 +366,60 @@ fn a_reverse_request_is_declined() {
     assert_eq!(sent[0]["request_seq"], 7);
     assert_eq!(sent[0]["success"], false);
 }
+
+#[test]
+fn delve_says_where_it_listens() {
+    assert_eq!(
+        listen_address("DAP server listening at: 127.0.0.1:38697"),
+        Some("127.0.0.1:38697".into())
+    );
+    assert_eq!(listen_address("Type 'help' for list of commands."), None);
+}
+
+#[test]
+fn a_tcp_adapter_is_reached_at_the_address_it_printed() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    let (tx, rx) = mpsc::channel();
+    let spec = LaunchSpec {
+        adapter: Adapter::Delve,
+        program: ".".into(),
+        args: Vec::new(),
+        cwd: "/p".into(),
+        build: None,
+        env: Vec::new(),
+        label: "go".into(),
+    };
+    let mut session = Session::new(spec, Vec::new(), rx, tx.clone());
+    tx.send(Incoming::Listening(address)).unwrap();
+    session.poll();
+
+    let (stream, _) = listener.accept().unwrap();
+    let mut reader = io::BufReader::new(stream.try_clone().unwrap());
+    let init = read_message(&mut reader).unwrap().unwrap();
+    assert_eq!(init["command"], "initialize");
+    assert_eq!(init["arguments"]["adapterID"], "go");
+
+    // Its answer comes back over the same socket.
+    let mut writer = stream;
+    writer
+        .write_all(&crate::dap::transport::encode(&json!({
+            "seq": 1, "type": "response", "request_seq": init["seq"],
+            "command": "initialize", "success": true, "body": {}
+        })))
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !session
+        .pending
+        .values()
+        .any(|p| matches!(p, Pending::Launch))
+    {
+        assert!(std::time::Instant::now() < deadline, "no launch was sent");
+        session.poll();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let launch = read_message(&mut reader).unwrap().unwrap();
+    assert_eq!(launch["command"], "launch");
+    assert_eq!(launch["arguments"]["mode"], "debug");
+    assert_eq!(launch["arguments"]["program"], ".");
+}

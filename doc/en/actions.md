@@ -58,7 +58,7 @@ mode = "background"
 | `group` | no | Puts the command into a submenu with this name |
 | `key` | no | Hotkey that runs the command, e.g. `Ctrl+Shift+D`, see [Hotkeys](#hotkeys) |
 | `params` | no | Values asked for before the command runs, see [Parameters](#parameters) |
-| `debugger` | no | `lldb-dap`, `gdb-dap`, `debugpy`, `lldb`, `gdb`, `dlv` or `pdb`: the command runs under this debugger, see [Debugging](#debugging) |
+| `debugger` | no | `lldb-dap`, `gdb-dap`, `debugpy`, `dlv-dap`, `lldb`, `gdb`, `dlv` or `pdb`: the command runs under this debugger, see [Debugging](#debugging) |
 | `build` | no | With `debugger`: a shell command run first; the debugger starts only if it succeeds |
 
 An unknown `mode` falls back to `terminal`. If a file cannot be parsed, none of its commands appear; the reason is written to the log.
@@ -179,7 +179,7 @@ The form's `Hotkey:` field accepts `Ctrl`, `Alt` and `Shift` combined with a let
 
 A command with `debugger` debugs a program with the breakpoints placed in the editor (see [Breakpoints](editor.md#breakpoints-and-debugging)) set, and runs it to the first one. `command` is then what to debug. Two kinds of debugger are supported:
 
-- a **debug adapter**, driven by TermIDE over the Debug Adapter Protocol and shown in the [debug panel](#the-debug-panel): `lldb-dap`, `gdb-dap`, `debugpy`;
+- a **debug adapter**, driven by TermIDE over the Debug Adapter Protocol and shown in the [debug panel](#the-debug-panel): `lldb-dap`, `gdb-dap`, `debugpy`, `dlv-dap`;
 - a **command-line debugger** started in a new terminal panel, where you step, print and continue with its own commands: `lldb`, `gdb`, `dlv`, `pdb`.
 
 | `debugger` | `command` is | Runs as |
@@ -187,6 +187,7 @@ A command with `debugger` debugs a program with the breakpoints placed in the ed
 | `lldb-dap` | the program and its arguments | LLVM's `lldb-dap` (on macOS also found through `xcrun`; `lldb-vscode` in older LLVM): Rust, C, C++ |
 | `gdb-dap` | the program and its arguments | `gdb -i dap`, GDB 14 or later |
 | `debugpy` | the script and its arguments | `python3 -m debugpy.adapter`; needs `pip install debugpy` |
+| `dlv-dap` | the package to build and its arguments, e.g. `./cmd/app --flag` | `dlv dap`, Delve's adapter, reached over a local TCP port |
 | `lldb` | the program and its arguments | `lldb -s <script> -- <command>` |
 | `gdb` | the program and its arguments | `gdb -q -x <script> --args <command>` |
 | `dlv` | Delve's subcommand and its arguments, e.g. `debug ./cmd/app` | `dlv --init <script> <command>` |
@@ -203,9 +204,9 @@ key = "Ctrl+Alt+D"
 
 For a debug adapter, `command` is split into words as a shell would split it (quotes and backslashes work) but no shell runs it: variables, `~` and globs are not expanded. `build` runs first, its output going to the debug panel; the adapter starts only if it succeeds. A command-line debugger reads its breakpoints from a script — a `breakpoint set` or `break` for each, then `run` (lldb, gdb) or `continue` (Delve) — written to `termide-debug` in the system's temporary directory; breakpoints set while it runs reach it only on the next launch, so set them in the debugger itself meanwhile.
 
-Only breakpoints in files under the project root go in, each to the debugger for its language: Python files to debugpy and pdb, Go files to Delve, the rest to lldb and gdb. Debug commands run in the project root, so a relative program path such as `target/debug/app` means the same wherever the focus is. Parameters work as for other commands; for a debug adapter they reach the build and the adapter as environment variables.
+Only breakpoints in files under the project root go in, each to the debugger for its language: Python files to debugpy and pdb, Go files to Delve and dlv-dap, the rest to lldb and gdb. Debug commands run in the project root, so a relative program path such as `target/debug/app` means the same wherever the focus is. Parameters work as for other commands; for a debug adapter they reach the build and the adapter as environment variables.
 
-`F5` in the editor (`start_debug`), or **Start debugging** in the command palette, starts debugging: with one launch available it starts at once, with several it offers them as a list. The launches are the debug commands of the project and the global file and, when the focused editor holds a Python or Go file, that file itself, which needs no command: a script runs under debugpy in the debug panel when debugpy is installed and under pdb in a terminal otherwise; a Go file's package runs under Delve (`dlv debug`) in a terminal. With none, the status bar says so. While a debug session is active, `F5` continues the program instead.
+`F5` in the editor (`start_debug`), or **Start debugging** in the command palette, starts debugging: with one launch available it starts at once, with several it offers them as a list. The launches are the debug commands of the project and the global file and, when the focused editor holds a Python or Go file, that file itself, which needs no command: a script runs under debugpy in the debug panel when debugpy is installed and under pdb in a terminal otherwise; the package in a Go file's directory runs under `dlv dap` in the debug panel when Delve is installed and under `dlv debug` in a terminal otherwise. With none, the status bar says so. While a debug session is active, `F5` continues the program instead.
 
 ### The debug panel
 

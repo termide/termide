@@ -15,10 +15,12 @@ pub enum Adapter {
     GdbDap,
     /// Microsoft's debugpy, for Python.
     Debugpy,
+    /// Delve, for Go: `dlv dap`, which talks over TCP.
+    Delve,
 }
 
 impl Adapter {
-    pub const ALL: [Adapter; 3] = [Self::LldbDap, Self::GdbDap, Self::Debugpy];
+    pub const ALL: [Adapter; 4] = [Self::LldbDap, Self::GdbDap, Self::Debugpy, Self::Delve];
 
     /// The spelling `commands.toml` uses for `debugger`.
     pub fn as_str(self) -> &'static str {
@@ -26,6 +28,7 @@ impl Adapter {
             Self::LldbDap => "lldb-dap",
             Self::GdbDap => "gdb-dap",
             Self::Debugpy => "debugpy",
+            Self::Delve => "dlv-dap",
         }
     }
 
@@ -45,6 +48,7 @@ impl Adapter {
         let go = ext.as_deref() == Some("go");
         match self {
             Self::Debugpy => python,
+            Self::Delve => go,
             Self::LldbDap | Self::GdbDap => !python && !go,
         }
     }
@@ -60,7 +64,16 @@ impl Adapter {
             Self::Debugpy => find_in_path("python3")
                 .or_else(|| find_in_path("python"))
                 .map(|p| (p, vec!["-m".into(), "debugpy.adapter".into()])),
+            Self::Delve => {
+                find_in_path("dlv").map(|p| (p, vec!["dap".into(), "--listen=127.0.0.1:0".into()]))
+            }
         }
+    }
+
+    /// Whether the adapter listens on a socket rather than talking over its
+    /// standard input and output.
+    pub fn uses_tcp(self) -> bool {
+        self == Self::Delve
     }
 
     /// The `adapterID` of `initialize`.
@@ -69,6 +82,7 @@ impl Adapter {
             Self::LldbDap => "lldb-dap",
             Self::GdbDap => "gdb",
             Self::Debugpy => "debugpy",
+            Self::Delve => "go",
         }
     }
 
@@ -89,6 +103,14 @@ impl Adapter {
                 "console": "internalConsole",
                 "justMyCode": true,
                 "redirectOutput": true,
+            }),
+            // `program` is the package to build, `.` or `./cmd/app`.
+            Self::Delve => json!({
+                "mode": "debug",
+                "program": program,
+                "args": args,
+                "cwd": cwd,
+                "outputMode": "remote",
             }),
         }
     }

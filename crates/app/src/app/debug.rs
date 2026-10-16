@@ -52,18 +52,30 @@ impl App {
                 .parent()
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| self.project_root.clone());
-            let python = Launch::for_file(file).is_some_and(|l| l.debugger == Debugger::Pdb);
-            if python && dap::debugpy_available() {
+            // A Python script or a Go package runs under its debug adapter in
+            // the debug panel when the adapter is installed, under its
+            // command-line debugger in a terminal otherwise.
+            let terminal = Launch::for_file(file);
+            let adapter = match terminal.as_ref().map(|l| l.debugger) {
+                Some(Debugger::Pdb) if dap::debugpy_available() => Some(Adapter::Debugpy),
+                Some(Debugger::Dlv) if Adapter::Delve.command().is_some() => Some(Adapter::Delve),
+                _ => None,
+            };
+            if let Some(adapter) = adapter {
+                let program = match adapter {
+                    Adapter::Delve => ".".to_string(),
+                    _ => file.to_string_lossy().into_owned(),
+                };
                 choices.push(DebugChoice::Dap(LaunchSpec {
-                    adapter: Adapter::Debugpy,
-                    program: file.to_string_lossy().into_owned(),
+                    adapter,
+                    program,
                     args: Vec::new(),
                     cwd,
                     build: None,
                     env: Vec::new(),
                     label: file_label(file),
                 }));
-            } else if let Some(launch) = Launch::for_file(file) {
+            } else if let Some(launch) = terminal {
                 choices.push(DebugChoice::File { launch, cwd });
             }
         }

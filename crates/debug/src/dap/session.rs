@@ -155,6 +155,8 @@ enum Pending {
 enum Incoming {
     Message(Value),
     Closed,
+    /// A TCP adapter said where it listens.
+    Listening(String),
     Log(String),
     BuildLine(String),
     BuildDone(bool),
@@ -347,9 +349,55 @@ impl Session {
         else {
             return self.fail("the adapter's pipes did not open".into());
         };
+        self.forward_lines(stderr);
+        self.adapter = Some(child);
+        if self.spec.adapter.uses_tcp() {
+            // The adapter prints where it listens, then talks over a socket;
+            // whatever else it prints is shown as its messages.
+            let tx = self.inbox_tx.clone();
+            std::thread::spawn(move || {
+                let mut said = false;
+                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                    let incoming = match listen_address(&line) {
+                        Some(address) if !said => {
+                            said = true;
+                            Incoming::Listening(address)
+                        }
+                        _ => Incoming::Log(line),
+                    };
+                    if tx.send(incoming).is_err() {
+                        return;
+                    }
+                }
+                if !said {
+                    let _ = tx.send(Incoming::Closed);
+                }
+            });
+        } else {
+            self.read_messages(stdout);
+            self.connect(Box::new(stdin));
+        }
+    }
+
+    /// Connect to an adapter listening at `address`.
+    fn connect_tcp(&mut self, address: &str) {
+        let stream = match std::net::TcpStream::connect(address) {
+            Ok(stream) => stream,
+            Err(e) => return self.fail(format!("{address}: {e}")),
+        };
+        let reader = match stream.try_clone() {
+            Ok(reader) => reader,
+            Err(e) => return self.fail(format!("{address}: {e}")),
+        };
+        self.read_messages(reader);
+        self.connect(Box::new(stream));
+    }
+
+    /// Read DAP messages from `stream` into the inbox until it ends.
+    fn read_messages(&self, stream: impl std::io::Read + Send + 'static) {
         let tx = self.inbox_tx.clone();
         std::thread::spawn(move || {
-            let mut reader = BufReader::new(stdout);
+            let mut reader = BufReader::new(stream);
             while let Ok(Some(message)) = read_message(&mut reader) {
                 if tx.send(Incoming::Message(message)).is_err() {
                     return;
@@ -357,16 +405,18 @@ impl Session {
             }
             let _ = tx.send(Incoming::Closed);
         });
+    }
+
+    /// Show the lines of `stream` as the adapter's messages.
+    fn forward_lines(&self, stream: impl std::io::Read + Send + 'static) {
         let tx = self.inbox_tx.clone();
         std::thread::spawn(move || {
-            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            for line in BufReader::new(stream).lines().map_while(Result::ok) {
                 if tx.send(Incoming::Log(line)).is_err() {
                     break;
                 }
             }
         });
-        self.adapter = Some(child);
-        self.connect(Box::new(stdin));
     }
 
     /// Talk to the adapter through `writer`: start with `initialize`.
@@ -440,6 +490,11 @@ impl Session {
                     self.push_line(OutputKind::Console, line);
                 }
                 Incoming::BuildLine(line) => self.push_line(OutputKind::Build, line),
+                Incoming::Listening(address) => {
+                    if self.status == Status::Starting && self.writer.is_none() {
+                        self.connect_tcp(&address);
+                    }
+                }
                 Incoming::BuildDone(success) => {
                     self.build = None;
                     if self.status != Status::Building {
@@ -952,6 +1007,14 @@ impl Drop for Session {
             let _ = adapter.wait();
         }
     }
+}
+
+/// The address in an adapter's "listening at" line: Delve prints
+/// `DAP server listening at: 127.0.0.1:38697`.
+fn listen_address(line: &str) -> Option<String> {
+    let (_, rest) = line.split_once("listening at:")?;
+    let address = rest.trim();
+    (!address.is_empty()).then(|| address.to_string())
 }
 
 fn shell_command(line: &str) -> Command {

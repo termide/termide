@@ -501,7 +501,7 @@ A breakpoint is drawn as a red `●` in the cell right of the line number, where
 
 A breakpoint stays with its text as you edit: lines added or removed above move it, a deleted line takes its breakpoint with it, and lines joined into one keep it on the joined line. Breakpoints are kept per file in `breakpoints.toml` in the data directory (`~/.local/share/termide/` on Linux, `~/Library/Application Support/termide/` on macOS), so they come back when the file is opened again, in any project and after a restart. **Remove all breakpoints** in the command palette clears them everywhere.
 
-`F5` starts debugging with the project's breakpoints set and runs the program to the first one: through a debug adapter (lldb-dap, gdb, debugpy) in the debug panel, or a command-line debugger (lldb, gdb, Delve, pdb) in a terminal panel. What it debugs comes from a command with a `debugger` in `commands.toml`, or, for a Python or Go file, from the file alone; see [Debugging](actions.md#debugging). When a debug adapter stops the program, the line it stopped at gets `→` on a highlighted cell in the gutter and the cursor; stepping moves it.
+`F5` starts debugging with the project's breakpoints set and runs the program to the first one: through a debug adapter (lldb-dap, gdb, debugpy, Delve) in the debug panel, or a command-line debugger (lldb, gdb, Delve, pdb) in a terminal panel. What it debugs comes from a command with a `debugger` in `commands.toml`, or, for a Python or Go file, from the file alone; see [Debugging](actions.md#debugging). When a debug adapter stops the program, the line it stopped at gets `→` on a highlighted cell in the gutter and the cursor; stepping moves it.
 
 ## Vim Mode
 

@@ -108,3 +108,18 @@ fn debugpy_stops_steps_and_finishes() {
 fn dunce_like(path: &Path) -> std::path::PathBuf {
     dunce::canonicalize(path).unwrap()
 }
+
+#[test]
+#[ignore]
+fn delve_stops_steps_and_finishes() {
+    let dir = tempfile::tempdir().unwrap();
+    let dir = dunce_like(dir.path());
+    let source = dir.join("main.go");
+    std::fs::write(
+        &source,
+        "package main\n\nimport \"fmt\"\n\nfunc main() {\n\ta := 41\n\ta = a + 1\n\tfmt.Println(a)\n}\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("go.mod"), "module smoke\n\ngo 1.21\n").unwrap();
+    run(Adapter::Delve, &dir, ".", &source, 7);
+}
