@@ -17,6 +17,9 @@ const MAX_POPUP_HEIGHT: u16 = 15;
 /// Minimum width of the hover popup.
 const MIN_POPUP_WIDTH: u16 = 20;
 
+/// Tab stop used when expanding tabs in hover text.
+const HOVER_TAB_WIDTH: usize = 4;
+
 /// Hover popup state and rendering.
 pub struct HoverPopup {
     /// Parsed hover content lines.
@@ -116,11 +119,36 @@ impl HoverPopup {
         line.trim_end().to_string()
     }
 
+    /// Replace tabs with spaces up to the next tab stop and drop other control
+    /// characters. Servers such as gopls send struct bodies indented with tabs;
+    /// a tab written into a buffer cell reaches the terminal as is, moves the
+    /// cursor without painting, and leaves holes in the popup and its line
+    /// running past the right edge.
+    fn expand_tabs(line: &str) -> String {
+        let mut out = String::with_capacity(line.len());
+        let mut col = 0usize;
+        for ch in line.chars() {
+            if ch == '\t' {
+                let n = HOVER_TAB_WIDTH - col % HOVER_TAB_WIDTH;
+                out.extend(std::iter::repeat_n(' ', n));
+                col += n;
+            } else if ch.is_control() {
+                continue;
+            } else {
+                out.push(ch);
+                col += unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+            }
+        }
+        out
+    }
+
     /// Wrap text to fit within max_width, breaking at word boundaries.
     fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
         let mut result = Vec::new();
 
         for line in text.lines() {
+            let line = Self::expand_tabs(line);
+            let line = line.as_str();
             let trimmed = line.trim_end();
             if trimmed.is_empty() {
                 result.push(String::new());
@@ -441,6 +469,33 @@ mod copy_tests {
             "precondition: this text is long enough to wrap"
         );
         assert!(!popup.text().contains('\n'));
+    }
+
+    /// gopls indents struct fields with tabs. A tab in a buffer cell reaches the
+    /// terminal raw: the cursor jumps without painting, leaving holes in the
+    /// popup and pushing the line past its right edge.
+    #[test]
+    fn tabs_are_expanded_and_never_reach_the_buffer() {
+        let text =
+            "```go\ntype TreeModel struct {\n\troot\t\tstring\n\tfocused\tbool // флаг\n}\n```";
+        let popup = HoverPopup::from_hover(hover_with(text)).expect("popup");
+        assert!(popup.lines.iter().all(|l| !l.chars().any(char::is_control)));
+        assert_eq!(popup.lines[2], "    root        string");
+
+        let area = Rect::new(0, 0, 100, 20);
+        let mut buf = Buffer::empty(area);
+        let rect = popup
+            .render(&mut buf, area, 5, 2, &Theme::default())
+            .expect("rendered");
+        for y in 0..area.height {
+            for x in 0..area.width {
+                assert_ne!(buf[(x, y)].symbol(), "\t", "tab at ({x},{y})");
+            }
+        }
+        let widest = popup.lines.iter().map(|l| l.width()).max().unwrap();
+        assert!(widest as u16 + 1 < rect.right() - rect.left() + 1);
+        // Copying still hands back the server's text untouched.
+        assert_eq!(popup.text(), text);
     }
 
     #[test]
