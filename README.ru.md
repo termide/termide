@@ -563,9 +563,15 @@ mode = "report"  # terminal (по умолчанию), background или report
 
 Код — Cargo workspace из модульных крейтов; версию тулчейна задаёт `rust-toolchain.toml`. Сборка, тесты, Nix-окружение и pre-commit hook описаны в **[Руководстве разработчика](doc/ru/developer-guide.md)**, раскладка крейтов, система панелей и поток событий — в **[Архитектуре](doc/ru/architecture.md)**.
 
+## Сообщество
+
+- **[Telegram — @termide_news](https://t.me/termide_news)** — анонсы релизов и обсуждения
+- **[GitHub Discussions](https://github.com/termide/termide/discussions)** — вопросы, идеи и рассказы о своём опыте
+- **[GitHub Issues](https://github.com/termide/termide/issues)** — сообщения об ошибках и запросы возможностей
+
 ## Вклад
 
-Issues и pull requests приветствуются; анонсы и обсуждения — в Telegram-канале [@termide_news](https://t.me/termide_news). Один раз на клон выполните `git config core.hooksPath .githooks`: pre-commit hook запускает те же проверки `fmt`, `clippy` и тестов, что и CI.
+Issues и pull requests приветствуются. Один раз на клон выполните `git config core.hooksPath .githooks`: pre-commit hook запускает те же проверки `fmt`, `clippy` и тестов, что и CI.
 
 ## Лицензия
 

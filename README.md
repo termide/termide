@@ -562,9 +562,15 @@ mode = "report"  # terminal (default), background, or report
 
 The codebase is a Cargo workspace of modular crates; `rust-toolchain.toml` pins the toolchain. Building, testing, the Nix shell and the pre-commit hook are in the **[Developer Guide](doc/en/developer-guide.md)**; the crate layout, panel system and event flow in **[Architecture](doc/en/architecture.md)**.
 
+## Community
+
+- **[Telegram — @termide_news](https://t.me/termide_news)** — release announcements and open discussion
+- **[GitHub Discussions](https://github.com/termide/termide/discussions)** — questions, ideas and show-and-tell
+- **[GitHub Issues](https://github.com/termide/termide/issues)** — bug reports and feature requests
+
 ## Contributing
 
-Issues and pull requests are welcome; announcements and discussion live in the [@termide_news](https://t.me/termide_news) Telegram channel. Run `git config core.hooksPath .githooks` once per clone: the pre-commit hook runs the same `fmt`, `clippy` and test checks as CI.
+Issues and pull requests are welcome. Run `git config core.hooksPath .githooks` once per clone: the pre-commit hook runs the same `fmt`, `clippy` and test checks as CI.
 
 ## License
 

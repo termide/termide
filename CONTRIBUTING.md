@@ -337,6 +337,7 @@ Use the [Feature Request template](.github/ISSUE_TEMPLATE/feature_request.md) wh
 ## Communication
 
 - **GitHub Issues** - For bug reports, feature requests, and technical discussions
+- **GitHub Discussions** - For questions, ideas and general talk
 - **Pull Requests** - For code review and implementation discussions
 - **Telegram** - [@termide_news](https://t.me/termide_news): release announcements and open discussion
 

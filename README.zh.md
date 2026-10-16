@@ -549,9 +549,15 @@ mode = "report"  # terminal（默认）、background 或 report
 
 代码库是由模块化 crate 组成的 Cargo workspace；工具链版本由 `rust-toolchain.toml` 固定。构建、测试、Nix 开发环境和 pre-commit 钩子见 **[开发者指南](doc/zh/developer-guide.md)**；crate 布局、面板系统和事件流见 **[架构](doc/zh/architecture.md)**。
 
+## 社区
+
+- **[Telegram — @termide_news](https://t.me/termide_news)** — 版本发布公告和交流讨论
+- **[GitHub Discussions](https://github.com/termide/termide/discussions)** — 提问、想法和使用分享
+- **[GitHub Issues](https://github.com/termide/termide/issues)** — 错误报告和功能请求
+
 ## 贡献
 
-欢迎提交 issue 和 pull request；公告和讨论在 Telegram 频道 [@termide_news](https://t.me/termide_news)。每个克隆执行一次 `git config core.hooksPath .githooks`：pre-commit 钩子会运行与 CI 相同的 `fmt`、`clippy` 和测试检查。
+欢迎提交 issue 和 pull request。每个克隆执行一次 `git config core.hooksPath .githooks`：pre-commit 钩子会运行与 CI 相同的 `fmt`、`clippy` 和测试检查。
 
 ## 许可证
 
