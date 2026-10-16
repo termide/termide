@@ -427,4 +427,30 @@ mod tests {
             "a drag after the release no longer selects"
         );
     }
+
+    /// A double click on the pattern takes the word under it, a triple click
+    /// the whole pattern.
+    #[test]
+    fn a_double_click_selects_a_word_and_a_triple_click_the_pattern() {
+        use crate::base::test_mouse::{press, release};
+        let mut modal = RenamePatternModal::new("Rename", "a.txt", "new_name-$0 копия", None, None);
+        let area = Rect::new(0, 0, 100, 30);
+        modal.render(area, &mut Buffer::empty(area), &Theme::default());
+        let field = modal.last_input_area.unwrap();
+        let click = |modal: &mut RenamePatternModal, column| {
+            modal.handle_mouse(press(column, field.y), area).unwrap();
+            modal.handle_mouse(release(column, field.y), area).unwrap();
+        };
+        click(&mut modal, field.x + 2);
+        click(&mut modal, field.x + 2);
+        assert_eq!(modal.input_handler.selected_text(), Some("new_name"));
+        click(&mut modal, field.x + 2);
+        assert_eq!(
+            modal.input_handler.selected_text(),
+            Some("new_name-$0 копия")
+        );
+        click(&mut modal, field.x + 14);
+        click(&mut modal, field.x + 14);
+        assert_eq!(modal.input_handler.selected_text(), Some("копия"));
+    }
 }

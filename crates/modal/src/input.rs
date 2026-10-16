@@ -735,7 +735,7 @@ impl Modal for InputModal {
                     {
                         self.focus = FocusArea::Input;
                         let char_pos = field_char_at(&self.input_handler, input_area, mouse.column);
-                        self.input_handler.set_cursor_with_selection_start(char_pos);
+                        self.input_handler.mouse_press(char_pos);
                         return Ok(None);
                     }
                 }

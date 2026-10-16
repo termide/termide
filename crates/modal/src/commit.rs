@@ -444,7 +444,7 @@ impl Modal for CommitModal {
                 self.focus = FocusArea::Textarea;
                 self.scroll_follows_cursor = true; // Click means follow cursor again
                 let (row, col) = self.message_position(textarea_area, mouse.column, mouse.row);
-                self.textarea.place_cursor(row, col);
+                self.textarea.mouse_press(row, col);
                 self.dragging = true;
                 return Ok(None);
             }

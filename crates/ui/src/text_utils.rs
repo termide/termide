@@ -135,6 +135,33 @@ pub fn follow_input_scroll(text: &str, cursor_pos: usize, width: usize, scroll: 
     scroll.min(to_end)
 }
 
+/// Whether `c` belongs to a word for a double click: letters and digits of any
+/// script and `_`, the editor's rule (`termide_buffer::is_word_boundary`), so
+/// a double click takes all of a `snake_case` name in every field.
+pub fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// The word of `chars` around character `col`, as a `(start, end)` character
+/// range, for a double click. A column past the end means the last character.
+/// `None` when that character is not part of a word (a space, a dot) or the
+/// text is empty, the editor's rule too.
+pub fn word_range_at(chars: &[char], col: usize) -> Option<(usize, usize)> {
+    let col = col.min(chars.len().checked_sub(1)?);
+    if !is_word_char(chars[col]) {
+        return None;
+    }
+    let start = chars[..col]
+        .iter()
+        .rposition(|&c| !is_word_char(c))
+        .map_or(0, |i| i + 1);
+    let end = chars[col..]
+        .iter()
+        .position(|&c| !is_word_char(c))
+        .map_or(chars.len(), |i| col + i);
+    Some((start, end))
+}
+
 #[cfg(test)]
 mod tests {
 

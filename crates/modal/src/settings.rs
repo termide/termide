@@ -233,8 +233,9 @@ pub struct SettingsModal {
     edit_area: Option<Rect>,
     /// A press on a text field is being dragged: the drag selects in it.
     field_drag: bool,
-    /// Presses by row, so a double click on a field selects its text.
-    clicks: termide_ui::ClickTracker<u16>,
+    /// Presses by cell, so a double click on a field selects a word of it
+    /// and a triple click all of it — counting the press that opened it.
+    clicks: termide_ui::ClickTracker<(u16, u16)>,
 
     /// Whether the config differs from the shipped defaults, i.e. whether
     /// "Reset to Defaults" has anything to do. Cached because rendering must

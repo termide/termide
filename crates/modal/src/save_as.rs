@@ -343,7 +343,7 @@ impl Modal for SaveAsModal {
             {
                 self.focus = FocusArea::Input;
                 let pos = field_char_at(&self.input_handler, input_area, mouse.column);
-                self.input_handler.set_cursor_with_selection_start(pos);
+                self.input_handler.mouse_press(pos);
                 return Ok(None);
             }
         }

@@ -779,7 +779,9 @@ impl ChoiceForm {
     }
 
     /// A press while an answer is typed: on the answer it places the cursor
-    /// and starts a selection a drag extends. Returns whether it landed there.
+    /// and starts a selection a drag extends; a quick second press selects the
+    /// word there and a third the whole answer (see
+    /// [`TextInput::mouse_press`]). Returns whether it landed there.
     pub fn mouse_press(&mut self, x: u16, y: u16) -> bool {
         if !self.contains(x, y) {
             return false;
@@ -790,7 +792,7 @@ impl ChoiceForm {
         let Some(input) = &mut self.typing else {
             return false;
         };
-        input.set_cursor_with_selection_start(pos);
+        input.mouse_press(pos);
         self.dragging = true;
         true
     }

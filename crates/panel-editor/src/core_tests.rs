@@ -617,20 +617,22 @@ fn a_click_in_the_find_bar_places_its_cursor_and_a_drag_selects() {
     typed(&mut editor, 'X');
     assert_eq!(editor.find_bar.as_ref().unwrap().find_text(), "nXeedle");
 
-    // A drag over "Xee" selects it, and typing replaces the selection.
+    // A drag back over "Xee" selects it, and typing replaces the selection.
+    // (It starts at the other end: a quick second press where the first
+    // landed would be a double click.)
     Panel::handle_mouse(
         &mut editor,
-        at(MouseEventKind::Down(MouseButton::Left), start + 1),
+        at(MouseEventKind::Down(MouseButton::Left), start + 4),
         panel_area,
     );
     Panel::handle_mouse(
         &mut editor,
-        at(MouseEventKind::Drag(MouseButton::Left), start + 4),
+        at(MouseEventKind::Drag(MouseButton::Left), start + 1),
         panel_area,
     );
     Panel::handle_mouse(
         &mut editor,
-        at(MouseEventKind::Up(MouseButton::Left), start + 4),
+        at(MouseEventKind::Up(MouseButton::Left), start + 1),
         panel_area,
     );
     typed(&mut editor, 'Y');

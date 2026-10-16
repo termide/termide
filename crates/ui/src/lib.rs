@@ -234,6 +234,9 @@ pub struct TextInput {
     /// Characters scrolled out of a single-line field's left edge, kept
     /// between frames (see [`follow_scroll`](Self::follow_scroll)).
     scroll: usize,
+    /// Quick presses at one character, so a second selects the word and a
+    /// third the whole text (see [`mouse_press`](Self::mouse_press)).
+    clicks: click_tracker::ClickTracker<usize>,
 }
 
 impl TextInput {
@@ -246,6 +249,7 @@ impl TextInput {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             scroll: 0,
+            clicks: click_tracker::ClickTracker::new(),
         }
     }
 
@@ -260,6 +264,7 @@ impl TextInput {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             scroll: 0,
+            clicks: click_tracker::ClickTracker::new(),
         }
     }
 
@@ -701,6 +706,55 @@ impl TextInput {
         self.cursor_pos = pos;
     }
 
+    /// A left press on character `pos`, counted with the presses before it
+    /// as the editor counts them: the first places the cursor and anchors a
+    /// selection there, a quick second at the same character selects the word
+    /// under it (letters, digits and `_`; on any other character it places the
+    /// cursor again), a third selects the whole text. A drag that follows
+    /// extends the selection by character. Returns the count, 1 to 3.
+    pub fn mouse_press(&mut self, pos: usize) -> u8 {
+        self.mouse_press_at(std::time::Instant::now(), pos)
+    }
+
+    /// [`mouse_press`](Self::mouse_press) at a given time, so tests can space
+    /// presses out.
+    pub fn mouse_press_at(&mut self, now: std::time::Instant, pos: usize) -> u8 {
+        let pos = pos.min(self.input.chars().count());
+        let clicks = self.clicks.click_at(now, pos);
+        self.press_counted(pos, clicks);
+        clicks
+    }
+
+    /// What [`mouse_press`](Self::mouse_press) does for the `clicks`-th quick
+    /// press on character `pos`, for a host that counts presses itself — one
+    /// whose field opens on the first press of a double click, which the
+    /// field never sees.
+    pub fn press_counted(&mut self, pos: usize, clicks: u8) {
+        let pos = pos.min(self.input.chars().count());
+        match clicks {
+            2 => self.select_word_at(pos),
+            3 => {
+                self.selection_anchor = Some(0);
+                self.cursor_pos = self.input.chars().count();
+            }
+            _ => self.set_cursor_with_selection_start(pos),
+        }
+    }
+
+    /// Select the word around character `pos` (see
+    /// [`text_utils::word_range_at`]), the cursor at its end; off a word just
+    /// place the cursor there.
+    pub fn select_word_at(&mut self, pos: usize) {
+        let chars: Vec<char> = self.input.chars().collect();
+        match text_utils::word_range_at(&chars, pos) {
+            Some((start, end)) => {
+                self.selection_anchor = Some(start);
+                self.cursor_pos = end;
+            }
+            None => self.set_cursor_with_selection_start(pos),
+        }
+    }
+
     /// Extend selection to position (for mouse drag)
     pub fn extend_selection_to(&mut self, pos: usize) {
         if self.selection_anchor.is_none() {
@@ -870,5 +924,42 @@ mod tests {
         assert_eq!(margined.y, 15);
         assert_eq!(margined.width, 90);
         assert_eq!(margined.height, 40);
+    }
+
+    /// A double click takes the word under the pointer (with `_`, any
+    /// script), a triple click the whole text, a slow second press is a
+    /// single one, and a drag after a double click extends by character.
+    #[test]
+    fn multi_clicks_select_a_word_then_the_whole_field() {
+        use std::time::{Duration, Instant};
+        let t0 = Instant::now();
+        let quick = Duration::from_millis(100);
+        let mut input = TextInput::with_text("foo bar_baz qux");
+        assert_eq!(input.mouse_press_at(t0, 6), 1);
+        assert!(!input.has_selection());
+        assert_eq!(input.mouse_press_at(t0 + quick, 6), 2);
+        assert_eq!(input.selected_text(), Some("bar_baz"));
+        assert_eq!(input.cursor_pos(), 11);
+        assert_eq!(input.mouse_press_at(t0 + quick * 2, 6), 3);
+        assert_eq!(input.selected_text(), Some("foo bar_baz qux"));
+        // After the timeout the next press only places the cursor.
+        assert_eq!(input.mouse_press_at(t0 + Duration::from_secs(2), 6), 1);
+        assert!(!input.has_selection());
+        assert_eq!(input.cursor_pos(), 6);
+        // A double click, then a drag: the word's start stays the anchor.
+        input.mouse_press_at(t0 + Duration::from_secs(2) + quick, 6);
+        input.extend_selection_to(15);
+        assert_eq!(input.selected_text(), Some("bar_baz qux"));
+
+        let mut cyr = TextInput::with_text("привет, мир");
+        cyr.mouse_press_at(t0, 2);
+        cyr.mouse_press_at(t0 + quick, 2);
+        assert_eq!(cyr.selected_text(), Some("привет"));
+        // On a space a double click just places the cursor.
+        let mut space = TextInput::with_text("a b");
+        space.mouse_press_at(t0, 1);
+        space.mouse_press_at(t0 + quick, 1);
+        assert!(!space.has_selection());
+        assert_eq!(space.cursor_pos(), 1);
     }
 }

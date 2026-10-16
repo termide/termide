@@ -453,7 +453,9 @@ impl InputBar {
     }
 
     /// Handle a left press, drag or release: on a field a press focuses it and
-    /// places the cursor, starting the selection that a drag then extends; on a
+    /// places the cursor, starting the selection that a drag then extends (a
+    /// quick second press selects the word there, a third the line — see
+    /// [`TextInput::mouse_press`]); on a
     /// control a press activates it. A drag only moves the selection when the
     /// press that owns it landed on the same field, so a drag begun elsewhere —
     /// in the transcript, on a divider — cannot select prompt text.
@@ -516,7 +518,7 @@ impl InputBar {
                     let pos = input.char_at_column(x);
                     if pressed {
                         self.focus = i;
-                        input.set_cursor_with_selection_start(pos);
+                        input.mouse_press(pos);
                     } else {
                         input.extend_selection_to(pos);
                     }
@@ -527,7 +529,7 @@ impl InputBar {
                     let pos = ta.position_at_drawn_row(usize::from(row - area.y), text_x);
                     if pressed {
                         self.focus = i;
-                        ta.place_cursor(pos.row, pos.col);
+                        ta.mouse_press(pos.row, pos.col);
                     } else {
                         ta.extend_selection_to(pos.row, pos.col);
                     }
@@ -1523,6 +1525,60 @@ mod tests {
             b.multiline(0).unwrap().selected_text(),
             Some("e two\nthre".into())
         );
+    }
+
+    /// In the prompt box a double click takes the word under the pointer and
+    /// a triple click its line; in a one-line find field the whole text.
+    #[test]
+    fn a_double_click_selects_a_word_and_a_triple_click_the_line() {
+        let at = |column, row| MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        };
+        let mut b = InputBar::new(vec![]).with_multiline_field("");
+        b.multiline_mut(0)
+            .unwrap()
+            .insert_str("first\nfoo bar_baz qux");
+        let area = Rect::new(0, 0, 40, b.height());
+        b.render(
+            area,
+            &mut Buffer::empty(area),
+            &ThemeColors::default(),
+            true,
+        );
+        // "› " takes two columns: column 8 of row 1 is inside "bar_baz".
+        b.handle_mouse(at(8, 1));
+        b.handle_mouse(at(8, 1));
+        assert_eq!(
+            b.multiline(0).unwrap().selected_text(),
+            Some("bar_baz".into())
+        );
+        b.handle_mouse(at(8, 1));
+        assert_eq!(
+            b.multiline(0).unwrap().selected_text(),
+            Some("foo bar_baz qux".into())
+        );
+
+        let mut find = InputBar::new(vec!["Find".into()]);
+        find.handle_key(key(KeyCode::Char('a')));
+        for c in " beta".chars() {
+            find.handle_key(key(KeyCode::Char(c)));
+        }
+        let area = Rect::new(0, 0, 40, find.height());
+        find.render(
+            area,
+            &mut Buffer::empty(area),
+            &ThemeColors::default(),
+            true,
+        );
+        let start = find.field_areas[0].x + str_display_width(field_prefix("Find")) as u16;
+        find.handle_mouse(at(start + 3, 0));
+        find.handle_mouse(at(start + 3, 0));
+        assert_eq!(find.selected_text(), Some("beta".into()));
+        find.handle_mouse(at(start + 3, 0));
+        assert_eq!(find.selected_text(), Some("a beta".into()));
     }
 
     #[test]

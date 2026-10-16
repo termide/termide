@@ -216,7 +216,9 @@ pub fn field_char_at(input: &crate::TextInputHandler, area: Rect, column: u16) -
 
 /// A left press inside `area`, the one-row field [`render_text_input`] last
 /// drew for `input`, places its cursor on the character under the pointer and
-/// anchors a selection there. Returns whether the press landed in the field,
+/// anchors a selection there; a quick second press selects the word there and
+/// a third the whole text (see
+/// [`TextInput::mouse_press`](termide_ui::TextInput::mouse_press)). Returns whether the press landed in the field,
 /// so the caller focuses it and remembers that a drag now belongs to it.
 pub fn press_field(
     input: &mut crate::TextInputHandler,
@@ -233,7 +235,7 @@ pub fn press_field(
         return false;
     }
     let pos = field_char_at(input, area, mouse.column);
-    input.set_cursor_with_selection_start(pos);
+    input.mouse_press(pos);
     true
 }
 

@@ -58,6 +58,9 @@ pub struct TextArea {
     wrap_rows: Vec<(usize, usize, usize)>,
     /// First visual row drawn by that render, i.e. the vertical scroll.
     visual_scroll: usize,
+    /// Quick presses at one position, so a second selects the word and a
+    /// third the line (see [`TextArea::mouse_press`]).
+    clicks: crate::click_tracker::ClickTracker<CursorPos>,
 }
 
 impl Default for TextArea {
@@ -78,6 +81,7 @@ impl TextArea {
             scroll_offset: 0,
             wrap_rows: Vec::new(),
             visual_scroll: 0,
+            clicks: crate::click_tracker::ClickTracker::new(),
         }
     }
 
@@ -100,6 +104,7 @@ impl TextArea {
             scroll_offset: 0,
             wrap_rows: Vec::new(),
             visual_scroll: 0,
+            clicks: crate::click_tracker::ClickTracker::new(),
         }
     }
 
@@ -806,6 +811,47 @@ impl TextArea {
         self.selection_anchor = Some(self.cursor);
     }
 
+    /// A left press at `(row, col)`, counted with the presses before it as
+    /// the editor counts them: the first places the cursor and anchors a
+    /// selection there ([`TextArea::place_cursor`]), a quick second at the
+    /// same spot selects the word under it (letters, digits and `_`; on any
+    /// other character it places the cursor again), a third selects the line.
+    /// A drag that follows extends the selection by character. Returns the
+    /// count, 1 to 3.
+    pub fn mouse_press(&mut self, row: usize, col: usize) -> u8 {
+        self.mouse_press_at(std::time::Instant::now(), row, col)
+    }
+
+    /// [`TextArea::mouse_press`] at a given time, so tests can space presses
+    /// out.
+    pub fn mouse_press_at(&mut self, now: std::time::Instant, row: usize, col: usize) -> u8 {
+        self.place_cursor(row, col);
+        let clicks = self.clicks.click_at(now, self.cursor);
+        match clicks {
+            2 => self.select_word_at(self.cursor.row, self.cursor.col),
+            3 => {
+                let row = self.cursor.row;
+                self.selection_anchor = Some(CursorPos::new(row, 0));
+                self.cursor.col = self.lines[row].chars().count();
+            }
+            _ => {}
+        }
+        clicks
+    }
+
+    /// Select the word around `(row, col)` (see
+    /// [`crate::text_utils::word_range_at`]), the cursor at its end; off a
+    /// word just place the cursor there.
+    pub fn select_word_at(&mut self, row: usize, col: usize) {
+        self.place_cursor(row, col);
+        let row = self.cursor.row;
+        let chars: Vec<char> = self.lines[row].chars().collect();
+        if let Some((start, end)) = crate::text_utils::word_range_at(&chars, self.cursor.col) {
+            self.selection_anchor = Some(CursorPos::new(row, start));
+            self.cursor.col = end;
+        }
+    }
+
     /// Extend the selection to `(row, col)` for a mouse drag, starting one at
     /// the current cursor when there is no selection in flight.
     pub fn extend_selection_to(&mut self, row: usize, col: usize) {
@@ -1045,5 +1091,30 @@ mod tests {
         let mut plain = TextArea::with_text("one\ntwo");
         plain.set_scroll_offset(1);
         assert_eq!(plain.position_at_drawn_row(0, 1), CursorPos::new(1, 1));
+    }
+
+    /// A double click takes the word under the pointer on its own line, a
+    /// triple click that line without its break.
+    #[test]
+    fn multi_clicks_select_a_word_then_the_line() {
+        use std::time::{Duration, Instant};
+        let t0 = Instant::now();
+        let quick = Duration::from_millis(100);
+        let mut ta = TextArea::with_text("first line\nfoo bar_baz qux\nслово тут");
+        assert_eq!(ta.mouse_press_at(t0, 1, 8), 1);
+        assert!(!ta.has_selection());
+        assert_eq!(ta.mouse_press_at(t0 + quick, 1, 8), 2);
+        assert_eq!(ta.selected_text().as_deref(), Some("bar_baz"));
+        assert_eq!(ta.cursor(), CursorPos::new(1, 11));
+        assert_eq!(ta.mouse_press_at(t0 + quick * 2, 1, 8), 3);
+        assert_eq!(ta.selected_text().as_deref(), Some("foo bar_baz qux"));
+
+        let later = t0 + Duration::from_secs(2);
+        ta.mouse_press_at(later, 2, 3);
+        ta.mouse_press_at(later + quick, 2, 3);
+        assert_eq!(ta.selected_text().as_deref(), Some("слово"));
+        // A press elsewhere starts counting again.
+        assert_eq!(ta.mouse_press_at(later + quick * 2, 0, 0), 1);
+        assert!(!ta.has_selection());
     }
 }

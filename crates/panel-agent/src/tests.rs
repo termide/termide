@@ -4519,17 +4519,25 @@ fn the_mouse_places_the_cursor_and_selects_in_a_typed_answer() {
         modifiers: KeyModifiers::NONE,
     };
     let area = Rect::new(0, 0, 60, 16);
-    // Pressed twice, as a double click: the answer stays as typed.
+    // Pressed twice, as a double click: the word under it is selected and
+    // the answer stays as typed, not confirmed.
     for _ in 0..2 {
         panel.handle_mouse(at(MouseEventKind::Down(MouseButton::Left), column), area);
         panel.handle_mouse(at(MouseEventKind::Up(MouseButton::Left), column), area);
     }
-    panel.handle_mouse(at(MouseEventKind::Down(MouseButton::Left), column), area);
+    let form = panel.pending.as_ref().unwrap().form();
+    assert_eq!(form.typed(), Some("hello world"));
+    assert_eq!(form.selected_text().as_deref(), Some("world"));
+    // A press on another character and a drag select from there.
+    panel.handle_mouse(
+        at(MouseEventKind::Down(MouseButton::Left), column + 1),
+        area,
+    );
     panel.handle_mouse(at(MouseEventKind::Drag(MouseButton::Left), 59), area);
     panel.handle_mouse(at(MouseEventKind::Up(MouseButton::Left), 59), area);
     let form = panel.pending.as_ref().unwrap().form();
     assert_eq!(form.typed(), Some("hello world"));
-    assert_eq!(form.selected_text().as_deref(), Some("world"));
+    assert_eq!(form.selected_text().as_deref(), Some("orld"));
     panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
     panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
     let _ = worker.join().unwrap();

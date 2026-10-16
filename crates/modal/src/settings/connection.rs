@@ -1345,8 +1345,8 @@ mod tests {
         type_text(&mut modal, "host");
         press(&mut modal, KeyCode::Enter);
 
-        // A double click on a field selects all of it, the first click being
-        // the one that opens it for editing.
+        // A double click on a field selects the word under it, the first
+        // click being the one that opens it for editing.
         let name_y = screen(&mut modal)
             .iter()
             .position(|row| row.contains(i18n::t().settings_ai_connection_name()))

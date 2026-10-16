@@ -39,7 +39,11 @@ impl<P: PartialEq + Clone> ClickTracker<P> {
     /// 1 (single), 2 (double), 3 (triple), cycling back to 1 on the fourth. A
     /// click at a different position or after the timeout resets to 1.
     pub fn click(&mut self, position: P) -> u8 {
-        let now = Instant::now();
+        self.click_at(Instant::now(), position)
+    }
+
+    /// [`click`](Self::click) at a given time, so tests can space presses out.
+    pub fn click_at(&mut self, now: Instant, position: P) -> u8 {
         let consecutive = match (self.time, &self.position) {
             (Some(t), Some(last))
                 if *last == position
