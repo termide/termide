@@ -551,7 +551,8 @@ mode = "report"  # terminal（默认）、background 或 report
 
 ## 社区
 
-- **[Telegram — @termide_news](https://t.me/termide_news)** — 版本发布公告和交流讨论
+- **[Telegram 频道 — @termide_news](https://t.me/termide_news)** — 新闻和版本发布公告
+- **[Telegram 群组 — @termide_talks](https://t.me/termide_talks)** — 与用户和开发者交流
 - **[GitHub Discussions](https://github.com/termide/termide/discussions)** — 提问、想法和使用分享
 - **[GitHub Issues](https://github.com/termide/termide/issues)** — 错误报告和功能请求
 

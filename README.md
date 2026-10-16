@@ -564,7 +564,8 @@ The codebase is a Cargo workspace of modular crates; `rust-toolchain.toml` pins 
 
 ## Community
 
-- **[Telegram — @termide_news](https://t.me/termide_news)** — release announcements and open discussion
+- **[Telegram channel — @termide_news](https://t.me/termide_news)** — news and release announcements
+- **[Telegram group — @termide_talks](https://t.me/termide_talks)** — chat with users and developers
 - **[GitHub Discussions](https://github.com/termide/termide/discussions)** — questions, ideas and show-and-tell
 - **[GitHub Issues](https://github.com/termide/termide/issues)** — bug reports and feature requests
 

@@ -565,7 +565,8 @@ mode = "report"  # terminal (по умолчанию), background или report
 
 ## Сообщество
 
-- **[Telegram — @termide_news](https://t.me/termide_news)** — анонсы релизов и обсуждения
+- **[Telegram-канал — @termide_news](https://t.me/termide_news)** — новости и анонсы релизов
+- **[Telegram-группа — @termide_talks](https://t.me/termide_talks)** — общение с пользователями и разработчиками
 - **[GitHub Discussions](https://github.com/termide/termide/discussions)** — вопросы, идеи и рассказы о своём опыте
 - **[GitHub Issues](https://github.com/termide/termide/issues)** — сообщения об ошибках и запросы возможностей
 
