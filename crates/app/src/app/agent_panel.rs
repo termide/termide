@@ -426,12 +426,24 @@ impl FsCatalog {
                 log::warn!("cannot lay out {}: {error}", global.display());
             }
         }
-        Self::with_global(cwd, project_root, global_agent_dir)
+        Self::with_global(
+            cwd,
+            project_root,
+            global_agent_dir,
+            dirs::home_dir().as_deref(),
+        )
     }
 
-    fn with_global(cwd: &Path, project_root: &Path, global_agent_dir: Option<PathBuf>) -> Self {
-        let dirs = AgentDirs::new(cwd, Some(project_root), global_agent_dir.as_deref())
-            .with_home(dirs::home_dir().as_deref());
+    /// `home` holds the user's shared skills (`~/.agents/skills`); tests
+    /// pass none, so what the user installed there does not leak in.
+    fn with_global(
+        cwd: &Path,
+        project_root: &Path,
+        global_agent_dir: Option<PathBuf>,
+        home: Option<&Path>,
+    ) -> Self {
+        let dirs =
+            AgentDirs::new(cwd, Some(project_root), global_agent_dir.as_deref()).with_home(home);
         // OAuth sign-ins are the user's, kept beside the user's own agent
         // files rather than in any project.
         let mcp = match &global_agent_dir {
@@ -3738,7 +3750,7 @@ done"#;
         let dir = global.join("agents").join("search");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(AGENT_FILE), "---\ntools: read\n---\n").unwrap();
-        let catalog = FsCatalog::with_global(tmp.path(), tmp.path(), Some(global));
+        let catalog = FsCatalog::with_global(tmp.path(), tmp.path(), Some(global), None);
         let servers = [(
             "docs".to_string(),
             termide_agent_core::McpServerConfig {
@@ -3807,7 +3819,7 @@ done"#;
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(dir.join(AGENT_FILE), format!("---\ntools: {tools}\n---\n")).unwrap();
         }
-        let mut catalog = FsCatalog::with_global(tmp.path(), tmp.path(), Some(global));
+        let mut catalog = FsCatalog::with_global(tmp.path(), tmp.path(), Some(global), None);
         let settings = with_cloud();
         catalog.subagents = Some(Arc::new(Subagents {
             active: Arc::new(std::sync::RwLock::new(active_on(&settings, "local"))),
@@ -3861,7 +3873,7 @@ done"#;
              You review.\n\n{{tools}}\n",
         )
         .unwrap();
-        let catalog = FsCatalog::with_global(tmp.path(), tmp.path(), Some(global.clone()));
+        let catalog = FsCatalog::with_global(tmp.path(), tmp.path(), Some(global.clone()), None);
 
         let entries = catalog.list();
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
