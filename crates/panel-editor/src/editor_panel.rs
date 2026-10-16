@@ -220,159 +220,9 @@ impl Panel for Editor {
     }
 
     fn handle_key(&mut self, chord: termide_core::KeyChord) -> Vec<PanelEvent> {
-        let key = chord.raw;
-
-        // The syntax-language picker owns input while open.
-        if self.syntax_picker.is_some() {
-            use crate::syntax_picker::PickerAction;
-            match self.syntax_picker.as_mut().unwrap().handle_key(key) {
-                PickerAction::Select(lang) => self.apply_syntax(&lang),
-                PickerAction::Cancel => self.syntax_picker = None,
-                PickerAction::None => {}
-            }
-            return vec![PanelEvent::NeedsRedraw];
-        }
-
-        // Any keyboard input should make viewport follow cursor again
-        self.scroll_follows_cursor = true;
-
-        // Close hover popups on any key press
-        // For Escape, just close the popup and don't process further if one was open
-        let had_popup = self.lsp.hover_popup.is_some()
-            || self.lsp.completion_popup.is_some()
-            || self.lsp.code_action_popup.is_some();
-        self.close_hover_popup();
-
-        if had_popup && key.code == crossterm::event::KeyCode::Esc {
-            // Close completion / code-action popups if open
-            if self.lsp.completion_popup.is_some() {
-                self.cancel_completion();
-            }
-            if self.lsp.code_action_popup.is_some() {
-                self.cancel_code_action();
-            }
-            // Just close the popup, don't trigger other Escape actions
-            return vec![];
-        }
-
-        // Note: Key translation should be done at app level before calling handle_key
-        // If you need translation, call termide_keyboard::KeyNormalizer::canonicalize
-
-        // The viewer's hex/text toggle (configurable, default Ctrl+L) swaps this
-        // editor in place for the hex viewer of the same file — the inverse of
-        // the binary viewer's toggle. Blocked when the buffer has unsaved edits
-        // so the swap can't discard them.
-        if self.hotkeys.matches("viewer_toggle_hex", &key) {
-            if let Some(path) = self.file_path().map(|p| p.to_path_buf()) {
-                if self.buffer_is_modified() {
-                    return vec![PanelEvent::ShowMessage(
-                        "Save the file before switching to hex view".to_string(),
-                    )];
-                }
-                return vec![PanelEvent::SwapActiveToHex(path)];
-            }
-            return vec![];
-        }
-
-        // Toggle view (read-only) ↔ edit. For Markdown the same key swaps to the
-        // rendered preview instead (source ↔ preview is the view/edit axis).
-        if self.hotkeys.matches("viewer_toggle_view", &key) {
-            if let Some(ev) = self.preview_swap_event() {
-                if self.buffer_is_modified() {
-                    return vec![PanelEvent::ShowMessage(
-                        "Save the file before switching to preview".to_string(),
-                    )];
-                }
-                return vec![ev];
-            }
-            self.config.read_only = !self.config.read_only;
-            return vec![PanelEvent::NeedsRedraw];
-        }
-
-        // The inline find/replace bar (before vim / command processing). Tab
-        // toggles focus between the bar and the buffer "results" zone, like the
-        // file manager. In the bar zone the bar owns keys; in the buffer zone
-        // keys fall through to normal editor handling (cursor navigation, F3
-        // stepping), with Esc closing the bar.
-        if self.find_bar.is_some() {
-            use crossterm::event::KeyCode;
-            let plain = key.modifiers.is_empty();
-            if plain && key.code == KeyCode::Tab {
-                self.find_bar_focus_buffer = !self.find_bar_focus_buffer;
-                return vec![PanelEvent::NeedsRedraw];
-            }
-            if self.find_bar_focus_buffer {
-                if plain && key.code == KeyCode::Esc {
-                    self.close_find_bar();
-                    return vec![PanelEvent::NeedsRedraw];
-                }
-                // else fall through to normal buffer handling below
-            } else {
-                return self.handle_find_bar_key(key);
-            }
-        }
-
-        // Collect events from internal state
-        let mut events = Vec::new();
-
-        // Handle Vim mode if enabled
-        if let Some(ref mut vim_state) = self.vim {
-            use crate::vim::{handle_vim_key, VimKeyResult};
-
-            let result = handle_vim_key(vim_state, key);
-
-            match result {
-                VimKeyResult::Consumed => return events,
-                VimKeyResult::PassThrough => {
-                    // In insert mode, fall through to normal editor handling
-                }
-                VimKeyResult::Unhandled => {
-                    // Key not recognized by vim in NORMAL/VISUAL mode - ignore it
-                    return events;
-                }
-                _ => {
-                    // Execute vim action
-                    if let Some(panel_events) = self.execute_vim_result(result) {
-                        events.extend(panel_events);
-                    }
-                    // Convert status_message to event
-                    if let Some(message) = self.status_message.take() {
-                        events.push(PanelEvent::SetStatusMessage {
-                            message,
-                            is_error: false,
-                        });
-                    }
-                    return events;
-                }
-            }
-        }
-
-        let command = keyboard::EditorCommand::from_key_event(
-            key,
-            self.config.read_only,
-            self.search.state.is_some(),
-            self.selection.is_some(),
-            self.lsp.completion_popup.is_some(),
-            self.lsp.code_action_popup.is_some(),
-            &self.hotkeys,
-        );
-
-        // Execute command and handle errors
-        if let Err(e) = command.execute(self) {
-            events.push(PanelEvent::SetStatusMessage {
-                message: e.to_string(),
-                is_error: true,
-            });
-        }
-
-        // Convert status_message to event and take it (removes from legacy field)
-        if let Some(message) = self.status_message.take() {
-            events.push(PanelEvent::SetStatusMessage {
-                message,
-                is_error: false,
-            });
-        }
-
+        let events = self.dispatch_key(chord);
+        // Edits move breakpoints; keep the store in step.
+        self.sync_breakpoints();
         events
     }
 
@@ -381,24 +231,9 @@ impl Panel for Editor {
         mouse: crossterm::event::MouseEvent,
         panel_area: Rect,
     ) -> Vec<PanelEvent> {
-        // The language picker owns the mouse while open (scroll / click / click-away).
-        if self.syntax_picker.is_some() {
-            use crate::syntax_picker::PickerAction;
-            match self.syntax_picker.as_mut().unwrap().handle_mouse(mouse) {
-                PickerAction::Select(lang) => self.apply_syntax(&lang),
-                PickerAction::Cancel => self.syntax_picker = None,
-                PickerAction::None => {}
-            }
-            return vec![PanelEvent::NeedsRedraw];
-        }
-        if self
-            .find_bar
-            .as_ref()
-            .is_some_and(|bar| bar.mouse_hits(mouse))
-        {
-            return self.handle_find_bar_mouse(mouse);
-        }
-        self.handle_mouse_event(mouse, panel_area)
+        let events = self.dispatch_mouse(mouse, panel_area);
+        self.sync_breakpoints();
+        events
     }
 
     fn handle_scroll(&mut self, delta: i32, _panel_area: Rect) -> Vec<PanelEvent> {
@@ -866,6 +701,204 @@ impl Panel for Editor {
     fn get_working_directory(&self) -> Option<PathBuf> {
         self.file_path()
             .and_then(|p| p.parent().map(|parent| parent.to_path_buf()))
+    }
+}
+
+impl Editor {
+    fn dispatch_key(&mut self, chord: termide_core::KeyChord) -> Vec<PanelEvent> {
+        let key = chord.raw;
+
+        // The syntax-language picker owns input while open.
+        if self.syntax_picker.is_some() {
+            use crate::syntax_picker::PickerAction;
+            match self.syntax_picker.as_mut().unwrap().handle_key(key) {
+                PickerAction::Select(lang) => self.apply_syntax(&lang),
+                PickerAction::Cancel => self.syntax_picker = None,
+                PickerAction::None => {}
+            }
+            return vec![PanelEvent::NeedsRedraw];
+        }
+
+        // Any keyboard input should make viewport follow cursor again
+        self.scroll_follows_cursor = true;
+
+        // Close hover popups on any key press
+        // For Escape, just close the popup and don't process further if one was open
+        let had_popup = self.lsp.hover_popup.is_some()
+            || self.lsp.completion_popup.is_some()
+            || self.lsp.code_action_popup.is_some();
+        self.close_hover_popup();
+
+        if had_popup && key.code == crossterm::event::KeyCode::Esc {
+            // Close completion / code-action popups if open
+            if self.lsp.completion_popup.is_some() {
+                self.cancel_completion();
+            }
+            if self.lsp.code_action_popup.is_some() {
+                self.cancel_code_action();
+            }
+            // Just close the popup, don't trigger other Escape actions
+            return vec![];
+        }
+
+        // Note: Key translation should be done at app level before calling handle_key
+        // If you need translation, call termide_keyboard::KeyNormalizer::canonicalize
+
+        // The viewer's hex/text toggle (configurable, default Ctrl+L) swaps this
+        // editor in place for the hex viewer of the same file — the inverse of
+        // the binary viewer's toggle. Blocked when the buffer has unsaved edits
+        // so the swap can't discard them.
+        if self.hotkeys.matches("viewer_toggle_hex", &key) {
+            if let Some(path) = self.file_path().map(|p| p.to_path_buf()) {
+                if self.buffer_is_modified() {
+                    return vec![PanelEvent::ShowMessage(
+                        "Save the file before switching to hex view".to_string(),
+                    )];
+                }
+                return vec![PanelEvent::SwapActiveToHex(path)];
+            }
+            return vec![];
+        }
+
+        // Toggle view (read-only) ↔ edit. For Markdown the same key swaps to the
+        // rendered preview instead (source ↔ preview is the view/edit axis).
+        if self.hotkeys.matches("viewer_toggle_view", &key) {
+            if let Some(ev) = self.preview_swap_event() {
+                if self.buffer_is_modified() {
+                    return vec![PanelEvent::ShowMessage(
+                        "Save the file before switching to preview".to_string(),
+                    )];
+                }
+                return vec![ev];
+            }
+            self.config.read_only = !self.config.read_only;
+            return vec![PanelEvent::NeedsRedraw];
+        }
+
+        // The inline find/replace bar (before vim / command processing). Tab
+        // toggles focus between the bar and the buffer "results" zone, like the
+        // file manager. In the bar zone the bar owns keys; in the buffer zone
+        // keys fall through to normal editor handling (cursor navigation, F3
+        // stepping), with Esc closing the bar.
+        if self.find_bar.is_some() {
+            use crossterm::event::KeyCode;
+            let plain = key.modifiers.is_empty();
+            if plain && key.code == KeyCode::Tab {
+                self.find_bar_focus_buffer = !self.find_bar_focus_buffer;
+                return vec![PanelEvent::NeedsRedraw];
+            }
+            if self.find_bar_focus_buffer {
+                if plain && key.code == KeyCode::Esc {
+                    self.close_find_bar();
+                    return vec![PanelEvent::NeedsRedraw];
+                }
+                // else fall through to normal buffer handling below
+            } else {
+                return self.handle_find_bar_key(key);
+            }
+        }
+
+        // Breakpoints and the debug launch leave the text alone, so they work
+        // in view mode and in every Vim mode too.
+        if self.hotkeys.matches("toggle_breakpoint", &key) {
+            if self.file_path().is_some() {
+                self.toggle_breakpoint();
+                return vec![PanelEvent::NeedsRedraw];
+            }
+            return vec![];
+        }
+        if self.hotkeys.matches("start_debug", &key) {
+            let file = self.file_path().map(|p| p.to_path_buf());
+            return vec![PanelEvent::StartDebug { file }];
+        }
+
+        // Collect events from internal state
+        let mut events = Vec::new();
+
+        // Handle Vim mode if enabled
+        if let Some(ref mut vim_state) = self.vim {
+            use crate::vim::{handle_vim_key, VimKeyResult};
+
+            let result = handle_vim_key(vim_state, key);
+
+            match result {
+                VimKeyResult::Consumed => return events,
+                VimKeyResult::PassThrough => {
+                    // In insert mode, fall through to normal editor handling
+                }
+                VimKeyResult::Unhandled => {
+                    // Key not recognized by vim in NORMAL/VISUAL mode - ignore it
+                    return events;
+                }
+                _ => {
+                    // Execute vim action
+                    if let Some(panel_events) = self.execute_vim_result(result) {
+                        events.extend(panel_events);
+                    }
+                    // Convert status_message to event
+                    if let Some(message) = self.status_message.take() {
+                        events.push(PanelEvent::SetStatusMessage {
+                            message,
+                            is_error: false,
+                        });
+                    }
+                    return events;
+                }
+            }
+        }
+
+        let command = keyboard::EditorCommand::from_key_event(
+            key,
+            self.config.read_only,
+            self.search.state.is_some(),
+            self.selection.is_some(),
+            self.lsp.completion_popup.is_some(),
+            self.lsp.code_action_popup.is_some(),
+            &self.hotkeys,
+        );
+
+        // Execute command and handle errors
+        if let Err(e) = command.execute(self) {
+            events.push(PanelEvent::SetStatusMessage {
+                message: e.to_string(),
+                is_error: true,
+            });
+        }
+
+        // Convert status_message to event and take it (removes from legacy field)
+        if let Some(message) = self.status_message.take() {
+            events.push(PanelEvent::SetStatusMessage {
+                message,
+                is_error: false,
+            });
+        }
+
+        events
+    }
+
+    fn dispatch_mouse(
+        &mut self,
+        mouse: crossterm::event::MouseEvent,
+        panel_area: Rect,
+    ) -> Vec<PanelEvent> {
+        // The language picker owns the mouse while open (scroll / click / click-away).
+        if self.syntax_picker.is_some() {
+            use crate::syntax_picker::PickerAction;
+            match self.syntax_picker.as_mut().unwrap().handle_mouse(mouse) {
+                PickerAction::Select(lang) => self.apply_syntax(&lang),
+                PickerAction::Cancel => self.syntax_picker = None,
+                PickerAction::None => {}
+            }
+            return vec![PanelEvent::NeedsRedraw];
+        }
+        if self
+            .find_bar
+            .as_ref()
+            .is_some_and(|bar| bar.mouse_hits(mouse))
+        {
+            return self.handle_find_bar_mouse(mouse);
+        }
+        self.handle_mouse_event(mouse, panel_area)
     }
 }
 

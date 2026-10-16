@@ -389,6 +389,16 @@ impl App {
             "open_bookmark_add" => self.handle_add_bookmark()?,
             "open_command_palette" => self.handle_open_command_palette()?,
             "open_path" => self.open_path_prompt(),
+            // Editor keys, offered by the palette from any panel.
+            "start_debug" => {
+                let file = self
+                    .layout_manager
+                    .active_panel()
+                    .and_then(|p| p.as_editor())
+                    .and_then(|e| e.file_path().map(|p| p.to_path_buf()));
+                self.start_debug(file)?;
+            }
+            "clear_breakpoints" => self.clear_breakpoints(),
             // Not a global binding (the panels own the key), but the palette
             // offers it for the focused panel.
             "switch_directory" => self.handle_open_directory_switcher()?,

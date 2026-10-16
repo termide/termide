@@ -27,6 +27,7 @@ termide-app-core = { path = "../app-core" }
 
 # Core workspace crates
 termide-core = { path = "../core" }
+termide-debug = { path = "../debug" }
 termide-detach = { path = "../detach" }
 termide-clipboard = { path = "../clipboard" }
 termide-keyboard = { path = "../keyboard" }

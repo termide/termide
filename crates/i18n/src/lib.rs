@@ -208,6 +208,13 @@ pub trait Translation: Send + Sync {
     fn help_desc_find_references(&self) -> &str;
     fn help_desc_rename_symbol(&self) -> &str;
     fn help_desc_code_action(&self) -> &str;
+    // Debugging
+    fn help_desc_toggle_breakpoint(&self) -> &str;
+    fn help_desc_start_debug(&self) -> &str;
+    fn help_desc_clear_breakpoints(&self) -> &str;
+    fn debug_select_title(&self) -> &str;
+    fn debug_nothing_to_launch(&self) -> &str;
+    fn debug_breakpoints_cleared(&self) -> &str;
 
     // LSP rename flow status messages
     fn lsp_rename_no_identifier(&self) -> &str;
@@ -813,6 +820,8 @@ pub trait Translation: Send + Sync {
     fn projects_delete_failed_fmt(&self, error: &str) -> String;
     fn command_edit_title_fmt(&self, name: &str) -> String;
     fn command_run_failed_fmt(&self, error: &str) -> String;
+    fn debug_current_file_fmt(&self, file: &str, debugger: &str) -> String;
+    fn debug_unknown_debugger_fmt(&self, name: &str) -> String;
     fn command_name_taken_fmt(&self, name: &str) -> String;
     fn agent_notice_goal_checking(&self) -> &str;
     fn agent_notice_handoff_preparing(&self) -> &str;

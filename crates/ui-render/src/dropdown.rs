@@ -698,7 +698,8 @@ fn command_shortcut(command: &termide_config::commands::CommandItem) -> Option<S
 }
 
 /// Format command label with type icon prefix (when terminal supports emoji).
-/// 💻 = runs in terminal panel, ⚙ = background, 📋 = background with result modal
+/// 💻 = runs in terminal panel, ⚙ = background, 📋 = background with result
+/// modal, 🐞 = runs under a debugger (in a terminal panel, whatever the mode)
 fn command_label(command: &termide_config::commands::CommandItem) -> String {
     use termide_config::commands::CommandMode;
 
@@ -710,6 +711,7 @@ fn command_label(command: &termide_config::commands::CommandItem) -> String {
 
     if termide_core::use_emoji_icons() {
         let icon = match command.mode {
+            _ if command.debugger().is_some() => "🐞",
             CommandMode::Report => "📋",
             CommandMode::Background => "⚙",
             CommandMode::Terminal => "💻",

@@ -58,6 +58,8 @@ mode = "background"
 | `group` | no | Puts the command into a submenu with this name |
 | `key` | no | Hotkey that runs the command, e.g. `Ctrl+Shift+D`, see [Hotkeys](#hotkeys) |
 | `params` | no | Values asked for before the command runs, see [Parameters](#parameters) |
+| `debugger` | no | `lldb`, `gdb`, `dlv` or `pdb`: the command runs under this debugger, see [Debugging](#debugging) |
+| `build` | no | With `debugger`: a shell command run first; the debugger starts only if it succeeds |
 
 An unknown `mode` falls back to `terminal`. If a file cannot be parsed, none of its commands appear; the reason is written to the log.
 
@@ -69,7 +71,7 @@ The `Commands` menu in the menu bar lists, from top to bottom:
 2. Project commands without a group, then project groups (bold).
 3. Global commands without a group, then global groups.
 
-Within each part, commands and groups are sorted by identifier and group name. A group opens a submenu with its commands; clicking the group header again closes it. A command's hotkey is shown in the shortcut column. When the terminal supports emoji, each label is prefixed with its mode: 💻 terminal, ⚙ background, 📋 report.
+Within each part, commands and groups are sorted by identifier and group name. A group opens a submenu with its commands; clicking the group header again closes it. A command's hotkey is shown in the shortcut column. When the terminal supports emoji, each label is prefixed with its mode: 💻 terminal, ⚙ background, 📋 report, 🐞 a command with a `debugger`.
 
 Keys on a selected command:
 
@@ -101,7 +103,7 @@ Saving from the form, renaming or deleting edits `commands.toml` in place: the o
 
 ## Execution modes
 
-Every command runs in the working directory of the focused panel (for example, the directory shown in a file manager or the current directory of a terminal), or in the project root if the panel has none.
+A command with a `debugger` runs in a terminal panel in the project root whatever its `mode`, see [Debugging](#debugging). Every other command runs in the working directory of the focused panel (for example, the directory shown in a file manager or the current directory of a terminal), or in the project root if the panel has none.
 
 | Mode | How it runs | Output |
 |------|-------------|--------|
@@ -172,6 +174,32 @@ The form is shown however the command is started: from the `Commands` menu, by i
 Commands with a hotkey are also listed in the command palette (`Ctrl+P`) as `Run command: <label>`.
 
 The form's `Hotkey:` field accepts `Ctrl`, `Alt` and `Shift` combined with a letter, a digit, `F1`–`F12` or a named key (`Enter`, `Tab`, `Space`, `Home`, `PageUp`, arrows and so on), and it rejects a hotkey that another command or a global TermIDE shortcut already uses (`Hotkey is already in use`). A hotkey written into the file by hand is not checked: if it matches a global shortcut, the shortcut wins and the command never runs from the keyboard. It takes effect the next time the `Commands` menu is opened or the file is saved from TermIDE.
+
+## Debugging
+
+A command with `debugger` starts a command-line debugger in a new terminal panel, sets the breakpoints placed in the editor (see [Breakpoints](editor.md#breakpoints-and-debugging)) and runs the program to the first one. From there the debugger is yours: step, print and continue with its own commands. `command` is then what to debug, as shell text:
+
+| `debugger` | `command` is | Runs as |
+|------------|--------------|---------|
+| `lldb` | the program and its arguments | `lldb -s <script> -- <command>` |
+| `gdb` | the program and its arguments | `gdb -q -x <script> --args <command>` |
+| `dlv` | Delve's subcommand and its arguments, e.g. `debug ./cmd/app` | `dlv --init <script> <command>` |
+| `pdb` | the script and its arguments | `python3 -m pdb -c 'break <file>:<line>' … -c continue <command>` |
+
+```toml
+[debug-app]
+name = "Debug app"
+command = "target/debug/app --verbose"
+debugger = "lldb"
+build = "cargo build"
+key = "Ctrl+Alt+D"
+```
+
+The script holds a `breakpoint set` or `break` for each breakpoint and then `run` (lldb, gdb) or `continue` (Delve); it is written to `termide-debug` in the system's temporary directory. Only breakpoints in files under the project root go in, each to the debugger for its language: Python files to pdb, Go files to Delve, the rest to lldb and gdb. Debug commands run in the project root, so a relative program path such as `target/debug/app` means the same wherever the focus is. Parameters work as for other commands.
+
+`F5` in the editor (`start_debug`), or **Start debugging** in the command palette, starts debugging: with one launch available it starts at once, with several it offers them as a list. The launches are the debug commands of the project and the global file and, when the focused editor holds a Python or Go file, that file itself — a script under pdb, the Go package in its directory under Delve (`dlv debug`) — which needs no command. With none, the status bar says so.
+
+Breakpoints set while the debugger runs reach it only on the next launch; set them in the debugger itself meanwhile.
 
 ## Tips
 

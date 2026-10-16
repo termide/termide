@@ -827,6 +827,9 @@ impl App {
                         self.handle_edit_command_config_result(command_name, is_project, result)?;
                     }
                 }
+                PendingAction::ChooseDebugLaunch => {
+                    self.handle_debug_choice(value)?;
+                }
                 PendingAction::RunCommandWithParams { command } => {
                     use termide_modal::CommandParamsResult;
                     if let Some(result) = value.downcast_ref::<CommandParamsResult>() {

@@ -87,6 +87,7 @@ mod tests {
             cursor_viewport_pos: None,
             diagnostic_line_severity: HashMap::new(),
             tab_size: 4,
+            breakpoint_lines: Default::default(),
         }
     }
 

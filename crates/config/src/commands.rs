@@ -115,6 +115,13 @@ pub struct CommandMetadata {
     /// Group (virtual grouping in menu).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
+    /// Debugger the command runs under (`lldb`, `gdb`, `dlv`, `pdb`); the
+    /// command line is then the program to debug and its arguments.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub debugger: Option<String>,
+    /// Shell command run before the debugger starts, which it must pass.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub build: Option<String>,
 }
 
 /// Parsed contents of a commands.toml file.
@@ -195,6 +202,17 @@ impl CommandsMetadata {
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
 
+            let text = |key: &str| {
+                section
+                    .get(key)
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+            };
+            let debugger = text("debugger");
+            let build = text("build");
+
             entries.insert(
                 section_name.clone(),
                 CommandMetadata {
@@ -204,6 +222,8 @@ impl CommandsMetadata {
                     key,
                     params,
                     group,
+                    debugger,
+                    build,
                 },
             );
         }
@@ -358,6 +378,8 @@ fn write_fields(
     set(table, "mode", meta.mode.map(CommandMode::as_str));
     set(table, "group", meta.group.as_deref());
     set(table, "key", meta.key.as_deref());
+    set(table, "debugger", meta.debugger.as_deref());
+    set(table, "build", meta.build.as_deref());
 
     if old_params == Some(&meta.params) {
         return;
@@ -399,6 +421,13 @@ pub struct CommandItem {
     pub is_project: bool,
     /// Metadata from commands.toml.
     pub metadata: Option<CommandMetadata>,
+}
+
+impl CommandItem {
+    /// The debugger this command runs under, as written in `commands.toml`.
+    pub fn debugger(&self) -> Option<&str> {
+        self.metadata.as_ref()?.debugger.as_deref()
+    }
 }
 
 /// A group of commands (virtual grouping via `group` field in TOML).
@@ -516,6 +545,19 @@ impl CommandsRegistry {
             }
         }
         result
+    }
+
+    /// Every command that runs under a debugger: project commands first,
+    /// commands without a group before grouped ones.
+    pub fn debug_commands(&self) -> Vec<&CommandItem> {
+        let mut out: Vec<&CommandItem> = self
+            .root_items
+            .iter()
+            .chain(self.groups.iter().flat_map(|g| g.items.iter()))
+            .filter(|c| c.debugger().is_some())
+            .collect();
+        out.sort_by_key(|c| !c.is_project);
+        out
     }
 
     /// Load commands from the global commands.toml in the config directory.
@@ -757,5 +799,30 @@ mode = "report"
                 name: "dev".to_string(),
             })
         );
+    }
+
+    #[test]
+    fn a_debug_command_keeps_its_debugger_and_build() {
+        let original = r#"[debug-app]
+command = "target/debug/app --verbose"
+debugger = "lldb"
+build = "cargo build"
+"#;
+        let meta = CommandsMetadata::parse(original);
+        let entry = &meta.entries["debug-app"];
+        assert_eq!(entry.debugger.as_deref(), Some("lldb"));
+        assert_eq!(entry.build.as_deref(), Some("cargo build"));
+        // Saving untouched entries leaves the file as it was.
+        assert_eq!(meta.render_over(original), original);
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("commands.toml"), original).unwrap();
+        let registry = CommandsRegistry::load_from_dir(dir.path()).unwrap();
+        let debug: Vec<&str> = registry
+            .debug_commands()
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        assert_eq!(debug, ["debug-app"]);
     }
 }

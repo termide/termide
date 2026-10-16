@@ -217,6 +217,22 @@ impl App {
                 },
             ),
             (
+                "start_debug",
+                CommandEntry {
+                    label: t.help_desc_start_debug().into(),
+                    category: t.palette_category_application(),
+                    keybinding: kb_str(&self.state.config.editor.keybindings.start_debug),
+                },
+            ),
+            (
+                "clear_breakpoints",
+                CommandEntry {
+                    label: t.help_desc_clear_breakpoints().into(),
+                    category: t.palette_category_application(),
+                    keybinding: String::new(),
+                },
+            ),
+            (
                 "menu",
                 CommandEntry {
                     label: t.help_desc_menu().into(),

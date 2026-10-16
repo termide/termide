@@ -52,8 +52,11 @@ impl App {
         use termide_config::commands::CommandMode;
         use termide_panel_terminal::Terminal;
 
-        let cwd = self.get_focused_panel_cwd();
         let env = param_env(params);
+        if command.debugger().is_some() {
+            return self.run_debug_command(command, &env);
+        }
+        let cwd = self.get_focused_panel_cwd();
         log::info!(
             "Running {} command '{}' in {:?} with {} params",
             command.mode.as_str(),

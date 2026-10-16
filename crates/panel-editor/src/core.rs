@@ -70,6 +70,9 @@ mod editor_git;
 #[path = "editor_file_io.rs"]
 mod editor_file_io;
 
+#[path = "editor_breakpoints.rs"]
+mod editor_breakpoints;
+
 #[cfg(test)]
 #[path = "core_tests.rs"]
 mod core_tests;
@@ -137,6 +140,11 @@ pub struct Editor {
     /// Sorted line positions of structural symbols (from outline) for Ctrl+Up/Down navigation.
     /// When empty, paragraph navigation falls back to blank lines.
     symbol_lines: Vec<usize>,
+
+    // === Breakpoints ===
+    /// `line_marks_version` of the buffer last written to the breakpoint
+    /// store, so only a change is written.
+    breakpoints_synced: u64,
 
     // === Stale-on-collapse optimization ===
     /// Whether panel is stale (collapsed, skipping background work)

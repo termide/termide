@@ -213,13 +213,22 @@ pub fn get_line_number_git_style(
 /// - ▶/► (red) for ERROR
 /// - ▶/► (yellow) for WARNING
 /// - ' ' (space) for no diagnostic or INFO/HINT
+/// - ● (red) for a breakpoint, which takes the cell over a diagnostic: the
+///   diagnostic still shows on its virtual line
 ///
 /// On Windows U+25B6 ▶ is outside WGL4; U+25BA ► is used instead.
 pub fn get_lsp_marker(
     diagnostic_severity: Option<lsp_types::DiagnosticSeverity>,
+    breakpoint: bool,
     theme: &Theme,
 ) -> LspMarkerInfo {
     const LSP_MARKER: char = if cfg!(windows) { '►' } else { '▶' };
+    if breakpoint {
+        return LspMarkerInfo {
+            marker: '●',
+            color: theme.error,
+        };
+    }
     if let Some(severity) = diagnostic_severity {
         use lsp_types::DiagnosticSeverity;
         match severity {

@@ -219,6 +219,7 @@ arrives in one piece.
 - **Shift+click** / **Alt+click**: Extend the current selection from its anchor (or the cursor, if no selection yet) to the click position. Alt+click exists because GNOME Terminal / VTE swallows Shift+click for its own native text selection; on terminals like kitty / alacritty / WezTerm both gestures work.
 - **Scroll wheel**: Scroll editor content
 - **Ctrl+Click**: Go to definition (LSP); or show color preview if cursor is on a hex color (e.g. `#ff0000`, `#abc`)
+- **Click on a line number**: Set or remove a breakpoint on that line, see [Breakpoints and Debugging](#breakpoints-and-debugging)
 
 **Color preview:** When you hold Ctrl and click on a hex color value, a small popup appears showing a color swatch and the hex code. The popup stays visible while the mouse button is held and disappears on release.
 
@@ -488,6 +489,19 @@ Docker files have no distinctive extension, so they are recognized by file name,
 TermIDE tells `docker-language-server` to send no telemetry when it starts; the server collects it by default otherwise.
 
 **Note:** You need to install the language server separately. TermIDE only provides the LSP client integration.
+
+## Breakpoints and Debugging
+
+| Shortcut   | Action                                                        |
+|------------|---------------------------------------------------------------|
+| `Ctrl+F8`  | Set or remove a breakpoint on the cursor line (`toggle_breakpoint`) |
+| `F5`       | Start debugging (`start_debug`)                               |
+
+A breakpoint is drawn as a red `●` in the cell right of the line number, where a diagnostic's `▶` would be; it takes that cell over a diagnostic, whose message still shows on its own line below. A click on a line number sets or removes one too. Both work in view mode and in every Vim mode, as neither changes the text.
+
+A breakpoint stays with its text as you edit: lines added or removed above move it, a deleted line takes its breakpoint with it, and lines joined into one keep it on the joined line. Breakpoints are kept per file in `breakpoints.toml` in the data directory (`~/.local/share/termide/` on Linux, `~/Library/Application Support/termide/` on macOS), so they come back when the file is opened again, in any project and after a restart. **Remove all breakpoints** in the command palette clears them everywhere.
+
+`F5` starts a command-line debugger (lldb, gdb, Delve or pdb) in a new terminal panel with the project's breakpoints set and runs the program to the first one. What it debugs comes from a command with a `debugger` in `commands.toml`, or, for a Python or Go file, from the file alone; see [Debugging](actions.md#debugging).
 
 ## Vim Mode
 

@@ -5060,6 +5060,7 @@ dependencies = [
  "termide-clipboard",
  "termide-config",
  "termide-core",
+ "termide-debug",
  "termide-detach",
  "termide-fetch",
  "termide-file-ops",
@@ -5182,6 +5183,18 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "termide-debug"
+version = "0.42.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "serde",
+ "tempfile",
+ "termide-config",
+ "toml",
 ]
 
 [[package]]
@@ -5444,6 +5457,7 @@ dependencies = [
  "termide-clipboard",
  "termide-config",
  "termide-core",
+ "termide-debug",
  "termide-git",
  "termide-highlight",
  "termide-i18n",

@@ -6,6 +6,7 @@
 mod buffer;
 mod cursor;
 mod history;
+mod line_marks;
 mod search;
 mod viewport;
 mod wrap;

@@ -327,6 +327,12 @@ impl Translation for RuntimeTranslation {
         help_desc_find_references,
         help_desc_rename_symbol,
         help_desc_code_action,
+        help_desc_toggle_breakpoint,
+        help_desc_start_debug,
+        help_desc_clear_breakpoints,
+        debug_select_title,
+        debug_nothing_to_launch,
+        debug_breakpoints_cleared,
         lsp_rename_no_identifier,
         lsp_rename_unsaved_file,
         lsp_rename_no_changes,
@@ -2035,6 +2041,17 @@ impl Translation for RuntimeTranslation {
 
     fn command_run_failed_fmt(&self, error: &str) -> String {
         self.format("command_run_failed_fmt", &[("error", error)])
+    }
+
+    fn debug_current_file_fmt(&self, file: &str, debugger: &str) -> String {
+        self.format(
+            "debug_current_file_fmt",
+            &[("file", file), ("debugger", debugger)],
+        )
+    }
+
+    fn debug_unknown_debugger_fmt(&self, name: &str) -> String {
+        self.format("debug_unknown_debugger_fmt", &[("name", name)])
     }
 
     fn command_name_taken_fmt(&self, name: &str) -> String {

@@ -503,6 +503,10 @@ pub enum PanelEvent {
         cwd: Option<PathBuf>,
     },
 
+    /// Start a debugger with the breakpoints set; `file` is the file the
+    /// request came from, for a launch that needs no configuration.
+    StartDebug { file: Option<PathBuf> },
+
     /// Preview media file (raster image) using native graphics or xdg-open
     PreviewMedia(PathBuf),
 

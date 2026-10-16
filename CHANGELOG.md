@@ -5,7 +5,11 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.42.0] - 2026-10-16
+## [Unreleased]
+
+### Added
+- **Breakpoints and a debug launch.** `Ctrl+F8` in the editor, or a click on a line number, sets a breakpoint on the line, drawn as `●` beside the number; it stays with its text as lines are added or removed above it, and is saved per file across restarts. `F5` starts a command-line debugger in a new terminal panel with the project's breakpoints set and runs the program to the first one: a command in `commands.toml` with `debugger = "lldb"`, `"gdb"`, `"dlv"` or `"pdb"` names the program to debug (with an optional `build` to run first), and a Python or Go file needs no command at all. Several launches are offered as a list. The command palette has **Start debugging** and **Remove all breakpoints** from any panel, and debug commands show 🐞 in the Commands menu.
+
 
 [0.42.0]: https://github.com/termide/termide/releases/tag/0.42.0
 

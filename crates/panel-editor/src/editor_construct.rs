@@ -57,6 +57,7 @@ impl Editor {
             scroll_follows_cursor: true,
             vim,
             symbol_lines: Vec::new(),
+            breakpoints_synced: 0,
             is_stale: false,
             hotkeys: HotkeyTable::default(),
             last_config_ptr: 0,
@@ -113,7 +114,7 @@ impl Editor {
             None
         };
 
-        Ok(Self {
+        let mut editor = Self {
             config,
             buffer,
             cursor: Cursor::new(),
@@ -136,12 +137,15 @@ impl Editor {
             scroll_follows_cursor: true,
             vim,
             symbol_lines: Vec::new(),
+            breakpoints_synced: 0,
             is_stale: false,
             hotkeys: HotkeyTable::default(),
             last_config_ptr: 0,
             tab_size_override: None,
             syntax_picker: None,
-        })
+        };
+        editor.reload_breakpoints();
+        Ok(editor)
     }
 
     /// Create editor with text (for displaying help, etc.)
@@ -178,6 +182,7 @@ impl Editor {
             scroll_follows_cursor: true,
             vim: None, // view_only mode doesn't have vim
             symbol_lines: Vec::new(),
+            breakpoints_synced: 0,
             is_stale: false,
             hotkeys: HotkeyTable::default(),
             last_config_ptr: 0,

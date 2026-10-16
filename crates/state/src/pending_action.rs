@@ -306,6 +306,8 @@ pub enum PendingAction {
         /// Selected index to restore on return
         selected: usize,
     },
+    /// Start the debug launch chosen from the list `App` keeps for it
+    ChooseDebugLaunch,
     /// Run a command with user-provided parameters
     RunCommandWithParams {
         command: termide_config::commands::CommandItem,

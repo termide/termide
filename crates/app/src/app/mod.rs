@@ -35,6 +35,7 @@ mod bg_fetch;
 mod bg_git;
 mod bg_lsp;
 mod bg_resource;
+mod debug;
 mod event_handler;
 mod file_transfer_ops;
 mod global_hotkeys;
@@ -75,6 +76,8 @@ pub struct App {
     title_click_tracker: ClickTracker<(u16, u16)>,
     /// Cached command list for Command Palette (index → action name).
     command_palette_actions: Option<Vec<String>>,
+    /// Debug launches offered by the open choice list (index → launch).
+    debug_choices: Option<Vec<debug::DebugChoice>>,
     /// Capability-aware key normalizer. Used to build a `KeyChord` from
     /// raw `KeyEvent`s on the dispatch boundary so that all matchers
     /// downstream see canonical keys while text-input and PTY paths
@@ -195,6 +198,7 @@ impl App {
             outline_last_edit_time: None,
             title_click_tracker: ClickTracker::new(),
             command_palette_actions: None,
+            debug_choices: None,
             normalizer: termide_keyboard::KeyNormalizer::default(),
             keyboard_caps: termide_keyboard::KeyboardCaps::default(),
             persist_layout: true,
@@ -292,6 +296,7 @@ impl App {
             outline_last_edit_time: None,
             title_click_tracker: ClickTracker::new(),
             command_palette_actions: None,
+            debug_choices: None,
             normalizer: termide_keyboard::KeyNormalizer::new(caps),
             keyboard_caps: caps,
             persist_layout: true,
@@ -984,6 +989,8 @@ impl App {
         }
 
         self.save_parked_layouts();
+        self.sync_editor_breakpoints();
+        termide_debug::breakpoints::flush();
         Ok(())
     }
 

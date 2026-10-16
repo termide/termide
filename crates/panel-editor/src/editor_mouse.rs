@@ -158,7 +158,13 @@ impl Editor {
         let is_drag = matches!(mouse.kind, MouseEventKind::Drag(MouseButton::Left));
         let has_selection = self.selection.is_some();
 
-        if is_outside && !(is_drag && has_selection) {
+        // A click on the line numbers sets or removes a breakpoint there.
+        let gutter_click = matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+            && mouse.column >= inner.x
+            && mouse.column < content_x
+            && !is_outside_y;
+
+        if is_outside && !(is_drag && has_selection) && !gutter_click {
             return vec![];
         }
 
@@ -192,7 +198,7 @@ impl Editor {
                 .clamp(content_y, content_y + content_height.saturating_sub(1));
             (col, row)
         } else {
-            (mouse.column, mouse.row)
+            (mouse.column.max(content_x), mouse.row)
         };
 
         let rel_x = (clamped_col - content_x) as usize;
@@ -276,6 +282,14 @@ impl Editor {
                 (line_idx, 0, line_len, false)
             }
         };
+
+        if gutter_click {
+            if !is_virtual_line && buffer_line < self.buffer.line_count() {
+                self.toggle_breakpoint_at(buffer_line);
+                return vec![PanelEvent::NeedsRedraw];
+            }
+            return vec![];
+        }
 
         // If mouse is on a virtual line (diagnostic/deletion), handle specially
         if is_virtual_line {
