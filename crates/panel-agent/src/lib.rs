@@ -10,6 +10,7 @@ mod delegation;
 mod events;
 mod export;
 mod failure;
+mod held;
 mod input;
 mod mcp;
 mod peers;
@@ -923,6 +924,9 @@ pub struct AgentPanel {
     /// The pause was taken up from the log: the panel or termide closed
     /// while work was under way; how `/continue` carries it on.
     restored: Option<unfinished::Restored>,
+    /// The session is another termide's, shown read-only until it lets it
+    /// go; see [`held`].
+    held: Option<held::HeldSession>,
     /// The unattended work the session's log records last, so a change is
     /// written once.
     logged_autorun: Autorun,
@@ -1017,6 +1021,7 @@ impl AgentPanel {
                 &setup.agent,
             )
         });
+        let held = held::HeldSession::of(session.as_ref());
         let model = session_model(&setup.model, session.as_ref());
         let checkpoints = checkpoint_store(setup.session_dir.as_deref(), session.as_ref());
         let (mut agent, mut system_prompt, mut tools, mut late_tools, mut backend) = (
@@ -1092,7 +1097,9 @@ impl AgentPanel {
             &setup.refusals,
             setup.persist_rule,
             setup.hooks.as_ref(),
-            backend.as_ref(),
+            // No agent runs on another termide's session: an external one
+            // would resume it beside the one running there.
+            backend.as_ref().filter(|_| held.is_none()),
             checkpoints.clone(),
             setup.fold,
             session.as_ref(),
@@ -1242,6 +1249,7 @@ impl AgentPanel {
             pause_start: None,
             resuming: false,
             restored: None,
+            held,
             logged_autorun: Autorun::default(),
             logged_retry: None,
             run_start_due: false,
@@ -1279,7 +1287,13 @@ impl AgentPanel {
         panel.notice_slash_conflicts();
         panel.notice_definition_problems();
         panel.refresh_recent_sessions();
-        panel.restore_unfinished();
+        // The other termide's run may be going on right now: none is offered
+        // to carry on here until this panel takes the session up.
+        if panel.held.is_some() {
+            panel.notice_held();
+        } else {
+            panel.restore_unfinished();
+        }
         panel
     }
 

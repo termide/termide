@@ -546,6 +546,15 @@ keeps its count of turns across the reopen, so its cap still holds. Sessions
 left so are marked `⏸` in the session lists, and a panel that reopens one is
 highlighted until seen and rings the bell, as a panel waiting for you does.
 
+A session is held by one termide at a time. Another termide opening the same
+project — while the first still runs, maybe in a terminal window out of sight
+— does not take its run for one cut off: its panel shows the session
+read-only, starts no agent, sends nothing and offers nothing to carry on, and
+says which process holds it. It looks again every two seconds; once that
+termide lets the session go — its panel closed, the session switched, termide
+quit or killed — the panel takes it up as it then stands and asks about its
+unfinished work as any reopen does.
+
 ### When a run fails
 
 A failure is sorted by what can be done about it: a network error or an

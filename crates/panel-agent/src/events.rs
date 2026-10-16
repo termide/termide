@@ -692,6 +692,7 @@ impl AgentPanel {
             changed = true;
         }
         changed |= self.follow_open_sessions();
+        changed |= self.check_held();
         changed |= self.drop_withdrawn_permission();
         if let Some((start, before)) = self.permission_wait {
             if matches!(

@@ -310,9 +310,21 @@ fn restore_numbered_agent_panel(
         return None;
     }
     // Exclusive: if this session is already open in another restored panel,
-    // fall back to a fresh one rather than back two panels with one log.
+    // fall back to a fresh one rather than back two panels with one log. One
+    // another termide holds — maybe running it right now, in a window that
+    // is out of sight — is shown read-only, for the panel to take it up once
+    // that termide lets it go.
     let session = session.and_then(|path| match Session::open_exclusive(&path) {
         Ok(session) => Some(session),
+        Err(error) if Session::held_elsewhere(&path).is_some() => {
+            log::info!(
+                "agent session {} is held elsewhere: {error}",
+                path.display()
+            );
+            Session::open_read_only(&path)
+                .map_err(|error| log::warn!("cannot read {}: {error}", path.display()))
+                .ok()
+        }
         Err(error) => {
             log::warn!("cannot reopen agent session {}: {error}", path.display());
             None

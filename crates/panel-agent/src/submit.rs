@@ -98,6 +98,11 @@ impl AgentPanel {
         if text.is_empty() {
             return vec![];
         }
+        // Nothing is sent on another termide's session; the input keeps the
+        // text for once it is taken up.
+        if self.refuse_held() {
+            return vec![PanelEvent::NeedsRedraw];
+        }
         self.completion = None;
         self.history_pos = None;
         self.draft.clear();

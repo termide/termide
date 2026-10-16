@@ -669,6 +669,7 @@ impl Translation for RuntimeTranslation {
         agent_suggest_denied_rule,
         agent_notice_clipboard_failed,
         agent_notice_goal_reached,
+        agent_notice_session_released,
         agent_notice_goal_impossible,
         agent_autorun_loop,
         agent_notice_looping,
@@ -1520,6 +1521,10 @@ impl Translation for RuntimeTranslation {
             "agent_notice_goal_idle_paused_fmt",
             &[("count", &count.to_string())],
         )
+    }
+
+    fn agent_notice_session_held_fmt(&self, pid: &str) -> String {
+        self.format("agent_notice_session_held_fmt", &[("pid", pid)])
     }
 
     fn agent_notice_goal_waiting_fmt(&self, reason: &str) -> String {

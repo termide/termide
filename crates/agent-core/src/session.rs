@@ -391,6 +391,91 @@ pub struct Session {
     /// was opened with [`Session::open_exclusive`] / [`Session::create_exclusive`].
     /// Released on drop so a session is never live in two panels at once.
     lock: Option<PathBuf>,
+    /// The claim other termide processes see, taken with `lock`.
+    lease: Option<Lease>,
+    /// Opened with [`Session::open_read_only`]: another termide holds the
+    /// session, so nothing is written to its log from here.
+    read_only: bool,
+}
+
+/// A claim on a session log that other termide processes see: an OS lock on
+/// `<log>.lock`, the file carrying the holder's process id. The OS drops the
+/// lock when the process ends, however it ends, so a crash or a kill leaves
+/// no stale claim. The in-process registry stays what tells this process's
+/// own panels apart, since the OS lets one process take its lock twice.
+#[derive(Debug)]
+struct Lease {
+    file: File,
+    path: PathBuf,
+}
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        // Removed while still locked, so no one takes the old file's lock
+        // between the unlock and the removal; a file Windows will not remove
+        // while open stays, unlocked, for the next holder to take.
+        let _ = std::fs::remove_file(&self.path);
+        let _ = self.file.unlock();
+    }
+}
+
+/// How a try for a session's lease went.
+enum Leased {
+    Taken(Lease),
+    /// Another process holds it; its id when the lock file names it.
+    Held(Option<u32>),
+    /// No lock file could be made or locked (a read-only directory, a file
+    /// system without locks): the session opens unleased, as it did before
+    /// leases.
+    Unavailable,
+}
+
+/// The lock file beside the log at `log`.
+fn lease_path(log: &Path) -> PathBuf {
+    let mut name = log.as_os_str().to_os_string();
+    name.push(".lock");
+    PathBuf::from(name)
+}
+
+fn take_lease(log: &Path) -> Leased {
+    let path = lease_path(log);
+    let mut file = match OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+    {
+        Ok(file) => file,
+        Err(error) => {
+            log::warn!("cannot make {}: {error}", path.display());
+            return Leased::Unavailable;
+        }
+    };
+    match file.try_lock() {
+        Ok(()) => {
+            // The holder's id, for another termide to name it.
+            let written = file
+                .set_len(0)
+                .and_then(|()| write!(file, "{}", std::process::id()))
+                .and_then(|()| file.flush());
+            if let Err(error) = written {
+                log::warn!("cannot write {}: {error}", path.display());
+            }
+            Leased::Taken(Lease { file, path })
+        }
+        Err(std::fs::TryLockError::WouldBlock) => Leased::Held(lease_holder_id(&path)),
+        Err(std::fs::TryLockError::Error(error)) => {
+            log::warn!("cannot lock {}: {error}", path.display());
+            Leased::Unavailable
+        }
+    }
+}
+
+/// The process id a lock file names; `None` when it cannot be read, as a
+/// file locked on Windows cannot.
+fn lease_holder_id(path: &Path) -> Option<u32> {
+    std::fs::read_to_string(path).ok()?.trim().parse().ok()
 }
 
 /// Paths currently open exclusively, so the same session log cannot back two
@@ -433,6 +518,9 @@ fn release(key: &Path) {
 
 impl Drop for Session {
     fn drop(&mut self) {
+        // The lease goes first: once the registry lets a panel of this
+        // process claim the session again, its lock must be free to take.
+        self.lease.take();
         if let Some(key) = self.lock.take() {
             release(&key);
         }
@@ -449,7 +537,7 @@ impl Session {
     /// exclusively as a panel's is: no panel opens it while the task runs.
     pub fn create_delegate(dir: &Path, cwd: &Path, parent: SessionParent) -> std::io::Result<Self> {
         let mut session = Self::create_with(dir, cwd, Some(parent))?;
-        session.lock = claim(&session.path);
+        session.claim_new();
         Ok(session)
     }
 
@@ -484,6 +572,8 @@ impl Session {
             leaf: None,
             file,
             lock: None,
+            lease: None,
+            read_only: false,
         })
     }
 
@@ -500,6 +590,8 @@ impl Session {
             leaf,
             file,
             lock: None,
+            lease: None,
+            read_only: false,
         })
     }
 
@@ -507,18 +599,84 @@ impl Session {
     /// cannot also be opened in another panel; the claim is released on drop.
     pub fn create_exclusive(dir: &Path, cwd: &Path) -> std::io::Result<Self> {
         let mut session = Self::create(dir, cwd)?;
-        session.lock = claim(&session.path);
+        session.claim_new();
         Ok(session)
     }
 
+    /// The claims of a session this call just made: no one else can hold
+    /// its new file, so the lease is taken unless locks are unavailable.
+    fn claim_new(&mut self) {
+        self.lock = claim(&self.path);
+        if self.lock.is_some() {
+            if let Leased::Taken(lease) = take_lease(&self.path) {
+                self.lease = Some(lease);
+            }
+        }
+    }
+
+    /// Load the session at `path` to be read and never written: the session
+    /// another termide holds, shown here until it lets it go. Every append
+    /// fails, and a discard leaves the file alone.
+    pub fn open_read_only(path: &Path) -> std::io::Result<Self> {
+        let (header, entries) = read_file(path)?;
+        let leaf = entries.last().map(|e| e.id.clone());
+        let file = OpenOptions::new().read(true).open(path)?;
+        Ok(Self {
+            path: path.to_path_buf(),
+            header,
+            entries,
+            leaf,
+            file,
+            lock: None,
+            lease: None,
+            read_only: true,
+        })
+    }
+
+    /// Whether this session was opened with [`Session::open_read_only`].
+    #[must_use]
+    pub fn is_read_only(&self) -> bool {
+        self.read_only
+    }
+
     /// Whether the session at `path` is open exclusively, in some panel of
-    /// this process.
+    /// this process or in another termide.
     #[must_use]
     pub fn is_open(path: &Path) -> bool {
         open_registry()
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .contains(&lock_key(path))
+            || Self::held_elsewhere(path).is_some()
+    }
+
+    /// Whether another termide holds the session at `path`: `Some` with its
+    /// process id when the lock file names it, `None` when no other process
+    /// does — this one's own claims are not "elsewhere".
+    #[must_use]
+    pub fn held_elsewhere(path: &Path) -> Option<Option<u32>> {
+        let in_this_process = open_registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&lock_key(path));
+        if in_this_process {
+            return None;
+        }
+        let lock_path = lease_path(path);
+        // No lock file, no holder: it is made with the claim.
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .ok()?;
+        match file.try_lock() {
+            Ok(()) => {
+                let _ = file.unlock();
+                None
+            }
+            Err(std::fs::TryLockError::WouldBlock) => Some(lease_holder_id(&lock_path)),
+            Err(std::fs::TryLockError::Error(_)) => None,
+        }
     }
 
     /// A counter that changes whenever a session is opened or released
@@ -653,9 +811,24 @@ impl Session {
                 "this session is already open in another panel",
             ));
         };
+        // Another termide's claim: its panel may be running the session
+        // right now, so this one must not write to it nor carry it on.
+        let lease = match take_lease(path) {
+            Leased::Taken(lease) => Some(lease),
+            Leased::Held(pid) => {
+                release(&key);
+                let holder = pid.map_or_else(String::new, |pid| format!(" (process {pid})"));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::WouldBlock,
+                    format!("this session is open in another termide{holder}"),
+                ));
+            }
+            Leased::Unavailable => None,
+        };
         match Self::open(path) {
             Ok(mut session) => {
                 session.lock = Some(key);
+                session.lease = lease;
                 Ok(session)
             }
             Err(error) => {
@@ -701,6 +874,10 @@ impl Session {
     /// Delete the session's file from disk, consuming the session (its lock is
     /// released as it drops). A missing file is not an error.
     pub fn discard(self) -> std::io::Result<()> {
+        // Another termide's session is not this one's to delete.
+        if self.read_only {
+            return Ok(());
+        }
         match std::fs::remove_file(&self.path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -768,6 +945,12 @@ impl Session {
     }
 
     fn append(&mut self, kind: EntryKind) -> std::io::Result<String> {
+        if self.read_only {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "this session is open in another termide; it is only read here",
+            ));
+        }
         let entry = Entry {
             id: new_id(),
             parent_id: self.leaf.clone(),
@@ -2095,6 +2278,90 @@ mod tests {
         assert!(matches!(&context[1], Message::User(u) if u.plain_text() == "three"));
         assert!(matches!(&context[3], Message::User(u) if u.plain_text() == "four"));
         assert_eq!(SessionSummary::from(&reopened).message_count, 7);
+    }
+
+    /// Another termide's claim, as this process sees one: the lock of the
+    /// lease file taken on a handle of its own, with the holder's id in it.
+    fn hold_elsewhere(log: &Path, pid: u32) -> File {
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(lease_path(log))
+            .unwrap();
+        file.try_lock().unwrap();
+        write!(file, "{pid}").unwrap();
+        file
+    }
+
+    #[test]
+    fn a_session_held_by_another_termide_opens_only_to_be_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), dir.path()).unwrap();
+        session
+            .append_message(&Message::User(UserMessage::text("hi")))
+            .unwrap();
+        let path = session.path().to_path_buf();
+        drop(session);
+
+        let other = hold_elsewhere(&path, 4242);
+        assert_eq!(Session::held_elsewhere(&path), Some(Some(4242)));
+        assert!(Session::is_open(&path));
+        let error = Session::open_exclusive(&path).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+        assert!(error.to_string().contains("4242"), "{error}");
+        // The refusal leaves no claim behind in this process.
+        assert!(!open_registry().lock().unwrap().contains(&lock_key(&path)));
+
+        // Read, it shows the conversation, and nothing is written to it.
+        let mut view = Session::open_read_only(&path).unwrap();
+        assert!(view.is_read_only());
+        assert_eq!(view.context_messages().len(), 1);
+        let before = std::fs::read_to_string(&path).unwrap();
+        assert!(view
+            .append_message(&Message::User(UserMessage::text("more")))
+            .is_err());
+        view.discard().unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+
+        // Once the other lets it go, it is this one's to take.
+        drop(other);
+        assert_eq!(Session::held_elsewhere(&path), None);
+        let taken = Session::open_exclusive(&path).unwrap();
+        assert!(!taken.is_read_only());
+        assert_eq!(
+            lease_holder_id(&lease_path(&path)),
+            Some(std::process::id())
+        );
+        // This process's own claim is not another termide's.
+        assert_eq!(Session::held_elsewhere(&path), None);
+        drop(taken);
+        assert!(
+            !lease_path(&path).exists(),
+            "the lease file goes with the claim"
+        );
+    }
+
+    #[test]
+    fn a_new_session_is_leased_from_the_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = Session::create_exclusive(dir.path(), dir.path()).unwrap();
+        let lock = lease_path(session.path());
+        assert_eq!(lease_holder_id(&lock), Some(std::process::id()));
+        // Another process trying for it now finds it taken.
+        let probe = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock)
+            .unwrap();
+        assert!(matches!(
+            probe.try_lock(),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+        drop(probe);
+        drop(session);
+        assert!(!lock.exists());
     }
 
     #[test]

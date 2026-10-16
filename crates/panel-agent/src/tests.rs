@@ -9377,6 +9377,95 @@ fn reply_calling(call: ToolCall) -> AssistantMessage {
     }
 }
 
+/// A session another termide holds, as this process sees it: the lock of its
+/// lease file taken on a handle of its own, naming `pid`.
+fn hold_elsewhere(log: &Path, pid: u32) -> std::fs::File {
+    use std::io::Write;
+    let mut lock = log.as_os_str().to_os_string();
+    lock.push(".lock");
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(PathBuf::from(lock))
+        .unwrap();
+    file.try_lock().unwrap();
+    write!(file, "{pid}").unwrap();
+    file
+}
+
+/// A run another termide has under way — its window out of sight — is not
+/// taken for one cut off: the panel shows the session read-only, offers
+/// nothing, sends nothing, and takes it up once that termide lets it go.
+#[test]
+fn a_session_another_termide_holds_is_shown_read_only_until_let_go() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = logged_request(dir.path(), |session| {
+        session.append_run_start().unwrap();
+    });
+    let other = hold_elsewhere(&path, 4242);
+    let session = Session::open_read_only(&path).unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        session: Some(session),
+        ..setup(vec![reply("built")])
+    });
+    assert!(panel.is_held_elsewhere());
+    assert_eq!(panel.peer_state(), PeerState::Held);
+    assert!(panel.pending.is_none(), "no carry-on card");
+    assert!(!panel.paused);
+    let held = termide_i18n::t().agent_notice_session_held_fmt("4242");
+    let notices = |panel: &AgentPanel, wanted: &str| {
+        panel
+            .transcript()
+            .items()
+            .iter()
+            .filter(|i| matches!(i, Item::Notice { text, .. } if text == wanted))
+            .count()
+    };
+    assert_eq!(notices(&panel, &held), 1);
+    // The conversation shows.
+    assert!(panel
+        .transcript()
+        .items()
+        .iter()
+        .any(|i| matches!(i, Item::User { text, .. } if text == "build it")));
+
+    // Nothing is sent, and the text waits in the input.
+    let before = std::fs::read_to_string(&path).unwrap();
+    type_text(&mut panel, "go on");
+    panel.submit();
+    assert!(!panel.is_busy());
+    assert_eq!(panel.input_text(), "go on");
+    assert_eq!(notices(&panel, &held), 2);
+    assert!(panel.deliver(UserMessage::text("from panel 2")).is_err());
+    // Still held: a look changes nothing.
+    panel.held.as_mut().unwrap().next_check = Instant::now();
+    panel.tick();
+    assert!(panel.is_held_elsewhere());
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        before,
+        "nothing is written to the other termide's log"
+    );
+
+    // Let go, it is taken up, and its cut-off run is asked about.
+    drop(other);
+    panel.held.as_mut().unwrap().next_check = Instant::now();
+    panel.tick();
+    assert!(!panel.is_held_elsewhere());
+    assert!(!panel.session.as_ref().unwrap().is_read_only());
+    assert!(Session::is_open(&path));
+    assert!(panel.paused);
+    assert_eq!(panel.restored, Some(Restored::Resume));
+    carry_on_card(&panel);
+    assert!(panel.transcript().items().iter().any(|i| matches!(
+        i,
+        Item::Notice { text, .. } if text == termide_i18n::t().agent_notice_session_released()
+    )));
+}
+
 #[test]
 fn a_run_cut_off_by_closing_is_asked_about_when_reopened() {
     let dir = tempfile::tempdir().unwrap();

@@ -25,6 +25,8 @@ pub enum PeerState {
     Waiting,
     /// It runs another agent's task, and takes no messages.
     Delegate,
+    /// Its session is open in another termide; it takes no messages.
+    Held,
 }
 
 impl PeerState {
@@ -36,6 +38,7 @@ impl PeerState {
             Self::Working => "working",
             Self::Waiting => "waiting for the user",
             Self::Delegate => "running another agent's task",
+            Self::Held => "showing a session another termide holds",
         }
     }
 }
@@ -71,6 +74,8 @@ impl AgentPanel {
     pub fn peer_state(&self) -> PeerState {
         if self.is_delegate() {
             PeerState::Delegate
+        } else if self.held.is_some() {
+            PeerState::Held
         } else if self.pending.is_some() {
             PeerState::Waiting
         } else if self.is_busy() {
@@ -89,6 +94,12 @@ impl AgentPanel {
         if self.is_delegate() {
             return Err(format!(
                 "panel {} runs another agent's task and takes no messages until it ends",
+                self.panel_id
+            ));
+        }
+        if self.held.is_some() {
+            return Err(format!(
+                "panel {} shows a session another termide holds and takes no messages until it is taken up here",
                 self.panel_id
             ));
         }

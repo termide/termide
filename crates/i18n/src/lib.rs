@@ -988,6 +988,10 @@ pub trait Translation: Send + Sync {
     fn agent_notice_goal_idle_paused_fmt(&self, count: usize) -> String;
     /// The goal judge found the agent waiting on the user; the goal pauses.
     fn agent_notice_goal_waiting_fmt(&self, reason: &str) -> String;
+    /// The panel's session is open in another termide, process `pid`.
+    fn agent_notice_session_held_fmt(&self, pid: &str) -> String;
+    /// The other termide let the panel's session go, and it is taken up.
+    fn agent_notice_session_released(&self) -> &str;
     fn agent_notice_looping_every_fmt(&self, interval: &str) -> String;
     fn agent_unfinished_run_cut_fmt(&self, age: &str) -> String;
     fn agent_unfinished_run_paused_fmt(&self, age: &str) -> String;
