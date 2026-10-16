@@ -415,9 +415,20 @@ impl Modal for CommitModal {
 
         match mouse.kind {
             // A drag from a press in the message extends its selection; past
-            // the message's edges it stops at the nearest row and column.
+            // the message's top or bottom it scrolls one row per move, as the
+            // editor's drag does, and past its sides it stops at the nearest
+            // column.
             MouseEventKind::Drag(MouseButton::Left) => {
                 if let (true, Some(area)) = (self.dragging, self.last_textarea_area) {
+                    let scroll = self.textarea.scroll_offset();
+                    if mouse.row < area.y && scroll > 0 {
+                        self.textarea.set_scroll_offset(scroll - 1);
+                    } else if mouse.row >= area.bottom()
+                        && scroll + usize::from(area.height) < self.textarea.line_count()
+                    {
+                        self.textarea.set_scroll_offset(scroll + 1);
+                    }
+                    self.scroll_follows_cursor = true;
                     let row = mouse
                         .row
                         .clamp(area.y, area.y + area.height.saturating_sub(1));
@@ -607,5 +618,56 @@ mod tests {
             Some("the bug\nbody text"),
             "after the release a drag selects nothing"
         );
+    }
+
+    /// Dragged past the message's bottom or top, the selection keeps going:
+    /// each move scrolls one row and extends the selection onto it.
+    #[test]
+    fn a_drag_past_the_message_edge_scrolls_it() {
+        use crate::base::test_mouse::{drag, press as down, release};
+        let mut modal = modal();
+        let lines: Vec<String> = (0..30).map(|i| format!("line {i:02}")).collect();
+        assert!(modal.handle_paste(&lines.join("\n")));
+        let area = Rect::new(0, 0, 100, 14);
+        let render = |modal: &mut CommitModal| {
+            modal.render(area, &mut Buffer::empty(area), &Theme::default());
+        };
+        // Back to the top, then a press on the first row.
+        modal.textarea.set_cursor(0, 0);
+        render(&mut modal);
+        let text = modal.last_textarea_area.unwrap();
+        let height = usize::from(text.height);
+        assert!(height < 30, "the message is taller than the field");
+        assert_eq!(modal.textarea.scroll_offset(), 0);
+        modal.handle_mouse(down(text.x + 5, text.y), area).unwrap();
+
+        // Three moves below the field: three rows scrolled, the selection on
+        // the last row now shown.
+        for _ in 0..3 {
+            modal
+                .handle_mouse(drag(text.x + 7, text.bottom() + 2), area)
+                .unwrap();
+            render(&mut modal);
+        }
+        assert_eq!(modal.textarea.scroll_offset(), 3);
+        let cursor = modal.textarea.cursor();
+        assert_eq!((cursor.row, cursor.col), (height + 2, 7));
+        let selected = modal.textarea.selected_text().unwrap();
+        assert!(selected.starts_with("00\nline 01"));
+        assert!(selected.ends_with(&format!("line {:02}", height + 2)));
+
+        // Back above the field: it scrolls up again, one row per move.
+        modal
+            .handle_mouse(drag(text.x + 2, text.y - 1), area)
+            .unwrap();
+        render(&mut modal);
+        assert_eq!(modal.textarea.scroll_offset(), 2);
+        let cursor = modal.textarea.cursor();
+        assert_eq!((cursor.row, cursor.col), (2, 2));
+        assert_eq!(
+            modal.textarea.selected_text().as_deref(),
+            Some("00\nline 01\nli")
+        );
+        modal.handle_mouse(release(0, 0), area).unwrap();
     }
 }
