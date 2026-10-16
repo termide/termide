@@ -20,11 +20,12 @@ pub struct Compat {
     pub max_tokens_field: String,
     /// How the server is asked for reasoning.
     pub reasoning: ReasoningParam,
-    /// Echo previous `reasoning_content` back in assistant messages and, with
-    /// [`ReasoningParam::EnableThinking`], ask the chat template to keep it
-    /// (`chat_template_kwargs.preserve_thinking`, Qwen 3.6 and later), so a
-    /// model reads its earlier reasoning. Off by default: DeepSeek's API
-    /// rejects the field, most servers ignore it.
+    /// Echo previous `reasoning_content` back in assistant messages and ask
+    /// the chat template to keep it (`chat_template_kwargs.preserve_thinking`,
+    /// Qwen 3.6 and later), so a model reads its earlier reasoning. The
+    /// kwarg goes with the echo, not with [`ReasoningParam::EnableThinking`]:
+    /// on, it is sent whichever field the reasoning level went in, or none.
+    /// Off by default: DeepSeek's API rejects the field, most servers ignore it.
     pub send_reasoning: bool,
     /// Ask for prompt-processing progress while streaming (llama.cpp's
     /// `return_progress`). Off by default: OpenAI rejects unknown fields.
@@ -184,6 +185,22 @@ impl OpenAiCompatProvider {
                     }
                     body.insert("chat_template_kwargs".into(), kwargs);
                 }
+            }
+        }
+        // The echo rides on its own switch. A user who asked for the model's
+        // reasoning back gets `preserve_thinking` whichever field the level
+        // went in — `enable_thinking`, `reasoning_effort`, or nowhere at all:
+        // a template that ignores the kwarg ignores it, and one that needs it
+        // to keep earlier turns, llama.cpp's among them, keeps them. Left
+        // inside the `enable_thinking` branch, an explicit `send_reasoning`
+        // never reached the template when the host left the level unserved.
+        if self.compat.send_reasoning {
+            let kwargs = body
+                .entry("chat_template_kwargs")
+                .or_insert_with(|| Value::Object(Map::new()));
+            if let Value::Object(map) = kwargs {
+                map.entry("preserve_thinking")
+                    .or_insert_with(|| json!(true));
             }
         }
         for (key, value) in &self.compat.extra_body {
@@ -903,6 +920,107 @@ mod tests {
             json!({ "enable_thinking": true, "preserve_thinking": true, "clear_thinking": false })
         );
         assert_eq!(body["messages"][1]["reasoning_content"], "plan");
+    }
+
+    /// The switch that sends reasoning back is the user's word, so it reaches
+    /// the chat template even where the reasoning level went elsewhere: a
+    /// server whose host is not recognized takes no `enable_thinking` at all,
+    /// and llama.cpp then drops the earlier reasoning unless asked to keep it.
+    #[test]
+    fn preserve_thinking_rides_on_the_echo_not_on_the_level() {
+        let messages = vec![
+            Message::User(UserMessage::text("hi")),
+            Message::Assistant(AssistantMessage {
+                content: vec![AssistantContent::thinking("plan")],
+                stop_reason: StopReason::Stop,
+                usage: Usage::default(),
+                provider: "p".into(),
+                model: "m".into(),
+                error_message: None,
+                failure: None,
+                timestamp: 0,
+            }),
+        ];
+        let body_at = |reasoning, send_reasoning| {
+            let provider = OpenAiCompatProvider::new("p", "http://x/v1").with_compat(Compat {
+                reasoning,
+                send_reasoning,
+                ..Compat::default()
+            });
+            provider.build_body(&Request {
+                model: &model(),
+                system_prompt: "",
+                messages: &messages,
+                tools: &[],
+                thinking: ThinkingLevel::High,
+            })
+        };
+
+        // No field for the level: the echo still asks the template to keep it.
+        let unserved = body_at(ReasoningParam::None, true);
+        assert_eq!(
+            unserved["chat_template_kwargs"],
+            json!({ "preserve_thinking": true })
+        );
+        assert_eq!(unserved["messages"][1]["reasoning_content"], "plan");
+
+        // Effort takes the level; the kwarg comes along, not instead.
+        let effort = body_at(ReasoningParam::Effort, true);
+        assert_eq!(effort["reasoning_effort"], "high");
+        assert_eq!(
+            effort["chat_template_kwargs"],
+            json!({ "preserve_thinking": true })
+        );
+
+        // The switch stays in the template's own field untouched.
+        let thinking = body_at(ReasoningParam::EnableThinking, true);
+        assert_eq!(
+            thinking["chat_template_kwargs"],
+            json!({ "enable_thinking": true, "preserve_thinking": true })
+        );
+
+        // Off asks for nothing: DeepSeek's API rejects what it is not asked for.
+        for reasoning in [
+            ReasoningParam::None,
+            ReasoningParam::Effort,
+            ReasoningParam::EnableThinking,
+        ] {
+            let body = body_at(reasoning, false);
+            assert!(
+                body["messages"][1].get("reasoning_content").is_none(),
+                "{reasoning:?} echoes reasoning"
+            );
+            if reasoning != ReasoningParam::EnableThinking {
+                assert!(
+                    body.get("chat_template_kwargs").is_none(),
+                    "{reasoning:?} sends kwargs unasked"
+                );
+            }
+        }
+
+        // `extra_body` merges last, so the user can still take it back.
+        let mut compat = Compat {
+            reasoning: ReasoningParam::None,
+            send_reasoning: true,
+            ..Compat::default()
+        };
+        compat.extra_body.insert(
+            "chat_template_kwargs".into(),
+            json!({ "preserve_thinking": false }),
+        );
+        let refused = OpenAiCompatProvider::new("p", "http://x/v1")
+            .with_compat(compat)
+            .build_body(&Request {
+                model: &model(),
+                system_prompt: "",
+                messages: &messages,
+                tools: &[],
+                thinking: ThinkingLevel::High,
+            });
+        assert_eq!(
+            refused["chat_template_kwargs"],
+            json!({ "preserve_thinking": false })
+        );
     }
 
     #[test]

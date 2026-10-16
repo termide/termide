@@ -5,6 +5,11 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **`send_reasoning = "on"` now reaches the chat template** ([#62](https://github.com/termide/termide/issues/62)). `preserve_thinking` went out only inside the `enable_thinking` branch, so a connection whose host left the reasoning level unserved — one named `.lan`, which `auto` does not recognize as local — sent the model's earlier reasoning back as `reasoning_content` yet never asked the template to keep it, and llama.cpp dropped it between turns: the model answered with a number it had just invented instead of the one it had thought of. The kwarg now rides on the echo itself: whenever reasoning goes back it is sent, whichever field the level went in or none. `extra_body` still merges last, so `chat_template_kwargs.preserve_thinking = false` there takes it back.
+
 ## [0.42.0] - 2026-10-16
 
 [0.42.0]: https://github.com/termide/termide/releases/tag/0.42.0
