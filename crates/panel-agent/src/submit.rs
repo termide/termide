@@ -868,6 +868,13 @@ impl AgentPanel {
         // ticks it while it lasts; the stopped answer then says it was
         // cancelled, so no notice stays behind.
         if self.is_busy() && self.stop_requested.is_none() {
+            // What the user queued for the run comes back into the input
+            // rather than going on its own after the stop (or, for an
+            // external agent, being dropped with it): having stopped, they
+            // decide whether to send it. A recalled request in the input
+            // counts as typed.
+            self.history_pos = None;
+            self.unqueue();
             self.note_delegate_stopped();
             self.runtime.abort();
             self.stop_requested = Some(Instant::now());

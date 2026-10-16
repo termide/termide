@@ -650,7 +650,7 @@ for (`↻ Usage limit reached  trying again at 21:40 (in 3m12s)`) or a pause
 asked for (`‖ Pausing  after the current step`; once it takes effect the
 transcript's `‖` line takes over, and a click anywhere on the row withdraws
 it); each message queued while the agent works (`› Queued  …`, its first line
-and how long it has waited; after three, a count of the rest); an active goal
+and how long it has waited, with a `✕`; after three, a count of the rest); an active goal
 (`◎ Heading for the goal · checking  …` while the judge decides) and loop
 (`↺ Repeating every 5m · 3/100 · next in 3m12s  …`), for as long as either
 goes on, with how long it has run — a click elsewhere on the row brings its
@@ -663,8 +663,10 @@ selects the block and brings it into view. Everything queued
 goes to the agent at once, as a single message with the pieces joined by a
 blank line — messages typed while the agent works are usually one thought
 added to — and leaves the strip then, showing up in the conversation as your
-message. Until the agent takes it, `↑` on the input's first line takes the
-queue back into the input, ahead of anything typed, to edit before it goes.
+message. Until the agent takes it, `↑` on the input's first line or the `✕`
+on a queued row takes the queue back into the input, ahead of anything typed,
+to edit before it goes; stopping the agent hands it back the same way, so
+nothing queued is sent or lost by a stop.
 
 The system prompt in effect is shown as a folded `# ` block at the start of a
 session and again whenever it changes before your next message (switching agent

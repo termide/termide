@@ -197,7 +197,9 @@ impl AgentPanel {
         for (text, since) in self.queued_texts.iter().take(STATE_QUEUED_ROWS) {
             let first = text.trim().lines().next().unwrap_or("").to_string();
             rows.push(
-                StripRow::new("›", queued_label.clone(), first, StripTarget::Queued).since(*since),
+                StripRow::new("›", queued_label.clone(), first, StripTarget::Queued)
+                    .since(*since)
+                    .stoppable(),
             );
         }
         if self.queued_texts.len() > STATE_QUEUED_ROWS {
@@ -377,6 +379,15 @@ impl AgentPanel {
                 return events;
             }
             StripTarget::Background(index) => select(self, index),
+            // `✕` takes the queue back into the input, as `↑` does: it goes
+            // as one message, so it comes back whole; a recalled request in
+            // the input counts as typed.
+            StripTarget::Queued if on_stop => {
+                self.history_pos = None;
+                if self.unqueue() {
+                    self.chat_focus = false;
+                }
+            }
             StripTarget::RetryWait | StripTarget::Queued | StripTarget::More => {}
         }
         vec![PanelEvent::NeedsRedraw]

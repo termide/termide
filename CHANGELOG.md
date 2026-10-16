@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **A queued message has a `✕`.** Its row in the agent's state strip, which already showed how long it has waited, now ends in a `✕` like the goal's and the loop's; a click on it takes the queue back into the input, as `↑` does.
+
 ### Fixed
+- **Stopping the agent hands its queue back.** A message typed while the agent worked and still waiting when you stopped it stayed in the state strip after the stop with nothing to send it, until `↑` took it back or the next request carried it along; an external agent dropped it with the cancelled turn. The stop now puts the queue in the input, ahead of anything typed, for you to send or change.
 - **`send_reasoning = "on"` now reaches the chat template** ([#62](https://github.com/termide/termide/issues/62)). `preserve_thinking` went out only inside the `enable_thinking` branch, so a connection whose host left the reasoning level unserved — one named `.lan`, which `auto` does not recognize as local — sent the model's earlier reasoning back as `reasoning_content` yet never asked the template to keep it, and llama.cpp dropped it between turns: the model answered with a number it had just invented instead of the one it had thought of. The kwarg now rides on the echo itself: whenever reasoning goes back it is sent, whichever field the level went in or none. `extra_body` still merges last, so `chat_template_kwargs.preserve_thinking = false` there takes it back.
 
 ## [0.42.0] - 2026-10-16

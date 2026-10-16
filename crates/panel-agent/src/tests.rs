@@ -304,9 +304,14 @@ fn the_state_strip_shows_queued_messages_until_the_agent_takes_them() {
     assert!(lines[1].starts_with("› Queued  first"), "{lines:?}");
     assert!(!lines[1].contains("second line"));
     assert!(lines[2].starts_with("› Queued  two"), "{lines:?}");
-    // How long each has waited at the right edge; nothing to call off yet.
+    // How long each has waited, then the `✕` that takes the queue back.
     let unit = termide_i18n::t().time_unit_secs();
-    assert!(lines[2].trim_end().ends_with(unit), "{lines:?}");
+    let tail = lines[2].trim_end();
+    assert!(tail.ends_with('✕'), "{lines:?}");
+    assert!(
+        tail.trim_end_matches('✕').trim_end().ends_with(unit),
+        "{lines:?}"
+    );
     assert!(lines[4].starts_with("› 2 more queued"), "{lines:?}");
     assert!(lines.iter().all(|l| termide_ui::str_display_width(l) <= 40));
     // The agent takes the two oldest; the strip follows its count.
@@ -9928,7 +9933,7 @@ fn a_goal_paused_by_failing_checks_ends_with_goal_stop() {
 }
 
 #[test]
-fn a_goal_set_during_a_run_ends_with_a_stop_and_leaves_the_queue_alone() {
+fn a_goal_set_during_a_run_ends_with_a_stop_and_hands_back_the_queue() {
     let mut panel = panel(vec![]);
     panel.busy = true;
     type_text(&mut panel, "/goal finish the refactor");
@@ -9945,13 +9950,9 @@ fn a_goal_set_during_a_run_ends_with_a_stop_and_leaves_the_queue_alone() {
     );
     panel.abort();
     assert!(panel.goal_task.is_none());
-    let left: Vec<String> = panel
-        .runtime
-        .take_queued()
-        .iter()
-        .map(UserMessage::typed)
-        .collect();
-    assert_eq!(left, ["are you stuck?"]);
+    // The goal took nothing from the queue; the stop hands it back.
+    assert!(panel.runtime.take_queued().is_empty());
+    assert_eq!(panel.input_text(), "are you stuck?");
 }
 
 #[test]
@@ -9964,14 +9965,54 @@ fn stopping_withdraws_the_queued_loop_turn() {
     panel.submit();
     panel.abort();
     assert!(panel.loop_task.is_none());
-    assert_eq!(
-        panel
-            .queued_texts
-            .iter()
-            .map(|(text, _)| text)
-            .collect::<Vec<_>>(),
-        ["are you stuck?"]
+    // The loop's turn is gone; the user's own message comes back to the input.
+    assert_eq!(panel.input_text(), "are you stuck?");
+    assert!(panel.queued_texts.is_empty());
+}
+
+#[test]
+fn stopping_takes_the_queue_back_into_the_input() {
+    let mut panel = panel(vec![]);
+    panel.apply(AgentEvent::AgentStart);
+    for text in ["fix the test", "and the docs"] {
+        type_text(&mut panel, text);
+        panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    }
+    assert_eq!(panel.runtime.queue_lens(), (2, 0));
+    // Esc on an empty input stops the run.
+    panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(panel.stop_requested.is_some());
+    assert_eq!(panel.input_text(), "fix the test\n\nand the docs");
+    assert_eq!(panel.runtime.queue_lens(), (0, 0));
+    panel.apply(AgentEvent::AgentEnd);
+    assert!(
+        panel.state_lines(60).is_empty(),
+        "nothing is left waiting in the strip"
     );
+    assert_eq!(panel.input_text(), "fix the test\n\nand the docs");
+}
+
+#[test]
+fn a_queued_row_shows_its_wait_and_its_cross_takes_it_back() {
+    let mut panel = panel(vec![]);
+    panel.apply(AgentEvent::AgentStart);
+    type_text(&mut panel, "fix the test");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    let rows = panel.strip_rows(60);
+    let row = rows
+        .iter()
+        .find(|row| row.target == crate::strip::StripTarget::Queued)
+        .expect("a queued row");
+    assert!(row.time.is_some(), "it shows how long it waits");
+    assert!(row.stop, "it has a ✕");
+    // Elsewhere on the row nothing happens; the ✕ takes it back.
+    panel.click_strip(crate::strip::StripTarget::Queued, false);
+    assert_eq!(panel.runtime.queue_lens(), (1, 0));
+    panel.click_strip(crate::strip::StripTarget::Queued, true);
+    assert_eq!(panel.input_text(), "fix the test");
+    assert_eq!(panel.runtime.queue_lens(), (0, 0));
+    assert!(panel.state_lines(60).is_empty());
+    assert!(panel.is_busy(), "the run goes on");
 }
 
 /// An external agent holds no copy of the request across a close, so its
