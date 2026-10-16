@@ -254,6 +254,7 @@ fn render_empty_line(
     let lsp_marker = git::get_lsp_marker(
         diagnostic_severity,
         render_context.has_breakpoint(line_idx),
+        render_context.is_execution_line(line_idx),
         theme,
     );
 
@@ -276,7 +277,7 @@ fn render_empty_line(
     }
 
     // Render LSP marker (penultimate gutter cell) with its own color
-    let marker_style = Style::default().fg(lsp_marker.color);
+    let marker_style = lsp_marker.style();
     let x = area.x + digit_cells;
     let y = area.y + visual_row as u16;
     if let Some(cell) = buf.cell_mut((x, y)) {
@@ -348,6 +349,7 @@ fn render_visual_line<H: LineHighlighter>(
         let lsp_marker = git::get_lsp_marker(
             diagnostic_severity,
             render_context.has_breakpoint(line_idx),
+            render_context.is_execution_line(line_idx),
             theme,
         );
 
@@ -371,7 +373,7 @@ fn render_visual_line<H: LineHighlighter>(
         }
 
         // Render LSP marker (penultimate gutter cell) with its own color
-        let marker_style = Style::default().fg(lsp_marker.color);
+        let marker_style = lsp_marker.style();
         let x = area.x + digit_cells;
         let y = area.y + visual_row as u16;
         if let Some(cell) = buf.cell_mut((x, y)) {

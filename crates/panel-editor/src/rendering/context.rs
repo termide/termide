@@ -34,6 +34,9 @@ pub struct RenderContext {
 
     /// Lines with a breakpoint, for the gutter marker.
     pub breakpoint_lines: BTreeSet<usize>,
+
+    /// The line a debugger stopped at, in this file.
+    pub execution_line: Option<usize>,
 }
 
 impl RenderContext {
@@ -83,6 +86,7 @@ impl RenderContext {
             diagnostic_line_severity,
             tab_size,
             breakpoint_lines: BTreeSet::new(),
+            execution_line: None,
         }
     }
 
@@ -94,6 +98,11 @@ impl RenderContext {
     /// Whether `line` carries a breakpoint.
     pub fn has_breakpoint(&self, line: usize) -> bool {
         self.breakpoint_lines.contains(&line)
+    }
+
+    /// Whether the debugger stopped at `line`.
+    pub fn is_execution_line(&self, line: usize) -> bool {
+        self.execution_line == Some(line)
     }
 }
 

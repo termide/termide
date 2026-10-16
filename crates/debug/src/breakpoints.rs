@@ -23,6 +23,8 @@ pub struct Breakpoints {
     /// Files changed since the last save; only these are written over what
     /// the file on disk holds, so two instances do not undo each other.
     touched: BTreeSet<PathBuf>,
+    /// Bumped by every change, for a running debug session to follow.
+    version: u64,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -51,6 +53,12 @@ impl Breakpoints {
             self.files.insert(path.clone(), lines);
         }
         self.touched.insert(path);
+        self.version += 1;
+    }
+
+    /// Bumped by every change of the breakpoints.
+    pub fn version(&self) -> u64 {
+        self.version
     }
 
     /// Every breakpoint, by file and then by line.
@@ -76,6 +84,7 @@ impl Breakpoints {
         let paths: Vec<PathBuf> = self.files.keys().cloned().collect();
         self.touched.extend(paths);
         self.files.clear();
+        self.version += 1;
     }
 
     /// Read the breakpoints saved in `file`; a missing file holds none.
@@ -102,6 +111,7 @@ impl Breakpoints {
         Ok(Self {
             files,
             touched: BTreeSet::new(),
+            version: 0,
         })
     }
 

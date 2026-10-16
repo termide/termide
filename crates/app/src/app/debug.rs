@@ -1,5 +1,6 @@
-//! Debug launches: a command-line debugger started in a terminal panel with
-//! the breakpoints of the project's files set.
+//! Debug launches: a debug adapter driven over DAP, shown in the debug
+//! panel, or a command-line debugger started in a terminal panel — either
+//! with the breakpoints of the project's files set.
 //!
 //! What to debug comes from the commands with a `debugger` in
 //! `commands.toml`, or — for a Python or Go file — from the file alone.
@@ -8,7 +9,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use termide_config::commands::{CommandItem, CommandsRegistry};
-use termide_debug::{breakpoints, Breakpoint, Debugger, Launch};
+use termide_debug::dap::{self, Adapter, LaunchSpec, Session};
+use termide_debug::{breakpoints, execution, Breakpoint, Debugger, Launch};
 
 use super::App;
 use crate::PanelExt;
@@ -20,12 +22,23 @@ pub(super) enum DebugChoice {
     Command(CommandItem),
     /// The launch a file needs no configuration for.
     File { launch: Launch, cwd: PathBuf },
+    /// A file debugged over DAP without configuration.
+    Dap(LaunchSpec),
 }
 
 impl App {
     /// Start debugging: the only launch there is, or a list to choose from.
     /// `file` is the file the request came from.
     pub(in crate::app) fn start_debug(&mut self, file: Option<PathBuf>) -> Result<()> {
+        // While a session runs, the key resumes it rather than starting another.
+        {
+            let mut slot = self.debug_session.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(session) = slot.as_mut().filter(|s| s.is_active()) {
+                session.continue_();
+                self.state.needs_redraw = true;
+                return Ok(());
+            }
+        }
         // Read the files afresh, as the Commands menu does when it opens.
         let registry = CommandsRegistry::load_merged(Some(&self.project_root)).unwrap_or_default();
         let mut choices: Vec<DebugChoice> = registry
@@ -35,11 +48,22 @@ impl App {
             .map(DebugChoice::Command)
             .collect();
         if let Some(file) = file.as_deref() {
-            if let Some(launch) = Launch::for_file(file) {
-                let cwd = file
-                    .parent()
-                    .map(Path::to_path_buf)
-                    .unwrap_or_else(|| self.project_root.clone());
+            let cwd = file
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| self.project_root.clone());
+            let python = Launch::for_file(file).is_some_and(|l| l.debugger == Debugger::Pdb);
+            if python && dap::debugpy_available() {
+                choices.push(DebugChoice::Dap(LaunchSpec {
+                    adapter: Adapter::Debugpy,
+                    program: file.to_string_lossy().into_owned(),
+                    args: Vec::new(),
+                    cwd,
+                    build: None,
+                    env: Vec::new(),
+                    label: file_label(file),
+                }));
+            } else if let Some(launch) = Launch::for_file(file) {
                 choices.push(DebugChoice::File { launch, cwd });
             }
         }
@@ -89,6 +113,10 @@ impl App {
             // Through the usual entry, so its parameters are asked for first.
             DebugChoice::Command(command) => self.start_command(command),
             DebugChoice::File { launch, cwd } => self.launch_debugger(&launch, cwd, &[]),
+            DebugChoice::Dap(spec) => {
+                self.launch_dap(spec);
+                Ok(())
+            }
         }
     }
 
@@ -101,6 +129,30 @@ impl App {
         env: &[(String, String)],
     ) -> Result<()> {
         let name = command.debugger().unwrap_or_default();
+        if let Some(adapter) = Adapter::parse(name) {
+            let text = command.command.clone().unwrap_or_default();
+            let Some((program, args)) = dap::split_words(&text)
+                .and_then(|words| words.split_first().map(|(p, a)| (p.clone(), a.to_vec())))
+            else {
+                self.show_error_modal(termide_i18n::t().command_run_failed_fmt(&text));
+                return Ok(());
+            };
+            let label = command
+                .metadata
+                .as_ref()
+                .and_then(|m| m.display_name.clone())
+                .unwrap_or_else(|| command.name.clone());
+            self.launch_dap(LaunchSpec {
+                adapter,
+                program,
+                args,
+                cwd: self.project_root.clone(),
+                build: command.metadata.as_ref().and_then(|m| m.build.clone()),
+                env: env.to_vec(),
+                label,
+            });
+            return Ok(());
+        }
         let Some(debugger) = Debugger::parse(name) else {
             self.show_error_modal(termide_i18n::t().debug_unknown_debugger_fmt(name));
             return Ok(());
@@ -160,6 +212,124 @@ impl App {
         Ok(())
     }
 
+    /// Start a DAP session in the debug panel, ending the one before.
+    fn launch_dap(&mut self, spec: LaunchSpec) {
+        self.sync_editor_breakpoints();
+        breakpoints::flush();
+        let (set, version) = {
+            let store = breakpoints::store();
+            (
+                project_breakpoints(&store.all(), &self.project_root),
+                store.version(),
+            )
+        };
+        log::info!(
+            "Debugging {} with {} ({} breakpoints) in {:?}",
+            spec.program,
+            spec.adapter.as_str(),
+            set.len(),
+            spec.cwd
+        );
+        self.end_debug_session();
+        *self.debug_session.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(Session::start(spec, set));
+        self.debug_breakpoints_version = version;
+        self.debug_revealed = None;
+
+        let open = self
+            .layout_manager
+            .focus_panel_where(|p| p.name() == "debug");
+        if !open {
+            self.close_help_panels();
+            let panel = termide_panel_debug::DebugPanel::new(self.debug_session.clone());
+            self.add_panel(Box::new(panel));
+        }
+        self.state.needs_redraw = true;
+    }
+
+    /// End the running session, ending its program.
+    pub(in crate::app) fn end_debug_session(&mut self) {
+        if let Some(mut old) = self
+            .debug_session
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
+            old.stop();
+        }
+        if execution::set(None) {
+            self.state.needs_redraw = true;
+        }
+    }
+
+    /// Apply what the adapter sent, pass breakpoint changes on, and show
+    /// where the program stopped. Called every tick.
+    pub(in crate::app) fn poll_debug_session(&mut self) {
+        let (changed, point, active) = {
+            let mut slot = self.debug_session.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(session) = slot.as_mut() else {
+                return;
+            };
+            let mut changed = session.poll();
+            if session.is_active() {
+                let store = breakpoints::store();
+                if store.version() != self.debug_breakpoints_version {
+                    self.debug_breakpoints_version = store.version();
+                    let set = project_breakpoints(&store.all(), &self.project_root);
+                    drop(store);
+                    session.update_breakpoints(&set);
+                    changed = true;
+                }
+            }
+            let point = session.execution_point().filter(|(path, _)| path.is_file());
+            (changed, point, session.is_active())
+        };
+        if execution::set(point.clone()) || changed {
+            self.state.needs_redraw = true;
+        }
+        if point.is_some() && point != self.debug_revealed {
+            if let Some((path, line)) = point.clone() {
+                self.reveal_execution_point(&path, line);
+            }
+            self.debug_revealed = point;
+        } else if point.is_none() {
+            self.debug_revealed = None;
+        }
+        if !active {
+            self.debug_revealed = None;
+        }
+    }
+
+    /// Show `line` (1-based) of `path` in an editor without taking the focus
+    /// from the debug panel: the editor that has the file, or a new one.
+    fn reveal_execution_point(&mut self, path: &Path, line: usize) {
+        let canonical = dunce::canonicalize(path).ok();
+        for panel in self.layout_manager.iter_all_panels_mut() {
+            if let Some(editor) = panel.as_editor_mut() {
+                let same = editor.file_path().is_some_and(|p| {
+                    p == path || canonical.is_some() && dunce::canonicalize(p).ok() == canonical
+                });
+                if same {
+                    editor.reveal_line(line.saturating_sub(1));
+                    return;
+                }
+            }
+        }
+        match termide_panel_editor::Editor::open_file_with_config(
+            path.to_path_buf(),
+            self.state.editor_config(),
+        ) {
+            Ok(mut editor) => {
+                editor.reveal_line(line.saturating_sub(1));
+                if let Some(ref mut lsp_manager) = self.state.lsp_manager {
+                    editor.init_lsp(lsp_manager);
+                }
+                self.add_panel_without_focus(Box::new(editor));
+            }
+            Err(e) => log::warn!("Debug: cannot open {}: {e}", path.display()),
+        }
+    }
+
     /// Remove every breakpoint, from the store and from open editors.
     pub(in crate::app) fn clear_breakpoints(&mut self) {
         breakpoints::store().clear();
@@ -196,8 +366,17 @@ impl App {
     }
 }
 
+fn file_label(file: &Path) -> String {
+    file.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
 fn choice_label(choice: &DebugChoice, file: Option<&Path>) -> String {
     match choice {
+        DebugChoice::Dap(spec) => {
+            termide_i18n::t().debug_current_file_fmt(&spec.label, spec.adapter.as_str())
+        }
         DebugChoice::Command(command) => command
             .metadata
             .as_ref()

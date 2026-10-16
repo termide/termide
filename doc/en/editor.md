@@ -495,13 +495,13 @@ TermIDE tells `docker-language-server` to send no telemetry when it starts; the 
 | Shortcut   | Action                                                        |
 |------------|---------------------------------------------------------------|
 | `Ctrl+F8`  | Set or remove a breakpoint on the cursor line (`toggle_breakpoint`) |
-| `F5`       | Start debugging (`start_debug`)                               |
+| `F5`       | Start debugging (`start_debug`); continue while a session is stopped |
 
 A breakpoint is drawn as a red `●` in the cell right of the line number, where a diagnostic's `▶` would be; it takes that cell over a diagnostic, whose message still shows on its own line below. A click on a line number sets or removes one too. Both work in view mode and in every Vim mode, as neither changes the text.
 
 A breakpoint stays with its text as you edit: lines added or removed above move it, a deleted line takes its breakpoint with it, and lines joined into one keep it on the joined line. Breakpoints are kept per file in `breakpoints.toml` in the data directory (`~/.local/share/termide/` on Linux, `~/Library/Application Support/termide/` on macOS), so they come back when the file is opened again, in any project and after a restart. **Remove all breakpoints** in the command palette clears them everywhere.
 
-`F5` starts a command-line debugger (lldb, gdb, Delve or pdb) in a new terminal panel with the project's breakpoints set and runs the program to the first one. What it debugs comes from a command with a `debugger` in `commands.toml`, or, for a Python or Go file, from the file alone; see [Debugging](actions.md#debugging).
+`F5` starts debugging with the project's breakpoints set and runs the program to the first one: through a debug adapter (lldb-dap, gdb, debugpy) in the debug panel, or a command-line debugger (lldb, gdb, Delve, pdb) in a terminal panel. What it debugs comes from a command with a `debugger` in `commands.toml`, or, for a Python or Go file, from the file alone; see [Debugging](actions.md#debugging). When a debug adapter stops the program, the line it stopped at gets `→` on a highlighted cell in the gutter and the cursor; stepping moves it.
 
 ## Vim Mode
 

@@ -160,6 +160,7 @@ pub fn panel_icon(name: &str) -> &'static str {
         "git_diff" => "🔀",
         "image" => "🎨",
         "diagnostics" => "🚧",
+        "debug" => "🐞",
         "outline" => "📑",
         "operations" => "🔄",
         "agent" => "🤖",

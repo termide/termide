@@ -58,7 +58,7 @@ mode = "background"
 | `group` | no | Puts the command into a submenu with this name |
 | `key` | no | Hotkey that runs the command, e.g. `Ctrl+Shift+D`, see [Hotkeys](#hotkeys) |
 | `params` | no | Values asked for before the command runs, see [Parameters](#parameters) |
-| `debugger` | no | `lldb`, `gdb`, `dlv` or `pdb`: the command runs under this debugger, see [Debugging](#debugging) |
+| `debugger` | no | `lldb-dap`, `gdb-dap`, `debugpy`, `lldb`, `gdb`, `dlv` or `pdb`: the command runs under this debugger, see [Debugging](#debugging) |
 | `build` | no | With `debugger`: a shell command run first; the debugger starts only if it succeeds |
 
 An unknown `mode` falls back to `terminal`. If a file cannot be parsed, none of its commands appear; the reason is written to the log.
@@ -103,7 +103,7 @@ Saving from the form, renaming or deleting edits `commands.toml` in place: the o
 
 ## Execution modes
 
-A command with a `debugger` runs in a terminal panel in the project root whatever its `mode`, see [Debugging](#debugging). Every other command runs in the working directory of the focused panel (for example, the directory shown in a file manager or the current directory of a terminal), or in the project root if the panel has none.
+A command with a `debugger` runs in the project root, in the debug panel or a terminal panel, whatever its `mode`, see [Debugging](#debugging). Every other command runs in the working directory of the focused panel (for example, the directory shown in a file manager or the current directory of a terminal), or in the project root if the panel has none.
 
 | Mode | How it runs | Output |
 |------|-------------|--------|
@@ -177,10 +177,16 @@ The form's `Hotkey:` field accepts `Ctrl`, `Alt` and `Shift` combined with a let
 
 ## Debugging
 
-A command with `debugger` starts a command-line debugger in a new terminal panel, sets the breakpoints placed in the editor (see [Breakpoints](editor.md#breakpoints-and-debugging)) and runs the program to the first one. From there the debugger is yours: step, print and continue with its own commands. `command` is then what to debug, as shell text:
+A command with `debugger` debugs a program with the breakpoints placed in the editor (see [Breakpoints](editor.md#breakpoints-and-debugging)) set, and runs it to the first one. `command` is then what to debug. Two kinds of debugger are supported:
+
+- a **debug adapter**, driven by TermIDE over the Debug Adapter Protocol and shown in the [debug panel](#the-debug-panel): `lldb-dap`, `gdb-dap`, `debugpy`;
+- a **command-line debugger** started in a new terminal panel, where you step, print and continue with its own commands: `lldb`, `gdb`, `dlv`, `pdb`.
 
 | `debugger` | `command` is | Runs as |
 |------------|--------------|---------|
+| `lldb-dap` | the program and its arguments | LLVM's `lldb-dap` (on macOS also found through `xcrun`; `lldb-vscode` in older LLVM): Rust, C, C++ |
+| `gdb-dap` | the program and its arguments | `gdb -i dap`, GDB 14 or later |
+| `debugpy` | the script and its arguments | `python3 -m debugpy.adapter`; needs `pip install debugpy` |
 | `lldb` | the program and its arguments | `lldb -s <script> -- <command>` |
 | `gdb` | the program and its arguments | `gdb -q -x <script> --args <command>` |
 | `dlv` | Delve's subcommand and its arguments, e.g. `debug ./cmd/app` | `dlv --init <script> <command>` |
@@ -190,16 +196,38 @@ A command with `debugger` starts a command-line debugger in a new terminal panel
 [debug-app]
 name = "Debug app"
 command = "target/debug/app --verbose"
-debugger = "lldb"
+debugger = "lldb-dap"
 build = "cargo build"
 key = "Ctrl+Alt+D"
 ```
 
-The script holds a `breakpoint set` or `break` for each breakpoint and then `run` (lldb, gdb) or `continue` (Delve); it is written to `termide-debug` in the system's temporary directory. Only breakpoints in files under the project root go in, each to the debugger for its language: Python files to pdb, Go files to Delve, the rest to lldb and gdb. Debug commands run in the project root, so a relative program path such as `target/debug/app` means the same wherever the focus is. Parameters work as for other commands.
+For a debug adapter, `command` is split into words as a shell would split it (quotes and backslashes work) but no shell runs it: variables, `~` and globs are not expanded. `build` runs first, its output going to the debug panel; the adapter starts only if it succeeds. A command-line debugger reads its breakpoints from a script — a `breakpoint set` or `break` for each, then `run` (lldb, gdb) or `continue` (Delve) — written to `termide-debug` in the system's temporary directory; breakpoints set while it runs reach it only on the next launch, so set them in the debugger itself meanwhile.
 
-`F5` in the editor (`start_debug`), or **Start debugging** in the command palette, starts debugging: with one launch available it starts at once, with several it offers them as a list. The launches are the debug commands of the project and the global file and, when the focused editor holds a Python or Go file, that file itself — a script under pdb, the Go package in its directory under Delve (`dlv debug`) — which needs no command. With none, the status bar says so.
+Only breakpoints in files under the project root go in, each to the debugger for its language: Python files to debugpy and pdb, Go files to Delve, the rest to lldb and gdb. Debug commands run in the project root, so a relative program path such as `target/debug/app` means the same wherever the focus is. Parameters work as for other commands; for a debug adapter they reach the build and the adapter as environment variables.
 
-Breakpoints set while the debugger runs reach it only on the next launch; set them in the debugger itself meanwhile.
+`F5` in the editor (`start_debug`), or **Start debugging** in the command palette, starts debugging: with one launch available it starts at once, with several it offers them as a list. The launches are the debug commands of the project and the global file and, when the focused editor holds a Python or Go file, that file itself, which needs no command: a script runs under debugpy in the debug panel when debugpy is installed and under pdb in a terminal otherwise; a Go file's package runs under Delve (`dlv debug`) in a terminal. With none, the status bar says so. While a debug session is active, `F5` continues the program instead.
+
+### The debug panel
+
+A launch through a debug adapter opens the debug panel (or reuses the open one). Its top line shows the session and where it stands — building, starting, running, stopped and why, exited with its code, or failed with the reason — and the keys. Below it are three sections:
+
+- **Call stack** — the frames of the thread that stopped, innermost first, each with its file and line. `Enter` or a click on a frame shows its variables and its line in an editor.
+- **Variables** — the scopes of the selected frame; the first one that is cheap to fetch opens by itself. `Enter`, `Space` or `→` opens a variable with members (fetched the first time), `←` closes it or goes to its parent; a second click on a row toggles it.
+- **Output** — the program's standard output and error, the adapter's messages, the build's output and evaluated expressions with their values. It follows new output; `↑`/`PgUp` scroll back and `Enter` returns to the end.
+
+| Key | Action |
+|-----|--------|
+| `c` / `F5` | Continue |
+| `n` | Step over |
+| `s` | Step into |
+| `o` | Step out |
+| `p` | Pause the running program |
+| `x` | Stop: end the session and the program |
+| `e` | Evaluate an expression in the selected frame |
+| `Tab` / `Shift+Tab` | Next / previous section |
+| `↑` `↓` `PgUp` `PgDn` `Home` `End` | Move in the section |
+
+When the program stops, the editor that has the file moves its cursor to the line, scrolling only as far as needed, and the gutter marks it with `→` on a highlighted cell; a file not open yet opens in a new editor, the focus staying on the panel. Breakpoints set or removed while the session runs reach the adapter at once. Closing the panel or starting another launch ends the session and its program. The program's standard input is not connected.
 
 ## Tips
 

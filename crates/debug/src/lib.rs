@@ -3,6 +3,8 @@
 //! (lldb, gdb, Delve, pdb) in a terminal with those breakpoints set.
 
 pub mod breakpoints;
+pub mod dap;
+pub mod execution;
 mod launch;
 
 pub use launch::{shell_quote, Breakpoint, Debugger, Launch};

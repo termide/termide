@@ -88,6 +88,7 @@ mod tests {
             diagnostic_line_severity: HashMap::new(),
             tab_size: 4,
             breakpoint_lines: Default::default(),
+            execution_line: None,
         }
     }
 

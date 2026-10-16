@@ -63,6 +63,7 @@ termide-fetch = { path = "../fetch" }
 termide-panel-git-status = { path = "../panel-git-status" }
 termide-panel-git-log = { path = "../panel-git-log" }
 termide-panel-git-diff = { path = "../panel-git-diff" }
+termide-panel-debug = { path = "../panel-debug" }
 termide-panel-diagnostics = { path = "../panel-diagnostics" }
 termide-panel-misc = { path = "../panel-misc" }
 termide-agent-core = { path = "../agent-core" }

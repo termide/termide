@@ -333,6 +333,18 @@ impl Translation for RuntimeTranslation {
         debug_select_title,
         debug_nothing_to_launch,
         debug_breakpoints_cleared,
+        debug_panel_title,
+        debug_section_stack,
+        debug_section_variables,
+        debug_section_output,
+        debug_status_building,
+        debug_status_starting,
+        debug_status_running,
+        debug_status_ended,
+        debug_no_session,
+        debug_no_frames,
+        debug_hints,
+        debug_evaluate_prompt,
         lsp_rename_no_identifier,
         lsp_rename_unsaved_file,
         lsp_rename_no_changes,
@@ -2052,6 +2064,18 @@ impl Translation for RuntimeTranslation {
 
     fn debug_unknown_debugger_fmt(&self, name: &str) -> String {
         self.format("debug_unknown_debugger_fmt", &[("name", name)])
+    }
+
+    fn debug_status_stopped_fmt(&self, reason: &str) -> String {
+        self.format("debug_status_stopped_fmt", &[("reason", reason)])
+    }
+
+    fn debug_status_exited_fmt(&self, code: &str) -> String {
+        self.format("debug_status_exited_fmt", &[("code", code)])
+    }
+
+    fn debug_status_failed_fmt(&self, error: &str) -> String {
+        self.format("debug_status_failed_fmt", &[("error", error)])
     }
 
     fn command_name_taken_fmt(&self, name: &str) -> String {

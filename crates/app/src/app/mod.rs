@@ -78,6 +78,12 @@ pub struct App {
     command_palette_actions: Option<Vec<String>>,
     /// Debug launches offered by the open choice list (index → launch).
     debug_choices: Option<Vec<debug::DebugChoice>>,
+    /// The DAP session, shared with the debug panel.
+    debug_session: termide_debug::dap::SharedSession,
+    /// Breakpoint store version the session was last told about.
+    debug_breakpoints_version: u64,
+    /// The stop last shown in an editor, so each stop is shown once.
+    debug_revealed: Option<(std::path::PathBuf, usize)>,
     /// Capability-aware key normalizer. Used to build a `KeyChord` from
     /// raw `KeyEvent`s on the dispatch boundary so that all matchers
     /// downstream see canonical keys while text-input and PTY paths
@@ -199,6 +205,9 @@ impl App {
             title_click_tracker: ClickTracker::new(),
             command_palette_actions: None,
             debug_choices: None,
+            debug_session: Default::default(),
+            debug_breakpoints_version: 0,
+            debug_revealed: None,
             normalizer: termide_keyboard::KeyNormalizer::default(),
             keyboard_caps: termide_keyboard::KeyboardCaps::default(),
             persist_layout: true,
@@ -297,6 +306,9 @@ impl App {
             title_click_tracker: ClickTracker::new(),
             command_palette_actions: None,
             debug_choices: None,
+            debug_session: Default::default(),
+            debug_breakpoints_version: 0,
+            debug_revealed: None,
             normalizer: termide_keyboard::KeyNormalizer::new(caps),
             keyboard_caps: caps,
             persist_layout: true,
@@ -991,6 +1003,7 @@ impl App {
         self.save_parked_layouts();
         self.sync_editor_breakpoints();
         termide_debug::breakpoints::flush();
+        self.end_debug_session();
         Ok(())
     }
 
@@ -1001,6 +1014,7 @@ impl App {
     /// operation-manager, git/command/fetch pollers and the always-on
     /// system-resource / LSP-completion / modal-spinner updates.
     fn poll_background(&mut self) {
+        self.poll_debug_session();
         self.flush_settings_save();
         self.poll_settings_model_fetch();
         if let Some(termide_modal::ActiveModal::Input(modal)) = self.state.active_modal.as_mut() {

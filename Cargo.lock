@@ -5075,6 +5075,7 @@ dependencies = [
  "termide-panel-agent",
  "termide-panel-binary",
  "termide-panel-db",
+ "termide-panel-debug",
  "termide-panel-diagnostics",
  "termide-panel-editor",
  "termide-panel-file-manager",
@@ -5190,8 +5191,10 @@ name = "termide-debug"
 version = "0.42.0"
 dependencies = [
  "anyhow",
+ "dunce",
  "log",
  "serde",
+ "serde_json",
  "tempfile",
  "termide-config",
  "toml",
@@ -5422,6 +5425,20 @@ dependencies = [
  "tokio",
  "unicode-width",
  "url",
+]
+
+[[package]]
+name = "termide-panel-debug"
+version = "0.42.0"
+dependencies = [
+ "crossterm",
+ "ratatui",
+ "termide-config",
+ "termide-core",
+ "termide-debug",
+ "termide-i18n",
+ "termide-theme",
+ "unicode-width",
 ]
 
 [[package]]

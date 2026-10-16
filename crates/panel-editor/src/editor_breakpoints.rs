@@ -33,6 +33,16 @@ impl Editor {
         set
     }
 
+    /// Put the cursor on `line` (0-based), scrolling only as far as needed
+    /// to show it: the debugger stepping through the file moves the view
+    /// with it but does not jump it about.
+    pub fn reveal_line(&mut self, line: usize) {
+        let line = line.min(self.buffer.line_count().saturating_sub(1));
+        self.cursor = termide_buffer::Cursor::at(line, 0);
+        self.selection = None;
+        self.scroll_follows_cursor = true;
+    }
+
     /// Take this file's breakpoints from the store.
     pub fn reload_breakpoints(&mut self) {
         let Some(path) = self.buffer.file_path() else {
