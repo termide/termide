@@ -5452,6 +5452,7 @@ dependencies = [
  "termide-keyboard",
  "termide-lsp",
  "termide-modal",
+ "termide-panel-markdown",
  "termide-panel-outline",
  "termide-project",
  "termide-state",

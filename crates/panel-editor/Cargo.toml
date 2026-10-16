@@ -30,6 +30,8 @@ termide-i18n = { path = "../i18n" }
 termide-keyboard = { path = "../keyboard" }
 termide-lsp = { path = "../lsp" }
 termide-modal = { path = "../modal" }
+# Hover popups render their Markdown with the shared renderer
+termide-panel-markdown = { path = "../panel-markdown" }
 termide-project = { path = "../project" }
 termide-state = { path = "../state" }
 termide-system-monitor = { path = "../system-monitor" }
