@@ -39,6 +39,8 @@ use termide_panel_agent::{
 use super::App;
 
 mod ask_place;
+mod debug_tool;
+pub(in crate::app) use debug_tool::Waiter as DebugWaiter;
 mod headless;
 mod in_panel;
 mod peers;
@@ -571,6 +573,8 @@ impl AgentCatalog for FsCatalog {
             for tool in peers::peer_tools(name, &self.project_root) {
                 tools.insert(tool);
             }
+            // The debugger, driven as the user drives it in the debug panel.
+            tools.insert(debug_tool::debug_tool(&self.project_root));
         }
         // The `task` tool lets this agent hand work to the others, and its
         // `tools` list can leave it out like any other capability; only when
@@ -2701,6 +2705,7 @@ mod tests {
         for tool in peers::peer_tools(DEFAULT_AGENT, tmp.path()) {
             tools.insert(tool);
         }
+        tools.insert(debug_tool::debug_tool(tmp.path()));
 
         let mut names: Vec<&str> = tools.iter().map(|tool| tool.name()).collect();
         names.sort_unstable();
@@ -3890,7 +3895,7 @@ done"#;
         let default = catalog.resolve(DEFAULT_AGENT).unwrap();
         // The built-in four, plus the two that speak to the user watching the
         // panel, `question` and `suggest_command`, and the two that speak to
-        // the agents of the other panels.
+        // the agents of the other panels, and the debugger.
         assert_eq!(
             default.tools.names(),
             [
@@ -3901,7 +3906,8 @@ done"#;
                 "question",
                 "suggest_command",
                 "agents",
-                "send_message"
+                "send_message",
+                "debug"
             ]
         );
         assert!(default

@@ -84,6 +84,8 @@ pub struct App {
     debug_breakpoints_version: u64,
     /// The stop last shown in an editor, so each stop is shown once.
     debug_revealed: Option<(std::path::PathBuf, usize)>,
+    /// Agents' `debug` calls waiting for the session to get somewhere.
+    debug_waiters: Vec<agent_panel::DebugWaiter>,
     /// Capability-aware key normalizer. Used to build a `KeyChord` from
     /// raw `KeyEvent`s on the dispatch boundary so that all matchers
     /// downstream see canonical keys while text-input and PTY paths
@@ -208,6 +210,7 @@ impl App {
             debug_session: Default::default(),
             debug_breakpoints_version: 0,
             debug_revealed: None,
+            debug_waiters: Vec::new(),
             normalizer: termide_keyboard::KeyNormalizer::default(),
             keyboard_caps: termide_keyboard::KeyboardCaps::default(),
             persist_layout: true,
@@ -309,6 +312,7 @@ impl App {
             debug_session: Default::default(),
             debug_breakpoints_version: 0,
             debug_revealed: None,
+            debug_waiters: Vec::new(),
             normalizer: termide_keyboard::KeyNormalizer::new(caps),
             keyboard_caps: caps,
             persist_layout: true,
@@ -1015,6 +1019,7 @@ impl App {
     /// system-resource / LSP-completion / modal-spinner updates.
     fn poll_background(&mut self) {
         self.poll_debug_session();
+        self.serve_debug_tool();
         self.flush_settings_save();
         self.poll_settings_model_fetch();
         if let Some(termide_modal::ActiveModal::Input(modal)) = self.state.active_modal.as_mut() {

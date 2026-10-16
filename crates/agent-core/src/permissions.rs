@@ -164,6 +164,9 @@ fn not_read_only(call: &ToolCall) -> Option<String> {
         // which only reads the project's history and code, or `agents`,
         // which lists the panels.
         "read" | "skill" | "fetch" | "web_search" | "question" | "recall" | "agents" => None,
+        // Reading the debug session changes nothing; every other action runs
+        // or stops the program.
+        "debug" if call.arguments["action"] == "state" => None,
         "bash" => {
             let parsed = split_shell(call.arguments["command"].as_str().unwrap_or(""));
             if parsed.has_substitution {
@@ -3734,6 +3737,18 @@ mod tests {
             &call(
                 "send_message",
                 json!({ "to": 2, "kind": "info", "text": "edit it" })
+            )
+        ));
+        // Reading the debug session is look-only; running the program is not.
+        assert!(!blocked(
+            &mut guard,
+            &call("debug", json!({ "action": "state" }))
+        ));
+        assert!(blocked(
+            &mut guard,
+            &call(
+                "debug",
+                json!({ "action": "start", "command": "debug-app" })
             )
         ));
 

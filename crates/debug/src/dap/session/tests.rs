@@ -423,3 +423,34 @@ fn a_tcp_adapter_is_reached_at_the_address_it_printed() {
     assert_eq!(launch["arguments"]["mode"], "debug");
     assert_eq!(launch["arguments"]["program"], ".");
 }
+
+#[test]
+fn the_session_reads_as_text_for_an_agent() {
+    let mut h = Harness::stopped_at_breakpoint();
+    assert!(!h.session.is_busy(), "stack and locals are in");
+    h.event(
+        "output",
+        json!({ "category": "stdout", "output": "hello\n" }),
+    );
+    let text = h.session.describe(10);
+    assert!(text.contains("stopped: breakpoint"), "{text}");
+    assert!(text.contains("At: /p/src/main.rs:4"), "{text}");
+    assert!(text.contains("*#0 app::main  /p/src/main.rs:4"), "{text}");
+    assert!(text.contains("a: i32 = 41"), "{text}");
+    assert!(text.contains("Registers: (not fetched)"), "{text}");
+    assert!(text.contains("  hello"), "{text}");
+
+    h.session.step_over();
+    assert!(h.session.is_busy());
+    h.event("stopped", json!({ "reason": "step", "threadId": 1 }));
+    assert!(h.session.is_busy(), "the stack is still to come");
+}
+
+#[test]
+fn an_evaluation_is_counted_with_its_result() {
+    let mut h = Harness::stopped_at_breakpoint();
+    h.session.evaluate("a");
+    h.respond("evaluate", json!({ "result": "41" }));
+    assert_eq!(h.session.evaluations, 1);
+    assert_eq!(h.session.last_evaluation, Some(Ok("41".into())));
+}

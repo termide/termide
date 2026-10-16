@@ -890,8 +890,9 @@ session log on a dead branch.
 The agent's built-in tools are listed below, plus those its MCP servers
 provide (see [MCP servers](#mcp-servers)). The panel's own agent, and Claude
 Code on termide's tools, also have **question** and **suggest_command**,
-described after the list, and **agents** and **send_message** (see
-[Talking to other panels](#talking-to-other-panels)).
+described after the list, **agents** and **send_message** (see
+[Talking to other panels](#talking-to-other-panels)), and **debug** (see
+[Debugging](#debugging)).
 
 Calls the model asks for in one reply that change nothing — `read`, `recall`,
 `fetch`, `web_search`, `skill`, a look-only `bash` command such as `rg` or
@@ -1112,6 +1113,34 @@ model = ""                   # a model of it; empty: the connection's (a CLI one
 The solver's instructions are `system/recall.md` (see
 [Service prompts](#service-prompts)).
 
+### Debugging
+
+The panel's own agent, and Claude Code on termide's tools, drive the debugger
+with **debug** as the user does in the debug panel (see
+[Debugging](actions.md#debugging)). `action` is one of:
+
+| Action | What it does |
+|--------|--------------|
+| `start` | Debug `command` — the identifier or label of a command with a debug adapter in `commands.toml` — or `file`, a Python script or the Go package of a file's directory, with the project's breakpoints set; waits up to 10 minutes, a build included, for the first stop or the end |
+| `breakpoint` | Set the breakpoint at `file`:`line`, or remove it with `set: false`; editors show it at once, and a running session gets it |
+| `continue`, `step_over`, `step_in`, `step_out` | Resume the stopped program and wait up to a minute for the next stop or the end |
+| `pause`, `stop` | Stop the running program where it is; end the session and the program |
+| `evaluate` | The value of `expression` in the selected frame |
+| `frame` | Select frame `frame` of the call stack, 0 the innermost |
+| `state` | The session as it stands |
+
+Each answer is the session as text: where it stands, the file and line it
+stopped at, the call stack with the selected frame marked `*`, the variables
+of the frame's scopes that are open, and the last 30 lines of output. A wait
+that runs out says the program still runs; `state` or `pause` follow it up.
+A session the agent starts opens the debug panel beside the others without
+taking the focus, and is the same session the user sees there: either can
+step it. Only debug adapters can be driven: a command whose `debugger` is a
+command-line debugger in a terminal, or one that asks for parameters, is
+refused with the reason, as is a file whose adapter (debugpy, Delve) is not
+installed. The session ends when the panel is closed, `stop` is called or
+another launch starts.
+
 ## Permissions
 
 Permissions are a control, not isolation: termide has no sandbox. The agent's
@@ -1296,7 +1325,8 @@ and a `deny` rule refuses it even when its server calls it read-only.
 `task` runs too: the subagent is held to plan mode whatever its `AGENT.md`
 says, so it only reads. `suggest_command` puts its card up with only **Copy**
 and **Don't run**. `send_message` is refused: the panel it reaches is not in
-plan mode, and could make the change this one may not.
+plan mode, and could make the change this one may not. `debug` only reads the
+session (`state`); starting, stepping or stopping the program is refused.
 
 The default instructions have the agent work the task through with you
 before it writes the plan. It explores first and finds out the facts itself,
@@ -1953,8 +1983,8 @@ to change how the answer is drawn or cited.
 
 What the model is told about each built-in tool is a file too:
 `tools/<name>.md` for `read`, `edit`, `write`, `bash`, `question`,
-`suggest_command`, `task`, `skill`, `fetch`, `web_search`, `recall`, `agents`
-and `send_message`, seeded
+`suggest_command`, `task`, `skill`, `fetch`, `web_search`, `recall`, `agents`,
+`send_message` and `debug`, seeded
 and kept current like the `system/` files, and read from the configuration
 level only. The body is the description the model sees with the tool;
 `snippet:` in the front matter is its line in the system prompt's tool list

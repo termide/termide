@@ -174,6 +174,9 @@ pub struct Session {
     pub output: VecDeque<OutputLine>,
     /// Bumped by every change the panel should show.
     pub version: u64,
+    /// Evaluations answered, the last one's result or error.
+    pub evaluations: u64,
+    pub last_evaluation: Option<Result<String, String>>,
 
     exit_code: Option<i64>,
     thread_id: Option<i64>,
@@ -235,6 +238,8 @@ impl Session {
             scopes: Vec::new(),
             output: VecDeque::new(),
             version: 0,
+            evaluations: 0,
+            last_evaluation: None,
             exit_code: None,
             thread_id: None,
             generation: 0,
@@ -271,6 +276,98 @@ impl Session {
         }
         let frame = self.frames.get(self.selected_frame)?;
         Some((frame.path.clone()?, frame.line))
+    }
+
+    /// Whether the program is on its way somewhere: building, starting,
+    /// running, or stopped with its stack and variables still being fetched.
+    pub fn is_busy(&self) -> bool {
+        match self.status {
+            Status::Building | Status::Starting | Status::Running => true,
+            Status::Stopped { .. } => self.pending.values().any(|p| {
+                matches!(
+                    p,
+                    Pending::StackTrace { .. }
+                        | Pending::Scopes { .. }
+                        | Pending::Variables { .. }
+                        | Pending::Threads {
+                            then_stack: true,
+                            ..
+                        }
+                )
+            }),
+            _ => false,
+        }
+    }
+
+    /// The session as text, for an agent: where it stands, the call stack,
+    /// the open variables of the selected frame and the last `output_lines`
+    /// lines of output.
+    pub fn describe(&self, output_lines: usize) -> String {
+        let mut out = String::new();
+        let status = match &self.status {
+            Status::Building => "building".to_string(),
+            Status::Starting => "starting".to_string(),
+            Status::Running => "running".to_string(),
+            Status::Stopped {
+                reason,
+                description,
+            } => match description {
+                Some(d) if d != reason => format!("stopped: {reason} ({d})"),
+                _ => format!("stopped: {reason}"),
+            },
+            Status::Exited { code } => match code {
+                Some(code) => format!("exited with code {code}"),
+                None => "exited".to_string(),
+            },
+            Status::Ended => "ended".to_string(),
+            Status::Failed(e) => format!("failed: {e}"),
+        };
+        out.push_str(&format!(
+            "Session: {} ({}) — {status}\n",
+            self.spec.label,
+            self.spec.adapter.as_str()
+        ));
+        if let Some((path, line)) = self.execution_point() {
+            out.push_str(&format!("At: {}:{line}\n", path.display()));
+        }
+        if !self.frames.is_empty() {
+            out.push_str("\nCall stack:\n");
+            for (i, frame) in self.frames.iter().enumerate() {
+                let marker = if i == self.selected_frame { "*" } else { " " };
+                let place = match &frame.path {
+                    Some(path) => format!("  {}:{}", path.display(), frame.line),
+                    None => String::new(),
+                };
+                out.push_str(&format!("{marker}#{i} {}{place}\n", frame.name));
+            }
+        }
+        for scope in &self.scopes {
+            out.push_str(&format!("\n{}:", scope.name));
+            match (&scope.children, scope.expanded) {
+                (Some(children), true) => {
+                    out.push('\n');
+                    describe_variables(children, 1, &mut out);
+                }
+                _ => out.push_str(" (not fetched)\n"),
+            }
+        }
+        let tail: Vec<&OutputLine> = self.output.iter().rev().take(output_lines).collect();
+        if !tail.is_empty() {
+            out.push_str(&format!("\nOutput (last {} lines):\n", tail.len()));
+            for line in tail.into_iter().rev() {
+                let prefix = match line.kind {
+                    OutputKind::Stderr => "stderr: ",
+                    OutputKind::Error => "error: ",
+                    OutputKind::Input => "> ",
+                    OutputKind::Result => "= ",
+                    OutputKind::Build => "build: ",
+                    OutputKind::Console => "debugger: ",
+                    OutputKind::Stdout => "",
+                };
+                out.push_str(&format!("  {prefix}{}\n", line.text));
+            }
+        }
+        out
     }
 
     // === Starting ===
@@ -574,7 +671,9 @@ impl Session {
             match pending {
                 Pending::Initialize | Pending::Launch => self.fail(text),
                 Pending::Evaluate => {
-                    self.push_line(OutputKind::Error, text);
+                    self.push_line(OutputKind::Error, text.clone());
+                    self.evaluations += 1;
+                    self.last_evaluation = Some(Err(text));
                     self.changed();
                 }
                 Pending::Disconnect => {}
@@ -672,7 +771,9 @@ impl Session {
             }
             Pending::Evaluate => {
                 let result = body["result"].as_str().unwrap_or_default().to_string();
-                self.push_line(OutputKind::Result, result);
+                self.push_line(OutputKind::Result, result.clone());
+                self.evaluations += 1;
+                self.last_evaluation = Some(Ok(result));
                 self.changed();
             }
         }
@@ -1015,6 +1116,26 @@ fn listen_address(line: &str) -> Option<String> {
     let (_, rest) = line.split_once("listening at:")?;
     let address = rest.trim();
     (!address.is_empty()).then(|| address.to_string())
+}
+
+fn describe_variables(vars: &[Variable], depth: usize, out: &mut String) {
+    for var in vars {
+        let indent = "  ".repeat(depth);
+        let type_name = var
+            .type_name
+            .as_deref()
+            .map(|t| format!(": {t}"))
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "{indent}{}{type_name} = {}\n",
+            var.name, var.value
+        ));
+        if var.expanded {
+            if let Some(children) = &var.children {
+                describe_variables(children, depth + 1, out);
+            }
+        }
+    }
 }
 
 fn shell_command(line: &str) -> Command {

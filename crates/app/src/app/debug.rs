@@ -47,37 +47,8 @@ impl App {
             .cloned()
             .map(DebugChoice::Command)
             .collect();
-        if let Some(file) = file.as_deref() {
-            let cwd = file
-                .parent()
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| self.project_root.clone());
-            // A Python script or a Go package runs under its debug adapter in
-            // the debug panel when the adapter is installed, under its
-            // command-line debugger in a terminal otherwise.
-            let terminal = Launch::for_file(file);
-            let adapter = match terminal.as_ref().map(|l| l.debugger) {
-                Some(Debugger::Pdb) if dap::debugpy_available() => Some(Adapter::Debugpy),
-                Some(Debugger::Dlv) if Adapter::Delve.command().is_some() => Some(Adapter::Delve),
-                _ => None,
-            };
-            if let Some(adapter) = adapter {
-                let program = match adapter {
-                    Adapter::Delve => ".".to_string(),
-                    _ => file.to_string_lossy().into_owned(),
-                };
-                choices.push(DebugChoice::Dap(LaunchSpec {
-                    adapter,
-                    program,
-                    args: Vec::new(),
-                    cwd,
-                    build: None,
-                    env: Vec::new(),
-                    label: file_label(file),
-                }));
-            } else if let Some(launch) = terminal {
-                choices.push(DebugChoice::File { launch, cwd });
-            }
+        if let Some(choice) = file.as_deref().and_then(|f| self.file_launch(f)) {
+            choices.push(choice);
         }
 
         let t = termide_i18n::t();
@@ -126,7 +97,7 @@ impl App {
             DebugChoice::Command(command) => self.start_command(command),
             DebugChoice::File { launch, cwd } => self.launch_debugger(&launch, cwd, &[]),
             DebugChoice::Dap(spec) => {
-                self.launch_dap(spec);
+                self.launch_dap(spec, true);
                 Ok(())
             }
         }
@@ -141,28 +112,11 @@ impl App {
         env: &[(String, String)],
     ) -> Result<()> {
         let name = command.debugger().unwrap_or_default();
-        if let Some(adapter) = Adapter::parse(name) {
-            let text = command.command.clone().unwrap_or_default();
-            let Some((program, args)) = dap::split_words(&text)
-                .and_then(|words| words.split_first().map(|(p, a)| (p.clone(), a.to_vec())))
-            else {
-                self.show_error_modal(termide_i18n::t().command_run_failed_fmt(&text));
-                return Ok(());
-            };
-            let label = command
-                .metadata
-                .as_ref()
-                .and_then(|m| m.display_name.clone())
-                .unwrap_or_else(|| command.name.clone());
-            self.launch_dap(LaunchSpec {
-                adapter,
-                program,
-                args,
-                cwd: self.project_root.clone(),
-                build: command.metadata.as_ref().and_then(|m| m.build.clone()),
-                env: env.to_vec(),
-                label,
-            });
+        if Adapter::parse(name).is_some() {
+            match self.dap_spec(command, env) {
+                Ok(spec) => self.launch_dap(spec, true),
+                Err(message) => self.show_error_modal(message),
+            }
             return Ok(());
         }
         let Some(debugger) = Debugger::parse(name) else {
@@ -224,8 +178,77 @@ impl App {
         Ok(())
     }
 
-    /// Start a DAP session in the debug panel, ending the one before.
-    fn launch_dap(&mut self, spec: LaunchSpec) {
+    /// What debugging `file` needs no command for: a Python script or a Go
+    /// package under its debug adapter in the debug panel when the adapter is
+    /// installed, under its command-line debugger in a terminal otherwise.
+    pub(in crate::app) fn file_launch(&self, file: &Path) -> Option<DebugChoice> {
+        let cwd = file
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| self.project_root.clone());
+        let terminal = Launch::for_file(file)?;
+        let adapter = match terminal.debugger {
+            Debugger::Pdb if dap::debugpy_available() => Some(Adapter::Debugpy),
+            Debugger::Dlv if Adapter::Delve.command().is_some() => Some(Adapter::Delve),
+            _ => None,
+        };
+        Some(match adapter {
+            Some(adapter) => {
+                let program = match adapter {
+                    Adapter::Delve => ".".to_string(),
+                    _ => file.to_string_lossy().into_owned(),
+                };
+                DebugChoice::Dap(LaunchSpec {
+                    adapter,
+                    program,
+                    args: Vec::new(),
+                    cwd,
+                    build: None,
+                    env: Vec::new(),
+                    label: file_label(file),
+                })
+            }
+            None => DebugChoice::File {
+                launch: terminal,
+                cwd,
+            },
+        })
+    }
+
+    /// The DAP launch of `command`, whose `debugger` is a debug adapter: its
+    /// command line is the program and its arguments, run in the project root.
+    pub(in crate::app) fn dap_spec(
+        &self,
+        command: &CommandItem,
+        env: &[(String, String)],
+    ) -> Result<LaunchSpec, String> {
+        let name = command.debugger().unwrap_or_default();
+        let adapter = Adapter::parse(name)
+            .ok_or_else(|| termide_i18n::t().debug_unknown_debugger_fmt(name))?;
+        let text = command.command.clone().unwrap_or_default();
+        let (program, args) = dap::split_words(&text)
+            .and_then(|words| words.split_first().map(|(p, a)| (p.clone(), a.to_vec())))
+            .ok_or_else(|| termide_i18n::t().command_run_failed_fmt(&text))?;
+        let label = command
+            .metadata
+            .as_ref()
+            .and_then(|m| m.display_name.clone())
+            .unwrap_or_else(|| command.name.clone());
+        Ok(LaunchSpec {
+            adapter,
+            program,
+            args,
+            cwd: self.project_root.clone(),
+            build: command.metadata.as_ref().and_then(|m| m.build.clone()),
+            env: env.to_vec(),
+            label,
+        })
+    }
+
+    /// Start a DAP session in the debug panel, ending the one before. The
+    /// panel takes the focus when `focus` (the user started it), and opens
+    /// beside the others otherwise (an agent did).
+    pub(in crate::app) fn launch_dap(&mut self, spec: LaunchSpec, focus: bool) {
         self.sync_editor_breakpoints();
         breakpoints::flush();
         let (set, version) = {
@@ -248,13 +271,24 @@ impl App {
         self.debug_breakpoints_version = version;
         self.debug_revealed = None;
 
-        let open = self
-            .layout_manager
-            .focus_panel_where(|p| p.name() == "debug");
+        let open = if focus {
+            self.layout_manager
+                .focus_panel_where(|p| p.name() == "debug")
+        } else {
+            self.layout_manager
+                .iter_all_panels_mut()
+                .any(|p| p.name() == "debug")
+        };
         if !open {
-            self.close_help_panels();
-            let panel = termide_panel_debug::DebugPanel::new(self.debug_session.clone());
-            self.add_panel(Box::new(panel));
+            let panel = Box::new(termide_panel_debug::DebugPanel::new(
+                self.debug_session.clone(),
+            ));
+            if focus {
+                self.close_help_panels();
+                self.add_panel(panel);
+            } else {
+                self.add_panel_without_focus(panel);
+            }
         }
         self.state.needs_redraw = true;
     }
