@@ -706,6 +706,8 @@ impl Translation for RuntimeTranslation {
         agent_tool_mcp,
         agent_tool_question,
         agent_tool_suggest,
+        agent_tool_send_message,
+        agent_tool_agents,
         agent_slash_kind_builtin,
         agent_slash_kind_template,
         agent_slash_kind_script,
@@ -1518,6 +1520,10 @@ impl Translation for RuntimeTranslation {
             "agent_notice_goal_idle_paused_fmt",
             &[("count", &count.to_string())],
         )
+    }
+
+    fn agent_notice_goal_waiting_fmt(&self, reason: &str) -> String {
+        self.format("agent_notice_goal_waiting_fmt", &[("reason", reason)])
     }
 
     fn agent_notice_looping_every_fmt(&self, interval: &str) -> String {

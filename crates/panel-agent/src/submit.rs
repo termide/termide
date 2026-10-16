@@ -807,6 +807,16 @@ impl AgentPanel {
                 self.raise_attention(true);
                 return;
             }
+            // Sent back, an agent waiting on the user would only restate the
+            // wait every turn, each a full model call: the goal pauses instead.
+            GoalOutcome::Waiting => {
+                task.idle_turns = 0;
+                self.paused = true;
+                self.restored = Some(unfinished::Restored::Autorun);
+                self.notice(t.agent_notice_goal_waiting_fmt(reason), NoticeKind::Warn);
+                self.raise_attention(true);
+                return;
+            }
             GoalOutcome::Continue if task.idle_turns >= GOAL_IDLE_TURNS => {
                 task.idle_turns = 0;
                 self.paused = true;

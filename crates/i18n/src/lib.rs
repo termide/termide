@@ -986,6 +986,8 @@ pub trait Translation: Send + Sync {
     fn agent_notice_empty_tool_text_fmt(&self, file: &str) -> String;
     fn agent_notice_loop_stopped_max_fmt(&self, count: usize) -> String;
     fn agent_notice_goal_idle_paused_fmt(&self, count: usize) -> String;
+    /// The goal judge found the agent waiting on the user; the goal pauses.
+    fn agent_notice_goal_waiting_fmt(&self, reason: &str) -> String;
     fn agent_notice_looping_every_fmt(&self, interval: &str) -> String;
     fn agent_unfinished_run_cut_fmt(&self, age: &str) -> String;
     fn agent_unfinished_run_paused_fmt(&self, age: &str) -> String;
@@ -1059,6 +1061,11 @@ pub trait Translation: Send + Sync {
     fn agent_tool_question(&self) -> &str;
     /// Agent transcript: the action words for a `suggest_command` call.
     fn agent_tool_suggest(&self) -> &str;
+    /// Agent transcript: the action words for a `send_message` call, before
+    /// the panel number.
+    fn agent_tool_send_message(&self) -> &str;
+    /// Agent transcript: the action words for an `agents` call.
+    fn agent_tool_agents(&self) -> &str;
     /// Agent notices: what defines a `/name` — a built-in command, a prompt
     /// template, a command script, a skill — as the object of "runs" and
     /// "hides".

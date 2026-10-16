@@ -1906,11 +1906,14 @@ message, which the session log leaves out: the body when the mode comes on,
 after each turn a judge — a separate, read-only model call — decides whether it
 is reached. `goal.md` is that judge's system prompt, with `{{goal}}` for the
 goal text and the verdict question in its front matter (`request:`). The judge
-answers `DONE`, `IMPOSSIBLE` or `CONTINUE` with a one-line reason; on
+answers `DONE`, `IMPOSSIBLE`, `WAITING` or `CONTINUE` with a one-line reason; on
 `CONTINUE` the agent is sent back to work with what is still missing, until the
 judge says done or out of reach, or a turn errors — there is no turn cap. A
 goal whose agent only talks, three work turns in a row without a tool call,
-pauses, still set: `/continue` carries on, `/goal stop` ends it. A failed check
+pauses, still set: `/continue` carries on, `/goal stop` ends it. So does one
+whose agent has stopped on you — a question, an approval, a process it will not
+touch — at the judge's first `WAITING`, rather than being sent back to restate
+the wait every turn, a full model call each. A failed check
 is tried again after 10 s and 20 s, then the goal pauses the same way and
 `/continue` checks again. A goal can be set while the agent works: it is taken
 at once, nothing is queued, and once the run ends its first turn, headed by the

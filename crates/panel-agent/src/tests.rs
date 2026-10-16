@@ -2576,6 +2576,35 @@ fn an_impossible_goal_ends_with_the_reason() {
         .any(|i| matches!(i, Item::Notice { text, .. } if *text == wanted)));
 }
 
+/// A judge that finds the agent waiting on the user pauses the goal at the
+/// first such verdict, still set, instead of sending it back to restate the
+/// wait: a turn that polls with a tool would otherwise defeat the idle count.
+#[test]
+fn a_goal_waiting_on_the_user_pauses_at_once() {
+    let mut panel = panel(vec![
+        reply("waiting until you close the other session"),
+        reply("WAITING\nthe agent waits for the user to close a session"),
+    ]);
+    type_text(&mut panel, "/goal land the slice");
+    panel.submit();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !panel.paused {
+        panel.tick();
+        assert!(Instant::now() < deadline, "the goal did not pause");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let task = panel.goal_task.as_ref().expect("the goal is still set");
+    assert_eq!(task.iterations, 1, "no turn was sent back");
+    assert_eq!(panel.restored, Some(Restored::Autorun));
+    let wanted = termide_i18n::t()
+        .agent_notice_goal_waiting_fmt("the agent waits for the user to close a session");
+    assert!(panel
+        .transcript()
+        .items()
+        .iter()
+        .any(|i| matches!(i, Item::Notice { text, .. } if *text == wanted)));
+}
+
 /// With no turn cap, a goal whose turns call no tool is what stops it: after
 /// [`GOAL_IDLE_TURNS`] such turns it waits at a pause, still set.
 #[test]

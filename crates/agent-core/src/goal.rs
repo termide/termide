@@ -57,6 +57,9 @@ pub enum GoalOutcome {
     Done,
     /// Cannot be reached from here: the goal ends, with the reason.
     Impossible,
+    /// The agent waits on the user or an outside event: the goal pauses,
+    /// still set, instead of sending it back to repeat the wait.
+    Waiting,
 }
 
 /// The judge's decision and a one-line reason.
@@ -68,7 +71,8 @@ pub struct GoalVerdict {
 
 /// Read a verdict from the judge's reply. The verdict word decides: an
 /// explicit `DONE` (or `ACHIEVED`/`COMPLETE`/`YES`) means done, `IMPOSSIBLE`
-/// (or `UNREACHABLE`) means the goal cannot be reached; anything else — an
+/// (or `UNREACHABLE`) means the goal cannot be reached, `WAITING` (or
+/// `BLOCKED`) that the agent waits on the user; anything else — an
 /// empty or confused reply included — means keep working: a goal that only
 /// spins is caught by the panel's idle-turn check. The word is looked for at
 /// the start of the first line that opens with one, past markup (`**DONE**`)
@@ -97,6 +101,7 @@ pub fn parse_verdict(reply: &str) -> GoalVerdict {
     let verdict = |token: &str| match token {
         "DONE" | "ACHIEVED" | "COMPLETE" | "YES" => Some(GoalOutcome::Done),
         "IMPOSSIBLE" | "UNREACHABLE" => Some(GoalOutcome::Impossible),
+        "WAITING" | "BLOCKED" => Some(GoalOutcome::Waiting),
         "CONTINUE" => Some(GoalOutcome::Continue),
         _ => None,
     };
@@ -167,6 +172,15 @@ mod tests {
         let v = parse_verdict("IMPOSSIBLE\nThe API it needs was removed.");
         assert_eq!(v.outcome, GoalOutcome::Impossible);
         assert_eq!(v.reason, "The API it needs was removed.");
+
+        // An agent stopped on the user is waiting, not to be sent back.
+        let v = parse_verdict("WAITING\nThe agent asks which session to keep.");
+        assert_eq!(v.outcome, GoalOutcome::Waiting);
+        assert_eq!(v.reason, "The agent asks which session to keep.");
+        assert_eq!(
+            parse_verdict("Blocked: on approval").outcome,
+            GoalOutcome::Waiting
+        );
 
         // Markup round the word, or a line before it, does not hide it: the
         // word is no reason ("Still missing: CONTINUE").

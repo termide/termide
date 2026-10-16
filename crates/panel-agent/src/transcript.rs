@@ -1595,7 +1595,8 @@ fn tool_headline(
     // write, as a shell redirects, `±` for an edit's diff, `↓` for a page
     // fetched, `?` for a search, `/` for a skill as it is typed by hand, `&`
     // for a subagent, as a shell backgrounds a job, `*` for an MCP tool, `¿`
-    // for a question to the user — then its localized action in the same
+    // for a question to the user, `@` for another agent panel addressed or
+    // listed — then its localized action in the same
     // state color and its subject.
     let accent = Style::default().fg(state);
     let styled_action = |glyph: &str, verb: &str, subject: String, style: Style| {
@@ -1681,6 +1682,22 @@ fn tool_headline(
             };
             action("¿", t.agent_tool_question(), subject)
         }
+        // `@` addresses another panel, by its number: the message's kind and
+        // its first line.
+        "send_message" => {
+            let text = arg("text");
+            let first = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+            let to = call.arguments["to"]
+                .as_u64()
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| arg("to"));
+            action(
+                "@",
+                t.agent_tool_send_message(),
+                format!("{to} · {}: {}", arg("kind"), first.trim()),
+            )
+        }
+        "agents" => action("@", t.agent_tool_agents(), String::new()),
         name if mcp_parts(name).is_some() => {
             let (server, tool) = mcp_parts(name).unwrap_or_default();
             action(
@@ -2521,6 +2538,15 @@ mod tests {
             ),
             "& Delegating to reviewer · check the diff"
         );
+        // Another agent panel: addressed by its number, or listed.
+        assert_eq!(
+            headline(
+                "send_message",
+                json!({ "to": 7, "kind": "info", "text": "\nI edit submit.rs\nmore" })
+            ),
+            "@ Writing to panel 7 · info: I edit submit.rs"
+        );
+        assert_eq!(headline("agents", json!({})), "@ Listing agent panels ");
         assert_eq!(
             headline(
                 "github__create_issue",

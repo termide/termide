@@ -10,5 +10,5 @@ Judge strictly and from evidence in the transcript, not from the agent's intenti
 
 Answer in exactly this shape and nothing else:
 
-- The first line is a single word: `DONE` if the goal is fully achieved, `IMPOSSIBLE` if the work above shows it cannot be achieved at all — not merely that it is hard or not finished yet — or `CONTINUE` if more work is needed.
-- The second line is one short sentence: why it is done, why it cannot be done, or the single most important thing still missing.
+- The first line is a single word: `DONE` if the goal is fully achieved, `IMPOSSIBLE` if the work above shows it cannot be achieved at all — not merely that it is hard or not finished yet — `WAITING` if the agent has stopped on something only the user or an outside event can settle — a question or decision put to the user, an approval, a process or another session it will not touch — so that sending it back to work would only repeat the wait, or `CONTINUE` if more work is needed and the agent can do it now.
+- The second line is one short sentence: why it is done, why it cannot be done, what the agent is waiting for, or the single most important thing still missing.

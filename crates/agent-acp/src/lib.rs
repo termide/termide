@@ -2915,13 +2915,21 @@ fn tool_call_of(update: &Value) -> ToolCall {
         .filter(|v| v.is_object())
         .cloned()
         .unwrap_or_else(|| json!({}));
-    let kind = update["kind"].as_str().unwrap_or("other").to_string();
-    if !title.is_empty() {
-        arguments["title"] = json!(title);
-    }
+    let kind = update["kind"].as_str().unwrap_or("other");
+    // `other` names no tool: the title does — what the model called, such as
+    // a `bash` it made up in place of `mcp__termide__bash` — so the block
+    // reads as that call, not as the ACP kind.
+    let name = if kind == "other" && !title.is_empty() {
+        title
+    } else {
+        if !title.is_empty() {
+            arguments["title"] = json!(title);
+        }
+        kind.to_string()
+    };
     ToolCall {
         id: update["toolCallId"].as_str().unwrap_or("").to_string(),
-        name: kind,
+        name,
         arguments,
         extra_content: None,
     }
@@ -3775,6 +3783,23 @@ mod tests {
             (call.name.as_str(), &call.arguments),
             ("bash", &json!({ "command": "ls" }))
         );
+        // A tool the model made up comes as kind `other`: the block takes
+        // the name it called, not the kind.
+        let call = tool_call_of(&json!({
+            "toolCallId": "t2", "title": "bash", "kind": "other",
+            "rawInput": { "command": "ls" }
+        }));
+        assert_eq!(
+            (call.name.as_str(), &call.arguments),
+            ("bash", &json!({ "command": "ls" }))
+        );
+        // A kind that names an action keeps it, the title beside.
+        let call = tool_call_of(&json!({
+            "toolCallId": "t3", "title": "Reading x.rs", "kind": "read",
+            "rawInput": { "path": "x.rs" }
+        }));
+        assert_eq!(call.name, "read");
+        assert_eq!(call.arguments["title"], "Reading x.rs");
     }
 
     /// Prompt `text` and wait for the turn to end; the text blocks the agent
