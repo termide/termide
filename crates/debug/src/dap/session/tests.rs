@@ -5,6 +5,7 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
 use super::*;
+use crate::dap::adapter::Console;
 use crate::dap::transport::read_message;
 
 #[derive(Clone, Default)]
@@ -39,6 +40,8 @@ impl Harness {
             build: None,
             env: Vec::new(),
             label: "app".into(),
+            console: Console::Panel,
+            tty: None,
         };
         let mut session = Session::new(spec, breakpoints, rx, tx.clone());
         let wire = Wire::default();
@@ -389,6 +392,8 @@ fn a_tcp_adapter_is_reached_at_the_address_it_printed() {
         build: None,
         env: Vec::new(),
         label: "go".into(),
+        console: Console::Panel,
+        tty: None,
     };
     let mut session = Session::new(spec, Vec::new(), rx, tx.clone());
     tx.send(Incoming::Listening(address)).unwrap();
@@ -453,4 +458,58 @@ fn an_evaluation_is_counted_with_its_result() {
     h.respond("evaluate", json!({ "result": "41" }));
     assert_eq!(h.session.evaluations, 1);
     assert_eq!(h.session.last_evaluation, Some(Ok("41".into())));
+}
+
+#[test]
+fn a_program_asked_for_in_a_terminal_is_started_by_the_app() {
+    let (tx, rx) = mpsc::channel();
+    let spec = LaunchSpec {
+        adapter: Adapter::Debugpy,
+        program: "t.py".into(),
+        args: Vec::new(),
+        cwd: "/p".into(),
+        build: None,
+        env: Vec::new(),
+        label: "t.py".into(),
+        console: Console::Terminal,
+        tty: None,
+    };
+    let mut session = Session::new(spec, Vec::new(), rx, tx.clone());
+    let wire = Wire::default();
+    session.connect(Box::new(wire.clone()));
+    let mut h = Harness {
+        session,
+        wire,
+        read: 0,
+        tx,
+        adapter_seq: 1000,
+    };
+    let init = h.sent();
+    assert_eq!(init[0]["arguments"]["supportsRunInTerminalRequest"], true);
+    h.respond("initialize", json!({}));
+    assert_eq!(h.sent()[0]["arguments"]["console"], "integratedTerminal");
+
+    h.tx.send(Incoming::Message(json!({
+        "seq": 9, "type": "request", "command": "runInTerminal",
+        "arguments": {
+            "kind": "integrated", "title": "Python Debug Console", "cwd": "/p",
+            "args": ["python", "launcher", "--", "t.py"], "env": { "A": "1", "B": null }
+        }
+    })))
+    .unwrap();
+    h.session.poll();
+    let request = h
+        .session
+        .take_terminal_request()
+        .expect("asked for a terminal");
+    assert_eq!(request.args, ["python", "launcher", "--", "t.py"]);
+    assert_eq!(request.env, [("A".to_string(), "1".to_string())]);
+    assert_eq!(request.cwd, Some(PathBuf::from("/p")));
+    assert!(h.session.take_terminal_request().is_none(), "taken once");
+
+    h.session.answer_terminal(&request, Ok(4242));
+    let sent = h.sent();
+    assert_eq!(sent[0]["request_seq"], 9);
+    assert_eq!(sent[0]["success"], true);
+    assert_eq!(sent[0]["body"]["processId"], 4242);
 }

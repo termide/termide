@@ -6,6 +6,27 @@ use std::process::Command;
 
 use serde_json::{json, Value};
 
+/// Where the program's input and output go.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Console {
+    /// A terminal panel: the program reads the keyboard there.
+    #[default]
+    Terminal,
+    /// The debug panel's output; the program gets no input.
+    Panel,
+}
+
+impl Console {
+    /// `terminal` or `panel`, as `commands.toml` spells it.
+    pub fn parse(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "terminal" => Some(Self::Terminal),
+            "panel" => Some(Self::Panel),
+            _ => None,
+        }
+    }
+}
+
 /// A debug adapter that speaks DAP over its standard input and output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Adapter {
@@ -86,32 +107,77 @@ impl Adapter {
         }
     }
 
+    /// Whether the program can run in a terminal panel, where it reads the
+    /// keyboard: debugpy and Delve ask termide to start it there
+    /// (`runInTerminal`), lldb-dap gets the terminal's device to use. GDB's
+    /// adapter has no such mode.
+    pub fn supports_terminal(self) -> bool {
+        !matches!(self, Self::GdbDap)
+    }
+
+    /// Whether the adapter asks termide to start the program in a terminal
+    /// (`runInTerminal`) rather than being handed a terminal's device.
+    pub fn asks_for_terminal(self) -> bool {
+        matches!(self, Self::Debugpy | Self::Delve)
+    }
+
     /// The arguments of `launch` for `program` run with `args` in `cwd`.
-    pub fn launch_arguments(self, program: &str, args: &[String], cwd: &Path) -> Value {
+    /// With `console` [`Console::Terminal`] the program's input and output
+    /// go to a terminal: one the adapter asks for, or the device `tty`.
+    pub fn launch_arguments(
+        self,
+        program: &str,
+        args: &[String],
+        cwd: &Path,
+        console: Console,
+        tty: Option<&Path>,
+    ) -> Value {
         let cwd = cwd.to_string_lossy();
+        let terminal = console == Console::Terminal && self.supports_terminal();
         match self {
-            Self::LldbDap | Self::GdbDap => json!({
-                "program": program,
-                "args": args,
-                "cwd": cwd,
-                "stopOnEntry": false,
-            }),
+            Self::LldbDap | Self::GdbDap => {
+                let mut arguments = json!({
+                    "program": program,
+                    "args": args,
+                    "cwd": cwd,
+                    "stopOnEntry": false,
+                });
+                // lldb-dap's own `runInTerminal` launcher fails to reach it
+                // on macOS (LLVM 21), and its `stdio` option is newer still;
+                // lldb's target settings point the program at the terminal
+                // in every version.
+                if let (true, Self::LldbDap, Some(tty)) = (terminal, self, tty) {
+                    let tty = tty.to_string_lossy();
+                    arguments["preRunCommands"] = json!([
+                        format!("settings set target.input-path {tty}"),
+                        format!("settings set target.output-path {tty}"),
+                        format!("settings set target.error-path {tty}"),
+                    ]);
+                }
+                arguments
+            }
             Self::Debugpy => json!({
                 "program": program,
                 "args": args,
                 "cwd": cwd,
-                "console": "internalConsole",
+                "console": if terminal { "integratedTerminal" } else { "internalConsole" },
                 "justMyCode": true,
-                "redirectOutput": true,
+                "redirectOutput": !terminal,
             }),
             // `program` is the package to build, `.` or `./cmd/app`.
-            Self::Delve => json!({
-                "mode": "debug",
-                "program": program,
-                "args": args,
-                "cwd": cwd,
-                "outputMode": "remote",
-            }),
+            Self::Delve => {
+                let mut arguments = json!({
+                    "mode": "debug",
+                    "program": program,
+                    "args": args,
+                    "cwd": cwd,
+                    "outputMode": "remote",
+                });
+                if terminal {
+                    arguments["console"] = json!("integratedTerminal");
+                }
+                arguments
+            }
         }
     }
 }
@@ -174,9 +240,53 @@ mod tests {
 
     #[test]
     fn debugpy_launches_into_its_internal_console() {
-        let args = Adapter::Debugpy.launch_arguments("t.py", &["x".into()], Path::new("/p"));
+        let args = Adapter::Debugpy.launch_arguments(
+            "t.py",
+            &["x".into()],
+            Path::new("/p"),
+            Console::Panel,
+            None,
+        );
         assert_eq!(args["program"], "t.py");
         assert_eq!(args["args"], json!(["x"]));
         assert_eq!(args["console"], "internalConsole");
+        let args = Adapter::Debugpy.launch_arguments(
+            "t.py",
+            &[],
+            Path::new("/p"),
+            Console::Terminal,
+            None,
+        );
+        assert_eq!(args["console"], "integratedTerminal");
+    }
+
+    #[test]
+    fn lldb_points_the_program_at_the_terminals_device() {
+        let args = Adapter::LldbDap.launch_arguments(
+            "./m",
+            &[],
+            Path::new("/p"),
+            Console::Terminal,
+            Some(Path::new("/dev/ttys004")),
+        );
+        assert_eq!(
+            args["preRunCommands"],
+            json!([
+                "settings set target.input-path /dev/ttys004",
+                "settings set target.output-path /dev/ttys004",
+                "settings set target.error-path /dev/ttys004"
+            ])
+        );
+        let args = Adapter::GdbDap.launch_arguments(
+            "./m",
+            &[],
+            Path::new("/p"),
+            Console::Terminal,
+            Some(Path::new("/dev/ttys004")),
+        );
+        assert!(
+            args.get("preRunCommands").is_none(),
+            "gdb has no terminal mode"
+        );
     }
 }

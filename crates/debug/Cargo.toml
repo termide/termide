@@ -18,3 +18,6 @@ termide-config = { path = "../config" }
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+libc.workspace = true

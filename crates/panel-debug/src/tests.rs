@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use crossterm::event::KeyEvent;
-use termide_debug::dap::{Adapter, Frame, LaunchSpec, OutputLine};
+use termide_debug::dap::{Adapter, Console, Frame, LaunchSpec, OutputLine};
 
 use super::*;
 
@@ -26,6 +26,8 @@ fn stopped_session() -> SharedSession {
         build: None,
         env: Vec::new(),
         label: "app".into(),
+        console: Console::Panel,
+        tty: None,
     });
     s.status = Status::Stopped {
         reason: "breakpoint".into(),

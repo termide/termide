@@ -122,6 +122,11 @@ pub struct CommandMetadata {
     /// Shell command run before the debugger starts, which it must pass.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub build: Option<String>,
+    /// With a debug adapter: `terminal` (the default) runs the program in a
+    /// terminal panel, where it reads the keyboard; `panel` shows its output
+    /// in the debug panel.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub console: Option<String>,
 }
 
 /// Parsed contents of a commands.toml file.
@@ -212,6 +217,7 @@ impl CommandsMetadata {
             };
             let debugger = text("debugger");
             let build = text("build");
+            let console = text("console");
 
             entries.insert(
                 section_name.clone(),
@@ -224,6 +230,7 @@ impl CommandsMetadata {
                     group,
                     debugger,
                     build,
+                    console,
                 },
             );
         }
@@ -380,6 +387,7 @@ fn write_fields(
     set(table, "key", meta.key.as_deref());
     set(table, "debugger", meta.debugger.as_deref());
     set(table, "build", meta.build.as_deref());
+    set(table, "console", meta.console.as_deref());
 
     if old_params == Some(&meta.params) {
         return;
@@ -807,11 +815,13 @@ mode = "report"
 command = "target/debug/app --verbose"
 debugger = "lldb"
 build = "cargo build"
+console = "panel"
 "#;
         let meta = CommandsMetadata::parse(original);
         let entry = &meta.entries["debug-app"];
         assert_eq!(entry.debugger.as_deref(), Some("lldb"));
         assert_eq!(entry.build.as_deref(), Some("cargo build"));
+        assert_eq!(entry.console.as_deref(), Some("panel"));
         // Saving untouched entries leaves the file as it was.
         assert_eq!(meta.render_over(original), original);
 

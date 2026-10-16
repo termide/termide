@@ -84,6 +84,8 @@ pub struct App {
     debug_breakpoints_version: u64,
     /// The stop last shown in an editor, so each stop is shown once.
     debug_revealed: Option<(std::path::PathBuf, usize)>,
+    /// The process holding the terminal a debugged program was pointed at.
+    debug_terminal_pid: Option<u32>,
     /// Agents' `debug` calls waiting for the session to get somewhere.
     debug_waiters: Vec<agent_panel::DebugWaiter>,
     /// Capability-aware key normalizer. Used to build a `KeyChord` from
@@ -211,6 +213,7 @@ impl App {
             debug_breakpoints_version: 0,
             debug_revealed: None,
             debug_waiters: Vec::new(),
+            debug_terminal_pid: None,
             normalizer: termide_keyboard::KeyNormalizer::default(),
             keyboard_caps: termide_keyboard::KeyboardCaps::default(),
             persist_layout: true,
@@ -313,6 +316,7 @@ impl App {
             debug_breakpoints_version: 0,
             debug_revealed: None,
             debug_waiters: Vec::new(),
+            debug_terminal_pid: None,
             normalizer: termide_keyboard::KeyNormalizer::new(caps),
             keyboard_caps: caps,
             persist_layout: true,

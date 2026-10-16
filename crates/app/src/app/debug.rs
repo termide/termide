@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use termide_config::commands::{CommandItem, CommandsRegistry};
-use termide_debug::dap::{self, Adapter, LaunchSpec, Session};
+use termide_debug::dap::{self, Adapter, Console, LaunchSpec, Session};
 use termide_debug::{breakpoints, execution, Breakpoint, Debugger, Launch};
 
 use super::App;
@@ -206,6 +206,8 @@ impl App {
                     build: None,
                     env: Vec::new(),
                     label: file_label(file),
+                    console: Console::Terminal,
+                    tty: None,
                 })
             }
             None => DebugChoice::File {
@@ -234,6 +236,12 @@ impl App {
             .as_ref()
             .and_then(|m| m.display_name.clone())
             .unwrap_or_else(|| command.name.clone());
+        let console = command
+            .metadata
+            .as_ref()
+            .and_then(|m| m.console.as_deref())
+            .and_then(Console::parse)
+            .unwrap_or_default();
         Ok(LaunchSpec {
             adapter,
             program,
@@ -242,13 +250,15 @@ impl App {
             build: command.metadata.as_ref().and_then(|m| m.build.clone()),
             env: env.to_vec(),
             label,
+            console,
+            tty: None,
         })
     }
 
     /// Start a DAP session in the debug panel, ending the one before. The
     /// panel takes the focus when `focus` (the user started it), and opens
     /// beside the others otherwise (an agent did).
-    pub(in crate::app) fn launch_dap(&mut self, spec: LaunchSpec, focus: bool) {
+    pub(in crate::app) fn launch_dap(&mut self, mut spec: LaunchSpec, focus: bool) {
         self.sync_editor_breakpoints();
         breakpoints::flush();
         let (set, version) = {
@@ -266,6 +276,17 @@ impl App {
             spec.cwd
         );
         self.end_debug_session();
+        if !spec.adapter.supports_terminal() {
+            spec.console = Console::Panel;
+        }
+        // lldb-dap is handed a terminal of termide's to point the program at;
+        // the other adapters ask for one when they launch it.
+        if spec.console == Console::Terminal && !spec.adapter.asks_for_terminal() {
+            spec.tty = self.open_debug_terminal(&spec.label);
+            if spec.tty.is_none() {
+                spec.console = Console::Panel;
+            }
+        }
         *self.debug_session.lock().unwrap_or_else(|e| e.into_inner()) =
             Some(Session::start(spec, set));
         self.debug_breakpoints_version = version;
@@ -293,8 +314,85 @@ impl App {
         self.state.needs_redraw = true;
     }
 
+    /// A terminal panel whose device a program can be pointed at, opened
+    /// beside the others; `None` where there is no such device.
+    fn open_debug_terminal(&mut self, label: &str) -> Option<PathBuf> {
+        #[cfg(unix)]
+        {
+            use termide_panel_terminal::Terminal;
+            let rows = self.state.terminal.height.saturating_sub(3);
+            let cols = self.state.terminal.width.saturating_sub(2);
+            match Terminal::new_for_device(rows, cols, label) {
+                Ok((terminal, device)) => {
+                    self.debug_terminal_pid = terminal.child_pid();
+                    self.add_panel_without_focus(Box::new(terminal));
+                    Some(device)
+                }
+                Err(e) => {
+                    log::warn!("Debug: no terminal for the program: {e}");
+                    None
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = label;
+            None
+        }
+    }
+
+    /// Start the program an adapter asked to have run in a terminal, in a
+    /// terminal panel beside the others, and tell the adapter its pid.
+    fn start_requested_terminal(&mut self, request: dap::TerminalRequest) {
+        use termide_panel_terminal::Terminal;
+        let rows = self.state.terminal.height.saturating_sub(3);
+        let cols = self.state.terminal.width.saturating_sub(2);
+        let pid = match Terminal::new_with_program(
+            rows,
+            cols,
+            &request.args,
+            request.cwd.clone(),
+            &request.env,
+        ) {
+            Ok(terminal) => {
+                let pid = terminal.child_pid();
+                self.add_panel_without_focus(Box::new(terminal));
+                pid.ok_or_else(|| "the program has no process id".to_string())
+            }
+            Err(e) => Err(format!("cannot start the program in a terminal: {e}")),
+        };
+        if let Some(session) = self
+            .debug_session
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_mut()
+        {
+            session.answer_terminal(&request, pid);
+        }
+        self.state.needs_redraw = true;
+    }
+
+    /// End what holds the terminal termide gave the program (lldb-dap), so
+    /// the panel shows that the session is over.
+    fn release_debug_terminal(&mut self) {
+        let Some(pid) = self.debug_terminal_pid.take() else {
+            return;
+        };
+        for panel in self.all_editor_panels_mut() {
+            if let Some(terminal) = panel
+                .as_any_mut()
+                .downcast_mut::<termide_panel_terminal::Terminal>()
+            {
+                if terminal.child_pid() == Some(pid) {
+                    termide_core::Panel::kill_processes(terminal);
+                }
+            }
+        }
+    }
+
     /// End the running session, ending its program.
     pub(in crate::app) fn end_debug_session(&mut self) {
+        self.release_debug_terminal();
         if let Some(mut old) = self
             .debug_session
             .lock()
@@ -311,12 +409,13 @@ impl App {
     /// Apply what the adapter sent, pass breakpoint changes on, and show
     /// where the program stopped. Called every tick.
     pub(in crate::app) fn poll_debug_session(&mut self) {
-        let (changed, point, active) = {
+        let (changed, point, active, terminal) = {
             let mut slot = self.debug_session.lock().unwrap_or_else(|e| e.into_inner());
             let Some(session) = slot.as_mut() else {
                 return;
             };
             let mut changed = session.poll();
+            let terminal = session.take_terminal_request();
             if session.is_active() {
                 let store = breakpoints::store();
                 if store.version() != self.debug_breakpoints_version {
@@ -328,8 +427,11 @@ impl App {
                 }
             }
             let point = session.execution_point().filter(|(path, _)| path.is_file());
-            (changed, point, session.is_active())
+            (changed, point, session.is_active(), terminal)
         };
+        if let Some(request) = terminal {
+            self.start_requested_terminal(request);
+        }
         if execution::set(point.clone()) || changed {
             self.state.needs_redraw = true;
         }
@@ -343,6 +445,7 @@ impl App {
         }
         if !active {
             self.debug_revealed = None;
+            self.release_debug_terminal();
         }
     }
 

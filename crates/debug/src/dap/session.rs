@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use super::adapter::Adapter;
+use super::adapter::{Adapter, Console};
 use super::transport::{encode, read_message};
 use crate::Breakpoint;
 
@@ -39,6 +39,22 @@ pub struct LaunchSpec {
     pub env: Vec<(String, String)>,
     /// What the session is called in the panel.
     pub label: String,
+    /// Where the program's input and output go.
+    pub console: Console,
+    /// The terminal device for an adapter that is handed one (lldb-dap).
+    pub tty: Option<PathBuf>,
+}
+
+/// A program an adapter asked to have started in a terminal
+/// (`runInTerminal`); the app starts it and answers with its pid through
+/// [`Session::answer_terminal`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalRequest {
+    pub seq: i64,
+    pub args: Vec<String>,
+    pub cwd: Option<PathBuf>,
+    pub env: Vec<(String, String)>,
+    pub title: Option<String>,
 }
 
 /// Where the session stands.
@@ -190,6 +206,7 @@ pub struct Session {
     seq: i64,
     pending: HashMap<i64, Pending>,
     partial: Option<(OutputKind, String)>,
+    terminal_request: Option<TerminalRequest>,
 
     writer: Option<Box<dyn Write + Send>>,
     inbox: Receiver<Incoming>,
@@ -249,6 +266,7 @@ impl Session {
             seq: 0,
             pending: HashMap::new(),
             partial: None,
+            terminal_request: None,
             writer: None,
             inbox,
             inbox_tx,
@@ -530,7 +548,8 @@ impl Session {
                 "columnsStartAt1": true,
                 "pathFormat": "path",
                 "supportsVariableType": true,
-                "supportsRunInTerminalRequest": false,
+                "supportsRunInTerminalRequest": self.spec.console == Console::Terminal
+                    && self.spec.adapter.asks_for_terminal(),
             }),
             Pending::Initialize,
         );
@@ -635,23 +654,78 @@ impl Session {
             Some("response") => self.handle_response(message),
             Some("event") => self.handle_event(message),
             Some("request") => {
-                // Reverse requests (runInTerminal, startDebugging) are not
-                // supported; say so rather than leave the adapter waiting.
                 let seq = message["seq"].as_i64().unwrap_or_default();
                 let command = message["command"].as_str().unwrap_or_default().to_string();
-                self.seq += 1;
-                let reply = json!({
-                    "seq": self.seq,
-                    "type": "response",
-                    "request_seq": seq,
-                    "command": command,
-                    "success": false,
-                    "message": "not supported by termide",
-                });
-                self.send(reply);
+                let arguments = &message["arguments"];
+                if command == "runInTerminal" && self.spec.console == Console::Terminal {
+                    let args = arguments["args"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(str::to_string))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let env = arguments["env"]
+                        .as_object()
+                        .map(|vars| {
+                            vars.iter()
+                                .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string())))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    self.terminal_request = Some(TerminalRequest {
+                        seq,
+                        args,
+                        cwd: arguments["cwd"]
+                            .as_str()
+                            .filter(|c| !c.is_empty())
+                            .map(PathBuf::from),
+                        env,
+                        title: arguments["title"].as_str().map(str::to_string),
+                    });
+                    self.changed();
+                    return;
+                }
+                // Other reverse requests (startDebugging) are not supported;
+                // say so rather than leave the adapter waiting.
+                self.reply(seq, &command, Err("not supported by termide".into()));
             }
             _ => {}
         }
+    }
+
+    /// Answer the adapter's request `seq`.
+    fn reply(&mut self, seq: i64, command: &str, result: Result<Value, String>) {
+        self.seq += 1;
+        let mut reply = json!({
+            "seq": self.seq,
+            "type": "response",
+            "request_seq": seq,
+            "command": command,
+            "success": result.is_ok(),
+        });
+        match result {
+            Ok(body) => reply["body"] = body,
+            Err(message) => reply["message"] = json!(message),
+        }
+        self.send(reply);
+    }
+
+    /// The program the adapter asked to have started in a terminal, once.
+    pub fn take_terminal_request(&mut self) -> Option<TerminalRequest> {
+        self.terminal_request.take()
+    }
+
+    /// Tell the adapter the program of `request` was started as `pid`, or
+    /// why it was not.
+    pub fn answer_terminal(&mut self, request: &TerminalRequest, pid: Result<u32, String>) {
+        let result = pid.map(|pid| json!({ "processId": pid }));
+        if let Err(message) = &result {
+            self.push_line(OutputKind::Error, message.clone());
+            self.changed();
+        }
+        self.reply(request.seq, "runInTerminal", result);
     }
 
     fn handle_response(&mut self, message: Value) {
@@ -688,6 +762,8 @@ impl Session {
                     &self.spec.program,
                     &self.spec.args,
                     &self.spec.cwd,
+                    self.spec.console,
+                    self.spec.tty.as_deref(),
                 );
                 self.request("launch", arguments, Pending::Launch);
             }

@@ -344,6 +344,12 @@ impl App {
             },
             (None, None) => return Err("`start` needs `command` or `file`".into()),
         };
+        // The agent reads the output from the session; a program waiting for
+        // the keyboard in a terminal would leave it waiting.
+        let spec = termide_debug::dap::LaunchSpec {
+            console: termide_debug::dap::Console::Panel,
+            ..spec
+        };
         self.launch_dap(spec, false);
         Ok(())
     }

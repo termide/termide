@@ -60,6 +60,7 @@ mode = "background"
 | `params` | no | Values asked for before the command runs, see [Parameters](#parameters) |
 | `debugger` | no | `lldb-dap`, `gdb-dap`, `debugpy`, `dlv-dap`, `lldb`, `gdb`, `dlv` or `pdb`: the command runs under this debugger, see [Debugging](#debugging) |
 | `build` | no | With `debugger`: a shell command run first; the debugger starts only if it succeeds |
+| `console` | no | With a debug adapter: `terminal` (the default) runs the program in a terminal panel, where it reads the keyboard; `panel` shows its output in the debug panel |
 
 An unknown `mode` falls back to `terminal`. If a file cannot be parsed, none of its commands appear; the reason is written to the log.
 
@@ -228,7 +229,11 @@ A launch through a debug adapter opens the debug panel (or reuses the open one).
 | `Tab` / `Shift+Tab` | Next / previous section |
 | `↑` `↓` `PgUp` `PgDn` `Home` `End` | Move in the section |
 
-When the program stops, the editor that has the file moves its cursor to the line, scrolling only as far as needed, and the gutter marks it with `→` on a highlighted cell; a file not open yet opens in a new editor, the focus staying on the panel. Breakpoints set or removed while the session runs reach the adapter at once. Closing the panel or starting another launch ends the session and its program. The program's standard input is not connected.
+When the program stops, the editor that has the file moves its cursor to the line, scrolling only as far as needed, and the gutter marks it with `→` on a highlighted cell; a file not open yet opens in a new editor, the focus staying on the panel. Breakpoints set or removed while the session runs reach the adapter at once. Closing the panel or starting another launch ends the session and its program.
+
+### The program's terminal
+
+By default (`console = "terminal"`) the program runs in a terminal panel of its own, opened beside the others: it reads the keyboard there — focus that panel to type to it — and its output, colours and full-screen interfaces show there as in any terminal, while the debug panel keeps the adapter's messages. debugpy and Delve ask TermIDE to start the program in that panel; lldb-dap starts it itself and is told the panel's terminal device through lldb's `target.input-path`, `output-path` and `error-path` settings, which every lldb-dap version takes. `Ctrl+C` in a terminal lldb-dap uses is not passed to the program: pause it with `p` in the debug panel. GDB's adapter has no such mode, so its programs always write to the debug panel and read nothing; so do the sessions an agent starts, whose output it reads from the session. `console = "panel"` asks for that for any adapter, for a program that does not read input.
 
 ## Tips
 
