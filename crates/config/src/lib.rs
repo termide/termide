@@ -33,9 +33,9 @@ pub use settings::{
     AiSettings, Config, Connection, CustomLanguage, DatabaseSettings, EditorSettings,
     FileManagerSettings, FoldBlocks, GeneralSettings, GitDiffSettings, GitLogSettings,
     GitStatusSettings, HighlightSettings, IconMode, LegacyConfig, LoggingSettings,
-    LspServerSettings, LspSettings, ReasoningParam, RecallSettings, SendReasoning, SideModel,
-    TerminalSettings, VaultSettings, VfsSettings, ViewerSettings, WebSettings,
-    CLAUDE_CODE_MIN_CONTEXT_LIMIT, DEFAULT_CONTEXT_WINDOW_FALLBACK,
+    LspServerSettings, LspSettings, RecallSettings, SideModel, TerminalSettings, VaultSettings,
+    VfsSettings, ViewerSettings, WebSettings, CLAUDE_CODE_MIN_CONTEXT_LIMIT,
+    DEFAULT_CONTEXT_WINDOW_FALLBACK,
 };
 /// The type of `[ai] reasoning`.
 pub use termide_agent_core::{LimitPolicy, SubagentPlace, ThinkingLevel};

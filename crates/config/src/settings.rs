@@ -212,14 +212,6 @@ pub struct Connection {
     /// default: servers that do not know the field may reject the request.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub prefill_progress: bool,
-    /// The field an `openai_compatible` server takes the reasoning level in.
-    #[serde(default, skip_serializing_if = "ReasoningParam::is_auto")]
-    pub reasoning_param: ReasoningParam,
-    /// Whether an `openai_compatible` connection sends the model's reasoning
-    /// back with its earlier answers, for models that degrade without it
-    /// (Qwen 3.6's `preserve_thinking`).
-    #[serde(default, skip_serializing_if = "SendReasoning::is_auto")]
-    pub send_reasoning: SendReasoning,
     /// The connection, by name, the agents this one delegates to with
     /// `task` run on; empty runs them on this one. A subagent runs the
     /// built-in loop, so it needs a model connection, not a CLI agent.
@@ -239,82 +231,6 @@ pub struct Connection {
 
 fn is_zero(n: &u32) -> bool {
     *n == 0
-}
-
-/// `reasoning_param` of an `openai_compatible` connection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ReasoningParam {
-    /// `reasoning_effort` for the hosted APIs known to take it (OpenAI,
-    /// OpenRouter, Gemini), `enable_thinking` for a server on this machine
-    /// or the local network, nothing elsewhere.
-    #[default]
-    Auto,
-    /// `reasoning_effort`, the OpenAI field.
-    ReasoningEffort,
-    /// `chat_template_kwargs.enable_thinking`, the on/off switch of the chat
-    /// templates of Qwen3, GLM and DeepSeek on vLLM or llama.cpp.
-    EnableThinking,
-    /// Nothing: the server decides.
-    None,
-}
-
-impl ReasoningParam {
-    pub const ALL: [Self; 4] = [
-        Self::Auto,
-        Self::ReasoningEffort,
-        Self::EnableThinking,
-        Self::None,
-    ];
-
-    #[must_use]
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Auto => "auto",
-            Self::ReasoningEffort => "reasoning_effort",
-            Self::EnableThinking => "enable_thinking",
-            Self::None => "none",
-        }
-    }
-
-    #[must_use]
-    pub fn is_auto(&self) -> bool {
-        *self == Self::Auto
-    }
-}
-
-/// `send_reasoning` of an `openai_compatible` connection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SendReasoning {
-    /// On where the reasoning goes in the chat template's `enable_thinking`
-    /// switch (a local server, or `reasoning_param = "enable_thinking"`),
-    /// off elsewhere.
-    #[default]
-    Auto,
-    /// Send it back: `reasoning_content` in the earlier answers, and
-    /// `preserve_thinking` with `enable_thinking`.
-    On,
-    /// Send no reasoning back: some APIs (DeepSeek's) reject the field.
-    Off,
-}
-
-impl SendReasoning {
-    pub const ALL: [Self; 3] = [Self::Auto, Self::On, Self::Off];
-
-    #[must_use]
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Auto => "auto",
-            Self::On => "on",
-            Self::Off => "off",
-        }
-    }
-
-    #[must_use]
-    pub fn is_auto(&self) -> bool {
-        *self == Self::Auto
-    }
 }
 
 /// A reasoning level, or the on/off switch it replaced.
@@ -346,8 +262,6 @@ impl Default for Connection {
             context_window_fallback: None,
             context_window_limit: None,
             prefill_progress: false,
-            reasoning_param: ReasoningParam::Auto,
-            send_reasoning: SendReasoning::Auto,
             subagents: String::new(),
             max_concurrent_requests: 0,
             reviewer: String::new(),
@@ -1522,27 +1436,20 @@ mod ai_settings_tests {
         assert!(toml::from_str::<AiSettings>("reasoning = \"extreme\"\n").is_err());
     }
 
+    /// The settings that chose the reasoning field and the echo by hand are
+    /// gone — the server's own answer decides — and a config that still
+    /// names them loads, the keys read past.
     #[test]
-    fn a_connection_names_its_reasoning_param_only_when_set() {
-        let mut local = Connection::default();
-        assert!(!toml::to_string(&local).unwrap().contains("reasoning_param"));
-        local.reasoning_param = ReasoningParam::EnableThinking;
-        let text = toml::to_string(&local).unwrap();
-        assert!(
-            text.contains("reasoning_param = \"enable_thinking\""),
-            "{text}"
-        );
-        assert_eq!(toml::from_str::<Connection>(&text).unwrap(), local);
-    }
-
-    #[test]
-    fn a_connection_names_its_send_reasoning_only_when_set() {
-        let mut local = Connection::default();
-        assert!(!toml::to_string(&local).unwrap().contains("send_reasoning"));
-        local.send_reasoning = SendReasoning::On;
-        let text = toml::to_string(&local).unwrap();
-        assert!(text.contains("send_reasoning = \"on\""), "{text}");
-        assert_eq!(toml::from_str::<Connection>(&text).unwrap(), local);
+    fn a_connection_with_the_old_reasoning_keys_still_loads() {
+        let text = "provider = \"openai_compatible\"\n\
+                    model = \"qwen\"\n\
+                    reasoning_param = \"enable_thinking\"\n\
+                    send_reasoning = \"on\"\n";
+        let connection: Connection = toml::from_str(text).unwrap();
+        assert_eq!(connection.model, "qwen");
+        let saved = toml::to_string(&connection).unwrap();
+        assert!(!saved.contains("reasoning_param"), "{saved}");
+        assert!(!saved.contains("send_reasoning"), "{saved}");
     }
 
     #[test]

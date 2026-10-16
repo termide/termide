@@ -1356,16 +1356,30 @@ OpenRouter and most gateways. Vendor differences are data in `Compat`
 way pi's per-model `compat` table works, instead of one code path per vendor.
 
 Reasoning between turns: Anthropic requires thinking blocks to be echoed with
-their signature; DeepSeek rejects an echoed `reasoning_content`; vLLM and Qwen
-accept it for the current turn. Decision: keep thinking in the transcript for
-the UI and the session, do not send it back by default; `send_reasoning` opts
-in for OpenAI. A connection's `send_reasoning` sets it, `auto` turning it
-on where the level goes in `enable_thinking`, and with that switch it also
-sends `chat_template_kwargs.preserve_thinking`: Qwen 3.6 answers worse without
-its earlier reasoning, and its template drops it unless asked
-([#62](https://github.com/termide/termide/issues/62)). `extra_body` merges an
-object into the one the body already has, so extra `chat_template_kwargs`
-keep `enable_thinking`. The Anthropic provider keeps each block's signature and hands
+their signature; Qwen 3.6 answers worse without its earlier reasoning, and its
+template drops it unless asked (`chat_template_kwargs.preserve_thinking`,
+[#62](https://github.com/termide/termide/issues/62)); Ollama reads `reasoning`
+rather than `reasoning_content`; some APIs refuse what they do not know.
+Decision: keep thinking in the transcript for the UI and the session, and send
+back the current turn's only — the answers after the last user message, which
+a tool round needs — as the Qwen and DeepSeek templates themselves keep it, so
+earlier turns cost no input tokens. The OpenAI-compatible provider sends it as
+`reasoning_content` and `reasoning` with `preserve_thinking`, to every server
+but the hosted APIs known to take `reasoning_effort` (OpenAI, OpenRouter,
+Gemini); every other server gets `enable_thinking` for the level.
+
+No setting chooses any of it, and the address decides nothing beyond that
+list of hosted APIs: a server's address tells where it runs, not what it is —
+llama.cpp on a rented machine with a public or VPN name is as common as one at
+home, and a host-name heuristic (`localhost`, `.local`, private addresses) left
+such a server with no reasoning switch and no echo, in silence. Instead the
+server's answer decides: a 400 or 422 that names one of the optional fields
+(`chat_template_kwargs`, `reasoning_effort`, `return_progress`,
+`reasoning_content`, `reasoning`) sends the request again at once without it,
+and the field stays out for every provider on that base URL for the rest of the
+process. Not on disk: an upgraded server would stay cut off from a field it now
+takes. `extra_body` (not a config key) merges an object into the one the body
+already has, so extra `chat_template_kwargs` keep `enable_thinking`. The Anthropic provider keeps each block's signature and hands
 back only the model's own blocks of the turn in progress (after the last user
 message), which a tool round needs: dropping the earlier ones is removing a
 leading run, which the API allows, so a compacted history or a rebuilt system

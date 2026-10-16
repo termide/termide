@@ -755,8 +755,6 @@ impl Translation for RuntimeTranslation {
         settings_ai_connection_name,
         settings_ai_connection_default,
         settings_ai_connection_prefill_progress,
-        settings_ai_connection_reasoning_param,
-        settings_ai_connection_send_reasoning,
         settings_ai_connection_subagents,
         settings_ai_connection_subagents_own,
         settings_ai_connection_context_limit,

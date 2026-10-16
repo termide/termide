@@ -2,7 +2,7 @@
 //! one. The page edits the connection in place in the config, so the modal's
 //! own Apply and Cancel cover it like every other field.
 
-use termide_config::{Connection, ReasoningParam, SendReasoning};
+use termide_config::Connection;
 use termide_i18n as i18n;
 use unicode_width::UnicodeWidthStr;
 
@@ -20,13 +20,11 @@ pub(super) const API_KEY_ENV: usize = 3;
 pub(super) const MODEL: usize = 4;
 pub(super) const CONTEXT_WINDOW: usize = 5;
 pub(super) const PREFILL_PROGRESS: usize = 6;
-pub(super) const REASONING_PARAM: usize = 7;
-pub(super) const DEFAULT: usize = 8;
-pub(super) const SUBAGENTS: usize = 9;
-pub(super) const MAX_REQUESTS: usize = 10;
-pub(super) const REVIEWER: usize = 11;
-pub(super) const CONTEXT_LIMIT: usize = 12;
-pub(super) const SEND_REASONING: usize = 13;
+pub(super) const DEFAULT: usize = 7;
+pub(super) const SUBAGENTS: usize = 8;
+pub(super) const MAX_REQUESTS: usize = 9;
+pub(super) const REVIEWER: usize = 10;
+pub(super) const CONTEXT_LIMIT: usize = 11;
 
 /// The connection page, while one is open.
 #[derive(Debug, Clone)]
@@ -101,10 +99,6 @@ pub(super) fn connection_fields() -> Vec<FieldDescriptor> {
             field_type: FieldType::Bool,
         },
         FieldDescriptor {
-            label: t.settings_ai_connection_reasoning_param(),
-            field_type: FieldType::Enum,
-        },
-        FieldDescriptor {
             label: t.settings_ai_connection_default(),
             field_type: FieldType::Bool,
         },
@@ -124,10 +118,6 @@ pub(super) fn connection_fields() -> Vec<FieldDescriptor> {
             label: t.settings_ai_connection_context_limit(),
             field_type: FieldType::OptionalNumber,
         },
-        FieldDescriptor {
-            label: t.settings_ai_connection_send_reasoning(),
-            field_type: FieldType::Enum,
-        },
     ]
 }
 
@@ -139,26 +129,6 @@ fn speaks_openai(connection: &Connection) -> bool {
             connection.provider.as_str(),
             "anthropic_compatible" | "anthropic"
         )
-}
-
-/// How a reasoning parameter reads on the page: the field's own name, or
-/// the localized "auto" and "none".
-fn reasoning_param_label(param: ReasoningParam) -> String {
-    let t = i18n::t();
-    match param {
-        ReasoningParam::Auto => t.settings_value_auto().to_string(),
-        ReasoningParam::None => t.settings_value_none().to_string(),
-        param => param.label().to_string(),
-    }
-}
-
-/// How a choice of sending reasoning back reads on the page: the localized
-/// "auto", or `on` and `off`.
-fn send_reasoning_label(choice: SendReasoning) -> String {
-    match choice {
-        SendReasoning::Auto => i18n::t().settings_value_auto().to_string(),
-        choice => choice.label().to_string(),
-    }
 }
 
 /// How the subagents' connection `value` of `connection` reads: a name, or
@@ -247,11 +217,7 @@ impl SettingsModal {
             rows.push(Field(CONTEXT_LIMIT));
         }
         if openai {
-            rows.extend([
-                Field(PREFILL_PROGRESS),
-                Field(REASONING_PARAM),
-                Field(SEND_REASONING),
-            ]);
+            rows.push(Field(PREFILL_PROGRESS));
         }
         // A CLI agent's requests go through its own process, not termide's.
         if !cli {
@@ -444,8 +410,6 @@ impl SettingsModal {
                 |n| n.to_string(),
             ),
             PREFILL_PROGRESS => bool_str(connection.prefill_progress),
-            REASONING_PARAM => reasoning_param_label(connection.reasoning_param),
-            SEND_REASONING => send_reasoning_label(connection.send_reasoning),
             DEFAULT => bool_str(self.config.ai.default_connection() == self.open_connection_name()),
             SUBAGENTS => subagents_label(connection, &connection.subagents),
             MAX_REQUESTS if connection.max_concurrent_requests == 0 => {
@@ -543,32 +507,6 @@ impl SettingsModal {
                 })
             }
             MODEL => Some(model_enum_options(&connection.model, &self.model_options)),
-            REASONING_PARAM => Some(EnumOptions {
-                values: ReasoningParam::ALL
-                    .iter()
-                    .map(|param| param.label().to_string())
-                    .collect(),
-                labels: ReasoningParam::ALL
-                    .iter()
-                    .map(|param| reasoning_param_label(*param))
-                    .collect(),
-                current: ReasoningParam::ALL
-                    .iter()
-                    .position(|param| *param == connection.reasoning_param),
-            }),
-            SEND_REASONING => Some(EnumOptions {
-                values: SendReasoning::ALL
-                    .iter()
-                    .map(|choice| choice.label().to_string())
-                    .collect(),
-                labels: SendReasoning::ALL
-                    .iter()
-                    .map(|choice| send_reasoning_label(*choice))
-                    .collect(),
-                current: SendReasoning::ALL
-                    .iter()
-                    .position(|choice| *choice == connection.send_reasoning),
-            }),
             REVIEWER => {
                 // Any connection reviews: a CLI agent through its subscription.
                 let values: Vec<String> = std::iter::once(String::new())
@@ -608,18 +546,6 @@ impl SettingsModal {
                     connection.model = value.to_string();
                 }
             }
-            REASONING_PARAM => {
-                let param = ReasoningParam::ALL.into_iter().find(|p| p.label() == value);
-                if let (Some(param), Some(connection)) = (param, self.edited_mut()) {
-                    connection.reasoning_param = param;
-                }
-            }
-            SEND_REASONING => {
-                let choice = SendReasoning::ALL.into_iter().find(|c| c.label() == value);
-                if let (Some(choice), Some(connection)) = (choice, self.edited_mut()) {
-                    connection.send_reasoning = choice;
-                }
-            }
             SUBAGENTS => {
                 if let Some(connection) = self.edited_mut() {
                     connection.subagents = value.to_string();
@@ -634,8 +560,8 @@ impl SettingsModal {
         }
     }
 
-    /// Step the provider, the reasoning parameter, sending reasoning back or
-    /// the subagents' connection with Left/Right, wrapping.
+    /// Step the provider, the subagents' connection or the reviewer with
+    /// Left/Right, wrapping.
     pub(super) fn cycle_connection_field(&mut self, index: usize, forward: bool) {
         if index == SUBAGENTS {
             let choices = self.subagents_choices();
@@ -650,32 +576,6 @@ impl SettingsModal {
                 .collect();
             if let Some(connection) = self.edited_mut() {
                 step_value(&mut connection.reviewer, &choices, forward);
-            }
-            return;
-        }
-        if index == REASONING_PARAM {
-            if let Some(connection) = self.edited_mut() {
-                let mut value = connection.reasoning_param.label().to_string();
-                let values: Vec<String> = ReasoningParam::ALL
-                    .iter()
-                    .map(|param| param.label().to_string())
-                    .collect();
-                step_value(&mut value, &values, forward);
-                if let Some(param) = ReasoningParam::ALL.into_iter().find(|p| p.label() == value) {
-                    connection.reasoning_param = param;
-                }
-            }
-            return;
-        }
-        if index == SEND_REASONING {
-            if let Some(connection) = self.edited_mut() {
-                let all = SendReasoning::ALL;
-                let at = all
-                    .iter()
-                    .position(|c| *c == connection.send_reasoning)
-                    .unwrap_or(0);
-                let step = if forward { 1 } else { all.len() - 1 };
-                connection.send_reasoning = all[(at + step) % all.len()];
             }
             return;
         }
@@ -868,8 +768,6 @@ impl SettingsModal {
         }
         if !speaks_openai(connection) {
             connection.prefill_progress = false;
-            connection.reasoning_param = ReasoningParam::Auto;
-            connection.send_reasoning = SendReasoning::Auto;
         }
         let auto = self.connection_edit.as_ref().is_some_and(|e| e.auto_named);
         if let (true, Some(old)) = (auto, self.open_connection_name().map(str::to_string)) {
@@ -1429,60 +1327,6 @@ mod tests {
         assert!(!modal
             .content_rows()
             .contains(&ContentRow::Field(PREFILL_PROGRESS)));
-    }
-
-    #[test]
-    fn the_reasoning_param_is_an_openai_compatible_choice() {
-        let mut modal = ai_modal(with_local());
-        modal.open_connection("local".into());
-        assert_eq!(
-            modal.connection_value(REASONING_PARAM),
-            i18n::t().settings_value_auto()
-        );
-        modal.cycle_connection_field(REASONING_PARAM, true);
-        assert_eq!(modal.connection_value(REASONING_PARAM), "reasoning_effort");
-        modal.apply_connection_enum(REASONING_PARAM, "enable_thinking");
-        assert_eq!(
-            modal.config.ai.connections["local"].reasoning_param,
-            ReasoningParam::EnableThinking
-        );
-        let options = modal.connection_enum_options(REASONING_PARAM).unwrap();
-        assert_eq!(options.current, Some(2));
-        // The Messages API asks by model: the choice leaves the page.
-        modal.apply_connection_enum(PROVIDER, "anthropic_compatible");
-        let name = modal.open_connection_name().unwrap().to_string();
-        assert!(modal.config.ai.connections[&name].reasoning_param.is_auto());
-        assert!(!modal
-            .content_rows()
-            .contains(&ContentRow::Field(REASONING_PARAM)));
-    }
-
-    #[test]
-    fn sending_reasoning_back_is_an_openai_compatible_choice() {
-        let mut modal = ai_modal(with_local());
-        modal.open_connection("local".into());
-        assert_eq!(
-            modal.connection_value(SEND_REASONING),
-            i18n::t().settings_value_auto()
-        );
-        modal.cycle_connection_field(SEND_REASONING, true);
-        assert_eq!(modal.connection_value(SEND_REASONING), "on");
-        modal.cycle_connection_field(SEND_REASONING, false);
-        modal.cycle_connection_field(SEND_REASONING, false);
-        assert_eq!(modal.connection_value(SEND_REASONING), "off");
-        modal.apply_connection_enum(SEND_REASONING, "on");
-        assert_eq!(
-            modal.config.ai.connections["local"].send_reasoning,
-            SendReasoning::On
-        );
-        let options = modal.connection_enum_options(SEND_REASONING).unwrap();
-        assert_eq!(options.current, Some(1));
-        modal.apply_connection_enum(PROVIDER, "anthropic_compatible");
-        let name = modal.open_connection_name().unwrap().to_string();
-        assert!(modal.config.ai.connections[&name].send_reasoning.is_auto());
-        assert!(!modal
-            .content_rows()
-            .contains(&ContentRow::Field(SEND_REASONING)));
     }
 
     #[test]

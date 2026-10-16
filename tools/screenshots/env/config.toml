@@ -17,7 +17,6 @@ reasoning = "high"
 provider = "openai_compatible"
 base_url = "http://127.0.0.1:10000/v1"
 model = "qwen3-coder-30b-a3b"
-reasoning_param = "enable_thinking"
 
 [ai.permissions]
 mode = "configured"

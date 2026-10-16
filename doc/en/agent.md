@@ -33,8 +33,6 @@ model = "Qwen3.8-Flash-Next-oQ4e-mtp"  # left out: the provider's first model
 # api_key_env = "OPENAI_API_KEY"   # name of the variable, never the key itself
 # context_window_fallback = 32000  # used only when the server does not report a window
 # prefill_progress = true          # ask a llama.cpp server for its prompt-processing progress
-# reasoning_param = "enable_thinking"  # auto (default) | reasoning_effort | enable_thinking | none
-# send_reasoning = "on"        # send the model's reasoning back: auto (default) | on | off
 # max_concurrent_requests = 1      # requests served at once across termide; default 0: no limit
 # reviewer = "small"               # the connection whose model reviews in `auto`; default: [ai.auto_reviewer]
 
@@ -50,8 +48,8 @@ provider = "codex"                 # a CLI agent needs nothing else
 
 A connection carries `provider`, `base_url`, `model`, `api_key_env`,
 `context_window_fallback`, `subagents` (see [Subagents](#subagents)),
-`reviewer` (see [Auto mode](#auto-mode)), `max_concurrent_requests` and, for `openai_compatible`, `prefill_progress`,
-`reasoning_param` and `send_reasoning`; what it leaves out takes that field's default.
+`reviewer` (see [Auto mode](#auto-mode)), `max_concurrent_requests` and, for `openai_compatible`, `prefill_progress`;
+what it leaves out takes that field's default.
 `max_concurrent_requests` caps how many requests the connection serves at
 once across the whole termide process — the agents of every panel, their
 subagents, the `auto` reviewer and the other side calls on it; the rest wait
@@ -78,39 +76,37 @@ and `max` on a model that tops out at `high` gets `high`. On the Messages API
 the model decides the form: adaptive thinking with its effort on Claude 4.6
 and later (asking for the reasoning's summary, which the newer models
 otherwise leave out), a thinking budget on Claude 4.5 and older and on a
-gateway's own models. An OpenAI-compatible connection sends the level in the
-field its `reasoning_param` names: `reasoning_effort` (OpenAI's models offer
-their own set of values, other models `low`, `medium` and `high`),
-`enable_thinking` — `chat_template_kwargs.enable_thinking`, the on/off switch
-of the Qwen3, GLM and DeepSeek chat templates on vLLM or llama.cpp — or
-`none`. The default, `auto`, sends `reasoning_effort` to OpenAI, OpenRouter and
-the Gemini API, `enable_thinking` to a server on this machine or the local
-network (`localhost`, a `.local` name, a loopback or private address) — which
-is how a local model gets its **Reasoning** chip — and nothing to other
-servers, which may reject a field they do not know; a model that is sent nothing reasons as its server has it and shows
-no **Reasoning** chip. The older `prefer_reasoning = true | false` still
-reads, as `high` or `off`.
+gateway's own models. An OpenAI-compatible connection to OpenAI, OpenRouter or
+the Gemini API sends the level as `reasoning_effort` (OpenAI's models offer
+their own set of values, other models `low`, `medium` and `high`). Any other
+server — whatever its address: llama.cpp on a rented machine is as likely as one
+at home — gets `chat_template_kwargs.enable_thinking`, the on/off switch of the
+Qwen3, GLM and DeepSeek chat templates on vLLM or llama.cpp, and so a
+**Reasoning** chip with `off` and `high`. The older
+`prefer_reasoning = true | false` still reads, as `high` or `off`.
 
-`send_reasoning` decides whether an OpenAI-compatible connection sends
-the model's reasoning back with its earlier answers: as `reasoning_content`
-on each of them and, where the level goes in `enable_thinking`, with
+The same servers get the model's reasoning back for the current turn — the
+answers since your last message, between the turn's tool calls — as
+`reasoning_content` and as `reasoning` (the field Ollama reads), with
 `chat_template_kwargs.preserve_thinking`, without which the Qwen 3.6 chat
-template drops it. Reasoning models such as Qwen 3.6 lose track of their own
-plan and answer worse when it is gone, and the prompt cache keeps more of a
-history that does not change between requests. The default, `auto`, sends it
-where the level goes in `enable_thinking` — a local server, or one set to
-`reasoning_param = "enable_thinking"` — and nowhere else, since some APIs
-(DeepSeek's) reject the field; `on` and `off` decide for themselves. The
-history sent back grows by the reasoning; when it outgrows the window, the
-reasoning is the first thing to go.
+template drops it. A reasoning model that loses its thoughts between the steps
+of one task forgets its own plan and answers worse. The reasoning of earlier
+turns stays behind, as the Qwen and DeepSeek templates leave it out
+themselves: it would cost input tokens on every request for little the model
+uses.
+
+None of this is a setting. A server that refuses one of these fields — a 400 or
+422 that names `chat_template_kwargs`, `reasoning_effort`, `return_progress`,
+`reasoning_content` or `reasoning` — gets the request again at once without
+it, and every session on that server leaves it out until termide restarts,
+when an upgraded server is asked again.
 
 The settings modal (the gear, or the command palette) has all of it under
 **AI**. **Connections** comes first: each row names a connection with its
 provider and model, the one new sessions start on marked `●`. `Enter` or a
 click opens a connection on a page of its own — name, provider, base URL, API
 key variable, model, context window (for a CLI agent, **Context window
-limit**, see below), **Prefill progress (llama.cpp)** and
-**Reasoning parameter** and **Send reasoning back** (for an
+limit**, see below), **Prefill progress (llama.cpp)** (for an
 OpenAI-compatible one), **Requests at once** (not for a CLI agent), **Subagents**, **Auto mode reviewer** and **Use by default** (new sessions start
 on it) — and **[ Back to list ]**, `Esc` or `Backspace` returns to the list;
 **+ Add connection** adds an OpenAI-compatible one, and

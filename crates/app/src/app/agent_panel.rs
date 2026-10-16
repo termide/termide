@@ -2465,7 +2465,7 @@ fn build_provider(connection: &Connection, api_key: Option<String>) -> Arc<dyn P
                         let reasoning = reasoning_param(settings);
                         Compat {
                             reasoning,
-                            send_reasoning: sends_reasoning(settings, reasoning),
+                            send_reasoning: sends_reasoning(settings),
                             prefill_progress: settings.prefill_progress,
                             ..Compat::default()
                         }
@@ -2476,47 +2476,36 @@ fn build_provider(connection: &Connection, api_key: Option<String>) -> Arc<dyn P
 }
 
 /// The field an OpenAI-compatible connection takes the reasoning level in.
-/// Left to `auto`, the hosted APIs known to take `reasoning_effort` get it, a
-/// server on this machine or the local network the chat template's
-/// `enable_thinking` switch (llama.cpp, vLLM, omlx and LM Studio take it or
-/// leave it be), and any other server nothing: an unknown field may fail its
-/// requests.
+/// A known hosted API — a fact about the service, not a guess from its
+/// address — takes `reasoning_effort`; any other server is taken for one that
+/// renders a chat template, whatever its address: llama.cpp on a rented
+/// machine is as likely as one at home. A server that refuses the template's
+/// `enable_thinking` is asked again without it (see the provider).
 fn reasoning_param(connection: &Connection) -> ReasoningParam {
-    match connection.reasoning_param {
-        termide_config::ReasoningParam::ReasoningEffort => ReasoningParam::Effort,
-        termide_config::ReasoningParam::EnableThinking => ReasoningParam::EnableThinking,
-        termide_config::ReasoningParam::None => ReasoningParam::None,
-        termide_config::ReasoningParam::Auto => {
-            let host = url_host(&connection.base_url);
-            let hosted = [
-                "api.openai.com",
-                "openrouter.ai",
-                "generativelanguage.googleapis.com",
-            ]
-            .iter()
-            .any(|known| host == *known || host.ends_with(&format!(".{known}")));
-            if hosted {
-                ReasoningParam::Effort
-            } else if is_local_host(&host) {
-                ReasoningParam::EnableThinking
-            } else {
-                ReasoningParam::None
-            }
-        }
+    if is_hosted_api(&connection.base_url) {
+        ReasoningParam::Effort
+    } else {
+        ReasoningParam::EnableThinking
     }
 }
 
-/// Whether a connection sends the model's reasoning back with its earlier
-/// answers. Left to `auto`, it does where the reasoning goes in the chat
-/// template's `enable_thinking` switch: the templates of Qwen, GLM and their
-/// kin take `reasoning_content`, and Qwen 3.6 answers worse without it,
-/// while a hosted API may reject the field (DeepSeek's does).
-fn sends_reasoning(connection: &Connection, reasoning: ReasoningParam) -> bool {
-    match connection.send_reasoning {
-        termide_config::SendReasoning::On => true,
-        termide_config::SendReasoning::Off => false,
-        termide_config::SendReasoning::Auto => reasoning == ReasoningParam::EnableThinking,
-    }
+/// Whether the model's reasoning goes back with the answers of the current
+/// turn: to every server but the hosted APIs, which keep reasoning their own
+/// way. A server that refuses the field is asked again without it.
+fn sends_reasoning(connection: &Connection) -> bool {
+    !is_hosted_api(&connection.base_url)
+}
+
+/// Whether `url` is one of the hosted APIs known to take `reasoning_effort`.
+fn is_hosted_api(url: &str) -> bool {
+    let host = url_host(url);
+    [
+        "api.openai.com",
+        "openrouter.ai",
+        "generativelanguage.googleapis.com",
+    ]
+    .iter()
+    .any(|known| host == *known || host.ends_with(&format!(".{known}")))
 }
 
 /// The lowercased host of `url`, without its port or an IPv6 address's
@@ -2532,24 +2521,6 @@ fn url_host(url: &str) -> String {
         None => authority.split(':').next().unwrap_or(""),
     };
     host.to_ascii_lowercase()
-}
-
-/// Whether `host` is this machine or an address of a private network.
-fn is_local_host(host: &str) -> bool {
-    use std::net::IpAddr;
-    if host == "localhost" || host.ends_with(".localhost") || host.ends_with(".local") {
-        return true;
-    }
-    match host.parse::<IpAddr>() {
-        Ok(IpAddr::V4(ip)) => ip.is_loopback() || ip.is_private() || ip.is_link_local(),
-        // Loopback, unique local (fc00::/7) and link-local (fe80::/10).
-        Ok(IpAddr::V6(ip)) => {
-            ip.is_loopback()
-                || ip.segments()[0] & 0xfe00 == 0xfc00
-                || ip.segments()[0] & 0xffc0 == 0xfe80
-        }
-        Err(_) => false,
-    }
 }
 
 /// The shipped default base URL, used to tell "left at default" from "set on
@@ -2768,79 +2739,40 @@ mod tests {
         }
     }
 
+    /// The address decides nothing but the hosted APIs, which are known
+    /// services: llama.cpp is as likely on a rented machine with a domain of
+    /// its own (`llm.mbk.lan` through a VPN, a public name) as at home.
     #[test]
-    fn hosted_apis_take_reasoning_effort_local_servers_the_switch_and_others_nothing() {
-        let at = |base_url: &str, param| {
-            reasoning_param(&Connection {
-                base_url: base_url.into(),
-                reasoning_param: param,
-                ..Connection::default()
-            })
-        };
-        let auto = termide_config::ReasoningParam::Auto;
-        assert_eq!(
-            at("https://api.openai.com/v1", auto),
-            ReasoningParam::Effort
-        );
-        assert_eq!(
-            at("https://openrouter.ai/api/v1", auto),
-            ReasoningParam::Effort
-        );
-        assert_eq!(
-            at(
-                "https://generativelanguage.googleapis.com/v1beta/openai",
-                auto
-            ),
-            ReasoningParam::Effort
-        );
-        for local in [
-            "http://127.0.0.1:10000/v1",
-            "http://localhost:8080/v1",
-            "http://studio.local:1234/v1",
-            "http://192.168.1.20:8000/v1",
-            "http://10.0.0.5/v1",
-            "http://[::1]:8080/v1",
-            "http://[fd00::5]:8080/v1",
-        ] {
-            assert_eq!(at(local, auto), ReasoningParam::EnableThinking, "{local}");
-        }
-        assert_eq!(at("https://api.mistral.ai/v1", auto), ReasoningParam::None);
-        assert_eq!(at("http://8.8.8.8:8080/v1", auto), ReasoningParam::None);
-        assert_eq!(
-            at("https://api.openai.com.evil.example/v1", auto),
-            ReasoningParam::None
-        );
-        assert_eq!(
-            at(
-                "http://127.0.0.1:8080/v1",
-                termide_config::ReasoningParam::EnableThinking
-            ),
-            ReasoningParam::EnableThinking
-        );
-        assert_eq!(
-            at(
-                "https://api.openai.com/v1",
-                termide_config::ReasoningParam::None
-            ),
-            ReasoningParam::None
-        );
-    }
-
-    #[test]
-    fn reasoning_goes_back_where_the_chat_template_switch_takes_it() {
-        use termide_config::SendReasoning::{Auto, Off, On};
-        let sends = |preserve, reasoning| {
+    fn hosted_apis_take_reasoning_effort_and_every_other_server_the_template() {
+        let at = |base_url: &str| {
             let connection = Connection {
-                send_reasoning: preserve,
+                base_url: base_url.into(),
                 ..Connection::default()
             };
-            sends_reasoning(&connection, reasoning)
+            (reasoning_param(&connection), sends_reasoning(&connection))
         };
-        assert!(sends(Auto, ReasoningParam::EnableThinking));
-        assert!(!sends(Auto, ReasoningParam::Effort));
-        assert!(!sends(Auto, ReasoningParam::None));
-        assert!(sends(On, ReasoningParam::None));
-        assert!(!sends(Off, ReasoningParam::EnableThinking));
+        for hosted in [
+            "https://api.openai.com/v1",
+            "https://openrouter.ai/api/v1",
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+        ] {
+            assert_eq!(at(hosted), (ReasoningParam::Effort, false), "{hosted}");
+        }
+        for server in [
+            "http://127.0.0.1:10000/v1",
+            "http://localhost:8080/v1",
+            "http://llm.mbk.lan:8000/v1",
+            "https://llm.example.com/v1",
+            "http://8.8.8.8:8080/v1",
+            "http://[fd00::5]:8080/v1",
+            "https://api.openai.com.evil.example/v1",
+        ] {
+            assert_eq!(
+                at(server),
+                (ReasoningParam::EnableThinking, true),
+                "{server}"
+            );
+        }
     }
 
     /// The applied `[ai]` settings are one per process: the tests that read
