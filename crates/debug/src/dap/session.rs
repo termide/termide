@@ -394,7 +394,7 @@ impl Session {
         self.status = Status::Building;
         self.push_line(OutputKind::Build, format!("$ {build}"));
         let mut command = shell_command(build);
-        command
+        crate::detach(&mut command)
             .current_dir(&self.spec.cwd)
             .envs(self.spec.env.iter().cloned())
             .stdin(Stdio::null())
@@ -448,7 +448,7 @@ impl Session {
             return self.fail(format!("{name} is not installed"));
         };
         let mut command = Command::new(&program);
-        command
+        crate::detach(&mut command)
             .args(&args)
             .current_dir(&self.spec.cwd)
             .envs(self.spec.env.iter().cloned())
