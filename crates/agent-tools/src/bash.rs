@@ -337,12 +337,15 @@ fn spawn(command: &str, ctx: &ToolContext, shim_path: Option<&Path>) -> Result<C
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        // Own process group, so killing the group takes pipelines and
-        // background children with it and a Ctrl-C in termide does not.
-        // SAFETY: setpgid is async-signal-safe and touches no Rust state.
+        // Own session, hence own process group: killing the group takes
+        // pipelines and background children with it, a Ctrl-C in termide
+        // does not reach them, and with no controlling terminal nothing they
+        // start (a debugger, `stty`, a password prompt) can open `/dev/tty`
+        // and take termide's terminal out of raw mode.
+        // SAFETY: setsid is async-signal-safe and touches no Rust state.
         unsafe {
             cmd.pre_exec(|| {
-                libc::setpgid(0, 0);
+                libc::setsid();
                 Ok(())
             });
         }
@@ -453,6 +456,25 @@ mod tests {
 
     fn run(dir: &std::path::Path, args: Value) -> ToolResultMessage {
         run_with(&tool(dir), dir, args, &CancelToken::new()).0
+    }
+
+    /// A command must not reach termide's own terminal: a debugger, `stty` or
+    /// a password prompt opening `/dev/tty` would take it out of raw mode and
+    /// leave every key echoed as an escape code. Only meaningful when the
+    /// test itself runs with a controlling terminal.
+    #[cfg(unix)]
+    #[test]
+    fn a_command_has_no_controlling_terminal() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = run(
+            dir.path(),
+            json!({ "command": "if (exec 3</dev/tty) 2>/dev/null; then echo TTY; else echo NO_TTY; fi" }),
+        );
+        assert!(
+            result.plain_text().starts_with("NO_TTY"),
+            "{}",
+            result.plain_text()
+        );
     }
 
     #[cfg(unix)]
