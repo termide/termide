@@ -104,8 +104,7 @@ The settings modal (the gear, or the command palette) has all of it under
 provider and model, the one new sessions start on marked `●`. `Enter` or a
 click opens a connection on a page of its own — name, provider, base URL, API
 key variable, model, context window (for a CLI agent, **Context window
-limit**, see below), **Prefill progress (llama.cpp)** (for an
-OpenAI-compatible one), **Requests at once** (not for a CLI agent), **Subagents**, **Auto mode reviewer** and **Use by default** (new sessions start
+limit**, see below), **Requests at once** (not for a CLI agent), **Subagents**, **Auto mode reviewer** and **Use by default** (new sessions start
 on it) — and **[ Back to list ]**, `Esc` or `Backspace` returns to the list;
 **+ Add connection** adds an OpenAI-compatible one, and
 **[ Delete connection ]** on the page, or `Del` on its row, removes one.
