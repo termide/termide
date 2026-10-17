@@ -65,6 +65,7 @@ Editor, LSP, terminal, git and project layouts are a given among terminal editor
 
 - **Editor** - Syntax highlighting for 23 languages, LSP completion, hover, go to definition, references, rename and diagnostics; toggle comment, auto-indent, auto-close brackets; optional Vim mode
 - **Outline and diagnostics** - Structural navigation synced with the cursor (`Alt+O`) and an LSP diagnostics panel (`Alt+I`)
+- **Debugger** - Breakpoints in the gutter (`Ctrl+F8`), `F5` to run to them; a debug panel with the call stack, variables and stepping over DAP (lldb-dap, GDB, debugpy, Delve), or lldb, gdb, Delve and pdb in a terminal
 - **Search and replace** - Live preview, match counter, regex
 - **Docs next to the code** - Rendered Markdown, HTML (a text-mode browser that saves pages as Markdown) and Mermaid diagrams drawn as text; `Ctrl+E` switches to the source
 - **Hex editor** - Hex/ASCII view with a byte cursor, selection and search; overwrite editing with a `.bak` backup
@@ -75,7 +76,7 @@ Editor, LSP, terminal, git and project layouts are a given among terminal editor
 - **Bring your own model** - Any OpenAI- or Anthropic-compatible endpoint: llama.cpp, Ollama, vLLM, omlx on your machine, or a hosted provider
 - **Nothing changes without you** - Permission per tool call, or a reviewer model in auto mode; `/undo` and checkpoints take edits back
 - **Plan mode and subagents** - The agent settles open decisions with you before it writes a plan; subagents work in parallel
-- **Tools** - Read, edit, shell, web search and fetch, `recall` over earlier sessions, git history and project files, and MCP servers
+- **Tools** - Read, edit, shell, web search and fetch, `recall` over earlier sessions, git history and project files, the debugger, and MCP servers
 - **Other agents in the same panel** - Claude Code, Codex and Gemini CLI over the Agent Client Protocol
 - **Extend it in files** - Skills, prompt templates, command scripts, hooks and project instructions
 - **Headless** - `termide --prompt "..." --output json` runs the same agent in scripts and CI
