@@ -353,7 +353,7 @@ fn write_zip(
                 let mut field = vec![0x01];
                 field.extend_from_slice(&secs.to_le_bytes());
                 options
-                    .add_extra_data(EXTENDED_TIMESTAMP, field, false)
+                    .add_extra_field(EXTENDED_TIMESTAMP, field, false)
                     .map_err(zip_error)?;
             }
         }

@@ -257,7 +257,12 @@ fn index_zip(zip: &mut ZipReader) -> VfsResult<(ArchiveIndex, Option<usize>)> {
         };
         entries.push(Entry {
             raw_name: entry.name_raw().to_vec(),
-            cp437_name: entry.name().to_owned(),
+            // Every byte has a CP437 character, so this does not fail; were
+            // it to, the raw name read leniently stands in.
+            cp437_name: entry
+                .name()
+                .map(|name| name.into_owned())
+                .unwrap_or_else(|_| String::from_utf8_lossy(entry.name_raw()).into_owned()),
             is_dir: entry.is_dir(),
             is_symlink: entry.is_symlink(),
             encrypted: entry.encrypted(),

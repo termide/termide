@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The connection settings `reasoning_param` and `send_reasoning`** (**Reasoning parameter** and **Send reasoning back** on a connection's page). They chose by hand what the server's own answer now settles, and their `auto` guessed from the host name: a server named `.lan`, or llama.cpp on a rented machine, got no reasoning switch and no `preserve_thinking`, so it dropped the model's reasoning between the steps of a turn and the model answered with a number it had just invented instead of the one it had thought of ([#62](https://github.com/termide/termide/issues/62)). A config that still names them loads; the keys are read past.
 - **The connection setting `prefill_progress`** (**Prefill progress (llama.cpp)**). Every server but the hosted APIs is now asked for its prompt-processing progress, so a llama.cpp server shows its prefill bar without being told to; a server that refuses `return_progress` is asked again without it, the others ignore it. A config that still names it loads.
 
+### Security
+- Updated `zip` to 9.0, clearing RUSTSEC-2026-0367 to 0369: its `extract()` kept setuid bits and followed links out of the destination. termide unpacks zip archives with its own code, which keeps names and links inside the destination, and never called `extract()`; the update clears the audit.
+
 ## [0.42.0] - 2026-10-16
 
 [0.42.0]: https://github.com/termide/termide/releases/tag/0.42.0
