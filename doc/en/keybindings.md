@@ -233,6 +233,8 @@ turned on:
 | Go to definition | `F12` | `editor` |
 | Find references | `Shift+F12`, `F24` | `editor` |
 | Rename symbol | `F4` | `editor` |
+| Toggle breakpoint | `Ctrl+F8` | `editor` |
+| Start debugging | `F5` | `editor` |
 | View file | `F3` | `git_status` |
 | Edit file | `F4` | `git_status` |
 

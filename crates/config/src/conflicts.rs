@@ -563,6 +563,8 @@ mod tests {
             "editor.goto_definition",
             "editor.find_references",
             "editor.rename_symbol",
+            "editor.toggle_breakpoint",
+            "editor.start_debug",
             "git_status.view",
             "git_status.edit",
         ] {
