@@ -187,7 +187,7 @@ pub fn debugpy_available() -> bool {
     let Some((python, _)) = Adapter::Debugpy.command() else {
         return false;
     };
-    Command::new(python)
+    crate::detach(&mut Command::new(python))
         .args(["-c", "import debugpy"])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -200,7 +200,7 @@ fn xcrun_lldb_dap() -> Option<PathBuf> {
     if !cfg!(target_os = "macos") {
         return None;
     }
-    let out = Command::new("xcrun")
+    let out = crate::detach(&mut Command::new("xcrun"))
         .args(["--find", "lldb-dap"])
         .stderr(std::process::Stdio::null())
         .output()

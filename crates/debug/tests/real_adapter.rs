@@ -79,7 +79,7 @@ fn lldb_dap_stops_steps_and_finishes() {
         "#include <stdio.h>\nint main(void) {\n  int a = 41;\n  a = a + 1;\n  printf(\"%d\\n\", a);\n  return 0;\n}\n",
     )
     .unwrap();
-    let ok = std::process::Command::new("cc")
+    let ok = termide_debug::detach(&mut std::process::Command::new("cc"))
         .args(["-g", "-O0", "m.c", "-o", "m"])
         .current_dir(&dir)
         .status()
@@ -144,7 +144,7 @@ fn lldb_dap_runs_the_program_on_a_terminal() {
         "#include <stdio.h>\nint main(void) {\n  char name[64] = {0};\n  printf(\"name? \"); fflush(stdout);\n  if (!fgets(name, sizeof name, stdin)) return 1;\n  int len = 0;\n  while (name[len] && name[len] != '\\n') len++;\n  printf(\"hello %.*s (%d)\\n\", len, name, len);\n  return 0;\n}\n",
     )
     .unwrap();
-    assert!(std::process::Command::new("cc")
+    assert!(termide_debug::detach(&mut std::process::Command::new("cc"))
         .args(["-g", "-O0", "m.c", "-o", "m"])
         .current_dir(&dir)
         .status()
@@ -289,7 +289,22 @@ fn debugpy_runs_the_program_in_a_terminal() {
             Stdio::from_raw_fd(libc::dup(slave)),
         )
     };
-    let mut child = std::process::Command::new(&request.args[0])
+    let mut command = std::process::Command::new(&request.args[0]);
+    // As a terminal panel starts it: a session of its own, with the PTY as
+    // its controlling terminal, never the one the tests run in.
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: setsid and ioctl are async-signal-safe; stdin is already
+        // the PTY's slave when the closure runs.
+        unsafe {
+            command.pre_exec(|| {
+                libc::setsid();
+                libc::ioctl(0, libc::TIOCSCTTY as _, 0);
+                Ok(())
+            });
+        }
+    }
+    let mut child = command
         .args(&request.args[1..])
         .current_dir(request.cwd.clone().unwrap_or(dir.clone()))
         .envs(request.env.iter().cloned())

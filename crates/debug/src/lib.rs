@@ -6,5 +6,7 @@ pub mod breakpoints;
 pub mod dap;
 pub mod execution;
 mod launch;
+mod process;
 
 pub use launch::{shell_quote, Breakpoint, Debugger, Launch};
+pub use process::detach;
