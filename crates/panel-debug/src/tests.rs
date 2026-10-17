@@ -144,6 +144,19 @@ fn e_asks_for_an_expression() {
 }
 
 #[test]
+fn r_asks_to_run_the_launch_again_and_leaves_the_session_to_the_app() {
+    let slot = stopped_session();
+    let mut panel = DebugPanel::new(Arc::clone(&slot));
+    let events = panel.handle_key(key(KeyCode::Char('r')));
+    assert!(matches!(events.as_slice(), [PanelEvent::RestartDebug]));
+    // The app ends the session when it starts the next one, not the panel.
+    assert!(matches!(
+        slot.lock().unwrap().as_ref().unwrap().status,
+        Status::Stopped { .. }
+    ));
+}
+
+#[test]
 fn closing_the_panel_ends_the_session() {
     let slot = stopped_session();
     drop(DebugPanel::new(Arc::clone(&slot)));

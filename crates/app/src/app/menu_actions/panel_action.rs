@@ -63,7 +63,10 @@ impl App {
             .map(|p| {
                 p.context_menu_items()
                     .into_iter()
-                    .map(|(label, action)| DropdownItem::new(&label, action))
+                    .map(|(label, action)| {
+                        DropdownItem::new(&label, action)
+                            .with_shortcut(self.context_item_shortcut(action))
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -73,6 +76,17 @@ impl App {
             Some(&self.state.config.general.keybindings),
         ));
         items
+    }
+
+    /// The key of a panel's own menu entry, for those a keybinding also does.
+    fn context_item_shortcut(&self, action: &str) -> Option<String> {
+        let binding = match action {
+            termide_panel_editor::START_DEBUG_ACTION => {
+                &self.state.config.editor.keybindings.start_debug
+            }
+            _ => return None,
+        };
+        binding.as_ref().map(|k| k.display().to_string())
     }
 
     /// Activate the panel that the menu was opened for, so actions that

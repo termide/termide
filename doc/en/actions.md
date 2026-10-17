@@ -225,6 +225,7 @@ A launch through a debug adapter opens the debug panel (or reuses the open one).
 | `o` | Step out |
 | `p` | Pause the running program |
 | `x` | Stop: end the session and the program |
+| `r` | Restart: run the launch again — its `build` first, with the same parameters — ending the session if it still runs |
 | `e` | Evaluate an expression in the selected frame |
 | `Tab` / `Shift+Tab` | Next / previous section |
 | `↑` `↓` `PgUp` `PgDn` `Home` `End` | Move in the section |

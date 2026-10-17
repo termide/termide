@@ -59,6 +59,10 @@ impl App {
                 self.start_debug(file)?;
             }
 
+            PanelEvent::RestartDebug => self.restart_debug(),
+
+            PanelEvent::ClearBreakpoints => self.clear_breakpoints(),
+
             PanelEvent::RunCommand { command, cwd } => {
                 self.event_run_command(command, cwd)?;
             }

@@ -507,6 +507,12 @@ pub enum PanelEvent {
     /// request came from, for a launch that needs no configuration.
     StartDebug { file: Option<PathBuf> },
 
+    /// Run the last debug launch again, ending the session if it still runs.
+    RestartDebug,
+
+    /// Remove every breakpoint of the project.
+    ClearBreakpoints,
+
     /// Preview media file (raster image) using native graphics or xdg-open
     PreviewMedia(PathBuf),
 

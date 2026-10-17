@@ -31,3 +31,8 @@ pub mod word_wrap;
 pub use config::{EditorConfig, EditorInfo};
 pub use core::{Editor, LspManager};
 pub use state::FileState;
+
+/// `[≡]` menu actions of the editor, named after the keybindings that do
+/// the same, so the menu can show their keys.
+pub const START_DEBUG_ACTION: &str = "start_debug";
+pub const CLEAR_BREAKPOINTS_ACTION: &str = "clear_breakpoints";

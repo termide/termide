@@ -74,6 +74,15 @@ impl App {
         }
     }
 
+    /// Run the last launch through a debug adapter again — its build first,
+    /// with the parameters it was given — ending the session if it still
+    /// runs.
+    pub(in crate::app) fn restart_debug(&mut self) {
+        if let Some(spec) = self.debug_last_launch.clone() {
+            self.launch_dap(spec, true);
+        }
+    }
+
     /// The launch picked from the list `start_debug` opened.
     pub(in crate::app) fn handle_debug_choice(
         &mut self,
@@ -259,6 +268,7 @@ impl App {
     /// panel takes the focus when `focus` (the user started it), and opens
     /// beside the others otherwise (an agent did).
     pub(in crate::app) fn launch_dap(&mut self, mut spec: LaunchSpec, focus: bool) {
+        self.debug_last_launch = Some(spec.clone());
         self.sync_editor_breakpoints();
         breakpoints::flush();
         let (set, version) = {

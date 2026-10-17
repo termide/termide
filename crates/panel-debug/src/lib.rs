@@ -490,6 +490,7 @@ impl Panel for DebugPanel {
             KeyCode::Char('x') if plain => {
                 self.with_session(Session::stop);
             }
+            KeyCode::Char('r') if plain => return vec![PanelEvent::RestartDebug],
             KeyCode::Char('e') if plain => {
                 return vec![PanelEvent::ShowInput {
                     prompt: termide_i18n::t().debug_evaluate_prompt().to_string(),

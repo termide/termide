@@ -22,6 +22,7 @@ use termide_state::PendingAction;
 use termide_theme::Theme;
 
 use crate::keyboard;
+use crate::{CLEAR_BREAKPOINTS_ACTION, START_DEBUG_ACTION};
 
 use super::{build_editor_hotkey_table, Editor};
 
@@ -355,7 +356,15 @@ impl Panel for Editor {
     }
 
     fn context_menu_items(&self) -> Vec<(String, &'static str)> {
-        vec![(t().menu_view_as_diagram().to_string(), "view_as_diagram")]
+        let t = t();
+        vec![
+            (t.menu_view_as_diagram().to_string(), "view_as_diagram"),
+            (t.help_desc_start_debug().to_string(), START_DEBUG_ACTION),
+            (
+                t.help_desc_clear_breakpoints().to_string(),
+                CLEAR_BREAKPOINTS_ACTION,
+            ),
+        ]
     }
 
     fn handle_status_action(&mut self, action: &str) -> Vec<PanelEvent> {
@@ -408,6 +417,11 @@ impl Panel for Editor {
                     vec![]
                 }
             }
+            START_DEBUG_ACTION => {
+                let file = self.file_path().map(|p| p.to_path_buf());
+                vec![PanelEvent::StartDebug { file }]
+            }
+            CLEAR_BREAKPOINTS_ACTION => vec![PanelEvent::ClearBreakpoints],
             "view_as_diagram" => {
                 let source = self.buffer.text();
                 let language = self

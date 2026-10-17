@@ -86,6 +86,9 @@ pub struct App {
     debug_revealed: Option<(std::path::PathBuf, usize)>,
     /// The process holding the terminal a debugged program was pointed at.
     debug_terminal_pid: Option<u32>,
+    /// The last launch through a debug adapter, as it was asked for, for a
+    /// restart.
+    debug_last_launch: Option<termide_debug::dap::LaunchSpec>,
     /// Agents' `debug` calls waiting for the session to get somewhere.
     debug_waiters: Vec<agent_panel::DebugWaiter>,
     /// Capability-aware key normalizer. Used to build a `KeyChord` from
@@ -214,6 +217,7 @@ impl App {
             debug_revealed: None,
             debug_waiters: Vec::new(),
             debug_terminal_pid: None,
+            debug_last_launch: None,
             normalizer: termide_keyboard::KeyNormalizer::default(),
             keyboard_caps: termide_keyboard::KeyboardCaps::default(),
             persist_layout: true,
@@ -317,6 +321,7 @@ impl App {
             debug_revealed: None,
             debug_waiters: Vec::new(),
             debug_terminal_pid: None,
+            debug_last_launch: None,
             normalizer: termide_keyboard::KeyNormalizer::new(caps),
             keyboard_caps: caps,
             persist_layout: true,

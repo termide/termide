@@ -142,6 +142,28 @@ mod tests {
     }
 
     #[test]
+    fn the_panel_menu_starts_debugging_and_removes_the_breakpoints() {
+        let (mut e, file) = editor("print(1)\n");
+        let actions: Vec<&str> = Panel::context_menu_items(&e)
+            .into_iter()
+            .map(|(_, action)| action)
+            .collect();
+        assert!(actions.contains(&crate::START_DEBUG_ACTION), "{actions:?}");
+        assert!(
+            actions.contains(&crate::CLEAR_BREAKPOINTS_ACTION),
+            "{actions:?}"
+        );
+
+        let events = Panel::handle_status_action(&mut e, crate::START_DEBUG_ACTION);
+        assert!(matches!(
+            events.as_slice(),
+            [PanelEvent::StartDebug { file: Some(f) }] if f == file.path()
+        ));
+        let events = Panel::handle_status_action(&mut e, crate::CLEAR_BREAKPOINTS_ACTION);
+        assert!(matches!(events.as_slice(), [PanelEvent::ClearBreakpoints]));
+    }
+
+    #[test]
     fn a_click_on_the_line_numbers_toggles_a_breakpoint() {
         let (mut e, file) = editor("a\nb\nc\n");
         let colors = termide_core::ThemeColors::default();
