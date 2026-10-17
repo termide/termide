@@ -9,10 +9,10 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -207,6 +207,10 @@ pub struct Session {
     pending: HashMap<i64, Pending>,
     partial: Option<(OutputKind, String)>,
     terminal_request: Option<TerminalRequest>,
+    /// The adapter's last message and the build's last line: what a
+    /// failure to start names as its cause.
+    last_adapter_line: Option<String>,
+    last_build_line: Option<String>,
 
     writer: Option<Box<dyn Write + Send>>,
     inbox: Receiver<Incoming>,
@@ -267,6 +271,8 @@ impl Session {
             pending: HashMap::new(),
             partial: None,
             terminal_request: None,
+            last_adapter_line: None,
+            last_build_line: None,
             writer: None,
             inbox,
             inbox_tx,
@@ -598,14 +604,17 @@ impl Session {
     /// anything changed.
     pub fn poll(&mut self) -> bool {
         let before = self.version;
-        while let Ok(incoming) = self.inbox.try_recv() {
+        let mut queue: VecDeque<Incoming> = self.inbox.try_iter().collect();
+        while let Some(incoming) = queue.pop_front() {
             match incoming {
                 Incoming::Message(message) => self.handle_message(message),
-                Incoming::Log(line) => {
-                    log::debug!("Debug adapter: {line}");
-                    self.push_line(OutputKind::Console, line);
+                Incoming::Log(line) => self.adapter_line(line),
+                Incoming::BuildLine(line) => {
+                    if !line.trim().is_empty() {
+                        self.last_build_line = Some(line.clone());
+                    }
+                    self.push_line(OutputKind::Build, line);
                 }
-                Incoming::BuildLine(line) => self.push_line(OutputKind::Build, line),
                 Incoming::Listening(address) => {
                     if self.status == Status::Starting && self.writer.is_none() {
                         self.connect_tcp(&address);
@@ -619,23 +628,97 @@ impl Session {
                     if success {
                         self.start_adapter();
                     } else {
-                        self.fail("the build failed".into());
+                        let line = self.last_build_line.clone();
+                        self.fail(with_cause("the build failed", line.as_deref()));
                     }
                 }
                 Incoming::Closed => {
                     self.writer = None;
                     self.flush_partial();
-                    if self.is_active() {
-                        self.status = match self.status {
-                            Status::Starting => Status::Failed("the debug adapter exited".into()),
-                            _ => self.ended_status(),
-                        };
+                    if self.status == Status::Starting {
+                        self.failed_to_start(&mut queue);
+                    } else if self.is_active() {
+                        self.end();
                     }
                     self.changed();
                 }
             }
         }
         self.version != before
+    }
+
+    /// The adapter went away before the program was launched. What it
+    /// printed on the way out says why — a refused connection, a crash —
+    /// so wait for it to exit and read its last lines, then fail with them.
+    fn failed_to_start(&mut self, queue: &mut VecDeque<Incoming>) {
+        let exit = self.wait_for_adapter(Duration::from_millis(500));
+        let mut rest = VecDeque::new();
+        loop {
+            let next = match queue.pop_front() {
+                Some(incoming) => incoming,
+                None => match self.inbox.recv_timeout(Duration::from_millis(30)) {
+                    Ok(incoming) => incoming,
+                    Err(_) => break,
+                },
+            };
+            match next {
+                Incoming::Log(line) => self.adapter_line(line),
+                other => rest.push_back(other),
+            }
+        }
+        *queue = rest;
+        let what = match exit {
+            Some(status) => format!("the debug adapter exited ({status})"),
+            None => "the debug adapter closed the connection".to_string(),
+        };
+        let line = self.last_adapter_line.clone();
+        self.fail(with_cause(&what, line.as_deref()));
+    }
+
+    /// The adapter's exit status, waiting up to `limit` for it to exit.
+    fn wait_for_adapter(&mut self, limit: Duration) -> Option<ExitStatus> {
+        let child = self.adapter.as_mut()?;
+        let deadline = Instant::now() + limit;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => return Some(status),
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(10))
+                }
+                _ => return None,
+            }
+        }
+    }
+
+    /// A line the adapter printed itself, outside DAP. While the session
+    /// starts it goes to the log: a failure to start is often explained
+    /// only there.
+    fn adapter_line(&mut self, line: String) {
+        self.note_adapter_line(&line);
+        self.push_line(OutputKind::Console, line);
+    }
+
+    fn note_adapter_line(&mut self, line: &str) {
+        if line.trim().is_empty() {
+            return;
+        }
+        if self.status == Status::Starting {
+            log::info!("Debug adapter: {line}");
+        } else {
+            log::debug!("Debug adapter: {line}");
+        }
+        self.last_adapter_line = Some(line.to_string());
+    }
+
+    /// The session is over: the program exited or the adapter went away.
+    fn end(&mut self) {
+        self.status = self.ended_status();
+        match self.status {
+            Status::Exited { code: Some(code) } => {
+                log::info!("Debug session: the program exited with code {code}")
+            }
+            _ => log::info!("Debug session: ended"),
+        }
     }
 
     fn changed(&mut self) {
@@ -922,7 +1005,7 @@ impl Session {
             "terminated" => {
                 self.flush_partial();
                 if self.is_active() {
-                    self.status = self.ended_status();
+                    self.end();
                 }
                 self.frames.clear();
                 self.scopes.clear();
@@ -941,6 +1024,14 @@ impl Session {
                     _ => OutputKind::Console,
                 };
                 let text = body["output"].as_str().unwrap_or_default();
+                // Before the launch, what the adapter says may be why it fails.
+                if self.status == Status::Starting
+                    && matches!(kind, OutputKind::Console | OutputKind::Stderr)
+                {
+                    for line in text.lines() {
+                        self.note_adapter_line(line);
+                    }
+                }
                 self.push_output(kind, text);
                 self.changed();
             }
@@ -1084,6 +1175,7 @@ impl Session {
             Pending::Disconnect,
         );
         self.flush_partial();
+        log::info!("Debug session: stopped");
         self.status = Status::Ended;
         self.frames.clear();
         self.scopes.clear();
@@ -1183,6 +1275,14 @@ impl Drop for Session {
             let _ = adapter.kill();
             let _ = adapter.wait();
         }
+    }
+}
+
+/// `what` went wrong, followed by the line that says why, if any.
+fn with_cause(what: &str, cause: Option<&str>) -> String {
+    match cause.map(str::trim).filter(|c| !c.is_empty()) {
+        Some(cause) => format!("{what}: {cause}"),
+        None => what.to_string(),
     }
 }
 

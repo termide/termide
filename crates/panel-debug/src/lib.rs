@@ -371,9 +371,14 @@ impl DebugPanel {
         let len = session.output.len();
         self.output_back = self.output_back.min(len.saturating_sub(height as usize));
         let end = len - self.output_back;
-        let start = end.saturating_sub(height as usize);
-        for (row, line) in session.output.range(start..end).enumerate() {
-            let y = y0 + row as u16;
+        // Long lines wrap; the rows of the lines up to `end` that fit are
+        // shown, the last at the bottom.
+        let width = area.width.saturating_sub(1).max(1) as usize;
+        let mut rows: Vec<(String, Style)> = Vec::new();
+        for line in session.output.range(..end).rev() {
+            if rows.len() >= height as usize {
+                break;
+            }
             let (prefix, style) = match line.kind {
                 OutputKind::Stdout => ("", Style::default().fg(th.fg)),
                 OutputKind::Stderr | OutputKind::Error => ("", Style::default().fg(th.error)),
@@ -381,18 +386,34 @@ impl DebugPanel {
                 OutputKind::Input => ("› ", Style::default().fg(th.accented_fg)),
                 OutputKind::Result => ("= ", Style::default().fg(th.success)),
             };
+            let text = format!("{prefix}{}", line.text.replace('\t', "    "));
+            let wrapped = wrap(&text, width);
+            rows.extend(wrapped.into_iter().rev().map(|row| (row, style)));
+        }
+        rows.truncate(height as usize);
+        for (i, (row, style)) in rows.into_iter().rev().enumerate() {
+            let y = y0 + i as u16;
             let x = put(buf, area.x, y, area.right(), " ", style);
-            let x = put(buf, x, y, area.right(), prefix, style);
-            put(
-                buf,
-                x,
-                y,
-                area.right(),
-                &line.text.replace('\t', "    "),
-                style,
-            );
+            put(buf, x, y, area.right(), &row, style);
         }
     }
+}
+
+/// `text` cut into rows at most `width` columns wide; an empty text is one
+/// empty row.
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let mut rows = vec![String::new()];
+    let mut used = 0;
+    for ch in text.chars() {
+        let w = ch.width().unwrap_or(0);
+        if used + w > width && used > 0 {
+            rows.push(String::new());
+            used = 0;
+        }
+        rows.last_mut().expect("never empty").push(ch);
+        used += w;
+    }
+    rows
 }
 
 impl Drop for DebugPanel {

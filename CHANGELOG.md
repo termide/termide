@@ -5,6 +5,12 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **A debug session that fails to start says why.** An adapter that went away before the launch left only "the debug adapter exited" in the panel and nothing in the log, even when it had hung up on termide while still running. The failure now says whether the adapter exited, and with what status, or only closed the connection, and ends with the last line it printed: for Delve in Termux, whose same-user check cannot read `/proc/net/tcp` on Android, that is `closing connection from different user`. What the adapter prints until the program is launched goes to the log at `info`, and termide waits for its last lines before it reports the failure. A failed build names its last line in the same way, and the log records when a session ends, stops, or the program exits with its code.
+- **Long lines in the debug panel's output wrap.** They were cut at the panel's edge, which hid the end of an adapter's error, usually the part that says why.
+
 ## [0.43.0] - 2026-10-17
 
 [0.43.0]: https://github.com/termide/termide/releases/tag/0.43.0

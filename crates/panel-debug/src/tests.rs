@@ -117,6 +117,34 @@ fn the_panel_shows_where_it_stopped_the_stack_variables_and_output() {
 }
 
 #[test]
+fn a_long_output_line_wraps_instead_of_being_cut() {
+    let slot = stopped_session();
+    let tail = "only accepted from the same UNIX user";
+    slot.lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .output
+        .push_back(OutputLine {
+            kind: OutputKind::Console,
+            text: format!("closing connection from different user (127.0.0.1:54426): {tail}"),
+        });
+    let mut panel = DebugPanel::new(slot);
+    let screen = render(&mut panel).join("\n");
+    assert!(screen.contains("closing connection"), "{screen}");
+    assert!(screen.contains("UNIX user"), "{screen}");
+    assert!(screen.contains("hello"), "{screen}");
+}
+
+#[test]
+fn wrapping_counts_columns_not_bytes() {
+    assert_eq!(wrap("", 4), [""]);
+    assert_eq!(wrap("abcdef", 4), ["abcd", "ef"]);
+    assert_eq!(wrap("абвгд", 2), ["аб", "вг", "д"]);
+    assert_eq!(wrap("日本語", 4), ["日本", "語"]);
+}
+
+#[test]
 fn left_closes_a_variable_and_then_goes_to_its_parent() {
     let slot = stopped_session();
     let mut panel = DebugPanel::new(Arc::clone(&slot));

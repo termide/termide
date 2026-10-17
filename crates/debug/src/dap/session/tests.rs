@@ -356,6 +356,66 @@ fn a_failed_launch_says_why() {
 }
 
 #[test]
+fn an_adapter_that_hangs_up_while_starting_says_why() {
+    // Delve on Android cannot read /proc/net/tcp, takes termide for another
+    // user and hangs up; its reason may come through after the hang-up.
+    let mut h = Harness::new(Vec::new());
+    h.tx.send(Incoming::Log(
+        "cannot check remote address: open /proc/net/tcp: permission denied".into(),
+    ))
+    .unwrap();
+    h.tx.send(Incoming::Closed).unwrap();
+    h.tx.send(Incoming::Log(
+        "closing connection from different user (127.0.0.1:54426)".into(),
+    ))
+    .unwrap();
+    h.session.poll();
+    assert_eq!(
+        h.session.status,
+        Status::Failed(
+            "the debug adapter closed the connection: \
+             closing connection from different user (127.0.0.1:54426)"
+                .into()
+        )
+    );
+    let console: Vec<&str> = h
+        .session
+        .output
+        .iter()
+        .filter(|l| l.kind == OutputKind::Console)
+        .map(|l| l.text.as_str())
+        .collect();
+    assert_eq!(console.len(), 2, "both lines are shown: {console:?}");
+}
+
+#[test]
+fn an_adapter_that_hangs_up_after_the_launch_ends_the_session() {
+    let mut h = Harness::stopped_at_breakpoint();
+    h.tx.send(Incoming::Closed).unwrap();
+    h.session.poll();
+    assert_eq!(h.session.status, Status::Ended);
+}
+
+#[test]
+fn a_failed_build_names_its_last_line() {
+    let mut h = Harness::new(Vec::new());
+    h.session.status = Status::Building;
+    for line in [
+        "   Compiling app",
+        "error[E0425]: cannot find value `x`",
+        "",
+    ] {
+        h.tx.send(Incoming::BuildLine(line.into())).unwrap();
+    }
+    h.tx.send(Incoming::BuildDone(false)).unwrap();
+    h.session.poll();
+    assert_eq!(
+        h.session.status,
+        Status::Failed("the build failed: error[E0425]: cannot find value `x`".into())
+    );
+}
+
+#[test]
 fn a_reverse_request_is_declined() {
     let mut h = Harness::new(Vec::new());
     h.sent();
