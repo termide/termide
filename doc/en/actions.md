@@ -228,6 +228,28 @@ When a file could be debugged but its debugger is missing (no LLDB or GDB for Ru
 
 **Set up debugging…**, in the editor's `[≡]` menu and the command palette, opens a form for a launch of your own: its name, the program and its arguments, the command to build it first, the debugger and its flags (split as a shell would), filled in for the file in the editor — for a Rust binary its path under `target/debug` and its `cargo build`. **Run** saves it as a debug command in the project's `.termide/commands.toml` and starts it; from then on `F5` offers it, and it can be edited there or in the Commands menu, for example to add arguments.
 
+### Debugger settings
+
+How each debugger starts is set in `config.toml` (global, or `.termide/config.toml` for one project), apart from what is debugged:
+
+```toml
+[debug]
+native = ["lldb-dap", "gdb-dap", "lldb"]  # Rust, C, C++ without a command: the first installed
+console = "terminal"                      # or "panel": where an adapter runs the program by default
+
+[debug.debuggers.lldb-dap]
+command = "/opt/homebrew/opt/llvm/bin/lldb-dap"  # in place of the one on PATH (or xcrun)
+
+[debug.debuggers.dlv-dap]
+args = ["--log"]                                 # flags for every launch
+```
+
+- `command` names the debugger's program: a path, or a name looked up on `PATH`. For `debugpy` and `pdb` it is the Python to run. A path that does not exist makes the debugger count as not installed rather than falling back to another.
+- `args` are the debugger's flags for every launch, in place of its default ones; a launch's `debugger_args` come after them. Unset keeps the defaults, `[]` drops them. The only default today is `--only-same-user=false` for `dlv-dap` where `/proc/net/tcp` cannot be read (Termux on Android): Delve's same-user check would refuse every connection there. Setting `args` for `dlv-dap` in such a system replaces it, so list it again if you still need it.
+- The arguments TermIDE needs to talk to an adapter (`dap --listen=…` for Delve, `-i dap` for GDB, `-m debugpy.adapter`) and its scripts for command-line debuggers are always given and cannot be changed.
+- `native` is tried in order for a Rust file debugged without a command; it takes `lldb-dap`, `gdb-dap`, `lldb` and `gdb`.
+- `console` applies to launches that do not set their own `console`.
+
 ### The debug panel
 
 A launch through a debug adapter opens the debug panel (or reuses the open one). Its top line shows the session and where it stands — building, starting, running, stopped and why, exited with its code, or failed with the reason — and the keys. Below it are three sections:

@@ -69,6 +69,11 @@ pub struct Config {
     #[serde(default)]
     pub lsp: LspSettings,
 
+    /// Debugger settings: how each debugger is started. What to debug is
+    /// in `commands.toml`.
+    #[serde(default)]
+    pub debug: DebugSettings,
+
     /// Logging settings
     #[serde(default)]
     pub logging: LoggingSettings,
@@ -849,6 +854,69 @@ fn default_vault_lock_after_mins() -> u64 {
     15
 }
 
+/// Debugger settings (`[debug]`): which program each debugger is and the
+/// flags it always gets, the debugger a Rust, C or C++ file uses without a
+/// command, and where the debugged program's input and output go.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DebugSettings {
+    /// The debuggers tried, in order, for a Rust file that has no debug
+    /// command; the first one installed is used.
+    #[serde(default = "default_debug_native")]
+    pub native: Vec<String>,
+
+    /// Where a debug adapter runs the program when the launch does not say:
+    /// `terminal` (a terminal panel, where it reads the keyboard) or
+    /// `panel` (the debug panel's output).
+    #[serde(default = "default_debug_console")]
+    pub console: String,
+
+    /// Per-debugger settings, keyed by the name `commands.toml` uses
+    /// (`lldb-dap`, `dlv-dap`, `gdb`…).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub debuggers: std::collections::BTreeMap<String, DebuggerSettings>,
+}
+
+/// How one debugger is started (`[debug.debuggers.<name>]`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DebuggerSettings {
+    /// The program to run instead of the one found on `PATH`: a custom
+    /// LLVM's `lldb-dap`, a `dlv` outside `PATH`, the Python debugpy needs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+
+    /// The debugger's flags for every launch, in place of its default ones
+    /// (for `dlv-dap` in Termux, `--only-same-user=false`). A launch's own
+    /// `debugger_args` come after these. Unset keeps the default; `[]` drops
+    /// it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args: Option<Vec<String>>,
+}
+
+impl Default for DebugSettings {
+    fn default() -> Self {
+        Self {
+            native: default_debug_native(),
+            console: default_debug_console(),
+            debuggers: Default::default(),
+        }
+    }
+}
+
+impl DebugSettings {
+    /// The settings of debugger `name`, empty when it has none.
+    pub fn debugger(&self, name: &str) -> DebuggerSettings {
+        self.debuggers.get(name).cloned().unwrap_or_default()
+    }
+}
+
+fn default_debug_native() -> Vec<String> {
+    ["lldb-dap", "gdb-dap", "lldb"].map(String::from).to_vec()
+}
+
+fn default_debug_console() -> String {
+    "terminal".to_string()
+}
+
 /// LSP (Language Server Protocol) settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LspSettings {
@@ -1212,6 +1280,7 @@ impl From<LegacyConfig> for Config {
             viewer: ViewerSettings::default(),
             terminal: TerminalSettings::default(),
             lsp: LspSettings::default(),
+            debug: DebugSettings::default(),
             logging: LoggingSettings {
                 file_path: legacy.log_file_path,
                 min_level: legacy.min_log_level,

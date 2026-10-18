@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use termide_config::commands::{CommandItem, CommandsRegistry};
+use termide_config::DebuggerSettings;
 use termide_debug::dap::{self, Adapter, Console, LaunchSpec, Session};
 use termide_debug::{breakpoints, execution, Breakpoint, Debugger, Launch};
 
@@ -84,6 +85,87 @@ impl App {
         }
     }
 
+    /// The settings of debugger `name` (`[debug.debuggers.<name>]`).
+    pub(in crate::app) fn debugger_settings(&self, name: &str) -> DebuggerSettings {
+        self.state.config.debug.debugger(name)
+    }
+
+    /// Whether `adapter` can be started as the settings say: its program is
+    /// there (and for debugpy, its Python imports it).
+    pub(in crate::app) fn adapter_installed(&self, adapter: Adapter) -> bool {
+        let settings = self.debugger_settings(adapter.as_str());
+        match adapter {
+            Adapter::Debugpy => dap::debugpy_available_with(&settings),
+            _ => adapter.command_with(&settings).is_some(),
+        }
+    }
+
+    /// The program of a command-line debugger: the settings', or the usual
+    /// one on `PATH`; `None` when it is not there.
+    fn terminal_program(&self, debugger: Debugger) -> Option<PathBuf> {
+        match self.debugger_settings(debugger.as_str()).command {
+            Some(command) => dap::resolve_program(&command),
+            None => dap::find_in_path(match debugger {
+                Debugger::Pdb => "python3",
+                other => other.as_str(),
+            }),
+        }
+    }
+
+    /// A launch under a command-line debugger with its settings applied:
+    /// their program, their flags, then the launch's own `extra_args`.
+    fn terminal_launch(
+        &self,
+        debugger: Debugger,
+        target: String,
+        build: Option<String>,
+        extra_args: &[String],
+    ) -> Launch {
+        let settings = self.debugger_settings(debugger.as_str());
+        let mut debugger_args = settings.args.unwrap_or_default();
+        debugger_args.extend_from_slice(extra_args);
+        Launch {
+            debugger,
+            target,
+            build,
+            debugger_args,
+            program: settings.command,
+        }
+    }
+
+    /// Where a debug adapter runs the program when the launch does not say.
+    fn default_console(&self) -> Console {
+        let name = &self.state.config.debug.console;
+        Console::parse(name).unwrap_or_else(|| {
+            log::warn!("[debug] console = {name:?} is neither terminal nor panel; using terminal");
+            Console::default()
+        })
+    }
+
+    /// The debugger a Rust, C or C++ file gets without a command: the first
+    /// installed of `[debug] native`.
+    pub(in crate::app) fn native_debugger(&self) -> Option<NativeDebugger> {
+        self.state.config.debug.native.iter().find_map(|name| {
+            if let Some(adapter) = Adapter::parse(name) {
+                let native = matches!(adapter, Adapter::LldbDap | Adapter::GdbDap);
+                return (native && self.adapter_installed(adapter))
+                    .then_some(NativeDebugger::Adapter(adapter));
+            }
+            match Debugger::parse(name) {
+                Some(d @ (Debugger::Lldb | Debugger::Gdb)) => self
+                    .terminal_program(d)
+                    .map(|_| NativeDebugger::Terminal(d)),
+                _ => {
+                    log::warn!(
+                        "[debug] native: {name:?} is not a debugger for Rust, C or C++ \
+                         (lldb-dap, gdb-dap, lldb, gdb)"
+                    );
+                    None
+                }
+            }
+        })
+    }
+
     /// A message about debugging, in a modal: the user asked for something
     /// and has to learn why it did not happen.
     pub(in crate::app) fn show_debug_message(&mut self, message: String) {
@@ -153,12 +235,12 @@ impl App {
             self.show_error_modal(termide_i18n::t().debug_unknown_debugger_fmt(name));
             return Ok(());
         };
-        let launch = Launch {
+        let launch = self.terminal_launch(
             debugger,
-            target: command.command.clone().unwrap_or_default(),
-            build: command.metadata.as_ref().and_then(|m| m.build.clone()),
-            debugger_args: command.debugger_args().to_vec(),
-        };
+            command.command.clone().unwrap_or_default(),
+            command.metadata.as_ref().and_then(|m| m.build.clone()),
+            command.debugger_args(),
+        );
         let cwd = self.project_root.clone();
         self.launch_debugger(&launch, cwd, env)
     }
@@ -229,12 +311,13 @@ impl App {
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| self.project_root.clone());
-        let Some(terminal) = Launch::for_file(file) else {
+        let Some(found) = Launch::for_file(file) else {
             return Ok(Vec::new());
         };
+        let terminal = self.terminal_launch(found.debugger, found.target, found.build, &[]);
         let adapter = match terminal.debugger {
-            Debugger::Pdb if dap::debugpy_available() => Some(Adapter::Debugpy),
-            Debugger::Dlv if Adapter::Delve.command().is_some() => Some(Adapter::Delve),
+            Debugger::Pdb if self.adapter_installed(Adapter::Debugpy) => Some(Adapter::Debugpy),
+            Debugger::Dlv if self.adapter_installed(Adapter::Delve) => Some(Adapter::Delve),
             Debugger::Dlv => return Err(t.debug_no_delve().to_string()),
             _ => None,
         };
@@ -246,6 +329,7 @@ impl App {
                 };
                 DebugChoice::Dap(LaunchSpec {
                     adapter,
+                    debugger_settings: self.debugger_settings(adapter.as_str()),
                     adapter_args: Vec::new(),
                     program,
                     args: Vec::new(),
@@ -253,7 +337,7 @@ impl App {
                     build: None,
                     env: Vec::new(),
                     label: file_label(file),
-                    console: Console::Terminal,
+                    console: self.default_console(),
                     tty: None,
                 })
             }
@@ -269,7 +353,9 @@ impl App {
     /// cargo first and run in the workspace root.
     fn cargo_launches(&self, file: &Path) -> Result<Vec<DebugChoice>, String> {
         let t = termide_i18n::t();
-        let debugger = native_debugger().ok_or_else(|| t.debug_no_native_debugger().to_string())?;
+        let debugger = self
+            .native_debugger()
+            .ok_or_else(|| t.debug_no_native_debugger().to_string())?;
         let bins = termide_debug::cargo::bins_for(file)
             .map_err(|e| t.debug_cargo_failed_fmt(&format!("{e:#}")))?;
         Ok(bins
@@ -281,6 +367,7 @@ impl App {
                 match debugger {
                     NativeDebugger::Adapter(adapter) => DebugChoice::Dap(LaunchSpec {
                         adapter,
+                        debugger_settings: self.debugger_settings(adapter.as_str()),
                         adapter_args: Vec::new(),
                         program,
                         args: Vec::new(),
@@ -288,17 +375,17 @@ impl App {
                         build: Some(build),
                         env: Vec::new(),
                         label: bin.name,
-                        console: Console::Terminal,
+                        console: self.default_console(),
                         tty: None,
                     }),
                     NativeDebugger::Terminal(debugger) => DebugChoice::File {
                         label: t.debug_current_file_fmt(&bin.name, debugger.as_str()),
-                        launch: Launch {
+                        launch: self.terminal_launch(
                             debugger,
-                            target: termide_debug::shell_quote(&program),
-                            build: Some(build),
-                            debugger_args: Vec::new(),
-                        },
+                            termide_debug::shell_quote(&program),
+                            Some(build),
+                            &[],
+                        ),
                         cwd,
                     },
                 }
@@ -330,9 +417,10 @@ impl App {
             .as_ref()
             .and_then(|m| m.console.as_deref())
             .and_then(Console::parse)
-            .unwrap_or_default();
+            .unwrap_or_else(|| self.default_console());
         Ok(LaunchSpec {
             adapter,
+            debugger_settings: self.debugger_settings(adapter.as_str()),
             adapter_args: command.debugger_args().to_vec(),
             program,
             args,
@@ -631,18 +719,6 @@ fn choice_label(choice: &DebugChoice) -> String {
 pub(super) enum NativeDebugger {
     Adapter(Adapter),
     Terminal(Debugger),
-}
-
-/// lldb-dap, then GDB's adapter, then lldb in a terminal; `None` when none
-/// of them is installed.
-pub(super) fn native_debugger() -> Option<NativeDebugger> {
-    if Adapter::LldbDap.command().is_some() {
-        return Some(NativeDebugger::Adapter(Adapter::LldbDap));
-    }
-    if Adapter::GdbDap.command().is_some() {
-        return Some(NativeDebugger::Adapter(Adapter::GdbDap));
-    }
-    dap::find_in_path("lldb").map(|_| NativeDebugger::Terminal(Debugger::Lldb))
 }
 
 /// The breakpoints in files under `root`: others belong to other projects,

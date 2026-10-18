@@ -13,7 +13,7 @@ use termide_config::commands::{
 use termide_debug::dap::{self, Adapter};
 use termide_debug::{shell_quote, Debugger};
 
-use super::debug::{native_debugger, NativeDebugger};
+use super::debug::NativeDebugger;
 use super::App;
 
 /// Every debugger the form offers, as `commands.toml` spells them: the
@@ -142,7 +142,7 @@ impl App {
     /// The form's fields for `file`. Commands run in the project root, so
     /// paths are written from there.
     fn debug_setup_guess(&self, file: Option<&Path>) -> SetupGuess {
-        let native = match native_debugger() {
+        let native = match self.native_debugger() {
             Some(NativeDebugger::Adapter(adapter)) => adapter.as_str(),
             Some(NativeDebugger::Terminal(debugger)) => debugger.as_str(),
             None => Adapter::LldbDap.as_str(),
@@ -174,7 +174,7 @@ impl App {
             "py" | "pyw" => {
                 guess.program = self.relative(file);
                 guess.subject = file_name(file);
-                guess.debugger = if dap::debugpy_available() {
+                guess.debugger = if self.adapter_installed(Adapter::Debugpy) {
                     Adapter::Debugpy.as_str()
                 } else {
                     Debugger::Pdb.as_str()
@@ -189,7 +189,7 @@ impl App {
                     .map(|dir| format!("./{dir}"))
                     .unwrap_or_else(|| ".".to_string());
                 guess.subject = file_name(file);
-                if Adapter::Delve.command().is_some() {
+                if self.adapter_installed(Adapter::Delve) {
                     guess.program = package;
                     guess.debugger = Adapter::Delve.as_str().to_string();
                 } else {

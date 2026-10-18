@@ -26,6 +26,7 @@ fn run(adapter: Adapter, dir: &Path, program: &str, source: &Path, line: usize) 
     let mut session = Session::start(
         LaunchSpec {
             adapter,
+            debugger_settings: Default::default(),
             adapter_args: Vec::new(),
             program: program.into(),
             args: Vec::new(),
@@ -184,6 +185,7 @@ fn lldb_dap_runs_the_program_on_a_terminal() {
     let mut session = Session::start(
         LaunchSpec {
             adapter: Adapter::LldbDap,
+            debugger_settings: Default::default(),
             adapter_args: Vec::new(),
             program: "./m".into(),
             args: Vec::new(),
@@ -244,6 +246,7 @@ fn debugpy_runs_the_program_in_a_terminal() {
     let mut session = Session::start(
         LaunchSpec {
             adapter: Adapter::Debugpy,
+            debugger_settings: Default::default(),
             adapter_args: Vec::new(),
             program: source.to_string_lossy().into_owned(),
             args: Vec::new(),

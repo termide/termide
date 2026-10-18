@@ -30,11 +30,11 @@ pub use overrides::{RuntimeOverrides, CONSOLE_THEME};
 pub use settings::{builtin_web_engines, WEB_BACKENDS, WEB_DISPLAYS};
 pub use settings::{is_cli_provider, permission_modes};
 pub use settings::{
-    AiSettings, Config, Connection, CustomLanguage, DatabaseSettings, EditorSettings,
-    FileManagerSettings, FoldBlocks, GeneralSettings, GitDiffSettings, GitLogSettings,
-    GitStatusSettings, HighlightSettings, IconMode, LegacyConfig, LoggingSettings,
-    LspServerSettings, LspSettings, RecallSettings, SideModel, TerminalSettings, VaultSettings,
-    VfsSettings, ViewerSettings, WebSettings, CLAUDE_CODE_MIN_CONTEXT_LIMIT,
+    AiSettings, Config, Connection, CustomLanguage, DatabaseSettings, DebugSettings,
+    DebuggerSettings, EditorSettings, FileManagerSettings, FoldBlocks, GeneralSettings,
+    GitDiffSettings, GitLogSettings, GitStatusSettings, HighlightSettings, IconMode, LegacyConfig,
+    LoggingSettings, LspServerSettings, LspSettings, RecallSettings, SideModel, TerminalSettings,
+    VaultSettings, VfsSettings, ViewerSettings, WebSettings, CLAUDE_CODE_MIN_CONTEXT_LIMIT,
     DEFAULT_CONTEXT_WINDOW_FALLBACK,
 };
 /// The type of `[ai] reasoning`.
@@ -775,6 +775,29 @@ mod layered_load_tests {
 
     fn binding(text: &str) -> Option<KeyBinding> {
         Some(KeyBinding::Single(text.to_string()))
+    }
+
+    #[test]
+    fn debugger_settings_layer_per_debugger() {
+        let (loaded, _dir) = layered(
+            "[debug.debuggers.lldb-dap]\ncommand = \"/opt/llvm/bin/lldb-dap\"\n\
+             [debug.debuggers.dlv-dap]\nargs = [\"--log\"]\n",
+            Some("[debug]\nconsole = \"panel\"\n[debug.debuggers.dlv-dap]\nargs = []\n"),
+        );
+        let debug = &loaded.effective.debug;
+        assert_eq!(debug.console, "panel");
+        assert_eq!(debug.native, ["lldb-dap", "gdb-dap", "lldb"]);
+        assert_eq!(
+            debug.debugger("lldb-dap").command.as_deref(),
+            Some("/opt/llvm/bin/lldb-dap")
+        );
+        // `[]` in the project drops the flags, which is not the same as unset.
+        assert_eq!(debug.debugger("dlv-dap").args, Some(Vec::new()));
+        assert_eq!(debug.debugger("gdb").args, None);
+        assert_eq!(
+            loaded.global_layer.debug.debugger("dlv-dap").args,
+            Some(vec!["--log".to_string()])
+        );
     }
 
     /// The defaults already hold `project_retention_days`; merging the old

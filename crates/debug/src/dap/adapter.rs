@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::{json, Value};
+use termide_config::DebuggerSettings;
 
 /// Where the program's input and output go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -74,18 +75,56 @@ impl Adapter {
         }
     }
 
-    /// The command that starts the adapter, when it can be found.
+    /// The command that starts the adapter with its default flags, when it
+    /// can be found.
     pub fn command(self) -> Option<(PathBuf, Vec<String>)> {
+        self.command_with(&DebuggerSettings::default())
+    }
+
+    /// The command that starts the adapter as `settings` say: their program
+    /// in place of the one found on `PATH`, their flags in place of the
+    /// default ones. The arguments termide needs to talk to it come first
+    /// and cannot be changed.
+    pub fn command_with(self, settings: &DebuggerSettings) -> Option<(PathBuf, Vec<String>)> {
+        let program = match settings.command.as_deref() {
+            Some(command) => resolve_program(command)?,
+            None => self.find()?,
+        };
+        let mut args = self.fixed_args();
+        args.extend(settings.args.clone().unwrap_or_else(|| self.default_args()));
+        Some((program, args))
+    }
+
+    /// The program found where it is usually installed.
+    fn find(self) -> Option<PathBuf> {
         match self {
             Self::LldbDap => find_in_path("lldb-dap")
                 .or_else(xcrun_lldb_dap)
-                .or_else(|| find_in_path("lldb-vscode"))
-                .map(|p| (p, Vec::new())),
-            Self::GdbDap => find_in_path("gdb").map(|p| (p, vec!["-i".into(), "dap".into()])),
-            Self::Debugpy => find_in_path("python3")
-                .or_else(|| find_in_path("python"))
-                .map(|p| (p, vec!["-m".into(), "debugpy.adapter".into()])),
-            Self::Delve => find_in_path("dlv").map(|p| (p, delve_args(delve_can_check_user()))),
+                .or_else(|| find_in_path("lldb-vscode")),
+            Self::GdbDap => find_in_path("gdb"),
+            Self::Debugpy => find_in_path("python3").or_else(|| find_in_path("python")),
+            Self::Delve => find_in_path("dlv"),
+        }
+    }
+
+    /// The arguments termide starts the adapter with to talk DAP to it.
+    fn fixed_args(self) -> Vec<String> {
+        let args: &[&str] = match self {
+            Self::LldbDap => &[],
+            Self::GdbDap => &["-i", "dap"],
+            Self::Debugpy => &["-m", "debugpy.adapter"],
+            Self::Delve => &["dap", "--listen=127.0.0.1:0"],
+        };
+        args.iter().map(|a| a.to_string()).collect()
+    }
+
+    /// The flags the adapter gets unless the settings name others. Delve,
+    /// where it cannot tell which user connects, gets its same-user check
+    /// turned off, as it would refuse termide too.
+    pub fn default_args(self) -> Vec<String> {
+        match self {
+            Self::Delve if !delve_can_check_user() => vec!["--only-same-user=false".to_string()],
+            _ => Vec::new(),
         }
     }
 
@@ -182,7 +221,13 @@ impl Adapter {
 
 /// Whether debugpy can be imported by the Python on `PATH`.
 pub fn debugpy_available() -> bool {
-    let Some((python, _)) = Adapter::Debugpy.command() else {
+    debugpy_available_with(&DebuggerSettings::default())
+}
+
+/// Whether debugpy can be imported by the Python `settings` name, or the
+/// one on `PATH`.
+pub fn debugpy_available_with(settings: &DebuggerSettings) -> bool {
+    let Some((python, _)) = Adapter::Debugpy.command_with(settings) else {
         return false;
     };
     crate::detach(&mut Command::new(python))
@@ -192,17 +237,6 @@ pub fn debugpy_available() -> bool {
         .stderr(std::process::Stdio::null())
         .status()
         .is_ok_and(|s| s.success())
-}
-
-/// The arguments of `dlv` for its DAP server on a local port. Where Delve
-/// cannot tell which user connects (`can_check_user` false), its same-user
-/// check is turned off, as it would refuse termide too.
-fn delve_args(can_check_user: bool) -> Vec<String> {
-    let mut args = vec!["dap".to_string(), "--listen=127.0.0.1:0".to_string()];
-    if !can_check_user {
-        args.push("--only-same-user=false".to_string());
-    }
-    args
 }
 
 /// Whether Delve can check that a local connection comes from the user who
@@ -243,6 +277,20 @@ fn xcrun_lldb_dap() -> Option<PathBuf> {
     (out.status.success() && path.is_file()).then_some(path)
 }
 
+/// The program a setting names: a path (absolute, or with a `/`, taken
+/// from the current directory) that exists, or a name looked up on `PATH`.
+pub fn resolve_program(command: &str) -> Option<PathBuf> {
+    let command = command.trim();
+    if command.is_empty() {
+        return None;
+    }
+    let path = Path::new(command);
+    if path.components().count() > 1 {
+        return path.is_file().then(|| path.to_path_buf());
+    }
+    find_in_path(command)
+}
+
 /// `name` in a directory of `PATH`.
 pub fn find_in_path(name: &str) -> Option<PathBuf> {
     let paths = std::env::var_os("PATH")?;
@@ -273,12 +321,33 @@ mod tests {
     }
 
     #[test]
-    fn delve_turns_its_same_user_check_off_only_where_it_cannot_work() {
-        assert_eq!(delve_args(true), ["dap", "--listen=127.0.0.1:0"]);
-        assert_eq!(
-            delve_args(false),
-            ["dap", "--listen=127.0.0.1:0", "--only-same-user=false"]
-        );
+    fn settings_replace_the_default_flags_but_not_termides_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("dlv");
+        std::fs::write(&program, "").unwrap();
+        let program_text = program.to_string_lossy().into_owned();
+        let with = |args: Option<Vec<String>>| DebuggerSettings {
+            command: Some(program_text.clone()),
+            args,
+        };
+        let (found, args) = Adapter::Delve
+            .command_with(&with(Some(vec!["--log".into()])))
+            .expect("the named program exists");
+        assert_eq!(found, program);
+        assert_eq!(args, ["dap", "--listen=127.0.0.1:0", "--log"]);
+        let (_, args) = Adapter::Delve
+            .command_with(&with(Some(Vec::new())))
+            .unwrap();
+        assert_eq!(args, ["dap", "--listen=127.0.0.1:0"]);
+        // Unset keeps the default flags, whatever this system needs.
+        let (_, args) = Adapter::Delve.command_with(&with(None)).unwrap();
+        assert_eq!(args[2..], Adapter::Delve.default_args()[..]);
+        // A named program that is not there is not replaced by another.
+        let missing = DebuggerSettings {
+            command: Some(dir.path().join("nope").to_string_lossy().into_owned()),
+            args: None,
+        };
+        assert_eq!(Adapter::Delve.command_with(&missing), None);
     }
 
     #[test]

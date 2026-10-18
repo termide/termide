@@ -29,6 +29,9 @@ const STACK_DEPTH: u64 = 64;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchSpec {
     pub adapter: Adapter,
+    /// How the settings say the adapter starts: its program and the flags
+    /// that replace its default ones.
+    pub debugger_settings: termide_config::DebuggerSettings,
     /// Flags of the adapter itself (`debugger_args` in `commands.toml`),
     /// after those termide starts it with.
     pub adapter_args: Vec<String>,
@@ -452,9 +455,13 @@ impl Session {
 
     fn start_adapter(&mut self) {
         self.status = Status::Starting;
-        let Some((program, args)) = self.spec.adapter.command() else {
+        let Some((program, args)) = self.spec.adapter.command_with(&self.spec.debugger_settings)
+        else {
             let name = self.spec.adapter.as_str();
-            return self.fail(format!("{name} is not installed"));
+            return self.fail(match self.spec.debugger_settings.command.as_deref() {
+                Some(command) => format!("{name}: {command} is not there"),
+                None => format!("{name} is not installed"),
+            });
         };
         let mut command = Command::new(&program);
         crate::detach(&mut command)

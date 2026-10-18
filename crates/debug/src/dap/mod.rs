@@ -5,7 +5,9 @@ mod adapter;
 mod session;
 mod transport;
 
-pub use adapter::{debugpy_available, find_in_path, Adapter, Console};
+pub use adapter::{
+    debugpy_available, debugpy_available_with, find_in_path, resolve_program, Adapter, Console,
+};
 pub use session::{
     Frame, LaunchSpec, OutputKind, OutputLine, Session, Status, TerminalRequest, Variable,
 };

@@ -78,9 +78,12 @@ pub struct Launch {
     pub target: String,
     /// A shell command run first; the debugger starts only if it succeeds.
     pub build: Option<String>,
-    /// Flags of the debugger itself (`debugger_args` in `commands.toml`),
-    /// put where it reads its own options, before the program.
+    /// Flags of the debugger itself (the settings' and the launch's own
+    /// `debugger_args`), put where it reads its options, before the program.
     pub debugger_args: Vec<String>,
+    /// The debugger's program from the settings, in place of `lldb`, `gdb`,
+    /// `dlv` or (for pdb) `python3` found on `PATH`.
+    pub program: Option<String>,
 }
 
 impl Launch {
@@ -98,6 +101,7 @@ impl Launch {
             target,
             build: None,
             debugger_args: Vec::new(),
+            program: None,
         })
     }
 
@@ -114,9 +118,13 @@ impl Launch {
             .iter()
             .map(|arg| format!(" {}", shell_quote(arg)))
             .collect();
+        let program = |default: &str| match self.program.as_deref() {
+            Some(program) => shell_quote(program),
+            None => default.to_string(),
+        };
         let debug = match self.debugger {
             Debugger::Pdb => {
-                let mut line = format!("python3 -m pdb{flags}");
+                let mut line = format!("{} -m pdb{flags}", program("python3"));
                 for b in &breakpoints {
                     let command = format!("break {}:{}", b.path.display(), b.line);
                     line.push_str(" -c ");
@@ -130,9 +138,17 @@ impl Launch {
                 let script = write_script(debugger, &script(debugger, &breakpoints), script_dir)?;
                 let script = shell_quote(&script.to_string_lossy());
                 match debugger {
-                    Debugger::Lldb => format!("lldb{flags} -s {script} -- {}", self.target),
-                    Debugger::Gdb => format!("gdb -q{flags} -x {script} --args {}", self.target),
-                    Debugger::Dlv => format!("dlv{flags} --init {script} {}", self.target),
+                    Debugger::Lldb => {
+                        format!("{}{flags} -s {script} -- {}", program("lldb"), self.target)
+                    }
+                    Debugger::Gdb => format!(
+                        "{} -q{flags} -x {script} --args {}",
+                        program("gdb"),
+                        self.target
+                    ),
+                    Debugger::Dlv => {
+                        format!("{}{flags} --init {script} {}", program("dlv"), self.target)
+                    }
                     Debugger::Pdb => unreachable!(),
                 }
             }
@@ -219,7 +235,20 @@ mod tests {
             target: target.into(),
             build: None,
             debugger_args: Vec::new(),
+            program: None,
         }
+    }
+
+    #[test]
+    fn the_settings_program_replaces_the_debuggers_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let line = Launch {
+            program: Some("/opt/my gdb/bin/gdb".into()),
+            ..launch(Debugger::Gdb, "./app")
+        }
+        .command_line(&[], dir.path())
+        .unwrap();
+        assert!(line.starts_with("'/opt/my gdb/bin/gdb' -q -x "), "{line}");
     }
 
     #[test]

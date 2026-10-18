@@ -34,6 +34,7 @@ impl Harness {
         let (tx, rx) = mpsc::channel();
         let spec = LaunchSpec {
             adapter: Adapter::LldbDap,
+            debugger_settings: Default::default(),
             adapter_args: Vec::new(),
             program: "target/debug/app".into(),
             args: vec!["--flag".into()],
@@ -447,6 +448,7 @@ fn a_tcp_adapter_is_reached_at_the_address_it_printed() {
     let (tx, rx) = mpsc::channel();
     let spec = LaunchSpec {
         adapter: Adapter::Delve,
+        debugger_settings: Default::default(),
         adapter_args: Vec::new(),
         program: ".".into(),
         args: Vec::new(),
@@ -527,6 +529,7 @@ fn a_program_asked_for_in_a_terminal_is_started_by_the_app() {
     let (tx, rx) = mpsc::channel();
     let spec = LaunchSpec {
         adapter: Adapter::Debugpy,
+        debugger_settings: Default::default(),
         adapter_args: Vec::new(),
         program: "t.py".into(),
         args: Vec::new(),
