@@ -174,8 +174,9 @@ Code copy alike, a stopped run's included. The task goes in as a
 `task` tool's closure carries (`SubagentTask`). The result's details name the
 log (`subagent_session`); `display_label` marks a delegate's session `&`.
 `o` on a `task` block opens that log through `PanelEvent::OpenAgentSession`,
-and a user block from another agent heads with `& <agent> · <kind>`, its text
-folded under it.
+and another agent's message is a step, not a user block
+(`peer_message_item`): `& Receiving reply from <agent> (panel N) · …`, its
+text folded under it.
 
 Done of the panels: `SubagentPlace` (`hidden`, `existing_panel`, `panel`) in
 `[ai] subagent_run`, on the settings' AI tab and in `AGENT.md`; `ask` came

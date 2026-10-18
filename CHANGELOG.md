@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **An LSP server opens on a page of its own, like an AI connection.** **+ Add Server** or a server in the LSP tab of the settings opens its page: language, command, arguments and root markers as ordinary fields, saved as they are edited, then **Back to list** and **Delete server**; `Esc` or `Backspace` goes back too. The form it replaces kept the list's rows under it for the mouse, so a click on a field could open another server or the add row, and it showed a line of key hints. A server added and left without a command is dropped on the way back.
 - **Long lines in the debug panel's output wrap.** They were cut at the panel's edge, which hid the end of an adapter's error, usually the part that says why.
 - **The outline fills in for a restored layout.** At startup, on a switch of project or when a parked project came back, the outline stayed empty until the editor was edited, refocused or reopened: nothing passed it the restored editor's text, and the live sync waits for an edit. It is now filled from the active editor at once, and when it has to pick an editor itself it takes the active one rather than the first in the layout.
+- **A click on the agent banner's list selects a session rather than opening it.** A single click on a recent session opened it at once in place of the fresh one. The first click now moves the list's cursor there; a click on the session already selected, or a double click, opens it.
 
 ## [0.43.0] - 2026-10-17
 
