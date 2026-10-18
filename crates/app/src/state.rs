@@ -720,13 +720,16 @@ impl AppState {
         self.pending_action.take()
     }
 
-    /// Set error message
+    /// Set error message. Nothing on screen draws the status message, so it
+    /// goes to the journal too, where it can be read.
     pub fn set_error(&mut self, message: String) {
+        log::warn!("{message}");
         self.ui.status_message = Some((message, true));
     }
 
-    /// Set informational message
+    /// Set informational message, written to the journal too.
     pub fn set_info(&mut self, message: String) {
+        log::info!("{message}");
         self.ui.status_message = Some((message, false));
     }
 
@@ -822,11 +825,11 @@ impl StateManager for AppState {
     }
 
     fn set_info(&mut self, msg: String) {
-        self.ui.status_message = Some((msg, false));
+        AppState::set_info(self, msg);
     }
 
     fn set_error(&mut self, msg: String) {
-        self.ui.status_message = Some((msg, true));
+        AppState::set_error(self, msg);
     }
 
     fn clear_status(&mut self) {

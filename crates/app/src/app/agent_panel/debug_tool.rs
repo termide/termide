@@ -326,22 +326,42 @@ impl App {
                 }
                 self.dap_spec(command, &[])?
             }
-            (None, Some(file)) => match self.file_launch(file) {
-                Some(DebugChoice::Dap(spec)) => spec,
-                Some(_) => {
-                    return Err(format!(
-                        "{} needs debugpy (Python) or Delve (Go) installed to be debugged here",
-                        file.display()
-                    ))
-                }
-                None => {
+            (None, Some(file)) => {
+                let launches = self.file_launches(file)?;
+                if launches.is_empty() {
                     return Err(format!(
                         "{} cannot be debugged without a command; give `command`, one with a \
                          `debugger` in commands.toml",
                         file.display()
-                    ))
+                    ));
                 }
-            },
+                let mut specs: Vec<_> = launches
+                    .into_iter()
+                    .filter_map(|choice| match choice {
+                        DebugChoice::Dap(spec) => Some(spec),
+                        _ => None,
+                    })
+                    .collect();
+                match specs.len() {
+                    0 => {
+                        return Err(format!(
+                            "{} needs a debug adapter installed to be debugged here: debugpy \
+                             (Python), Delve (Go), lldb-dap or GDB 14+ (Rust)",
+                            file.display()
+                        ))
+                    }
+                    1 => specs.remove(0),
+                    _ => {
+                        let names: Vec<&str> = specs.iter().map(|s| s.label.as_str()).collect();
+                        return Err(format!(
+                            "{} belongs to several binaries ({}); give the main file of one, \
+                             such as src/main.rs or src/bin/<name>.rs",
+                            file.display(),
+                            names.join(", ")
+                        ));
+                    }
+                }
+            }
             (None, None) => return Err("`start` needs `command` or `file`".into()),
         };
         // The agent reads the output from the session; a program waiting for

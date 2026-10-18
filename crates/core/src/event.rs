@@ -507,6 +507,9 @@ pub enum PanelEvent {
     /// request came from, for a launch that needs no configuration.
     StartDebug { file: Option<PathBuf> },
 
+    /// Open the form that sets up a debug launch, filled in for `file`.
+    ConfigureDebug { file: Option<PathBuf> },
+
     /// Run the last debug launch again, ending the session if it still runs.
     RestartDebug,
 

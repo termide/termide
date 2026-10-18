@@ -159,6 +159,15 @@ mod tests {
             events.as_slice(),
             [PanelEvent::StartDebug { file: Some(f) }] if f == file.path()
         ));
+        assert!(
+            actions.contains(&crate::CONFIGURE_DEBUG_ACTION),
+            "{actions:?}"
+        );
+        let events = Panel::handle_status_action(&mut e, crate::CONFIGURE_DEBUG_ACTION);
+        assert!(matches!(
+            events.as_slice(),
+            [PanelEvent::ConfigureDebug { file: Some(f) }] if f == file.path()
+        ));
         let events = Panel::handle_status_action(&mut e, crate::CLEAR_BREAKPOINTS_ACTION);
         assert!(matches!(events.as_slice(), [PanelEvent::ClearBreakpoints]));
     }

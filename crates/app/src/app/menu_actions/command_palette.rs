@@ -225,6 +225,14 @@ impl App {
                 },
             ),
             (
+                "configure_debug",
+                CommandEntry {
+                    label: t.help_desc_configure_debug().into(),
+                    category: t.palette_category_application(),
+                    keybinding: String::new(),
+                },
+            ),
+            (
                 "clear_breakpoints",
                 CommandEntry {
                     label: t.help_desc_clear_breakpoints().into(),

@@ -308,6 +308,9 @@ pub enum PendingAction {
     },
     /// Start the debug launch chosen from the list `App` keeps for it
     ChooseDebugLaunch,
+    /// Save the debug launch set up in the form as a project command, then
+    /// start it
+    DebugSetup,
     /// Run a command with user-provided parameters
     RunCommandWithParams {
         command: termide_config::commands::CommandItem,

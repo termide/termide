@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Rust debugs without a command.** `F5` on a Rust file in a Cargo project offers its binaries, found with `cargo metadata`: the one whose main file it is, or else those of its package, or else every binary of the workspace. Each is built with `cargo build -p <package> --bin <name>` first and runs from the workspace root under `lldb-dap`, GDB's adapter or `lldb` in a terminal, whichever is installed. Without any of them, or without Delve for a Go file, a window says what to install, where Go used to start a `dlv` that was not there.
+- **Set up debugging…** in the editor's `[≡]` menu and the command palette opens a form for a launch: its name, the program and its arguments, the build to run first and the debugger, filled in for the file in the editor. **Run** saves it as a debug command in the project's `.termide/commands.toml` and starts it. `F5` opens the same form when there is nothing to launch, where it used to do nothing visible.
+
 ### Fixed
+- **Status messages reach the journal.** What termide reported in the status line — a failed preview switch, a cleared set of breakpoints, a panel's notice — was kept for a status bar that no longer draws it, so nobody saw it; it is now written to the journal too, errors as warnings.
 - **A debug session that fails to start says why.** An adapter that went away before the launch left only "the debug adapter exited" in the panel and nothing in the log, even when it had hung up on termide while still running. The failure now says whether the adapter exited, and with what status, or only closed the connection, and ends with the last line it printed: for Delve in Termux, whose same-user check cannot read `/proc/net/tcp` on Android, that is `closing connection from different user`. What the adapter prints until the program is launched goes to the log at `info`, and termide waits for its last lines before it reports the failure. A failed build names its last line in the same way, and the log records when a session ends, stops, or the program exits with its code.
 - **Long lines in the debug panel's output wrap.** They were cut at the panel's edge, which hid the end of an adapter's error, usually the part that says why.
 

@@ -172,7 +172,7 @@ impl Tool for DebugTool {
                 },
                 "file": {
                     "type": "string",
-                    "description": "start: a Python or Go file to debug without a command; breakpoint: the source file"
+                    "description": "start: a Python, Go or Rust file to debug without a command (a Rust file: the main file of its binary, or any file of a package with one binary); breakpoint: the source file"
                 },
                 "line": {
                     "type": "integer",

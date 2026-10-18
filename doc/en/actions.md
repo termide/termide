@@ -207,7 +207,15 @@ For a debug adapter, `command` is split into words as a shell would split it (qu
 
 Only breakpoints in files under the project root go in, each to the debugger for its language: Python files to debugpy and pdb, Go files to Delve and dlv-dap, the rest to lldb and gdb. Debug commands run in the project root, so a relative program path such as `target/debug/app` means the same wherever the focus is. Parameters work as for other commands; for a debug adapter they reach the build and the adapter as environment variables.
 
-`F5` in the editor (`start_debug`), or **Start debugging** in the command palette, starts debugging: with one launch available it starts at once, with several it offers them as a list. The launches are the debug commands of the project and the global file and, when the focused editor holds a Python or Go file, that file itself, which needs no command: a script runs under debugpy in the debug panel when debugpy is installed and under pdb in a terminal otherwise; the package in a Go file's directory runs under `dlv dap` in the debug panel when Delve is installed and under `dlv debug` in a terminal otherwise. With none, the status bar says so. While a debug session is active, `F5` continues the program instead.
+`F5` in the editor (`start_debug`), or **Start debugging** in the command palette, starts debugging: with one launch available it starts at once, with several it offers them as a list. The launches are the debug commands of the project and the global file and, when the focused editor holds a Python, Go or Rust file, that file itself, which needs no command:
+
+- a Python script runs under debugpy in the debug panel when debugpy is installed and under pdb in a terminal otherwise;
+- the package in a Go file's directory runs under `dlv dap` in the debug panel when Delve is installed and under `dlv debug` in a terminal otherwise;
+- a Rust file in a Cargo project offers the binaries found with `cargo metadata`: the one whose main file it is, or else those of its package, or else every binary of the workspace. Each is built with `cargo build -p <package> --bin <name>` and run from the workspace root under `lldb-dap`, or GDB's adapter, or `lldb` in a terminal, whichever is installed first.
+
+When a file could be debugged but its debugger is missing (no LLDB or GDB for Rust, no Delve for Go), a window says what to install. When there is nothing to launch at all, the **Set up debugging** form opens instead (see below). While a debug session is active, `F5` continues the program instead.
+
+**Set up debugging…**, in the editor's `[≡]` menu and the command palette, opens a form for a launch of your own: its name, the program and its arguments, the command to build it first and the debugger, filled in for the file in the editor — for a Rust binary its path under `target/debug` and its `cargo build`. **Run** saves it as a debug command in the project's `.termide/commands.toml` and starts it; from then on `F5` offers it, and it can be edited there or in the Commands menu, for example to add arguments.
 
 ### The debug panel
 

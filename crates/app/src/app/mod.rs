@@ -36,6 +36,7 @@ mod bg_git;
 mod bg_lsp;
 mod bg_resource;
 mod debug;
+mod debug_setup;
 mod event_handler;
 mod file_transfer_ops;
 mod global_hotkeys;

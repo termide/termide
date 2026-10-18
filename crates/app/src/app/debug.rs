@@ -20,8 +20,13 @@ use crate::PanelExt;
 pub(super) enum DebugChoice {
     /// A command with a `debugger`.
     Command(CommandItem),
-    /// The launch a file needs no configuration for.
-    File { launch: Launch, cwd: PathBuf },
+    /// The launch a file needs no configuration for, under a command-line
+    /// debugger in a terminal; `label` names it in the list.
+    File {
+        launch: Launch,
+        cwd: PathBuf,
+        label: String,
+    },
     /// A file debugged over DAP without configuration.
     Dap(LaunchSpec),
 }
@@ -47,22 +52,27 @@ impl App {
             .cloned()
             .map(DebugChoice::Command)
             .collect();
-        if let Some(choice) = file.as_deref().and_then(|f| self.file_launch(f)) {
-            choices.push(choice);
+        let mut missing = None;
+        match file.as_deref().map(|f| self.file_launches(f)) {
+            Some(Ok(launches)) => choices.extend(launches),
+            Some(Err(why)) => missing = Some(why),
+            None => {}
         }
 
         let t = termide_i18n::t();
         match choices.len() {
+            // Nothing to launch: say what is missing, or let the user set
+            // the launch up.
             0 => {
-                self.state.set_info(t.debug_nothing_to_launch().to_string());
+                match missing {
+                    Some(why) => self.show_debug_message(why),
+                    None => self.open_debug_setup(file.as_deref()),
+                }
                 Ok(())
             }
             1 => self.run_debug_choice(choices.remove(0)),
             _ => {
-                let labels = choices
-                    .iter()
-                    .map(|choice| choice_label(choice, file.as_deref()))
-                    .collect();
+                let labels = choices.iter().map(choice_label).collect();
                 let modal = termide_modal::SelectModal::single(t.debug_select_title(), "", labels);
                 self.debug_choices = Some(choices);
                 self.state.set_pending_action(
@@ -72,6 +82,17 @@ impl App {
                 Ok(())
             }
         }
+    }
+
+    /// A message about debugging, in a modal: the user asked for something
+    /// and has to learn why it did not happen.
+    pub(in crate::app) fn show_debug_message(&mut self, message: String) {
+        let t = termide_i18n::t();
+        let modal =
+            termide_modal::InfoModal::new(t.debug_select_title(), vec![(String::new(), message)]);
+        self.state
+            .show_message_modal(crate::state::ActiveModal::Info(Box::new(modal)));
+        self.state.needs_redraw = true;
     }
 
     /// Run the last launch through a debug adapter again — its build first,
@@ -104,7 +125,7 @@ impl App {
         match choice {
             // Through the usual entry, so its parameters are asked for first.
             DebugChoice::Command(command) => self.start_command(command),
-            DebugChoice::File { launch, cwd } => self.launch_debugger(&launch, cwd, &[]),
+            DebugChoice::File { launch, cwd, .. } => self.launch_debugger(&launch, cwd, &[]),
             DebugChoice::Dap(spec) => {
                 self.launch_dap(spec, true);
                 Ok(())
@@ -187,21 +208,36 @@ impl App {
         Ok(())
     }
 
-    /// What debugging `file` needs no command for: a Python script or a Go
-    /// package under its debug adapter in the debug panel when the adapter is
-    /// installed, under its command-line debugger in a terminal otherwise.
-    pub(in crate::app) fn file_launch(&self, file: &Path) -> Option<DebugChoice> {
+    /// What debugging `file` needs no command for: a Python script, a Go
+    /// package or the binaries of a Cargo project, under a debug adapter in
+    /// the debug panel when one is installed, under a command-line debugger
+    /// in a terminal otherwise. Empty for other files; `Err` says what is
+    /// missing for a file that could be debugged.
+    pub(in crate::app) fn file_launches(&self, file: &Path) -> Result<Vec<DebugChoice>, String> {
+        let t = termide_i18n::t();
+        let is_rust = file
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("rs"));
+        if is_rust {
+            if termide_debug::cargo::manifest_for(file).is_none() {
+                return Ok(Vec::new());
+            }
+            return self.cargo_launches(file);
+        }
         let cwd = file
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| self.project_root.clone());
-        let terminal = Launch::for_file(file)?;
+        let Some(terminal) = Launch::for_file(file) else {
+            return Ok(Vec::new());
+        };
         let adapter = match terminal.debugger {
             Debugger::Pdb if dap::debugpy_available() => Some(Adapter::Debugpy),
             Debugger::Dlv if Adapter::Delve.command().is_some() => Some(Adapter::Delve),
+            Debugger::Dlv => return Err(t.debug_no_delve().to_string()),
             _ => None,
         };
-        Some(match adapter {
+        Ok(vec![match adapter {
             Some(adapter) => {
                 let program = match adapter {
                     Adapter::Delve => ".".to_string(),
@@ -220,10 +256,50 @@ impl App {
                 })
             }
             None => DebugChoice::File {
+                label: t.debug_current_file_fmt(&file_label(file), terminal.debugger.as_str()),
                 launch: terminal,
                 cwd,
             },
-        })
+        }])
+    }
+
+    /// One launch per binary of the Cargo project `file` is in, built with
+    /// cargo first and run in the workspace root.
+    fn cargo_launches(&self, file: &Path) -> Result<Vec<DebugChoice>, String> {
+        let t = termide_i18n::t();
+        let debugger = native_debugger().ok_or_else(|| t.debug_no_native_debugger().to_string())?;
+        let bins = termide_debug::cargo::bins_for(file)
+            .map_err(|e| t.debug_cargo_failed_fmt(&format!("{e:#}")))?;
+        Ok(bins
+            .into_iter()
+            .map(|bin| {
+                let cwd = bin.workspace_root.clone();
+                let build = bin.build_command(&cwd);
+                let program = bin.program.to_string_lossy().into_owned();
+                match debugger {
+                    NativeDebugger::Adapter(adapter) => DebugChoice::Dap(LaunchSpec {
+                        adapter,
+                        program,
+                        args: Vec::new(),
+                        cwd,
+                        build: Some(build),
+                        env: Vec::new(),
+                        label: bin.name,
+                        console: Console::Terminal,
+                        tty: None,
+                    }),
+                    NativeDebugger::Terminal(debugger) => DebugChoice::File {
+                        label: t.debug_current_file_fmt(&bin.name, debugger.as_str()),
+                        launch: Launch {
+                            debugger,
+                            target: termide_debug::shell_quote(&program),
+                            build: Some(build),
+                        },
+                        cwd,
+                    },
+                }
+            })
+            .collect())
     }
 
     /// The DAP launch of `command`, whose `debugger` is a debug adapter: its
@@ -531,7 +607,7 @@ fn file_label(file: &Path) -> String {
         .unwrap_or_default()
 }
 
-fn choice_label(choice: &DebugChoice, file: Option<&Path>) -> String {
+fn choice_label(choice: &DebugChoice) -> String {
     match choice {
         DebugChoice::Dap(spec) => {
             termide_i18n::t().debug_current_file_fmt(&spec.label, spec.adapter.as_str())
@@ -541,14 +617,27 @@ fn choice_label(choice: &DebugChoice, file: Option<&Path>) -> String {
             .as_ref()
             .and_then(|m| m.display_name.clone())
             .unwrap_or_else(|| command.name.clone()),
-        DebugChoice::File { launch, .. } => {
-            let name = file
-                .and_then(Path::file_name)
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            termide_i18n::t().debug_current_file_fmt(&name, launch.debugger.as_str())
-        }
+        DebugChoice::File { label, .. } => label.clone(),
     }
+}
+
+/// The debugger for Rust, C and C++ that is installed, best first.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum NativeDebugger {
+    Adapter(Adapter),
+    Terminal(Debugger),
+}
+
+/// lldb-dap, then GDB's adapter, then lldb in a terminal; `None` when none
+/// of them is installed.
+pub(super) fn native_debugger() -> Option<NativeDebugger> {
+    if Adapter::LldbDap.command().is_some() {
+        return Some(NativeDebugger::Adapter(Adapter::LldbDap));
+    }
+    if Adapter::GdbDap.command().is_some() {
+        return Some(NativeDebugger::Adapter(Adapter::GdbDap));
+    }
+    dap::find_in_path("lldb").map(|_| NativeDebugger::Terminal(Debugger::Lldb))
 }
 
 /// The breakpoints in files under `root`: others belong to other projects,

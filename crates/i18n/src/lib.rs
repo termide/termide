@@ -212,8 +212,16 @@ pub trait Translation: Send + Sync {
     fn help_desc_toggle_breakpoint(&self) -> &str;
     fn help_desc_start_debug(&self) -> &str;
     fn help_desc_clear_breakpoints(&self) -> &str;
+    fn help_desc_configure_debug(&self) -> &str;
     fn debug_select_title(&self) -> &str;
-    fn debug_nothing_to_launch(&self) -> &str;
+    fn debug_no_native_debugger(&self) -> &str;
+    fn debug_no_delve(&self) -> &str;
+    fn debug_setup_title(&self) -> &str;
+    fn debug_setup_name(&self) -> &str;
+    fn debug_setup_program(&self) -> &str;
+    fn debug_setup_build(&self) -> &str;
+    fn debug_setup_debugger(&self) -> &str;
+    fn debug_setup_no_program(&self) -> &str;
     fn debug_breakpoints_cleared(&self) -> &str;
     fn debug_panel_title(&self) -> &str;
     fn debug_section_stack(&self) -> &str;
@@ -834,6 +842,8 @@ pub trait Translation: Send + Sync {
     fn command_run_failed_fmt(&self, error: &str) -> String;
     fn debug_current_file_fmt(&self, file: &str, debugger: &str) -> String;
     fn debug_unknown_debugger_fmt(&self, name: &str) -> String;
+    fn debug_cargo_failed_fmt(&self, error: &str) -> String;
+    fn debug_setup_default_name_fmt(&self, name: &str) -> String;
     fn debug_status_stopped_fmt(&self, reason: &str) -> String;
     fn debug_status_exited_fmt(&self, code: &str) -> String;
     fn debug_status_failed_fmt(&self, error: &str) -> String;

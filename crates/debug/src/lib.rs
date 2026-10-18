@@ -3,6 +3,7 @@
 //! (lldb, gdb, Delve, pdb) in a terminal with those breakpoints set.
 
 pub mod breakpoints;
+pub mod cargo;
 pub mod dap;
 pub mod execution;
 mod launch;

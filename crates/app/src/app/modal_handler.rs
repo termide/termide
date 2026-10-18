@@ -830,6 +830,12 @@ impl App {
                 PendingAction::ChooseDebugLaunch => {
                     self.handle_debug_choice(value)?;
                 }
+                PendingAction::DebugSetup => {
+                    use termide_modal::CommandParamsResult;
+                    if let Some(result) = value.downcast_ref::<CommandParamsResult>() {
+                        self.handle_debug_setup(&result.values)?;
+                    }
+                }
                 PendingAction::RunCommandWithParams { command } => {
                     use termide_modal::CommandParamsResult;
                     if let Some(result) = value.downcast_ref::<CommandParamsResult>() {

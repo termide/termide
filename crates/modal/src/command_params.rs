@@ -57,6 +57,8 @@ enum FocusArea {
 #[derive(Debug)]
 pub struct CommandParamsModal {
     command_name: String,
+    /// The whole title, in place of "Parameters: <command>".
+    title: Option<String>,
     params: Vec<CommandParam>,
     values: Vec<ParamValue>,
     focus: FocusArea,
@@ -112,6 +114,7 @@ impl CommandParamsModal {
 
         Self {
             command_name,
+            title: None,
             params,
             values,
             focus,
@@ -123,8 +126,25 @@ impl CommandParamsModal {
         }
     }
 
+    /// Title the form `title` rather than after the command it runs.
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    fn title_text(&self) -> String {
+        match &self.title {
+            Some(title) => title.clone(),
+            None => format!(
+                "{} {}",
+                termide_i18n::t().command_params_title(),
+                self.command_name
+            ),
+        }
+    }
+
     fn calculate_modal_size(&self, screen_width: u16, screen_height: u16) -> (u16, u16) {
-        let title_width = self.command_name.len() as u16 + 20; // "Parameters: name" + padding
+        let title_width = termide_ui::str_display_width(&self.title_text()) as u16 + 4;
         let label_width = 20u16;
         let input_width = 30u16;
         let content_width = title_width.max(label_width + input_width).max(36);
@@ -213,7 +233,7 @@ impl Modal for CommandParamsModal {
         let modal_area = centered_rect_with_size(modal_width, modal_height, area);
 
         let t = termide_i18n::t();
-        let title = format!("{} {}", t.command_params_title(), self.command_name);
+        let title = self.title_text();
         let inner = render_modal_block(modal_area, buf, &title, theme);
 
         // Layout: fields + spacer + buttons

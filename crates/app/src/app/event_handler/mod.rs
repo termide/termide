@@ -59,6 +59,7 @@ impl App {
                 self.start_debug(file)?;
             }
 
+            PanelEvent::ConfigureDebug { file } => self.open_debug_setup(file.as_deref()),
             PanelEvent::RestartDebug => self.restart_debug(),
 
             PanelEvent::ClearBreakpoints => self.clear_breakpoints(),

@@ -330,8 +330,16 @@ impl Translation for RuntimeTranslation {
         help_desc_toggle_breakpoint,
         help_desc_start_debug,
         help_desc_clear_breakpoints,
+        help_desc_configure_debug,
         debug_select_title,
-        debug_nothing_to_launch,
+        debug_no_native_debugger,
+        debug_no_delve,
+        debug_setup_title,
+        debug_setup_name,
+        debug_setup_program,
+        debug_setup_build,
+        debug_setup_debugger,
+        debug_setup_no_program,
         debug_breakpoints_cleared,
         debug_panel_title,
         debug_section_stack,
@@ -2072,6 +2080,14 @@ impl Translation for RuntimeTranslation {
 
     fn debug_unknown_debugger_fmt(&self, name: &str) -> String {
         self.format("debug_unknown_debugger_fmt", &[("name", name)])
+    }
+
+    fn debug_cargo_failed_fmt(&self, error: &str) -> String {
+        self.format("debug_cargo_failed_fmt", &[("error", error)])
+    }
+
+    fn debug_setup_default_name_fmt(&self, name: &str) -> String {
+        self.format("debug_setup_default_name_fmt", &[("name", name)])
     }
 
     fn debug_status_stopped_fmt(&self, reason: &str) -> String {

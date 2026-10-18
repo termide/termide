@@ -36,3 +36,4 @@ pub use state::FileState;
 /// the same, so the menu can show their keys.
 pub const START_DEBUG_ACTION: &str = "start_debug";
 pub const CLEAR_BREAKPOINTS_ACTION: &str = "clear_breakpoints";
+pub const CONFIGURE_DEBUG_ACTION: &str = "configure_debug";
