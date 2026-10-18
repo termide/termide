@@ -666,6 +666,12 @@ pub struct AgentPanel {
     /// The recent session the keyboard cursor is on while the chat focus is
     /// in the banner's list, an index into `recent_sessions`.
     recent_selected: usize,
+    /// Whether the last render drew the list's cursor: a click opens the
+    /// session only when it lands on the one shown selected.
+    recent_cursor_shown: bool,
+    /// Consecutive clicks on a recent session, so a double click opens it
+    /// even before the first click's selection is drawn.
+    session_clicks: ClickTracker<usize>,
     /// First row of the welcome banner on screen: its fields, notices and
     /// list of sessions scroll as one document.
     banner_top: usize,
@@ -1138,6 +1144,8 @@ impl AgentPanel {
             recent_hits: Vec::new(),
             session_search: None,
             recent_selected: 0,
+            recent_cursor_shown: false,
+            session_clicks: ClickTracker::new(),
             banner_top: 0,
             banner_rows: 0,
             banner_list_start: 0,

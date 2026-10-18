@@ -294,7 +294,8 @@ first, each with the local date and time of its last change, starting from
 the logo's column so the titles get the panel's width. The banner scrolls as
 one page with the wheel or its scrollbar, so on a short panel the fields make
 way for the list. A session open in another panel is left out, and comes back
-once that panel lets it go. A click opens one in place of the empty session;
+once that panel lets it go. A click selects a session, and a click on the
+selected one or a double click opens it in place of the empty session;
 from the keyboard, `Tab` moves into the list, the arrows, `PgUp`/`PgDn` and
 `Home`/`End` walk it, scrolling the banner to keep the cursor in view (back
 on the first session the banner shows from its top), `Enter` opens the
