@@ -10,7 +10,7 @@
 
 use std::path::Path;
 
-use termide_agent_core::UserMessage;
+use termide_agent_core::{OriginKind, UserMessage};
 
 use crate::AgentPanel;
 
@@ -33,7 +33,7 @@ impl PeerState {
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
-            Self::Free => "free",
+            Self::Free => "free (nothing asked yet)",
             Self::Idle => "idle",
             Self::Working => "working",
             Self::Waiting => "waiting for the user",
@@ -89,7 +89,8 @@ impl AgentPanel {
 
     /// Take `message`, another agent's: as the next request when idle, at
     /// the run's next step when busy. A panel running another agent's task
-    /// takes none — its session is that agent's.
+    /// takes none — its session is that agent's — and a free one takes no
+    /// question: it has nothing to answer from.
     pub fn deliver(&mut self, message: UserMessage) -> Result<(), String> {
         if self.is_delegate() {
             return Err(format!(
@@ -100,6 +101,19 @@ impl AgentPanel {
         if self.held.is_some() {
             return Err(format!(
                 "panel {} shows a session another termide holds and takes no messages until it is taken up here",
+                self.panel_id
+            ));
+        }
+        // A panel with nothing in its session knows nothing of the work so
+        // far: a question would only start a session there to say so.
+        let question = message
+            .origin
+            .as_ref()
+            .is_some_and(|origin| origin.kind == OriginKind::Question);
+        if question && self.peer_state() == PeerState::Free {
+            return Err(format!(
+                "panel {} has nothing in its session yet: its agent knows nothing of the work so far, \
+                 so it cannot answer; ask the panels that have worked, or the user",
                 self.panel_id
             ));
         }

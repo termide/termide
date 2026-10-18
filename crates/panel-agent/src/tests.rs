@@ -10658,6 +10658,17 @@ fn another_agents_message_starts_a_turn_and_counts_its_hops() {
 }
 
 #[test]
+fn a_free_panel_takes_no_question() {
+    let mut panel = panel(vec![reply("noted")]);
+    assert_eq!(panel.peer_state(), PeerState::Free);
+    let refused = panel
+        .deliver(from_peer(termide_agent_core::OriginKind::Question, 1))
+        .unwrap_err();
+    assert!(refused.contains("nothing in its session"), "{refused}");
+    assert_eq!(panel.peer_state(), PeerState::Free);
+}
+
+#[test]
 fn a_panel_running_another_agents_task_takes_no_messages() {
     let mut panel = panel(vec![reply("found it")]);
     let (updates, _received) = mpsc::channel();

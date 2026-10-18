@@ -1720,7 +1720,9 @@ sender's name and panel, so it knows where to answer, and the `auto`
 reviewer does not take it for a request of yours. An answer comes back the
 same way, as a message of its own, not as the call's result. A panel running
 another agent's task takes no messages, and sends none to the panel that
-handed it the task: its answer goes back as its final message. `send_message` acts outside the
+handed it the task: its answer goes back as its final message. A free panel,
+nothing asked in it yet, takes no `question`: its agent knows nothing of the
+work so far and has nothing to answer from. `send_message` acts outside the
 panel, so it asks as such tools do: in `ask` mode you confirm each message,
 in plan mode none goes; `agents` only reads. Agents may pass ten messages to
 one another without you; the next is refused and the agent told to finish
