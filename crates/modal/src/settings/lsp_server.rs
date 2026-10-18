@@ -89,6 +89,7 @@ impl SettingsModal {
         match self.field_tab() {
             SettingsTab::Connection => self.connection_edit.as_ref()?.error.as_ref(),
             SettingsTab::LspServer => self.lsp_server_edit.as_ref()?.error.as_ref(),
+            SettingsTab::DebuggerPage => self.debugger_edit.as_ref()?.error.as_ref(),
             _ => None,
         }
     }
@@ -99,6 +100,10 @@ impl SettingsModal {
             SettingsTab::LspServer => (
                 lsp_server_buttons(),
                 self.lsp_server_edit.as_ref().map_or(BACK, |e| e.button),
+            ),
+            SettingsTab::DebuggerPage => (
+                super::debugger::debugger_buttons(),
+                self.debugger_edit.as_ref().map_or(BACK, |e| e.button),
             ),
             _ => (
                 super::connection::connection_buttons(),
@@ -113,6 +118,9 @@ impl SettingsModal {
             edit.button = button;
         }
         if let Some(edit) = self.lsp_server_edit.as_mut() {
+            edit.button = button;
+        }
+        if let Some(edit) = self.debugger_edit.as_mut() {
             edit.button = button;
         }
     }

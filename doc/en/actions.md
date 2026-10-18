@@ -250,6 +250,8 @@ args = ["--log"]                                 # flags for every launch
 - `native` is tried in order for a Rust file debugged without a command; it takes `lldb-dap`, `gdb-dap`, `lldb` and `gdb`.
 - `console` applies to launches that do not set their own `console`.
 
+The **Debug** tab of the settings window edits the same: the order and the console, then every debugger TermIDE knows with its program and flags, the defaults shown as such. A debugger opens on a page of its own; its flags are typed as a shell would split them (quotes keep a value whole, commas are part of a flag), emptying them means no flags, and **Reset** brings back the program on `PATH` and the default flags.
+
 ### The debug panel
 
 A launch through a debug adapter opens the debug panel (or reuses the open one). Its top line shows the session and where it stands — building, starting, running, stopped and why, exited with its code, or failed with the reason — and the keys. Below it are three sections:

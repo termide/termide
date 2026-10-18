@@ -16,6 +16,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::{Modal, ModalResult};
 
 mod connection;
+mod debugger;
 mod fields;
 mod input;
 mod kb;
@@ -48,16 +49,22 @@ pub enum SettingsTab {
     /// One LSP server, opened from the LSP tab: not in the sidebar, it
     /// names the fields of the page that edits it.
     LspServer,
+    /// How each debugger starts (`[debug]`).
+    Debug,
+    /// One debugger, opened from the Debug tab: not in the sidebar, it
+    /// names the fields of the page that edits it.
+    DebuggerPage,
     Keybindings,
 }
 
 /// Top-level leaf tabs in the sidebar (excluding the Keybindings group).
-const TOP_LEVEL_TABS: [SettingsTab; 8] = [
+const TOP_LEVEL_TABS: [SettingsTab; 9] = [
     SettingsTab::General,
     SettingsTab::Editor,
     SettingsTab::FileManager,
     SettingsTab::Terminal,
     SettingsTab::Lsp,
+    SettingsTab::Debug,
     SettingsTab::Logging,
     SettingsTab::Vfs,
     SettingsTab::Ai,
@@ -75,6 +82,7 @@ impl SettingsTab {
             SettingsTab::FileManager => t.settings_tab_file_manager().to_string(),
             SettingsTab::Terminal => t.settings_tab_terminal().to_string(),
             SettingsTab::Lsp | SettingsTab::LspServer => t.settings_tab_lsp().to_string(),
+            SettingsTab::Debug | SettingsTab::DebuggerPage => t.settings_tab_debug().to_string(),
             SettingsTab::Logging => t.settings_tab_logging().to_string(),
             SettingsTab::Vfs => t.settings_tab_vfs().to_string(),
             SettingsTab::Ai | SettingsTab::Connection => t.settings_tab_agent().to_string(),
@@ -248,6 +256,13 @@ pub struct SettingsModal {
     lsp_server_keys: Vec<String>,
     /// The server page, while one is open from the LSP tab.
     lsp_server_edit: Option<lsp_server::LspServerEdit>,
+
+    // --- Debuggers ---
+    /// The debugger page, while one is open from the Debug tab.
+    debugger_edit: Option<debugger::DebuggerEdit>,
+    /// The flags each debugger gets on this system when the settings name
+    /// none, by name; given by the app, shown beside the flags field.
+    debugger_defaults: std::collections::HashMap<String, Vec<String>>,
 
     // --- AI connections ---
     /// The connection page, while one is open from the AI tab.
@@ -537,6 +552,7 @@ impl Modal for SettingsModal {
                             rows[idx],
                             fields::ContentRow::ConnectionButtons
                                 | fields::ContentRow::LspServerButtons
+                                | fields::ContentRow::DebuggerButtons
                         ) {
                             let column = mouse.column as usize;
                             let (labels, _) = self.page_buttons();

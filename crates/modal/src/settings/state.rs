@@ -44,6 +44,8 @@ impl SettingsModal {
             enum_picker: None,
             lsp_server_keys,
             lsp_server_edit: None,
+            debugger_edit: None,
+            debugger_defaults: Default::default(),
             connection_edit: None,
             model_fetch_request: None,
             kb_mode: KbMode::Bindings,
@@ -95,6 +97,7 @@ impl SettingsModal {
         match self.field_tab() {
             SettingsTab::Connection => self.connection_value(index),
             SettingsTab::LspServer => self.lsp_server_value(index),
+            SettingsTab::DebuggerPage => self.debugger_value(index),
             tab => get_field_value(&self.config, tab, index),
         }
     }
@@ -169,6 +172,7 @@ impl SettingsModal {
                 self.active_tab = tab;
                 self.connection_edit = None;
                 self.lsp_server_edit = None;
+                self.debugger_edit = None;
                 self.content_scroll = 0;
                 self.editing = false;
                 self.field_cursor = self.first_selectable_row();
@@ -330,6 +334,7 @@ impl SettingsModal {
         // The connection the page had open may be gone with the rest.
         self.connection_edit = None;
         self.lsp_server_edit = None;
+        self.debugger_edit = None;
         self.enum_picker = None;
         self.kb_mode = KbMode::Bindings;
         self.field_cursor = self.first_selectable_row();
@@ -592,6 +597,8 @@ impl SettingsModal {
             }
             SettingsTab::Connection => self.connection_page_rows(),
             SettingsTab::LspServer => self.lsp_server_page_rows(),
+            SettingsTab::Debug => self.debug_tab_rows(),
+            SettingsTab::DebuggerPage => self.debugger_page_rows(),
             SettingsTab::Keybindings => Vec::new(),
         }
     }
@@ -796,6 +803,10 @@ impl SettingsModal {
             self.connection_edit_text(field_idx)
         } else if self.field_tab() == SettingsTab::LspServer {
             self.lsp_server_edit_text(field_idx)
+        } else if self.field_tab() == SettingsTab::DebuggerPage {
+            self.debugger_edit_text(field_idx)
+        } else if self.field_tab() == SettingsTab::Debug && field_idx == super::debugger::NATIVE {
+            self.config.debug.native.join(", ")
         } else {
             let mut value = self.field_value(field_idx);
             // Strip "(auto)" / "(none)" placeholders
@@ -889,6 +900,8 @@ impl SettingsModal {
             }
             SettingsTab::Connection => self.apply_connection_text(index, text),
             SettingsTab::LspServer => self.apply_lsp_server_text(index, text),
+            SettingsTab::DebuggerPage => self.apply_debugger_text(index, text),
+            SettingsTab::Debug if index == super::debugger::NATIVE => self.apply_debug_native(text),
             _ => {}
         }
     }
@@ -912,6 +925,7 @@ mod content_row_tests {
             SettingsTab::FileManager,
             SettingsTab::Terminal,
             SettingsTab::Lsp,
+            SettingsTab::Debug,
             SettingsTab::Logging,
             SettingsTab::Vfs,
             SettingsTab::Ai,

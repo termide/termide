@@ -152,6 +152,12 @@ impl SettingsModal {
                 }
             }
             Some(ContentRow::LspServerButtons) => self.press_lsp_server_button(),
+            Some(ContentRow::Debugger(index)) => {
+                if let Some(name) = super::debugger::DEBUGGERS.get(index) {
+                    self.open_debugger(name);
+                }
+            }
+            Some(ContentRow::DebuggerButtons) => self.press_debugger_button(),
             _ => {}
         }
     }
@@ -291,6 +297,10 @@ impl SettingsModal {
             KeyCode::Esc | KeyCode::Backspace if self.lsp_server_edit.is_some() => {
                 self.close_lsp_server();
             }
+            // And the debugger page.
+            KeyCode::Esc | KeyCode::Backspace if self.debugger_edit.is_some() => {
+                self.close_debugger();
+            }
             KeyCode::BackTab | KeyCode::Esc => {
                 self.focus = FocusArea::Sidebar;
             }
@@ -318,6 +328,9 @@ impl SettingsModal {
             }
             KeyCode::Left | KeyCode::Right if current == Some(ContentRow::LspServerButtons) => {
                 self.step_lsp_server_button(key.code == KeyCode::Right);
+            }
+            KeyCode::Left | KeyCode::Right if current == Some(ContentRow::DebuggerButtons) => {
+                self.step_debugger_button(key.code == KeyCode::Right);
             }
             KeyCode::Left => {
                 if let (Some(ContentRow::Field(field_idx)), Some(d)) = (current, field_desc) {

@@ -1064,6 +1064,18 @@ impl Translation for RuntimeTranslation {
         settings_tab_file_manager,
         settings_tab_terminal,
         settings_tab_lsp,
+        settings_tab_debug,
+        settings_header_debuggers,
+        settings_header_debugger,
+        settings_debug_native,
+        settings_debug_console,
+        settings_debug_console_terminal,
+        settings_debug_console_panel,
+        settings_debugger_command,
+        settings_debugger_args,
+        settings_debugger_reset,
+        settings_debugger_no_defaults,
+        settings_debugger_bad_args,
         settings_tab_logging,
         settings_tab_vfs,
         settings_btn_reset,
@@ -2096,6 +2108,10 @@ impl Translation for RuntimeTranslation {
 
     fn debug_setup_default_name_fmt(&self, name: &str) -> String {
         self.format("debug_setup_default_name_fmt", &[("name", name)])
+    }
+
+    fn settings_debugger_default_fmt(&self, args: &str) -> String {
+        self.format("settings_debugger_default_fmt", &[("args", args)])
     }
 
     fn debug_setup_bad_args_fmt(&self, text: &str) -> String {

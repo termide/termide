@@ -269,6 +269,7 @@ impl SettingsModal {
         let open = match self.field_tab() {
             SettingsTab::Connection => self.open_connection_name(),
             SettingsTab::LspServer => self.open_lsp_server_name(),
+            SettingsTab::DebuggerPage => self.open_debugger_name(),
             _ => None,
         };
         let title = match open {
@@ -386,7 +387,9 @@ impl SettingsModal {
                         );
                     }
                 }
-                ContentRow::ConnectionButtons | ContentRow::LspServerButtons => {
+                ContentRow::ConnectionButtons
+                | ContentRow::LspServerButtons
+                | ContentRow::DebuggerButtons => {
                     let (labels, chosen) = self.page_buttons();
                     let spans = super::connection::page_button_spans(&labels, area.x as usize + 2);
                     for (index, (label, (x, _))) in labels.iter().zip(spans).enumerate() {
@@ -461,6 +464,32 @@ impl SettingsModal {
                             Style::default().fg(theme.accented_fg),
                         );
                     }
+                }
+                ContentRow::Debugger(index) => {
+                    let Some(name) = super::debugger::DEBUGGERS.get(index) else {
+                        continue;
+                    };
+                    let (label_style, summary_style) = if is_focused {
+                        (
+                            Style::default()
+                                .fg(theme.selected_fg)
+                                .add_modifier(Modifier::BOLD),
+                            Style::default().fg(theme.selected_fg),
+                        )
+                    } else {
+                        (
+                            Style::default().fg(theme.fg),
+                            Style::default().fg(theme.disabled),
+                        )
+                    };
+                    buf.set_string(
+                        area.x + 2,
+                        y,
+                        fit_width(format!("• {name}"), label_width),
+                        label_style,
+                    );
+                    let summary = fit_width(self.debugger_summary(name), max_value_width);
+                    buf.set_string(value_x as u16, y, &summary, summary_style);
                 }
                 ContentRow::LspAddServer => {
                     let label = i18n::t().settings_lsp_add_server();
@@ -894,6 +923,7 @@ mod label_column_tests {
             SettingsTab::FileManager,
             SettingsTab::Terminal,
             SettingsTab::Lsp,
+            SettingsTab::Debug,
             SettingsTab::Logging,
             SettingsTab::Vfs,
         ] {

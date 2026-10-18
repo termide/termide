@@ -186,7 +186,15 @@ impl App {
             .runtime_overrides
             .applied_to(&self.state.global_baseline);
         let in_project = termide_config::project_config_path(&self.project_root).exists();
-        let modal = SettingsModal::new(config, global_layer, in_project);
+        // The flags a debugger gets on this system with none set (Delve's in
+        // Termux), for the Debug tab to show.
+        let debugger_defaults = termide_debug::dap::Adapter::ALL
+            .into_iter()
+            .map(|adapter| (adapter.as_str().to_string(), adapter.default_args()))
+            .filter(|(_, args)| !args.is_empty())
+            .collect();
+        let modal = SettingsModal::new(config, global_layer, in_project)
+            .with_debugger_defaults(debugger_defaults);
         self.settings_model_fetch = None;
         self.state.set_pending_action(
             crate::state::PendingAction::Settings,

@@ -848,6 +848,7 @@ pub trait Translation: Send + Sync {
     fn debug_cargo_failed_fmt(&self, error: &str) -> String;
     fn debug_setup_default_name_fmt(&self, name: &str) -> String;
     fn debug_setup_bad_args_fmt(&self, text: &str) -> String;
+    fn settings_debugger_default_fmt(&self, args: &str) -> String;
     fn debug_status_stopped_fmt(&self, reason: &str) -> String;
     fn debug_status_exited_fmt(&self, code: &str) -> String;
     fn debug_status_failed_fmt(&self, error: &str) -> String;
@@ -1259,6 +1260,18 @@ pub trait Translation: Send + Sync {
     fn settings_tab_file_manager(&self) -> &str;
     fn settings_tab_terminal(&self) -> &str;
     fn settings_tab_lsp(&self) -> &str;
+    fn settings_tab_debug(&self) -> &str;
+    fn settings_header_debuggers(&self) -> &str;
+    fn settings_header_debugger(&self) -> &str;
+    fn settings_debug_native(&self) -> &str;
+    fn settings_debug_console(&self) -> &str;
+    fn settings_debug_console_terminal(&self) -> &str;
+    fn settings_debug_console_panel(&self) -> &str;
+    fn settings_debugger_command(&self) -> &str;
+    fn settings_debugger_args(&self) -> &str;
+    fn settings_debugger_reset(&self) -> &str;
+    fn settings_debugger_no_defaults(&self) -> &str;
+    fn settings_debugger_bad_args(&self) -> &str;
     fn settings_tab_logging(&self) -> &str;
     fn settings_tab_vfs(&self) -> &str;
     fn settings_tab_keybindings(&self) -> &str;

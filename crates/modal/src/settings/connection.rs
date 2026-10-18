@@ -148,6 +148,8 @@ impl SettingsModal {
             SettingsTab::Connection
         } else if self.active_tab == SettingsTab::Lsp && self.lsp_server_edit.is_some() {
             SettingsTab::LspServer
+        } else if self.active_tab == SettingsTab::Debug && self.debugger_edit.is_some() {
+            SettingsTab::DebuggerPage
         } else {
             self.active_tab
         }

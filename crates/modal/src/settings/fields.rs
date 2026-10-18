@@ -55,6 +55,10 @@ pub(super) enum ContentRow {
     ConnectionButtons,
     /// LSP server page: the buttons back to the list and deleting it.
     LspServerButtons,
+    /// Debug: a debugger (index into `debugger::DEBUGGERS`); opens its page.
+    Debugger(usize),
+    /// Debugger page: the buttons back to the list and resetting it.
+    DebuggerButtons,
 }
 
 impl ContentRow {
@@ -251,6 +255,8 @@ pub(super) fn fields_for_tab(tab: SettingsTab) -> Vec<FieldDescriptor> {
         ],
         SettingsTab::Connection => super::connection::connection_fields(),
         SettingsTab::LspServer => super::lsp_server::lsp_server_fields(),
+        SettingsTab::Debug => super::debugger::debug_fields(),
+        SettingsTab::DebuggerPage => super::debugger::debugger_fields(),
         SettingsTab::Keybindings => vec![],
     }
 }
@@ -354,8 +360,15 @@ pub(super) fn get_field_value(config: &Config, tab: SettingsTab, index: usize) -
             }
             _ => String::new(),
         },
-        // Read from the open connection by the modal, not the config alone.
-        SettingsTab::Connection | SettingsTab::LspServer => String::new(),
+        SettingsTab::Debug => match index {
+            super::debugger::NATIVE => config.debug.native.join(", "),
+            super::debugger::CONSOLE => super::debugger::console_label(&config.debug.console),
+            _ => String::new(),
+        },
+        // Read from the open page by the modal, not the config alone.
+        SettingsTab::Connection | SettingsTab::LspServer | SettingsTab::DebuggerPage => {
+            String::new()
+        }
         SettingsTab::Keybindings => String::new(),
     }
 }
@@ -479,6 +492,14 @@ pub(super) fn enum_options(config: &Config, tab: SettingsTab, index: usize) -> O
             let current = format!("{:?}", config.general.icon_mode).to_lowercase();
             (values.clone(), values, current)
         }
+        (SettingsTab::Debug, super::debugger::CONSOLE) => {
+            let values = strings(&super::debugger::CONSOLES);
+            let labels = values
+                .iter()
+                .map(|v| super::debugger::console_label(v))
+                .collect();
+            (values, labels, config.debug.console.clone())
+        }
         (SettingsTab::Logging, 1) => {
             let values: Vec<String> = ["trace", "debug", "info", "warn", "error"]
                 .iter()
@@ -572,6 +593,7 @@ pub(super) fn apply_enum_value(config: &mut Config, tab: SettingsTab, index: usi
     match (tab, index) {
         (SettingsTab::General, 1) => config.general.theme = value.to_string(),
         (SettingsTab::General, 2) => config.general.language = value.to_string(),
+        (SettingsTab::Debug, super::debugger::CONSOLE) => config.debug.console = value.to_string(),
         (SettingsTab::General, 3) => {
             config.general.icon_mode = match value {
                 "emoji" => termide_config::IconMode::Emoji,
@@ -809,6 +831,14 @@ pub(super) const MODEL_TYPE_SENTINEL: &str = "\u{0}type-a-model-id";
 /// Cycle an enum field to the next variant.
 pub(super) fn cycle_enum_forward(config: &mut Config, tab: SettingsTab, index: usize) {
     match tab {
+        // Two choices: either way is the other one.
+        SettingsTab::Debug if index == super::debugger::CONSOLE => {
+            config.debug.console = if config.debug.console == "panel" {
+                "terminal".to_string()
+            } else {
+                "panel".to_string()
+            };
+        }
         SettingsTab::General => match index {
             1 => {
                 let names = Theme::all_theme_names();
@@ -862,6 +892,14 @@ pub(super) fn cycle_enum_forward(config: &mut Config, tab: SettingsTab, index: u
 /// Cycle an enum field to the previous variant.
 pub(super) fn cycle_enum_backward(config: &mut Config, tab: SettingsTab, index: usize) {
     match tab {
+        // Two choices: either way is the other one.
+        SettingsTab::Debug if index == super::debugger::CONSOLE => {
+            config.debug.console = if config.debug.console == "panel" {
+                "terminal".to_string()
+            } else {
+                "panel".to_string()
+            };
+        }
         SettingsTab::General => match index {
             1 => {
                 let names = Theme::all_theme_names();
@@ -1005,6 +1043,7 @@ mod enum_option_tests {
             SettingsTab::FileManager,
             SettingsTab::Terminal,
             SettingsTab::Lsp,
+            SettingsTab::Debug,
             SettingsTab::Logging,
             SettingsTab::Vfs,
             SettingsTab::Ai,
