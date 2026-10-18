@@ -188,7 +188,7 @@ A command with `debugger` debugs a program with the breakpoints placed in the ed
 | `lldb-dap` | the program and its arguments | LLVM's `lldb-dap` (on macOS also found through `xcrun`; `lldb-vscode` in older LLVM): Rust, C, C++ |
 | `gdb-dap` | the program and its arguments | `gdb -i dap`, GDB 14 or later |
 | `debugpy` | the script and its arguments | `python3 -m debugpy.adapter`; needs `pip install debugpy` |
-| `dlv-dap` | the package to build and its arguments, e.g. `./cmd/app --flag` | `dlv dap`, Delve's adapter, reached over a local TCP port |
+| `dlv-dap` | the package to build and its arguments, e.g. `./cmd/app --flag` | `dlv dap`, Delve's adapter, reached over a local TCP port; where `/proc/net/tcp` cannot be read (Termux on Android), with `--only-same-user=false`, as Delve's same-user check would refuse every connection there |
 | `lldb` | the program and its arguments | `lldb -s <script> -- <command>` |
 | `gdb` | the program and its arguments | `gdb -q -x <script> --args <command>` |
 | `dlv` | Delve's subcommand and its arguments, e.g. `debug ./cmd/app` | `dlv --init <script> <command>` |

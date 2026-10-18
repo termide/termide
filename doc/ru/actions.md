@@ -188,7 +188,7 @@ default = true
 | `lldb-dap` | программа и её аргументы | `lldb-dap` из LLVM (в macOS ищется и через `xcrun`; в старых LLVM — `lldb-vscode`): Rust, C, C++ |
 | `gdb-dap` | программа и её аргументы | `gdb -i dap`, GDB 14 и новее |
 | `debugpy` | скрипт и его аргументы | `python3 -m debugpy.adapter`; нужен `pip install debugpy` |
-| `dlv-dap` | собираемый пакет и аргументы, например `./cmd/app --flag` | `dlv dap`, адаптер Delve, связь через локальный TCP-порт |
+| `dlv-dap` | собираемый пакет и аргументы, например `./cmd/app --flag` | `dlv dap`, адаптер Delve, связь через локальный TCP-порт; где `/proc/net/tcp` не читается (Termux на Android) — с `--only-same-user=false`, иначе проверка пользователя в Delve отвергает любое подключение |
 | `lldb` | программа и её аргументы | `lldb -s <сценарий> -- <command>` |
 | `gdb` | программа и её аргументы | `gdb -q -x <сценарий> --args <command>` |
 | `dlv` | подкоманда Delve и её аргументы, например `debug ./cmd/app` | `dlv --init <сценарий> <command>` |

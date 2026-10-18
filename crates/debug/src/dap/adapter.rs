@@ -85,9 +85,7 @@ impl Adapter {
             Self::Debugpy => find_in_path("python3")
                 .or_else(|| find_in_path("python"))
                 .map(|p| (p, vec!["-m".into(), "debugpy.adapter".into()])),
-            Self::Delve => {
-                find_in_path("dlv").map(|p| (p, vec!["dap".into(), "--listen=127.0.0.1:0".into()]))
-            }
+            Self::Delve => find_in_path("dlv").map(|p| (p, delve_args(delve_can_check_user()))),
         }
     }
 
@@ -196,6 +194,42 @@ pub fn debugpy_available() -> bool {
         .is_ok_and(|s| s.success())
 }
 
+/// The arguments of `dlv` for its DAP server on a local port. Where Delve
+/// cannot tell which user connects (`can_check_user` false), its same-user
+/// check is turned off, as it would refuse termide too.
+fn delve_args(can_check_user: bool) -> Vec<String> {
+    let mut args = vec!["dap".to_string(), "--listen=127.0.0.1:0".to_string()];
+    if !can_check_user {
+        args.push("--only-same-user=false".to_string());
+    }
+    args
+}
+
+/// Whether Delve can check that a local connection comes from the user who
+/// started it. On Linux it reads `/proc/net/tcp` for that, which Android 10
+/// and later deny to apps (Termux among them, whatever the binary was built
+/// for); the check then fails and Delve closes every connection with
+/// "closing connection from different user" (go-delve/delve#3202). Asked
+/// once; the answer does not change while termide runs.
+fn delve_can_check_user() -> bool {
+    static CAN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *CAN.get_or_init(|| {
+        if !cfg!(any(target_os = "linux", target_os = "android")) {
+            return true;
+        }
+        match std::fs::File::open("/proc/net/tcp") {
+            Ok(_) => true,
+            Err(e) => {
+                log::info!(
+                    "Delve: /proc/net/tcp cannot be read ({e}), so its same-user check \
+                     would refuse termide; starting it with --only-same-user=false"
+                );
+                false
+            }
+        }
+    })
+}
+
 fn xcrun_lldb_dap() -> Option<PathBuf> {
     if !cfg!(target_os = "macos") {
         return None;
@@ -236,6 +270,15 @@ mod tests {
         assert_eq!(Adapter::parse("LLDB-DAP"), Some(Adapter::LldbDap));
         assert_eq!(Adapter::parse("debugpy"), Some(Adapter::Debugpy));
         assert_eq!(Adapter::parse("lldb"), None);
+    }
+
+    #[test]
+    fn delve_turns_its_same_user_check_off_only_where_it_cannot_work() {
+        assert_eq!(delve_args(true), ["dap", "--listen=127.0.0.1:0"]);
+        assert_eq!(
+            delve_args(false),
+            ["dap", "--listen=127.0.0.1:0", "--only-same-user=false"]
+        );
     }
 
     #[test]
