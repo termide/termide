@@ -277,16 +277,24 @@ fn xcrun_lldb_dap() -> Option<PathBuf> {
     (out.status.success() && path.is_file()).then_some(path)
 }
 
-/// The program a setting names: a path (absolute, or with a `/`, taken
-/// from the current directory) that exists, or a name looked up on `PATH`.
+/// The program a setting names: a path (absolute, `~/…` under the home
+/// directory, or with a `/`, taken from the current directory) that exists,
+/// or a name looked up on `PATH`.
 pub fn resolve_program(command: &str) -> Option<PathBuf> {
+    resolve_program_in(command, std::env::var_os("HOME").map(PathBuf::from))
+}
+
+fn resolve_program_in(command: &str, home: Option<PathBuf>) -> Option<PathBuf> {
     let command = command.trim();
     if command.is_empty() {
         return None;
     }
-    let path = Path::new(command);
+    let path = match command.strip_prefix("~/") {
+        Some(rest) => home?.join(rest),
+        None => PathBuf::from(command),
+    };
     if path.components().count() > 1 {
-        return path.is_file().then(|| path.to_path_buf());
+        return path.is_file().then_some(path);
     }
     find_in_path(command)
 }
@@ -318,6 +326,21 @@ mod tests {
         assert_eq!(Adapter::parse("LLDB-DAP"), Some(Adapter::LldbDap));
         assert_eq!(Adapter::parse("debugpy"), Some(Adapter::Debugpy));
         assert_eq!(Adapter::parse("lldb"), None);
+    }
+
+    #[test]
+    fn a_program_under_the_home_directory_is_found() {
+        let home = tempfile::tempdir().unwrap();
+        let program = home.path().join("go/bin/dlv");
+        std::fs::create_dir_all(program.parent().unwrap()).unwrap();
+        std::fs::write(&program, "").unwrap();
+        let home = Some(home.path().to_path_buf());
+        assert_eq!(
+            resolve_program_in("~/go/bin/dlv", home.clone()),
+            Some(program)
+        );
+        assert_eq!(resolve_program_in("~/go/bin/gdb", home), None);
+        assert_eq!(resolve_program_in("~/go/bin/dlv", None), None);
     }
 
     #[test]

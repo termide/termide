@@ -1125,7 +1125,7 @@ with **debug** as the user does in the debug panel (see
 
 | Action | What it does |
 |--------|--------------|
-| `start` | Debug `command` — the identifier or label of a command with a debug adapter in `commands.toml` — or `file`, a Python script or the Go package of a file's directory, with the project's breakpoints set; waits up to 10 minutes, a build included, for the first stop or the end |
+| `start` | Debug `command` — the identifier or label of a command with a debug adapter in `commands.toml` — or `file`, a Python script, the Go package of a file's directory or the Cargo binary a Rust file belongs to, with the project's breakpoints set; waits up to 10 minutes, a build included, for the first stop or the end |
 | `breakpoint` | Set the breakpoint at `file`:`line`, or remove it with `set: false`; editors show it at once, and a running session gets it |
 | `continue`, `step_over`, `step_in`, `step_out` | Resume the stopped program and wait up to a minute for the next stop or the end |
 | `pause`, `stop` | Stop the running program where it is; end the session and the program |
@@ -1141,9 +1141,9 @@ A session the agent starts opens the debug panel beside the others without
 taking the focus, and is the same session the user sees there: either can
 step it. Only debug adapters can be driven: a command whose `debugger` is a
 command-line debugger in a terminal, or one that asks for parameters, is
-refused with the reason, as is a file whose adapter (debugpy, Delve) is not
-installed. The session ends when the panel is closed, `stop` is called or
-another launch starts.
+refused with the reason, as is a file whose adapter (debugpy, Delve, lldb-dap
+or GDB's) is not installed. The session ends when the panel is closed, `stop`
+is called or another launch starts.
 
 ## Permissions
 

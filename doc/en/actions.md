@@ -244,13 +244,13 @@ command = "/opt/homebrew/opt/llvm/bin/lldb-dap"  # in place of the one on PATH (
 args = ["--log"]                                 # flags for every launch
 ```
 
-- `command` names the debugger's program: a path, or a name looked up on `PATH`. For `debugpy` and `pdb` it is the Python to run. A path that does not exist makes the debugger count as not installed rather than falling back to another.
+- `command` names the debugger's program: a path (`~/` stands for the home directory), or a name looked up on `PATH`. For `debugpy` and `pdb` it is the Python to run. A path that does not exist makes the debugger count as not installed rather than falling back to another.
 - `args` are the debugger's flags for every launch, in place of its default ones; a launch's `debugger_args` come after them. Unset keeps the defaults, `[]` drops them. The only default today is `--only-same-user=false` for `dlv-dap` where `/proc/net/tcp` cannot be read (Termux on Android): Delve's same-user check would refuse every connection there. Setting `args` for `dlv-dap` in such a system replaces it, so list it again if you still need it.
 - The arguments TermIDE needs to talk to an adapter (`dap --listen=…` for Delve, `-i dap` for GDB, `-m debugpy.adapter`) and its scripts for command-line debuggers are always given and cannot be changed.
 - `native` is tried in order for a Rust file debugged without a command; it takes `lldb-dap`, `gdb-dap`, `lldb` and `gdb`.
 - `console` applies to launches that do not set their own `console`.
 
-The **Debug** tab of the settings window edits the same: the order and the console, then every debugger TermIDE knows with its program and flags, the defaults shown as such. A debugger opens on a page of its own; its flags are typed as a shell would split them (quotes keep a value whole, commas are part of a flag), emptying them means no flags, and **Reset** brings back the program on `PATH` and the default flags.
+The **Debug** tab of the settings window edits the same: the order and the console, then every debugger TermIDE knows with its program and flags, the defaults shown as such. A debugger opens on a page of its own; its flags are typed as a shell would split them (quotes keep a value whole, commas are part of a flag), emptying them means no flags, and **Reset** brings back the program on `PATH` and the default flags — in a project's settings, the global ones.
 
 ### The debug panel
 

@@ -239,7 +239,10 @@ impl SettingsModal {
         }
     }
 
-    /// Press the chosen button: back to the list, or reset the debugger.
+    /// Press the chosen button: back to the list, or reset the debugger —
+    /// as the settings' Reset does, to the global settings in a project
+    /// (a project file cannot unset what the global one sets) and to the
+    /// defaults in the global file.
     pub(super) fn press_debugger_button(&mut self) {
         let Some(edit) = self.debugger_edit.as_mut() else {
             return;
@@ -247,7 +250,17 @@ impl SettingsModal {
         if edit.button == DELETE {
             edit.error = None;
             let name = edit.name.clone();
-            if self.config.debug.debuggers.remove(&name).is_some() {
+            let target = self
+                .in_project
+                .then(|| self.global_layer.debug.debuggers.get(&name).cloned())
+                .flatten();
+            let changed = match target {
+                Some(global) => {
+                    self.config.debug.debuggers.insert(name, global.clone()) != Some(global)
+                }
+                None => self.config.debug.debuggers.remove(&name).is_some(),
+            };
+            if changed {
                 self.mark_dirty();
             }
         } else {
@@ -476,6 +489,31 @@ mod tests {
         press(&mut modal, KeyCode::Esc);
         assert!(modal.debugger_edit.is_none());
         assert_eq!(modal.current_row(), Some(dlv_row()));
+    }
+
+    /// A project file cannot unset what the global one sets, so Reset in a
+    /// project goes back to the global entry, as the reload would.
+    #[test]
+    fn reset_in_a_project_restores_the_global_entry() {
+        let global_entry = DebuggerSettings {
+            command: Some("/opt/llvm/bin/lldb-dap".into()),
+            args: None,
+        };
+        let mut global = Config::default();
+        global
+            .debug
+            .debuggers
+            .insert("lldb-dap".into(), global_entry.clone());
+        let mut modal = SettingsModal::new(global.clone(), global, true);
+        modal.active_tab = SettingsTab::Debug;
+        modal.focus = FocusArea::Content;
+        modal.open_debugger("lldb-dap");
+        edit(&mut modal, COMMAND, "/usr/bin/lldb-dap");
+
+        focus(&mut modal, ContentRow::DebuggerButtons);
+        modal.step_debugger_button(true);
+        press(&mut modal, KeyCode::Enter);
+        assert_eq!(modal.config.debug.debugger("lldb-dap"), global_entry);
     }
 
     #[test]

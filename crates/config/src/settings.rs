@@ -855,8 +855,8 @@ fn default_vault_lock_after_mins() -> u64 {
 }
 
 /// Debugger settings (`[debug]`): which program each debugger is and the
-/// flags it always gets, the debugger a Rust, C or C++ file uses without a
-/// command, and where the debugged program's input and output go.
+/// flags it always gets, the debugger a Rust file uses without a command,
+/// and where the debugged program's input and output go.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DebugSettings {
     /// The debuggers tried, in order, for a Rust file that has no debug

@@ -129,7 +129,11 @@ impl App {
             target,
             build,
             debugger_args,
-            program: settings.command,
+            // Resolved, so a `~/…` path works though the shell gets it quoted.
+            program: settings.command.map(|command| {
+                dap::resolve_program(&command)
+                    .map_or(command, |path| path.to_string_lossy().into_owned())
+            }),
         }
     }
 
@@ -142,22 +146,20 @@ impl App {
         })
     }
 
-    /// The debugger a Rust, C or C++ file gets without a command: the first
-    /// installed of `[debug] native`.
+    /// The debugger a Rust file gets without a command: the first installed
+    /// of `[debug] native`.
     pub(in crate::app) fn native_debugger(&self) -> Option<NativeDebugger> {
         self.state.config.debug.native.iter().find_map(|name| {
-            if let Some(adapter) = Adapter::parse(name) {
-                let native = matches!(adapter, Adapter::LldbDap | Adapter::GdbDap);
-                return (native && self.adapter_installed(adapter))
-                    .then_some(NativeDebugger::Adapter(adapter));
-            }
-            match Debugger::parse(name) {
-                Some(d @ (Debugger::Lldb | Debugger::Gdb)) => self
+            match (Adapter::parse(name), Debugger::parse(name)) {
+                (Some(adapter @ (Adapter::LldbDap | Adapter::GdbDap)), _) => self
+                    .adapter_installed(adapter)
+                    .then_some(NativeDebugger::Adapter(adapter)),
+                (None, Some(d @ (Debugger::Lldb | Debugger::Gdb))) => self
                     .terminal_program(d)
                     .map(|_| NativeDebugger::Terminal(d)),
                 _ => {
                     log::warn!(
-                        "[debug] native: {name:?} is not a debugger for Rust, C or C++ \
+                        "[debug] native: {name:?} is not a debugger for Rust \
                          (lldb-dap, gdb-dap, lldb, gdb)"
                     );
                     None
@@ -318,7 +320,9 @@ impl App {
         let adapter = match terminal.debugger {
             Debugger::Pdb if self.adapter_installed(Adapter::Debugpy) => Some(Adapter::Debugpy),
             Debugger::Dlv if self.adapter_installed(Adapter::Delve) => Some(Adapter::Delve),
-            Debugger::Dlv => return Err(t.debug_no_delve().to_string()),
+            Debugger::Dlv if self.terminal_program(Debugger::Dlv).is_none() => {
+                return Err(t.debug_no_delve().to_string());
+            }
             _ => None,
         };
         Ok(vec![match adapter {
@@ -714,7 +718,7 @@ fn choice_label(choice: &DebugChoice) -> String {
     }
 }
 
-/// The debugger for Rust, C and C++ that is installed, best first.
+/// The debugger a Rust file gets without a command (`[debug] native`).
 #[derive(Debug, Clone, Copy)]
 pub(super) enum NativeDebugger {
     Adapter(Adapter),
