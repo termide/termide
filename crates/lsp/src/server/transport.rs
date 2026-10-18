@@ -42,6 +42,14 @@ pub(super) fn initialization_options(command: &str) -> Option<Value> {
         // `workspace/configuration` round-trip we never start — answering
         // that falls back to `all` again.
         "docker-language-server" => Some(serde_json::json!({ "telemetry": "off" })),
+        // rust-analyzer runs `cargo check` and builds build scripts and
+        // proc macros in the project's target directory by default, holding
+        // its lock: a `cargo build` for the debugger, or one typed in a
+        // terminal, then waits "for file lock on build directory" until the
+        // check ends, and the check waits for them. `targetDir: true` gives
+        // it `target/rust-analyzer` of its own, at the cost of building those
+        // artifacts twice.
+        "rust-analyzer" => Some(serde_json::json!({ "cargo": { "targetDir": true } })),
         _ => None,
     }
 }
@@ -436,11 +444,19 @@ mod tests {
     }
 
     #[test]
+    fn rust_analyzer_builds_in_a_target_directory_of_its_own() {
+        // Sharing target/ with cargo makes a debug build wait for its check.
+        for command in ["rust-analyzer", "/home/u/.cargo/bin/rust-analyzer"] {
+            let options = initialization_options(command).expect("options");
+            assert_eq!(options["cargo"]["targetDir"], true, "{command}");
+        }
+    }
+
+    #[test]
     fn other_servers_get_no_initialization_options() {
         // None of these read a `telemetry` option; sending them a document
         // written for another server is at best noise we did not justify.
         for command in [
-            "rust-analyzer",
             "pylsp",
             "typescript-language-server",
             "gopls",

@@ -440,6 +440,20 @@ workspace then share one server. A standalone crate or module, one under a
 workspace without belonging to it, or a missing `cargo`/`go` keeps the nearest
 marker. The answer is remembered until TermIDE restarts.
 
+Library code opens in the server of the project it came from, not in one of its
+own: for Rust the toolchain's sources (`rustlib/src`) and the crates cargo
+fetched (`~/.cargo/registry`, `~/.cargo/git`), for Go `GOROOT` and the module
+cache (`pkg/mod`). That is where the debugger stops in the standard library and
+where go-to-definition leads into a dependency; the project's server has those
+files loaded already. Only when no server runs for the language does such a
+file get one of its own.
+
+rust-analyzer is started with `cargo.targetDir = true`: its `cargo check` and
+its build of build scripts and proc macros go to `target/rust-analyzer`, so a
+`cargo build` for the debugger or in a terminal never waits for the build
+directory's lock while it checks. The price is building those artifacts twice;
+the first start after an update builds them once.
+
 
 ### Find References
 

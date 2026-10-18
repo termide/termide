@@ -34,6 +34,57 @@ pub(crate) fn workspace_root(lang: &str, package_root: &Path) -> Option<PathBuf>
     }
 }
 
+/// Whether `path` is library code a project uses rather than a project of
+/// its own: the toolchain's sources (`rustlib/src`, Go's `GOROOT`) or a
+/// dependency fetched into a cache (`~/.cargo/registry`, `~/.cargo/git`,
+/// Go's `pkg/mod`). The debugger stops there and go-to-definition leads
+/// there; such a file belongs to the server of the project that brought it
+/// in, which has it loaded already. A server of its own would load the
+/// crate as a workspace — for the standard library that fails on nightly
+/// manifests, builds its build scripts inside the toolchain and runs
+/// `cargo check` there.
+pub(crate) fn is_library_file(lang: &str, path: &Path) -> bool {
+    match lang {
+        "rust" => {
+            has_components(path, &["rustlib", "src"])
+                || has_components(path, &[".cargo", "registry"])
+                || has_components(path, &[".cargo", "git"])
+                || std::env::var_os("CARGO_HOME").is_some_and(|home| {
+                    let home = Path::new(&home);
+                    path.starts_with(home.join("registry")) || path.starts_with(home.join("git"))
+                })
+        }
+        "go" => {
+            has_components(path, &["pkg", "mod"]) || go_root().is_some_and(|r| path.starts_with(r))
+        }
+        _ => false,
+    }
+}
+
+/// Whether `path` has `names` as consecutive components.
+fn has_components(path: &Path, names: &[&str]) -> bool {
+    let parts: Vec<&std::ffi::OsStr> = path.iter().collect();
+    parts
+        .windows(names.len())
+        .any(|window| window.iter().zip(names).all(|(part, name)| *part == *name))
+}
+
+/// Go's `GOROOT`, asked of `go` once.
+fn go_root() -> Option<&'static Path> {
+    static ROOT: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    ROOT.get_or_init(|| {
+        std::env::var_os("GOROOT")
+            .map(PathBuf::from)
+            .or_else(|| {
+                let out = run(go_command(&["env", "GOROOT"]), Path::new("."))?;
+                let root = out.trim();
+                (!root.is_empty()).then(|| PathBuf::from(root))
+            })
+            .filter(|root| root.is_absolute())
+    })
+    .as_deref()
+}
+
 /// The directory of the workspace manifest cargo assigns the package to.
 /// For a crate outside any workspace that is its own directory; for a crate
 /// that sits under a workspace without being a member cargo errors out and
@@ -213,6 +264,37 @@ mod tests {
         write(&stray.join("Cargo.toml"), &crate_manifest("stray"));
         write(&stray.join("src/lib.rs"), "");
         assert_eq!(workspace_root("rust", &stray), None);
+    }
+
+    #[test]
+    fn toolchain_and_dependency_sources_are_library_files() {
+        let rust = [
+            "/Users/u/.rustup/toolchains/stable-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/ops/function.rs",
+            "/home/u/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.0/src/lib.rs",
+            "/home/u/.cargo/git/checkouts/ratatui-abc/1234/src/lib.rs",
+        ];
+        for path in rust {
+            assert!(is_library_file("rust", Path::new(path)), "{path}");
+        }
+        for path in [
+            "/home/u/work/app/src/main.rs",
+            "/home/u/work/registry/src/lib.rs",
+            "/home/u/work/app/target/debug/build/x/out/gen.rs",
+        ] {
+            assert!(!is_library_file("rust", Path::new(path)), "{path}");
+        }
+        assert!(is_library_file(
+            "go",
+            Path::new("/home/u/go/pkg/mod/github.com/x/y@v1.0.0/y.go")
+        ));
+        assert!(!is_library_file(
+            "go",
+            Path::new("/home/u/work/app/main.go")
+        ));
+        assert!(!is_library_file(
+            "python",
+            Path::new("/home/u/.cargo/registry/src/x/a.py")
+        ));
     }
 
     #[test]

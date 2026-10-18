@@ -62,6 +62,10 @@ pub struct LspManager {
     /// Workspace roots the toolchain named, keyed by (language_id, package
     /// root), so it is asked once per package rather than on every request.
     workspace_roots: Mutex<HashMap<(String, PathBuf), PathBuf>>,
+    /// The workspace of the project file last opened per language, whose
+    /// server takes the library files opened from it (see
+    /// [`workspace::is_library_file`]).
+    last_roots: Mutex<HashMap<String, PathBuf>>,
 }
 
 impl std::fmt::Debug for LspManager {
@@ -86,6 +90,7 @@ impl LspManager {
             apply_edit_rx,
             apply_edit_tx,
             workspace_roots: Mutex::new(HashMap::new()),
+            last_roots: Mutex::new(HashMap::new()),
         }
     }
 
@@ -176,6 +181,11 @@ impl LspManager {
     /// widened to the workspace the toolchain puts that package in (see
     /// [`workspace`]). Files without a marker use their own directory.
     fn resolve_root(&self, lang: &str, file_path: &Path, markers: &[String]) -> PathBuf {
+        if workspace::is_library_file(lang, file_path) {
+            if let Some(root) = self.library_root(lang) {
+                return root;
+            }
+        }
         let Some(package_root) = Self::find_workspace_root(file_path, markers) else {
             return file_path.parent().unwrap_or(Path::new("/")).to_path_buf();
         };
@@ -192,6 +202,26 @@ impl LspManager {
         root
     }
 
+    /// The running server's workspace a library file of `lang` goes to: the
+    /// one of the project file opened last, or else any running for `lang`.
+    /// `None` when none runs, and the file gets a server of its own.
+    fn library_root(&self, lang: &str) -> Option<PathBuf> {
+        let last = self
+            .last_roots
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(lang)
+            .cloned();
+        last.filter(|root| self.servers.contains_key(&(lang.to_string(), root.clone())))
+            .or_else(|| {
+                self.servers
+                    .keys()
+                    .filter(|(l, _)| l == lang)
+                    .map(|(_, root)| root.clone())
+                    .min()
+            })
+    }
+
     /// Ensure a server is running for the given language and file
     pub fn ensure_server(&mut self, lang: &str, file_path: &Path) -> Result<()> {
         let server_config = self
@@ -204,6 +234,12 @@ impl LspManager {
         let workspace_root = self.resolve_root(lang, file_path, &server_config.root_markers);
 
         let key = (lang.to_string(), workspace_root.clone());
+        if !workspace::is_library_file(lang, file_path) {
+            self.last_roots
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .insert(lang.to_string(), workspace_root.clone());
+        }
 
         if self.servers.contains_key(&key) {
             return Ok(());
