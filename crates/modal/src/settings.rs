@@ -19,6 +19,7 @@ mod connection;
 mod fields;
 mod input;
 mod kb;
+mod lsp_server;
 mod render;
 mod state;
 
@@ -44,6 +45,9 @@ pub enum SettingsTab {
     /// One AI connection, opened from the AI tab: not in the sidebar, it
     /// names the fields of the page that edits it.
     Connection,
+    /// One LSP server, opened from the LSP tab: not in the sidebar, it
+    /// names the fields of the page that edits it.
+    LspServer,
     Keybindings,
 }
 
@@ -70,7 +74,7 @@ impl SettingsTab {
             SettingsTab::Editor => t.settings_tab_editor().to_string(),
             SettingsTab::FileManager => t.settings_tab_file_manager().to_string(),
             SettingsTab::Terminal => t.settings_tab_terminal().to_string(),
-            SettingsTab::Lsp => t.settings_tab_lsp().to_string(),
+            SettingsTab::Lsp | SettingsTab::LspServer => t.settings_tab_lsp().to_string(),
             SettingsTab::Logging => t.settings_tab_logging().to_string(),
             SettingsTab::Vfs => t.settings_tab_vfs().to_string(),
             SettingsTab::Ai | SettingsTab::Connection => t.settings_tab_agent().to_string(),
@@ -96,15 +100,6 @@ enum SidebarRow {
     KbGroupHeader,
     /// Keybindings subsection (index into `KB_SECTIONS`).
     KbChild(usize),
-}
-
-/// LSP tab sub-mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LspMode {
-    /// Normal field browsing + server list.
-    Fields,
-    /// Editing an LSP server (new or existing).
-    ServerEdit,
 }
 
 /// One slot drawn in a binding row's value column: a bound key, or the `+`
@@ -249,17 +244,10 @@ pub struct SettingsModal {
     pub(super) enum_picker: Option<EnumPicker>,
 
     // --- LSP server management ---
-    lsp_mode: LspMode,
-    /// Index of the server being edited (None = adding new).
-    lsp_edit_index: Option<usize>,
     /// Sorted server language names for stable indexing.
     lsp_server_keys: Vec<String>,
-    /// Inline edit form for LSP server: [language, command, args, root_markers].
-    lsp_edit_fields: [termide_ui::TextInput; 4],
-    /// Which field (0-3) is focused in the LSP edit form.
-    lsp_edit_cursor: usize,
-    /// Where each LSP form field was last drawn, for clicks and drags.
-    lsp_field_areas: Vec<Rect>,
+    /// The server page, while one is open from the LSP tab.
+    lsp_server_edit: Option<lsp_server::LspServerEdit>,
 
     // --- AI connections ---
     /// The connection page, while one is open from the AI tab.
@@ -545,19 +533,22 @@ impl Modal for SettingsModal {
                         self.field_cursor = idx;
                         // The buttons row acts on the button under the click;
                         // the gap between them does nothing.
-                        if rows[idx] == fields::ContentRow::ConnectionButtons {
+                        if matches!(
+                            rows[idx],
+                            fields::ContentRow::ConnectionButtons
+                                | fields::ContentRow::LspServerButtons
+                        ) {
                             let column = mouse.column as usize;
+                            let (labels, _) = self.page_buttons();
                             let spans =
-                                connection::connection_button_spans(content_area.x as usize + 2);
+                                connection::page_button_spans(&labels, content_area.x as usize + 2);
                             let Some(button) = spans
                                 .iter()
                                 .position(|(start, end)| (*start..*end).contains(&column))
                             else {
                                 return Ok(None);
                             };
-                            if let Some(edit) = self.connection_edit.as_mut() {
-                                edit.button = button;
-                            }
+                            self.choose_page_button(button);
                         }
                         // Clicking a control operates it, the way Enter does.
                         // Moving the cursor and leaving the switch alone looks

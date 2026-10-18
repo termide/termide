@@ -9,8 +9,8 @@ use super::connection;
 use super::fields::{fields_for_tab, get_field_value, ContentRow, FieldType};
 use super::kb::{kb_binding_names, kb_keys_of, KB_SECTIONS};
 use super::{
-    Confirm, FocusArea, KbCapture, KbMode, LspMode, SettingsModal, SettingsSave, SettingsTab,
-    SidebarRow, BUTTON_CLOSE, BUTTON_RESET, BUTTON_STORAGE, TOP_LEVEL_TABS,
+    Confirm, FocusArea, KbCapture, KbMode, SettingsModal, SettingsSave, SettingsTab, SidebarRow,
+    BUTTON_CLOSE, BUTTON_RESET, BUTTON_STORAGE, TOP_LEVEL_TABS,
 };
 
 impl SettingsModal {
@@ -42,12 +42,8 @@ impl SettingsModal {
             clicks: termide_ui::ClickTracker::new(),
             reset_available: false,
             enum_picker: None,
-            lsp_mode: LspMode::Fields,
-            lsp_edit_index: None,
             lsp_server_keys,
-            lsp_edit_fields: Default::default(),
-            lsp_edit_cursor: 0,
-            lsp_field_areas: Vec::new(),
+            lsp_server_edit: None,
             connection_edit: None,
             model_fetch_request: None,
             kb_mode: KbMode::Bindings,
@@ -98,6 +94,7 @@ impl SettingsModal {
     pub(super) fn field_value(&self, index: usize) -> String {
         match self.field_tab() {
             SettingsTab::Connection => self.connection_value(index),
+            SettingsTab::LspServer => self.lsp_server_value(index),
             tab => get_field_value(&self.config, tab, index),
         }
     }
@@ -171,6 +168,7 @@ impl SettingsModal {
             SidebarRow::Leaf(tab) => {
                 self.active_tab = tab;
                 self.connection_edit = None;
+                self.lsp_server_edit = None;
                 self.content_scroll = 0;
                 self.editing = false;
                 self.field_cursor = self.first_selectable_row();
@@ -331,8 +329,8 @@ impl SettingsModal {
         self.refresh_server_keys();
         // The connection the page had open may be gone with the rest.
         self.connection_edit = None;
+        self.lsp_server_edit = None;
         self.enum_picker = None;
-        self.lsp_mode = LspMode::Fields;
         self.kb_mode = KbMode::Bindings;
         self.field_cursor = self.first_selectable_row();
         self.content_scroll = 0;
@@ -593,6 +591,7 @@ impl SettingsModal {
                 rows
             }
             SettingsTab::Connection => self.connection_page_rows(),
+            SettingsTab::LspServer => self.lsp_server_page_rows(),
             SettingsTab::Keybindings => Vec::new(),
         }
     }
@@ -657,13 +656,11 @@ impl SettingsModal {
     /// offset. Moving the cursor instead left the view still until the cursor
     /// reached its edge, which looked like lag — the more so with the content
     /// unfocused and the cursor not drawn. Focus is
-    /// left alone; an inline edit, a key capture and the LSP form keep their
+    /// left alone; an inline edit and a key capture keep their
     /// cursor where it is.
     pub(super) fn wheel_content(&mut self, forward: bool) {
         const WHEEL_STEP: usize = 3;
-        if self.editing
-            || (self.active_tab == SettingsTab::Lsp && self.lsp_mode == LspMode::ServerEdit)
-        {
+        if self.editing {
             return;
         }
         if self.active_tab == SettingsTab::Keybindings {
@@ -797,6 +794,8 @@ impl SettingsModal {
         }
         let value = if self.field_tab() == SettingsTab::Connection {
             self.connection_edit_text(field_idx)
+        } else if self.field_tab() == SettingsTab::LspServer {
+            self.lsp_server_edit_text(field_idx)
         } else {
             let mut value = self.field_value(field_idx);
             // Strip "(auto)" / "(none)" placeholders
@@ -889,6 +888,7 @@ impl SettingsModal {
                 }
             }
             SettingsTab::Connection => self.apply_connection_text(index, text),
+            SettingsTab::LspServer => self.apply_lsp_server_text(index, text),
             _ => {}
         }
     }

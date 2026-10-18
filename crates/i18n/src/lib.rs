@@ -807,6 +807,8 @@ pub trait Translation: Send + Sync {
     fn settings_header_general(&self) -> &str;
     fn settings_header_timing(&self) -> &str;
     fn settings_header_servers(&self) -> &str;
+    /// Settings modal: the heading of an LSP server's page.
+    fn settings_header_server(&self) -> &str;
     fn settings_header_model(&self) -> &str;
     fn settings_header_permissions(&self) -> &str;
     fn settings_header_transcript(&self) -> &str;
@@ -1320,6 +1322,18 @@ pub trait Translation: Send + Sync {
     fn settings_lsp_completion_delay(&self) -> &str;
     fn settings_lsp_hover_delay(&self) -> &str;
     fn settings_lsp_add_server(&self) -> &str;
+    /// Settings modal: the action that deletes the open LSP server.
+    fn settings_lsp_delete_server(&self) -> &str;
+    /// Settings modal: the LSP server page's language field, its key.
+    fn settings_lsp_server_language(&self) -> &str;
+    /// Settings modal: the command that starts the LSP server.
+    fn settings_lsp_server_command(&self) -> &str;
+    /// Settings modal: the LSP server's arguments, typed comma-separated.
+    fn settings_lsp_server_args(&self) -> &str;
+    /// Settings modal: the files that mark a project root, comma-separated.
+    fn settings_lsp_server_root_markers(&self) -> &str;
+    /// Settings modal: an LSP server left without a language, or with another's.
+    fn settings_lsp_server_language_taken(&self) -> &str;
 
     // Settings modal — Logging fields
     fn settings_logging_file_path(&self) -> &str;

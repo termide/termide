@@ -55,9 +55,10 @@ pub(super) fn connection_buttons() -> [String; 2] {
     ]
 }
 
-/// The column span of each button on a row starting at `x`.
-pub(super) fn connection_button_spans(x: usize) -> [(usize, usize); 2] {
-    let [back, delete] = connection_buttons().map(|label| label.width());
+/// The column span of each of a page's two buttons, `labels` as drawn, on a
+/// row starting at `x`.
+pub(super) fn page_button_spans(labels: &[String; 2], x: usize) -> [(usize, usize); 2] {
+    let [back, delete] = [labels[0].width(), labels[1].width()];
     let back = (x, x + back);
     let delete_x = back.1 + BUTTON_GAP;
     [back, (delete_x, delete_x + delete)]
@@ -140,11 +141,13 @@ fn provider_slug(provider: &str) -> &str {
 }
 
 impl SettingsModal {
-    /// Which tab's fields the content shows: the connection page's while one
-    /// is open, the active tab's otherwise.
+    /// Which tab's fields the content shows: the connection page's or the
+    /// LSP server page's while one is open, the active tab's otherwise.
     pub(super) fn field_tab(&self) -> SettingsTab {
         if self.active_tab == SettingsTab::Ai && self.connection_edit.is_some() {
             SettingsTab::Connection
+        } else if self.active_tab == SettingsTab::Lsp && self.lsp_server_edit.is_some() {
+            SettingsTab::LspServer
         } else {
             self.active_tab
         }

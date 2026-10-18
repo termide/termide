@@ -16,7 +16,7 @@ use crate::base::button_style;
 use super::fields::{fields_for_tab, ContentRow, FieldDescriptor, FieldType};
 use super::kb::{kb_binding_names, kb_keys_of};
 use super::{
-    button_spans, FocusArea, KbCapture, KbMode, KbRow, KbSlot, LspMode, SettingsModal, SettingsTab,
+    button_spans, FocusArea, KbCapture, KbMode, KbRow, KbSlot, SettingsModal, SettingsTab,
     SidebarRow, BUTTON_RESET, ENUM_PICKER_MAX_VISIBLE,
 };
 
@@ -254,19 +254,6 @@ impl SettingsModal {
 
     /// Render content area with field rows.
     pub(super) fn render_content(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
-        // LSP server edit form — takes over the entire content area
-        if self.active_tab == SettingsTab::Lsp && self.lsp_mode == LspMode::ServerEdit {
-            let title = format!(
-                "{} › {}",
-                SettingsTab::Lsp.label(),
-                i18n::t().settings_lsp_add_server()
-            );
-            let inner = Self::render_section_title(area, buf, theme, &title);
-            self.render_lsp_edit_form(inner, buf, theme);
-            self.last_content_area = Some(inner);
-            return;
-        }
-
         // Keybindings tab — dedicated renderer (renders its own title).
         if self.active_tab == SettingsTab::Keybindings {
             let section_name = Self::kb_section_label(self.kb_section);
@@ -277,13 +264,16 @@ impl SettingsModal {
             return;
         }
 
-        // Regular tab: title + grouped fields. The connection page names the
-        // connection it has open.
-        let title = match self.open_connection_name() {
-            Some(name) if self.field_tab() == SettingsTab::Connection => {
-                format!("{} › {name}", self.active_tab.label())
-            }
-            _ => self.active_tab.label(),
+        // Regular tab: title + grouped fields. A connection's or a server's
+        // page names what it has open.
+        let open = match self.field_tab() {
+            SettingsTab::Connection => self.open_connection_name(),
+            SettingsTab::LspServer => self.open_lsp_server_name(),
+            _ => None,
+        };
+        let title = match open {
+            Some(name) => format!("{} › {name}", self.active_tab.label()),
+            None => self.active_tab.label(),
         };
         let area = Self::render_section_title(area, buf, theme, &title);
 
@@ -382,14 +372,8 @@ impl SettingsModal {
                     buf.set_string(value_x as u16, y, &display_value, value_style);
                     // A refused value says why, after the value kept.
                     let refused = self
-                        .connection_edit
-                        .as_ref()
-                        .and_then(|edit| edit.error.as_ref())
-                        .filter(|(field, _)| {
-                            self.field_tab() == SettingsTab::Connection
-                                && *field == field_idx
-                                && !self.editing
-                        })
+                        .page_error()
+                        .filter(|(field, _)| *field == field_idx && !self.editing)
                         .map(|(_, error)| error.as_str());
                     if let Some(error) = refused {
                         let x = value_x + display_value.width() + 2;
@@ -402,10 +386,9 @@ impl SettingsModal {
                         );
                     }
                 }
-                ContentRow::ConnectionButtons => {
-                    let chosen = self.connection_edit.as_ref().map_or(0, |edit| edit.button);
-                    let labels = super::connection::connection_buttons();
-                    let spans = super::connection::connection_button_spans(area.x as usize + 2);
+                ContentRow::ConnectionButtons | ContentRow::LspServerButtons => {
+                    let (labels, chosen) = self.page_buttons();
+                    let spans = super::connection::page_button_spans(&labels, area.x as usize + 2);
                     for (index, (label, (x, _))) in labels.iter().zip(spans).enumerate() {
                         let style = if is_focused {
                             let style = Style::default().fg(theme.selected_fg);
@@ -550,55 +533,6 @@ impl SettingsModal {
         }
 
         self.last_content_area = Some(area);
-    }
-
-    /// Render the LSP server edit form.
-    fn render_lsp_edit_form(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
-        let labels = [
-            "Language:",
-            "Command:",
-            "Args (comma-sep):",
-            "Root markers (comma-sep):",
-        ];
-        let x = area.x as usize + 4;
-        let val_x = x + 26;
-        let max_val = (area.x as usize + area.width as usize)
-            .saturating_sub(val_x)
-            .saturating_sub(2);
-
-        self.lsp_field_areas.clear();
-        for (i, label) in labels.iter().enumerate() {
-            let y = area.y + 1 + i as u16;
-            if y >= area.y + area.height {
-                break;
-            }
-            let is_focused = self.lsp_edit_cursor == i;
-            let label_style = if is_focused {
-                Style::default()
-                    .fg(theme.accented_fg)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(theme.fg)
-            };
-            buf.set_string(x as u16, y, label, label_style);
-
-            let area = Rect::new(val_x as u16, y, max_val as u16, 1);
-            crate::base::render_text_input(
-                buf,
-                area,
-                &mut self.lsp_edit_fields[i],
-                is_focused,
-                theme,
-            );
-            self.lsp_field_areas.push(area);
-        }
-
-        // Hint line
-        let hint_y = area.y + 6;
-        if hint_y < area.y + area.height {
-            let hint = "Enter=save  Esc=cancel  Tab=next field";
-            buf.set_string(x as u16, hint_y, hint, Style::default().fg(theme.disabled));
-        }
     }
 
     /// Format a field value for display, with visual indicators.

@@ -53,6 +53,8 @@ pub(super) enum ContentRow {
     ConnectionAdd,
     /// Connection page: the buttons back to the list and deleting it.
     ConnectionButtons,
+    /// LSP server page: the buttons back to the list and deleting it.
+    LspServerButtons,
 }
 
 impl ContentRow {
@@ -248,6 +250,7 @@ pub(super) fn fields_for_tab(tab: SettingsTab) -> Vec<FieldDescriptor> {
             },
         ],
         SettingsTab::Connection => super::connection::connection_fields(),
+        SettingsTab::LspServer => super::lsp_server::lsp_server_fields(),
         SettingsTab::Keybindings => vec![],
     }
 }
@@ -352,7 +355,7 @@ pub(super) fn get_field_value(config: &Config, tab: SettingsTab, index: usize) -
             _ => String::new(),
         },
         // Read from the open connection by the modal, not the config alone.
-        SettingsTab::Connection => String::new(),
+        SettingsTab::Connection | SettingsTab::LspServer => String::new(),
         SettingsTab::Keybindings => String::new(),
     }
 }

@@ -1,9 +1,9 @@
-//! Settings modal input handling: per-focus-area key routing, LSP server
-//! edit form, inline field editing, buttons, and keybinding capture.
+//! Settings modal input handling: per-focus-area key routing, inline field
+//! editing, buttons, and keybinding capture.
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use termide_config::{KeyBinding, LspServerSettings, ParsedKeyBinding};
+use termide_config::{KeyBinding, ParsedKeyBinding};
 use termide_i18n as i18n;
 
 use crate::base::field_char_at;
@@ -17,7 +17,7 @@ use super::kb::{
     format_key_event, get_kb_binding, kb_binding_names, kb_keys_of, kb_section_key, set_kb_value,
 };
 use super::{
-    EnumPicker, FocusArea, KbCapture, KbMode, LspMode, SettingsModal, SettingsResult, SettingsTab,
+    EnumPicker, FocusArea, KbCapture, KbMode, SettingsModal, SettingsResult, SettingsTab,
     SidebarRow, ENUM_PICKER_MAX_VISIBLE,
 };
 
@@ -112,7 +112,7 @@ impl SettingsModal {
     }
 
     /// Act on the focused row: toggle a switch, cycle an enum, start editing
-    /// a value, or open an LSP server form.
+    /// a value, or open a connection's or an LSP server's page.
     ///
     /// Shared by Enter/Space and by a mouse click, so that clicking a checkbox
     /// does what pressing Enter on it does — previously a click only moved the
@@ -145,29 +145,13 @@ impl SettingsModal {
                 }
             }
             Some(ContentRow::ConnectionButtons) => self.press_connection_button(),
-            Some(ContentRow::LspAddServer) => {
-                self.lsp_edit_fields = Default::default();
-                self.lsp_edit_index = None;
-                self.lsp_edit_cursor = 0;
-                self.lsp_mode = LspMode::ServerEdit;
-            }
-            Some(ContentRow::LspServer(idx)) => {
-                if idx < self.lsp_server_keys.len() {
-                    let lang = self.lsp_server_keys[idx].clone();
-                    if let Some(srv) = self.config.lsp.servers.get(&lang) {
-                        self.lsp_edit_fields = [
-                            lang,
-                            srv.command.clone(),
-                            srv.args.join(", "),
-                            srv.root_markers.join(", "),
-                        ]
-                        .map(termide_ui::TextInput::with_text);
-                        self.lsp_edit_index = Some(idx);
-                        self.lsp_edit_cursor = 0;
-                        self.lsp_mode = LspMode::ServerEdit;
-                    }
+            Some(ContentRow::LspAddServer) => self.add_lsp_server(),
+            Some(ContentRow::LspServer(index)) => {
+                if let Some(language) = self.lsp_server_keys.get(index).cloned() {
+                    self.open_lsp_server(language);
                 }
             }
+            Some(ContentRow::LspServerButtons) => self.press_lsp_server_button(),
             _ => {}
         }
     }
@@ -269,13 +253,8 @@ impl SettingsModal {
         &mut self,
         chord: termide_core::KeyChord,
     ) -> Result<Option<ModalResult<SettingsResult>>> {
-        // The LSP server form is all text fields: they get the key as the
-        // keyboard sent it, so `ф` and `+` type themselves rather than their
-        // Latin, unshifted twins; the field grammar normalizes Ctrl chords.
-        if self.active_tab == SettingsTab::Lsp && self.lsp_mode == LspMode::ServerEdit {
-            return self.handle_lsp_edit_key(chord.raw);
-        }
-        // Elsewhere nothing is typed, so the rows match the
+        // Nothing is typed here (a field being edited takes the raw key
+        // before this), so the rows match the
         // layout-normalized key: `Ctrl+Ы` applies as `Ctrl+S` does.
         let key = chord.canonical;
         // An open dropdown owns the keyboard until it closes.
@@ -308,6 +287,10 @@ impl SettingsModal {
             KeyCode::Esc | KeyCode::Backspace if self.connection_edit.is_some() => {
                 self.close_connection();
             }
+            // So does the LSP server page.
+            KeyCode::Esc | KeyCode::Backspace if self.lsp_server_edit.is_some() => {
+                self.close_lsp_server();
+            }
             KeyCode::BackTab | KeyCode::Esc => {
                 self.focus = FocusArea::Sidebar;
             }
@@ -324,17 +307,17 @@ impl SettingsModal {
                 }
             }
             KeyCode::Delete => {
-                if let Some(ContentRow::LspServer(idx)) = current {
-                    if idx < self.lsp_server_keys.len() {
-                        let lang = self.lsp_server_keys[idx].clone();
-                        self.config.lsp.servers.remove(&lang);
-                        self.refresh_server_keys();
-                        self.mark_dirty();
+                if let Some(ContentRow::LspServer(index)) = current {
+                    if let Some(language) = self.lsp_server_keys.get(index).cloned() {
+                        self.delete_lsp_server(&language);
                     }
                 }
             }
             KeyCode::Left | KeyCode::Right if current == Some(ContentRow::ConnectionButtons) => {
                 self.step_connection_button(key.code == KeyCode::Right);
+            }
+            KeyCode::Left | KeyCode::Right if current == Some(ContentRow::LspServerButtons) => {
+                self.step_lsp_server_button(key.code == KeyCode::Right);
             }
             KeyCode::Left => {
                 if let (Some(ContentRow::Field(field_idx)), Some(d)) = (current, field_desc) {
@@ -382,87 +365,6 @@ impl SettingsModal {
         }
     }
 
-    /// Handle keys in LSP server edit form.
-    fn handle_lsp_edit_key(
-        &mut self,
-        key: KeyEvent,
-    ) -> Result<Option<ModalResult<SettingsResult>>> {
-        match key.code {
-            KeyCode::Esc => {
-                self.lsp_mode = LspMode::Fields;
-            }
-            KeyCode::Enter => {
-                self.commit_lsp_edit();
-                self.lsp_mode = LspMode::Fields;
-            }
-            KeyCode::Tab => {
-                self.lsp_edit_cursor = (self.lsp_edit_cursor + 1) % 4;
-            }
-            KeyCode::BackTab => {
-                self.lsp_edit_cursor = if self.lsp_edit_cursor == 0 {
-                    3
-                } else {
-                    self.lsp_edit_cursor - 1
-                };
-            }
-            _ => {
-                termide_ui::edit_text_input(&mut self.lsp_edit_fields[self.lsp_edit_cursor], key);
-            }
-        }
-        Ok(None)
-    }
-
-    /// Commit the LSP server edit form.
-    fn commit_lsp_edit(&mut self) {
-        let lang = self.lsp_edit_fields[0].text().trim().to_string();
-        if lang.is_empty() {
-            return;
-        }
-
-        // If editing existing, remove old key if language changed
-        if let Some(idx) = self.lsp_edit_index {
-            if idx < self.lsp_server_keys.len() {
-                let old_lang = self.lsp_server_keys[idx].clone();
-                if old_lang != lang {
-                    self.config.lsp.servers.remove(&old_lang);
-                }
-            }
-        }
-
-        let command = self.lsp_edit_fields[1].text().trim().to_string();
-        let args: Vec<String> = if self.lsp_edit_fields[2].text().trim().is_empty() {
-            vec![]
-        } else {
-            self.lsp_edit_fields[2]
-                .text()
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
-        };
-        let root_markers: Vec<String> = if self.lsp_edit_fields[3].text().trim().is_empty() {
-            vec![]
-        } else {
-            self.lsp_edit_fields[3]
-                .text()
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
-        };
-
-        self.config.lsp.servers.insert(
-            lang,
-            LspServerSettings {
-                command,
-                args,
-                root_markers,
-            },
-        );
-        self.refresh_server_keys();
-        self.mark_dirty();
-    }
-
     pub(super) fn handle_edit_key(
         &mut self,
         key: KeyEvent,
@@ -488,10 +390,6 @@ impl SettingsModal {
 
     /// Paste into the field being edited.
     pub(super) fn paste_into_edit(&mut self, text: &str) -> bool {
-        if self.active_tab == SettingsTab::Lsp && self.lsp_mode == LspMode::ServerEdit {
-            self.lsp_edit_fields[self.lsp_edit_cursor].paste(text);
-            return true;
-        }
         if !self.editing {
             return false;
         }
@@ -508,19 +406,10 @@ impl SettingsModal {
     /// landed on.
     pub(super) fn handle_field_mouse(&mut self, mouse: MouseEvent) -> bool {
         let point = (mouse.column, mouse.row).into();
-        let lsp_form = self.active_tab == SettingsTab::Lsp && self.lsp_mode == LspMode::ServerEdit;
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 let presses = self.clicks.click((mouse.column, mouse.row));
-                let hit = if lsp_form {
-                    self.lsp_field_areas
-                        .iter()
-                        .position(|area| area.contains(point))
-                        .map(|index| {
-                            self.lsp_edit_cursor = index;
-                            self.lsp_field_areas[index]
-                        })
-                } else if self.editing {
+                let hit = if self.editing {
                     let area = self.edit_area.filter(|area| area.contains(point));
                     if area.is_none() {
                         self.commit_edit();
@@ -533,22 +422,15 @@ impl SettingsModal {
                     return false;
                 };
                 self.focus = FocusArea::Content;
-                let input = self.mouse_input();
-                let pos = field_char_at(input, area, mouse.column);
-                input.press_counted(pos, presses);
+                let pos = field_char_at(&self.edit_input, area, mouse.column);
+                self.edit_input.press_counted(pos, presses);
                 self.field_drag = true;
                 true
             }
             MouseEventKind::Drag(MouseButton::Left) if self.field_drag => {
-                let area = if lsp_form {
-                    self.lsp_field_areas.get(self.lsp_edit_cursor).copied()
-                } else {
-                    self.edit_area
-                };
-                if let Some(area) = area {
-                    let input = self.mouse_input();
-                    let pos = field_char_at(input, area, mouse.column);
-                    input.extend_selection_to(pos);
+                if let Some(area) = self.edit_area {
+                    let pos = field_char_at(&self.edit_input, area, mouse.column);
+                    self.edit_input.extend_selection_to(pos);
                 }
                 true
             }
@@ -557,15 +439,6 @@ impl SettingsModal {
                 true
             }
             _ => false,
-        }
-    }
-
-    /// The text field a click or drag works on.
-    fn mouse_input(&mut self) -> &mut termide_ui::TextInput {
-        if self.active_tab == SettingsTab::Lsp && self.lsp_mode == LspMode::ServerEdit {
-            &mut self.lsp_edit_fields[self.lsp_edit_cursor]
-        } else {
-            &mut self.edit_input
         }
     }
 
@@ -1429,37 +1302,5 @@ mod wheel_tests {
         let sidebar = modal.last_sidebar_area.expect("sidebar drawn");
         wheel(&mut modal, screen, sidebar, true);
         assert_eq!(modal.active_tab, SettingsTab::General);
-    }
-}
-
-#[cfg(test)]
-mod lsp_form_tests {
-    use super::*;
-    use crate::Modal;
-    use crossterm::event::KeyEvent;
-    use termide_config::Config;
-
-    /// A key as a Russian layout sends it: `raw` is what was typed,
-    /// `canonical` its Latin, unshifted twin.
-    fn typed(modal: &mut SettingsModal, raw: char, canonical: char) {
-        let chord = termide_core::KeyChord {
-            raw: KeyEvent::new(KeyCode::Char(raw), KeyModifiers::NONE),
-            canonical: KeyEvent::new(KeyCode::Char(canonical), KeyModifiers::NONE),
-        };
-        modal.handle_key(chord).unwrap();
-    }
-
-    #[test]
-    fn the_server_form_types_what_the_keyboard_sends() {
-        let config = Config::default();
-        let mut modal = SettingsModal::new(config.clone(), config, false);
-        modal.active_tab = SettingsTab::Lsp;
-        modal.focus = FocusArea::Content;
-        modal.lsp_mode = LspMode::ServerEdit;
-        modal.lsp_edit_cursor = 1;
-        typed(&mut modal, 'ф', 'a');
-        typed(&mut modal, '+', '=');
-        assert_eq!(modal.lsp_edit_fields[1].text(), "ф+");
-        assert_eq!(modal.lsp_mode, LspMode::ServerEdit);
     }
 }
