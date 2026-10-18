@@ -221,6 +221,7 @@ pub trait Translation: Send + Sync {
     fn debug_setup_program(&self) -> &str;
     fn debug_setup_build(&self) -> &str;
     fn debug_setup_debugger(&self) -> &str;
+    fn debug_setup_debugger_args(&self) -> &str;
     fn debug_setup_no_program(&self) -> &str;
     fn debug_breakpoints_cleared(&self) -> &str;
     fn debug_panel_title(&self) -> &str;
@@ -844,6 +845,7 @@ pub trait Translation: Send + Sync {
     fn debug_unknown_debugger_fmt(&self, name: &str) -> String;
     fn debug_cargo_failed_fmt(&self, error: &str) -> String;
     fn debug_setup_default_name_fmt(&self, name: &str) -> String;
+    fn debug_setup_bad_args_fmt(&self, text: &str) -> String;
     fn debug_status_stopped_fmt(&self, reason: &str) -> String;
     fn debug_status_exited_fmt(&self, code: &str) -> String;
     fn debug_status_failed_fmt(&self, error: &str) -> String;

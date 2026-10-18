@@ -20,6 +20,7 @@ fn variable(name: &str, value: &str, reference: i64, children: Option<Vec<Variab
 fn stopped_session() -> SharedSession {
     let mut s = Session::detached(LaunchSpec {
         adapter: Adapter::LldbDap,
+        adapter_args: Vec::new(),
         program: "app".into(),
         args: Vec::new(),
         cwd: "/p".into(),

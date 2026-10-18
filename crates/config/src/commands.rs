@@ -119,6 +119,10 @@ pub struct CommandMetadata {
     /// command line is then the program to debug and its arguments.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub debugger: Option<String>,
+    /// Flags of the debugger itself, each its own word, added to those
+    /// termide starts it with: `["--only-same-user=false"]` for Delve.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub debugger_args: Vec<String>,
     /// Shell command run before the debugger starts, which it must pass.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub build: Option<String>,
@@ -216,6 +220,7 @@ impl CommandsMetadata {
                     .map(str::to_string)
             };
             let debugger = text("debugger");
+            let debugger_args = Self::parse_words(section, "debugger_args", section_name);
             let build = text("build");
             let console = text("console");
 
@@ -229,6 +234,7 @@ impl CommandsMetadata {
                     params,
                     group,
                     debugger,
+                    debugger_args,
                     build,
                     console,
                 },
@@ -236,6 +242,31 @@ impl CommandsMetadata {
         }
 
         Self { entries }
+    }
+
+    /// An array of strings under `key`; anything else is reported and left
+    /// out, so a typo cannot pass a stray flag.
+    fn parse_words(
+        section: &toml::map::Map<String, toml::Value>,
+        key: &str,
+        command: &str,
+    ) -> Vec<String> {
+        let Some(value) = section.get(key) else {
+            return Vec::new();
+        };
+        let words = value.as_array().and_then(|items| {
+            items
+                .iter()
+                .map(|item| item.as_str().map(str::to_string))
+                .collect::<Option<Vec<_>>>()
+        });
+        words.unwrap_or_else(|| {
+            log::warn!(
+                "commands.toml: `{key}` of `{command}` must be an array of strings, \
+                 such as [\"--flag\", \"value\"]; ignored"
+            );
+            Vec::new()
+        })
     }
 
     fn parse_params(section: &toml::map::Map<String, toml::Value>) -> Vec<CommandParam> {
@@ -386,6 +417,25 @@ fn write_fields(
     set(table, "group", meta.group.as_deref());
     set(table, "key", meta.key.as_deref());
     set(table, "debugger", meta.debugger.as_deref());
+    let old_args: Vec<&str> = table
+        .get("debugger_args")
+        .and_then(toml_edit::Item::as_array)
+        .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+    if old_args
+        != meta
+            .debugger_args
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+    {
+        if meta.debugger_args.is_empty() {
+            table.remove("debugger_args");
+        } else {
+            let args: toml_edit::Array = meta.debugger_args.iter().map(String::as_str).collect();
+            table.insert("debugger_args", toml_edit::value(args));
+        }
+    }
     set(table, "build", meta.build.as_deref());
     set(table, "console", meta.console.as_deref());
 
@@ -435,6 +485,14 @@ impl CommandItem {
     /// The debugger this command runs under, as written in `commands.toml`.
     pub fn debugger(&self) -> Option<&str> {
         self.metadata.as_ref()?.debugger.as_deref()
+    }
+
+    /// The debugger's own flags, as written in `commands.toml`.
+    pub fn debugger_args(&self) -> &[String] {
+        self.metadata
+            .as_ref()
+            .map(|m| m.debugger_args.as_slice())
+            .unwrap_or_default()
     }
 }
 
@@ -834,5 +892,32 @@ console = "panel"
             .map(|c| c.name.as_str())
             .collect();
         assert_eq!(debug, ["debug-app"]);
+    }
+
+    #[test]
+    fn debugger_args_are_an_array_of_words() {
+        let original = r#"[go]
+command = "./cmd/app"
+debugger = "dlv-dap"
+debugger_args = ["--only-same-user=false", "--log"]
+"#;
+        let mut meta = CommandsMetadata::parse(original);
+        assert_eq!(
+            meta.entries["go"].debugger_args,
+            ["--only-same-user=false", "--log"]
+        );
+        assert_eq!(meta.render_over(original), original);
+
+        meta.entries.get_mut("go").unwrap().debugger_args = vec!["--log".into()];
+        let changed = meta.render_over(original);
+        assert!(changed.contains("debugger_args = [\"--log\"]"), "{changed}");
+        meta.entries.get_mut("go").unwrap().debugger_args.clear();
+        assert!(!meta.render_over(original).contains("debugger_args"));
+
+        // A string is a mistake, not one flag: it is left out.
+        let wrong = "[go]\ndebugger = \"dlv-dap\"\ndebugger_args = \"--log\"\n";
+        assert!(CommandsMetadata::parse(wrong).entries["go"]
+            .debugger_args
+            .is_empty());
     }
 }

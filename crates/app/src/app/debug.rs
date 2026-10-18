@@ -157,6 +157,7 @@ impl App {
             debugger,
             target: command.command.clone().unwrap_or_default(),
             build: command.metadata.as_ref().and_then(|m| m.build.clone()),
+            debugger_args: command.debugger_args().to_vec(),
         };
         let cwd = self.project_root.clone();
         self.launch_debugger(&launch, cwd, env)
@@ -245,6 +246,7 @@ impl App {
                 };
                 DebugChoice::Dap(LaunchSpec {
                     adapter,
+                    adapter_args: Vec::new(),
                     program,
                     args: Vec::new(),
                     cwd,
@@ -279,6 +281,7 @@ impl App {
                 match debugger {
                     NativeDebugger::Adapter(adapter) => DebugChoice::Dap(LaunchSpec {
                         adapter,
+                        adapter_args: Vec::new(),
                         program,
                         args: Vec::new(),
                         cwd,
@@ -294,6 +297,7 @@ impl App {
                             debugger,
                             target: termide_debug::shell_quote(&program),
                             build: Some(build),
+                            debugger_args: Vec::new(),
                         },
                         cwd,
                     },
@@ -329,6 +333,7 @@ impl App {
             .unwrap_or_default();
         Ok(LaunchSpec {
             adapter,
+            adapter_args: command.debugger_args().to_vec(),
             program,
             args,
             cwd: self.project_root.clone(),

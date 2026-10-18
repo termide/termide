@@ -78,6 +78,9 @@ pub struct Launch {
     pub target: String,
     /// A shell command run first; the debugger starts only if it succeeds.
     pub build: Option<String>,
+    /// Flags of the debugger itself (`debugger_args` in `commands.toml`),
+    /// put where it reads its own options, before the program.
+    pub debugger_args: Vec<String>,
 }
 
 impl Launch {
@@ -94,6 +97,7 @@ impl Launch {
             debugger,
             target,
             build: None,
+            debugger_args: Vec::new(),
         })
     }
 
@@ -105,9 +109,14 @@ impl Launch {
             .iter()
             .filter(|b| self.debugger.accepts(&b.path))
             .collect();
+        let flags: String = self
+            .debugger_args
+            .iter()
+            .map(|arg| format!(" {}", shell_quote(arg)))
+            .collect();
         let debug = match self.debugger {
             Debugger::Pdb => {
-                let mut line = String::from("python3 -m pdb");
+                let mut line = format!("python3 -m pdb{flags}");
                 for b in &breakpoints {
                     let command = format!("break {}:{}", b.path.display(), b.line);
                     line.push_str(" -c ");
@@ -121,9 +130,9 @@ impl Launch {
                 let script = write_script(debugger, &script(debugger, &breakpoints), script_dir)?;
                 let script = shell_quote(&script.to_string_lossy());
                 match debugger {
-                    Debugger::Lldb => format!("lldb -s {script} -- {}", self.target),
-                    Debugger::Gdb => format!("gdb -q -x {script} --args {}", self.target),
-                    Debugger::Dlv => format!("dlv --init {script} {}", self.target),
+                    Debugger::Lldb => format!("lldb{flags} -s {script} -- {}", self.target),
+                    Debugger::Gdb => format!("gdb -q{flags} -x {script} --args {}", self.target),
+                    Debugger::Dlv => format!("dlv{flags} --init {script} {}", self.target),
                     Debugger::Pdb => unreachable!(),
                 }
             }
@@ -209,7 +218,34 @@ mod tests {
             debugger,
             target: target.into(),
             build: None,
+            debugger_args: Vec::new(),
         }
+    }
+
+    #[test]
+    fn debugger_flags_go_before_the_program() {
+        let dir = tempfile::tempdir().unwrap();
+        let with = |debugger, target: &str| Launch {
+            debugger_args: vec!["--nx".into(), "a b".into()],
+            ..launch(debugger, target)
+        };
+        let line = with(Debugger::Gdb, "./app -v")
+            .command_line(&[], dir.path())
+            .unwrap();
+        assert!(line.starts_with("gdb -q --nx 'a b' -x "), "{line}");
+        assert!(line.ends_with(" --args ./app -v"), "{line}");
+        let line = with(Debugger::Lldb, "./app")
+            .command_line(&[], dir.path())
+            .unwrap();
+        assert!(line.starts_with("lldb --nx 'a b' -s "), "{line}");
+        let line = with(Debugger::Pdb, "t.py")
+            .command_line(&[], dir.path())
+            .unwrap();
+        assert!(line.starts_with("python3 -m pdb --nx 'a b' -c "), "{line}");
+        let line = with(Debugger::Dlv, "debug .")
+            .command_line(&[], dir.path())
+            .unwrap();
+        assert!(line.starts_with("dlv --nx 'a b' --init "), "{line}");
     }
 
     fn script_of(line: &str) -> String {

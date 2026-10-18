@@ -60,6 +60,11 @@ impl App {
                 options: DEBUGGERS.iter().map(|d| d.to_string()).collect(),
                 default: Some(guess.debugger),
             },
+            text(
+                "debugger_args",
+                t.debug_setup_debugger_args(),
+                String::new(),
+            ),
         ];
         let modal = termide_modal::CommandParamsModal::new(String::new(), params)
             .with_title(t.debug_setup_title());
@@ -87,6 +92,17 @@ impl App {
             return Ok(());
         };
         let debugger = get("debugger").unwrap_or_else(|| DEBUGGERS[0].to_string());
+        // Split as a shell would, so a quoted value stays one flag.
+        let debugger_args = match get("debugger_args") {
+            Some(text) => match dap::split_words(&text) {
+                Some(words) => words,
+                None => {
+                    self.show_debug_message(t.debug_setup_bad_args_fmt(&text));
+                    return Ok(());
+                }
+            },
+            None => Vec::new(),
+        };
 
         let dir = self.project_root.join(".termide");
         let mut metadata = CommandsMetadata::load(&dir);
@@ -98,6 +114,7 @@ impl App {
             command: Some(program.clone()),
             display_name: get("name"),
             debugger: Some(debugger),
+            debugger_args,
             build: get("build"),
             ..Default::default()
         };

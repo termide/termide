@@ -29,6 +29,9 @@ const STACK_DEPTH: u64 = 64;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaunchSpec {
     pub adapter: Adapter,
+    /// Flags of the adapter itself (`debugger_args` in `commands.toml`),
+    /// after those termide starts it with.
+    pub adapter_args: Vec<String>,
     /// The program — for debugpy, the script.
     pub program: String,
     pub args: Vec<String>,
@@ -456,6 +459,7 @@ impl Session {
         let mut command = Command::new(&program);
         crate::detach(&mut command)
             .args(&args)
+            .args(&self.spec.adapter_args)
             .current_dir(&self.spec.cwd)
             .envs(self.spec.env.iter().cloned())
             .stdin(Stdio::piped())

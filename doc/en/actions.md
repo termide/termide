@@ -203,6 +203,17 @@ build = "cargo build"
 key = "Ctrl+Alt+D"
 ```
 
+`debugger_args` gives the debugger flags of its own, as an array of words, added to those TermIDE starts it with:
+
+```toml
+[debug-go]
+command = "./cmd/app"
+debugger = "dlv-dap"
+debugger_args = ["--log", "--log-output=dap"]
+```
+
+They go where the debugger reads its options, before the program: an adapter gets them after its own arguments (`dlv dap --listen=… --log …`, `gdb -i dap …`), `lldb` and `gdb` before `--` and `--args`, `dlv` before its subcommand, `pdb` before its `-c`. The program's arguments stay in `command`.
+
 For a debug adapter, `command` is split into words as a shell would split it (quotes and backslashes work) but no shell runs it: variables, `~` and globs are not expanded. `build` runs first, its output going to the debug panel; the adapter starts only if it succeeds. A command-line debugger reads its breakpoints from a script — a `breakpoint set` or `break` for each, then `run` (lldb, gdb) or `continue` (Delve) — written to `termide-debug` in the system's temporary directory; breakpoints set while it runs reach it only on the next launch, so set them in the debugger itself meanwhile.
 
 Only breakpoints in files under the project root go in, each to the debugger for its language: Python files to debugpy and pdb, Go files to Delve and dlv-dap, the rest to lldb and gdb. Debug commands run in the project root, so a relative program path such as `target/debug/app` means the same wherever the focus is. Parameters work as for other commands; for a debug adapter they reach the build and the adapter as environment variables.
@@ -215,7 +226,7 @@ Only breakpoints in files under the project root go in, each to the debugger for
 
 When a file could be debugged but its debugger is missing (no LLDB or GDB for Rust, no Delve for Go), a window says what to install. When there is nothing to launch at all, the **Set up debugging** form opens instead (see below). While a debug session is active, `F5` continues the program instead.
 
-**Set up debugging…**, in the editor's `[≡]` menu and the command palette, opens a form for a launch of your own: its name, the program and its arguments, the command to build it first and the debugger, filled in for the file in the editor — for a Rust binary its path under `target/debug` and its `cargo build`. **Run** saves it as a debug command in the project's `.termide/commands.toml` and starts it; from then on `F5` offers it, and it can be edited there or in the Commands menu, for example to add arguments.
+**Set up debugging…**, in the editor's `[≡]` menu and the command palette, opens a form for a launch of your own: its name, the program and its arguments, the command to build it first, the debugger and its flags (split as a shell would), filled in for the file in the editor — for a Rust binary its path under `target/debug` and its `cargo build`. **Run** saves it as a debug command in the project's `.termide/commands.toml` and starts it; from then on `F5` offers it, and it can be edited there or in the Commands menu, for example to add arguments.
 
 ### The debug panel
 

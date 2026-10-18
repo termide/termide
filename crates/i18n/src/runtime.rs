@@ -339,6 +339,7 @@ impl Translation for RuntimeTranslation {
         debug_setup_program,
         debug_setup_build,
         debug_setup_debugger,
+        debug_setup_debugger_args,
         debug_setup_no_program,
         debug_breakpoints_cleared,
         debug_panel_title,
@@ -2088,6 +2089,10 @@ impl Translation for RuntimeTranslation {
 
     fn debug_setup_default_name_fmt(&self, name: &str) -> String {
         self.format("debug_setup_default_name_fmt", &[("name", name)])
+    }
+
+    fn debug_setup_bad_args_fmt(&self, text: &str) -> String {
+        self.format("debug_setup_bad_args_fmt", &[("text", text)])
     }
 
     fn debug_status_stopped_fmt(&self, reason: &str) -> String {
