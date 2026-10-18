@@ -10599,11 +10599,18 @@ fn ctrl_t_takes_a_delegated_task_over() {
     settle(&mut panel);
     assert!(!panel.take_released());
     assert!(!panel.banner_shown());
-    // The task heads its block as the agent's, not the user's words.
+    // The task is a step of the agent's, not the user's words.
     assert!(panel.transcript().items().iter().any(|item| matches!(
         item,
-        Item::User { command: Some(head), .. } if head == "& lead · task"
+        Item::Tool { call, .. } if crate::transcript::is_peer_message(call)
+            && call.arguments["agent"] == "lead"
+            && call.arguments["kind"] == "task"
     )));
+    assert!(!panel
+        .transcript()
+        .items()
+        .iter()
+        .any(|item| matches!(item, Item::User { .. })));
     type_text(&mut panel, "go on");
     assert_eq!(panel.input_text(), "go on");
 }
@@ -10646,10 +10653,20 @@ fn another_agents_message_starts_a_turn_and_counts_its_hops() {
     assert_eq!(panel.agent_hops(), 3);
     settle(&mut panel);
     assert_eq!(panel.peer_state(), PeerState::Idle);
+    // It shows as a step of the agent's, never as the user's plate.
     assert!(panel.transcript().items().iter().any(|item| matches!(
         item,
-        Item::User { command: Some(head), .. } if head == "& reviewer · info"
+        Item::Tool { call, .. } if crate::transcript::is_peer_message(call)
+            && call.arguments["agent"] == "reviewer"
+            && call.arguments["kind"] == "info"
+            && call.arguments["panel"] == 7
+            && call.arguments["subject"] == "the config loader moved"
     )));
+    assert!(!panel
+        .transcript()
+        .items()
+        .iter()
+        .any(|item| matches!(item, Item::User { .. })));
     // The user writing starts the count again.
     type_text(&mut panel, "thanks");
     panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));

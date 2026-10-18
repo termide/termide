@@ -286,14 +286,10 @@ impl AgentPanel {
                     Message::User(user) => {
                         // A command the user ran while the agent worked was
                         // steered in, and shows as the shell call block it
-                        // would have shown had the agent been idle.
-                        let item = transcript::user_command_item(user, now_hms(), None)
-                            .unwrap_or_else(|| Item::User {
-                                text: user.plain_text(),
-                                at: now_hms(),
-                                command: transcript::user_headline(user),
-                            });
-                        self.transcript.push(item);
+                        // would have shown had the agent been idle. Another
+                        // agent's message is a step, not the user's plate.
+                        self.transcript
+                            .push(transcript::user_item(user, now_hms(), None));
                         None
                     }
                     // An external agent's calls show as they run; the

@@ -385,15 +385,7 @@ pub(crate) fn push_history(transcript: &mut Transcript, logged: &LoggedMessage) 
                 Some(Timing::Tool { duration_ms, .. }) => Some(duration_ms),
                 _ => None,
             };
-            let item =
-                transcript::user_command_item(user, at.clone(), duration_ms).unwrap_or_else(|| {
-                    Item::User {
-                        text: user.plain_text(),
-                        at,
-                        command: transcript::user_headline(user),
-                    }
-                });
-            transcript.push(item);
+            transcript.push(transcript::user_item(user, at, duration_ms));
         }
         Message::Assistant(assistant) => {
             let cost = match logged.timing {

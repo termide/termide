@@ -1694,8 +1694,9 @@ A `task` call with `background` does not wait: the task goes to an agent
 panel — a free one, else a new one beside the others — whatever
 `subagent_run` says, and the call returns as soon as a panel has taken it,
 naming that panel. The delegating agent carries on, and when the task is over
-its answer reaches the agent as a message of the delegate's, headed
-`& <delegate> · reply`, the way an answer to `send_message` does: an idle
+its answer reaches the agent as a message of the delegate's, a step reading
+`& Receiving reply from <delegate> · …`, the way an answer to `send_message`
+does: an idle
 agent starts a turn on it, a busy one reads it at its next step. Several
 background tasks can run at once, each in its panel. Closing that panel ends
 the task, and the agent hears so; stopping the delegating panel's run does
@@ -1715,14 +1716,21 @@ waiting for you, running another agent's task) and where it works — and
 `question` to ask it something, `reply` to answer a message it got. The
 message reaches the other agent at once — an idle one starts a turn on it, a
 busy one reads it at its next step — as that agent's words, never yours: the
-transcript heads it `& <agent> · <kind>`, the model reads it framed with the
+transcript shows it as a step, not on the plate of your messages —
+`& Receiving reply from reviewer (panel 3) · …`, `& Receiving question
+from …`, `& Receiving note from …`, `& Taking task from …`, its text folded
+under it — and the model reads it framed with the
 sender's name and panel, so it knows where to answer, and the `auto`
 reviewer does not take it for a request of yours. An answer comes back the
 same way, as a message of its own, not as the call's result. A panel running
 another agent's task takes no messages, and sends none to the panel that
 handed it the task: its answer goes back as its final message. A free panel,
 nothing asked in it yet, takes no `question`: its agent knows nothing of the
-work so far and has nothing to answer from. `send_message` acts outside the
+work so far and has nothing to answer from. Every exchange with another
+agent opens with `&` in the transcript, the verb saying which way it goes:
+`& Delegating to …` for a task, `& Asking panel 3 · …`, `& Replying to
+panel 1 · …` and `& Telling panel 3 · …` for a message sent, `& Listing agent
+panels` for `agents`. `send_message` acts outside the
 panel, so it asks as such tools do: in `ask` mode you confirm each message,
 in plan mode none goes; `agents` only reads. Agents may pass ten messages to
 one another without you; the next is refused and the agent told to finish

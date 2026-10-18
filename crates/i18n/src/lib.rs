@@ -931,6 +931,8 @@ pub trait Translation: Send + Sync {
     fn agent_notice_taken_over_fmt(&self, agent: &str) -> String;
     fn agent_close_confirm_delegate_fmt(&self, agent: &str) -> String;
     fn agent_take_over_confirm_fmt(&self, agent: &str) -> String;
+    /// Agent transcript: who sent a message, and from which panel.
+    fn agent_peer_from_panel_fmt(&self, agent: &str, panel: &str) -> String;
     fn agent_delegate_ask_question_fmt(&self, tasks: &str) -> String;
     fn agent_notice_cannot_check_goal_fmt(&self, error: &str) -> String;
     fn agent_notice_cannot_handoff_fmt(&self, error: &str) -> String;
@@ -1109,6 +1111,27 @@ pub trait Translation: Send + Sync {
     fn agent_tool_send_message(&self) -> &str;
     /// Agent transcript: the action words for an `agents` call.
     fn agent_tool_agents(&self) -> &str;
+    /// Agent transcript: the action words for a `send_message` question,
+    /// before the panel number.
+    fn agent_tool_send_question(&self) -> &str;
+    /// Agent transcript: the action words for a `send_message` reply, before
+    /// the panel number.
+    fn agent_tool_send_reply(&self) -> &str;
+    /// Agent transcript: the action words for a `send_message` note, before
+    /// the panel number.
+    fn agent_tool_send_info(&self) -> &str;
+    /// Agent transcript: the action words for another agent's answer, before
+    /// its name.
+    fn agent_peer_reply(&self) -> &str;
+    /// Agent transcript: the action words for another agent's question,
+    /// before its name.
+    fn agent_peer_question(&self) -> &str;
+    /// Agent transcript: the action words for another agent's note, before
+    /// its name.
+    fn agent_peer_info(&self) -> &str;
+    /// Agent transcript: the action words for a task another agent gives,
+    /// before its name.
+    fn agent_peer_task(&self) -> &str;
     /// Agent notices: what defines a `/name` — a built-in command, a prompt
     /// template, a command script, a skill — as the object of "runs" and
     /// "hides".

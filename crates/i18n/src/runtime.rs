@@ -737,6 +737,13 @@ impl Translation for RuntimeTranslation {
         agent_tool_suggest,
         agent_tool_send_message,
         agent_tool_agents,
+        agent_tool_send_question,
+        agent_tool_send_reply,
+        agent_tool_send_info,
+        agent_peer_reply,
+        agent_peer_question,
+        agent_peer_info,
+        agent_peer_task,
         agent_slash_kind_builtin,
         agent_slash_kind_template,
         agent_slash_kind_script,
@@ -1254,6 +1261,13 @@ impl Translation for RuntimeTranslation {
 
     fn agent_take_over_confirm_fmt(&self, agent: &str) -> String {
         self.format("agent_take_over_confirm_fmt", &[("agent", agent)])
+    }
+
+    fn agent_peer_from_panel_fmt(&self, agent: &str, panel: &str) -> String {
+        self.format(
+            "agent_peer_from_panel_fmt",
+            &[("agent", agent), ("panel", panel)],
+        )
     }
 
     fn agent_delegate_ask_question_fmt(&self, tasks: &str) -> String {

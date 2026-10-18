@@ -143,13 +143,75 @@ pub(crate) fn is_user_command(call: &ToolCall) -> bool {
     call.id == USER_COMMAND_ID
 }
 
-/// What heads a user block: the `/name args` that produced it, or — for
-/// another agent's message — who sent it and what it is (`& lead · task`),
-/// so it never reads as the user's words; its text folds under it.
-pub(crate) fn user_headline(user: &UserMessage) -> Option<String> {
-    match &user.origin {
-        Some(origin) => Some(format!("& {} · {}", origin.agent, origin.kind.as_str())),
-        None => user.command.clone(),
+/// The call id and name of another agent's message. It shows as a step —
+/// `& Receiving reply from lead · …` — not as the user's plate, so it never
+/// reads as the user's words; no model-issued call takes this id.
+pub(crate) const PEER_MESSAGE_ID: &str = "agent-message";
+pub(crate) const PEER_MESSAGE_TOOL: &str = "agent_message";
+
+/// Whether `call` is another agent's message rather than a call.
+pub(crate) fn is_peer_message(call: &ToolCall) -> bool {
+    call.id == PEER_MESSAGE_ID
+}
+
+/// The block of a message: a command the user ran by hand, another agent's
+/// message, or the user's own words, headed by the `/name args` that
+/// produced them.
+pub(crate) fn user_item(user: &UserMessage, at: String, duration_ms: Option<u32>) -> Item {
+    if let Some(item) = user_command_item(user, at.clone(), duration_ms) {
+        return item;
+    }
+    if let Some(item) = peer_message_item(user, at.clone()) {
+        return item;
+    }
+    Item::User {
+        text: user.plain_text(),
+        at,
+        command: user.command.clone(),
+    }
+}
+
+/// The step of another agent's message: who sent it, from which panel, what
+/// it is, and its text folded under it. `None` for a message of the user's.
+fn peer_message_item(user: &UserMessage, at: String) -> Option<Item> {
+    let origin = user.origin.as_ref()?;
+    let text = user.plain_text();
+    let subject = text
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let call = ToolCall {
+        id: PEER_MESSAGE_ID.into(),
+        name: PEER_MESSAGE_TOOL.into(),
+        arguments: serde_json::json!({
+            "agent": origin.agent,
+            "kind": origin.kind.as_str(),
+            "panel": origin.panel,
+            "subject": subject,
+        }),
+        extra_content: None,
+    };
+    let result = ToolResultMessage::text(&call, text);
+    Some(Item::Tool {
+        call,
+        result: Some(result),
+        live: None,
+        at,
+        duration_ms: None,
+        waited_ms: None,
+        waiting: false,
+    })
+}
+
+/// The first line of another agent's message that has text, for a title.
+pub(crate) fn peer_message_subject(item: &Item) -> Option<String> {
+    match item {
+        Item::Tool { call, .. } if is_peer_message(call) => {
+            call.arguments["subject"].as_str().map(str::to_string)
+        }
+        _ => None,
     }
 }
 
@@ -1594,10 +1656,10 @@ fn tool_headline(
     // A tool opens with its type glyph like every block — `<` read and `>`
     // write, as a shell redirects, `±` for an edit's diff, `↓` for a page
     // fetched, `?` for a search, `/` for a skill as it is typed by hand, `&`
-    // for a subagent, as a shell backgrounds a job, `*` for an MCP tool, `¿`
-    // for a question to the user, `@` for another agent panel addressed or
-    // listed — then its localized action in the same
-    // state color and its subject.
+    // for any exchange with another agent — a task, a message to or from a
+    // panel, the panels listed — as a shell backgrounds a job, `*` for an MCP
+    // tool, `¿` for a question to the user — then its localized action in the
+    // same state color and its subject.
     let accent = Style::default().fg(state);
     let styled_action = |glyph: &str, verb: &str, subject: String, style: Style| {
         let mut spans = vec![
@@ -1682,8 +1744,9 @@ fn tool_headline(
             };
             action("¿", t.agent_tool_question(), subject)
         }
-        // `@` addresses another panel, by its number: the message's kind and
-        // its first line.
+        // Every exchange with another agent opens with `&`, as a task does;
+        // the verb tells which way it goes. A message to a panel, by its
+        // number: what it is says the verb, then its first line.
         "send_message" => {
             let text = arg("text");
             let first = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
@@ -1691,13 +1754,31 @@ fn tool_headline(
                 .as_u64()
                 .map(|n| n.to_string())
                 .unwrap_or_else(|| arg("to"));
-            action(
-                "@",
-                t.agent_tool_send_message(),
-                format!("{to} · {}: {}", arg("kind"), first.trim()),
-            )
+            let verb = match arg("kind").as_str() {
+                "question" => t.agent_tool_send_question(),
+                "reply" => t.agent_tool_send_reply(),
+                "info" => t.agent_tool_send_info(),
+                _ => t.agent_tool_send_message(),
+            };
+            action("&", verb, format!("{to} · {}", first.trim()))
         }
-        "agents" => action("@", t.agent_tool_agents(), String::new()),
+        "agents" => action("&", t.agent_tool_agents(), String::new()),
+        // Another agent's message to this one: from whom, what it is, and
+        // its first line; the rest folds under it.
+        PEER_MESSAGE_TOOL if is_peer_message(call) => {
+            let verb = match arg("kind").as_str() {
+                "task" => t.agent_peer_task(),
+                "question" => t.agent_peer_question(),
+                "info" => t.agent_peer_info(),
+                _ => t.agent_peer_reply(),
+            };
+            let agent = arg("agent");
+            let from = match call.arguments["panel"].as_u64() {
+                Some(panel) => t.agent_peer_from_panel_fmt(&agent, &panel.to_string()),
+                None => agent,
+            };
+            action("&", verb, format!("{from} · {}", arg("subject")))
+        }
         name if mcp_parts(name).is_some() => {
             let (server, tool) = mcp_parts(name).unwrap_or_default();
             action(
@@ -2274,7 +2355,11 @@ fn render_body(
             let kind = |i: usize| kinds.as_ref().map(|k| k[i]);
             // A running call shows the newest output, where progress is; a
             // finished one shows its output from the top.
-            let (start, end) = if running {
+            // Another agent's message is read whole, as the user's own is.
+            let peer = is_peer_message(call);
+            let (start, end) = if peer {
+                (0, all.len())
+            } else if running {
                 (all.len().saturating_sub(EXPANDED_OUTPUT_LINES), all.len())
             } else {
                 (0, all.len().min(EXPANDED_OUTPUT_LINES))
@@ -2286,9 +2371,9 @@ fn render_body(
                 ));
             }
             for (i, line) in all.iter().enumerate().take(end).skip(start) {
-                if call.name == "question" || kind(i) == Some(DiffKind::Summary) {
-                    // The answers, and an edit's text outside a diff (an
-                    // error), are prose: they wrap rather than clip.
+                if peer || call.name == "question" || kind(i) == Some(DiffKind::Summary) {
+                    // The answers, a message, and an edit's text outside a
+                    // diff (an error), are prose: they wrap rather than clip.
                     lines.extend(prose_output_lines(line, width, colors));
                 } else {
                     lines.push(output_line(line, kind(i), width, colors));
@@ -2538,15 +2623,30 @@ mod tests {
             ),
             "& Delegating to reviewer · check the diff"
         );
-        // Another agent panel: addressed by its number, or listed.
+        // Another agent panel: addressed by its number, the verb saying
+        // what the message is, or listed — all with the `&` of a task.
         assert_eq!(
             headline(
                 "send_message",
                 json!({ "to": 7, "kind": "info", "text": "\nI edit submit.rs\nmore" })
             ),
-            "@ Writing to panel 7 · info: I edit submit.rs"
+            "& Telling panel 7 · I edit submit.rs"
         );
-        assert_eq!(headline("agents", json!({})), "@ Listing agent panels ");
+        assert_eq!(
+            headline(
+                "send_message",
+                json!({ "to": 2, "kind": "question", "text": "Which?" })
+            ),
+            "& Asking panel 2 · Which?"
+        );
+        assert_eq!(
+            headline(
+                "send_message",
+                json!({ "to": 1, "kind": "reply", "text": "Done" })
+            ),
+            "& Replying to panel 1 · Done"
+        );
+        assert_eq!(headline("agents", json!({})), "& Listing agent panels ");
         assert_eq!(
             headline(
                 "github__create_issue",
@@ -2584,6 +2684,38 @@ mod tests {
         assert!(unfolded.contains("› /review a.rs"), "{unfolded}");
         assert!(unfolded.contains("  Review a.rs."), "{unfolded}");
         assert!(unfolded.contains("  Quote the lines."), "{unfolded}");
+    }
+
+    #[test]
+    fn another_agents_message_is_a_step_not_the_users_plate() {
+        let colors = ThemeColors::default();
+        let mut transcript = Transcript::default();
+        let message = UserMessage::text("Found the loader in app.rs.\nIt reads the config twice.")
+            .with_origin(termide_agent_core::MessageOrigin {
+                session: String::new(),
+                agent: "default".into(),
+                kind: termide_agent_core::OriginKind::Reply,
+                panel: Some(3),
+                hops: 1,
+            });
+        transcript.push(user_item(&message, "12:00:00".into(), None));
+        transcript.set_expanded(0, false);
+        let folded = text_of(transcript.lines(80, &colors, false)).join("\n");
+        assert!(
+            folded.contains(
+                "& Receiving reply from ▸ default (panel 3) · Found the loader in app.rs."
+            ),
+            "{folded}"
+        );
+        assert!(!folded.contains('›'), "{folded}");
+        assert!(!folded.contains("twice"), "{folded}");
+
+        transcript.set_expanded(0, true);
+        let unfolded = text_of(transcript.lines(80, &colors, false)).join("\n");
+        assert!(
+            unfolded.contains("It reads the config twice."),
+            "{unfolded}"
+        );
     }
 
     #[test]

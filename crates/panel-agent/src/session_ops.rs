@@ -762,7 +762,10 @@ impl AgentPanel {
             .transcript
             .items()
             .iter()
-            .filter(|item| matches!(item, Item::User { .. } | Item::Assistant { .. }))
+            .filter(|item| {
+                matches!(item, Item::User { .. } | Item::Assistant { .. })
+                    || crate::transcript::peer_message_subject(item).is_some()
+            })
             .count();
         let mut rows: Vec<(String, String)> = vec![(t.agent_info_session().into(), name)];
         if let Some(session) = self.session.as_ref() {

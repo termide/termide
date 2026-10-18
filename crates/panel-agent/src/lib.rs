@@ -1357,11 +1357,10 @@ impl AgentPanel {
     }
 
     fn is_fresh(&self) -> bool {
-        !self
-            .transcript
-            .items()
-            .iter()
-            .any(|item| matches!(item, Item::User { .. } | Item::Assistant { .. }))
+        !self.transcript.items().iter().any(|item| {
+            matches!(item, Item::User { .. } | Item::Assistant { .. })
+                || transcript::peer_message_subject(item).is_some()
+        })
     }
 
     /// The rules the agent runs under: the configured and "always" rules, and
@@ -1521,7 +1520,8 @@ impl Panel for AgentPanel {
                     Item::User { text, command, .. } => {
                         Some(single_line(command.as_ref().unwrap_or(text)))
                     }
-                    _ => None,
+                    // A task another agent gave this panel names it too.
+                    _ => transcript::peer_message_subject(item).map(|s| single_line(&s)),
                 })
             })
             .unwrap_or_else(|| self.cwd.to_string_lossy().into_owned());
