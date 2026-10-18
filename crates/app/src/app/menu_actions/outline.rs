@@ -12,8 +12,10 @@ impl App {
         }
     }
 
-    /// Re-sync outline after a panel close: rebind to another editor or clear.
-    pub(in crate::app) fn resync_outline_after_close(&mut self) {
+    /// Re-sync the outline with the layout as it now stands — after a panel
+    /// close or a restored layout: bind it to the active editor, else to any
+    /// editor, else clear it.
+    pub(in crate::app) fn resync_outline(&mut self) {
         // 1. Try the now-active panel (may be the next editor in stack)
         if self.collect_editor_info_for_outline().is_some() {
             self.notify_outline_file_opened();
@@ -176,6 +178,13 @@ impl App {
     /// Populate the outline panel from any editor found in the layout.
     /// Used on first open when the outline itself may already be focused.
     pub(in crate::app) fn populate_outline_from_any_editor(&mut self) {
+        // The active editor first: the first one in the layout may be
+        // another file.
+        if let Some((path, content, language, cursor_line)) = self.collect_editor_info_for_outline()
+        {
+            self.push_to_outline(path, &content, language.as_deref(), Some(cursor_line));
+            return;
+        }
         let editor_info: Option<(Option<std::path::PathBuf>, String, Option<String>)> = {
             let mut info = None;
             for panel in self.layout_manager.iter_all_panels_mut() {

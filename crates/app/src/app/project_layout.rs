@@ -103,6 +103,11 @@ impl App {
             Err(e) => log::warn!("Failed to restore orphaned buffers: {}", e),
         }
 
+        // A restored outline is empty until something pushes the editor's
+        // content to it; a freshly loaded buffer has no edits for the live
+        // sync to notice.
+        self.resync_outline();
+
         Ok(())
     }
 

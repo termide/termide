@@ -225,6 +225,8 @@ impl App {
                 }
             }
         }
+        // The outline may have missed edits and focus moves while parked.
+        self.resync_outline();
         self.state.needs_watcher_registration = true;
         self.state.needs_redraw = true;
         if !parked.events.is_empty() {

@@ -73,7 +73,7 @@ impl App {
         self.auto_save_layout();
 
         // Re-sync outline panel after editor close
-        self.resync_outline_after_close();
+        self.resync_outline();
 
         // Note: FileManager reload removed - FS watcher handles git status updates
         // when files change. Cascade reload caused O(n*m) delays on panel close.
