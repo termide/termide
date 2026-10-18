@@ -59,15 +59,6 @@ pub(super) fn lsp_server_fields() -> Vec<FieldDescriptor> {
     .collect()
 }
 
-/// A comma-separated list, as the args and root markers are typed.
-fn split_list(text: &str) -> Vec<String> {
-    text.split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
 impl SettingsModal {
     /// The language of the server the page has open.
     pub(super) fn open_lsp_server_name(&self) -> Option<&str> {
@@ -295,8 +286,8 @@ impl SettingsModal {
         };
         match index {
             COMMAND => server.command = text.to_string(),
-            ARGS => server.args = split_list(text),
-            ROOT_MARKERS => server.root_markers = split_list(text),
+            ARGS => server.args = super::fields::split_list(text),
+            ROOT_MARKERS => server.root_markers = super::fields::split_list(text),
             _ => {}
         }
     }

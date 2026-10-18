@@ -382,6 +382,16 @@ pub(super) fn empty_or(value: &str) -> String {
     }
 }
 
+/// A comma-separated list as a field takes it (an LSP server's arguments
+/// and root markers, the native debuggers), empty items dropped.
+pub(super) fn split_list(text: &str) -> Vec<String> {
+    text.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// Display label for a provider value: the wire protocol is stored, but the
 /// row shows that the endpoint is free-form (base_url picks the real server).
 pub(super) fn provider_label(value: &str) -> String {

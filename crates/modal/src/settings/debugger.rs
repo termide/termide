@@ -87,68 +87,9 @@ pub(super) fn console_label(value: &str) -> String {
     }
 }
 
-/// A comma-separated list, as the native debuggers are typed.
-fn split_list(text: &str) -> Vec<String> {
-    text.split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
-/// Flags as a shell would split them: a quoted value (`'a b'`, `"a b"`)
-/// stays one flag, a backslash escapes the next character. `None` when a
-/// quote is left open. Commas are not separators: `--log-output=dap,rpc`
-/// is one flag.
-pub(super) fn split_flags(text: &str) -> Option<Vec<String>> {
-    let mut words = Vec::new();
-    let mut word = String::new();
-    let mut in_word = false;
-    let mut chars = text.chars();
-    while let Some(c) = chars.next() {
-        match c {
-            '\'' => {
-                in_word = true;
-                loop {
-                    match chars.next()? {
-                        '\'' => break,
-                        c => word.push(c),
-                    }
-                }
-            }
-            '"' => {
-                in_word = true;
-                loop {
-                    match chars.next()? {
-                        '"' => break,
-                        '\\' => word.push(chars.next()?),
-                        c => word.push(c),
-                    }
-                }
-            }
-            '\\' => {
-                in_word = true;
-                word.push(chars.next()?);
-            }
-            c if c.is_whitespace() => {
-                if in_word {
-                    words.push(std::mem::take(&mut word));
-                    in_word = false;
-                }
-            }
-            c => {
-                in_word = true;
-                word.push(c);
-            }
-        }
-    }
-    if in_word {
-        words.push(word);
-    }
-    Some(words)
-}
-
-/// Flags joined back into the text [`split_flags`] reads.
+/// Flags joined back into the text [`split_words`] reads.
+///
+/// [`split_words`]: termide_config::split_words
 pub(super) fn join_flags(flags: &[String]) -> String {
     flags
         .iter()
@@ -364,7 +305,7 @@ impl SettingsModal {
                 let command = (!text.is_empty()).then(|| text.to_string());
                 self.update_debugger(|s| s.command = command);
             }
-            ARGS => match split_flags(text) {
+            ARGS => match termide_config::split_words(text) {
                 Some(flags) => {
                     if let Some(edit) = self.debugger_edit.as_mut() {
                         edit.error = None;
@@ -385,7 +326,7 @@ impl SettingsModal {
     /// Store the native debuggers typed on the Debug tab; an empty list
     /// brings the default order back.
     pub(super) fn apply_debug_native(&mut self, text: &str) {
-        let list = split_list(text);
+        let list = super::fields::split_list(text);
         self.config.debug.native = if list.is_empty() {
             termide_config::DebugSettings::default().native
         } else {
@@ -460,7 +401,7 @@ mod tests {
     #[test]
     fn flags_split_as_a_shell_would_and_join_back() {
         assert_eq!(
-            split_flags("--log --log-output=dap,rpc 'a b' \"c\\\"d\""),
+            termide_config::split_words("--log --log-output=dap,rpc 'a b' \"c\\\"d\""),
             Some(vec![
                 "--log".to_string(),
                 "--log-output=dap,rpc".to_string(),
@@ -468,10 +409,13 @@ mod tests {
                 "c\"d".to_string(),
             ])
         );
-        assert_eq!(split_flags("'open"), None);
-        assert_eq!(split_flags("  "), Some(Vec::new()));
-        let flags = split_flags("--x 'a b' it\\'s").unwrap();
-        assert_eq!(split_flags(&join_flags(&flags)), Some(flags));
+        assert_eq!(termide_config::split_words("'open"), None);
+        assert_eq!(termide_config::split_words("  "), Some(Vec::new()));
+        let flags = termide_config::split_words("--x 'a b' it\\'s").unwrap();
+        assert_eq!(
+            termide_config::split_words(&join_flags(&flags)),
+            Some(flags)
+        );
     }
 
     #[test]

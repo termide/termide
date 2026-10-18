@@ -11,6 +11,7 @@ pub mod diff;
 pub mod keybindings;
 mod overrides;
 mod settings;
+mod words;
 mod xdg;
 
 pub use bookmarks::{Bookmark, BookmarkType, BookmarksConfig};
@@ -39,6 +40,7 @@ pub use settings::{
 };
 /// The type of `[ai] reasoning`.
 pub use termide_agent_core::{LimitPolicy, SubagentPlace, ThinkingLevel};
+pub use words::split_words;
 pub use xdg::{get_config_dir, get_data_dir};
 
 use anyhow::Result;
