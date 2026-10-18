@@ -539,6 +539,7 @@ impl AgentPanel {
         // A search shows its cursor while the query has the keyboard too: the
         // arrows move it from there.
         let cursor_shown = (self.chat_focus || searching) && panel_focused;
+        self.recent_cursor_shown = cursor_shown;
         let top = self.banner_top;
         for screen_row in 0..height.min(total - top) {
             let row = top + screen_row;

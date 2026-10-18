@@ -3873,13 +3873,21 @@ fn a_fresh_banner_offers_recent_sessions_to_open() {
     let logo_row = &render_text(&mut panel, 80, 24)[title.y as usize];
     assert_eq!(row.find(&stamp), logo_row.find('╭'), "{row:?} {logo_row:?}");
 
-    // A click on it opens it in place of the fresh one.
+    // A first click only selects it, showing the list's cursor.
     let click = MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
         column: rect.x + 1,
         row: rect.y,
         modifiers: KeyModifiers::NONE,
     };
+    panel.handle_mouse(click, Rect::new(0, 0, 80, 24));
+    assert_ne!(panel.session_path().unwrap(), first_path);
+    assert!(panel.chat_focus);
+    assert_eq!(panel.recent_selected, 0);
+    // A click on the session shown selected opens it in place of the fresh
+    // one, however long after the first.
+    render_text(&mut panel, 80, 24);
+    panel.session_clicks.reset();
     panel.handle_mouse(click, Rect::new(0, 0, 80, 24));
     assert_eq!(panel.session_path().unwrap(), first_path);
     assert!(matches!(
@@ -3888,6 +3896,45 @@ fn a_fresh_banner_offers_recent_sessions_to_open() {
     ));
     // With a conversation on screen, the banner and its list are gone.
     assert!(panel.recent_sessions.is_empty());
+}
+
+#[test]
+fn a_click_selects_a_banner_session_and_a_double_click_opens_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![reply("one"), reply("two")])
+    });
+    let mut first_path = None;
+    for prompt in ["first task", "second task"] {
+        first_path.get_or_insert_with(|| panel.session_path().unwrap().to_path_buf());
+        type_text(&mut panel, prompt);
+        panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+        settle(&mut panel);
+        panel.handle_status_action(NEW_SESSION_ACTION);
+    }
+    let first_path = first_path.unwrap();
+    render_text(&mut panel, 80, 24);
+    // The oldest session is listed second, below the cursor's default row.
+    let (rect, _) = panel
+        .banner_hits
+        .iter()
+        .find(|(_, hit)| *hit == BannerHit::Session(1))
+        .copied()
+        .expect("the older session is clickable");
+    let area = Rect::new(0, 0, 80, 24);
+    let click = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: rect.x + 1,
+        row: rect.y,
+        modifiers: KeyModifiers::NONE,
+    };
+    panel.handle_mouse(click, area);
+    assert_ne!(panel.session_path().unwrap(), first_path);
+    assert_eq!(panel.recent_selected, 1);
+    // The second click comes before any render has drawn the selection.
+    panel.handle_mouse(click, area);
+    assert_eq!(panel.session_path().unwrap(), first_path);
 }
 
 #[test]

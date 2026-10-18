@@ -1656,7 +1656,8 @@ impl AgentPanel {
                 }
                 // A click on a re-pickable field in the welcome banner opens its
                 // picker — the same one its status-bar chip opens — and one on
-                // a recent session opens that session.
+                // a recent session selects it; a click on the session already
+                // shown selected, or a double click, opens it.
                 let banner_hit = self
                     .banner_hits
                     .iter()
@@ -1669,7 +1670,18 @@ impl AgentPanel {
                 match banner_hit {
                     Some(BannerHit::Action(action)) => return self.handle_status_action(action),
                     Some(BannerHit::Session(index)) => {
-                        self.open_recent_session(index);
+                        let selected = self.recent_cursor_shown && self.recent_selected == index;
+                        if selected || self.session_clicks.click(index) >= 2 {
+                            self.session_clicks.reset();
+                            self.open_recent_session(index);
+                        } else {
+                            self.recent_selected = index;
+                            // The cursor shows in the list; a search keeps
+                            // the keyboard on its query, where it shows too.
+                            if !self.session_search_on() {
+                                self.chat_focus = true;
+                            }
+                        }
                         return vec![PanelEvent::NeedsRedraw];
                     }
                     None => {}
