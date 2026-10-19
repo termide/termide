@@ -1021,7 +1021,8 @@ termide ships `duckduckgo`, `bing`, `google` and `yandex` and keeps them
 current like its other shipped files. When an engine changes its page and the
 search starts returning nothing, the selectors in its file need updating; a
 file of your own with a new name adds an engine. The keys are described in
-the shipped files.
+the shipped files. Only the configuration's `ai/web/engines/` is read: a
+project's would send the agent's queries where the repository chose.
 
 In `plan` and `edit` both tools run without asking; in `ask` and, without a
 rule, in `configured` they ask; in `auto` a search runs and a fetch, whose

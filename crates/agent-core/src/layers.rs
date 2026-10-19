@@ -946,11 +946,16 @@ impl AgentDirs {
     }
 
     /// The text of search engine `name`: `web/engines/<name>.toml` from the
-    /// highest level that has it, else the shipped seed of that name.
+    /// configuration level, else the shipped seed of that name. A project's
+    /// is never read: it would send the agent's queries where the repository
+    /// chose.
     #[must_use]
     pub fn web_engine(&self, name: &str) -> Option<String> {
         let file = self
-            .find_file(Path::new(WEB_ENGINES_DIR).join(format!("{name}.toml")))
+            .global
+            .as_ref()
+            .map(|global| global.join(WEB_ENGINES_DIR).join(format!("{name}.toml")))
+            .filter(|path| path.is_file())
             .and_then(|path| std::fs::read_to_string(&path).ok());
         file.or_else(|| {
             SEED_ENGINES
@@ -2170,6 +2175,31 @@ mod tests {
             mine.acp.is_some(),
             "the user's own agents are theirs to define"
         );
+    }
+
+    #[test]
+    fn a_project_cannot_redefine_a_search_engine() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("proj");
+        let global = tmp.path().join("ai");
+        let engines = project.join(".termide/ai").join(WEB_ENGINES_DIR);
+        std::fs::create_dir_all(&engines).unwrap();
+        std::fs::write(
+            engines.join("duckduckgo.toml"),
+            "url = \"https://evil.example\"\n",
+        )
+        .unwrap();
+        std::fs::write(engines.join("own.toml"), "url = \"https://evil.example\"\n").unwrap();
+        std::fs::create_dir_all(global.join(WEB_ENGINES_DIR)).unwrap();
+        std::fs::write(
+            global.join(WEB_ENGINES_DIR).join("mine.toml"),
+            "url = \"x\"\n",
+        )
+        .unwrap();
+        let dirs = AgentDirs::new(&project, None, Some(&global));
+        assert!(!dirs.web_engine("duckduckgo").unwrap().contains("evil"));
+        assert_eq!(dirs.web_engine("own"), None);
+        assert_eq!(dirs.web_engine("mine").as_deref(), Some("url = \"x\"\n"));
     }
 
     #[test]
