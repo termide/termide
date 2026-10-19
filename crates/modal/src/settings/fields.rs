@@ -4,7 +4,7 @@
 //! each tab, how to read/write them on a `Config`, and the type markers used
 //! by the renderer. It deliberately contains no UI state or rendering logic.
 
-use termide_config::{Config, LimitPolicy, SubagentPlace};
+use termide_config::{Config, LimitPolicy};
 use termide_i18n as i18n;
 use termide_theme::Theme;
 
@@ -248,10 +248,6 @@ pub(super) fn fields_for_tab(tab: SettingsTab) -> Vec<FieldDescriptor> {
                 label: t.settings_agent_on_limit(),
                 field_type: FieldType::Enum,
             },
-            FieldDescriptor {
-                label: t.settings_agent_subagent_run(),
-                field_type: FieldType::Enum,
-            },
         ],
         SettingsTab::Connection => super::connection::connection_fields(),
         SettingsTab::LspServer => super::lsp_server::lsp_server_fields(),
@@ -348,7 +344,6 @@ pub(super) fn get_field_value(config: &Config, tab: SettingsTab, index: usize) -
             AI_PERMISSION_MODE_FIELD => permission_mode_label(config.ai.permission_mode()),
             AI_AUTO_REVIEWER_FIELD => auto_reviewer_label(&config.ai.auto_reviewer.connection),
             AI_ON_LIMIT_FIELD => on_limit_label(config.ai.on_limit),
-            AI_SUBAGENT_RUN_FIELD => subagent_run_label(config.ai.subagent_run),
             AI_AUTO_REVIEWER_MODEL_FIELD => {
                 if config.ai.auto_reviewer.model.is_empty() {
                     i18n::t()
@@ -571,17 +566,6 @@ pub(super) fn enum_options(config: &Config, tab: SettingsTab, index: usize) -> O
                 .collect();
             (values, labels, config.ai.on_limit.label().to_string())
         }
-        (SettingsTab::Ai, AI_SUBAGENT_RUN_FIELD) => {
-            let values: Vec<String> = SubagentPlace::ALL
-                .iter()
-                .map(|p| p.label().to_string())
-                .collect();
-            let labels = SubagentPlace::ALL
-                .iter()
-                .map(|p| subagent_run_label(*p))
-                .collect();
-            (values, labels, config.ai.subagent_run.label().to_string())
-        }
         (SettingsTab::Ai, AI_AUTO_REVIEWER_FIELD) => {
             let values = auto_reviewer_choices(config);
             let labels = values.iter().map(|v| auto_reviewer_label(v)).collect();
@@ -634,11 +618,6 @@ pub(super) fn apply_enum_value(config: &mut Config, tab: SettingsTab, index: usi
                 config.ai.on_limit = policy;
             }
         }
-        (SettingsTab::Ai, AI_SUBAGENT_RUN_FIELD) => {
-            if let Some(place) = SubagentPlace::ALL.into_iter().find(|p| p.label() == value) {
-                config.ai.subagent_run = place;
-            }
-        }
         (SettingsTab::Ai, AI_AUTO_REVIEWER_FIELD) => {
             config.ai.auto_reviewer.connection = value.to_string();
         }
@@ -674,36 +653,6 @@ fn cycle_fold_blocks(config: &mut Config, forward: bool) {
 
 /// The AI tab's field for what a run stopped by a limit or an outage does.
 pub(super) const AI_ON_LIMIT_FIELD: usize = 10;
-
-/// The AI tab's field for where delegated tasks run.
-pub(super) const AI_SUBAGENT_RUN_FIELD: usize = 11;
-
-/// A delegated task's place, by its localized name.
-fn subagent_run_label(place: SubagentPlace) -> String {
-    let t = i18n::t();
-    match place {
-        SubagentPlace::Hidden => t.settings_agent_subagent_run_hidden(),
-        SubagentPlace::Ask => t.settings_agent_subagent_run_ask(),
-        SubagentPlace::ExistingPanel => t.settings_agent_subagent_run_existing_panel(),
-        SubagentPlace::Panel => t.settings_agent_subagent_run_panel(),
-    }
-    .to_string()
-}
-
-/// Step where delegated tasks run to the next (or previous) place, wrapping.
-fn cycle_subagent_run(config: &mut Config, forward: bool) {
-    let all = SubagentPlace::ALL;
-    let pos = all
-        .iter()
-        .position(|p| *p == config.ai.subagent_run)
-        .unwrap_or(0);
-    let len = all.len();
-    config.ai.subagent_run = all[if forward {
-        (pos + 1) % len
-    } else {
-        (pos + len - 1) % len
-    }];
-}
 
 /// A limit policy's localized name.
 fn on_limit_label(policy: LimitPolicy) -> String {
@@ -892,7 +841,6 @@ pub(super) fn cycle_enum_forward(config: &mut Config, tab: SettingsTab, index: u
             AI_PERMISSION_MODE_FIELD => cycle_permission_mode(config, true),
             AI_AUTO_REVIEWER_FIELD => cycle_auto_reviewer(config, true),
             AI_ON_LIMIT_FIELD => cycle_on_limit(config, true),
-            AI_SUBAGENT_RUN_FIELD => cycle_subagent_run(config, true),
             _ => {}
         },
         _ => {}
@@ -954,7 +902,6 @@ pub(super) fn cycle_enum_backward(config: &mut Config, tab: SettingsTab, index: 
             AI_PERMISSION_MODE_FIELD => cycle_permission_mode(config, false),
             AI_AUTO_REVIEWER_FIELD => cycle_auto_reviewer(config, false),
             AI_ON_LIMIT_FIELD => cycle_on_limit(config, false),
-            AI_SUBAGENT_RUN_FIELD => cycle_subagent_run(config, false),
             _ => {}
         },
         _ => {}
@@ -1011,8 +958,8 @@ mod field_index_tests {
         let fields = fields_for_tab(SettingsTab::Ai);
         assert_eq!(
             fields.len(),
-            12,
-            "the permission mode, its reviewer and model, the limit policy and where delegated tasks run follow the web fields"
+            11,
+            "the permission mode, its reviewer and model and the limit policy follow the web fields"
         );
         assert!(matches!(fields[6].field_type, FieldType::OptionalText));
         assert!(matches!(fields[7].field_type, FieldType::Enum));
@@ -1101,25 +1048,6 @@ mod enum_option_tests {
     }
 
     #[test]
-    fn delegated_tasks_run_hidden_or_in_a_panel() {
-        let mut config = Config::default();
-        let field = AI_SUBAGENT_RUN_FIELD;
-        let options = enum_options(&config, SettingsTab::Ai, field).unwrap();
-        assert_eq!(options.values, ["hidden", "ask", "existing_panel", "panel"]);
-        assert_eq!(options.current, Some(0));
-        assert_eq!(
-            get_field_value(&config, SettingsTab::Ai, field),
-            i18n::t().settings_agent_subagent_run_hidden()
-        );
-        apply_enum_value(&mut config, SettingsTab::Ai, field, "panel");
-        assert_eq!(config.ai.subagent_run, SubagentPlace::Panel);
-        cycle_enum_forward(&mut config, SettingsTab::Ai, field);
-        assert_eq!(config.ai.subagent_run, SubagentPlace::Hidden);
-        cycle_enum_backward(&mut config, SettingsTab::Ai, field);
-        assert_eq!(config.ai.subagent_run, SubagentPlace::Panel);
-    }
-
-    #[test]
     fn the_permission_mode_for_new_sessions_is_chosen_from_the_six() {
         let mut config = Config::default();
         let field = AI_PERMISSION_MODE_FIELD;
@@ -1153,11 +1081,7 @@ mod enum_option_tests {
     fn the_limit_policy_cycles_and_reads_back() {
         let mut config = Config::default();
         let field = AI_ON_LIMIT_FIELD;
-        assert_eq!(AI_SUBAGENT_RUN_FIELD, field + 1);
-        assert_eq!(
-            fields_for_tab(SettingsTab::Ai).len(),
-            AI_SUBAGENT_RUN_FIELD + 1
-        );
+        assert_eq!(fields_for_tab(SettingsTab::Ai).len(), field + 1);
         assert_eq!(config.ai.on_limit, LimitPolicy::Ask);
         cycle_enum_forward(&mut config, SettingsTab::Ai, field);
         assert_eq!(config.ai.on_limit, LimitPolicy::AskElseWait);

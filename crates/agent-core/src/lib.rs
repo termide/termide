@@ -28,7 +28,6 @@ pub mod commands;
 pub mod compaction;
 pub mod conflicts;
 pub mod context;
-pub mod delegation;
 pub mod failure;
 pub mod fit;
 pub mod goal;
@@ -75,7 +74,6 @@ pub use context::{
     build_system_prompt, civil_date, discover_context_files, ContextFile, PromptOptions,
     SEED_TEMPLATE,
 };
-pub use delegation::SubagentPlace;
 pub use failure::{parse_reset, Failure, FailureKind, LimitPolicy};
 pub use fit::{chars_for_tokens, fit, FitStep, Fitted};
 pub use goal::{parse_verdict, GoalOutcome, GoalPrompt, GoalVerdict, SEED_GOAL};

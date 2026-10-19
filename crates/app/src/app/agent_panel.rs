@@ -15,8 +15,8 @@ use termide_agent_core::{
     HostTools, IntentLog, Message, MessageOrigin, ModeHandle, ModelChoice, ModelSpec, OriginKind,
     PermissionAnswer, PermissionHooks, PermissionRules, PersistScope, PlanGuard, PromptOptions,
     Provider, Refusals, ReviewerSetup, Session, SessionParent, SessionSummary, ShellOutput,
-    ShellRunner, StreamEvent, SubagentPlace, ThinkingLevel, Tool, ToolCall, ToolContext,
-    ToolRegistry, ToolUpdate, Usage, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
+    ShellRunner, StreamEvent, ThinkingLevel, Tool, ToolCall, ToolContext, ToolRegistry, ToolUpdate,
+    Usage, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
 };
 use termide_agent_hooks::CommandHooks;
 use termide_agent_mcp::{Connections, TokenStore};
@@ -38,11 +38,9 @@ use termide_panel_agent::{
 
 use super::App;
 
-mod ask_place;
 mod debug_tool;
 pub(in crate::app) use debug_tool::Waiter as DebugWaiter;
 mod headless;
-mod in_panel;
 mod live;
 mod peers;
 pub use headless::{run_agent_headless, run_recall, HeadlessOutput};
@@ -1163,8 +1161,6 @@ struct Subagents {
     compaction: CompactionPolicy,
     /// What the subagent's model reads when a call is refused.
     refusals: Refusals,
-    /// The card that asks where delegated tasks run, for `ask`.
-    asks: ask_place::PlaceAsks,
 }
 
 /// The mode a subagent runs in: its own, else the delegating agent's. Plan
@@ -1713,49 +1709,11 @@ impl Subagents {
             call: task.call.to_string(),
         };
 
-        let connection = match &target {
-            SubagentTarget::Session => active.connection.clone(),
-            SubagentTarget::Model(name, _) | SubagentTarget::Cli(name, _) => name.clone(),
-        };
         let intent = ctx
             .session
             .as_ref()
             .map(|session| IntentLog::delegated(&session.intent))
             .unwrap_or_default();
-        // In a panel, when the settings say so and one takes the task: the
-        // user watches it there and answers what it asks. A task handed over
-        // in the background runs out of sight, on its thread, whatever they
-        // say: it is followed from its row in the delegating panel.
-        let place = match definition
-            .spec
-            .subagent_run
-            .unwrap_or(settings.subagent_run)
-        {
-            SubagentPlace::Ask if !task.background => {
-                self.asks
-                    .place(name, task.prompt, ctx.asker.as_ref(), cancel)
-            }
-            place => place,
-        };
-        if place.in_panel() && !task.background {
-            let request = in_panel::PanelDelegation {
-                place,
-                project_root: self.project_root.clone(),
-                cwd: self.cwd.clone(),
-                agent: name.to_string(),
-                connection,
-                mode: rules.mode,
-                lineage: lineage.clone(),
-                message: message.clone(),
-                cancel: CancelToken::new(),
-                intent: intent.clone(),
-            };
-            if let Some(outcome) =
-                in_panel::run_in_panel(request, &self.cwd, max_turns, cancel, on_update)
-            {
-                return Ok(outcome);
-            }
-        }
         // An external agent runs its own program, whatever the session's
         // connection: out of sight as a Claude Code copy does, asking the
         // user of its parent's panel what its rules leave open.
@@ -2281,7 +2239,6 @@ fn agent_setup(
         reasoning: settings.reasoning,
         compaction: settings.compaction,
         refusals: catalog.dirs.refusals(),
-        asks: Default::default(),
     }));
     let compaction_prompts = catalog.dirs.compaction_prompts();
     let plan_prompt = catalog.dirs.plan_prompt();
@@ -2336,7 +2293,6 @@ fn agent_setup(
     let connection_dirs = catalog.dirs.clone();
 
     AgentPanelSetup {
-        inherited_intent: None,
         panel_id: None,
         cwd,
         agent,
@@ -3794,7 +3750,6 @@ mod tests {
             reasoning: ThinkingLevel::Off,
             compaction: settings.compaction,
             refusals: Refusals::default(),
-            asks: Default::default(),
         };
         let cancel = CancelToken::new();
         let stopper = {
@@ -3951,7 +3906,6 @@ done"#;
             reasoning: ThinkingLevel::Off,
             compaction: settings.compaction,
             refusals: Refusals::default(),
-            asks: Default::default(),
         };
         let definition = catalog.dirs.agent("search");
         let (tools, _, prompt) = subagents.toolset("search", &definition, false);
@@ -4014,7 +3968,6 @@ done"#;
             reasoning: ThinkingLevel::Off,
             compaction: settings.compaction,
             refusals: Refusals::default(),
-            asks: Default::default(),
         }));
 
         assert_eq!(catalog.resolve("search").unwrap().tools.names(), ["read"]);

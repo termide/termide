@@ -1072,22 +1072,20 @@ impl AgentPanel {
     }
 
     /// The body of [`Panel::handle_key`].
-    /// A key while another agent's task runs here: `Ctrl+T` takes the panel
-    /// over, `Esc` stops the run; scrolling, the chat's blocks, copying, the
-    /// summary and saving the chat go on as usual (`None`). Anything else —
-    /// typing, the session's keys, the mode — takes nothing.
+    /// A key while the panel follows another agent's task: `Ctrl+T` takes
+    /// the task over, `Esc` stops it; scrolling, the chat's blocks, copying,
+    /// the summary and saving the chat go on as usual (`None`). Anything
+    /// else — typing, the session's keys, the mode — takes nothing.
     fn delegate_key(&mut self, key: KeyEvent) -> Option<Vec<PanelEvent>> {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let passes = match key.code {
             KeyCode::Char('t') if ctrl && !alt => return Some(self.ask_take_over()),
-            // A task followed here stops; one run here stops as any run.
-            KeyCode::Esc if self.is_watching() => return Some(self.stop_watched()),
+            KeyCode::Esc => return Some(self.stop_watched()),
             KeyCode::Char('s' | 'c' | 'o') if ctrl && !alt => true,
             KeyCode::F(3) => true,
             KeyCode::F(_) => false,
             _ if self.chat_focus => true,
-            KeyCode::Esc => self.is_busy(),
             KeyCode::Tab | KeyCode::PageUp | KeyCode::PageDown => true,
             KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End => ctrl,
             _ => false,

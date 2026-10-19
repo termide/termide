@@ -708,7 +708,6 @@ impl AgentPanel {
             }
         }
         for event in self.runtime.drain() {
-            self.forward_to_delegator(&event);
             self.apply(event);
             changed = true;
         }
@@ -840,7 +839,6 @@ impl AgentPanel {
             changed = true;
         }
         changed |= self.settle_restored();
-        changed |= self.settle_delegation();
         changed |= self.settle_watch();
         // A goal or loop started, stepped or stopped is written to the log,
         // so a session reopened later offers to carry it on — between runs,

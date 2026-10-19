@@ -890,7 +890,6 @@ impl AgentPanel {
             // counts as typed.
             self.history_pos = None;
             self.unqueue();
-            self.note_delegate_stopped();
             self.runtime.abort();
             self.stop_requested = Some(Instant::now());
         }

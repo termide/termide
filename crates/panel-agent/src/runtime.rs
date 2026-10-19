@@ -202,7 +202,6 @@ pub(crate) fn spawn_runtime(
     shell_run: Option<ShellRunner>,
     skills: Vec<SkillInfo>,
     panel: u64,
-    inherited_intent: Option<&termide_agent_core::IntentLog>,
 ) -> Spawned {
     let cancel = CancelToken::new();
     let (prompter, permission_rx) = permission_channel(cancel.clone());
@@ -353,9 +352,6 @@ pub(crate) fn spawn_runtime(
     .with_asker(asker)
     .with_prompter(delegate_prompter)
     .with_suggester(suggester);
-    if let Some(intent) = inherited_intent {
-        agent = agent.with_inherited_intent(intent);
-    }
     if let Some(run) = shell_run {
         // A command the user confirms on the card runs through this, in the
         // middle of the call that asked.

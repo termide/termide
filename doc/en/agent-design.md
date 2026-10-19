@@ -258,6 +258,45 @@ delegate may come later only as an explicit choice (`isolation =
 "worktree"`), its result the branch and a diff summary, merged by the
 parent or the user.
 
+### Delegates out of sight, followed in panels
+
+Superseded: running a delegate in a panel (`subagent_run`, `ask`,
+`existing_panel`, `panel`, `agent_panel/in_panel.rs`, `ask_place.rs`). The
+setting tied three separate things together — who waits for the answer
+(the model's `background`), who answers what the delegate asks (refused out
+of sight, the user in a panel) and where the user watches it — and a task
+in a panel took over a panel the user might have wanted, or changed the
+layout under them.
+
+Decision: every delegate runs out of sight, and where to watch it is the
+user's choice at the moment, not a setting. What it asks goes to the panel
+that delegated it: `ToolContext::prompter` carries that panel's permission
+channel, and `ChannelPrompter::for_delegate` heads its cards `& <delegate> ·`
+as `UserAsker::for_delegate` heads its questions. The panel queues cards
+that arrive while one is up rather than refusing them, since delegates run
+side by side; a card given up while it waits (`withdrawn`) is never shown.
+What the user grants a delegate for the session stays in its hooks. With
+that, an external agent can be a delegate too, run over ACP as a copy of
+Claude Code is.
+
+A delegate registers while it runs (`panel-agent/src/live.rs`) under the
+panel and the `task` call that handed it over. A click on its row, or `o`
+on its block, opens a panel following it (`watch.rs`): the panel reads the
+task's session log and rebuilds its transcript when the log grows, so it
+takes nothing from the task, and closing it stops nothing. The panel is
+the delegating agent's while the task runs — input off, session keys off,
+`Esc` stops the task and `Ctrl+T` takes it over through the registry's
+`DelegateControl` — and opens the task's session once it is over. It stays
+on the default agent until then: built on the delegate's, an external one
+would start a process of its own.
+
+A task handed over in the background runs on a thread of its own through
+the same path; its call returns at once, so the registry lists it in the
+delegating panel's state strip, with a `✕`. Its cards outlive a stop of
+that panel's run (`detached`), since stopping the run does not reach it;
+closing the panel stops it, after a confirmation that counts such tasks.
+The hop limit is checked before it starts, through the peers channel.
+
 ## 3b. Web tools
 
 Most requests that reach outside the checkout are searches, and `curl` fails

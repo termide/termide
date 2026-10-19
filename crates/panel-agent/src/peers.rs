@@ -23,7 +23,7 @@ pub enum PeerState {
     Working,
     /// A card waits for the user.
     Waiting,
-    /// It runs another agent's task, and takes no messages.
+    /// It follows another agent's task, and takes no messages.
     Delegate,
     /// Its session is open in another termide; it takes no messages.
     Held,
@@ -37,7 +37,7 @@ impl PeerState {
             Self::Idle => "idle",
             Self::Working => "working",
             Self::Waiting => "waiting for the user",
-            Self::Delegate => "running another agent's task",
+            Self::Delegate => "following another agent's task",
             Self::Held => "showing a session another termide holds",
         }
     }
@@ -88,13 +88,13 @@ impl AgentPanel {
     }
 
     /// Take `message`, another agent's: as the next request when idle, at
-    /// the run's next step when busy. A panel running another agent's task
+    /// the run's next step when busy. A panel following another agent's task
     /// takes none — its session is that agent's — and a free one takes no
     /// question: it has nothing to answer from.
     pub fn deliver(&mut self, message: UserMessage) -> Result<(), String> {
         if self.is_delegate() {
             return Err(format!(
-                "panel {} runs another agent's task and takes no messages until it ends",
+                "panel {} follows another agent's task and takes no messages until it ends",
                 self.panel_id
             ));
         }

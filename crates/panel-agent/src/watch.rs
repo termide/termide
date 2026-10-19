@@ -3,9 +3,9 @@
 //! A hidden delegate runs on its own thread and writes its session log as it
 //! goes. A panel watching it only reads that log: it rebuilds the transcript
 //! whenever the log grows, so closing the panel takes nothing from the task.
-//! While the task runs the panel is the delegating agent's, as one running a
-//! task is ([`crate::Delegation`]): the input takes nothing and names whose
-//! delegate it is. `Esc` stops the task, `Ctrl+T` takes it over. Once the
+//! While the task runs the panel is the delegating agent's: the input takes
+//! nothing and names whose delegate it is, and the keys and menu entries
+//! that act on a session do nothing. `Esc` stops the task, `Ctrl+T` takes it over. Once the
 //! task is over the panel opens its session as any other, to go on with.
 
 use std::path::{Path, PathBuf};
@@ -14,10 +14,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use termide_agent_core::{CancelToken, Session};
-use termide_core::PanelEvent;
+use termide_core::{ConfirmAction, PanelEvent};
 
 use crate::runtime::push_history;
-use crate::{AgentPanel, NoticeKind, Transcript};
+use crate::{AgentPanel, NoticeKind, Transcript, TAKE_OVER_ACTION};
 
 /// What the user can do to a delegate running out of sight, from a panel
 /// watching it, and what the delegate tells it back. Shared between the
@@ -146,14 +146,6 @@ impl AgentPanel {
         self.refresh_watch();
     }
 
-    /// Whether the panel follows the task the `task` call `call` of panel
-    /// `by` handed over.
-    pub(crate) fn watches_task(&self, by: u64, call: &str) -> bool {
-        self.watch
-            .as_ref()
-            .is_some_and(|watch| watch.by_panel == by && watch.call == call)
-    }
-
     /// Rebuild the transcript from the log when it grew. `true` when it did.
     fn refresh_watch(&mut self) -> bool {
         let Some(watch) = &mut self.watch else {
@@ -222,31 +214,53 @@ impl AgentPanel {
         vec![PanelEvent::NeedsRedraw]
     }
 
-    /// Take the watched task over, once confirmed.
-    pub(crate) fn take_over_watched(&mut self) -> Vec<PanelEvent> {
+    /// `Ctrl+T`: ask before taking the task over; the answer comes back as
+    /// `PanelCommand::Confirmed(TAKE_OVER_ACTION)`.
+    pub(crate) fn ask_take_over(&self) -> Vec<PanelEvent> {
+        let Some(watch) = &self.watch else {
+            return Vec::new();
+        };
+        vec![PanelEvent::ShowConfirm {
+            message: termide_i18n::t().agent_take_over_confirm_fmt(&watch.from),
+            on_confirm: ConfirmAction::Custom(TAKE_OVER_ACTION.to_string()),
+        }]
+    }
+
+    /// Take the task over, once confirmed: it stops, and its session opens
+    /// here once it has.
+    pub(crate) fn take_over(&mut self) -> Vec<PanelEvent> {
         if let Some(watch) = &self.watch {
             watch.control.take_over();
         }
         vec![PanelEvent::NeedsRedraw]
     }
 
-    pub(crate) fn watch_from(&self) -> Option<&str> {
-        self.watch.as_ref().map(|watch| watch.from.as_str())
-    }
-
-    pub(crate) fn watch_placeholder(&self) -> Option<String> {
+    /// The placeholder the input shows while the task runs.
+    pub(crate) fn delegate_placeholder(&self) -> Option<String> {
         self.watch.as_ref().map(|watch| {
             termide_i18n::t().agent_input_placeholder_delegate_fmt(&watch.from, &watch.task)
         })
     }
 
-    pub(crate) fn watch_by_panel(&self) -> Option<u64> {
+    /// The panel whose task this one follows.
+    #[must_use]
+    pub fn delegated_by(&self) -> Option<u64> {
         self.watch.as_ref().map(|watch| watch.by_panel)
     }
 
-    /// Whether the panel follows a task running out of sight.
+    /// Whether the panel follows the task the `task` call `call` of the
+    /// panel `by` handed over.
     #[must_use]
-    pub fn is_watching(&self) -> bool {
+    pub fn runs_task(&self, by: u64, call: &str) -> bool {
+        self.watch
+            .as_ref()
+            .is_some_and(|watch| watch.by_panel == by && watch.call == call)
+    }
+
+    /// Whether the panel follows another agent's task: its session is that
+    /// agent's until the task is over.
+    #[must_use]
+    pub fn is_delegate(&self) -> bool {
         self.watch.is_some()
     }
 }

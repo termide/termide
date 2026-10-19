@@ -146,7 +146,6 @@ impl AgentPanel {
                 &self.context_off,
             ),
             self.panel_id,
-            self.inherited_intent.as_ref(),
         );
         // Dropping the old runtime cancels it and asks its worker to stop.
         self.runtime = runtime;

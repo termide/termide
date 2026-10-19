@@ -1127,9 +1127,7 @@ impl App {
                     log::error!("Error processing panel events: {}", e);
                 }
             }
-            // Delegated tasks waiting for an agent panel, and what agents
-            // ask of the other panels.
-            self.serve_delegations();
+            // What agents ask of the other panels.
             self.serve_peers();
             self.tick_parked_projects();
             self.vault_tick();

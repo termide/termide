@@ -6,7 +6,6 @@
 //! [`Transcript`] from `tick()`, so it never blocks the UI thread. Every
 //! transcript change also goes to the JSONL [`Session`] when one is attached.
 
-mod delegation;
 mod events;
 mod export;
 mod failure;
@@ -68,7 +67,6 @@ use crate::runtime::{
 use crate::session_ops::discard_if_empty;
 use crate::toolset::{served_skills, Blocked, TOOLSET_ACTION};
 
-pub use delegation::{DelegateEnd, DelegateUpdate, Delegation};
 pub use peers::PeerState;
 pub use runtime::local_minute;
 pub use slash::user_skill_description;
@@ -206,10 +204,6 @@ const UNDO_ACTION: &str = "agent_undo";
 /// The panel keeps these so it can rebuild its agent when the user switches
 /// to another session.
 pub struct AgentPanelSetup {
-    /// What the user asked the agent that delegates this panel's first task,
-    /// for the `auto` reviewer to judge the task's calls against; see
-    /// [`termide_agent_core::Agent::with_inherited_intent`].
-    pub inherited_intent: Option<termide_agent_core::IntentLog>,
     /// The number of the panel this one takes the place of, which it keeps;
     /// `None` gives it a number of its own.
     pub panel_id: Option<u64>,
@@ -970,16 +964,8 @@ pub struct AgentPanel {
     /// step with the runtime's steering count (`QueueUpdate`); each with
     /// when it was sent, for the strip's clock.
     queued_texts: VecDeque<(String, Instant)>,
-    /// The task another agent delegated to this panel, while it runs.
-    delegation: Option<Delegation>,
     /// The delegated task running out of sight this panel follows.
     watch: Option<watch::Watch>,
-    /// A delegated task ended here and the panel is free again, for the app
-    /// to set up anew as a panel opened by the user is.
-    released: bool,
-    /// What the user asked the delegating agent, while its task is this
-    /// panel's: a rebuilt agent keeps judging by it.
-    inherited_intent: Option<termide_agent_core::IntentLog>,
     /// The panel's number, which other agents address it by.
     panel_id: u64,
     /// How many messages agents passed one another, without the user, to
@@ -1121,7 +1107,6 @@ impl AgentPanel {
             setup.shell_run.clone(),
             served_skills(setup.catalog.as_ref(), &offered_skills, &context_off),
             panel_id,
-            setup.inherited_intent.as_ref(),
         );
         // Learn the context window from the provider in the background and
         // adopt the active model's real `max_model_len`; the configured window
@@ -1276,10 +1261,7 @@ impl AgentPanel {
             strip_stop_x: 0,
             run_buttons: Vec::new(),
             queued_texts: VecDeque::new(),
-            delegation: None,
             watch: None,
-            released: false,
-            inherited_intent: setup.inherited_intent.clone(),
             panel_id,
             agent_hops: 0,
             queued: (0, 0),
@@ -1732,10 +1714,6 @@ impl Panel for AgentPanel {
     /// can be carried on when the session is opened again, but the user
     /// should know it stops.
     fn needs_close_confirmation(&self) -> Option<String> {
-        // Another agent waits for the task this panel runs, busy or not.
-        if let Some(text) = self.delegate_close_confirmation() {
-            return Some(text);
-        }
         // The tasks it handed over in the background stop with it.
         let delegates = live::background_of(self.panel_id).len();
         if delegates > 0 {

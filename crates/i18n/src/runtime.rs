@@ -770,16 +770,6 @@ impl Translation for RuntimeTranslation {
         settings_agent_on_limit_ask_else_wait,
         settings_agent_on_limit_wait,
         settings_agent_on_limit_stop,
-        settings_agent_subagent_run,
-        settings_agent_subagent_run_hidden,
-        settings_agent_subagent_run_existing_panel,
-        settings_agent_subagent_run_panel,
-        settings_agent_subagent_run_ask,
-        agent_delegate_ask_header,
-        agent_delegate_ask_hidden_desc,
-        agent_delegate_ask_panel_desc,
-        agent_delegate_ask_one_by_one,
-        agent_delegate_ask_one_by_one_desc,
         settings_ai_add_connection,
         settings_ai_delete_connection,
         settings_ai_connection_back,
@@ -1255,10 +1245,6 @@ impl Translation for RuntimeTranslation {
         self.format("agent_notice_taken_over_fmt", &[("agent", agent)])
     }
 
-    fn agent_close_confirm_delegate_fmt(&self, agent: &str) -> String {
-        self.format("agent_close_confirm_delegate_fmt", &[("agent", agent)])
-    }
-
     fn agent_close_confirm_delegates_fmt(&self, count: usize) -> String {
         self.format(
             "agent_close_confirm_delegates_fmt",
@@ -1275,10 +1261,6 @@ impl Translation for RuntimeTranslation {
             "agent_peer_from_panel_fmt",
             &[("agent", agent), ("panel", panel)],
         )
-    }
-
-    fn agent_delegate_ask_question_fmt(&self, tasks: &str) -> String {
-        self.format("agent_delegate_ask_question_fmt", &[("tasks", tasks)])
     }
 
     fn agent_notice_cannot_check_goal_fmt(&self, error: &str) -> String {

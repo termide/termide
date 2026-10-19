@@ -17,7 +17,6 @@ use crate::classifier::{ClassifyPrompt, SEED_CLASSIFY};
 use crate::commands::{CommandScript, COMMANDS_DIR};
 use crate::compaction::{CompactionPrompts, SEED_COMPACT, SEED_COMPACTED};
 use crate::context::SEED_TEMPLATE;
-use crate::delegation::SubagentPlace;
 use crate::goal::{GoalPrompt, SEED_GOAL};
 use crate::handoff::{HandoffPrompt, SEED_HANDOFF};
 use crate::hooks::{HookConfig, HOOKS_FILE};
@@ -494,14 +493,13 @@ fn move_legacy_default_template(
 }
 
 /// The front-matter keys an `AGENT.md` is read for, besides `env.<NAME>`.
-const AGENT_KEYS: [&str; 10] = [
+const AGENT_KEYS: [&str; 9] = [
     "description",
     "icon",
     "model",
     "mode",
     "tools",
     "max_turns",
-    "subagent_run",
     "prompt",
     "command",
     "timeout",
@@ -540,9 +538,6 @@ pub struct AgentSpec {
     /// How many model calls a task delegated to the agent may take before
     /// it is cut off: `max_turns`, at least one; the default when absent.
     pub max_turns: Option<usize>,
-    /// Where a task delegated to the agent runs: `subagent_run`; the
-    /// `[ai]` setting when absent.
-    pub subagent_run: Option<SubagentPlace>,
     /// An external agent spoken to over ACP instead of the built-in loop:
     /// `command` with `timeout`, `env.<NAME>` and `adapter` (else told by
     /// the command); `model` is then the agent's model to pick, `mode` the
@@ -591,13 +586,6 @@ impl AgentSpec {
                 warn("max_turns", &error);
                 None
             }
-        });
-        let subagent_run = text("subagent_run").and_then(|value| {
-            SubagentPlace::deserialize(
-                serde::de::value::StrDeserializer::<serde::de::value::Error>::new(value),
-            )
-            .map_err(|error| warn("subagent_run", &error))
-            .ok()
         });
         let acp = text("command").and_then(|line| {
             let mut words = split_command_line(line)
@@ -651,7 +639,6 @@ impl AgentSpec {
             mode,
             tools,
             max_turns,
-            subagent_run,
             acp,
         };
         if let Some(acp) = &spec.acp {
@@ -1468,7 +1455,7 @@ mod tests {
         write(
             "review",
             "---\ndescription: Reviews diffs: risks first\nicon: \"🔍\"\nmodel: big\n\
-             mode: accept-edits\ntools: read, bash\nmax_turns: 120\nsubagent_run: panel\n---\n\
+             mode: accept-edits\ntools: read, bash\nmax_turns: 120\n---\n\
              You review.\n\n{{tools}}\n",
         );
         write("bracketed", "---\ntools: [\"read\", 'bash']\n---\n");
@@ -1476,7 +1463,7 @@ mod tests {
         // A field that does not parse is dropped; the others still count.
         write(
             "broken",
-            "---\ndescription: still read\nmode: 42\nmax_turns: 0\nsubagent_run: aside\n---\n",
+            "---\ndescription: still read\nmode: 42\nmax_turns: 0\n---\n",
         );
         write(
             "claude",
@@ -1508,7 +1495,6 @@ mod tests {
         let read_bash = Some(vec!["read".to_string(), "bash".to_string()]);
         assert_eq!(spec.tools, read_bash);
         assert_eq!(spec.max_turns, Some(120));
-        assert_eq!(spec.subagent_run, Some(SubagentPlace::Panel));
         assert!(spec.acp.is_none());
         assert_eq!(
             dirs.soul("review").as_deref(),
@@ -1521,7 +1507,6 @@ mod tests {
         assert_eq!(broken.icon, None);
         assert_eq!(broken.mode, None);
         assert_eq!(broken.max_turns, None);
-        assert_eq!(broken.subagent_run, None);
 
         let acp = dirs.spec("claude").acp.unwrap();
         assert_eq!(acp.command, "/opt/my agent/acp");

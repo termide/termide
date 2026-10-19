@@ -802,14 +802,14 @@ pub enum PanelEvent {
     /// the agent panel for a delegated task's session.
     OpenAgentSession(PathBuf),
 
-    /// Bring forward the agent panel running the task that the `task` call
-    /// `call` of the agent panel `panel` handed over, if a panel runs it.
-    /// Emitted by the agent panel when its row for a running task is
-    /// clicked; a task running hidden has no panel, and nothing moves.
+    /// Bring forward the agent panel following the task that the `task`
+    /// call `call` of the agent panel `panel` handed over, else open one on
+    /// it while it runs. Emitted by the agent panel when its row for a
+    /// running task is clicked, or `o` pressed on its block.
     FocusDelegate { panel: u64, call: String },
 
     /// Bring forward the agent panel with this number, if it is still open.
-    /// Emitted by a panel running another agent's task when its input, which
+    /// Emitted by a panel following another agent's task when its input, which
     /// names the delegating agent, is clicked: focus goes back to that agent.
     FocusAgentPanel(u64),
 

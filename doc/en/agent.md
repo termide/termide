@@ -24,7 +24,6 @@ reasoning = "high"                 # default; off | minimal | low | medium | hig
 fold_blocks = "immediately"        # immediately (default) | on-finish | never
 bell_on_attention = true           # default; ring the bell when a panel out of sight waits for you
 on_limit = "ask"                   # default; ask | ask_else_wait | wait | stop — see "When a run fails"
-subagent_run = "hidden"            # default; hidden | ask | existing_panel | panel — see "Subagents"
 
 [ai.connections.local]
 provider = "openai_compatible"     # openai_compatible (default), anthropic_compatible, claude_code, codex, gemini_cli
@@ -408,7 +407,7 @@ you have named or sent even one message to is always kept.
 | `Shift+Tab` | Cycle the permission mode: ask → plan → edit → configured → auto → all |
 | `F2` | Rename this session (the same prompt as the `[≡]` menu); in the banner's list of sessions, rename the one under the cursor |
 | `Ctrl+S` | Save the chat as a Markdown file (your messages and the agent's answers under who and when, each day under its own heading); also the `[≡]` menu |
-| `Ctrl+T` | In a panel running another agent's task, take the task over, after a confirmation (see [Subagents](#subagents)) |
+| `Ctrl+T` | In a panel following another agent's task, take the task over, after a confirmation (see [Subagents](#subagents)) |
 | `F3` | Open the session-info modal (model, agent, mode, directory, created/last-active times, messages, compactions, tokens, context, how much shell output was cleaned); also `/usage` and the `[≡]` menu |
 | `F4` | Pick a message to rewind the session to, as `Esc` does in the idle empty prompt |
 | `F5` | Fork this session (after a confirmation): its log is copied and the copy opens in a new agent panel, while this one goes on working at its own |
@@ -1585,8 +1584,7 @@ YAML list of `- name` lines under `tools:`),
 none. Skills and MCP servers' tools are not governed by
 it: they come with what you configured. `max_turns` is how many model calls
 a task delegated to the agent may take before it is cut off (fifty when
-absent; see [Subagents](#subagents)), and `subagent_run` where such a task
-runs — `hidden`, `ask`, `existing_panel` or `panel`, over the `[ai]` setting. `icon` is what the panel's header,
+absent; see [Subagents](#subagents)). `icon` is what the panel's header,
 the agent picker and the agents menu show in place of 🤖 (with emoji icons
 on). Only its first character is kept, an emoji sequence counting as one, and
 invisible marks a copy may bring along — a zero-width space, a byte order
@@ -1646,50 +1644,16 @@ session is not offered in the list; `o` on its block, or a click on its row
 above the input, opens a panel that follows it instead, beside the others
 and in focus — or brings forward the one already following it. The panel
 shows the delegate's steps as its log gains them, and belongs to the
-delegating agent the way a panel running a task does (below): the input
-takes nothing and reads `& Delegate of <agent>: <task>`, a click on it goes
-back to the delegating panel. `Esc` stops the task and `Ctrl+T`, after a
+delegating agent while the task runs: the input takes nothing and reads
+`& Delegate of <agent>: <task>` — a click on it goes back to the delegating
+panel — and the session keys (`F2`, `F4`–`F8`), the chips and the menu's
+session entries do nothing; scrolling, the blocks, copying, `F3` and
+`Ctrl+S` still work. `Esc` stops the task and `Ctrl+T`, after a
 confirmation, takes it over: the delegating agent hears that you stopped it
 or took it, with what was said so far. Closing the panel only stops
 following: the task goes on. Once the task is over, the panel opens its
 session as any other, to read or go on talking to. `o` on a finished
 `task` block opens its session in a panel.
-
-Where a delegate runs is `subagent_run` under `[ai]` (in the settings,
-**Delegated tasks run**), and a delegate's `AGENT.md` may name its own:
-`hidden` (the default) runs it out of sight as above; `ask` puts the choice to
-you on a card — one card for the tasks handed over together, listing them,
-with **Hidden**, **In a panel** and, for several, **One by one**, which asks
-for each task (dismissed, or with nobody to ask, the task runs hidden);
-`existing_panel` runs
-it in an agent panel already open that still shows its banner, has nothing
-typed and is not the one you are in — else hidden, so a delegation never
-changes your layout; `panel` does the same, but when no panel is free it
-opens a new one beside the others, without taking the focus. In a panel the
-task is an ordinary session of that panel, on the delegate's agent,
-connection and mode: you watch it work, and what it would have to ask is put
-to you on that panel's cards. In `auto` the reviewer judges its
-calls by what you asked the delegating agent and the task, as for a hidden
-delegate (not yet for an external agent). The delegating panel's block shows
-its progress as for a hidden one, and a click on the task's row above that
-panel's input brings the delegate's panel forward. A panel taken for a task
-keeps its number. While the task runs, the panel belongs to
-the delegating agent: the input takes nothing and reads `& Delegate of
-<agent>: <task>` — a click on it brings the delegating panel back — and the session keys (`F2`, `F4`–`F8`), the chips and the
-menu's session entries do nothing; scrolling, the blocks, copying, `F3`,
-`Ctrl+S`, the cards, pause and stop still work. `Esc` stops the task: the
-delegating agent hears that you stopped it, with what was said so far.
-`Ctrl+T` takes the task over, after a confirmation: it ends for the
-delegating agent with what the delegate had said, and the conversation is
-yours to go on with. Once the
-task is over, the panel goes back to its banner, set up as a panel you open
-— the default agent, connection and mode — in the directory it worked in
-before it was taken, and free for the next task; the task's session stays in
-the list. Closing the panel ends the task as
-well; it asks first, naming the agent waiting for the task, even when
-nothing is running at that moment. Only the panels of the delegating panel's project take its tasks,
-also while that project is open in the background: the task's panel is
-there when you switch to it.
 
 A delegate runs on the connection the session's connection names under
 **Subagents** on its settings page (`subagents` in the file), or on the
@@ -1712,8 +1676,7 @@ to their own connection.
 #### In the background
 
 A `task` call with `background` does not wait: the task runs out of sight
-as a delegate the call waits for does, whatever `subagent_run` says, and the
-call returns at once. The delegating agent carries on, and when the task is
+as a delegate the call waits for does, and the call returns at once. The delegating agent carries on, and when the task is
 over its answer reaches the agent as a message of the delegate's, a step
 reading `& Receiving reply from <delegate> · …`, the way an answer to
 `send_message` does: an idle agent starts a turn on it, a busy one reads it
@@ -1737,7 +1700,7 @@ The panel's own agent, and Claude Code on termide's tools, can write to the
 agents of the other agent panels open in the project, on screen or in the
 background. **agents** lists them —
 each panel's number, its agent, what it is doing (free, idle, working,
-waiting for you, running another agent's task) and where it works — and
+waiting for you, following another agent's task) and where it works — and
 **send_message** sends one of them a message: `info` to tell it something,
 `question` to ask it something, `reply` to answer a message it got. The
 message reaches the other agent at once — an idle one starts a turn on it, a
@@ -1748,9 +1711,8 @@ from …`, `& Receiving note from …`, `& Taking task from …`, its text folde
 under it — and the model reads it framed with the
 sender's name and panel, so it knows where to answer, and the `auto`
 reviewer does not take it for a request of yours. An answer comes back the
-same way, as a message of its own, not as the call's result. A panel running
-another agent's task takes no messages, and sends none to the panel that
-handed it the task: its answer goes back as its final message. A free panel,
+same way, as a message of its own, not as the call's result. A panel following
+another agent's task takes no messages until the task is over. A free panel,
 nothing asked in it yet, takes no `question`: its agent knows nothing of the
 work so far and has nothing to answer from. Every exchange with another
 agent opens with `&` in the transcript, the verb saying which way it goes:

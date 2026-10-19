@@ -460,14 +460,6 @@ impl App {
         }
     }
 
-    /// The roots of the parked projects.
-    pub(super) fn parked_roots(&self) -> Vec<PathBuf> {
-        self.open_projects
-            .parked()
-            .map(|(root, _)| root.to_path_buf())
-            .collect()
-    }
-
     /// The open projects' roots in the order the menus list them.
     pub(super) fn listed_open_roots(&self) -> Vec<PathBuf> {
         self.open_projects.roots().map(Path::to_path_buf).collect()

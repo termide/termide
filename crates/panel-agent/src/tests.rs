@@ -212,7 +212,6 @@ impl AgentCatalog for Agents {
 
 fn setup_with(provider: Arc<Scripted>) -> AgentPanelSetup {
     AgentPanelSetup {
-        inherited_intent: None,
         panel_id: None,
         cwd: PathBuf::from("/tmp"),
         agent: "default".into(),
@@ -10599,165 +10598,6 @@ fn a_reopened_card_past_its_reset_tries_again_after_a_grace() {
     assert!(answered_done(&panel));
 }
 
-fn delegated_task() -> UserMessage {
-    UserMessage::text("find the loader").with_origin(termide_agent_core::MessageOrigin {
-        session: "p1".into(),
-        agent: "lead".into(),
-        kind: termide_agent_core::OriginKind::Task,
-        panel: None,
-        hops: 0,
-    })
-}
-
-/// Tick until the panel no longer runs a task for another agent.
-fn settle_delegate(panel: &mut AgentPanel) {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while panel.is_delegate() {
-        panel.tick();
-        assert!(Instant::now() < deadline, "the task did not end");
-        std::thread::sleep(Duration::from_millis(5));
-    }
-}
-
-#[test]
-fn a_delegated_task_runs_with_the_input_off_and_reports_to_its_agent() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut panel = AgentPanel::new(AgentPanelSetup {
-        session_dir: Some(dir.path().to_path_buf()),
-        ..setup(vec![reply("found it")])
-    });
-    assert!(panel.takes_delegate());
-    let (updates, received) = mpsc::channel();
-    panel.start_delegation(
-        delegated_task(),
-        Delegation::new(
-            "lead",
-            "find the loader\nin src",
-            updates,
-            CancelToken::new(),
-        ),
-    );
-    assert!(panel.is_delegate() && !panel.takes_delegate());
-    let task_session = panel.session_path().unwrap().to_path_buf();
-
-    // The input takes nothing and says whose task runs here; the session's
-    // keys and pastes do nothing either.
-    type_text(&mut panel, "hi");
-    panel.handle_command(PanelCommand::PasteText {
-        text: "pasted".into(),
-    });
-    assert_eq!(panel.input_text(), "");
-    panel.handle_key(chord(KeyCode::F(7), KeyModifiers::NONE));
-    assert_eq!(panel.session_path(), Some(task_session.as_path()));
-    assert!(panel.handle_status_action(AGENT_ACTION).is_empty());
-    let rows = render_text(&mut panel, 100, 16);
-    assert!(
-        rows.iter()
-            .any(|row| row.contains("& Delegate of lead: find the loader ·")),
-        "{rows:?}"
-    );
-
-    settle_delegate(&mut panel);
-    // Free again, once, for the app to set up anew.
-    assert!(panel.take_released() && !panel.take_released());
-    let updates: Vec<DelegateUpdate> = received.try_iter().collect();
-    assert!(updates.iter().any(|update| matches!(
-        update,
-        DelegateUpdate::Event(AgentEvent::MessageEnd(Message::Assistant(message)))
-            if message.plain_text() == "found it"
-    )));
-    assert!(matches!(
-        updates.last(),
-        Some(DelegateUpdate::Ended(DelegateEnd::Done))
-    ));
-    // Back at the banner on a fresh session, free for the next task; the
-    // task's session stays, the task in it as the delegating agent's.
-    assert!(panel.banner_shown() && panel.takes_delegate());
-    assert_ne!(panel.session_path(), Some(task_session.as_path()));
-    let logged = Session::open(&task_session).unwrap();
-    assert!(logged.entries().iter().any(|entry| matches!(
-        &entry.kind,
-        EntryKind::Message { message: Message::User(user), .. } if user.origin.is_some()
-    )));
-    type_text(&mut panel, "mine");
-    assert_eq!(panel.input_text(), "mine");
-}
-
-#[test]
-fn ctrl_t_takes_a_delegated_task_over() {
-    let mut panel = panel(vec![reply("half done")]);
-    let (updates, received) = mpsc::channel();
-    panel.start_delegation(
-        delegated_task(),
-        Delegation::new("lead", "find the loader", updates, CancelToken::new()),
-    );
-    // Closing asks with the task named, whatever the panel is doing.
-    assert!(panel
-        .needs_close_confirmation()
-        .is_some_and(|text| text.contains("runs a task for lead")));
-    // Ctrl+T asks first; the task stays the agent's until the answer.
-    let asked = panel.handle_key(chord(KeyCode::Char('t'), KeyModifiers::CONTROL));
-    assert!(asked.iter().any(|event| matches!(
-        event,
-        PanelEvent::ShowConfirm { on_confirm: ConfirmAction::Custom(action), .. }
-            if action == TAKE_OVER_ACTION
-    )));
-    assert!(panel.is_delegate());
-    panel.handle_command(PanelCommand::Confirmed {
-        action: TAKE_OVER_ACTION.to_string(),
-    });
-    assert!(!panel.is_delegate());
-    assert!(matches!(
-        received.try_iter().last(),
-        Some(DelegateUpdate::Ended(DelegateEnd::TakenOver))
-    ));
-    // The conversation is the user's now: it stays, and the input works.
-    settle(&mut panel);
-    assert!(!panel.take_released());
-    assert!(!panel.banner_shown());
-    // The task is a step of the agent's, not the user's words.
-    assert!(panel.transcript().items().iter().any(|item| matches!(
-        item,
-        Item::Tool { call, .. } if crate::transcript::is_peer_message(call)
-            && call.arguments["agent"] == "lead"
-            && call.arguments["kind"] == "task"
-    )));
-    assert!(!panel
-        .transcript()
-        .items()
-        .iter()
-        .any(|item| matches!(item, Item::User { .. })));
-    type_text(&mut panel, "go on");
-    assert_eq!(panel.input_text(), "go on");
-}
-
-#[test]
-fn a_task_its_agent_stopped_waiting_for_ends_stopped() {
-    let mut panel = panel(vec![reply("late")]);
-    let (updates, received) = mpsc::channel();
-    let cancel = CancelToken::new();
-    cancel.cancel();
-    panel.start_delegation(
-        delegated_task(),
-        Delegation::new("lead", "find the loader", updates, cancel),
-    );
-    settle_delegate(&mut panel);
-    assert!(matches!(
-        received.try_iter().last(),
-        Some(DelegateUpdate::Ended(DelegateEnd::Stopped))
-    ));
-}
-
-fn from_peer(kind: termide_agent_core::OriginKind, hops: u32) -> UserMessage {
-    UserMessage::text("the config loader moved").with_origin(termide_agent_core::MessageOrigin {
-        session: String::new(),
-        agent: "reviewer".into(),
-        kind,
-        panel: Some(7),
-        hops,
-    })
-}
-
 #[test]
 fn another_agents_message_starts_a_turn_and_counts_its_hops() {
     let mut panel = panel(vec![reply("noted"), reply("ok")]);
@@ -10802,21 +10642,6 @@ fn a_free_panel_takes_no_question() {
 }
 
 #[test]
-fn a_panel_running_another_agents_task_takes_no_messages() {
-    let mut panel = panel(vec![reply("found it")]);
-    let (updates, _received) = mpsc::channel();
-    panel.start_delegation(
-        delegated_task(),
-        Delegation::new("lead", "find the loader", updates, CancelToken::new()),
-    );
-    assert_eq!(panel.peer_state(), PeerState::Delegate);
-    let refused = panel
-        .deliver(from_peer(termide_agent_core::OriginKind::Question, 1))
-        .unwrap_err();
-    assert!(refused.contains("another agent's task"), "{refused}");
-}
-
-#[test]
 fn a_panel_rebuilt_in_place_keeps_its_number() {
     let panel = AgentPanel::new(AgentPanelSetup {
         panel_id: Some(42),
@@ -10824,64 +10649,6 @@ fn a_panel_rebuilt_in_place_keeps_its_number() {
     });
     assert_eq!(panel.panel_id(), 42);
     assert_ne!(AgentPanel::new(setup(vec![])).panel_id(), 42);
-}
-
-#[test]
-fn a_delegate_panel_knows_the_task_and_the_panel_it_came_from() {
-    let mut panel = panel(vec![reply("found it")]);
-    let (updates, _received) = mpsc::channel();
-    let mut task = delegated_task();
-    task.origin.as_mut().unwrap().panel = Some(6);
-    panel.start_delegation(
-        task,
-        Delegation::new("lead", "find the loader", updates, CancelToken::new()).with_call("call-9"),
-    );
-    assert_eq!(panel.delegated_by(), Some(6));
-    assert!(panel.runs_task(6, "call-9"));
-    assert!(!panel.runs_task(5, "call-9") && !panel.runs_task(6, "call-1"));
-    settle_delegate(&mut panel);
-    assert!(!panel.runs_task(6, "call-9"));
-}
-
-#[test]
-fn clicking_a_delegates_input_goes_back_to_the_delegating_panel() {
-    let mut panel = panel(vec![reply("found it")]);
-    let (updates, _received) = mpsc::channel();
-    let mut task = delegated_task();
-    task.origin.as_mut().unwrap().panel = Some(6);
-    panel.start_delegation(
-        task,
-        Delegation::new("lead", "find the loader", updates, CancelToken::new()).with_call("call-9"),
-    );
-    render_text(&mut panel, 80, 20);
-    // The row under the input's top border, where the prompt would be.
-    let row = panel.input_area.y + 1;
-    let click = |panel: &mut AgentPanel, kind| {
-        panel.handle_mouse(
-            MouseEvent {
-                kind,
-                column: 4,
-                row,
-                modifiers: KeyModifiers::NONE,
-            },
-            ratatui::layout::Rect::new(0, 0, 80, 20),
-        )
-    };
-    let events = click(&mut panel, MouseEventKind::Down(MouseButton::Left));
-    assert!(
-        events
-            .iter()
-            .any(|event| matches!(event, PanelEvent::FocusAgentPanel(6))),
-        "{events:?}"
-    );
-    assert!(click(&mut panel, MouseEventKind::Up(MouseButton::Left)).is_empty());
-    // Once the task is over the input is the user's again.
-    settle_delegate(&mut panel);
-    render_text(&mut panel, 80, 20);
-    let events = click(&mut panel, MouseEventKind::Down(MouseButton::Left));
-    assert!(!events
-        .iter()
-        .any(|event| matches!(event, PanelEvent::FocusAgentPanel(_))));
 }
 
 #[test]
@@ -11102,14 +10869,24 @@ fn a_followed_task_shows_its_log_and_opens_when_over() {
         control.ended_by_user(),
         Some("the user stopped the subagent")
     );
-    assert!(panel.is_watching());
+    assert!(panel.is_delegate());
 
     // Over: the session opens here as any other.
     drop(log);
     control.finish();
     panel.tick();
-    assert!(!panel.is_watching() && !panel.is_delegate());
+    assert!(!panel.is_delegate() && !panel.is_delegate());
     assert_eq!(panel.session_path(), Some(path.as_path()));
+}
+
+fn from_peer(kind: termide_agent_core::OriginKind, hops: u32) -> UserMessage {
+    UserMessage::text("the config loader moved").with_origin(termide_agent_core::MessageOrigin {
+        session: String::new(),
+        agent: "reviewer".into(),
+        kind,
+        panel: Some(7),
+        hops,
+    })
 }
 
 /// A task handed over in the background has no running block: the strip
