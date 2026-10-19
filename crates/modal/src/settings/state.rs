@@ -46,6 +46,7 @@ impl SettingsModal {
             lsp_server_edit: None,
             debugger_edit: None,
             debugger_defaults: Default::default(),
+            plugin_names: Vec::new(),
             connection_edit: None,
             model_fetch_request: None,
             kb_mode: KbMode::Bindings,
@@ -599,6 +600,7 @@ impl SettingsModal {
             SettingsTab::LspServer => self.lsp_server_page_rows(),
             SettingsTab::Debug => self.debug_tab_rows(),
             SettingsTab::DebuggerPage => self.debugger_page_rows(),
+            SettingsTab::Plugins => self.plugins_tab_rows(),
             SettingsTab::Keybindings => Vec::new(),
         }
     }
@@ -781,11 +783,37 @@ impl SettingsModal {
         self.editing = false;
     }
 
+    /// Whether field `index` of the tab shown is one a project may not set
+    /// while the settings are stored in the project: a program termide
+    /// starts, a file it writes, where a key is sent, or the agent's mode.
+    /// The config loader drops these from a project file, so editing one
+    /// here would last only until the next load.
+    pub(super) fn is_global_only(&self, index: usize) -> bool {
+        use super::{connection, debugger, fields, lsp_server};
+        self.in_project
+            && match self.field_tab() {
+                SettingsTab::Terminal | SettingsTab::Logging => index == 0,
+                SettingsTab::Ai => {
+                    index == fields::AI_CHROME_PATH_FIELD
+                        || index == fields::AI_PERMISSION_MODE_FIELD
+                }
+                SettingsTab::Connection => {
+                    index == connection::BASE_URL || index == connection::API_KEY_ENV
+                }
+                SettingsTab::LspServer => index == lsp_server::COMMAND || index == lsp_server::ARGS,
+                SettingsTab::DebuggerPage => index == debugger::COMMAND || index == debugger::ARGS,
+                _ => false,
+            }
+    }
+
     /// Start editing the current field.
     pub(super) fn start_edit(&mut self) {
         let Some(field_idx) = self.current_field_idx() else {
             return;
         };
+        if self.is_global_only(field_idx) {
+            return;
+        }
         let fields = fields_for_tab(self.field_tab());
         let Some(desc) = fields.get(field_idx) else {
             return;
@@ -892,7 +920,7 @@ impl SettingsModal {
                 }
             }
             SettingsTab::Ai => {
-                if index == 6 {
+                if index == super::fields::AI_CHROME_PATH_FIELD {
                     self.config.ai.web.chrome_path = text.to_string();
                 } else if index == super::fields::AI_AUTO_REVIEWER_MODEL_FIELD {
                     self.config.ai.auto_reviewer.model = text.trim().to_string();

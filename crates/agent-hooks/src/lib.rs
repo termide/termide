@@ -278,6 +278,7 @@ mod tests {
             tools: tools.iter().map(|t| t.to_string()).collect(),
             timeout_secs: timeout,
             enabled: true,
+            from_project: false,
         }
     }
 

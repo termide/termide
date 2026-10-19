@@ -144,13 +144,16 @@ mod tests {
     #[test]
     fn the_panel_menu_starts_debugging_and_removes_the_breakpoints() {
         let (mut e, file) = editor("print(1)\n");
-        let actions: Vec<&str> = Panel::context_menu_items(&e)
+        let actions: Vec<String> = Panel::context_menu_items(&e)
             .into_iter()
             .map(|(_, action)| action)
             .collect();
-        assert!(actions.contains(&crate::START_DEBUG_ACTION), "{actions:?}");
         assert!(
-            actions.contains(&crate::CLEAR_BREAKPOINTS_ACTION),
+            actions.iter().any(|a| a == crate::START_DEBUG_ACTION),
+            "{actions:?}"
+        );
+        assert!(
+            actions.iter().any(|a| a == crate::CLEAR_BREAKPOINTS_ACTION),
             "{actions:?}"
         );
 
@@ -160,7 +163,7 @@ mod tests {
             [PanelEvent::StartDebug { file: Some(f) }] if f == file.path()
         ));
         assert!(
-            actions.contains(&crate::CONFIGURE_DEBUG_ACTION),
+            actions.iter().any(|a| a == crate::CONFIGURE_DEBUG_ACTION),
             "{actions:?}"
         );
         let events = Panel::handle_status_action(&mut e, crate::CONFIGURE_DEBUG_ACTION);

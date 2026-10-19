@@ -1,0 +1,2 @@
+description = "Shows the words of the active file in the status bar"
+command = "./run.py"

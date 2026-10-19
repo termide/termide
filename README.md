@@ -104,6 +104,8 @@ Editor, LSP, terminal, git and project layouts are a given among terminal editor
 - **Projects** - Panel layouts restored per project; projects you switch away from keep running in the background, as buttons in the menu bar; `termide --restore` reopens the last run's set
 - **Multi-panel layout** - Stacked panel groups with adjustable heights, a fullscreen toggle (`Alt+F11`) and auto-stacking in narrow terminals
 - **Custom commands** - Global or per-project commands with hotkeys, parameter forms and terminal, background or report modes
+- **Plugins** - Programs in the global plugins directory, run beside each open project over JSON-RPC: they hear files opened and saved, add commands, status bar items and agent tools; each project switches them within the mode you set
+- **Safe with any repository** - A project's files can tighten things, never name what termide runs: its MCP servers, hooks and commands wait for your approval, and its config cannot pick programs, send keys elsewhere or loosen the agent
 - **Command palette and Open prompt** - `Ctrl+P` runs any command by fuzzy name; `Ctrl+G` opens a file, a folder or a URL with path suggestions
 - **Settings** - A full-screen settings modal (`Alt+P`) with in-place keybinding capture
 
@@ -558,6 +560,22 @@ mode = "report"  # terminal (default), background, or report
 
 `Commands → Add command...` creates one through a form. See
 [Custom Commands](doc/en/actions.md) for modes, parameters and hotkeys.
+A command from a project's file runs once you have seen what it runs.
+
+### Plugins
+
+A plugin is a directory in `plugins/` beside the global `config.toml`, with a
+`plugin.toml` naming the program termide runs beside each open project:
+
+```toml
+# plugins/save-count/plugin.toml
+command = "./run.py"
+```
+
+The global `config.toml` sets each plugin's mode — `on` (the default),
+`opt-in` or `off` — and a project's `.termide/config.toml` may only switch it
+within that mode (`[plugins.<name>] enabled = true | false`). The protocol,
+JSON-RPC on the plugin's stdin and stdout, is in [Plugins](doc/en/plugins.md).
 
 ## Development
 

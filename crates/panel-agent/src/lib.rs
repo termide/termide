@@ -181,9 +181,12 @@ const PROMPT_COMMAND: &str = "prompt";
 /// The built-in `/mcp` command: the MCP servers' status, a reload of their
 /// configuration, a sign-in or a sign-out.
 const MCP_COMMAND: &str = "mcp";
+/// The built-in `/trust` command: what the project brings that runs
+/// programs and waits for approval, and approving it.
+const TRUST_COMMAND: &str = "trust";
 /// Every built-in `/name`, whatever the state; a template, script or skill
 /// of the same name never runs under it (see `slash`).
-const BUILTIN_COMMANDS: [&str; 15] = [
+const BUILTIN_COMMANDS: [&str; 16] = [
     UNDO_COMMAND,
     COMPACT_COMMAND,
     NEW_COMMAND,
@@ -199,6 +202,7 @@ const BUILTIN_COMMANDS: [&str; 15] = [
     USAGE_COMMAND,
     PROMPT_COMMAND,
     MCP_COMMAND,
+    TRUST_COMMAND,
 ];
 /// Context-menu action (also `Ctrl+S`) that saves the chat as Markdown.
 const SAVE_CHAT_ACTION: &str = "agent_save_chat";
@@ -446,6 +450,22 @@ pub trait AgentCatalog: Send + Sync {
     /// Why it cannot be forgotten.
     fn mcp_logout(&self, server: &str) -> Result<bool, String> {
         Err(format!("no MCP server named {server}"))
+    }
+    /// The hooks the project brings that are held back until approved, by
+    /// name, with what each runs.
+    fn held_hooks(&self) -> Vec<(String, String)> {
+        Vec::new()
+    }
+    /// Approve the MCP server or hook `name` the project brings, as it is
+    /// configured now. A server is connected at once, and its report comes
+    /// back; a hook runs from the next run on.
+    ///
+    /// # Errors
+    ///
+    /// When nothing of that name waits for approval, or the approval cannot
+    /// be kept.
+    fn trust(&self, name: &str) -> Result<Option<McpReload>, String> {
+        Err(termide_i18n::t().agent_notice_trust_unknown_fmt(name))
     }
 }
 
@@ -1312,6 +1332,7 @@ impl AgentPanel {
         // a fresh session's banner the notices sit below it.
         panel.notice_slash_conflicts();
         panel.notice_definition_problems();
+        panel.notice_held_hooks();
         panel.refresh_recent_sessions();
         // The other termide's run may be going on right now: none is offered
         // to carry on here until this panel takes the session up.
@@ -1562,7 +1583,7 @@ impl Panel for AgentPanel {
         self.attention
     }
 
-    fn context_menu_items(&self) -> Vec<(String, &'static str)> {
+    fn context_menu_items(&self) -> Vec<(String, String)> {
         let t = termide_i18n::t();
         // Only actions with no home elsewhere. New/switch/delete sessions also
         // have F-keys, sessions/prompts/agents live in the AI menu, and the
@@ -1571,19 +1592,24 @@ impl Panel for AgentPanel {
         // reached with `/prompt`, so neither needs another menu slot beyond this.
         // While the panel follows another agent's task the session is that
         // agent's: only what reads it is offered.
-        if self.is_delegate() {
-            return vec![
-                (t.agent_session_info().to_string(), SESSION_INFO_ACTION),
-                (t.agent_save_chat().to_string(), SAVE_CHAT_ACTION),
-            ];
-        }
-        vec![
-            (t.agent_session_info().to_string(), SESSION_INFO_ACTION),
-            (t.agent_rename().to_string(), RENAME_ACTION),
-            (t.agent_save_chat().to_string(), SAVE_CHAT_ACTION),
-            (t.agent_fork_session().to_string(), FORK_SESSION_ACTION),
-            (t.agent_delete_session().to_string(), DELETE_SESSION_ACTION),
-        ]
+        let entries: &[(&str, &str)] = if self.is_delegate() {
+            &[
+                (t.agent_session_info(), SESSION_INFO_ACTION),
+                (t.agent_save_chat(), SAVE_CHAT_ACTION),
+            ]
+        } else {
+            &[
+                (t.agent_session_info(), SESSION_INFO_ACTION),
+                (t.agent_rename(), RENAME_ACTION),
+                (t.agent_save_chat(), SAVE_CHAT_ACTION),
+                (t.agent_fork_session(), FORK_SESSION_ACTION),
+                (t.agent_delete_session(), DELETE_SESSION_ACTION),
+            ]
+        };
+        entries
+            .iter()
+            .map(|(label, action)| (label.to_string(), action.to_string()))
+            .collect()
     }
 
     fn handle_status_action(&mut self, action: &str) -> Vec<PanelEvent> {

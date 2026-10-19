@@ -57,7 +57,7 @@ impl App {
             .as_ref()
             .map(|r| {
                 use termide_ui_render::get_commands_items;
-                get_commands_items(r)
+                get_commands_items(r, &self.state.ui.plugin_commands)
             })
             .unwrap_or_default();
         let item_count = commands_items.len();
@@ -82,7 +82,7 @@ impl App {
                     .as_ref()
                     .map(|r| {
                         use termide_ui_render::get_commands_items;
-                        get_commands_items(r)
+                        get_commands_items(r, &self.state.ui.plugin_commands)
                     })
                     .and_then(|items| items.get(sel).map(|i| i.has_submenu))
                     .unwrap_or(false);
@@ -111,7 +111,8 @@ impl App {
         };
 
         // Look up the selected item by index in the rendered menu items
-        let items = termide_ui_render::get_commands_items(&registry);
+        let items =
+            termide_ui_render::get_commands_items(&registry, &self.state.ui.plugin_commands);
         let item = match items.get(selected) {
             Some(i) if !i.is_separator => i,
             _ => return Ok(()),
@@ -123,6 +124,13 @@ impl App {
         if key == termide_ui_render::COMMAND_MANAGE || key == termide_ui_render::COMMAND_ADD_NEW {
             self.state.close_menu();
             self.handle_add_command()?;
+            return Ok(());
+        }
+
+        if let Some(action) = key.strip_prefix(super::super::plugins::PLUGIN_COMMAND_PREFIX) {
+            let action = action.to_string();
+            self.state.close_menu();
+            self.run_plugin_command(&action);
             return Ok(());
         }
 
@@ -234,7 +242,8 @@ impl App {
         }
 
         if let Some(registry) = self.commands_registry() {
-            let items = termide_ui_render::get_commands_items(&registry);
+            let items =
+                termide_ui_render::get_commands_items(&registry, &self.state.ui.plugin_commands);
             if let Some(item) = items.get(selected) {
                 if item.is_separator || item.has_submenu {
                     return Ok(());
@@ -354,7 +363,8 @@ impl App {
     fn delete_selected_command(&mut self) -> Result<()> {
         let selected = self.state.ui.commands_submenu.selected;
         if let Some(registry) = self.commands_registry() {
-            let items = termide_ui_render::get_commands_items(&registry);
+            let items =
+                termide_ui_render::get_commands_items(&registry, &self.state.ui.plugin_commands);
             if let Some(item) = items.get(selected) {
                 if item.is_separator || item.has_submenu {
                     return Ok(());
@@ -423,7 +433,8 @@ impl App {
     fn rename_selected_command(&mut self) -> Result<()> {
         let selected = self.state.ui.commands_submenu.selected;
         if let Some(registry) = self.commands_registry() {
-            let items = termide_ui_render::get_commands_items(&registry);
+            let items =
+                termide_ui_render::get_commands_items(&registry, &self.state.ui.plugin_commands);
             if let Some(item) = items.get(selected) {
                 if item.is_separator || item.has_submenu {
                     return Ok(());
@@ -510,7 +521,10 @@ impl App {
 
         if let Some(group_name) = group {
             if let Some(registry) = self.commands_registry() {
-                let items = termide_ui_render::get_commands_items(&registry);
+                let items = termide_ui_render::get_commands_items(
+                    &registry,
+                    &self.state.ui.plugin_commands,
+                );
                 let group_idx = items
                     .iter()
                     .position(|i| i.has_submenu && i.key == group_name)

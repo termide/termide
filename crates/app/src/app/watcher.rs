@@ -152,6 +152,17 @@ impl App {
             }
         }
 
+        // A repository's index, HEAD or refs moved: a commit, a checkout, a
+        // stage — for the plugins of the current project that asked.
+        let project = self.open_projects.current().to_path_buf();
+        for repo in &git_repos {
+            self.plugins.host.emit(
+                &project,
+                termide_plugins::protocol::events::GIT_CHANGED,
+                &serde_json::json!({ "root": repo }),
+            );
+        }
+
         // Process git events — panels showing content get the update, panels
         // collapsed to their title bar get marked stale
         let area_height = self.panel_area_height();

@@ -430,6 +430,8 @@ pub trait Translation: Send + Sync {
     fn command_params_run(&self) -> &str;
     fn command_params_cancel(&self) -> &str;
     fn command_run_label(&self) -> &str;
+    fn command_confirm_project_title(&self) -> &str;
+    fn command_confirm_project_fmt(&self, name: &str, command: &str) -> String;
 
     // Command config modal (create/edit)
     fn command_config_label_name(&self) -> &str;
@@ -713,6 +715,10 @@ pub trait Translation: Send + Sync {
     fn agent_notice_mcp_usage(&self) -> &str;
     fn agent_mcp_status_connecting(&self) -> &str;
     fn agent_mcp_status_needs_login(&self) -> &str;
+    fn agent_cmd_desc_trust(&self) -> &str;
+    fn agent_hint_trust(&self) -> &str;
+    fn agent_mcp_status_needs_approval(&self) -> &str;
+    fn agent_notice_trust_none(&self) -> &str;
     fn agent_mcp_status_signing_in(&self) -> &str;
     fn agent_cmd_desc_prompt(&self) -> &str;
 
@@ -826,6 +832,17 @@ pub trait Translation: Send + Sync {
     fn palette_category_panel_management(&self) -> &str;
     fn palette_category_application(&self) -> &str;
     fn palette_category_commands(&self) -> &str;
+    fn palette_category_plugins(&self) -> &str;
+    fn plugins_title(&self) -> &str;
+    fn palette_plugins_status(&self) -> &str;
+    fn palette_plugins_reload(&self) -> &str;
+    fn plugins_state_ready(&self) -> &str;
+    fn plugins_state_starting(&self) -> &str;
+    fn plugins_state_gave_up(&self) -> &str;
+    fn plugins_state_off(&self) -> &str;
+    fn plugins_none(&self) -> &str;
+    fn palette_plugins_restart_fmt(&self, name: &str) -> String;
+    fn plugins_reloaded_fmt(&self, count: usize) -> String;
     fn command_report_no_output(&self) -> &str;
     fn agent_paste_placeholder_fmt(&self, n: usize, what: &str) -> String;
     fn agent_paste_lines_fmt(&self, count: usize) -> String;
@@ -957,6 +974,10 @@ pub trait Translation: Send + Sync {
     fn agent_notice_mcp_reload_fmt(&self, started: &str, removed: &str, kept: &str) -> String;
     fn agent_notice_mcp_needs_login_fmt(&self, source: &str) -> String;
     fn agent_notice_mcp_login_started_fmt(&self, source: &str, url: &str) -> String;
+    fn agent_notice_trusted_fmt(&self, name: &str) -> String;
+    fn agent_notice_trust_unknown_fmt(&self, name: &str) -> String;
+    fn agent_notice_mcp_needs_approval_fmt(&self, source: &str, launch: &str) -> String;
+    fn agent_notice_hook_needs_approval_fmt(&self, name: &str, launch: &str) -> String;
     fn agent_notice_mcp_gone_fmt(&self, source: &str) -> String;
     fn agent_notice_mcp_updated_fmt(&self, source: &str, count: usize) -> String;
     fn agent_notice_mcp_logout_fmt(&self, source: &str) -> String;
@@ -1285,6 +1306,16 @@ pub trait Translation: Send + Sync {
     fn settings_debugger_command(&self) -> &str;
     fn settings_debugger_args(&self) -> &str;
     fn settings_debugger_reset(&self) -> &str;
+    fn settings_global_only(&self) -> &str;
+    fn settings_tab_plugins(&self) -> &str;
+    fn settings_header_plugins(&self) -> &str;
+    fn settings_plugin_mode_on(&self) -> &str;
+    fn settings_plugin_mode_opt_in(&self) -> &str;
+    fn settings_plugin_mode_off(&self) -> &str;
+    fn settings_plugin_follow(&self) -> &str;
+    fn settings_plugin_on(&self) -> &str;
+    fn settings_plugin_off(&self) -> &str;
+    fn settings_plugin_blocked(&self) -> &str;
     fn settings_debugger_no_defaults(&self) -> &str;
     fn settings_debugger_bad_args(&self) -> &str;
     fn settings_tab_logging(&self) -> &str;

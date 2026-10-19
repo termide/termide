@@ -13,16 +13,20 @@ impl App {
         &mut self,
         result: &termide_modal::CommandConfigResult,
     ) -> Result<()> {
-        if result.is_edit {
-            let config_dir = self.command_config_dir(result.is_project);
+        let config_dir = self.command_config_dir(result.is_project);
+        let key = if result.is_edit {
             self.write_command_entry(result, &config_dir, result.name.clone())?;
+            result.name.clone()
         } else {
-            let config_dir = self.command_config_dir(result.is_project);
-            self.create_command_entry(result, &config_dir)?;
-        }
+            self.create_command_entry(result, &config_dir)?
+        };
 
         self.state.cache.commands_registry = None;
         self.state.cache.hotkey_table = None;
+        // What the user wrote in the form runs without being asked about.
+        if result.is_project {
+            self.approve_project_command(&key);
+        }
         Ok(())
     }
 
@@ -41,10 +45,10 @@ impl App {
         &mut self,
         result: &termide_modal::CommandConfigResult,
         config_dir: &Path,
-    ) -> Result<()> {
+    ) -> Result<String> {
         let key = CommandsMetadata::load(config_dir).free_name(&result.name);
-        self.write_command_entry(result, config_dir, key)?;
-        Ok(())
+        self.write_command_entry(result, config_dir, key.clone())?;
+        Ok(key)
     }
 
     pub(in crate::app) fn handle_edit_command_config_result(
@@ -57,7 +61,7 @@ impl App {
         let target_dir = self.command_config_dir(result.is_project);
         let old_key = command_name;
 
-        if was_project != result.is_project {
+        let key = if was_project != result.is_project {
             let mut source_metadata = CommandsMetadata::load(&source_dir);
             let mut entry = source_metadata.entries.remove(&old_key).unwrap_or_default();
             apply_result_to_entry(&mut entry, result);
@@ -65,11 +69,13 @@ impl App {
 
             let mut target_metadata = CommandsMetadata::load(&target_dir);
             let key = target_metadata.free_name(&old_key);
-            target_metadata.entries.insert(key, entry);
+            target_metadata.entries.insert(key.clone(), entry);
             target_metadata.save(&target_dir)?;
+            key
         } else {
-            self.write_command_entry(result, &target_dir, old_key)?;
-        }
+            self.write_command_entry(result, &target_dir, old_key.clone())?;
+            old_key
+        };
 
         // Invalidate caches so the new hotkey/binding takes effect on the next
         // keypress. Without this, `state.cache.hotkey_table` keeps the previous
@@ -79,6 +85,9 @@ impl App {
         // re-parsed on the next cold start).
         self.state.cache.commands_registry = None;
         self.state.cache.hotkey_table = None;
+        if result.is_project {
+            self.approve_project_command(&key);
+        }
         Ok(())
     }
 

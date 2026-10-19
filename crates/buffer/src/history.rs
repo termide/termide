@@ -9,6 +9,8 @@ pub enum Action {
     Insert { position: Cursor, text: String },
     /// Text deletion
     Delete { position: Cursor, text: String },
+    /// Several actions undone and redone as one, in order.
+    Group(Vec<Action>),
 }
 
 impl Action {
@@ -23,6 +25,9 @@ impl Action {
                 position: *position,
                 text: text.clone(),
             },
+            Action::Group(actions) => {
+                Action::Group(actions.iter().rev().map(Action::inverse).collect())
+            }
         }
     }
 
@@ -115,6 +120,8 @@ pub struct History {
     max_size: usize,
     /// Current accumulated action
     pending_action: Option<Action>,
+    /// Actions recorded since [`History::begin_group`], to be one step.
+    group: Option<Vec<Action>>,
 }
 
 impl History {
@@ -130,6 +137,26 @@ impl History {
             redo_stack: Vec::new(),
             max_size,
             pending_action: None,
+            group: None,
+        }
+    }
+
+    /// Record what follows, until [`History::end_group`], as one step.
+    pub fn begin_group(&mut self) {
+        self.commit_pending();
+        self.group = Some(Vec::new());
+    }
+
+    /// Close the step [`History::begin_group`] opened; an empty one leaves
+    /// nothing.
+    pub fn end_group(&mut self) {
+        if let Some(actions) = self.group.take() {
+            if !actions.is_empty() {
+                self.undo_stack.push_back(Action::Group(actions));
+                if self.undo_stack.len() > self.max_size {
+                    self.undo_stack.pop_front();
+                }
+            }
         }
     }
 
@@ -137,6 +164,11 @@ impl History {
     pub fn push(&mut self, action: Action) {
         // Clear redo stack on new action
         self.redo_stack.clear();
+
+        if let Some(group) = &mut self.group {
+            group.push(action);
+            return;
+        }
 
         // Try to merge with previous action
         if let Some(pending) = &mut self.pending_action {

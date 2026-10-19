@@ -42,3 +42,6 @@ CLAUDE.md
 # Local agent panel settings (model, provider, permission grants): per-machine,
 # not shared like the tracked .termide/bookmarks.toml and commands.toml.
 /.termide/config.toml
+# Python bytecode of the example plugins
+__pycache__/
+*.pyc

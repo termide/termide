@@ -1,0 +1,2 @@
+description = "Marks TODO comments, offers to mark one DONE, and lists them in a panel"
+command = "./run.py"

@@ -218,6 +218,15 @@ impl Translation for RuntimeTranslation {
         palette_category_panel_management,
         palette_category_application,
         palette_category_commands,
+        palette_category_plugins,
+        plugins_title,
+        palette_plugins_status,
+        palette_plugins_reload,
+        plugins_state_ready,
+        plugins_state_starting,
+        plugins_state_gave_up,
+        plugins_state_off,
+        plugins_none,
         command_report_no_output,
         git_operation_cancelled,
         modal_yes,
@@ -466,6 +475,7 @@ impl Translation for RuntimeTranslation {
         command_params_run,
         command_params_cancel,
         command_run_label,
+        command_confirm_project_title,
         command_config_label_name,
         command_config_label_command,
         command_config_label_group,
@@ -623,6 +633,10 @@ impl Translation for RuntimeTranslation {
         agent_notice_mcp_usage,
         agent_mcp_status_connecting,
         agent_mcp_status_needs_login,
+        agent_cmd_desc_trust,
+        agent_hint_trust,
+        agent_mcp_status_needs_approval,
+        agent_notice_trust_none,
         agent_mcp_status_signing_in,
         agent_cmd_desc_prompt,
         agent_notice_busy,
@@ -1071,6 +1085,16 @@ impl Translation for RuntimeTranslation {
         settings_debugger_command,
         settings_debugger_args,
         settings_debugger_reset,
+        settings_global_only,
+        settings_tab_plugins,
+        settings_header_plugins,
+        settings_plugin_mode_on,
+        settings_plugin_mode_opt_in,
+        settings_plugin_mode_off,
+        settings_plugin_follow,
+        settings_plugin_on,
+        settings_plugin_off,
+        settings_plugin_blocked,
         settings_debugger_no_defaults,
         settings_debugger_bad_args,
         settings_tab_logging,
@@ -1418,6 +1442,43 @@ impl Translation for RuntimeTranslation {
         self.format(
             "agent_notice_mcp_login_started_fmt",
             &[("source", source), ("url", url)],
+        )
+    }
+
+    fn palette_plugins_restart_fmt(&self, name: &str) -> String {
+        self.format("palette_plugins_restart_fmt", &[("name", name)])
+    }
+
+    fn plugins_reloaded_fmt(&self, count: usize) -> String {
+        self.format("plugins_reloaded_fmt", &[("count", &count.to_string())])
+    }
+
+    fn command_confirm_project_fmt(&self, name: &str, command: &str) -> String {
+        self.format(
+            "command_confirm_project_fmt",
+            &[("name", name), ("command", command)],
+        )
+    }
+
+    fn agent_notice_trusted_fmt(&self, name: &str) -> String {
+        self.format("agent_notice_trusted_fmt", &[("name", name)])
+    }
+
+    fn agent_notice_trust_unknown_fmt(&self, name: &str) -> String {
+        self.format("agent_notice_trust_unknown_fmt", &[("name", name)])
+    }
+
+    fn agent_notice_mcp_needs_approval_fmt(&self, source: &str, launch: &str) -> String {
+        self.format(
+            "agent_notice_mcp_needs_approval_fmt",
+            &[("source", source), ("launch", launch)],
+        )
+    }
+
+    fn agent_notice_hook_needs_approval_fmt(&self, name: &str, launch: &str) -> String {
+        self.format(
+            "agent_notice_hook_needs_approval_fmt",
+            &[("name", name), ("launch", launch)],
         )
     }
 

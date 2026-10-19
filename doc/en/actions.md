@@ -25,6 +25,8 @@ The project file belongs to the current project root, so it can be committed and
 
 The two files do not override each other: a project command and a global command with the same identifier are two separate menu entries. Project commands are listed first and drawn in bold.
 
+Since the project file comes with the repository, a project command runs only once you have seen it. The first time one is started — from the menu, the palette, its hotkey or `F5` — a window shows what it runs (its `build`, then the command) and asks; agreeing runs it and approves it as it is, in termide's data directory under the project (`trust/<project path>/approved.toml`). If the repository changes the command, its mode, `build`, debugger or key, it asks again. A project command's hotkey works only while the command is approved: start it once from the menu, and the key is bound from then on. A command you write in the `Add command...` or **Set up debugging** form is approved as you save it.
+
 ## File format
 
 Each TOML table is one command; the table name is the command's identifier.
@@ -230,7 +232,7 @@ When a file could be debugged but its debugger is missing (no LLDB or GDB for Ru
 
 ### Debugger settings
 
-How each debugger starts is set in `config.toml` (global, or `.termide/config.toml` for one project), apart from what is debugged:
+How each debugger starts is set in `config.toml`, apart from what is debugged. A project's `.termide/config.toml` may set `native` and `console`; the debuggers' `command` and `args` come from the global file only, since they name the program termide starts:
 
 ```toml
 [debug]

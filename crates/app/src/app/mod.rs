@@ -52,6 +52,10 @@ mod panel_factory;
 mod panel_manager;
 mod panel_operations;
 mod parked_projects;
+mod plugin_editor;
+mod plugin_providers;
+mod plugin_windows;
+mod plugins;
 mod project_layout;
 mod vault;
 mod watcher;
@@ -67,6 +71,8 @@ pub struct App {
     /// Projects open in this instance; the ones not current keep their
     /// panels parked here.
     open_projects: crate::open_projects::OpenProjects<parked_projects::ParkedProject>,
+    /// Plugins running for the loaded projects.
+    plugins: plugins::PluginRuntime,
     /// Last seen editor edit_version (for debounced outline sync).
     outline_last_version: u64,
     /// Last seen editor cursor line (for outline cursor sync).
@@ -206,6 +212,7 @@ impl App {
                 termide_config::constants::EVENT_HANDLER_INTERVAL_MS,
             )),
             open_projects: crate::open_projects::OpenProjects::new(project_root.clone()),
+            plugins: plugins::PluginRuntime::new(),
             project_root,
             outline_last_version: 0,
             outline_last_cursor: 0,
@@ -310,6 +317,7 @@ impl App {
                 termide_config::constants::EVENT_HANDLER_INTERVAL_MS,
             )),
             open_projects: crate::open_projects::OpenProjects::new(project_root.clone()),
+            plugins: plugins::PluginRuntime::new(),
             project_root,
             outline_last_version: 0,
             outline_last_cursor: 0,
@@ -701,6 +709,9 @@ impl App {
         if config.ai_differs_from(&old) {
             agent_panel::publish_ai_settings(&config.ai);
         }
+        if config.plugins != old.plugins {
+            self.plugins.mark_dirty();
+        }
         // The table is built from the keybindings in the config.
         self.state.cache.hotkey_table = None;
         self.state.config = std::sync::Arc::new(config);
@@ -1018,6 +1029,7 @@ impl App {
         self.sync_editor_breakpoints();
         termide_debug::breakpoints::flush();
         self.end_debug_session();
+        self.shutdown_plugins();
         Ok(())
     }
 
@@ -1029,6 +1041,7 @@ impl App {
     /// system-resource / LSP-completion / modal-spinner updates.
     fn poll_background(&mut self) {
         self.poll_debug_session();
+        self.poll_plugins();
         self.serve_debug_tool();
         self.flush_settings_save();
         self.poll_settings_model_fetch();
@@ -1172,6 +1185,9 @@ impl App {
                 self.handle_pending_upload(temp_path, remote_path, vfs_manager);
                 self.state.needs_redraw = true;
             }
+
+            // Files the editors wrote, for the plugins that watch saves.
+            self.emit_plugin_saves();
 
             // Check channel for directory size calculation results
             self.check_dir_size_update();

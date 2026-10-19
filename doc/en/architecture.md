@@ -726,10 +726,10 @@ the app's `VaultState`. See `doc/en/passwords.md` for the user view.
    - Long-running operations (search, compile) don't block UI
    - Background tasks with progress indicators
 
-2. **Plugin System**
-   - Load panels dynamically
-   - User-defined panel types
-   - Script integration (Lua, Python)
+2. **Plugin panels**
+   - Plugins (`crates/plugins`, see `plugins-design.md`) run as processes
+     beside termide; their own panels, drawn from a rich-text model they send,
+     are the next stage
 
 3. **Network Panels**
    - SSH terminal panels
@@ -770,6 +770,21 @@ the app's `VaultState`. See `doc/en/passwords.md` for the user view.
 - File size limit (100 MB) for editor
 - Scrollback buffer limit for terminal
 - Log rotation to prevent disk exhaustion
+
+**Untrusted projects:**
+A project's files come with the repository, so nothing in them decides what
+termide runs, where a key is sent, or how freely the agent acts.
+- `.termide/config.toml` passes through `config::layer_rules`: programs
+  (debuggers, LSP servers, shell, browser), the log file, a connection's
+  address and key variable, the agent's mode and `allow` rules are dropped
+  from it; the settings modal shows those fields as global-only
+- Plugins live only in the global plugins directory; a project switches one
+  within the mode the global config gives it
+- A project's MCP servers, hooks and `commands.toml` commands start only once
+  approved as they are configured (`agent_core::approvals`), and its agents
+  start only in `plan` or `ask` and are never external ones
+- What the user decides for a project — approvals, "allow always" rules — is
+  kept under `trust/` in termide's data directory, never in the project
 
 ## Conclusion
 

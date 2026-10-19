@@ -43,7 +43,17 @@ Opened with `Alt+P` or menu **Options → Edit preferences**. The previous horiz
 
 **Reset** asks first and acts where the settings are stored: a project goes back to the global settings, the global settings to the defaults.
 
-Theme, language and shell chosen from the menus are stored the same way.
+Theme and language chosen from the menus are stored the same way; a shell
+chosen from the menu is stored globally.
+
+**What only the global settings set.** A project's file comes with the
+repository, so it may not name a program termide starts, a file it writes or
+where a key is sent, nor loosen the agent: the terminal's default shell, the
+log file, the web tools' browser, an LSP server's or a debugger's command and
+arguments, a connection's base URL and API key variable, and the agent's
+permission mode. Stored in the project, these fields show their value with
+"set in the global settings" and cannot be changed; found in a project file,
+they are ignored, with a line in the log.
 
 **Sidebar sections:**
 - General, Editor, File Manager, Terminal, LSP, Logging, VFS — plain leaves

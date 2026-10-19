@@ -385,6 +385,15 @@ impl SettingsModal {
                             fit_width(error.to_string(), room),
                             Style::default().fg(theme.error),
                         );
+                    } else if self.is_global_only(field_idx) {
+                        let x = value_x + display_value.width() + 2;
+                        let room = (area.x as usize + area.width as usize).saturating_sub(x);
+                        buf.set_string(
+                            x as u16,
+                            y,
+                            fit_width(i18n::t().settings_global_only().to_string(), room),
+                            Style::default().fg(theme.disabled),
+                        );
                     }
                 }
                 ContentRow::ConnectionButtons
@@ -490,6 +499,32 @@ impl SettingsModal {
                     );
                     let summary = fit_width(self.debugger_summary(name), max_value_width);
                     buf.set_string(value_x as u16, y, &summary, summary_style);
+                }
+                ContentRow::Plugin(index) => {
+                    let Some(name) = self.plugin_names.get(index) else {
+                        continue;
+                    };
+                    let (label_style, value_style) = if is_focused {
+                        (
+                            Style::default()
+                                .fg(theme.selected_fg)
+                                .add_modifier(Modifier::BOLD),
+                            Style::default().fg(theme.selected_fg),
+                        )
+                    } else {
+                        (
+                            Style::default().fg(theme.fg),
+                            Style::default().fg(theme.accented_fg),
+                        )
+                    };
+                    buf.set_string(
+                        area.x + 2,
+                        y,
+                        fit_width(format!("🧩 {name}"), label_width),
+                        label_style,
+                    );
+                    let summary = fit_width(self.plugin_summary(name), max_value_width);
+                    buf.set_string(value_x as u16, y, &summary, value_style);
                 }
                 ContentRow::LspAddServer => {
                     let label = i18n::t().settings_lsp_add_server();

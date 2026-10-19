@@ -101,7 +101,7 @@ fn render_dropdowns_and_modals(
             let dropdown_y = 1_u16; // Below menu bar
 
             // Render Commands submenu
-            let commands_items = get_commands_items(&registry);
+            let commands_items = get_commands_items(&registry, &state.ui.plugin_commands);
             let dropdown = Dropdown::new(
                 &commands_items,
                 state.ui.commands_submenu.selected,
@@ -853,6 +853,7 @@ fn render_status_bar_for_active(
             recommended_layout: state.get_recommended_layout(),
             background_ops,
             disk_selected,
+            plugin_status: state.ui.plugin_status.as_deref(),
         };
         StatusBar::render(
             frame.buffer_mut(),

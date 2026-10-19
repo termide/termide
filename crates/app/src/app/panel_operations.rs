@@ -643,11 +643,21 @@ impl App {
             .unwrap_or("?")
             .to_string();
 
+        let opened = file_path.clone();
         match Editor::open_file_with_config(file_path, self.state.editor_config()) {
             Ok(mut editor_panel) => {
+                self.emit_plugin_file_event(
+                    termide_plugins::protocol::events::FILE_OPENED,
+                    &opened,
+                );
                 // Initialize LSP for the editor
                 if let Some(ref mut lsp_manager) = self.state.lsp_manager {
                     editor_panel.init_lsp(lsp_manager);
+                }
+                // What is known of the file already: a plugin's marks, or a
+                // server's from a file opened before.
+                if let Some(diagnostics) = self.state.all_diagnostics.get(&opened) {
+                    editor_panel.update_diagnostics(diagnostics.clone());
                 }
 
                 self.add_panel(Box::new(editor_panel));

@@ -1,0 +1,20 @@
+[package]
+name = "termide-plugins"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "termide plugins: global programs run beside the editor, spoken to over JSON-RPC on stdio"
+
+[dependencies]
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

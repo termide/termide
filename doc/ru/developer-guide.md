@@ -158,6 +158,7 @@ termide/
 │   ├── panel-operations/     # Панель фоновых операций
 │   ├── panel-outline/        # Панель структуры (Outline)
 │   ├── panel-terminal/       # Панель эмулятора терминала (PTY)
+│   ├── plugins/              # Плагины: манифесты, JSON-RPC и хост процессов
 │   ├── project/              # Сохранённые раскладки проектов
 │   ├── richtext/             # Движок раскладки форматированного текста
 │   ├── state/                # Состояние приложения (batch, layout, operations, ui)

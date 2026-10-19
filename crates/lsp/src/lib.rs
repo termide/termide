@@ -13,6 +13,7 @@
 //! - `std::sync::mpsc` channels for async communication
 //! - Non-blocking `try_recv()` polling in the main event loop
 
+pub mod extra;
 mod protocol;
 mod server;
 mod workspace;
@@ -33,7 +34,8 @@ use lsp_types::{
 use url::Url;
 
 /// Convert a file path to an LSP Uri. Used across the crate (lib, server).
-pub(crate) fn path_to_uri(path: &Path) -> Option<Uri> {
+/// The `file://` URI of `path`, as the servers are told it.
+pub fn path_to_uri(path: &Path) -> Option<Uri> {
     let url = Url::from_file_path(path).ok()?;
     url.as_str().parse().ok()
 }
@@ -277,9 +279,14 @@ impl LspManager {
         trigger_kind: CompletionTriggerKind,
         trigger_character: Option<String>,
     ) -> Option<mpsc::Receiver<Option<CompletionResponse>>> {
-        let server = self.get_server(lang, file_path)?;
-        let uri = path_to_uri(file_path)?;
-        Some(server.completion(uri, position, trigger_kind, trigger_character))
+        let from_server = self.get_server(lang, file_path).and_then(|server| {
+            let uri = path_to_uri(file_path)?;
+            Some(server.completion(uri, position, trigger_kind, trigger_character))
+        });
+        let extras = extra::extra()
+            .map(|extra| extra.completion(lang, file_path, position))
+            .unwrap_or_default();
+        extra::merged(from_server, extras, extra::merge_completions)
     }
 
     /// Completion trigger characters advertised by the server handling this
@@ -298,9 +305,14 @@ impl LspManager {
         range: lsp_types::Range,
         diagnostics: Vec<lsp_types::Diagnostic>,
     ) -> Option<mpsc::Receiver<Option<lsp_types::CodeActionResponse>>> {
-        let server = self.get_server(lang, file_path)?;
-        let uri = path_to_uri(file_path)?;
-        Some(server.code_action(uri, range, diagnostics))
+        let extras = extra::extra()
+            .map(|extra| extra.code_action(lang, file_path, range, &diagnostics))
+            .unwrap_or_default();
+        let from_server = self.get_server(lang, file_path).and_then(|server| {
+            let uri = path_to_uri(file_path)?;
+            Some(server.code_action(uri, range, diagnostics))
+        });
+        extra::merged(from_server, extras, extra::merge_actions)
     }
 
     /// Whether the server for this file resolves code actions lazily.
@@ -347,9 +359,14 @@ impl LspManager {
         file_path: &Path,
         position: Position,
     ) -> Option<mpsc::Receiver<Option<Hover>>> {
-        let server = self.get_server(lang, file_path)?;
-        let uri = path_to_uri(file_path)?;
-        Some(server.hover(uri, position))
+        let from_server = self.get_server(lang, file_path).and_then(|server| {
+            let uri = path_to_uri(file_path)?;
+            Some(server.hover(uri, position))
+        });
+        let extras = extra::extra()
+            .map(|extra| extra.hover(lang, file_path, position))
+            .unwrap_or_default();
+        extra::merged(from_server, extras, extra::merge_hovers)
     }
 
     /// Request go-to-definition at position
@@ -359,9 +376,14 @@ impl LspManager {
         file_path: &Path,
         position: Position,
     ) -> Option<mpsc::Receiver<Option<GotoDefinitionResponse>>> {
-        let server = self.get_server(lang, file_path)?;
-        let uri = path_to_uri(file_path)?;
-        Some(server.goto_definition(uri, position))
+        let from_server = self.get_server(lang, file_path).and_then(|server| {
+            let uri = path_to_uri(file_path)?;
+            Some(server.goto_definition(uri, position))
+        });
+        let extras = extra::extra()
+            .map(|extra| extra.definition(lang, file_path, position))
+            .unwrap_or_default();
+        extra::merged(from_server, extras, extra::merge_definitions)
     }
 
     /// Request find-references at position
@@ -372,9 +394,14 @@ impl LspManager {
         position: Position,
         include_declaration: bool,
     ) -> Option<mpsc::Receiver<Option<Vec<Location>>>> {
-        let server = self.get_server(lang, file_path)?;
-        let uri = path_to_uri(file_path)?;
-        Some(server.references(uri, position, include_declaration))
+        let from_server = self.get_server(lang, file_path).and_then(|server| {
+            let uri = path_to_uri(file_path)?;
+            Some(server.references(uri, position, include_declaration))
+        });
+        let extras = extra::extra()
+            .map(|extra| extra.references(lang, file_path, position))
+            .unwrap_or_default();
+        extra::merged(from_server, extras, extra::merge_references)
     }
 
     /// Request rename symbol at position

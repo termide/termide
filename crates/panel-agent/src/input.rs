@@ -12,7 +12,8 @@ use crate::{
     select, transcript, AgentPanel, BannerHit, FoldMode, Item, NoticeKind, Paste, RunButton,
     CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND, FORK_COMMAND, GOAL_COMMAND, HANDOFF_COMMAND,
     LOOP_COMMAND, MCP_COMMAND, NAME_COMMAND, NEW_COMMAND, NEW_SESSION_ACTION, PAUSE_COMMAND,
-    PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND, RESUME_ACTION, UNDO_COMMAND, USAGE_COMMAND,
+    PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND, RESUME_ACTION, TRUST_COMMAND, UNDO_COMMAND,
+    USAGE_COMMAND,
 };
 
 /// A paste past either bound is held as a short placeholder rather than
@@ -904,6 +905,14 @@ impl AgentPanel {
                     .with_label(format!("/{MCP_COMMAND}"))
                     .with_hint(termide_i18n::t().agent_hint_mcp())
                     .with_description(termide_i18n::t().agent_cmd_desc_mcp()),
+            );
+        }
+        if TRUST_COMMAND.starts_with(prefix) && !self.external {
+            items.push(
+                CompletionItem::new(TRUST_COMMAND)
+                    .with_label(format!("/{TRUST_COMMAND}"))
+                    .with_hint(termide_i18n::t().agent_hint_trust())
+                    .with_description(termide_i18n::t().agent_cmd_desc_trust()),
             );
         }
         // The external agent's own commands, but those termide's take.

@@ -355,18 +355,24 @@ impl Panel for Editor {
         s
     }
 
-    fn context_menu_items(&self) -> Vec<(String, &'static str)> {
+    fn context_menu_items(&self) -> Vec<(String, String)> {
         let t = t();
         vec![
-            (t.menu_view_as_diagram().to_string(), "view_as_diagram"),
-            (t.help_desc_start_debug().to_string(), START_DEBUG_ACTION),
+            (
+                t.menu_view_as_diagram().to_string(),
+                "view_as_diagram".into(),
+            ),
+            (
+                t.help_desc_start_debug().to_string(),
+                START_DEBUG_ACTION.into(),
+            ),
             (
                 t.help_desc_configure_debug().to_string(),
-                CONFIGURE_DEBUG_ACTION,
+                CONFIGURE_DEBUG_ACTION.into(),
             ),
             (
                 t.help_desc_clear_breakpoints().to_string(),
-                CLEAR_BREAKPOINTS_ACTION,
+                CLEAR_BREAKPOINTS_ACTION.into(),
             ),
         ]
     }

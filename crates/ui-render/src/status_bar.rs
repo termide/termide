@@ -195,14 +195,16 @@ pub fn segment_hit_areas(segments: &[StatusSegment], start_x: u16, width: u16) -
 /// Columns the indicators right of a panel's segments take — background
 /// operations and disk space — so the segments are laid out in the rest.
 pub fn status_trailing_width(
+    plugin_status: Option<&str>,
     background_ops: Option<&BackgroundOpsSummary>,
     disk_space: Option<&DiskSpaceInfo>,
 ) -> u16 {
+    let plugins = plugin_status.map_or(0, |text| " | ".width() + plugin_text(text).width());
     let ops = background_ops
         .filter(|ops| ops.has_operations)
         .map_or(0, |ops| " | ".width() + background_ops_text(ops).width());
     let disk = disk_space.map_or(0, |disk| disk_text(disk).width());
-    (ops + disk) as u16
+    (plugins + ops + disk) as u16
 }
 
 /// Summary of background file operations (for status bar display).
@@ -231,6 +233,13 @@ pub struct StatusBarParams<'a> {
     pub background_ops: Option<BackgroundOpsSummary>,
     /// Whether disk indicator is selected via menu navigation
     pub disk_selected: bool,
+    /// Plugin status items, joined (if any)
+    pub plugin_status: Option<&'a str>,
+}
+
+/// The plugin status indicator's text, after its separator.
+fn plugin_text(text: &str) -> String {
+    format!("{text} ")
 }
 
 /// The disk-space indicator's text.
@@ -252,6 +261,14 @@ fn trailing_spans(
 ) -> Vec<Span<'static>> {
     let theme = params.theme;
     let mut spans = Vec::new();
+    if let Some(text) = params.plugin_status {
+        let style = Style::default().fg(theme.disabled).bg(theme.accented_bg);
+        spans.push(Span::styled(" | ", style));
+        spans.push(Span::styled(
+            plugin_text(text),
+            Style::default().fg(theme.accented_fg).bg(theme.accented_bg),
+        ));
+    }
     if let Some(ops) = params
         .background_ops
         .as_ref()
@@ -725,6 +742,32 @@ mod tests {
     }
 
     #[test]
+    fn plugin_status_sits_before_the_other_indicators() {
+        let theme = Theme::default();
+        let params = StatusBarParams {
+            theme: &theme,
+            status_message: None,
+            terminal_width: 30,
+            terminal_height: 10,
+            recommended_layout: "",
+            background_ops: Some(BackgroundOpsSummary {
+                has_operations: true,
+                status_text: "Copy".into(),
+                is_paused: false,
+            }),
+            disk_selected: false,
+            plugin_status: Some("PROBE"),
+        };
+        let segs = vec![StatusSegment::new("left", SegmentKind::Value)];
+        let spans =
+            StatusBar::get_status_text(&params, "", None, None, None, None, None, Some(&segs), 30);
+        let drawn = line(&spans);
+        assert!(drawn.ends_with(" | PROBE  | ⟳ Copy "), "{drawn:?}");
+        let trailing = status_trailing_width(Some("PROBE"), params.background_ops.as_ref(), None);
+        assert_eq!(usize::from(trailing), " | PROBE  | ⟳ Copy ".width());
+    }
+
+    #[test]
     fn segments_render_where_their_hit_areas_are() {
         let theme = Theme::default();
         let params = StatusBarParams {
@@ -739,6 +782,7 @@ mod tests {
                 is_paused: false,
             }),
             disk_selected: false,
+            plugin_status: None,
         };
         let segs = vec![
             StatusSegment::clickable("Agent: default", SegmentKind::Active, "a"),
@@ -749,7 +793,7 @@ mod tests {
             StatusBar::get_status_text(&params, "", None, None, None, None, None, Some(&segs), 25);
         let drawn = line(&spans);
         assert_eq!(drawn, "Agent: defa…12k | ⟳ Copy ");
-        let width = 25 - status_trailing_width(params.background_ops.as_ref(), None);
+        let width = 25 - status_trailing_width(None, params.background_ops.as_ref(), None);
         for hit in segment_hit_areas(&segs, 0, width) {
             let text: String = drawn
                 .chars()
@@ -780,6 +824,7 @@ mod tests {
             recommended_layout: "",
             background_ops: None,
             disk_selected: false,
+            plugin_status: None,
         };
         let segs = vec![
             StatusSegment::new("漢字\tx", SegmentKind::Value),

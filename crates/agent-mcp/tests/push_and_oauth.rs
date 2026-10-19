@@ -334,6 +334,7 @@ fn ready(event: LateTools) -> Vec<Arc<dyn Tool>> {
         LateTools::NeedsLogin { .. } => panic!("asked for a sign-in"),
         LateTools::Gone { .. } => panic!("gone"),
         LateTools::LoginStarted { .. } => panic!("a sign-in started"),
+        LateTools::NeedsApproval { .. } => panic!("held back for approval"),
     }
 }
 
@@ -367,6 +368,7 @@ fn a_change_pushed_on_the_stream_brings_the_new_tools() {
             name: "live".into(),
             status: McpStatus::Ready { tools: 3 },
             sign_in: McpSignIn::None,
+            launch: connections.status()[0].launch.clone(),
         }]
     );
 }

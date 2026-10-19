@@ -640,6 +640,7 @@ impl App {
                 // background-operations and disk indicators on its right.
                 let width = self.state.terminal.width.saturating_sub(
                     termide_ui_render::status_trailing_width(
+                        self.state.ui.plugin_status.as_deref(),
                         self.state.background_ops_indicator().as_ref(),
                         self.state.cache.disk_space.as_ref(),
                     ),

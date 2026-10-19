@@ -148,6 +148,10 @@ pub trait Tool: Send + Sync {
 /// `Ready` is the whole set, the first one or one that replaces the set
 /// before it (the server changed its list, or it was reconnected), and every
 /// other event but `LoginStarted` leaves the source with none.
+/// The `source` of a termide plugin's tools starts with this, then the
+/// plugin's name; any other source is an MCP server.
+pub const PLUGIN_TOOL_SOURCE: &str = "plugin:";
+
 #[derive(Clone)]
 pub enum LateTools {
     Ready {
@@ -172,6 +176,12 @@ pub enum LateTools {
         source: String,
         url: String,
     },
+    /// The source comes from a project and waits for the user to approve
+    /// what it runs, `launch`.
+    NeedsApproval {
+        source: String,
+        launch: String,
+    },
 }
 
 impl LateTools {
@@ -182,7 +192,8 @@ impl LateTools {
             | Self::Failed { source, .. }
             | Self::Gone { source }
             | Self::NeedsLogin { source }
-            | Self::LoginStarted { source, .. } => source,
+            | Self::LoginStarted { source, .. }
+            | Self::NeedsApproval { source, .. } => source,
         }
     }
 }

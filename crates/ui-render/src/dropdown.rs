@@ -724,6 +724,7 @@ fn command_label(command: &termide_config::commands::CommandItem) -> String {
 
 pub fn get_commands_items(
     registry: &termide_config::commands::CommandsRegistry,
+    plugin_commands: &[(String, String)],
 ) -> Vec<DropdownItem> {
     use termide_config::commands::{encode_command_menu_key, CommandMenuKeyKind};
 
@@ -783,6 +784,17 @@ pub fn get_commands_items(
             )
             .with_submenu(),
         );
+    }
+
+    // Plugin commands last, under a separator: they are not the user's to
+    // rename, edit or delete.
+    if !plugin_commands.is_empty() {
+        if items.len() > 2 {
+            items.push(DropdownItem::separator());
+        }
+        for (action, label) in plugin_commands {
+            items.push(DropdownItem::new(label, action.clone()));
+        }
     }
 
     items
@@ -1466,5 +1478,21 @@ mod menu_shortcut_tests {
             annotated.width(),
             plain.width()
         );
+    }
+}
+
+#[cfg(test)]
+mod plugin_command_tests {
+    use super::*;
+
+    #[test]
+    fn plugin_commands_come_last() {
+        let registry = termide_config::commands::CommandsRegistry::default();
+        let plugins = vec![("plugin_command:p:a".to_string(), "p: A".to_string())];
+        let items = get_commands_items(&registry, &plugins);
+        // Add, its separator, then the plugin's command with no second one.
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[2].key, "plugin_command:p:a");
+        assert_eq!(get_commands_items(&registry, &[]).len(), 2);
     }
 }

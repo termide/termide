@@ -45,6 +45,7 @@ impl App {
         }
 
         // Poll for diagnostics from LSP and dispatch to editors and diagnostics panel
+        let mut published = Vec::new();
         if let Some(ref lsp_manager) = self.state.lsp_manager {
             while let Some(params) = lsp_manager.poll_diagnostics() {
                 // Convert URI to path - parse as URL then extract file path
@@ -56,32 +57,13 @@ impl App {
                     #[cfg(windows)]
                     let path = std::path::PathBuf::from(path_str.trim_start_matches('/'));
 
-                    let diagnostics = params.diagnostics;
-
-                    // Single pass over panels: the matching editor takes an
-                    // owned copy via clone(); the diagnostics panel borrows.
-                    let mut editor_updated = false;
-                    for panel in self.layout_manager.iter_all_panels_mut() {
-                        if !editor_updated {
-                            if let Some(editor) = panel.as_editor_mut() {
-                                if editor.file_path() == Some(&path) {
-                                    editor.update_diagnostics(diagnostics.clone());
-                                    self.state.needs_redraw = true;
-                                    editor_updated = true;
-                                    continue;
-                                }
-                            }
-                        }
-                        if let Some(diag_panel) = panel.as_diagnostics_panel_mut() {
-                            diag_panel.update_diagnostics(path.clone(), &diagnostics);
-                            self.state.needs_redraw = true;
-                        }
-                    }
-
-                    // Move the diagnostics into app state (no extra clone).
-                    self.state.all_diagnostics.insert(path, diagnostics);
+                    published.push((path, params.diagnostics));
                 }
             }
+        }
+        for (path, diagnostics) in published {
+            self.state.lsp_diagnostics.insert(path.clone(), diagnostics);
+            self.publish_diagnostics(path);
         }
 
         // Apply edits the server pushed via `workspace/applyEdit` — the path
@@ -268,6 +250,49 @@ impl App {
                     self.show_error_modal(format!("Rename failed: {}", e));
                 }
             }
+        }
+    }
+}
+
+impl App {
+    /// Show `path`'s diagnostics — the language servers' and the plugins'
+    /// together — in its editor and the diagnostics panel, and keep them for
+    /// the editors and panels opened later.
+    pub(super) fn publish_diagnostics(&mut self, path: std::path::PathBuf) {
+        let mut diagnostics = self
+            .state
+            .lsp_diagnostics
+            .get(&path)
+            .cloned()
+            .unwrap_or_default();
+        if let Some(by_plugin) = self.state.plugin_diagnostics.get(&path) {
+            diagnostics.extend(by_plugin.values().flatten().cloned());
+        }
+
+        // Single pass over panels: the matching editor takes an owned copy
+        // via clone(); the diagnostics panel borrows.
+        let mut editor_updated = false;
+        for panel in self.layout_manager.iter_all_panels_mut() {
+            if !editor_updated {
+                if let Some(editor) = panel.as_editor_mut() {
+                    if editor.file_path() == Some(&path) {
+                        editor.update_diagnostics(diagnostics.clone());
+                        self.state.needs_redraw = true;
+                        editor_updated = true;
+                        continue;
+                    }
+                }
+            }
+            if let Some(diag_panel) = panel.as_diagnostics_panel_mut() {
+                diag_panel.update_diagnostics(path.clone(), &diagnostics);
+                self.state.needs_redraw = true;
+            }
+        }
+
+        if diagnostics.is_empty() {
+            self.state.all_diagnostics.remove(&path);
+        } else {
+            self.state.all_diagnostics.insert(path, diagnostics);
         }
     }
 }

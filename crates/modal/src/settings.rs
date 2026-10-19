@@ -21,6 +21,7 @@ mod fields;
 mod input;
 mod kb;
 mod lsp_server;
+mod plugins;
 mod render;
 mod state;
 
@@ -54,11 +55,13 @@ pub enum SettingsTab {
     /// One debugger, opened from the Debug tab: not in the sidebar, it
     /// names the fields of the page that edits it.
     DebuggerPage,
+    /// Each installed plugin and whether it runs (`[plugins]`).
+    Plugins,
     Keybindings,
 }
 
 /// Top-level leaf tabs in the sidebar (excluding the Keybindings group).
-const TOP_LEVEL_TABS: [SettingsTab; 9] = [
+const TOP_LEVEL_TABS: [SettingsTab; 10] = [
     SettingsTab::General,
     SettingsTab::Editor,
     SettingsTab::FileManager,
@@ -68,6 +71,7 @@ const TOP_LEVEL_TABS: [SettingsTab; 9] = [
     SettingsTab::Logging,
     SettingsTab::Vfs,
     SettingsTab::Ai,
+    SettingsTab::Plugins,
 ];
 
 /// Sidebar width in columns.
@@ -86,6 +90,7 @@ impl SettingsTab {
             SettingsTab::Logging => t.settings_tab_logging().to_string(),
             SettingsTab::Vfs => t.settings_tab_vfs().to_string(),
             SettingsTab::Ai | SettingsTab::Connection => t.settings_tab_agent().to_string(),
+            SettingsTab::Plugins => t.settings_tab_plugins().to_string(),
             SettingsTab::Keybindings => t.settings_tab_keybindings().to_string(),
         }
     }
@@ -263,6 +268,8 @@ pub struct SettingsModal {
     /// The flags each debugger gets on this system when the settings name
     /// none, by name; given by the app, shown beside the flags field.
     debugger_defaults: std::collections::HashMap<String, Vec<String>>,
+    /// The plugins installed, by name, for the Plugins tab.
+    plugin_names: Vec<String>,
 
     // --- AI connections ---
     /// The connection page, while one is open from the AI tab.

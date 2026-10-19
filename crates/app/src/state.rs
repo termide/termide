@@ -143,6 +143,12 @@ pub struct AppState {
     pub lsp_manager: Option<LspManager>,
     /// All diagnostics from LSP servers, keyed by file path
     pub all_diagnostics: HashMap<PathBuf, Vec<lsp_types::Diagnostic>>,
+    /// What the language servers last published for each file; with
+    /// `plugin_diagnostics`, what `all_diagnostics` is made of.
+    pub lsp_diagnostics: HashMap<PathBuf, Vec<lsp_types::Diagnostic>>,
+    /// What each plugin set for each file, by the plugin's project and name.
+    pub plugin_diagnostics:
+        HashMap<PathBuf, std::collections::BTreeMap<(PathBuf, String), Vec<lsp_types::Diagnostic>>>,
     /// User bookmarks
     pub bookmarks: BookmarksConfig,
     /// Project-local bookmarks from `.termide/bookmarks.toml` (read-only overlay)
@@ -273,6 +279,8 @@ impl AppState {
             last_git_spinner_update: None,
             lsp_manager,
             all_diagnostics: HashMap::new(),
+            lsp_diagnostics: HashMap::new(),
+            plugin_diagnostics: HashMap::new(),
             bookmarks,
             project_bookmarks: None,
             project_root: std::env::current_dir().unwrap_or_default(),

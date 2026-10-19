@@ -240,6 +240,7 @@ impl App {
     /// open projects, and save the set for reopening when it changed.
     pub(super) fn sync_open_projects(&mut self) {
         self.save_open_projects();
+        self.plugins.mark_dirty();
         let views: Vec<OpenProjectView> =
             self.open_projects
                 .roots()
@@ -458,6 +459,94 @@ impl App {
                 self.state.global_baseline.ai.clone()
             }
         }
+    }
+
+    /// The files the parked projects' editors wrote since the last call,
+    /// with the root of the project each belongs to.
+    pub(super) fn take_parked_saved_paths(&mut self) -> Vec<(PathBuf, PathBuf)> {
+        let mut saved = Vec::new();
+        for (root, parked) in self.open_projects.parked_mut() {
+            for panel in parked.layout.iter_all_panels_mut() {
+                if let Some(editor) = panel.as_editor_mut() {
+                    saved.extend(
+                        editor
+                            .take_saved_paths()
+                            .into_iter()
+                            .map(|path| (root.to_path_buf(), path)),
+                    );
+                }
+            }
+        }
+        saved
+    }
+
+    /// The editor of `path` in the project at `project` — the current one or
+    /// a parked one — if it is open there.
+    pub(super) fn project_editor_mut(
+        &mut self,
+        project: &Path,
+        path: &Path,
+    ) -> Option<&mut termide_panel_editor::Editor> {
+        let layout = if project == self.open_projects.current() {
+            &mut self.layout_manager
+        } else {
+            &mut self
+                .open_projects
+                .parked_mut()
+                .find(|(root, _)| *root == project)?
+                .1
+                .layout
+        };
+        layout
+            .iter_all_panels_mut()
+            .filter_map(|panel| panel.as_editor_mut())
+            .find(|editor| editor.file_path() == Some(path))
+    }
+
+    /// The plugin panel `id`, in the current project or a parked one.
+    pub(super) fn plugin_panel_mut(
+        &mut self,
+        id: u64,
+    ) -> Option<&mut termide_panel_markdown::MarkdownPanel> {
+        let parked = self
+            .open_projects
+            .parked_mut()
+            .flat_map(|(_, parked)| parked.layout.iter_all_panels_mut());
+        self.layout_manager
+            .iter_all_panels_mut()
+            .chain(parked)
+            .filter_map(|panel| {
+                panel
+                    .as_any_mut()
+                    .downcast_mut::<termide_panel_markdown::MarkdownPanel>()
+            })
+            .find(|panel| panel.plugin_panel_id() == Some(id))
+    }
+
+    /// The ids of every plugin panel open, in any project.
+    pub(super) fn plugin_panel_ids(&mut self) -> Vec<u64> {
+        let parked = self
+            .open_projects
+            .parked_mut()
+            .flat_map(|(_, parked)| parked.layout.iter_all_panels_mut());
+        self.layout_manager
+            .iter_all_panels_mut()
+            .chain(parked)
+            .filter_map(|panel| {
+                panel
+                    .as_any()
+                    .downcast_ref::<termide_panel_markdown::MarkdownPanel>()
+                    .and_then(termide_panel_markdown::MarkdownPanel::plugin_panel_id)
+            })
+            .collect()
+    }
+
+    /// The roots of the parked projects.
+    pub(super) fn parked_roots(&self) -> Vec<PathBuf> {
+        self.open_projects
+            .parked()
+            .map(|(root, _)| root.to_path_buf())
+            .collect()
     }
 
     /// The open projects' roots in the order the menus list them.

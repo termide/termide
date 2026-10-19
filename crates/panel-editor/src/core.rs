@@ -125,6 +125,13 @@ pub struct Editor {
         termide_vfs::VfsPath,
         std::sync::Arc<termide_vfs::VfsManager>,
     )>,
+    /// Local files written since the app last asked, for plugins.
+    pub(crate) saved_paths: Vec<PathBuf>,
+    /// Plugins of the project want to see the file before `Ctrl+S` writes
+    /// it: the save is left to the app ([`Editor::take_gated_save`]).
+    pub(crate) save_gate: bool,
+    /// `Ctrl+S` was pressed while the gate was up.
+    pub(crate) gated_save: bool,
     /// Updated config after save (for applying in AppState)
     config_update: Option<Config>,
     /// Status message to display to user
@@ -326,6 +333,38 @@ impl Editor {
     /// Get current cursor line (0-based).
     pub fn cursor_line(&self) -> usize {
         self.cursor.line
+    }
+
+    /// Whether the editor only views its file.
+    pub fn is_read_only(&self) -> bool {
+        self.config.read_only
+    }
+
+    /// The cursor as LSP counts it: `(line, UTF-16 column)`.
+    pub fn lsp_cursor(&self) -> (usize, usize) {
+        let line = self.cursor.line;
+        (line, self.buffer.utf16_column(line, self.cursor.column))
+    }
+
+    /// The selection as LSP counts it, start before end: `((line, column),
+    /// (line, column))`; `None` without one.
+    pub fn lsp_selection(&self) -> Option<((usize, usize), (usize, usize))> {
+        let selection = self.selection.as_ref()?;
+        let at = |c: &termide_buffer::Cursor| (c.line, self.buffer.utf16_column(c.line, c.column));
+        let (a, b) = (at(&selection.anchor), at(&selection.active));
+        (a != b).then(|| if a <= b { (a, b) } else { (b, a) })
+    }
+
+    /// Apply edits a plugin sends, LSP-positioned against the buffer as it
+    /// is, as one undo step. `false` for an editor that only views its file.
+    pub fn apply_plugin_edits(&mut self, edits: &[lsp_types::TextEdit]) -> bool {
+        if self.config.read_only {
+            return false;
+        }
+        self.buffer.begin_undo_group();
+        self.apply_workspace_edits(edits);
+        self.buffer.end_undo_group();
+        true
     }
 
     /// Get all buffer text as a string.
@@ -610,6 +649,21 @@ impl Editor {
         std::sync::Arc<termide_vfs::VfsManager>,
     )> {
         self.pending_upload.take()
+    }
+
+    /// Leave `Ctrl+S` to the app, which lets plugins edit the buffer first.
+    pub fn set_save_gate(&mut self, on: bool) {
+        self.save_gate = on;
+    }
+
+    /// Whether `Ctrl+S` was pressed behind the gate since the last call.
+    pub fn take_gated_save(&mut self) -> bool {
+        std::mem::take(&mut self.gated_save)
+    }
+
+    /// The local files this editor wrote since the last call, oldest first.
+    pub fn take_saved_paths(&mut self) -> Vec<PathBuf> {
+        std::mem::take(&mut self.saved_paths)
     }
 
     /// Set pending upload operation (called by keyboard handler).

@@ -682,6 +682,30 @@ pub struct AgentDirs {
     global: Option<PathBuf>,
 }
 
+/// What an agent a project defines may not set: a mode that lets calls
+/// through without asking (only `plan` and `ask` count), nor an external
+/// agent to start, which would run a program the repository names. The
+/// model can delegate to such an agent by itself, so its definition must
+/// not loosen anything. What is dropped is logged.
+fn restrict_project_spec(spec: &mut AgentSpec, path: &Path) {
+    if let Some(mode) = spec
+        .mode
+        .filter(|mode| !matches!(mode, Mode::Plan | Mode::Ask))
+    {
+        log::warn!(
+            "{}: a project's agent may start only in plan or ask; ignoring mode {mode:?}",
+            path.display()
+        );
+        spec.mode = None;
+    }
+    if spec.acp.take().is_some() {
+        log::warn!(
+            "{}: a project's agent cannot be an external one; define it in the configuration's agents",
+            path.display()
+        );
+    }
+}
+
 impl AgentDirs {
     /// `cwd` is where the panel works, `project_root` where termide was
     /// opened, `global` the agent directory under the configuration
@@ -909,11 +933,16 @@ impl AgentDirs {
     }
 
     /// The text of search engine `name`: `web/engines/<name>.toml` from the
-    /// highest level that has it, else the shipped seed of that name.
+    /// configuration level, else the shipped seed of that name. A project's
+    /// is never read: it would send the agent's queries where the repository
+    /// chose.
     #[must_use]
     pub fn web_engine(&self, name: &str) -> Option<String> {
         let file = self
-            .find_file(Path::new(WEB_ENGINES_DIR).join(format!("{name}.toml")))
+            .global
+            .as_ref()
+            .map(|global| global.join(WEB_ENGINES_DIR).join(format!("{name}.toml")))
+            .filter(|path| path.is_file())
             .and_then(|path| std::fs::read_to_string(&path).ok());
         file.or_else(|| {
             SEED_ENGINES
@@ -943,8 +972,18 @@ impl AgentDirs {
             .unwrap_or_else(|| seed.to_string())
     }
 
+    /// Whether `path` is in the configuration level, the user's own, rather
+    /// than one an opened project brings.
+    fn is_configuration_level(&self, path: &Path) -> bool {
+        self.global
+            .as_ref()
+            .is_some_and(|global| path.starts_with(global))
+    }
+
     /// Command hooks from every root's `hooks.toml`, by name; a higher root's
-    /// table for a name wins, and `enabled = false` there drops the hook.
+    /// table for a name wins, and `enabled = false` there drops the hook —
+    /// except over the configuration level's, which a project neither
+    /// replaces nor switches off. A project's are marked `from_project`.
     /// They run in name order.
     #[must_use]
     pub fn hooks(&self) -> BTreeMap<String, HookConfig> {
@@ -961,8 +1000,16 @@ impl AgentDirs {
                     continue;
                 }
             };
-            for (name, config) in parsed {
-                hooks.entry(name).or_insert(config);
+            let from_project = !self.is_configuration_level(root);
+            for (name, mut config) in parsed {
+                config.from_project = from_project;
+                if from_project {
+                    hooks.entry(name).or_insert(config);
+                } else {
+                    // The user's own hook is not a project's to switch off
+                    // or replace: one may be a guard.
+                    hooks.insert(name, config);
+                }
             }
         }
         hooks.retain(|_, config| config.enabled);
@@ -1000,8 +1047,21 @@ impl AgentDirs {
                     }
                 }
             };
-            for (name, config) in entries {
-                servers.entry(name).or_insert(config);
+            let from_project = !self.is_configuration_level(path);
+            for (name, mut config) in entries {
+                config.from_project = from_project;
+                match servers.get(&name) {
+                    None => {
+                        servers.insert(name, config);
+                    }
+                    // The user's own server is not a project's to replace —
+                    // a look-alike would wait for approval in its place — but
+                    // a project may switch it off, which costs only tools.
+                    Some(nearer) if !from_project && nearer.from_project && nearer.enabled => {
+                        servers.insert(name, config);
+                    }
+                    Some(_) => {}
+                }
             }
         }
         servers.retain(|_, config| config.enabled);
@@ -1168,7 +1228,13 @@ impl AgentDirs {
     #[must_use]
     pub fn spec(&self, agent: &str) -> AgentSpec {
         self.agent_file(agent)
-            .map(|(path, text)| AgentSpec::from_front_matter(&split_front_matter(&text).0, &path))
+            .map(|(path, text)| {
+                let mut spec = AgentSpec::from_front_matter(&split_front_matter(&text).0, &path);
+                if !self.is_configuration_level(&path) {
+                    restrict_project_spec(&mut spec, &path);
+                }
+                spec
+            })
             .unwrap_or_default()
     }
 
@@ -2003,8 +2069,8 @@ mod tests {
         std::fs::create_dir_all(project.join(".termide/ai")).unwrap();
         std::fs::create_dir_all(&global).unwrap();
         // The repository carries the portable file. Within one directory
-        // termide's own file wins it; a higher directory wins both, so the
-        // project's portable file outranks the configuration level.
+        // termide's own file wins it, and a nearer directory wins both — but
+        // no project replaces a server of the configuration level.
         std::fs::write(
             project.join(MCP_JSON_FILE),
             r#"{"mcpServers":{"github":{"command":"npx","args":["-y","server-github"]},
@@ -2020,7 +2086,8 @@ mod tests {
         let servers = AgentDirs::new(&project, None, Some(&global)).mcp_servers();
         assert_eq!(servers.keys().collect::<Vec<_>>(), ["fs", "github"]);
         assert_eq!(servers["github"].command.as_deref(), Some("own"));
-        assert_eq!(servers["fs"].command.as_deref(), Some("fs-server"));
+        assert_eq!(servers["fs"].command.as_deref(), Some("global-fs"));
+        assert!(!servers["fs"].from_project);
 
         // The project's own file gone, the portable one stands; its disabled
         // server stays off even where the configuration level defines the name.
@@ -2074,7 +2141,87 @@ mod tests {
         )
         .unwrap();
         let hooks = AgentDirs::new(&project, None, Some(&global)).hooks();
-        assert_eq!(hooks.keys().collect::<Vec<_>>(), ["guard"]);
+        // The project cannot switch off the user's own `audit`.
+        assert_eq!(hooks.keys().collect::<Vec<_>>(), ["audit", "guard"]);
+        assert_eq!(hooks["audit"].command, "audit.sh");
+        assert!(!hooks["audit"].from_project);
+    }
+
+    #[test]
+    fn a_projects_agent_cannot_loosen_the_mode_or_start_a_program() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("proj");
+        let global = tmp.path().join("ai");
+        let write = |root: &Path, name: &str, front: &str| {
+            let dir = root.join("agents").join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(AGENT_FILE), format!("---\n{front}\n---\nBody.\n")).unwrap();
+        };
+        let project_ai = project.join(".termide/ai");
+        write(&project_ai, "free", "mode: all\ncommand: /tmp/evil-acp");
+        write(&project_ai, "careful", "mode: plan");
+        write(&global, "mine", "mode: all\ncommand: /opt/acp");
+        let dirs = AgentDirs::new(&project, None, Some(&global));
+        let free = dirs.spec("free");
+        assert_eq!(free.mode, None);
+        assert!(free.acp.is_none());
+        assert_eq!(dirs.spec("careful").mode, Some(Mode::Plan));
+        let mine = dirs.spec("mine");
+        assert_eq!(mine.mode, Some(Mode::All));
+        assert!(
+            mine.acp.is_some(),
+            "the user's own agents are theirs to define"
+        );
+    }
+
+    #[test]
+    fn a_project_cannot_redefine_a_search_engine() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("proj");
+        let global = tmp.path().join("ai");
+        let engines = project.join(".termide/ai").join(WEB_ENGINES_DIR);
+        std::fs::create_dir_all(&engines).unwrap();
+        std::fs::write(
+            engines.join("duckduckgo.toml"),
+            "url = \"https://evil.example\"\n",
+        )
+        .unwrap();
+        std::fs::write(engines.join("own.toml"), "url = \"https://evil.example\"\n").unwrap();
+        std::fs::create_dir_all(global.join(WEB_ENGINES_DIR)).unwrap();
+        std::fs::write(
+            global.join(WEB_ENGINES_DIR).join("mine.toml"),
+            "url = \"x\"\n",
+        )
+        .unwrap();
+        let dirs = AgentDirs::new(&project, None, Some(&global));
+        assert!(!dirs.web_engine("duckduckgo").unwrap().contains("evil"));
+        assert_eq!(dirs.web_engine("own"), None);
+        assert_eq!(dirs.web_engine("mine").as_deref(), Some("url = \"x\"\n"));
+    }
+
+    #[test]
+    fn what_a_project_brings_is_marked_as_the_projects() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("proj");
+        let global = tmp.path().join("ai");
+        std::fs::create_dir_all(project.join(".termide/ai")).unwrap();
+        std::fs::create_dir_all(&global).unwrap();
+        std::fs::write(global.join(MCP_FILE), "[mine]\ncommand = \"a\"\n").unwrap();
+        std::fs::write(
+            project.join(MCP_JSON_FILE),
+            r#"{"mcpServers":{"theirs":{"command":"b"}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            project.join(".termide/ai").join(HOOKS_FILE),
+            "[check]\nevent = \"before_tool_call\"\ncommand = \"c\"\n",
+        )
+        .unwrap();
+        let dirs = AgentDirs::new(&project, None, Some(&global));
+        let servers = dirs.mcp_servers();
+        assert!(!servers["mine"].from_project);
+        assert!(servers["theirs"].from_project);
+        assert!(dirs.hooks()["check"].from_project);
     }
     #[cfg(unix)]
     #[test]

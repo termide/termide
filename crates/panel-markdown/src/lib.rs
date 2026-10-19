@@ -34,6 +34,9 @@ use termide_ui::ScrollBar;
 
 use termide_ui::text_utils::{char_col_to_display, display_to_char_col, url_fragment};
 
+/// What a plugin panel's own `[≡]` entries are routed back under.
+const PLUGIN_MENU_PREFIX: &str = "plugin-menu:";
+
 /// A cursor / selection position: `(line index, character column)`.
 type Pos = (usize, usize);
 
@@ -101,6 +104,12 @@ pub struct MarkdownPanel {
     /// The fetch this viewer waits for, `(request id, URL)`: its title shows a
     /// spinner and the URL until the app delivers the page or the failure.
     loading: Option<(u64, String)>,
+    /// The id the app gave the panel when a plugin opened it; its content
+    /// comes from the plugin, a `plugin:` link is an action for it, and it
+    /// has no source to edit nor a place in the saved layout.
+    plugin_panel: Option<u64>,
+    /// A plugin panel's own entries of its `[≡]` menu: label and action.
+    plugin_menu: Vec<(String, String)>,
 }
 
 impl MarkdownPanel {
@@ -139,7 +148,43 @@ impl MarkdownPanel {
             hist_idx: 0,
             pending_anchor: None,
             loading: None,
+            plugin_panel: None,
+            plugin_menu: Vec::new(),
         }
+    }
+
+    /// A panel a plugin opened: `source` is its Markdown, `id` what the app
+    /// knows it by.
+    pub fn for_plugin(id: u64, title: String, source: String) -> Self {
+        let mut panel = Self::empty();
+        panel.title = title;
+        panel.source = source;
+        panel.plugin_panel = Some(id);
+        panel
+    }
+
+    /// Set a plugin panel's own `[≡]` entries, `(label, action)`: one chosen
+    /// is handed to the plugin as the action.
+    pub fn set_plugin_menu(&mut self, menu: Vec<(String, String)>) {
+        self.plugin_menu = menu;
+    }
+
+    /// The id of a panel a plugin opened; `None` for any other viewer.
+    pub fn plugin_panel_id(&self) -> Option<u64> {
+        self.plugin_panel
+    }
+
+    /// Replace a plugin panel's content, keeping the reader where they were
+    /// as far as the new content reaches.
+    pub fn set_plugin_content(&mut self, title: Option<String>, source: String) {
+        if let Some(title) = title {
+            self.title = title;
+        }
+        self.source = source;
+        self.matches.clear();
+        self.anchor = None;
+        // Laid out again on the next render, which clamps the position.
+        self.layout_width = 0;
     }
 
     /// Open a markdown file in the preview panel.
@@ -264,6 +309,9 @@ impl Panel for MarkdownPanel {
 
     fn icon(&self) -> Option<&str> {
         // A globe for a fetched web page (matching the bookmark icon).
+        if self.plugin_panel.is_some() {
+            return Some("🧩");
+        }
         self.source_url.as_ref().map(|_| "🌐")
     }
 
@@ -441,7 +489,9 @@ impl Panel for MarkdownPanel {
         // regardless of the active keyboard layout (e.g. Cyrillic `х`/`ъ`).
         let key = chord.canonical;
 
-        if self.hotkeys.matches("toggle_view", &key) {
+        // A plugin's panel has no source to edit nor a file to re-read.
+        let from_file = self.plugin_panel.is_none();
+        if from_file && self.hotkeys.matches("toggle_view", &key) {
             return vec![PanelEvent::SwapActiveToText(self.file_path.clone())];
         }
         // Open the link under the cursor outside termide (`O`/`Alt+Enter` by
@@ -457,7 +507,7 @@ impl Panel for MarkdownPanel {
         let page = (self.viewport_height() as i32 - 1).max(1);
 
         // Ctrl+R: re-read from disk (pick up external edits), keeping position.
-        if ctrl && key.code == KeyCode::Char('r') {
+        if from_file && ctrl && key.code == KeyCode::Char('r') {
             let (top, cursor) = (self.top, self.cursor);
             let _ = self.reload();
             self.cursor = cursor;
@@ -612,6 +662,13 @@ impl Panel for MarkdownPanel {
         let sep = || StatusSegment::new(" │ ", SegmentKind::Label);
         let total = self.line_count().max(1);
         let pos = (self.cursor.0 + 1).min(total);
+        if self.plugin_panel.is_some() {
+            return vec![
+                StatusSegment::new(" ", SegmentKind::Label),
+                StatusSegment::new("Line: ", SegmentKind::Label),
+                StatusSegment::new(format!("{pos}/{total}"), SegmentKind::Value),
+            ];
+        }
         // Same field order as the editor: View first, then Edit.
         vec![
             StatusSegment::new(" ", SegmentKind::Label),
@@ -626,9 +683,26 @@ impl Panel for MarkdownPanel {
         ]
     }
 
+    fn context_menu_items(&self) -> Vec<(String, String)> {
+        self.plugin_menu
+            .iter()
+            .map(|(label, action)| (label.clone(), format!("{PLUGIN_MENU_PREFIX}{action}")))
+            .collect()
+    }
+
     fn handle_status_action(&mut self, action: &str) -> Vec<PanelEvent> {
+        if let (Some(panel), Some(action)) =
+            (self.plugin_panel, action.strip_prefix(PLUGIN_MENU_PREFIX))
+        {
+            return vec![PanelEvent::PluginAction {
+                panel,
+                action: action.to_string(),
+            }];
+        }
         match action {
-            "edit_source" => vec![PanelEvent::SwapActiveToText(self.file_path.clone())],
+            "edit_source" if self.plugin_panel.is_none() => {
+                vec![PanelEvent::SwapActiveToText(self.file_path.clone())]
+            }
             _ => vec![],
         }
     }
@@ -644,8 +718,9 @@ impl Panel for MarkdownPanel {
     }
 
     fn to_state(&self, _project_dir: &Path) -> Option<PanelState> {
-        // Only file-backed viewers persist; fetched URLs are not restored.
-        if self.source_url.is_some() {
+        // Only file-backed viewers persist; fetched URLs and plugin panels
+        // are not restored.
+        if self.source_url.is_some() || self.plugin_panel.is_some() {
             return None;
         }
         Some(PanelState::Markdown {
@@ -704,6 +779,8 @@ mod tests {
             hist_idx: 0,
             pending_anchor: None,
             loading: None,
+            plugin_panel: None,
+            plugin_menu: Vec::new(),
         };
         p.doc = render::render_markdown(src, 80, &p.colors, false);
         p.layout_width = 80;
@@ -763,6 +840,50 @@ mod tests {
         });
         assert_eq!(p.top, target.min(p.line_count() - 1));
         assert!(p.top > 0, "the panel actually scrolled");
+    }
+
+    #[test]
+    fn a_plugin_panel_hands_its_links_to_the_plugin() {
+        let mut p =
+            MarkdownPanel::for_plugin(7, "Status".into(), "[Refresh](plugin:refresh)".into());
+        p.relayout_if_needed(80);
+        let url = p
+            .doc
+            .links
+            .first()
+            .expect("the link is laid out")
+            .url
+            .clone();
+        assert!(matches!(
+            p.activate_link(&url).as_slice(),
+            [PanelEvent::PluginAction { panel: 7, action }] if action == "refresh"
+        ));
+        assert!(
+            p.to_state(Path::new("/")).is_none(),
+            "not saved in the layout"
+        );
+        assert_eq!(p.icon(), Some("🧩"));
+        assert!(p.handle_status_action("edit_source").is_empty());
+        p.set_plugin_menu(vec![("Refresh".into(), "refresh".into())]);
+        let (label, id) = p.context_menu_items().remove(0);
+        assert_eq!(label, "Refresh");
+        assert!(matches!(
+            p.handle_status_action(&id).as_slice(),
+            [PanelEvent::PluginAction { panel: 7, action }] if action == "refresh"
+        ));
+
+        p.top = 0;
+        p.set_plugin_content(Some("Status 2".into()), "# New\n\nmore".into());
+        p.relayout_if_needed(80);
+        assert_eq!(p.title, "Status 2");
+        assert!(p.selected_text().is_empty());
+        assert!((0..p.line_count()).any(|i| p.line_text(i).contains("New")));
+        // A `plugin:` link in an ordinary viewer is not an action.
+        let mut plain = panel_from("[x](plugin:refresh)");
+        assert!(!matches!(
+            plain.activate_link("plugin:refresh").as_slice(),
+            [PanelEvent::PluginAction { .. }]
+        ));
     }
 
     #[test]

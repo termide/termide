@@ -277,6 +277,19 @@ impl App {
             }
         }
 
+        for (action, label) in self
+            .plugin_palette_commands()
+            .into_iter()
+            .chain(self.plugin_management_commands())
+        {
+            actions.push(action);
+            entries.push(CommandEntry {
+                label,
+                category: t.palette_category_plugins(),
+                keybinding: String::new(),
+            });
+        }
+
         self.command_palette_actions = Some(actions);
 
         let modal = CommandPaletteModal::new(entries);

@@ -59,6 +59,8 @@ pub(super) enum ContentRow {
     Debugger(usize),
     /// Debugger page: the buttons back to the list and resetting it.
     DebuggerButtons,
+    /// Plugins: an installed plugin (index into the names); steps its value.
+    Plugin(usize),
 }
 
 impl ContentRow {
@@ -253,7 +255,7 @@ pub(super) fn fields_for_tab(tab: SettingsTab) -> Vec<FieldDescriptor> {
         SettingsTab::LspServer => super::lsp_server::lsp_server_fields(),
         SettingsTab::Debug => super::debugger::debug_fields(),
         SettingsTab::DebuggerPage => super::debugger::debugger_fields(),
-        SettingsTab::Keybindings => vec![],
+        SettingsTab::Plugins | SettingsTab::Keybindings => vec![],
     }
 }
 
@@ -364,7 +366,7 @@ pub(super) fn get_field_value(config: &Config, tab: SettingsTab, index: usize) -
         SettingsTab::Connection | SettingsTab::LspServer | SettingsTab::DebuggerPage => {
             String::new()
         }
-        SettingsTab::Keybindings => String::new(),
+        SettingsTab::Plugins | SettingsTab::Keybindings => String::new(),
     }
 }
 
@@ -681,6 +683,8 @@ fn cycle_on_limit(config: &mut Config, forward: bool) {
     }];
 }
 
+/// The AI tab's browser program field.
+pub(super) const AI_CHROME_PATH_FIELD: usize = 6;
 /// The AI tab's field for the permission mode new sessions start in.
 pub(super) const AI_PERMISSION_MODE_FIELD: usize = 7;
 

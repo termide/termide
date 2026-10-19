@@ -1023,7 +1023,8 @@ termide ships `duckduckgo`, `bing`, `google` and `yandex` and keeps them
 current like its other shipped files. When an engine changes its page and the
 search starts returning nothing, the selectors in its file need updating; a
 file of your own with a new name adds an engine. The keys are described in
-the shipped files.
+the shipped files. Only the configuration's `ai/web/engines/` is read: a
+project's would send the agent's queries where the repository chose.
 
 In `plan` and `edit` both tools run without asking; in `ask` and, without a
 rule, in `configured` they ask; in `auto` a search runs and a fetch, whose
@@ -1180,9 +1181,14 @@ in front of you in a focused terminal window, the question also rings the
 terminal bell, and so does the end of a run that took ten seconds or more (not
 one you stopped, nor one an active `/goal` or `/loop` carries on from: those
 ring when they end); it rings once until you look at the panel, and
-`bell_on_attention = false` under `[ai]` silences it. "In this project" appends the rule to
-`.termide/config.toml` in the project, "everywhere" to the global
-configuration; answers for the session live until the panel closes.
+`bell_on_attention = false` under `[ai]` silences it. "In this project" keeps
+the rule in termide's data directory, filed under the project
+(`trust/<project path>/permissions.toml`), "everywhere" appends it to the
+global configuration; answers for the session live until the panel closes.
+The rule is not written to the project's `.termide/config.toml`: a file that
+comes with the repository may make the agent ask or refuse, but its `mode`
+and its `allow` rules are ignored, so that no repository can let the agent
+through on its own.
 
 Every call keeps who decided it, in the session log and so across a resume:
 the rules, plan mode, a hook, the auto mode reviewer with its reason, no one
@@ -1593,6 +1599,12 @@ invisible marks a copy may bring along — a zero-width space, a byte order
 mark, control characters — are dropped; an icon with nothing visible left
 keeps 🤖. A key termide does not read — a typo
 such as `descripton:` — is reported under the banner when a panel opens.
+
+An agent a project defines may start only in `plan` or `ask`, and cannot be
+an external agent (`command:`): the model can delegate to it by itself, and a
+repository must not loosen what the agent may do or name a program for
+termide to start. Such a `mode` or `command` is ignored, with a line in the
+log; define those agents in the configuration's `agents/`.
 
 Switching agents mid-session swaps the prompt and the tools for the next
 request; the model and the mode change only when the definition names them,
@@ -2213,9 +2225,23 @@ older transport, where requests go to an address a stream names first, is not
 the one TermIDE speaks — and so is one
 holding a `${input:…}` reference: that asks you for a secret in the other
 tool, and termide would start it on an empty one. Every skip is in the log. Within one directory `mcp.toml` wins the
-same name; the directory nearer the panel wins both. One `.mcp.json` above a
+same name; the directory nearer the panel wins both — except over a server of
+the configuration level, which a project may switch off (`enabled = false`,
+`disabled`) but not replace. One `.mcp.json` above a
 group of repositories therefore serves every panel opened inside them, the
 same way Claude Code reads it.
+
+A server that comes from anywhere but the configuration level — a project's
+`mcp.toml`, any `.mcp.json` — starts a program or sends your keys to an
+address the repository chose, so it waits for you: the session says what it
+would run (`mcp ext: from the project, runs npx ext-server — /trust ext to
+start it`) and it is listed but not started. `/trust` lists everything a
+project brings that waits so, `/trust <name>` (or `t` on its heading in the
+toolset list) approves it and connects it. The approval is for the launch as
+it is now — command, arguments, environment, working directory, or URL,
+headers and OAuth client — and is kept in termide's data directory under the
+project (`trust/<project path>/approved.toml`), never in the project. If the
+repository changes any of it, it waits again.
 
 An MCP tool asks for permission like a command: it runs in `all`, goes to
 the reviewer in `auto`, and asks elsewhere unless a rule covers it in
@@ -2255,6 +2281,12 @@ what the model sees; exit code 2 turns the result into an error with
 standard error as its text. Hooks run in name order before the permission
 rules; a hook that fails in any other way, or exceeds its timeout, is logged
 and ignored, so a broken hook never stops the agent.
+
+A project's hook waits for approval as a project's MCP server does: the panel
+says so when it opens, it does not run until `/trust <name>`, and the approval
+holds while its command, arguments, event, tools and timeout stay as they were; it then runs from
+the next run on. A project can neither switch off nor replace a hook of the
+configuration level: one of yours may be a guard.
 
 ### Command shims
 

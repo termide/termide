@@ -5206,6 +5206,7 @@ dependencies = [
  "termide-panel-operations",
  "termide-panel-outline",
  "termide-panel-terminal",
+ "termide-plugins",
  "termide-project",
  "termide-secrets",
  "termide-state",
@@ -5269,6 +5270,7 @@ dependencies = [
  "tempfile",
  "termide-agent-core",
  "termide-keyboard",
+ "termide-project",
  "toml",
  "toml_edit",
 ]
@@ -5863,6 +5865,18 @@ dependencies = [
  "unicode-width",
  "vte",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "termide-plugins"
+version = "0.44.0"
+dependencies = [
+ "libc",
+ "log",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
 ]
 
 [[package]]
