@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Background tasks run out of sight.** A `task` handed over in the background took an agent panel, a free one or a new one beside the others, and changed the layout for as long as it ran. It now runs out of sight as a task the call waits for does, and has a row above the delegating panel's input — the delegate, the task, what it did last and its time — whose `✕` stops it, after a confirmation, and whose click shows a view of it. Its cards stay up when the delegating panel's own run stops, and closing that panel stops its tasks, after a confirmation that counts them.
 - **A delegate asks you instead of being refused.** A delegated task running out of sight could do only what the rules and the mode already allowed: anything that would have asked was refused, though you were right there in the panel that delegated it. Its permission requests now come to that panel on the usual card, headed `& <delegate> ·` as its questions are, for termide's own loop and for a copy of Claude Code alike; only a `termide --prompt` run, with no one to ask, still refuses them. Delegates working side by side ask in turn, one card at a time, where a second question at once used to be turned away. What you grant a delegate for the session holds for its task alone, and "always" is not offered it.
 
+### Fixed
+- **`install.sh` on systems without glibc.** The installer always picked the gnu build on Linux, which needs the system's glibc loader; where there is none — a 32-bit Raspberry Pi OS booted with a 64-bit kernel (`arm_64bit=1`), Alpine, NixOS — the installed binary failed with "No such file or directory". It now checks for the loader and installs the fully static musl build when it is missing.
+
 ## [0.44.0] - 2026-10-19
 
 [0.44.0]: https://github.com/termide/termide/releases/tag/0.44.0

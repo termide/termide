@@ -95,7 +95,20 @@ install_binary() {
     info "Installing binary to $INSTALL_DIR..."
 
     if [ "$OS" = "linux" ]; then
-        TARGET="${ARCH}-unknown-linux-gnu"
+        # The gnu build needs the system's glibc loader. Without it (Alpine,
+        # NixOS, a 32-bit userland on a 64-bit kernel such as Raspberry Pi OS
+        # with arm_64bit=1) the binary fails with "No such file or directory",
+        # so fall back to the fully static musl build.
+        case "$ARCH" in
+            x86_64) LOADER="/lib64/ld-linux-x86-64.so.2" ;;
+            aarch64) LOADER="/lib/ld-linux-aarch64.so.1" ;;
+        esac
+        if [ -e "$LOADER" ]; then
+            TARGET="${ARCH}-unknown-linux-gnu"
+        else
+            info "No glibc loader ($LOADER) found, using the static musl build"
+            TARGET="${ARCH}-unknown-linux-musl"
+        fi
     else
         TARGET="${ARCH}-apple-darwin"
     fi
