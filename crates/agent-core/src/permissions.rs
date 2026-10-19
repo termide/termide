@@ -570,6 +570,9 @@ pub struct PermissionEnvelope {
     /// The delegate that asks, when it is not the panel's own agent: its
     /// card is headed with its name, and what it grants stays with its task.
     pub delegate: Option<String>,
+    /// The id of the `task` call that handed the delegate its task, so a
+    /// panel following that task can take the card.
+    pub task: Option<String>,
 }
 
 /// Cloneable, so the hooks of calls that come in another way — tools served
@@ -581,6 +584,8 @@ pub struct ChannelPrompter {
     next_id: u64,
     /// Who asks, when it is not the panel's own agent.
     delegate: Option<String>,
+    /// The `task` call that handed it its task.
+    task: Option<String>,
     /// Ends the wait besides `cancel`: a delegate's own stop, which the
     /// panel's run does not see.
     stop: Option<CancelToken>,
@@ -600,6 +605,16 @@ impl ChannelPrompter {
         Self {
             delegate: Some(agent.to_string()),
             stop: Some(stop),
+            ..self.clone()
+        }
+    }
+
+    /// This prompter for the task the `task` call `call` handed over: its
+    /// cards say so, for a panel following the task to take them.
+    #[must_use]
+    pub fn for_task(&self, call: &str) -> Self {
+        Self {
+            task: Some(call.to_string()),
             ..self.clone()
         }
     }
@@ -628,6 +643,7 @@ pub fn permission_channel(cancel: CancelToken) -> (ChannelPrompter, Receiver<Per
             cancel,
             next_id: 0,
             delegate: None,
+            task: None,
             stop: None,
         },
         rx,
@@ -654,6 +670,7 @@ impl PermissionPrompter for ChannelPrompter {
             reply,
             withdrawn: withdrawn.clone(),
             delegate: self.delegate.clone(),
+            task: self.task.clone(),
         };
         if self.tx.send(envelope).is_err() {
             // The panel is gone; nobody can approve anything.

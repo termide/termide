@@ -68,6 +68,7 @@ use crate::session_ops::discard_if_empty;
 use crate::toolset::{served_skills, Blocked, TOOLSET_ACTION};
 
 pub use peers::PeerState;
+pub use pending::Card;
 pub use runtime::local_minute;
 pub use slash::user_skill_description;
 pub use transcript::{FoldMode, Item, NoticeKind, Transcript};
@@ -84,6 +85,11 @@ const RENAME_ACTION: &str = "agent_rename";
 const DELETE_SESSION_ACTION: &str = "agent_delete_session";
 /// The confirmation of `Ctrl+T`, taking another agent's task over.
 const TAKE_OVER_ACTION: &str = "agent_take_over";
+/// Stop the task this panel follows, once confirmed.
+const STOP_WATCHED_ACTION: &str = "agent_stop_watched";
+/// Stop a task this panel handed over in the background, once confirmed;
+/// the `task` call's id follows the colon.
+const STOP_TASK_ACTION: &str = "agent_stop_task:";
 /// Confirmation action that forks the session into a new panel (also `F5`).
 const FORK_SESSION_ACTION: &str = "agent_fork_session";
 /// Confirmation action that deletes the recent session picked in the banner.
@@ -466,8 +472,14 @@ enum RunButton {
     /// `[▶]`: resume a paused run, or withdraw a pause not reached yet, like
     /// `/continue`.
     Continue,
-    /// `[■]`: stop the run, like `Esc`.
+    /// `[■]`: stop the run, like `Esc`; in a panel following another
+    /// agent's task, stop that task, once confirmed.
     Stop,
+    /// `[✎]`: take the task this panel follows over, once confirmed.
+    TakeOver,
+    /// `[⧉]`: move the view of a task, shown over the layout, into a panel
+    /// of its own.
+    Dock,
 }
 
 /// Live state of the current run: the phase, when it started, and enough to
@@ -969,6 +981,13 @@ pub struct AgentPanel {
     queued_texts: VecDeque<(String, Instant)>,
     /// The delegated task running out of sight this panel follows.
     watch: Option<watch::Watch>,
+    /// The panel is shown over the layout, not in it.
+    in_overlay: bool,
+    /// Delegates' cards handed here by another panel, shown in their turn.
+    cards_in: VecDeque<pending::Card>,
+    /// Delegates' cards set aside for the panels following their tasks,
+    /// each with its `task` call's id, until the app hands them over.
+    cards_out: Vec<(String, pending::Card)>,
     /// The panel's number, which other agents address it by.
     panel_id: u64,
     /// How many messages agents passed one another, without the user, to
@@ -1266,6 +1285,9 @@ impl AgentPanel {
             run_buttons: Vec::new(),
             queued_texts: VecDeque::new(),
             watch: None,
+            in_overlay: false,
+            cards_in: VecDeque::new(),
+            cards_out: Vec::new(),
             panel_id,
             agent_hops: 0,
             queued: (0, 0),
@@ -1946,6 +1968,15 @@ impl Panel for AgentPanel {
             PanelCommand::Confirmed { action } if action == TAKE_OVER_ACTION => {
                 let events = self.take_over();
                 self.pending_events.extend(events);
+                CommandResult::Handled(true)
+            }
+            PanelCommand::Confirmed { action } if action == STOP_WATCHED_ACTION => {
+                let events = self.stop_watched();
+                self.pending_events.extend(events);
+                CommandResult::Handled(true)
+            }
+            PanelCommand::Confirmed { action } if action.starts_with(STOP_TASK_ACTION) => {
+                live::stop(self.panel_id, &action[STOP_TASK_ACTION.len()..]);
                 CommandResult::Handled(true)
             }
             PanelCommand::Confirmed { action } if action == DELETE_SESSION_ACTION => {

@@ -5565,6 +5565,7 @@ fn a_permission_wait_is_timed_apart_from_the_call() {
             reply,
             withdrawn: termide_agent_core::CancelToken::default(),
             delegate: None,
+            task: None,
         },
         form: ChoiceForm::new("", vec![]),
         answers: Vec::new(),
@@ -5630,6 +5631,7 @@ fn a_grant_reaches_the_panel_rules_so_it_survives_a_rebuild() {
                 reply,
                 withdrawn: termide_agent_core::CancelToken::default(),
                 delegate: delegate.map(str::to_string),
+                task: None,
             },
             form: ChoiceForm::new("", vec![]),
             answers: Vec::new(),
@@ -10863,8 +10865,30 @@ fn a_followed_task_shows_its_log_and_opens_when_over() {
         Item::Assistant { text, .. } if text.contains("found it")
     )));
 
-    // `Esc` stops the task; the panel follows it until it is over.
-    panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    // `Esc` only goes back to the panel that delegated the task.
+    let events = panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(matches!(
+        events.as_slice(),
+        [PanelEvent::FocusAgentPanel(3)]
+    ));
+    assert!(control.ended_by_user().is_none());
+    // The border offers to take the task over and to stop it; stopping asks
+    // first.
+    let (width, height) = (80, 30);
+    let rows = render_text(&mut panel, width, height);
+    assert!(rows
+        .iter()
+        .any(|line| line.contains("[✎]") && line.contains("[■]")));
+    assert!(!rows.iter().any(|line| line.contains("[⧉]")));
+    let events = panel.ask_stop_watched();
+    let Some(PanelEvent::ShowConfirm {
+        on_confirm: ConfirmAction::Custom(action),
+        ..
+    }) = events.into_iter().next()
+    else {
+        panic!("no confirmation");
+    };
+    panel.handle_command(PanelCommand::Confirmed { action });
     assert_eq!(
         control.ended_by_user(),
         Some("the user stopped the subagent")
@@ -10935,9 +10959,9 @@ fn a_background_task_has_a_row_that_stops_or_follows_it() {
         event,
         PanelEvent::FocusDelegate { panel, call } if *panel == id && call == "bg-1"
     )));
-    // `✕` stops it.
+    // `✕` asks first, then stops it.
     render_text(&mut panel, width, height);
-    panel.handle_mouse(
+    let events = panel.handle_mouse(
         MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: panel.strip_stop_x,
@@ -10946,6 +10970,16 @@ fn a_background_task_has_a_row_that_stops_or_follows_it() {
         },
         Rect::new(0, 0, width, height),
     );
+    let Some(PanelEvent::ShowConfirm {
+        message,
+        on_confirm: ConfirmAction::Custom(action),
+    }) = events.into_iter().next()
+    else {
+        panic!("no confirmation");
+    };
+    assert!(message.contains("search"), "{message}");
+    assert!(registration.control().ended_by_user().is_none());
+    panel.handle_command(PanelCommand::Confirmed { action });
     assert_eq!(
         registration.control().ended_by_user(),
         Some("the user stopped the subagent")
@@ -11023,4 +11057,124 @@ fn the_strip_count_of_subagents_unfolds_and_folds_back() {
     click(&mut panel);
     assert_eq!(shown(&mut panel), 3);
     drop(registrations);
+}
+
+/// Shown over the layout, a view offers to move into a panel (`[⧉]`, `F9`),
+/// and a task that ended stays as it ended, to read, until it does.
+#[test]
+fn a_view_over_the_layout_docks_and_keeps_an_ended_task() {
+    let dir = tempfile::tempdir().unwrap();
+    let parent = termide_agent_core::SessionParent {
+        session: Some("p1".into()),
+        agent: "lead".into(),
+        call: "call-ov".into(),
+    };
+    let mut log = Session::create_delegate(dir.path(), dir.path(), parent).unwrap();
+    log.append_message(&Message::User(UserMessage::text("find the loader")))
+        .unwrap();
+    let path = log.path().to_path_buf();
+    let mut panel = panel(vec![]);
+    let control = DelegateControl::new();
+    panel.set_in_overlay(true);
+    panel.start_watch(Watch::new(
+        "lead",
+        "find the loader",
+        path.clone(),
+        control.clone(),
+        4,
+        "call-ov",
+    ));
+    let (width, height) = (80, 30);
+    let rows = render_text(&mut panel, width, height);
+    assert!(rows
+        .iter()
+        .any(|line| line.contains("[⧉]") && line.contains("[✎]") && line.contains("[■]")));
+    let events = panel.handle_key(chord(KeyCode::F(9), KeyModifiers::NONE));
+    assert!(matches!(events.as_slice(), [PanelEvent::DockOverlay]));
+
+    // Over: still the task as it ended, with only the way into a panel.
+    drop(log);
+    control.finish();
+    panel.tick();
+    assert!(panel.is_delegate());
+    let rows = render_text(&mut panel, width, height);
+    assert!(rows.iter().any(|line| line.contains("[⧉]")));
+    assert!(!rows
+        .iter()
+        .any(|line| line.contains("[■]") || line.contains("[✎]")));
+    // In a panel, its session opens.
+    panel.set_in_overlay(false);
+    panel.tick();
+    assert!(!panel.is_delegate());
+    assert_eq!(panel.session_path(), Some(path.as_path()));
+}
+
+/// While a view follows a task, the panel that delegated it sets the task's
+/// cards aside for it; the view shows them, and gives back what it holds
+/// when it goes.
+#[test]
+fn a_delegates_cards_follow_the_view_of_its_task() {
+    let mut parent = panel(vec![]);
+    let id = parent.panel_id();
+    let (prompter, rx) = permission_channel(CancelToken::new());
+    parent.permission_rx = rx;
+    let registration = crate::live::register(crate::live::LiveTask {
+        panel: Some(id),
+        call: "call-cards",
+        from: "default",
+        agent: "search",
+        task: "find it",
+        session: Some(std::path::PathBuf::from("/nonexistent/x.jsonl")),
+        background: false,
+    });
+    let watch = crate::live::watch(id, "call-cards").unwrap();
+    let mut view = panel(vec![]);
+    view.start_watch(watch);
+
+    let mut delegate = prompter
+        .for_delegate("search", CancelToken::new())
+        .for_task("call-cards");
+    let worker = std::thread::spawn(move || {
+        delegate.ask(&termide_agent_core::PermissionRequest {
+            tool: "bash".into(),
+            subject: "git fetch".into(),
+            call: termide_agent_core::ToolCall {
+                id: "c".into(),
+                name: "bash".into(),
+                arguments: serde_json::json!({ "command": "git fetch" }),
+                extra_content: None,
+            },
+            suggested_pattern: String::new(),
+            can_persist: false,
+            can_allow_session: false,
+            parts: Vec::new(),
+        })
+    });
+    // The parent sets it aside rather than showing it.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut out = Vec::new();
+    while out.is_empty() {
+        parent.tick();
+        out = parent.take_cards_out();
+        assert!(Instant::now() < deadline, "no card set aside");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(parent.pending.is_none());
+    let (call, card) = out.pop().unwrap();
+    assert_eq!(call, "call-cards");
+    // The view shows it.
+    view.give_card(card);
+    view.tick();
+    assert!(matches!(view.pending, Some(Pending::Permission { .. })));
+    // The view goes: the card goes back, and the parent shows it.
+    let back = view.release_cards();
+    drop(view);
+    for card in back {
+        parent.give_card(card);
+    }
+    parent.tick();
+    assert!(matches!(parent.pending, Some(Pending::Permission { .. })));
+    assert!(parent.answer_permission(PermissionAnswer::AllowOnce));
+    assert_eq!(worker.join().unwrap(), PermissionAnswer::AllowOnce);
+    drop(registration);
 }

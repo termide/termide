@@ -92,7 +92,7 @@ pub(super) fn build_global_hotkey_table(kb: &GlobalKeybindings) -> HotkeyTable {
 
 impl App {
     /// Build the hotkey table when the cache holds none.
-    fn ensure_hotkey_table(&mut self) {
+    pub(super) fn ensure_hotkey_table(&mut self) {
         if self.state.cache.hotkey_table.is_some() {
             return;
         }

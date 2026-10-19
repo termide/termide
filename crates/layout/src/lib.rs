@@ -15,5 +15,5 @@ pub use geometry::{
     calculate_panel_rects, classify_panel_drag, compute_drop_target, compute_vertical_constraints,
     group_spans_from_rects, PanelDragIntent, PanelDropTarget,
 };
-pub use layout_manager::LayoutManager;
+pub use layout_manager::{overlay_area, LayoutManager};
 pub use panel_group::{PanelGroup, MIN_PANEL_HEIGHT};

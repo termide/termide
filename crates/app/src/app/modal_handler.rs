@@ -334,7 +334,12 @@ impl App {
                     // it stays as it was. As with the input and selection
                     // prompts, deliver to the focused panel that raised it.
                     if value.downcast_ref::<bool>().copied().unwrap_or(false) {
-                        if let Some(panel) = self.layout_manager.active_panel_mut() {
+                        // A view shown over the layout raised it if one is up.
+                        let panel = match self.layout_manager.overlay.as_mut() {
+                            Some(overlay) => Some(overlay),
+                            None => self.layout_manager.active_panel_mut(),
+                        };
+                        if let Some(panel) = panel {
                             panel.handle_command(termide_core::PanelCommand::Confirmed { action });
                         }
                         self.state.needs_redraw = true;

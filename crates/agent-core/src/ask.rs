@@ -56,6 +56,9 @@ pub struct QuestionEnvelope {
     /// Cancelled once no one waits for the reply any more — the run
     /// stopped — so a set still waiting its turn is never shown.
     pub withdrawn: CancelToken,
+    /// The id of the `task` call that handed the asking delegate its task,
+    /// so a panel following that task can take the card.
+    pub task: Option<String>,
 }
 
 /// Asks the panel's user. Cloneable and shared by the calls of one run; each
@@ -67,6 +70,8 @@ pub struct UserAsker {
     /// Who asks, when it is not the panel's own agent: a delegate's
     /// questions reach its parent's panel headed with its name.
     on_behalf_of: Option<String>,
+    /// The `task` call that handed the delegate its task.
+    task: Option<String>,
     /// Ends the wait besides `cancel`: a delegate's own stop.
     stop: Option<CancelToken>,
 }
@@ -86,6 +91,7 @@ pub fn question_channel(cancel: CancelToken) -> (UserAsker, Receiver<QuestionEnv
             tx,
             cancel,
             on_behalf_of: None,
+            task: None,
             stop: None,
         },
         rx,
@@ -108,6 +114,7 @@ impl UserAsker {
             questions,
             reply,
             withdrawn: withdrawn.clone(),
+            task: self.task.clone(),
         };
         if self.tx.send(envelope).is_err() {
             return QuestionReply::Declined;
@@ -135,6 +142,16 @@ impl UserAsker {
     pub fn for_delegate(&self, agent: &str) -> Self {
         Self {
             on_behalf_of: Some(agent.to_string()),
+            ..self.clone()
+        }
+    }
+
+    /// This asker for the task the `task` call `call` handed over: its cards
+    /// say so, for a panel following the task to take them.
+    #[must_use]
+    pub fn for_task(&self, call: &str) -> Self {
+        Self {
+            task: Some(call.to_string()),
             ..self.clone()
         }
     }

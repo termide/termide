@@ -808,6 +808,10 @@ pub enum PanelEvent {
     /// running task is clicked, or `o` pressed on its block.
     FocusDelegate { panel: u64, call: String },
 
+    /// Move the view shown over the layout into a panel of its own beside
+    /// the others. Emitted by an agent panel shown over the layout.
+    DockOverlay,
+
     /// Bring forward the agent panel with this number, if it is still open.
     /// Emitted by a panel following another agent's task when its input, which
     /// names the delegating agent, is clicked: focus goes back to that agent.

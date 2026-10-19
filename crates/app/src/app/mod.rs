@@ -1127,6 +1127,12 @@ impl App {
                     log::error!("Error processing panel events: {}", e);
                 }
             }
+            // The view shown over the layout, and the delegates' cards on
+            // their way to the views following their tasks.
+            if let Err(e) = self.tick_overlay() {
+                log::error!("Error processing the overlay's events: {}", e);
+            }
+            self.route_delegate_cards();
             // What agents ask of the other panels.
             self.serve_peers();
             self.tick_parked_projects();

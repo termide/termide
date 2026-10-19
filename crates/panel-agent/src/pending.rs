@@ -242,7 +242,49 @@ pub(crate) fn suggestion_form(
     (form, answers)
 }
 
+/// A delegate's card on its way between panels: from the panel that
+/// delegated the task to one following it, and back when that one closes.
+pub enum Card {
+    Permission(Box<PermissionEnvelope>),
+    Question(QuestionEnvelope),
+}
+
 impl AgentPanel {
+    /// The cards set aside for the panels following the tasks they come
+    /// from, each with its `task` call's id; taking them clears the list.
+    pub fn take_cards_out(&mut self) -> Vec<(String, Card)> {
+        std::mem::take(&mut self.cards_out)
+    }
+
+    /// Take `card`, handed over by another panel, to show in its turn.
+    pub fn give_card(&mut self, card: Card) {
+        self.cards_in.push_back(card);
+    }
+
+    /// The delegate's cards this panel holds — the one on screen and those
+    /// waiting their turn — given up as the panel stops following its task,
+    /// for the panel that delegated it to show.
+    pub fn release_cards(&mut self) -> Vec<Card> {
+        let mut cards: Vec<Card> = self.cards_in.drain(..).collect();
+        let shown = match self.pending.take() {
+            Some(Pending::Permission { envelope, .. }) if envelope.delegate.is_some() => {
+                Some(Card::Permission(Box::new(envelope)))
+            }
+            Some(Pending::Question { envelope, .. }) if envelope.task.is_some() => {
+                Some(Card::Question(envelope))
+            }
+            other => {
+                self.pending = other;
+                None
+            }
+        };
+        if let Some(card) = shown {
+            self.end_permission_wait();
+            cards.insert(0, card);
+        }
+        cards
+    }
+
     /// Take down a permission or question card no one waits for any more —
     /// the external agent gave the call up, the run or the delegate's task
     /// stopped — so it neither lingers nor holds up the next one. Whether one
@@ -273,8 +315,29 @@ impl AgentPanel {
             if self.pending.is_some() {
                 break;
             }
-            let Ok(envelope) = self.permission_rx.try_recv() else {
-                break;
+            // A card handed here by the panel that delegated the task first,
+            // then the panel's own channel.
+            let handed = self
+                .cards_in
+                .iter()
+                .position(|card| matches!(card, Card::Permission(_)));
+            let envelope = match handed.and_then(|index| self.cards_in.remove(index)) {
+                Some(Card::Permission(envelope)) => *envelope,
+                _ => {
+                    let Ok(envelope) = self.permission_rx.try_recv() else {
+                        break;
+                    };
+                    // A panel follows the delegate that asks: the card is
+                    // its to show.
+                    if let Some(call) = envelope.task.clone() {
+                        if crate::live::is_viewed(self.panel_id, &call) {
+                            self.cards_out
+                                .push((call, Card::Permission(Box::new(envelope))));
+                            continue;
+                        }
+                    }
+                    envelope
+                }
             };
             if envelope.withdrawn.is_cancelled() {
                 // Given up while it waited its turn.
@@ -391,8 +454,24 @@ impl AgentPanel {
             if self.pending.is_some() {
                 break;
             }
-            let Ok(envelope) = self.question_rx.try_recv() else {
-                break;
+            let handed = self
+                .cards_in
+                .iter()
+                .position(|card| matches!(card, Card::Question(_)));
+            let envelope = match handed.and_then(|index| self.cards_in.remove(index)) {
+                Some(Card::Question(envelope)) => envelope,
+                _ => {
+                    let Ok(envelope) = self.question_rx.try_recv() else {
+                        break;
+                    };
+                    if let Some(call) = envelope.task.clone() {
+                        if crate::live::is_viewed(self.panel_id, &call) {
+                            self.cards_out.push((call, Card::Question(envelope)));
+                            continue;
+                        }
+                    }
+                    envelope
+                }
             };
             if envelope.withdrawn.is_cancelled() {
                 // Given up while it waited its turn.

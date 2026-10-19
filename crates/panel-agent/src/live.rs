@@ -30,6 +30,9 @@ struct Live {
     started: Instant,
     /// What it did last, for its row.
     status: Arc<Mutex<String>>,
+    /// A panel follows it: its cards go there rather than to the panel that
+    /// delegated it.
+    viewed: bool,
 }
 
 /// The tasks running out of sight, by the panel and the `task` call that
@@ -109,6 +112,7 @@ pub fn register(task: LiveTask<'_>) -> Registration {
                 background: task.background,
                 started: Instant::now(),
                 status: Arc::clone(&status),
+                viewed: false,
             },
         );
         key
@@ -173,6 +177,22 @@ pub(crate) fn background_of(panel: u64) -> Vec<BackgroundTask> {
         .collect();
     tasks.sort_by_key(|task| task.started);
     tasks
+}
+
+/// Note whether a panel follows the task the `task` call `call` of panel
+/// `panel` handed over: while one does, the task's cards go there.
+pub(crate) fn set_viewed(panel: u64, call: &str, viewed: bool) {
+    if let Some(live) = lock().get_mut(&(panel, call.to_string())) {
+        live.viewed = viewed;
+    }
+}
+
+/// Whether a panel follows the task the `task` call `call` of panel
+/// `panel` handed over.
+pub(crate) fn is_viewed(panel: u64, call: &str) -> bool {
+    lock()
+        .get(&(panel, call.to_string()))
+        .is_some_and(|live| live.viewed)
 }
 
 /// Stop the task the `task` call `call` of panel `panel` handed over.

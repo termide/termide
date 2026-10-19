@@ -243,6 +243,11 @@ impl App {
             return Ok(());
         }
 
+        // A view shown over the layout takes the wheel.
+        if self.overlay_scroll(mouse, delta)? {
+            return Ok(());
+        }
+
         // An open menu/submenu dropdown takes the wheel: replay it as Up/Down
         // key presses through the existing dropdown navigation, reusing each
         // dropdown's item-count and separator-skipping logic.

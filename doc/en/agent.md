@@ -407,7 +407,8 @@ you have named or sent even one message to is always kept.
 | `Shift+Tab` | Cycle the permission mode: ask → plan → edit → configured → auto → all |
 | `F2` | Rename this session (the same prompt as the `[≡]` menu); in the banner's list of sessions, rename the one under the cursor |
 | `Ctrl+S` | Save the chat as a Markdown file (your messages and the agent's answers under who and when, each day under its own heading); also the `[≡]` menu |
-| `Ctrl+T` | In a panel following another agent's task, take the task over, after a confirmation (see [Subagents](#subagents)) |
+| `Ctrl+T` | In a view of another agent's task, take the task over, after a confirmation (see [Subagents](#subagents)) |
+| `F9` | In a view of another agent's task shown over the layout, move it into a panel of its own (see [Subagents](#subagents)) |
 | `F3` | Open the session-info modal (model, agent, mode, directory, created/last-active times, messages, compactions, tokens, context, how much shell output was cleaned); also `/usage` and the `[≡]` menu |
 | `F4` | Pick a message to rewind the session to, as `Esc` does in the idle empty prompt |
 | `F5` | Fork this session (after a confirmation): its log is copied and the copy opens in a new agent panel, while this one goes on working at its own |
@@ -1642,19 +1643,27 @@ called. It is listed with the other sessions, marked `&` (`& find the config
 loader`), so you can open it to see how the delegate got its answer or go on
 talking to it, and `recall` finds what it did. While the task runs, its
 session is not offered in the list; `o` on its block, or a click on its row
-above the input, opens a panel that follows it instead, beside the others
-and in focus — or brings forward the one already following it. The panel
-shows the delegate's steps as its log gains them, and belongs to the
-delegating agent while the task runs: the input takes nothing and reads
+above the input, shows a view of it over the layout instead, so that no
+column moves; with a panel already following it, that panel comes forward.
+The view shows the delegate's steps as its log gains them, and what the
+delegate asks — its permission requests and questions — comes to the view
+while it is up, rather than to the delegating panel under it. It belongs to
+the delegating agent while the task runs: the input takes nothing and reads
 `& Delegate of <agent>: <task>` — a click on it goes back to the delegating
 panel — and the session keys (`F2`, `F4`–`F8`), the chips and the menu's
 session entries do nothing; scrolling, the blocks, copying, `F3` and
-`Ctrl+S` still work. `Esc` stops the task and `Ctrl+T`, after a
-confirmation, takes it over: the delegating agent hears that you stopped it
-or took it, with what was said so far. Closing the panel only stops
-following: the task goes on. Once the task is over, the panel opens its
-session as any other, to read or go on talking to. `o` on a finished
-`task` block opens its session in a panel.
+`Ctrl+S` still work. The prompt's border carries `[⧉]`, which moves the view
+into a panel of its own beside the others (`F9` too), `[✎]`, which takes the
+task over, and `[■]`, which stops it; both of those ask first, as does
+`Ctrl+T`, and the delegating agent hears that you took the task or stopped
+it, with what was said so far. `Esc`, the panel-close key or a click outside
+the view closes it, and `Esc` in a panel following the task goes back to the
+delegating panel: neither stops the task, and the cards still unanswered go
+back to the delegating panel. Once the task is over, the view shows it as it
+ended, to read, with `[⧉]` alone; in a panel — or once moved into one — its
+session opens as any other, to go on talking to. A task taken over in the
+view moves into a panel at once. `o` on a finished `task` block opens its
+session in a panel.
 
 A delegate runs on the connection the session's connection names under
 **Subagents** on its settings page (`subagents` in the file), or on the
@@ -1684,8 +1693,8 @@ reading `& Receiving reply from <delegate> · …`, the way an answer to
 at its next step. Several background tasks can run at once. With no block
 running for it, each has a row above the delegating panel's input
 (`& Delegating to · agent  task`, what it did last and its time) with a `✕`
-that stops it; a click elsewhere on the row, or `o` on the `task` block,
-opens a panel following it, as for any delegate (above). Its permission
+that stops it, after a confirmation; a click elsewhere on the row, or `o` on the `task` block,
+shows a view of it, as for any delegate (above). Its permission
 requests and questions come to the delegating panel as a delegate's do, and
 stay up when that panel's own run stops: stopping the run does not reach a
 task handed over in the background. Closing the delegating panel stops its

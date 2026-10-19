@@ -66,12 +66,18 @@ impl App {
         }
 
         // An agent panel's delegated tasks are its own: they stop with it.
+        // One following another agent's task gives the cards it holds back
+        // to the panel that delegated it.
+        let mut cards = None;
         if let Some(agent) = self.layout_manager.active_panel_mut().and_then(|panel| {
             panel
-                .as_any()
-                .downcast_ref::<termide_panel_agent::AgentPanel>()
+                .as_any_mut()
+                .downcast_mut::<termide_panel_agent::AgentPanel>()
         }) {
             termide_panel_agent::live::stop_all(agent.panel_id());
+            if let Some(parent) = agent.delegated_by() {
+                cards = Some((parent, agent.release_cards()));
+            }
         }
 
         // Calculate available width for panel groups
@@ -79,6 +85,9 @@ impl App {
 
         // Close active panel (LayoutManager handles active panel tracking)
         let _ = self.layout_manager.close_active_panel(terminal_width);
+        if let Some((parent, cards)) = cards {
+            self.give_cards(parent, cards);
+        }
         self.auto_save_layout();
 
         // Re-sync outline panel after editor close

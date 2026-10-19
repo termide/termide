@@ -1081,7 +1081,9 @@ impl AgentPanel {
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let passes = match key.code {
             KeyCode::Char('t') if ctrl && !alt => return Some(self.ask_take_over()),
-            KeyCode::Esc => return Some(self.stop_watched()),
+            // Esc only steps away: back to the panel that delegated the task.
+            KeyCode::Esc => return Some(self.leave_watched()),
+            KeyCode::F(9) if self.in_overlay => return Some(vec![PanelEvent::DockOverlay]),
             KeyCode::Char('s' | 'c' | 'o') if ctrl && !alt => true,
             KeyCode::F(3) => true,
             KeyCode::F(_) => false,
@@ -1524,6 +1526,15 @@ impl AgentPanel {
                 .border_button_at(event.column, event.row)
                 .and_then(|index| self.run_buttons.get(index).copied());
             if let Some(button) = button {
+                // Another agent's task: nothing ends it without a yes.
+                if self.is_delegate() {
+                    return match button {
+                        RunButton::Stop => self.ask_stop_watched(),
+                        RunButton::TakeOver => self.ask_take_over(),
+                        RunButton::Dock => vec![PanelEvent::DockOverlay],
+                        RunButton::Pause | RunButton::Continue => Vec::new(),
+                    };
+                }
                 match button {
                     RunButton::Pause => {
                         self.request_pause();
@@ -1538,6 +1549,7 @@ impl AgentPanel {
                         self.cancel_retry_wait()
                     }
                     RunButton::Stop => self.abort(),
+                    RunButton::TakeOver | RunButton::Dock => {}
                 }
                 return vec![PanelEvent::NeedsRedraw];
             }

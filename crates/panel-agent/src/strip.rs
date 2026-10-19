@@ -444,8 +444,18 @@ impl AgentPanel {
                     return vec![PanelEvent::NeedsRedraw];
                 };
                 if on_stop {
-                    crate::live::stop(self.panel_id, &call);
-                    return vec![PanelEvent::NeedsRedraw];
+                    let agent = crate::live::background_of(self.panel_id)
+                        .into_iter()
+                        .find(|task| task.call == call)
+                        .map(|task| task.agent)
+                        .unwrap_or_default();
+                    return vec![PanelEvent::ShowConfirm {
+                        message: termide_i18n::t().agent_stop_background_confirm_fmt(&agent),
+                        on_confirm: termide_core::ConfirmAction::Custom(format!(
+                            "{}{call}",
+                            crate::STOP_TASK_ACTION
+                        )),
+                    }];
                 }
                 return vec![
                     PanelEvent::NeedsRedraw,

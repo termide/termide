@@ -116,6 +116,16 @@ impl App {
             }
         }
 
+        // A view shown over the layout takes the mouse; a click outside
+        // closes it. The wheel is coalesced and reaches it apart.
+        if !matches!(
+            mouse.kind,
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+        ) && self.overlay_mouse(mouse)?
+        {
+            return Ok(());
+        }
+
         // Scroll events should reach panels when no modal is active
         // This allows scrolling terminal history, editor, etc.
         if matches!(

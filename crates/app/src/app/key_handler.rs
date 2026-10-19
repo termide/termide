@@ -114,6 +114,11 @@ impl App {
             return self.handle_menu_key(key);
         }
 
+        // A view shown over the layout takes the keys, but for quitting.
+        if self.overlay_key(key)? {
+            return Ok(());
+        }
+
         // Handle app-level actions via HotkeyTable
         if self.handle_global_hotkey(&key)? {
             return Ok(());

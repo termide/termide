@@ -462,6 +462,9 @@ impl App {
                     self.state.needs_redraw = true;
                 }
             }
+            // A view shown over the layout moves into a panel of its own.
+            PanelEvent::DockOverlay => self.dock_overlay(),
+
             PanelEvent::FocusAgentPanel(id) => {
                 let found = self.layout_manager.focus_panel_where(|candidate| {
                     candidate

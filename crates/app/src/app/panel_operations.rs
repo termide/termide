@@ -12,6 +12,11 @@ use termide_i18n as i18n;
 impl App {
     /// Handle panel close request with confirmation if needed
     pub(crate) fn handle_close_panel_request(&mut self) -> Result<()> {
+        // A view shown over the layout closes; the panel under it stays.
+        if self.layout_manager.overlay.is_some() {
+            self.close_overlay();
+            return Ok(());
+        }
         // Check if confirmation is required before closing active panel
         if let Some(panel) = self.layout_manager.active_panel_mut() {
             if let Some(_message) = panel.needs_close_confirmation() {

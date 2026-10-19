@@ -16,6 +16,24 @@ pub struct LayoutManager {
     pub panel_groups: Vec<PanelGroup>,
     /// Current focus (active group index).
     pub focus: usize,
+    /// A panel shown over the layout rather than in it: it takes the keys
+    /// and the mouse while it is up, moves no column, and is not saved with
+    /// the layout.
+    pub overlay: Option<Box<dyn Panel>>,
+}
+
+/// Where a panel shown over the layout goes in `main`, the area the layout
+/// fills: most of it, centered, with the layout showing around it.
+#[must_use]
+pub fn overlay_area(main: ratatui::layout::Rect) -> ratatui::layout::Rect {
+    let width = (main.width.saturating_mul(9) / 10).max(main.width.min(40));
+    let height = (main.height.saturating_mul(9) / 10).max(main.height.min(10));
+    ratatui::layout::Rect {
+        x: main.x + (main.width - width) / 2,
+        y: main.y + (main.height - height) / 2,
+        width,
+        height,
+    }
 }
 
 impl LayoutManager {
@@ -24,6 +42,7 @@ impl LayoutManager {
         Self {
             panel_groups: Vec::new(),
             focus: 0,
+            overlay: None,
         }
     }
 

@@ -588,6 +588,19 @@ impl AgentPanel {
     /// has taken effect, stop alone while a stop is under way, none while
     /// idle.
     pub(crate) fn run_buttons(&self) -> Vec<RunButton> {
+        // Following another agent's task: move the view into a panel when it
+        // is shown over the layout, take the task over, stop it.
+        if self.is_delegate() {
+            let mut buttons = Vec::new();
+            if self.in_overlay {
+                buttons.push(RunButton::Dock);
+            }
+            // A task that is over has nothing left to stop or take.
+            if !self.watched_task_over() {
+                buttons.extend([RunButton::TakeOver, RunButton::Stop]);
+            }
+            return buttons;
+        }
         let paused = (self.paused || self.retry_wait.is_some()) && !self.is_busy();
         if self.is_busy() && self.stop_requested.is_some() {
             vec![RunButton::Stop]
@@ -616,7 +629,7 @@ impl AgentPanel {
             RunButton::Pause => self.colors.border_focused,
             RunButton::Continue => self.colors.success,
             RunButton::Stop if self.stop_requested.is_some() => self.colors.error,
-            RunButton::Stop => self.colors.border_focused,
+            RunButton::Stop | RunButton::TakeOver | RunButton::Dock => self.colors.border_focused,
         }
     }
 
@@ -641,6 +654,8 @@ impl AgentPanel {
                     RunButton::Pause => "[‖]",
                     RunButton::Continue => "[▶]",
                     RunButton::Stop => "[■]",
+                    RunButton::TakeOver => "[✎]",
+                    RunButton::Dock => "[⧉]",
                 };
                 (
                     label.to_string(),

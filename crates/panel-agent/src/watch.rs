@@ -17,7 +17,7 @@ use termide_agent_core::{CancelToken, Session};
 use termide_core::{ConfirmAction, PanelEvent};
 
 use crate::runtime::push_history;
-use crate::{AgentPanel, NoticeKind, Transcript, TAKE_OVER_ACTION};
+use crate::{AgentPanel, NoticeKind, Transcript, STOP_WATCHED_ACTION, TAKE_OVER_ACTION};
 
 /// What the user can do to a delegate running out of sight, from a panel
 /// watching it, and what the delegate tells it back. Shared between the
@@ -133,6 +133,14 @@ impl Watch {
     }
 }
 
+impl Drop for Watch {
+    /// No panel follows the task any more: its cards go back to the panel
+    /// that delegated it.
+    fn drop(&mut self) {
+        crate::live::set_viewed(self.by_panel, &self.call, false);
+    }
+}
+
 /// The log's length, which only grows while the task writes it.
 fn log_len(path: &Path) -> Option<u64> {
     std::fs::metadata(path).ok().map(|meta| meta.len())
@@ -141,6 +149,7 @@ fn log_len(path: &Path) -> Option<u64> {
 impl AgentPanel {
     /// Follow `watch`'s task here.
     pub fn start_watch(&mut self, watch: Watch) {
+        crate::live::set_viewed(watch.by_panel, &watch.call, true);
         self.chat_focus = true;
         self.watch = Some(watch);
         self.refresh_watch();
@@ -178,14 +187,22 @@ impl AgentPanel {
         let Some(watch) = &mut self.watch else {
             return false;
         };
-        let done = watch.control.is_done();
-        if !done && watch.looked.is_some_and(|at| at.elapsed() < LOOK_EVERY) {
+        let taken = watch.control.taken.load(Ordering::Acquire);
+        // Over, its session opens here — but shown over the layout a task
+        // that ended stays as it ended, to read, until the view moves into
+        // a panel; one taken over moves there itself, to go on with.
+        let opens = watch.control.is_done() && (!self.in_overlay || taken);
+        if !opens && watch.looked.is_some_and(|at| at.elapsed() < LOOK_EVERY) {
             return false;
         }
         watch.looked = Some(Instant::now());
         let changed = self.refresh_watch();
-        if !done {
+        if !opens {
             return changed;
+        }
+        if self.in_overlay {
+            self.pending_events.push(PanelEvent::DockOverlay);
+            self.in_overlay = false;
         }
         let Some(watch) = self.watch.take() else {
             return changed;
@@ -206,7 +223,28 @@ impl AgentPanel {
         true
     }
 
-    /// `Esc` while watching: stop the task.
+    /// `Esc` while watching: back to the panel that delegated the task,
+    /// which goes on.
+    pub(crate) fn leave_watched(&mut self) -> Vec<PanelEvent> {
+        match &self.watch {
+            Some(watch) => vec![PanelEvent::FocusAgentPanel(watch.by_panel)],
+            None => Vec::new(),
+        }
+    }
+
+    /// `[■]` while watching: ask before stopping the task; the answer comes
+    /// back as `PanelCommand::Confirmed(STOP_WATCHED_ACTION)`.
+    pub(crate) fn ask_stop_watched(&self) -> Vec<PanelEvent> {
+        let Some(watch) = self.watch.as_ref().filter(|_| !self.watched_task_over()) else {
+            return Vec::new();
+        };
+        vec![PanelEvent::ShowConfirm {
+            message: termide_i18n::t().agent_stop_task_confirm_fmt(&watch.from),
+            on_confirm: ConfirmAction::Custom(STOP_WATCHED_ACTION.to_string()),
+        }]
+    }
+
+    /// Stop the task, once confirmed.
     pub(crate) fn stop_watched(&mut self) -> Vec<PanelEvent> {
         if let Some(watch) = &self.watch {
             watch.control.stop();
@@ -217,7 +255,7 @@ impl AgentPanel {
     /// `Ctrl+T`: ask before taking the task over; the answer comes back as
     /// `PanelCommand::Confirmed(TAKE_OVER_ACTION)`.
     pub(crate) fn ask_take_over(&self) -> Vec<PanelEvent> {
-        let Some(watch) = &self.watch else {
+        let Some(watch) = self.watch.as_ref().filter(|_| !self.watched_task_over()) else {
             return Vec::new();
         };
         vec![PanelEvent::ShowConfirm {
@@ -255,6 +293,19 @@ impl AgentPanel {
         self.watch
             .as_ref()
             .is_some_and(|watch| watch.by_panel == by && watch.call == call)
+    }
+
+    /// Whether the task the panel follows is over.
+    pub(crate) fn watched_task_over(&self) -> bool {
+        self.watch
+            .as_ref()
+            .is_some_and(|watch| watch.control.is_done())
+    }
+
+    /// Show the panel over the layout, or back in it: a view shown over the
+    /// layout offers to move into a panel of its own.
+    pub fn set_in_overlay(&mut self, in_overlay: bool) {
+        self.in_overlay = in_overlay;
     }
 
     /// Whether the panel follows another agent's task: its session is that

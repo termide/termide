@@ -1630,7 +1630,10 @@ impl Subagents {
         let definition = self.dirs.agent(name);
         // What the delegate wants to know goes to the user its parent's
         // panel asks, headed with the delegate's name.
-        let asker = ctx.asker.as_ref().map(|asker| asker.for_delegate(name));
+        let asker = ctx
+            .asker
+            .as_ref()
+            .map(|asker| asker.for_delegate(name).for_task(task.call));
         let (tools, skills, system_prompt) = self.toolset(name, &definition, asker.is_some());
         let max_turns = definition.spec.max_turns.unwrap_or(SUBAGENT_MAX_TURNS);
 
@@ -1663,7 +1666,9 @@ impl Subagents {
         // A task handed over in the background is no run's to stop: a stop
         // of its panel's run leaves its cards up, its own takes them back.
         let prompter = ctx.prompter.as_ref().map(|prompter| {
-            let prompter = prompter.for_delegate(name, budget.clone());
+            let prompter = prompter
+                .for_delegate(name, budget.clone())
+                .for_task(task.call);
             if task.background {
                 prompter.detached()
             } else {
