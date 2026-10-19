@@ -393,11 +393,12 @@ impl App {
                 }
                 let id = self.plugins.next_panel;
                 self.plugins.next_panel += 1;
-                let title = params["title"].as_str().unwrap_or(&key.name).to_string();
+                let title = plugin_title(&key.name, params["title"].as_str());
                 let markdown = text("markdown")?;
-                self.add_panel(Box::new(termide_panel_markdown::MarkdownPanel::for_plugin(
-                    id, title, markdown,
-                )));
+                let mut panel =
+                    termide_panel_markdown::MarkdownPanel::for_plugin(id, title, markdown);
+                panel.set_plugin_menu(protocol::menu_items(&params["menu"]));
+                self.add_panel(Box::new(panel));
                 self.plugins.panels.insert(id, key.clone());
                 self.state.needs_redraw = true;
                 Ok(json!({ "panel": id }))
@@ -405,9 +406,15 @@ impl App {
             protocol::PANEL_UPDATE => {
                 let id = self.owned_panel(key, params)?;
                 let markdown = text("markdown")?;
-                let title = params["title"].as_str().map(str::to_string);
+                let title = params["title"]
+                    .as_str()
+                    .map(|title| plugin_title(&key.name, Some(title)));
+                let menu = params.get("menu").map(protocol::menu_items);
                 if let Some(panel) = self.plugin_panel_mut(id) {
                     panel.set_plugin_content(title, markdown);
+                    if let Some(menu) = menu {
+                        panel.set_plugin_menu(menu);
+                    }
                 }
                 self.state.needs_redraw = true;
                 Ok(Value::Null)
@@ -537,6 +544,19 @@ impl App {
     /// Stop every plugin, waiting briefly for each to finish.
     pub(super) fn shutdown_plugins(&mut self) {
         self.plugins.host.shutdown();
+    }
+}
+
+/// A plugin panel's title as termide shows it: the plugin's name, which the
+/// plugin cannot choose, then its own title, cleaned. Nothing a plugin sends
+/// can make its panel pass for one of termide's.
+fn plugin_title(plugin: &str, title: Option<&str>) -> String {
+    let title = title
+        .map(|title| protocol::clean_text(title, protocol::MAX_TITLE))
+        .filter(|title| !title.is_empty());
+    match title {
+        Some(title) => format!("{plugin}: {title}"),
+        None => plugin.to_string(),
     }
 }
 
@@ -704,5 +724,22 @@ impl PluginToolHub {
     /// The keys holding tools now.
     fn keys(&self) -> Vec<PluginKey> {
         self.lock().tools.keys().cloned().collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::plugin_title;
+
+    #[test]
+    fn a_plugin_panel_is_always_headed_by_its_plugin() {
+        assert_eq!(plugin_title("deploy", Some("Report")), "deploy: Report");
+        assert_eq!(plugin_title("deploy", None), "deploy");
+        assert_eq!(plugin_title("deploy", Some(" \u{200B} ")), "deploy");
+        // A title cannot pose as another panel, or push the name away.
+        assert_eq!(
+            plugin_title("deploy", Some("\u{202E}Terminal\nzsh")),
+            "deploy: Terminal zsh"
+        );
     }
 }

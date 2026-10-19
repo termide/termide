@@ -140,11 +140,18 @@ answers by updating the panel.
 
 | Method | Kind | Direction | Params / result |
 |---|---|---|---|
-| `panel/open` | request | plugin → termide | `title`, `markdown`; the result is `{ "panel" }`, its id |
-| `panel/update` | request | plugin → termide | `panel`, `markdown`, `title` (optional) |
+| `panel/open` | request | plugin → termide | `title`, `markdown`, `menu` (optional); the result is `{ "panel" }`, its id |
+| `panel/update` | request | plugin → termide | `panel`, `markdown`, `title` and `menu` (optional) |
 | `panel/close` | request | plugin → termide | `panel` |
 | `panel/action` | notification | termide → plugin | `panel`, `action` |
 | `panel/closed` | notification | termide → plugin | `panel`: the user closed it |
+
+`menu` is the panel's own entries of its `[≡]` menu, `[{ "label",
+"action" }]` (at most 12): a chosen one is sent as `panel/action`, as a
+`plugin:` link is. What shows who drew the panel is termide's: its icon is
+always 🧩 and its title always starts with the plugin's name (`deploy:
+Report`); the plugin's title and labels are cleaned of control and invisible
+characters and cut to length.
 
 A panel opens in the plugin's project, which must be the current one; it is
 not saved with the layout. An update keeps the reader's place as far as the

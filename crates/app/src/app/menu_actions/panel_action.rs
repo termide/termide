@@ -64,8 +64,8 @@ impl App {
                 p.context_menu_items()
                     .into_iter()
                     .map(|(label, action)| {
-                        DropdownItem::new(&label, action)
-                            .with_shortcut(self.context_item_shortcut(action))
+                        let shortcut = self.context_item_shortcut(&action);
+                        DropdownItem::new(&label, action).with_shortcut(shortcut)
                     })
                     .collect()
             })

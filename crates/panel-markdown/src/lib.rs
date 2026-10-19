@@ -34,6 +34,9 @@ use termide_ui::ScrollBar;
 
 use termide_ui::text_utils::{char_col_to_display, display_to_char_col, url_fragment};
 
+/// What a plugin panel's own `[≡]` entries are routed back under.
+const PLUGIN_MENU_PREFIX: &str = "plugin-menu:";
+
 /// A cursor / selection position: `(line index, character column)`.
 type Pos = (usize, usize);
 
@@ -105,6 +108,8 @@ pub struct MarkdownPanel {
     /// comes from the plugin, a `plugin:` link is an action for it, and it
     /// has no source to edit nor a place in the saved layout.
     plugin_panel: Option<u64>,
+    /// A plugin panel's own entries of its `[≡]` menu: label and action.
+    plugin_menu: Vec<(String, String)>,
 }
 
 impl MarkdownPanel {
@@ -144,6 +149,7 @@ impl MarkdownPanel {
             pending_anchor: None,
             loading: None,
             plugin_panel: None,
+            plugin_menu: Vec::new(),
         }
     }
 
@@ -155,6 +161,12 @@ impl MarkdownPanel {
         panel.source = source;
         panel.plugin_panel = Some(id);
         panel
+    }
+
+    /// Set a plugin panel's own `[≡]` entries, `(label, action)`: one chosen
+    /// is handed to the plugin as the action.
+    pub fn set_plugin_menu(&mut self, menu: Vec<(String, String)>) {
+        self.plugin_menu = menu;
     }
 
     /// The id of a panel a plugin opened; `None` for any other viewer.
@@ -671,7 +683,22 @@ impl Panel for MarkdownPanel {
         ]
     }
 
+    fn context_menu_items(&self) -> Vec<(String, String)> {
+        self.plugin_menu
+            .iter()
+            .map(|(label, action)| (label.clone(), format!("{PLUGIN_MENU_PREFIX}{action}")))
+            .collect()
+    }
+
     fn handle_status_action(&mut self, action: &str) -> Vec<PanelEvent> {
+        if let (Some(panel), Some(action)) =
+            (self.plugin_panel, action.strip_prefix(PLUGIN_MENU_PREFIX))
+        {
+            return vec![PanelEvent::PluginAction {
+                panel,
+                action: action.to_string(),
+            }];
+        }
         match action {
             "edit_source" if self.plugin_panel.is_none() => {
                 vec![PanelEvent::SwapActiveToText(self.file_path.clone())]
@@ -753,6 +780,7 @@ mod tests {
             pending_anchor: None,
             loading: None,
             plugin_panel: None,
+            plugin_menu: Vec::new(),
         };
         p.doc = render::render_markdown(src, 80, &p.colors, false);
         p.layout_width = 80;
@@ -836,6 +864,13 @@ mod tests {
         );
         assert_eq!(p.icon(), Some("🧩"));
         assert!(p.handle_status_action("edit_source").is_empty());
+        p.set_plugin_menu(vec![("Refresh".into(), "refresh".into())]);
+        let (label, id) = p.context_menu_items().remove(0);
+        assert_eq!(label, "Refresh");
+        assert!(matches!(
+            p.handle_status_action(&id).as_slice(),
+            [PanelEvent::PluginAction { panel: 7, action }] if action == "refresh"
+        ));
 
         p.top = 0;
         p.set_plugin_content(Some("Status 2".into()), "# New\n\nmore".into());

@@ -728,12 +728,15 @@ impl Panel for HtmlPanel {
         }
     }
 
-    fn context_menu_items(&self) -> Vec<(String, &'static str)> {
+    fn context_menu_items(&self) -> Vec<(String, String)> {
         if self.error.is_some() || self.is_placeholder() {
             return vec![];
         }
         let t = termide_i18n::t();
-        vec![(t.menu_save_page_as_markdown().to_string(), "save_markdown")]
+        vec![(
+            t.menu_save_page_as_markdown().to_string(),
+            "save_markdown".into(),
+        )]
     }
 
     fn reload(&mut self) -> anyhow::Result<()> {
@@ -1055,7 +1058,7 @@ mod tests {
         assert_eq!(
             p.context_menu_items()
                 .iter()
-                .map(|(_, id)| *id)
+                .map(|(_, id)| id.as_str())
                 .collect::<Vec<_>>(),
             ["save_markdown"]
         );

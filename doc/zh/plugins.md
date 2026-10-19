@@ -112,11 +112,13 @@ enabled = false
 
 | 方法 | 类型 | 方向 | 参数 / 结果 |
 |---|---|---|---|
-| `panel/open` | 请求 | 插件 → termide | `title`、`markdown`；结果为 `{ "panel" }`，即其 id |
-| `panel/update` | 请求 | 插件 → termide | `panel`、`markdown`、`title`（可选） |
+| `panel/open` | 请求 | 插件 → termide | `title`、`markdown`、`menu`（可选）；结果为 `{ "panel" }`，即其 id |
+| `panel/update` | 请求 | 插件 → termide | `panel`、`markdown`，以及可选的 `title` 和 `menu` |
 | `panel/close` | 请求 | 插件 → termide | `panel` |
 | `panel/action` | 通知 | termide → 插件 | `panel`、`action` |
 | `panel/closed` | 通知 | termide → 插件 | `panel`：用户关闭了它 |
+
+`menu` 是面板 `[≡]` 菜单中它自己的条目，`[{ "label", "action" }]`（最多 12 个）：选中的条目会像 `plugin:` 链接一样作为 `panel/action` 发送。表明面板出自谁之手的部分由 termide 决定：图标总是 🧩，标题总是以插件名开头（`deploy: Report`）；插件给出的标题和标签会去掉控制字符与不可见字符并截断长度。
 
 面板在插件所属的项目中打开，该项目必须是当前项目；面板不会随布局保存。更新会尽量让读者停留在原处。插件停止时，它的面板保留并说明这一点；重新启动的插件不会再拿回它们。
 

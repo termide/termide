@@ -433,14 +433,14 @@ impl Panel for MermaidPanel {
         }
     }
 
-    fn context_menu_items(&self) -> Vec<(String, &'static str)> {
+    fn context_menu_items(&self) -> Vec<(String, String)> {
         if self.error.is_some() {
             return vec![];
         }
         let t = termide_i18n::t();
         vec![
-            (t.menu_copy_diagram().to_string(), "copy_diagram"),
-            (t.menu_save_diagram_as().to_string(), "save_diagram"),
+            (t.menu_copy_diagram().to_string(), "copy_diagram".into()),
+            (t.menu_save_diagram_as().to_string(), "save_diagram".into()),
         ]
     }
 

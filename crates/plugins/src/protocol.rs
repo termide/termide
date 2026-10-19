@@ -58,6 +58,59 @@ pub mod events {
     pub const FILE_SAVED: &str = "file/saved";
 }
 
+/// `text` from a plugin made fit to stand in termide's own chrome — a panel
+/// title, a menu entry, a window's heading: control and invisible
+/// characters (zero-width ones, direction overrides) removed, runs of
+/// whitespace made one space, and cut to `max` characters with `…`.
+#[must_use]
+pub fn clean_text(text: &str, max: usize) -> String {
+    let invisible = |c: char| {
+        c.is_control()
+            || matches!(
+                c,
+                '\u{200B}'..='\u{200F}'
+                    | '\u{202A}'..='\u{202E}'
+                    | '\u{2060}'..='\u{2064}'
+                    | '\u{2066}'..='\u{2069}'
+                    | '\u{FEFF}'
+            )
+    };
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let joined = words.join(" ");
+    let kept: String = joined.chars().filter(|c| !invisible(*c)).collect();
+    if kept.chars().count() <= max {
+        kept
+    } else {
+        let mut cut: String = kept.chars().take(max.saturating_sub(1)).collect();
+        cut.push('…');
+        cut
+    }
+}
+
+/// The entries of a `menu` param, `[{ "label", "action" }]`: at most
+/// [`MAX_MENU_ITEMS`], labels cleaned, the malformed ones left out.
+#[must_use]
+pub fn menu_items(value: &Value) -> Vec<(String, String)> {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let label = clean_text(item["label"].as_str()?, MAX_LABEL);
+            let action = item["action"].as_str()?.to_string();
+            (!label.is_empty() && !action.is_empty()).then_some((label, action))
+        })
+        .take(MAX_MENU_ITEMS)
+        .collect()
+}
+
+/// The most entries a plugin's menu holds.
+pub const MAX_MENU_ITEMS: usize = 12;
+/// The longest a plugin's title may be, in characters.
+pub const MAX_TITLE: usize = 60;
+/// The longest a plugin's menu label may be, in characters.
+pub const MAX_LABEL: usize = 40;
+
 /// The params of `initialize`.
 #[must_use]
 pub fn initialize_params(key: &PluginKey, launch: &Launch) -> Value {
@@ -145,6 +198,19 @@ mod tests {
         assert_eq!(c.tools.len(), 1);
         assert!(c.tools[0].read_only);
         assert_eq!(c.tools[0].input_schema["type"], "object");
+    }
+
+    #[test]
+    fn text_from_a_plugin_is_cleaned_for_termides_chrome() {
+        assert_eq!(clean_text("  Report\n\tdaily ", 60), "Report daily");
+        assert_eq!(clean_text("a\u{202E}b\u{200B}c\u{1b}[31m", 60), "abc[31m");
+        assert_eq!(clean_text("abcdef", 4), "abc…");
+        let menu = menu_items(&json!([
+            { "label": "Refresh", "action": "refresh" },
+            { "label": "", "action": "x" },
+            { "action": "y" },
+        ]));
+        assert_eq!(menu, [("Refresh".to_string(), "refresh".to_string())]);
     }
 
     #[test]

@@ -2212,7 +2212,7 @@ fn a_named_session_titles_the_panel() {
         .find(|(_, action)| *action == RENAME_ACTION)
         .expect("a rename entry in the menu");
     assert_eq!(label, "Rename session");
-    let events = panel.handle_status_action(action);
+    let events = panel.handle_status_action(&action);
     let Some(PanelEvent::ShowInput { on_submit, .. }) = events.first() else {
         panic!("expected an input prompt, got {events:?}");
     };

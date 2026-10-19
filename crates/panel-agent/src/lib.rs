@@ -1565,20 +1565,23 @@ impl Panel for AgentPanel {
         self.attention
     }
 
-    fn context_menu_items(&self) -> Vec<(String, &'static str)> {
+    fn context_menu_items(&self) -> Vec<(String, String)> {
         let t = termide_i18n::t();
         // Only actions with no home elsewhere. New/switch/delete sessions also
         // have F-keys, sessions/prompts/agents live in the AI menu, and the
         // model/agent/mode pickers are status-bar chips — none is repeated here.
         // Session info also answers F3 and `/usage`; the assembled prompt is
         // reached with `/prompt`, so neither needs another menu slot beyond this.
-        vec![
-            (t.agent_session_info().to_string(), SESSION_INFO_ACTION),
-            (t.agent_rename().to_string(), RENAME_ACTION),
-            (t.agent_save_chat().to_string(), SAVE_CHAT_ACTION),
-            (t.agent_fork_session().to_string(), FORK_SESSION_ACTION),
-            (t.agent_delete_session().to_string(), DELETE_SESSION_ACTION),
+        [
+            (t.agent_session_info(), SESSION_INFO_ACTION),
+            (t.agent_rename(), RENAME_ACTION),
+            (t.agent_save_chat(), SAVE_CHAT_ACTION),
+            (t.agent_fork_session(), FORK_SESSION_ACTION),
+            (t.agent_delete_session(), DELETE_SESSION_ACTION),
         ]
+        .into_iter()
+        .map(|(label, action)| (label.to_string(), action.to_string()))
+        .collect()
     }
 
     fn handle_status_action(&mut self, action: &str) -> Vec<PanelEvent> {
