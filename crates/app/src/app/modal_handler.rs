@@ -836,6 +836,9 @@ impl App {
                         self.handle_debug_setup(&result.values)?;
                     }
                 }
+                PendingAction::PluginWindow { request } => {
+                    self.answer_plugin_window(request, &*value);
+                }
                 PendingAction::ConfirmProjectCommand { command } => {
                     if value.downcast_ref::<bool>().copied().unwrap_or(false) {
                         // The command as it was shown, not as the file may

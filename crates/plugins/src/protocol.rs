@@ -18,6 +18,13 @@
 //! - `contributions/changed` (notification): a new [`Contributions`].
 //! - `window/notify` (request) `{ "message", "level"? }`.
 //! - `status/set` (request) `{ "id", "text" }`; an empty text removes it.
+//! - `window/confirm` `{ "title", "message" }` → `true`, `false` or `null`
+//!   (dismissed); `window/choose` `{ "title", "items" }` → an index or
+//!   `null`; `window/input` `{ "title", "prompt", "default"? }` → text or
+//!   `null`; `window/form` `{ "title", "fields" }` → `{ name: value }` or
+//!   `null`; `window/message` `{ "title", "message" }` → `null`. Requests,
+//!   answered once the user closes the window; one window per plugin at a
+//!   time, shown while its project is current.
 //! - `panel/open` (request) `{ "title", "markdown" }` opens a panel in the
 //!   plugin's project, which must be the current one; the result is
 //!   `{ "panel" }`, its id.
@@ -46,6 +53,11 @@ pub const COMMAND_EXECUTE: &str = "command/execute";
 pub const TOOL_CALL: &str = "tool/call";
 pub const WINDOW_NOTIFY: &str = "window/notify";
 pub const STATUS_SET: &str = "status/set";
+pub const WINDOW_CONFIRM: &str = "window/confirm";
+pub const WINDOW_CHOOSE: &str = "window/choose";
+pub const WINDOW_INPUT: &str = "window/input";
+pub const WINDOW_FORM: &str = "window/form";
+pub const WINDOW_MESSAGE: &str = "window/message";
 pub const PANEL_OPEN: &str = "panel/open";
 pub const PANEL_UPDATE: &str = "panel/update";
 pub const PANEL_CLOSE: &str = "panel/close";

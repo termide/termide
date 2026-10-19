@@ -32,7 +32,7 @@ use crate::PanelExt;
 
 /// The app's side of the plugins.
 pub(crate) struct PluginRuntime {
-    host: Host,
+    pub(super) host: Host,
     /// What the plugins directory held at startup.
     installed: Vec<Installed>,
     /// What each ready plugin contributes.
@@ -47,6 +47,8 @@ pub(crate) struct PluginRuntime {
     panels: BTreeMap<u64, PluginKey>,
     /// The id the next plugin panel gets.
     next_panel: u64,
+    /// The windows plugins asked for.
+    pub(super) windows: super::plugin_windows::Windows,
 }
 
 impl PluginRuntime {
@@ -89,6 +91,7 @@ impl PluginRuntime {
             dirty: true,
             panels: BTreeMap::new(),
             next_panel: 1,
+            windows: Default::default(),
         }
     }
 
@@ -187,6 +190,16 @@ impl App {
         {
             self.plugins.host.close_project(gone);
         }
+        let gone: Vec<PathBuf> = self
+            .plugins
+            .synced
+            .iter()
+            .filter(|root| !roots.contains(root))
+            .cloned()
+            .collect();
+        for root in gone {
+            self.drop_project_windows(&root);
+        }
         let host = &self.plugins.host;
         let alive = host.states();
         self.plugins
@@ -227,6 +240,7 @@ impl App {
             self.handle_plugin_event(event);
         }
         self.notice_closed_plugin_panels();
+        self.serve_plugin_windows();
     }
 
     /// Tell each plugin about its panels the user closed since the last tick.
@@ -302,6 +316,7 @@ impl App {
                 self.plugins.contributions.remove(&key);
                 tool_hub().set(&key, Vec::new());
                 self.orphan_plugin_panels(&key);
+                self.drop_plugin_windows(&key);
                 self.plugins.status.retain(|(k, _), _| *k != key);
                 self.refresh_plugin_ui();
                 if restart_in.is_none() {
@@ -318,6 +333,11 @@ impl App {
                 method,
                 params,
             } => {
+                // A window is answered when the user closes it.
+                if super::plugin_windows::is_window_method(&method) {
+                    self.ask_plugin_window(key, id, &method, &params);
+                    return;
+                }
                 let outcome = self.serve_plugin_request(&key, &method, &params);
                 self.plugins.host.respond(&key, &id, outcome);
             }

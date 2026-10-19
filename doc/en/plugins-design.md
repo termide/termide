@@ -132,6 +132,12 @@ Contributions, declared in `initialize` (they can change later):
    because the viewer already lays out headings, lists, tables, code and
    links, with the cursor, selection, search and copy, and every plugin
    author knows it.
+   Windows (`window/confirm`, `choose`, `input`, `form`, `message`) are
+   termide's own modals: the plugin picks the kind and the words, termide
+   heads every one `🧩 <plugin>`, offers no hidden input, queues them one per
+   plugin and answers the request when the window closes. What tells who
+   speaks — a panel's icon and the plugin name leading its title, a window's
+   heading — is never the plugin's to set.
 3. Editor decorations.
 
 Out of scope: an install command (copying the directory is enough), declared

@@ -3,8 +3,8 @@
 A plugin is a program that termide runs in the background while a project is
 open and talks to over JSON-RPC on the program's stdin and stdout. It can
 react to files being opened and saved, add commands to the command palette and the Commands menu,
-show items in the status bar, open panels of its own and give the coding
-agent tools.
+show items in the status bar, ask in termide's windows, open panels of its
+own and give the coding agent tools.
 
 Plugins are global: they are installed in your config directory, and a project
 can only switch off a plugin you installed or switch on one you allowed it to.
@@ -129,6 +129,29 @@ as MCP tools: they are asked about before running unless they are `readOnly`.
 
 A plugin of a project in the background is not shown on screen: its
 notifications go to the log.
+
+### Windows
+
+A plugin can ask the user something in one of termide's own windows. The
+request is answered when the user closes the window: with the answer, or
+`null` when it was dismissed (`Esc`).
+
+| Method | Params | Answer |
+|---|---|---|
+| `window/confirm` | `title`, `message` | `true`, `false` or `null` |
+| `window/choose` | `title`, `items` (strings) | the index picked, or `null` |
+| `window/input` | `title`, `prompt`, `default` (optional) | the text, or `null` |
+| `window/form` | `title`, `fields`: `[{ "name", "label", "type", "options"?, "default"? }]`, `type` one of `text`, `number`, `bool`, `select` | `{ name: value }` (switches as booleans, numbers as numbers), or `null` |
+| `window/message` | `title`, `message` | `null` |
+
+Every window is headed `🧩 <plugin> · <title>` by termide, so that it never
+passes for termide's own questions; the plugin's words are cleaned of control
+and invisible characters. There is no hidden input: a window asking for a
+password is what a phishing plugin would show, so a secret belongs in the
+plugin's `settings` or its environment. A window waits behind any other one
+on screen and shows only while its plugin's project is current; a plugin has
+one window at a time, and asking for another meanwhile is refused as busy.
+When the plugin stops or its project closes, its windows go.
 
 ### Panels
 
