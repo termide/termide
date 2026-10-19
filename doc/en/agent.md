@@ -658,7 +658,8 @@ and how long it has waited, with a `✕`; after three, a count of the rest); an 
 goes on, with how long it has run — a click elsewhere on the row brings its
 latest run into view; and, closest to the input, each subagent still running
 (`& Delegating to · agent  task`, worded as its block, with what it did last
-or its wait for a slot before its time; after three, `& +N`) and each command
+or its wait for a slot before its time; after three, `& +N`, which a click
+unfolds into all of them, with a `& ▴` row after them that folds them back) and each command
 the agent moved to the background (`$ Running  cargo test`), so one whose
 block has scrolled out of view still shows it works — a click on its row
 selects the block and brings it into view, and for a subagent opens the panel

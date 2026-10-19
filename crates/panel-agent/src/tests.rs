@@ -10956,3 +10956,71 @@ fn a_background_task_has_a_row_that_stops_or_follows_it() {
     assert!(rows.iter().all(|line| !line.contains("find the loader")));
     assert!(panel.needs_close_confirmation().is_none());
 }
+
+/// Past three running subagents the strip counts the rest; a click on the
+/// count shows them all, and the row after them folds them back.
+#[test]
+fn the_strip_count_of_subagents_unfolds_and_folds_back() {
+    let mut panel = panel(vec![]);
+    let id = panel.panel_id();
+    let calls: Vec<String> = (0..5).map(|n| format!("more-{n}")).collect();
+    let tasks: Vec<String> = (0..5).map(|n| format!("task number {n}")).collect();
+    let registrations: Vec<_> = calls
+        .iter()
+        .zip(&tasks)
+        .map(|(call, task)| {
+            crate::live::register(crate::live::LiveTask {
+                panel: Some(id),
+                call,
+                from: "default",
+                agent: "search",
+                task,
+                session: None,
+                background: true,
+            })
+        })
+        .collect();
+    let (width, height) = (80, 40);
+    let shown = |panel: &mut AgentPanel| {
+        let rows = render_text(panel, width, height);
+        (0..5)
+            .filter(|n| {
+                rows.iter()
+                    .any(|line| line.contains(&format!("task number {n}")))
+            })
+            .count()
+    };
+    let click = |panel: &mut AgentPanel| {
+        let row = strip_row(panel, crate::strip::StripTarget::MoreTasks);
+        panel.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 1,
+                row,
+                modifiers: KeyModifiers::NONE,
+            },
+            Rect::new(0, 0, width, height),
+        );
+        row
+    };
+    assert_eq!(shown(&mut panel), 3);
+    let rows = render_text(&mut panel, width, height);
+    let row = strip_row(&panel, crate::strip::StripTarget::MoreTasks);
+    assert!(
+        rows[row as usize].starts_with("& +2"),
+        "{}",
+        rows[row as usize]
+    );
+    click(&mut panel);
+    assert_eq!(shown(&mut panel), 5);
+    let rows = render_text(&mut panel, width, height);
+    let row = strip_row(&panel, crate::strip::StripTarget::MoreTasks);
+    assert!(
+        rows[row as usize].starts_with("& ▴"),
+        "{}",
+        rows[row as usize]
+    );
+    click(&mut panel);
+    assert_eq!(shown(&mut panel), 3);
+    drop(registrations);
+}

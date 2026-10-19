@@ -34,6 +34,9 @@ pub(crate) enum StripTarget {
     Background(usize),
     /// The count of rows left out.
     More,
+    /// The count of subagents' rows left out, which shows them all; or,
+    /// with them all shown, the row that folds them back.
+    MoreTasks,
 }
 
 /// One row of the strip.
@@ -250,9 +253,28 @@ impl AgentPanel {
         let mut tasks = self.running_tasks();
         tasks.extend(self.background_tasks());
         let more = tasks.len().saturating_sub(STATE_QUEUED_ROWS);
-        rows.extend(tasks.into_iter().take(STATE_QUEUED_ROWS));
-        if more > 0 {
-            rows.push(StripRow::more("&", format!("+{more}")));
+        if more == 0 {
+            // Nothing left out: the next time there is, it starts folded.
+            self.strip_tasks_open = false;
+        }
+        if self.strip_tasks_open {
+            rows.extend(tasks);
+            rows.push(StripRow::new(
+                "&",
+                String::new(),
+                "▴".to_string(),
+                StripTarget::MoreTasks,
+            ));
+        } else {
+            rows.extend(tasks.into_iter().take(STATE_QUEUED_ROWS));
+            if more > 0 {
+                rows.push(StripRow::new(
+                    "&",
+                    String::new(),
+                    format!("+{more}"),
+                    StripTarget::MoreTasks,
+                ));
+            }
         }
         rows.extend(self.background_rows(width));
         rows
@@ -443,6 +465,8 @@ impl AgentPanel {
                     self.chat_focus = false;
                 }
             }
+            // `+N` shows the subagents left out, `▴` folds them back.
+            StripTarget::MoreTasks => self.strip_tasks_open = !self.strip_tasks_open,
             StripTarget::RetryWait | StripTarget::Queued | StripTarget::More => {}
         }
         vec![PanelEvent::NeedsRedraw]

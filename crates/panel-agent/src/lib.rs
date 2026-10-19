@@ -954,6 +954,9 @@ pub struct AgentPanel {
     /// The calls of the tasks handed over in the background, as the strip
     /// last listed them: a click on one of their rows maps back to one.
     strip_delegates: Vec<String>,
+    /// The strip shows every running subagent, not the first few and a
+    /// count of the rest.
+    strip_tasks_open: bool,
     /// The column of the strip's `✕` buttons as last drawn.
     strip_stop_x: u16,
     /// The run controls last put on the prompt's border, in order, so a
@@ -1258,6 +1261,7 @@ impl AgentPanel {
             task_clocks: HashMap::new(),
             strip_hits: Vec::new(),
             strip_delegates: Vec::new(),
+            strip_tasks_open: false,
             strip_stop_x: 0,
             run_buttons: Vec::new(),
             queued_texts: VecDeque::new(),
