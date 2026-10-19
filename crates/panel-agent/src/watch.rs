@@ -1,0 +1,252 @@
+//! A delegated task running out of sight, followed in a panel.
+//!
+//! A hidden delegate runs on its own thread and writes its session log as it
+//! goes. A panel watching it only reads that log: it rebuilds the transcript
+//! whenever the log grows, so closing the panel takes nothing from the task.
+//! While the task runs the panel is the delegating agent's, as one running a
+//! task is ([`crate::Delegation`]): the input takes nothing and names whose
+//! delegate it is. `Esc` stops the task, `Ctrl+T` takes it over. Once the
+//! task is over the panel opens its session as any other, to go on with.
+
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use termide_agent_core::{CancelToken, Session};
+use termide_core::PanelEvent;
+
+use crate::runtime::push_history;
+use crate::{AgentPanel, NoticeKind, Transcript};
+
+/// What the user can do to a delegate running out of sight, from a panel
+/// watching it, and what the delegate tells it back. Shared between the
+/// task's thread and the panels.
+#[derive(Debug, Clone, Default)]
+pub struct DelegateControl {
+    /// Cancelled when the user stops the task, or takes it over.
+    stop: CancelToken,
+    /// The user took the task over: it is theirs to go on with.
+    taken: Arc<AtomicBool>,
+    /// The task is over.
+    done: Arc<AtomicBool>,
+}
+
+impl DelegateControl {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Cancelled once the user stopped the task or took it over: the task
+    /// stops its run on it.
+    #[must_use]
+    pub fn stop_token(&self) -> &CancelToken {
+        &self.stop
+    }
+
+    /// Stop the task.
+    pub fn stop(&self) {
+        self.stop.cancel();
+    }
+
+    /// Take the task over: it stops, and its session is the user's.
+    pub fn take_over(&self) {
+        self.taken.store(true, Ordering::Release);
+        self.stop.cancel();
+    }
+
+    /// Why the task ended, when the user ended it: what the delegating
+    /// agent is told along with what the delegate said so far.
+    #[must_use]
+    pub fn ended_by_user(&self) -> Option<&'static str> {
+        if !self.stop.is_cancelled() {
+            None
+        } else if self.taken.load(Ordering::Acquire) {
+            Some("the user took the task over")
+        } else {
+            Some("the user stopped the subagent")
+        }
+    }
+
+    /// Mark the task over.
+    pub fn finish(&self) {
+        self.done.store(true, Ordering::Release);
+    }
+
+    #[must_use]
+    pub fn is_done(&self) -> bool {
+        self.done.load(Ordering::Acquire)
+    }
+}
+
+/// A delegated task this panel follows.
+pub struct Watch {
+    /// The delegating agent's name.
+    from: String,
+    /// The task's first line, for the input's placeholder.
+    task: String,
+    /// The task's session log.
+    session: PathBuf,
+    control: DelegateControl,
+    /// The panel the task came from.
+    by_panel: u64,
+    /// The id of the `task` call that handed it over.
+    call: String,
+    /// How long the log was when last read.
+    seen: Option<u64>,
+    /// When the log was last looked at.
+    looked: Option<Instant>,
+}
+
+/// How often a watched log is looked at: a step of the task is seconds, so
+/// a stat a few times a second keeps up without work on every frame.
+const LOOK_EVERY: Duration = Duration::from_millis(250);
+
+impl Watch {
+    /// The task the `task` call `call` of panel `by_panel`, an agent
+    /// `from`'s, handed over, logged at `session`.
+    #[must_use]
+    pub fn new(
+        from: impl Into<String>,
+        task: &str,
+        session: PathBuf,
+        control: DelegateControl,
+        by_panel: u64,
+        call: impl Into<String>,
+    ) -> Self {
+        Self {
+            from: from.into(),
+            task: task
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+            session,
+            control,
+            by_panel,
+            call: call.into(),
+            seen: None,
+            looked: None,
+        }
+    }
+}
+
+/// The log's length, which only grows while the task writes it.
+fn log_len(path: &Path) -> Option<u64> {
+    std::fs::metadata(path).ok().map(|meta| meta.len())
+}
+
+impl AgentPanel {
+    /// Follow `watch`'s task here.
+    pub fn start_watch(&mut self, watch: Watch) {
+        self.chat_focus = true;
+        self.watch = Some(watch);
+        self.refresh_watch();
+    }
+
+    /// Whether the panel follows the task the `task` call `call` of panel
+    /// `by` handed over.
+    pub(crate) fn watches_task(&self, by: u64, call: &str) -> bool {
+        self.watch
+            .as_ref()
+            .is_some_and(|watch| watch.by_panel == by && watch.call == call)
+    }
+
+    /// Rebuild the transcript from the log when it grew. `true` when it did.
+    fn refresh_watch(&mut self) -> bool {
+        let Some(watch) = &mut self.watch else {
+            return false;
+        };
+        let len = log_len(&watch.session);
+        if len.is_none() || len == watch.seen {
+            return false;
+        }
+        let Ok(session) = Session::open_read_only(&watch.session) else {
+            return false;
+        };
+        watch.seen = len;
+        let mut transcript = Transcript::default();
+        transcript.set_fold(self.fold);
+        for logged in session.context_messages_with_times(&self.compaction_prompts) {
+            push_history(&mut transcript, &logged);
+        }
+        self.transcript = transcript;
+        self.selected = self
+            .selected
+            .min(self.transcript.items().len().saturating_sub(1));
+        true
+    }
+
+    /// Follow the task: show what its log gained, and once it is over open
+    /// its session here, as any other, to go on with. `true` when the panel
+    /// changed.
+    pub(crate) fn settle_watch(&mut self) -> bool {
+        let Some(watch) = &mut self.watch else {
+            return false;
+        };
+        let done = watch.control.is_done();
+        if !done && watch.looked.is_some_and(|at| at.elapsed() < LOOK_EVERY) {
+            return false;
+        }
+        watch.looked = Some(Instant::now());
+        let changed = self.refresh_watch();
+        if !done {
+            return changed;
+        }
+        let Some(watch) = self.watch.take() else {
+            return changed;
+        };
+        match Session::open(&watch.session) {
+            Ok(session) => {
+                self.switch_session(Some(session));
+            }
+            Err(error) => log::warn!("cannot open the delegate's session: {error}"),
+        }
+        if watch.control.taken.load(Ordering::Acquire) {
+            self.chat_focus = false;
+            self.notice(
+                termide_i18n::t().agent_notice_taken_over_fmt(&watch.from),
+                NoticeKind::Info,
+            );
+        }
+        true
+    }
+
+    /// `Esc` while watching: stop the task.
+    pub(crate) fn stop_watched(&mut self) -> Vec<PanelEvent> {
+        if let Some(watch) = &self.watch {
+            watch.control.stop();
+        }
+        vec![PanelEvent::NeedsRedraw]
+    }
+
+    /// Take the watched task over, once confirmed.
+    pub(crate) fn take_over_watched(&mut self) -> Vec<PanelEvent> {
+        if let Some(watch) = &self.watch {
+            watch.control.take_over();
+        }
+        vec![PanelEvent::NeedsRedraw]
+    }
+
+    pub(crate) fn watch_from(&self) -> Option<&str> {
+        self.watch.as_ref().map(|watch| watch.from.as_str())
+    }
+
+    pub(crate) fn watch_placeholder(&self) -> Option<String> {
+        self.watch.as_ref().map(|watch| {
+            termide_i18n::t().agent_input_placeholder_delegate_fmt(&watch.from, &watch.task)
+        })
+    }
+
+    pub(crate) fn watch_by_panel(&self) -> Option<u64> {
+        self.watch.as_ref().map(|watch| watch.by_panel)
+    }
+
+    /// Whether the panel follows a task running out of sight.
+    #[must_use]
+    pub fn is_watching(&self) -> bool {
+        self.watch.is_some()
+    }
+}

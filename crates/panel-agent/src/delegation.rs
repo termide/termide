@@ -99,6 +99,7 @@ impl AgentPanel {
     #[must_use]
     pub fn takes_delegate(&self) -> bool {
         self.delegation.is_none()
+            && self.watch.is_none()
             && self.banner_shown()
             && self.input_area().is_empty()
             && !self.shell_mode
@@ -106,19 +107,21 @@ impl AgentPanel {
             && self.pending.is_none()
     }
 
-    /// Whether the panel runs a task for another agent.
+    /// Whether the panel runs a task for another agent, or follows one
+    /// running out of sight.
     #[must_use]
     pub fn is_delegate(&self) -> bool {
-        self.delegation.is_some()
+        self.delegation.is_some() || self.watch.is_some()
     }
 
     /// Whether the panel runs the task the `task` call `call` of the panel
     /// `by` handed over.
     #[must_use]
     pub fn runs_task(&self, by: u64, call: &str) -> bool {
-        self.delegation.as_ref().is_some_and(|delegation| {
-            delegation.by_panel == Some(by) && delegation.call.as_deref() == Some(call)
-        })
+        self.watches_task(by, call)
+            || self.delegation.as_ref().is_some_and(|delegation| {
+                delegation.by_panel == Some(by) && delegation.call.as_deref() == Some(call)
+            })
     }
 
     /// The panel whose task this one runs, when it says.
@@ -127,6 +130,7 @@ impl AgentPanel {
         self.delegation
             .as_ref()
             .and_then(|delegation| delegation.by_panel)
+            .or_else(|| self.watch_by_panel())
     }
 
     /// Run `message`, another agent's task, as this panel's next request.
@@ -155,10 +159,13 @@ impl AgentPanel {
 
     /// The placeholder the input shows while a task runs here.
     pub(crate) fn delegate_placeholder(&self) -> Option<String> {
-        self.delegation.as_ref().map(|delegation| {
-            termide_i18n::t()
-                .agent_input_placeholder_delegate_fmt(&delegation.from, &delegation.task)
-        })
+        self.delegation
+            .as_ref()
+            .map(|delegation| {
+                termide_i18n::t()
+                    .agent_input_placeholder_delegate_fmt(&delegation.from, &delegation.task)
+            })
+            .or_else(|| self.watch_placeholder())
     }
 
     /// Follow the task: stop it when the delegating agent stopped waiting,
@@ -212,11 +219,16 @@ impl AgentPanel {
     /// `Ctrl+T`: ask before taking the task over; the answer comes back as
     /// `PanelCommand::Confirmed(TAKE_OVER_ACTION)`.
     pub(crate) fn ask_take_over(&self) -> Vec<PanelEvent> {
-        let Some(delegation) = &self.delegation else {
+        let Some(from) = self
+            .delegation
+            .as_ref()
+            .map(|delegation| delegation.from.as_str())
+            .or_else(|| self.watch_from())
+        else {
             return Vec::new();
         };
         vec![PanelEvent::ShowConfirm {
-            message: termide_i18n::t().agent_take_over_confirm_fmt(&delegation.from),
+            message: termide_i18n::t().agent_take_over_confirm_fmt(from),
             on_confirm: ConfirmAction::Custom(TAKE_OVER_ACTION.to_string()),
         }]
     }
@@ -224,6 +236,10 @@ impl AgentPanel {
     /// Take the panel over from the delegating agent: the task ends for it
     /// with what was said so far, and the conversation is the user's.
     pub(crate) fn take_over(&mut self) -> Vec<PanelEvent> {
+        // A task followed here stops, and its session opens once it has.
+        if self.watch.is_some() {
+            return self.take_over_watched();
+        }
         let Some(delegation) = self.delegation.take() else {
             return Vec::new();
         };

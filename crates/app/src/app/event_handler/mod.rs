@@ -456,7 +456,9 @@ impl App {
                         .downcast_ref::<termide_panel_agent::AgentPanel>()
                         .is_some_and(|agent| agent.runs_task(panel, &call))
                 });
-                if found {
+                // A task running out of sight is followed in a panel opened
+                // for it.
+                if found || self.watch_delegate(panel, &call) {
                     self.state.needs_redraw = true;
                 }
             }

@@ -11052,3 +11052,62 @@ fn the_strip_stop_button_gives_up_a_retry_wait() {
     );
     assert!(panel.retry_wait.is_none());
 }
+
+/// A panel following a task that runs out of sight shows what its log
+/// gains, stops it on `Esc`, and opens its session once it is over.
+#[test]
+fn a_followed_task_shows_its_log_and_opens_when_over() {
+    let dir = tempfile::tempdir().unwrap();
+    let parent = termide_agent_core::SessionParent {
+        session: Some("p1".into()),
+        agent: "lead".into(),
+        call: "call-1".into(),
+    };
+    let mut log = Session::create_delegate(dir.path(), dir.path(), parent).unwrap();
+    log.append_message(&Message::User(UserMessage::text("find the loader")))
+        .unwrap();
+    let path = log.path().to_path_buf();
+
+    let mut panel = panel(vec![]);
+    let control = DelegateControl::new();
+    panel.start_watch(Watch::new(
+        "lead",
+        "find the loader\nmore",
+        path.clone(),
+        control.clone(),
+        3,
+        "call-1",
+    ));
+    assert!(panel.is_delegate() && panel.runs_task(3, "call-1"));
+    assert!(!panel.runs_task(3, "call-2"));
+    assert_eq!(panel.delegated_by(), Some(3));
+    assert!(panel.transcript.items().iter().any(|item| matches!(
+        item,
+        Item::User { text, .. } if text.contains("find the loader")
+    )));
+
+    // What the delegate says next shows up.
+    log.append_message(&Message::Assistant(reply("found it")))
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    panel.tick();
+    assert!(panel.transcript.items().iter().any(|item| matches!(
+        item,
+        Item::Assistant { text, .. } if text.contains("found it")
+    )));
+
+    // `Esc` stops the task; the panel follows it until it is over.
+    panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(
+        control.ended_by_user(),
+        Some("the user stopped the subagent")
+    );
+    assert!(panel.is_watching());
+
+    // Over: the session opens here as any other.
+    drop(log);
+    control.finish();
+    panel.tick();
+    assert!(!panel.is_watching() && !panel.is_delegate());
+    assert_eq!(panel.session_path(), Some(path.as_path()));
+}

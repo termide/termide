@@ -625,6 +625,14 @@ impl AgentPanel {
             Item::Tool {
                 call, result, live, ..
             } => {
+                // A delegated task still running is followed in a panel of
+                // its own, or the panel running it comes forward.
+                if call.name == "task" && result.is_none() {
+                    return vec![PanelEvent::FocusDelegate {
+                        panel: self.panel_id,
+                        call: call.id.clone(),
+                    }];
+                }
                 // A delegated task's block opens the delegate's session.
                 if let Some(path) = result.as_ref().and_then(delegate_session) {
                     if path.exists() {
@@ -1070,6 +1078,8 @@ impl AgentPanel {
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let passes = match key.code {
             KeyCode::Char('t') if ctrl && !alt => return Some(self.ask_take_over()),
+            // A task followed here stops; one run here stops as any run.
+            KeyCode::Esc if self.is_watching() => return Some(self.stop_watched()),
             KeyCode::Char('s' | 'c' | 'o') if ctrl && !alt => true,
             KeyCode::F(3) => true,
             KeyCode::F(_) => false,

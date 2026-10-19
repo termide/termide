@@ -841,6 +841,7 @@ impl AgentPanel {
         }
         changed |= self.settle_restored();
         changed |= self.settle_delegation();
+        changed |= self.settle_watch();
         // A goal or loop started, stepped or stopped is written to the log,
         // so a session reopened later offers to carry it on — between runs,
         // so nothing comes between a request's start and its message.

@@ -43,6 +43,7 @@ mod debug_tool;
 pub(in crate::app) use debug_tool::Waiter as DebugWaiter;
 mod headless;
 mod in_panel;
+mod live;
 mod peers;
 pub use headless::{run_agent_headless, run_recall, HeadlessOutput};
 pub(super) use peers::same_dir;
@@ -1485,6 +1486,11 @@ impl DelegateLog {
         }
     }
 
+    /// The log's path, when there is one.
+    fn path(&self) -> Option<PathBuf> {
+        self.0.as_ref().map(|session| session.path().to_path_buf())
+    }
+
     /// `outcome` with the log noted beside it.
     fn into_outcome(self, mut outcome: SubagentOutcome) -> SubagentOutcome {
         outcome.session = self.0.map(|session| session.path().to_path_buf());
@@ -1743,7 +1749,7 @@ impl Subagents {
                 panel: ctx.panel,
             };
             return self
-                .run_cli(run, message, log, &budget, cancel, on_update)
+                .run_cli(run, message, log, &budget, cancel, caller, task, on_update)
                 .map(with_reviews);
         }
 
@@ -1779,7 +1785,7 @@ impl Subagents {
                     panel: ctx.panel,
                 };
                 return self
-                    .run_cli(run, message, log, &budget, cancel, on_update)
+                    .run_cli(run, message, log, &budget, cancel, caller, task, on_update)
                     .map(with_reviews);
             }
             // On a connection of its own the subagent runs that connection's
@@ -1839,6 +1845,9 @@ impl Subagents {
             agent = agent.with_panel(panel);
         }
 
+        // Followed from its parent's panel while it runs.
+        let live = live::register(ctx.panel, task.call, caller, task.prompt, log.path());
+        let user_stop = live.control().stop_token().clone();
         let mut hooks = hooks;
         let mut report = SubagentReport::new(max_turns);
         let finished = std::sync::atomic::AtomicBool::new(false);
@@ -1847,7 +1856,7 @@ impl Subagents {
             // event: a long prefill or tool sends none.
             scope.spawn(|| {
                 while !finished.load(std::sync::atomic::Ordering::Acquire) {
-                    if cancel.is_cancelled() {
+                    if cancel.is_cancelled() || user_stop.is_cancelled() {
                         budget.cancel();
                         return;
                     }
@@ -1886,9 +1895,12 @@ impl Subagents {
         if report.answer.is_none() && report.error.is_none() {
             report.error = run_error(agent.messages());
         }
-        Ok(with_reviews(
-            log.into_outcome(report.into_outcome(cancel.is_cancelled())),
-        ))
+        Ok(with_reviews(log.into_outcome(
+            match live.control().ended_by_user() {
+                Some(why) if !cancel.is_cancelled() => report.ended_by_user(why),
+                _ => report.into_outcome(cancel.is_cancelled()),
+            },
+        )))
     }
 
     /// Run `run` as a session of its own of its CLI agent, which calls the
@@ -1896,6 +1908,7 @@ impl Subagents {
     /// connection names one, nobody to ask — the agent's own permission
     /// requests are refused with the reason a subagent's calls get — and the
     /// process gone once the task is.
+    #[allow(clippy::too_many_arguments)]
     fn run_cli(
         &self,
         run: CliSubagent,
@@ -1903,8 +1916,12 @@ impl Subagents {
         mut log: DelegateLog,
         budget: &CancelToken,
         cancel: &CancelToken,
+        caller: &str,
+        task: &SubagentTask,
         on_update: &mut dyn FnMut(ToolUpdate),
     ) -> Result<SubagentOutcome, String> {
+        // Followed from its parent's panel while it runs.
+        let live = live::register(run.panel, task.call, caller, task.prompt, log.path());
         let config = run.config;
         // The agent's own requests go where its parent's panel asks; with
         // no one there they come here, and are refused.
@@ -1943,6 +1960,7 @@ impl Subagents {
         };
         let runtime = AcpRuntime::start(&run.name, &config, setup)?;
         let drive = CliDrive {
+            control: live.control(),
             name: &run.name,
             model: &run.model,
             permission_rx: permission_rx.as_ref(),
@@ -1966,6 +1984,8 @@ impl Subagents {
 
 /// The run of a subagent on a CLI agent once its process is up.
 struct CliDrive<'a> {
+    /// What the user does to the task from a panel following it.
+    control: &'a termide_panel_agent::DelegateControl,
     name: &'a str,
     /// The model to pick for the task, empty for the agent's own.
     model: &'a str,
@@ -1993,7 +2013,11 @@ impl CliDrive<'_> {
         log: &mut DelegateLog,
         on_update: &mut dyn FnMut(ToolUpdate),
     ) -> Result<SubagentOutcome, String> {
-        let stopped = || self.cancel.is_cancelled() || self.budget.is_cancelled();
+        let stopped = || {
+            self.cancel.is_cancelled()
+                || self.budget.is_cancelled()
+                || self.control.stop_token().is_cancelled()
+        };
         // The model goes before the task does, so the whole task runs on it.
         if !self.model.is_empty() {
             while starting() && !stopped() {
@@ -2068,7 +2092,10 @@ impl CliDrive<'_> {
             }
             std::thread::sleep(CLI_SUBAGENT_POLL);
         }
-        Ok(report.into_outcome(self.cancel.is_cancelled()))
+        Ok(match self.control.ended_by_user() {
+            Some(why) if !self.cancel.is_cancelled() => report.ended_by_user(why),
+            _ => report.into_outcome(self.cancel.is_cancelled()),
+        })
     }
 }
 
@@ -3097,7 +3124,9 @@ mod tests {
     fn a_subagent_on_a_cli_agent_runs_its_task_to_the_end() {
         let (_prompter, permission_rx) = permission_channel(CancelToken::new());
         let (budget, cancel) = (CancelToken::new(), CancelToken::new());
+        let control = termide_panel_agent::DelegateControl::new();
         let drive = CliDrive {
+            control: &control,
             name: "claude:search",
             model: "haiku",
             permission_rx: Some(&permission_rx),

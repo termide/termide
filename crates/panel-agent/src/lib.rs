@@ -28,6 +28,7 @@ mod submit;
 mod toolset;
 mod transcript;
 mod unfinished;
+mod watch;
 
 use std::any::Any;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
@@ -71,6 +72,7 @@ pub use peers::PeerState;
 pub use runtime::local_minute;
 pub use slash::user_skill_description;
 pub use transcript::{FoldMode, Item, NoticeKind, Transcript};
+pub use watch::{DelegateControl, Watch};
 
 /// A duration in whole milliseconds, saturated to fit a `u32`.
 fn millis(duration: Duration) -> u32 {
@@ -966,6 +968,8 @@ pub struct AgentPanel {
     queued_texts: VecDeque<(String, Instant)>,
     /// The task another agent delegated to this panel, while it runs.
     delegation: Option<Delegation>,
+    /// The delegated task running out of sight this panel follows.
+    watch: Option<watch::Watch>,
     /// A delegated task ended here and the panel is free again, for the app
     /// to set up anew as a panel opened by the user is.
     released: bool,
@@ -1268,6 +1272,7 @@ impl AgentPanel {
             run_buttons: Vec::new(),
             queued_texts: VecDeque::new(),
             delegation: None,
+            watch: None,
             released: false,
             inherited_intent: setup.inherited_intent.clone(),
             panel_id,

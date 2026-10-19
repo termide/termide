@@ -662,7 +662,8 @@ latest run into view; and, closest to the input, each subagent still running
 or its wait for a slot before its time; after three, `& +N`) and each command
 the agent moved to the background (`$ Running  cargo test`), so one whose
 block has scrolled out of view still shows it works — a click on its row
-selects the block and brings it into view. Everything queued
+selects the block and brings it into view, and for a subagent opens the panel
+following it or running it (see [Subagents](#subagents)). Everything queued
 goes to the agent at once, as a single message with the pieces joined by a
 blank line — messages typed while the agent works are usually one thought
 added to — and leaves the strip then, showing up in the conversation as your
@@ -1641,7 +1642,18 @@ when it ends or is stopped: the task, what the delegate said and the tools it
 called. It is listed with the other sessions, marked `&` (`& find the config
 loader`), so you can open it to see how the delegate got its answer or go on
 talking to it, and `recall` finds what it did. While the task runs, its
-session is not offered. `o` on a `task` block opens it in a panel.
+session is not offered in the list; `o` on its block, or a click on its row
+above the input, opens a panel that follows it instead, beside the others
+and in focus — or brings forward the one already following it. The panel
+shows the delegate's steps as its log gains them, and belongs to the
+delegating agent the way a panel running a task does (below): the input
+takes nothing and reads `& Delegate of <agent>: <task>`, a click on it goes
+back to the delegating panel. `Esc` stops the task and `Ctrl+T`, after a
+confirmation, takes it over: the delegating agent hears that you stopped it
+or took it, with what was said so far. Closing the panel only stops
+following: the task goes on. Once the task is over, the panel opens its
+session as any other, to read or go on talking to. `o` on a finished
+`task` block opens its session in a panel.
 
 Where a delegate runs is `subagent_run` under `[ai]` (in the settings,
 **Delegated tasks run**), and a delegate's `AGENT.md` may name its own:
