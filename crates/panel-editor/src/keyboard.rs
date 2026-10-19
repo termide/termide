@@ -596,6 +596,15 @@ impl EditorCommand {
 
             // File operations - Save requires special handling for SaveAs modal
             Self::Save => {
+                // Plugins of the project want a say before the file is
+                // written: the app asks them, applies their edits and saves.
+                if editor.save_gate
+                    && editor.file_path().is_some()
+                    && !editor.file_state.is_remote()
+                {
+                    editor.gated_save = true;
+                    return Ok(());
+                }
                 match editor.handle_save() {
                     Ok(Some(upload)) => {
                         // Remote file - store upload operation for app layer to process

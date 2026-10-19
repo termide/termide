@@ -97,6 +97,9 @@ pub mod events {
     pub const EDITOR_FOCUSED: &str = "editor/focused";
     pub const EDITOR_CHANGED: &str = "editor/changed";
     pub const GIT_CHANGED: &str = "git/changed";
+    /// A request, not a notification: `{ "path", "version" }` before `Ctrl+S`
+    /// writes the file; the answer is `{ "edits" }` or `null`.
+    pub const FILE_WILL_SAVE: &str = "file/will_save";
 }
 
 /// `text` from a plugin made fit to stand in termide's own chrome — a panel

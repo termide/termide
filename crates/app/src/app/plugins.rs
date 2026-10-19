@@ -269,6 +269,7 @@ impl App {
         self.notice_closed_plugin_panels();
         self.serve_plugin_windows();
         self.watch_editors_for_plugins();
+        self.serve_plugin_saves();
     }
 
     /// Tell each plugin about its panels the user closed since the last tick.

@@ -127,6 +127,11 @@ pub struct Editor {
     )>,
     /// Local files written since the app last asked, for plugins.
     pub(crate) saved_paths: Vec<PathBuf>,
+    /// Plugins of the project want to see the file before `Ctrl+S` writes
+    /// it: the save is left to the app ([`Editor::take_gated_save`]).
+    pub(crate) save_gate: bool,
+    /// `Ctrl+S` was pressed while the gate was up.
+    pub(crate) gated_save: bool,
     /// Updated config after save (for applying in AppState)
     config_update: Option<Config>,
     /// Status message to display to user
@@ -644,6 +649,16 @@ impl Editor {
         std::sync::Arc<termide_vfs::VfsManager>,
     )> {
         self.pending_upload.take()
+    }
+
+    /// Leave `Ctrl+S` to the app, which lets plugins edit the buffer first.
+    pub fn set_save_gate(&mut self, on: bool) {
+        self.save_gate = on;
+    }
+
+    /// Whether `Ctrl+S` was pressed behind the gate since the last call.
+    pub fn take_gated_save(&mut self) -> bool {
+        std::mem::take(&mut self.gated_save)
     }
 
     /// The local files this editor wrote since the last call, oldest first.

@@ -8,8 +8,9 @@
 //! can take it back. Changes are told once the typing pauses, and only to
 //! plugins that asked, so a busy editor does not flood them.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -27,6 +28,22 @@ const MAX_READ: usize = 16 * 1024 * 1024;
 /// The most edits one `editor/edit` applies.
 const MAX_EDITS: usize = 10_000;
 
+/// How long each plugin may take over `file/will_save`.
+const WILL_SAVE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Where a plugin's answer to `file/will_save` arrives.
+type Answer = Receiver<Result<Value, String>>;
+
+/// A `Ctrl+S` the plugins see first: the ones still to ask, and the answer
+/// waited for.
+#[derive(Debug)]
+pub(crate) struct SaveJob {
+    project: PathBuf,
+    path: PathBuf,
+    queue: VecDeque<PluginKey>,
+    waiting: Option<(PluginKey, u64, Answer)>,
+}
+
 /// What the plugins were last told of the current project's editors.
 #[derive(Debug, Default)]
 pub(crate) struct EditorWatch {
@@ -37,6 +54,8 @@ pub(crate) struct EditorWatch {
     versions: BTreeMap<PathBuf, (u64, Instant, u64)>,
     /// The project the above describes; a switch starts afresh.
     project: Option<PathBuf>,
+    /// Saves waiting for the plugins.
+    saves: Vec<SaveJob>,
 }
 
 /// A position from a request: `line`/`col`, LSP-counted.
@@ -206,6 +225,130 @@ impl App {
         })
         .map_err(|e| RpcError::new(INVALID_PARAMS, e.to_string()))?;
         Ok(Value::Null)
+    }
+
+    /// Per tick: hold `Ctrl+S` for the plugins that asked to see a file
+    /// before it is written, ask them one after another, apply their edits
+    /// and write the file. Nothing waits on the UI thread: each plugin is
+    /// asked on a thread of its own and has three seconds.
+    pub(super) fn serve_plugin_saves(&mut self) {
+        let project = self.open_projects.current().to_path_buf();
+        let gate = self.plugins.host.wants(&project, events::FILE_WILL_SAVE);
+        let mut held = Vec::new();
+        for editor in self
+            .layout_manager
+            .iter_all_panels_mut()
+            .filter_map(|panel| panel.as_editor_mut())
+        {
+            editor.set_save_gate(gate);
+            if editor.take_gated_save() {
+                if let Some(path) = editor.file_path() {
+                    held.push(path.to_path_buf());
+                }
+            }
+        }
+        for path in held {
+            let saves = &mut self.plugins.editors.saves;
+            if saves.iter().any(|job| job.path == path) {
+                continue;
+            }
+            let queue = self
+                .plugins
+                .host
+                .subscribers(&project, events::FILE_WILL_SAVE)
+                .into();
+            self.plugins.editors.saves.push(SaveJob {
+                project: project.clone(),
+                path,
+                queue,
+                waiting: None,
+            });
+        }
+
+        let mut jobs = std::mem::take(&mut self.plugins.editors.saves);
+        jobs.retain_mut(|job| self.advance_save(job));
+        self.plugins.editors.saves.extend(jobs);
+    }
+
+    /// One step of `job`; `false` once it is done.
+    fn advance_save(&mut self, job: &mut SaveJob) -> bool {
+        if let Some((key, version, rx)) = &job.waiting {
+            let outcome = match rx.try_recv() {
+                Ok(outcome) => outcome,
+                Err(std::sync::mpsc::TryRecvError::Empty) => return true,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => Err("no answer".to_string()),
+            };
+            let (key, version) = (key.clone(), *version);
+            job.waiting = None;
+            match outcome.and_then(|result| match result.get("edits") {
+                Some(edits) => text_edits(edits),
+                None => Ok(Vec::new()),
+            }) {
+                Ok(edits) if !edits.is_empty() => {
+                    let Some(editor) = self.project_editor_mut(&job.project, &job.path) else {
+                        return false;
+                    };
+                    if editor.edit_version() == version {
+                        editor.apply_plugin_edits(&edits);
+                    } else {
+                        log::info!(
+                            "plugin {}: its edits before saving came after the buffer changed",
+                            key.name
+                        );
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => log::warn!("plugin {}: before saving: {e}", key.name),
+            }
+        }
+        while let Some(key) = job.queue.pop_front() {
+            let Some(peer) = self.plugins.host.peer(&key) else {
+                continue;
+            };
+            let Some(editor) = self.project_editor_mut(&job.project, &job.path) else {
+                return false;
+            };
+            let version = editor.edit_version();
+            let params = json!({ "path": job.path, "version": version });
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(peer.request(
+                    events::FILE_WILL_SAVE,
+                    params,
+                    WILL_SAVE_TIMEOUT,
+                    &|| false,
+                ));
+            });
+            job.waiting = Some((key, version, rx));
+            return true;
+        }
+        // Everyone was asked: write the file, as Ctrl+S would have.
+        // Held apart while the editor is borrowed, and put back below.
+        let lsp_manager = self.state.lsp_manager.take();
+        let Some(editor) = self.project_editor_mut(&job.project, &job.path) else {
+            self.state.lsp_manager = lsp_manager;
+            return false;
+        };
+        let saved = editor.save();
+        if saved.is_ok() {
+            if let Some(lsp_manager) = &lsp_manager {
+                editor.notify_lsp_change(lsp_manager);
+            }
+        }
+        self.state.lsp_manager = lsp_manager;
+        match saved {
+            Ok(_) => {
+                let name = job
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                self.state.set_info(format!("Saved: {name}"));
+            }
+            Err(e) => self.state.set_error(format!("Save failed: {e}")),
+        }
+        self.state.needs_redraw = true;
+        false
     }
 
     /// Per tick: tell the current project's plugins which file is focused,

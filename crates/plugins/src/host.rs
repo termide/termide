@@ -359,6 +359,22 @@ impl Host {
             .collect()
     }
 
+    /// The ready plugins of `project` that subscribed to `method`, in name
+    /// order.
+    #[must_use]
+    pub fn subscribers(&self, project: &Path, method: &str) -> Vec<PluginKey> {
+        self.plugins
+            .iter()
+            .filter(|(key, handle)| {
+                key.project == project
+                    && lock(&handle.live).as_ref().is_some_and(|live| {
+                        live.ready && live.subscriptions.iter().any(|s| s == method)
+                    })
+            })
+            .map(|(key, _)| key.clone())
+            .collect()
+    }
+
     /// Whether a ready plugin of `project` subscribed to `method`: what
     /// decides whether the event is worth watching for at all.
     #[must_use]
