@@ -288,7 +288,8 @@ impl App {
                 let nested_items = get_commands_group_items(&registry, group_name);
                 if !nested_items.is_empty() {
                     let menu_x = get_menu_item_x_position(COMMANDS_MENU_INDEX);
-                    let parent_items = get_commands_items(&registry);
+                    let parent_items =
+                        get_commands_items(&registry, &self.state.ui.plugin_commands);
                     let parent_width = dropdown_width(&parent_items);
                     let nested_x = menu_x + parent_width;
                     let nested_y = 2 + self.state.ui.commands_submenu.selected as u16;
@@ -311,7 +312,7 @@ impl App {
 
         // Check click on Commands main dropdown
         let menu_x = get_menu_item_x_position(COMMANDS_MENU_INDEX);
-        let commands_items = get_commands_items(&registry);
+        let commands_items = get_commands_items(&registry, &self.state.ui.plugin_commands);
         if let Some(index) = hit_dropdown_item(
             x,
             y,

@@ -297,6 +297,9 @@ pub struct UiState {
     pub status_message: Option<(String, bool)>, // (message, is_error)
     /// The current project's plugin status items, joined; `None` without any.
     pub plugin_status: Option<String>,
+    /// The current project's plugin commands for the Commands menu: the
+    /// action each runs as, and its label.
+    pub plugin_commands: Vec<(String, String)>,
     /// Options submenu state (e.g., Preferences dropdown)
     pub options_submenu: SubmenuState,
     /// Nested submenu state (e.g., Themes list inside Options)

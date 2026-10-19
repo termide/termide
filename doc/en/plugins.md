@@ -2,7 +2,7 @@
 
 A plugin is a program that termide runs in the background while a project is
 open and talks to over JSON-RPC on the program's stdin and stdout. It can
-react to files being opened and saved, add commands to the command palette,
+react to files being opened and saved, add commands to the command palette and the Commands menu,
 show items in the status bar and give the coding agent tools.
 
 Plugins are global: they are installed in your config directory, and a project
@@ -113,8 +113,8 @@ notification sent later to replace it:
 }
 ```
 
-Commands appear in the command palette (`Plugins` category) as
-`<plugin>: <title>`. Tools are offered to the agent sessions of the plugin's
+Commands appear as `<plugin>: <title>` in the command palette (`Plugins`
+category) and at the end of the Commands menu. Tools are offered to the agent sessions of the plugin's
 project as `plugin-<plugin>__<tool>`. The agent's permission rules treat them
 as MCP tools: they are asked about before running unless they are `readOnly`.
 

@@ -113,8 +113,8 @@ a command in a terminal panel, set a status item.
 
 Contributions, declared in `initialize` (they can change later):
 
-- palette commands, which termide invokes as `command/execute` (the menu
-  later);
+- commands for the palette and the Commands menu, which termide invokes as
+  `command/execute`;
 - status bar items;
 - agent tools, which the agent calls as `tool/call` over the same connection.
   The usual permission rules and hooks apply to them as to built-in tools.

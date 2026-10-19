@@ -195,14 +195,19 @@ impl App {
             }
         }
         self.plugins.synced = roots;
-        self.refresh_plugin_status();
+        self.refresh_plugin_ui();
     }
 
-    /// Show the current project's status items.
-    fn refresh_plugin_status(&mut self) {
+    /// Show the current project's status items and commands.
+    fn refresh_plugin_ui(&mut self) {
         let line = self.plugins.status_line(self.open_projects.current());
         if line != self.state.ui.plugin_status {
             self.state.ui.plugin_status = line;
+            self.state.needs_redraw = true;
+        }
+        let commands = self.plugin_palette_commands();
+        if commands != self.state.ui.plugin_commands {
+            self.state.ui.plugin_commands = commands;
             self.state.needs_redraw = true;
         }
     }
@@ -223,10 +228,12 @@ impl App {
                 log::info!("plugin {} ready for {}", key.name, key.project.display());
                 self.publish_plugin_tools(&key, &contributions);
                 self.plugins.contributions.insert(key, contributions);
+                self.refresh_plugin_ui();
             }
             HostEvent::Contributions { key, contributions } => {
                 self.publish_plugin_tools(&key, &contributions);
                 self.plugins.contributions.insert(key, contributions);
+                self.refresh_plugin_ui();
             }
             HostEvent::Stopped {
                 key,
@@ -236,7 +243,7 @@ impl App {
                 self.plugins.contributions.remove(&key);
                 tool_hub().set(&key, Vec::new());
                 self.plugins.status.retain(|(k, _), _| *k != key);
-                self.refresh_plugin_status();
+                self.refresh_plugin_ui();
                 if restart_in.is_none() {
                     self.state.set_error(format!(
                         "Plugin {} stopped and will not be restarted: {reason}",
@@ -314,7 +321,7 @@ impl App {
                 } else {
                     self.plugins.status.insert(item, value);
                 }
-                self.refresh_plugin_status();
+                self.refresh_plugin_ui();
                 Ok(Value::Null)
             }
             _ => Err(RpcError::new(
