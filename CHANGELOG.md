@@ -5,12 +5,14 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.44.0] - 2026-10-19
+
+[0.44.0]: https://github.com/termide/termide/releases/tag/0.44.0
 
 ### Added
 - **Debugger settings.** `[debug]` in `config.toml` says how each debugger starts, globally or for one project: `[debug.debuggers.<name>]` gives its program (`command`, a custom LLVM's `lldb-dap`, a `dlv` outside `PATH`, the Python debugpy needs) and the flags it gets in every launch (`args`, in place of its defaults, before a launch's own `debugger_args`); `native` orders the debuggers a Rust file tries without a command, and `console` is where an adapter runs the program by default. Delve's `--only-same-user=false` in Termux is now the default `args` of `dlv-dap` there, shown and replaceable rather than fixed in code. The settings window has a **Debug** tab for all of it, a page per debugger.
 - **The debugger's own flags.** `debugger_args = ["--log", "--log-output=dap"]` in a debug command of `commands.toml` adds flags to the debugger itself, where it reads its options: after an adapter's own arguments, before `--`/`--args` for lldb and gdb, before the subcommand for Delve, before pdb's `-c`. The **Set up debugging** form has a field for them. Until now the only way was a wrapper script under the debugger's name.
-- **Rust debugs without a command.** `F5` on a Rust file in a Cargo project offers its binaries, found with `cargo metadata`: the one whose main file it is, or else those of its package, or else every binary of the workspace. Each is built with `cargo build -p <package> --bin <name>` first and runs from the workspace root under `lldb-dap`, GDB's adapter or `lldb` in a terminal, whichever is installed. Without any of them, or without Delve for a Go file, a window says what to install, where Go used to start a `dlv` that was not there.
+- **Rust debugs without a command.** `F5` on a Rust file in a Cargo project offers its binaries, found with `cargo metadata`: the one whose main file it is, or else those of its package, or else every binary of the workspace. Each is built with `cargo build -p <package> --bin <name>` first and runs from the workspace root under `lldb-dap`, GDB's adapter or `lldb` in a terminal, whichever is installed. Without any of them, or without Delve for a Go file, a window says what to install, where Go used to start a `dlv` that was not there. The agent's `debug` tool starts Rust files the same way.
 - **Set up debugging…** in the editor's `[≡]` menu and the command palette opens a form for a launch: its name, the program and its arguments, the build to run first and the debugger, filled in for the file in the editor. **Run** saves it as a debug command in the project's `.termide/commands.toml` and starts it. `F5` opens the same form when there is nothing to launch, where it used to do nothing visible.
 
 ### Changed
@@ -27,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Long lines in the debug panel's output wrap.** They were cut at the panel's edge, which hid the end of an adapter's error, usually the part that says why.
 - **The outline fills in for a restored layout.** At startup, on a switch of project or when a parked project came back, the outline stayed empty until the editor was edited, refocused or reopened: nothing passed it the restored editor's text, and the live sync waits for an edit. It is now filled from the active editor at once, and when it has to pick an editor itself it takes the active one rather than the first in the layout.
 - **A click on the agent banner's list selects a session rather than opening it.** A single click on a recent session opened it at once in place of the fresh one. The first click now moves the list's cursor there; a click on the session already selected, or a double click, opens it.
+- **Picking a launch from the debug list starts it.** When `F5` or **Start debugging** offered several launches — a debug command and the Python, Go or Rust file in the editor — the one chosen from the list did nothing.
 
 ## [0.43.0] - 2026-10-17
 
