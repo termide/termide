@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 FROM ghcr.io/charmbracelet/vhs:v0.12.1
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git sqlite3 python3-pylsp procps locales libcap2-bin faketime \
+ && apt-get install -y --no-install-recommends git sqlite3 python3-pylsp python3-debugpy procps locales libcap2-bin faketime \
  && sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen \
  && rm -rf /var/lib/apt/lists/*
 RUN ln -s "$(dpkg -L libfaketime | grep 'libfaketime.so.1$')" /usr/local/lib/libfaketime.so.1

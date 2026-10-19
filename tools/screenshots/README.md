@@ -70,6 +70,7 @@ keys, so `env/config.toml` binds the layout actions the tapes need to free
 `Alt+<letter>` chords; `Alt+m` also trips VHS's parser, so the menu is
 opened with `Alt+M`. Viewers are opened from the file manager (`v` views,
 `Enter` opens), since `termide <file>` always starts the text editor.
+The debug tape needs `F5` and `Ctrl+F8` too: it starts debugging from the command palette, sets the breakpoint with `Alt+y` and unstacks the debug panel with `Ctrl+b`, both bound in `env/config.toml`, and debugs a script and a debug command that `env/debug-scene.sh` adds to the project (debugpy comes from Debian's `python3-debugpy`). Mouse clicks are out of VHS's reach.
 The resource modals are reached with `Alt+M` then `Left` past the disk
 indicator and through the calendar, whose weekday the pinned date fixes.
 The theme gallery tape is generated from `crates/theme/themes` by
