@@ -25,6 +25,7 @@ take hex.png hex.png
 take terminal.png terminal.png
 take debug.png debug.png
 take debug.gif debug.gif
+take tour.gif tour.gif
 take ghostty/image.png image.png
 
 ff() { ffmpeg -loglevel error -y "$@"; }

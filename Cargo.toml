@@ -73,7 +73,6 @@ categories = ["command-line-utilities", "development-tools"]
 readme = "README.md"
 exclude = [
     ".github/",
-    "assets/screenshots/",
     "doc/",
     ".gitignore",
     ".pre-commit-config.yaml",

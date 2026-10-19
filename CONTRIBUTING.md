@@ -392,8 +392,8 @@ The theme file format and its color keys are described in
 
 ### Submitting a Theme
 
-1. (Optional) Render its preview with `tools/screenshots/run.sh themes` and copy
-   `tools/screenshots/out/themes/your-theme.png` to `assets/screenshots/themes/`
+1. (Optional) Render its preview with `tools/screenshots/run.sh themes`; the
+   website repository's `sync-shots.sh` takes it into the theme gallery
 2. Update the theme list in `README.md`
 3. Submit a pull request with the title: `feat: add [theme name] theme`
 

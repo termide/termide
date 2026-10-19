@@ -10,7 +10,7 @@
 
 **[Сайт](https://termide.github.io)** | **[Документация](doc/ru/README.md)** | **[Релизы](https://github.com/termide/termide/releases)** | **[Скриншоты](https://termide.github.io/ru/#screenshots)** | **[Telegram](https://t.me/termide_news)**
 
-<p align="center"><img src="assets/screenshots/termide.gif" alt="TermIDE — редактор, файловый менеджер, терминал и просмотрщики в одном TUI" width="900"></p>
+<p align="center"><img src="https://termide.github.io/assets/screenshots/tour.gif" alt="TermIDE — редактор, файловый менеджер, терминал и просмотрщики в одном TUI" width="900"></p>
 
 ## Почему TermIDE?
 
@@ -56,9 +56,9 @@
 
 | | |
 |:---:|:---:|
-| <img src="assets/screenshots/agent.png" alt="Агент для кода за работой" width="440"> | <img src="assets/screenshots/file-manager.png" alt="Файловый менеджер с вложенным git-статусом" width="440"> |
+| <img src="https://termide.github.io/assets/screenshots/agent.png" alt="Агент для кода за работой" width="440"> | <img src="https://termide.github.io/assets/screenshots/file-manager.png" alt="Файловый менеджер с вложенным git-статусом" width="440"> |
 | Агент для кода за работой | Файловый менеджер с вложенным git-статусом |
-| <img src="assets/screenshots/db.png" alt="Просмотр баз данных" width="440"> | <img src="assets/screenshots/git.png" alt="Журнал git с графом коммитов" width="440"> |
+| <img src="https://termide.github.io/assets/screenshots/db.png" alt="Просмотр баз данных" width="440"> | <img src="https://termide.github.io/assets/screenshots/git.png" alt="Журнал git с графом коммитов" width="440"> |
 | Просмотр баз данных | Журнал git с графом коммитов |
 
 ### Код
@@ -525,9 +525,9 @@ min_level = "info"
 
 | | | |
 |:---:|:---:|:---:|
-| ![Windows XP](assets/screenshots/themes/windows-xp.png) | ![Dracula](assets/screenshots/themes/dracula.png) | ![Ayu Light](assets/screenshots/themes/ayu-light.png) |
+| ![Windows XP](https://termide.github.io/assets/themes/windows-xp.png) | ![Dracula](https://termide.github.io/assets/themes/dracula.png) | ![Ayu Light](https://termide.github.io/assets/themes/ayu-light.png) |
 | Windows XP (по умолчанию) | Dracula | Ayu Light |
-| ![Monokai](assets/screenshots/themes/monokai.png) | ![Nord](assets/screenshots/themes/nord.png) | ![Material Lighter](assets/screenshots/themes/material-lighter.png) |
+| ![Monokai](https://termide.github.io/assets/themes/monokai.png) | ![Nord](https://termide.github.io/assets/themes/nord.png) | ![Material Lighter](https://termide.github.io/assets/themes/material-lighter.png) |
 | Monokai | Nord | Material Lighter |
 
 ### Пользовательские темы

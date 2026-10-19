@@ -10,7 +10,7 @@
 
 **[网站](https://termide.github.io)** | **[文档](doc/zh/README.md)** | **[版本发布](https://github.com/termide/termide/releases)** | **[截图](https://termide.github.io/zh/#screenshots)** | **[Telegram](https://t.me/termide_news)**
 
-<p align="center"><img src="assets/screenshots/termide.gif" alt="TermIDE — 编辑器、文件管理器、终端和查看器合为一个 TUI" width="900"></p>
+<p align="center"><img src="https://termide.github.io/assets/screenshots/tour.gif" alt="TermIDE — 编辑器、文件管理器、终端和查看器合为一个 TUI" width="900"></p>
 
 ## 为什么选择 TermIDE？
 
@@ -56,9 +56,9 @@
 
 | | |
 |:---:|:---:|
-| <img src="assets/screenshots/agent.png" alt="工作中的编程智能体" width="440"> | <img src="assets/screenshots/file-manager.png" alt="带嵌套 Git 状态的文件管理器" width="440"> |
+| <img src="https://termide.github.io/assets/screenshots/agent.png" alt="工作中的编程智能体" width="440"> | <img src="https://termide.github.io/assets/screenshots/file-manager.png" alt="带嵌套 Git 状态的文件管理器" width="440"> |
 | 工作中的编程智能体 | 带嵌套 Git 状态的文件管理器 |
-| <img src="assets/screenshots/db.png" alt="数据库查看器" width="440"> | <img src="assets/screenshots/git.png" alt="带提交图的 Git 日志" width="440"> |
+| <img src="https://termide.github.io/assets/screenshots/db.png" alt="数据库查看器" width="440"> | <img src="https://termide.github.io/assets/screenshots/git.png" alt="带提交图的 Git 日志" width="440"> |
 | 数据库查看器 | 带提交图的 Git 日志 |
 
 ### 代码
@@ -512,9 +512,9 @@ min_level = "info"
 
 | | | |
 |:---:|:---:|:---:|
-| ![Windows XP](assets/screenshots/themes/windows-xp.png) | ![Dracula](assets/screenshots/themes/dracula.png) | ![Ayu Light](assets/screenshots/themes/ayu-light.png) |
+| ![Windows XP](https://termide.github.io/assets/themes/windows-xp.png) | ![Dracula](https://termide.github.io/assets/themes/dracula.png) | ![Ayu Light](https://termide.github.io/assets/themes/ayu-light.png) |
 | Windows XP（默认） | Dracula | Ayu Light |
-| ![Monokai](assets/screenshots/themes/monokai.png) | ![Nord](assets/screenshots/themes/nord.png) | ![Material Lighter](assets/screenshots/themes/material-lighter.png) |
+| ![Monokai](https://termide.github.io/assets/themes/monokai.png) | ![Nord](https://termide.github.io/assets/themes/nord.png) | ![Material Lighter](https://termide.github.io/assets/themes/material-lighter.png) |
 | Monokai | Nord | Material Lighter |
 
 ### 自定义主题

@@ -13,8 +13,10 @@ SKIP_BUILD=1 tools/screenshots/run.sh overview   # reuse the last image
 Output lands in `tools/screenshots/out/` (ignored by git), and
 `out/site/` holds the same shots under the names the website uses:
 `screenshots/*.png|gif`, `themes/<theme-id>.png` for every built-in theme
-and `og.png` (1200x630). The first build compiles termide from this checkout
-and takes several minutes; later builds reuse BuildKit's cargo cache. A full
+and `og.png` (1200x630). No image is committed here: `sync-shots.sh` in
+the website repository (termide.github.io) copies `out/site/` into its
+`assets/`, and the README and docs link them from there. The first build
+compiles termide from this checkout and takes several minutes; later builds reuse BuildKit's cargo cache. A full
 run takes about 20 minutes, most of it the theme gallery. Requires Docker
 with BuildKit.
 
@@ -65,7 +67,7 @@ Each `tapes/*.tape` is one shot; files starting with `_` are shared steps:
 the project), `_widen.tape` (move the panel just opened into a wide
 column) and `_next-scene.tape` (quit and restart termide on a fresh
 project out of frame). `tour.tape` chains the single-shot tapes into the
-README's hero GIF; copy `out/tour.gif` to `assets/screenshots/termide.gif`. VHS cannot send `Alt` with a digit or a special key, nor function
+README's hero GIF, `tour.gif` on the website. VHS cannot send `Alt` with a digit or a special key, nor function
 keys, so `env/config.toml` binds the layout actions the tapes need to free
 `Alt+<letter>` chords; `Alt+m` also trips VHS's parser, so the menu is
 opened with `Alt+M`. Viewers are opened from the file manager (`v` views,
@@ -73,5 +75,12 @@ opened with `Alt+M`. Viewers are opened from the file manager (`v` views,
 The debug tape needs `F5` and `Ctrl+F8` too: it starts debugging from the command palette, sets the breakpoint with `Alt+y` and unstacks the debug panel with `Ctrl+b`, both bound in `env/config.toml`, and debugs a script and a debug command that `env/debug-scene.sh` adds to the project (debugpy comes from Debian's `python3-debugpy`). Mouse clicks are out of VHS's reach.
 The resource modals are reached with `Alt+M` then `Left` past the disk
 indicator and through the calendar, whose weekday the pinned date fixes.
+`# hint:` comments in a tape are key badges laid over its GIF after the
+recording, by `keys.mjs` on this machine (Node, ffmpeg, Chrome): `# hint:
+Ctrl+F8 "breakpoint" for=1.4s color=#ffd166 bg=#3a1020` — keys and quoted
+text, then optionally how long it stays, its colour and background. They
+name what a viewer would press, not the stand-in a tape sends: `debug.tape`
+shows `Ctrl+F8` where it sends `Alt+y`. The GIF with the badges replaces the
+plain one, and an MP4 of it lands beside it.
 The theme gallery tape is generated from `crates/theme/themes` by
 `gen-themes.sh`.

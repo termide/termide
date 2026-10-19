@@ -35,7 +35,19 @@ for tape in "$@"; do
         -v "$here/fixtures:/opt/shots/fixtures:ro" \
         -v "$here/mock-llm:/opt/shots/mock-llm:ro" \
         -v "$here/tapes:/opt/shots/tapes:ro" \
-        "$image" "$tape_file" || failed+=("$tape")
+        "$image" "$tape_file" || { failed+=("$tape"); continue; }
+    # Key badges: a tape with `# hint:` lines gets them laid over its GIF
+    # (keys.mjs, on this machine: Node, ffmpeg, Chrome), which then replaces
+    # the plain one; the MP4 with the badges lands beside it.
+    gif=$(sed -n 's|^Output out/\(.*\.gif\)$|\1|p' "$here/$tape_file" | head -1)
+    if [ -n "$gif" ] && grep -q '^# hint:' "$here/$tape_file"; then
+        if command -v node >/dev/null && command -v ffmpeg >/dev/null; then
+            node "$here/keys.mjs" "$here/$tape_file" "$here/out/$gif" \
+                --out "$here/out/${gif%.gif}.mp4" --gif >/dev/null || failed+=("$tape (hints)")
+        else
+            echo "warning: no node or ffmpeg here; out/$gif keeps no key badges" >&2
+        fi
+    fi
 done
 # Site file names: out/site/.
 docker run --rm --network none -v "$here/out:/opt/shots/out" \
