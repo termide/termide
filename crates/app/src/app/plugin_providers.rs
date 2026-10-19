@@ -62,14 +62,6 @@ impl ProviderHub {
         }
     }
 
-    /// Keep only the plugins `alive` says are still held.
-    pub(crate) fn retain(&self, alive: impl Fn(&PluginKey) -> bool) {
-        self.by_plugin
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .retain(|key, _| alive(key));
-    }
-
     /// The plugins whose project holds `path` and who answer `pick` for `lang`.
     fn answering(
         &self,

@@ -177,6 +177,7 @@ impl App {
         }
         let roots = self.loaded_project_roots();
         let current = self.open_projects.current().to_path_buf();
+        let mut stopped = Vec::new();
         for root in &roots {
             let config = if *root == current {
                 Ok(Arc::clone(&self.state.config))
@@ -195,57 +196,40 @@ impl App {
             for problem in problems {
                 log::warn!("{problem}");
             }
-            self.plugins.host.set_project(root, launches);
+            stopped.extend(self.plugins.host.set_project(root, launches));
         }
-        for gone in self
-            .plugins
-            .synced
-            .iter()
-            .filter(|root| !roots.contains(root))
-        {
-            self.plugins.host.close_project(gone);
-        }
-        let gone: Vec<PathBuf> = self
+        let closed: Vec<PathBuf> = self
             .plugins
             .synced
             .iter()
             .filter(|root| !roots.contains(root))
             .cloned()
             .collect();
-        for root in gone {
-            self.drop_project_windows(&root);
+        for root in &closed {
+            stopped.extend(self.plugins.host.close_project(root));
+            self.drop_project_windows(root);
         }
-        let host = &self.plugins.host;
-        let alive = host.states();
-        self.plugins
-            .contributions
-            .retain(|key, _| alive.iter().any(|(k, _)| k == key));
-        self.plugins
-            .status
-            .retain(|(key, _), _| alive.iter().any(|(k, _)| k == key));
-        for key in tool_hub().keys() {
-            if !alive.iter().any(|(k, _)| *k == key) {
-                tool_hub().set(&key, Vec::new());
-                super::plugin_providers::provider_hub().set(&key, None);
-            }
-        }
-        super::plugin_providers::provider_hub().retain(|key| alive.iter().any(|(k, _)| k == key));
-        // A plugin stopped by the sync sends no `Stopped`: its marks go here.
-        let marked: Vec<PluginKey> = self
-            .state
-            .plugin_diagnostics
-            .values()
-            .flat_map(|by_plugin| by_plugin.keys())
-            .map(|(project, name)| PluginKey {
-                project: project.clone(),
-                name: name.clone(),
-            })
-            .filter(|key| !alive.iter().any(|(k, _)| k == key))
-            .collect();
-        for key in marked {
-            self.clear_plugin_diagnostics(&key);
+        // A plugin stopped or replaced here sends no `Stopped`: what termide
+        // holds of it goes now, before a new process can be taken for it.
+        for key in stopped {
+            self.forget_plugin(&key);
         }
         self.plugins.synced = roots;
+        self.refresh_plugin_ui();
+    }
+
+    /// Let go of all termide holds of `key`'s process — what it contributes,
+    /// its tools and language features, status items, marks, windows and
+    /// panels — when it stopped or was replaced: a new process knows nothing
+    /// of any of it.
+    fn forget_plugin(&mut self, key: &PluginKey) {
+        self.plugins.contributions.remove(key);
+        tool_hub().set(key, Vec::new());
+        super::plugin_providers::provider_hub().set(key, None);
+        self.plugins.status.retain(|(k, _), _| k != key);
+        self.orphan_plugin_panels(key);
+        self.drop_plugin_windows(key);
+        self.clear_plugin_diagnostics(key);
         self.refresh_plugin_ui();
     }
 
@@ -349,14 +333,7 @@ impl App {
                 reason,
                 restart_in,
             } => {
-                self.plugins.contributions.remove(&key);
-                tool_hub().set(&key, Vec::new());
-                super::plugin_providers::provider_hub().set(&key, None);
-                self.orphan_plugin_panels(&key);
-                self.drop_plugin_windows(&key);
-                self.clear_plugin_diagnostics(&key);
-                self.plugins.status.retain(|(k, _), _| *k != key);
-                self.refresh_plugin_ui();
+                self.forget_plugin(&key);
                 if restart_in.is_none() {
                     self.state.set_error(format!(
                         "Plugin {} stopped and will not be restarted: {reason}",
@@ -813,13 +790,7 @@ impl App {
             name: name.to_string(),
         };
         if self.plugins.host.restart(&key) {
-            self.plugins.contributions.remove(&key);
-            tool_hub().set(&key, Vec::new());
-            super::plugin_providers::provider_hub().set(&key, None);
-            self.orphan_plugin_panels(&key);
-            self.drop_plugin_windows(&key);
-            self.clear_plugin_diagnostics(&key);
-            self.refresh_plugin_ui();
+            self.forget_plugin(&key);
         }
     }
 
@@ -1098,11 +1069,6 @@ impl PluginToolHub {
         } else {
             inner.tools.insert(key.clone(), tools);
         }
-    }
-
-    /// The keys holding tools now.
-    fn keys(&self) -> Vec<PluginKey> {
-        self.lock().tools.keys().cloned().collect()
     }
 }
 

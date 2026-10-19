@@ -273,8 +273,9 @@ impl Host {
     /// Make the plugins running for `project` exactly `launches`: start the
     /// new ones, stop the ones no longer wanted, and restart the ones whose
     /// launch changed. One that gave up stays down while its launch is the
-    /// same, so syncing again does not wake it.
-    pub fn set_project(&mut self, project: &Path, launches: Vec<Launch>) {
+    /// same, so syncing again does not wake it. Returns the keys whose process
+    /// was stopped — gone, or replaced by a new one that knows nothing of it.
+    pub fn set_project(&mut self, project: &Path, launches: Vec<Launch>) -> Vec<PluginKey> {
         let wanted: HashMap<String, Launch> = launches
             .into_iter()
             .map(|launch| (launch.name.clone(), launch))
@@ -285,12 +286,14 @@ impl Host {
             .filter(|key| key.project == project)
             .cloned()
             .collect();
+        let mut gone = Vec::new();
         for key in running {
             let keep = wanted
                 .get(&key.name)
                 .is_some_and(|launch| *launch == self.plugins[&key].launch);
             if !keep {
                 self.stop(&key);
+                gone.push(key);
             }
         }
         for (name, launch) in wanted {
@@ -302,6 +305,7 @@ impl Host {
                 self.start(key, launch);
             }
         }
+        gone
     }
 
     /// Start `key` afresh: the running process is stopped and a new one
@@ -315,9 +319,9 @@ impl Host {
         true
     }
 
-    /// Stop every plugin of `project`.
-    pub fn close_project(&mut self, project: &Path) {
-        self.set_project(project, Vec::new());
+    /// Stop every plugin of `project`; the keys stopped.
+    pub fn close_project(&mut self, project: &Path) -> Vec<PluginKey> {
+        self.set_project(project, Vec::new())
     }
 
     /// What happened since the last call. Events of plugins stopped or
@@ -587,11 +591,13 @@ impl Supervisor {
                     live.ready = true;
                     live.subscriptions.clone_from(&contributions.subscriptions);
                 }
-                let _ = peer.notify(protocol::INITIALIZED, json!({}));
+                // Ready first: what the plugin sends in answer to
+                // `initialized` (a `contributions/changed`) must come after.
                 self.send(HostEvent::Ready {
                     key: self.key.clone(),
                     contributions,
                 });
+                let _ = peer.notify(protocol::INITIALIZED, json!({}));
             }
             Err(e) if self.stopping() => {
                 process.child.kill();
@@ -746,6 +752,13 @@ mod tests {
                                 }),
                             );
                         }
+                        "initialized" if part == "changes" => reply(
+                            &mut plugin_out,
+                            json!({
+                                "jsonrpc": "2.0", "method": "contributions/changed",
+                                "params": { "commands": [{ "id": "later", "title": "Later" }] }
+                            }),
+                        ),
                         "initialized" => reply(
                             &mut plugin_out,
                             json!({
@@ -914,5 +927,44 @@ mod tests {
         events.wait_for(|event| matches!(event, HostEvent::Ready { .. }).then_some(()));
         events.host.shutdown();
         assert!(lock(&log.received).contains(&"shutdown".to_string()));
+    }
+
+    #[test]
+    fn contributions_changed_on_initialized_come_after_ready() {
+        let (mut events, _log) = host();
+        let project = PathBuf::from("/projects/a");
+        events.host.set_project(&project, vec![launch("changes")]);
+        let first = events.wait_for(|event| match event {
+            HostEvent::Ready { .. } => Some("ready"),
+            HostEvent::Contributions { .. } => Some("contributions"),
+            _ => None,
+        });
+        assert_eq!(
+            first, "ready",
+            "a Ready must not overwrite what came after it"
+        );
+        let commands = events.wait_for(|event| match event {
+            HostEvent::Contributions { contributions, .. } => Some(contributions.commands.clone()),
+            _ => None,
+        });
+        assert_eq!(commands[0].id, "later");
+        events.host.shutdown();
+    }
+
+    #[test]
+    fn a_sync_names_the_processes_it_stopped_or_replaced() {
+        let (mut events, _log) = host();
+        let project = PathBuf::from("/projects/a");
+        assert!(events
+            .host
+            .set_project(&project, vec![launch("good")])
+            .is_empty());
+        let same = events.host.set_project(&project, vec![launch("good")]);
+        assert!(same.is_empty(), "an unchanged launch keeps its process");
+        let mut changed = launch("good");
+        changed.args.push("--new".into());
+        let replaced = events.host.set_project(&project, vec![changed]);
+        assert_eq!(replaced.len(), 1);
+        assert_eq!(events.host.close_project(&project), replaced);
     }
 }

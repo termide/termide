@@ -2603,8 +2603,10 @@ fn default_openai_base_url() -> String {
     Connection::default().base_url
 }
 
-/// Persist an "allow always" rule as `[ai.permissions.<tool>]` in the
-/// project's `.termide/config.toml` or the global configuration.
+/// Persist an "allow always" rule as `[ai.permissions.<tool>]`: for the
+/// project, in termide's data directory under the current project
+/// (`termide_project::granted_rules_path`) — never in the repository, whose
+/// config may not allow anything — or in the global configuration.
 ///
 /// The rule is merged into the document rather than appended, so a repeated
 /// grant updates it in place instead of writing a second `[ai.permissions.…]`
