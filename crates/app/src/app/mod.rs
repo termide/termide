@@ -52,6 +52,7 @@ mod panel_factory;
 mod panel_manager;
 mod panel_operations;
 mod parked_projects;
+mod plugin_editor;
 mod plugin_windows;
 mod plugins;
 mod project_layout;

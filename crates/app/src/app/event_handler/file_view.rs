@@ -118,7 +118,7 @@ impl App {
     }
 
     /// Handle RunCommand event - run command in a new terminal
-    pub(super) fn event_run_command(
+    pub(in crate::app) fn event_run_command(
         &mut self,
         command: String,
         cwd: Option<PathBuf>,

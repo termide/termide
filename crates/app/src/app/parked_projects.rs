@@ -480,6 +480,29 @@ impl App {
         saved
     }
 
+    /// The editor of `path` in the project at `project` — the current one or
+    /// a parked one — if it is open there.
+    pub(super) fn project_editor_mut(
+        &mut self,
+        project: &Path,
+        path: &Path,
+    ) -> Option<&mut termide_panel_editor::Editor> {
+        let layout = if project == self.open_projects.current() {
+            &mut self.layout_manager
+        } else {
+            &mut self
+                .open_projects
+                .parked_mut()
+                .find(|(root, _)| *root == project)?
+                .1
+                .layout
+        };
+        layout
+            .iter_all_panels_mut()
+            .filter_map(|panel| panel.as_editor_mut())
+            .find(|editor| editor.file_path() == Some(path))
+    }
+
     /// The plugin panel `id`, in the current project or a parked one.
     pub(super) fn plugin_panel_mut(
         &mut self,

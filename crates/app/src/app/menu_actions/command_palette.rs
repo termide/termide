@@ -277,7 +277,11 @@ impl App {
             }
         }
 
-        for (action, label) in self.plugin_palette_commands() {
+        for (action, label) in self
+            .plugin_palette_commands()
+            .into_iter()
+            .chain(self.plugin_management_commands())
+        {
             actions.push(action);
             entries.push(CommandEntry {
                 label,

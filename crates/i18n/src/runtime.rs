@@ -219,6 +219,14 @@ impl Translation for RuntimeTranslation {
         palette_category_application,
         palette_category_commands,
         palette_category_plugins,
+        plugins_title,
+        palette_plugins_status,
+        palette_plugins_reload,
+        plugins_state_ready,
+        plugins_state_starting,
+        plugins_state_gave_up,
+        plugins_state_off,
+        plugins_none,
         command_report_no_output,
         git_operation_cancelled,
         modal_yes,
@@ -1422,6 +1430,14 @@ impl Translation for RuntimeTranslation {
             "agent_notice_mcp_login_started_fmt",
             &[("source", source), ("url", url)],
         )
+    }
+
+    fn palette_plugins_restart_fmt(&self, name: &str) -> String {
+        self.format("palette_plugins_restart_fmt", &[("name", name)])
+    }
+
+    fn plugins_reloaded_fmt(&self, count: usize) -> String {
+        self.format("plugins_reloaded_fmt", &[("count", &count.to_string())])
     }
 
     fn command_confirm_project_fmt(&self, name: &str, command: &str) -> String {

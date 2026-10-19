@@ -144,5 +144,16 @@ Contributions, declared in `initialize` (they can change later):
    the editor and the diagnostics panel, named after the plugin. They reuse
    the gutter, underline, message rows and panel the editor already has.
 
+4. The editor and the project. Done: `editor/active`, `read`, `edit`, `open`
+   on the editors of the plugin's own project, an edit applied to the open
+   buffer only and as one undo step (`TextBuffer::begin_undo_group`), and
+   refused as `stale` against a version; `terminal/run` in a visible
+   terminal; events `file/closed`, `editor/focused`, `editor/changed`
+   (watched only while asked for, told after 300 ms of quiet) and
+   `git/changed`; command keys limited to strong chords nothing else binds;
+   `$/cancelRequest` for what termide gives up on; `tool/progress` routed on
+   the connection's thread; the palette's status, reload and restart; the
+   plugin's whole process group ended with it; 256 messages per tick at most.
+
 Out of scope: an install command (copying the directory is enough), declared
 capability permissions, and a shared daemon.

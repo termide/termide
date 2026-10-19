@@ -330,6 +330,38 @@ impl Editor {
         self.cursor.line
     }
 
+    /// Whether the editor only views its file.
+    pub fn is_read_only(&self) -> bool {
+        self.config.read_only
+    }
+
+    /// The cursor as LSP counts it: `(line, UTF-16 column)`.
+    pub fn lsp_cursor(&self) -> (usize, usize) {
+        let line = self.cursor.line;
+        (line, self.buffer.utf16_column(line, self.cursor.column))
+    }
+
+    /// The selection as LSP counts it, start before end: `((line, column),
+    /// (line, column))`; `None` without one.
+    pub fn lsp_selection(&self) -> Option<((usize, usize), (usize, usize))> {
+        let selection = self.selection.as_ref()?;
+        let at = |c: &termide_buffer::Cursor| (c.line, self.buffer.utf16_column(c.line, c.column));
+        let (a, b) = (at(&selection.anchor), at(&selection.active));
+        (a != b).then(|| if a <= b { (a, b) } else { (b, a) })
+    }
+
+    /// Apply edits a plugin sends, LSP-positioned against the buffer as it
+    /// is, as one undo step. `false` for an editor that only views its file.
+    pub fn apply_plugin_edits(&mut self, edits: &[lsp_types::TextEdit]) -> bool {
+        if self.config.read_only {
+            return false;
+        }
+        self.buffer.begin_undo_group();
+        self.apply_workspace_edits(edits);
+        self.buffer.end_undo_group();
+        true
+    }
+
     /// Get all buffer text as a string.
     pub fn content_string(&self) -> String {
         self.buffer.text()

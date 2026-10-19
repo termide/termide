@@ -304,6 +304,17 @@ impl Host {
         }
     }
 
+    /// Start `key` afresh: the running process is stopped and a new one
+    /// started, a plugin given up on included. `false` for one not held.
+    pub fn restart(&mut self, key: &PluginKey) -> bool {
+        let Some(handle) = self.plugins.remove(key) else {
+            return false;
+        };
+        handle.stop.store(true, Ordering::Relaxed);
+        self.start(key.clone(), handle.launch);
+        true
+    }
+
     /// Stop every plugin of `project`.
     pub fn close_project(&mut self, project: &Path) {
         self.set_project(project, Vec::new());
@@ -346,6 +357,18 @@ impl Host {
                 (key.clone(), state)
             })
             .collect()
+    }
+
+    /// Whether a ready plugin of `project` subscribed to `method`: what
+    /// decides whether the event is worth watching for at all.
+    #[must_use]
+    pub fn wants(&self, project: &Path, method: &str) -> bool {
+        self.plugins.iter().any(|(key, handle)| {
+            key.project == project
+                && lock(&handle.live).as_ref().is_some_and(|live| {
+                    live.ready && live.subscriptions.iter().any(|s| s == method)
+                })
+        })
     }
 
     /// Send the event `method` to every ready plugin of `project` that
@@ -595,6 +618,17 @@ impl Supervisor {
             stdin,
             move |incoming| {
                 let event = match incoming {
+                    // Straight to the call it is for, not through the UI.
+                    Incoming::Notification { method, params }
+                        if method == protocol::TOOL_PROGRESS =>
+                    {
+                        if let (Some(token), Some(text)) =
+                            (params["token"].as_u64(), params["text"].as_str())
+                        {
+                            crate::progress::deliver(token, text.to_string());
+                        }
+                        return;
+                    }
                     Incoming::Notification { method, params }
                         if method == protocol::CONTRIBUTIONS_CHANGED =>
                     {

@@ -25,6 +25,8 @@ use super::App;
 
 /// The action prefix of a plugin command in the palette.
 pub(super) const PLUGIN_COMMAND_PREFIX: &str = "plugin_command:";
+/// The action prefix of a plugin's restart in the palette.
+pub(super) const PLUGIN_RESTART_PREFIX: &str = "plugin_restart:";
 
 /// How long a plugin command may take before its answer is given up on.
 const COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
@@ -49,39 +51,46 @@ pub(crate) struct PluginRuntime {
     next_panel: u64,
     /// The windows plugins asked for.
     pub(super) windows: super::plugin_windows::Windows,
+    /// What the plugins were last told of the editors.
+    pub(super) editors: super::plugin_editor::EditorWatch,
+}
+
+/// What the plugins directory beside the global config file holds now.
+fn discover_installed() -> Vec<Installed> {
+    match Config::config_file_path() {
+        Ok(config_file) => {
+            let dir = config_file
+                .parent()
+                .map(termide_plugins::plugins_dir)
+                .unwrap_or_default();
+            let (installed, problems) = termide_plugins::discover(&dir);
+            for problem in problems {
+                log::warn!("{problem}");
+            }
+            if !installed.is_empty() {
+                log::info!(
+                    "Plugins in {}: {}",
+                    dir.display(),
+                    installed
+                        .iter()
+                        .map(|p| p.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            installed
+        }
+        Err(e) => {
+            log::warn!("No plugins: {e}");
+            Vec::new()
+        }
+    }
 }
 
 impl PluginRuntime {
     /// Read the plugins directory beside the global config file.
     pub(crate) fn new() -> Self {
-        let installed = match Config::config_file_path() {
-            Ok(config_file) => {
-                let dir = config_file
-                    .parent()
-                    .map(termide_plugins::plugins_dir)
-                    .unwrap_or_default();
-                let (installed, problems) = termide_plugins::discover(&dir);
-                for problem in problems {
-                    log::warn!("{problem}");
-                }
-                if !installed.is_empty() {
-                    log::info!(
-                        "Plugins in {}: {}",
-                        dir.display(),
-                        installed
-                            .iter()
-                            .map(|p| p.name.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    );
-                }
-                installed
-            }
-            Err(e) => {
-                log::warn!("No plugins: {e}");
-                Vec::new()
-            }
-        };
+        let installed = discover_installed();
         Self {
             host: Host::new(Arc::new(ProcessLauncher), Timing::default()),
             installed,
@@ -92,6 +101,7 @@ impl PluginRuntime {
             panels: BTreeMap::new(),
             next_panel: 1,
             windows: Default::default(),
+            editors: Default::default(),
         }
     }
 
@@ -157,7 +167,7 @@ impl App {
     /// Tell the host which plugins each loaded project wants.
     fn sync_plugins(&mut self) {
         self.plugins.dirty = false;
-        if self.plugins.installed.is_empty() {
+        if self.plugins.installed.is_empty() && self.plugins.synced.is_empty() {
             return;
         }
         let roots = self.loaded_project_roots();
@@ -242,6 +252,8 @@ impl App {
         let commands = self.plugin_palette_commands();
         if commands != self.state.ui.plugin_commands {
             self.state.ui.plugin_commands = commands;
+            // Their keys are bound from the table, built again.
+            self.state.cache.hotkey_table = None;
             self.state.needs_redraw = true;
         }
     }
@@ -256,6 +268,7 @@ impl App {
         }
         self.notice_closed_plugin_panels();
         self.serve_plugin_windows();
+        self.watch_editors_for_plugins();
     }
 
     /// Tell each plugin about its panels the user closed since the last tick.
@@ -386,6 +399,9 @@ impl App {
         method: &str,
         params: &Value,
     ) -> Result<Value, RpcError> {
+        if let Some(outcome) = self.serve_editor_request(key, method, params) {
+            return outcome;
+        }
         let text = |field: &str| {
             params[field]
                 .as_str()
@@ -418,6 +434,29 @@ impl App {
                     self.plugins.status.insert(item, value);
                 }
                 self.refresh_plugin_ui();
+                Ok(Value::Null)
+            }
+            protocol::TERMINAL_RUN => {
+                // In a terminal panel the user sees, with the command typed
+                // in it: nothing a plugin starts this way runs unseen.
+                if key.project != self.open_projects.current() {
+                    return Err(RpcError::new(
+                        INVALID_PARAMS,
+                        "the plugin's project is in the background",
+                    ));
+                }
+                let command = text("command")?;
+                if command.contains('\n') || command.trim().is_empty() {
+                    return Err(RpcError::new(INVALID_PARAMS, "`command` must be one line"));
+                }
+                let cwd = match params["cwd"].as_str() {
+                    Some(cwd) if Path::new(cwd).is_absolute() => PathBuf::from(cwd),
+                    Some(_) => return Err(RpcError::new(INVALID_PARAMS, "`cwd` must be absolute")),
+                    None => key.project.clone(),
+                };
+                self.event_run_command(command, Some(cwd))
+                    .map_err(|e| RpcError::new(INVALID_PARAMS, e.to_string()))?;
+                self.state.needs_redraw = true;
                 Ok(Value::Null)
             }
             protocol::EDITOR_DIAGNOSTICS => {
@@ -597,6 +636,57 @@ impl App {
             .collect()
     }
 
+    /// The keys the current project's plugin commands may take, by action:
+    /// one with `Ctrl` or `Alt` and another modifier, or an F-key with one —
+    /// keys a program in the terminal rarely wants — and that nothing in
+    /// termide binds already, the user's commands included. A key that does
+    /// not qualify is left unbound, with a line in the log.
+    pub(super) fn plugin_command_keys(&self) -> Vec<(String, String)> {
+        let mut taken: Vec<termide_config::ParsedKeyBinding> =
+            termide_config::enumerate_bindings(&self.state.config)
+                .into_iter()
+                .map(|(_, binding, _)| binding)
+                .collect();
+        if let Some(registry) = self.state.cache.commands_registry.as_ref() {
+            taken.extend(
+                registry
+                    .commands_with_hotkeys()
+                    .into_iter()
+                    .filter_map(|(_, key)| termide_config::parse_keybinding(key).ok()),
+            );
+        }
+        let current = self.open_projects.current();
+        let mut keys = Vec::new();
+        for (plugin, contributions) in &self.plugins.contributions {
+            if plugin.project != current {
+                continue;
+            }
+            for command in &contributions.commands {
+                let Some(key) = &command.key else { continue };
+                let Ok(parsed) = termide_config::parse_keybinding(key) else {
+                    log::warn!("plugin {}: `{key}` is not a key", plugin.name);
+                    continue;
+                };
+                let allowed = plugin_key_allowed(&parsed);
+                if !allowed {
+                    log::warn!(
+                        "plugin {}: `{key}` needs Ctrl or Alt with another modifier, or an F-key with one",
+                        plugin.name
+                    );
+                } else if taken.contains(&parsed) {
+                    log::warn!("plugin {}: `{key}` is taken", plugin.name);
+                } else {
+                    taken.push(parsed);
+                    keys.push((
+                        format!("{PLUGIN_COMMAND_PREFIX}{}:{}", plugin.name, command.id),
+                        key.clone(),
+                    ));
+                }
+            }
+        }
+        keys
+    }
+
     /// Run a plugin command named by its action, `<plugin>:<id>` after the
     /// prefix. The plugin is asked on a thread of its own: it answers when it
     /// is done, and speaks through `window/notify` if it has something to say.
@@ -626,9 +716,112 @@ impl App {
         });
     }
 
+    /// The palette's entries for the plugins themselves: their state, a
+    /// fresh read of the directory, and a restart of each the current
+    /// project runs.
+    pub(super) fn plugin_management_commands(&self) -> Vec<(String, String)> {
+        let t = termide_i18n::t();
+        let mut entries = vec![
+            (
+                "plugins_status".to_string(),
+                t.palette_plugins_status().to_string(),
+            ),
+            (
+                "plugins_reload".to_string(),
+                t.palette_plugins_reload().to_string(),
+            ),
+        ];
+        let current = self.open_projects.current();
+        for (key, _) in self.plugins.host.states() {
+            if key.project == current {
+                entries.push((
+                    format!("{PLUGIN_RESTART_PREFIX}{}", key.name),
+                    t.palette_plugins_restart_fmt(&key.name),
+                ));
+            }
+        }
+        entries
+    }
+
+    /// The installed plugins and where each stands in the current project.
+    pub(super) fn show_plugins_status(&mut self) {
+        let t = termide_i18n::t();
+        let current = self.open_projects.current().to_path_buf();
+        let states = self.plugins.host.states();
+        let lines: Vec<(String, String)> = if self.plugins.installed.is_empty() {
+            vec![(String::new(), t.plugins_none().to_string())]
+        } else {
+            self.plugins
+                .installed
+                .iter()
+                .map(|installed| {
+                    let state = states
+                        .iter()
+                        .find(|(key, _)| key.project == current && key.name == installed.name)
+                        .map(|(_, state)| *state);
+                    let text = match state {
+                        Some(termide_plugins::PluginState::Ready) => t.plugins_state_ready(),
+                        Some(termide_plugins::PluginState::Starting) => t.plugins_state_starting(),
+                        Some(termide_plugins::PluginState::GaveUp) => t.plugins_state_gave_up(),
+                        None => t.plugins_state_off(),
+                    };
+                    (installed.name.clone(), text.to_string())
+                })
+                .collect()
+        };
+        let modal = termide_modal::InfoModal::new(t.plugins_title(), lines);
+        self.state
+            .show_message_modal(crate::state::ActiveModal::Info(Box::new(modal)));
+    }
+
+    /// Read the plugins directory again — one installed, removed or changed
+    /// since takes effect — and run what the projects now want.
+    pub(super) fn reload_plugins(&mut self) {
+        self.plugins.installed = discover_installed();
+        self.sync_plugins();
+        let count = self.plugins.installed.len();
+        self.state
+            .set_info(termide_i18n::t().plugins_reloaded_fmt(count));
+    }
+
+    /// Start the current project's plugin `name` afresh.
+    pub(super) fn restart_plugin(&mut self, name: &str) {
+        let key = PluginKey {
+            project: self.open_projects.current().to_path_buf(),
+            name: name.to_string(),
+        };
+        if self.plugins.host.restart(&key) {
+            self.plugins.contributions.remove(&key);
+            tool_hub().set(&key, Vec::new());
+            self.orphan_plugin_panels(&key);
+            self.drop_plugin_windows(&key);
+            self.clear_plugin_diagnostics(&key);
+            self.refresh_plugin_ui();
+        }
+    }
+
     /// Stop every plugin, waiting briefly for each to finish.
     pub(super) fn shutdown_plugins(&mut self) {
         self.plugins.host.shutdown();
+    }
+}
+
+/// Whether a plugin may bind `key`: `Ctrl` or `Alt` with another modifier,
+/// or an F-key with one — what a program in the terminal rarely asks for.
+fn plugin_key_allowed(key: &termide_config::ParsedKeyBinding) -> bool {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    let mods = key.modifiers;
+    let count = [
+        KeyModifiers::CONTROL,
+        KeyModifiers::ALT,
+        KeyModifiers::SHIFT,
+    ]
+    .iter()
+    .filter(|m| mods.contains(**m))
+    .count();
+    match key.key {
+        KeyCode::F(_) => count >= 1,
+        _ => mods.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) && count >= 2,
     }
 }
 
@@ -768,7 +961,7 @@ impl Tool for PluginTool {
         &self,
         call: &ToolCall,
         _ctx: &ToolContext,
-        _on_update: &mut dyn FnMut(ToolUpdate),
+        on_update: &mut dyn FnMut(ToolUpdate),
         cancel: &CancelToken,
     ) -> ToolResultMessage {
         let arguments = if call.arguments.is_object() {
@@ -776,12 +969,33 @@ impl Tool for PluginTool {
         } else {
             json!({})
         };
-        match self.peer.request(
-            protocol::TOOL_CALL,
-            json!({ "name": self.info.name, "arguments": arguments }),
-            TOOL_TIMEOUT,
-            &|| cancel.is_cancelled(),
-        ) {
+        // The request waits on a thread of its own, so that the progress the
+        // plugin sends meanwhile reaches the transcript as it comes.
+        let (token, progress) = termide_plugins::progress::register();
+        let (done_tx, done) = std::sync::mpsc::channel();
+        let peer = Arc::clone(&self.peer);
+        let params = json!({ "name": self.info.name, "arguments": arguments, "progress": token });
+        let thread_cancel = cancel.clone();
+        std::thread::spawn(move || {
+            let outcome = peer.request(protocol::TOOL_CALL, params, TOOL_TIMEOUT, &|| {
+                thread_cancel.is_cancelled()
+            });
+            let _ = done_tx.send(outcome);
+        });
+        let outcome = loop {
+            while let Ok(text) = progress.try_recv() {
+                on_update(ToolUpdate::Output(text));
+            }
+            match done.recv_timeout(std::time::Duration::from_millis(50)) {
+                Ok(outcome) => break outcome,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    break Err("the plugin's call ended unanswered".to_string())
+                }
+            }
+        };
+        termide_plugins::progress::unregister(token);
+        match outcome {
             Ok(result) => {
                 let text = result["text"].as_str().unwrap_or_default().to_string();
                 if result["isError"].as_bool() == Some(true) {
@@ -895,6 +1109,20 @@ mod tests {
             &serde_json::json!([{ "line": 1, "message": "x", "severity": "fatal" }])
         )
         .is_err());
+    }
+
+    #[test]
+    fn a_plugin_takes_only_keys_a_terminal_program_rarely_wants() {
+        let allowed =
+            |key: &str| super::plugin_key_allowed(&termide_config::parse_keybinding(key).unwrap());
+        assert!(allowed("Ctrl+Alt+R"));
+        assert!(allowed("Ctrl+Shift+R"));
+        assert!(allowed("Alt+Shift+R"));
+        assert!(allowed("Shift+F7"));
+        assert!(!allowed("Ctrl+R"), "the shell's history search");
+        assert!(!allowed("Alt+B"), "readline's word back");
+        assert!(!allowed("F7"));
+        assert!(!allowed("R"));
     }
 
     #[test]

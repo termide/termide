@@ -113,6 +113,9 @@ impl App {
                 table.insert_raw(format!("run_command:{command_key}"), key_str);
             }
         }
+        for (action, key) in self.plugin_command_keys() {
+            table.insert_raw(action, &key);
+        }
         self.state.cache.hotkey_table = Some(table);
     }
 
@@ -336,6 +339,11 @@ impl App {
             self.run_command_by_menu_key(key)?;
             return Ok(true);
         }
+        let prefix = super::plugins::PLUGIN_COMMAND_PREFIX;
+        if let Some(action) = table.find_match(prefix, key) {
+            self.run_plugin_command(&action[prefix.len()..]);
+            return Ok(true);
+        }
 
         Ok(false)
     }
@@ -430,6 +438,8 @@ impl App {
             "quit" => self.handle_quit_request()?,
             "detach_instance" => self.handle_detach_instance(),
             "lock_vault" => self.vault_lock_now(),
+            "plugins_status" => self.show_plugins_status(),
+            "plugins_reload" => self.reload_plugins(),
             other => {
                 if let Some(key) = other.strip_prefix("run_command:") {
                     self.run_command_by_menu_key(key)?;
@@ -437,6 +447,9 @@ impl App {
                     other.strip_prefix(super::plugins::PLUGIN_COMMAND_PREFIX)
                 {
                     self.run_plugin_command(action);
+                } else if let Some(name) = other.strip_prefix(super::plugins::PLUGIN_RESTART_PREFIX)
+                {
+                    self.restart_plugin(name);
                 } else {
                     return Ok(false);
                 }

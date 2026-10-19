@@ -1,11 +1,11 @@
 # Plugins
 
 A plugin is a program that termide runs in the background while a project is
-open and talks to over JSON-RPC on the program's stdin and stdout. It can
-react to files being opened and saved, add commands to the command palette and the Commands menu,
-mark lines in the editor, show items in the status bar, ask in termide's
-windows, open panels of its
-own and give the coding agent tools.
+open and talks to over JSON-RPC on the program's stdin and stdout. It hears
+what happens in the project's editors and repository, reads and edits the open
+buffers, adds commands with keys of their own, marks lines in the editor,
+shows items in the status bar, asks in termide's windows, opens panels of its
+own and terminals, and gives the coding agent tools.
 
 Plugins are global: they are installed in your config directory, and a project
 can only switch off a plugin you installed or switch on one you allowed it to.
@@ -37,8 +37,11 @@ LOG_LEVEL = "info"
 only in the absolute entries of `PATH`. The plugin runs with its own directory
 as the working directory and learns the project's root from `initialize`.
 
-Plugins are read when termide starts. Restart termide after installing or
-removing one.
+Plugins are read when termide starts. After installing, removing or changing
+one, **Plugins: read the plugins directory again** in the command palette
+(`Ctrl+P`) takes it in without a restart. **Plugins: show where each stands**
+lists the installed plugins and their state in the current project, and
+**Plugins: restart <name>** starts one afresh.
 
 ## Turning plugins on and off
 
@@ -93,11 +96,25 @@ goes to termide's log.
 |---|---|---|---|
 | `initialize` | request | `protocolVersion` (1), `termide.version`, `plugin.name`, `plugin.dir`, `project.root`, `settings` | what the plugin contributes, see below |
 | `initialized` | notification | | |
-| `file/opened`, `file/saved` | notification, only if subscribed | `path` | |
 | `command/execute` | request | `id` | anything |
-| `tool/call` | request | `name`, `arguments` | `text`, `isError` |
+| `tool/call` | request | `name`, `arguments`, `progress` | `text`, `isError` |
+| `$/cancelRequest` | notification | `id` of a request termide gave up on | |
 | `shutdown` | request | | `null` |
 | `exit` | notification | | |
+
+The events a plugin subscribes to, notifications about its own project:
+
+| Event | Params | When |
+|---|---|---|
+| `file/opened` | `path` | a file opened in an editor |
+| `file/saved` | `path` | an editor wrote its file |
+| `file/closed` | `path` | an editor of the current project closed |
+| `editor/focused` | `path` | another file's editor became the active panel |
+| `editor/changed` | `path`, `version` | a buffer changed, once the typing paused for 300 ms |
+| `git/changed` | `root` | a repository's index, HEAD or refs moved: a commit, a checkout, a stage |
+
+The events of the editors are watched only while a plugin of the current
+project has asked for them.
 
 The result of `initialize`, and the params of a `contributions/changed`
 notification sent later to replace it:
@@ -105,7 +122,7 @@ notification sent later to replace it:
 ```json
 {
   "subscriptions": ["file/saved"],
-  "commands": [{ "id": "check", "title": "Check the project" }],
+  "commands": [{ "id": "check", "title": "Check the project", "key": "Ctrl+Alt+K" }],
   "tools": [{
     "name": "lookup",
     "description": "Look a word up in the project glossary",
@@ -116,9 +133,20 @@ notification sent later to replace it:
 ```
 
 Commands appear as `<plugin>: <title>` in the command palette (`Plugins`
-category) and at the end of the Commands menu. Tools are offered to the agent sessions of the plugin's
-project as `plugin-<plugin>__<tool>`. The agent's permission rules treat them
-as MCP tools: they are asked about before running unless they are `readOnly`.
+category) and at the end of the Commands menu. A command's `key` runs it from
+anywhere, if termide binds that key nowhere — the user's own commands
+included — and it is `Ctrl` or `Alt` with another modifier (`Ctrl+Alt+K`,
+`Ctrl+Shift+K`, `Alt+Shift+K`) or an F-key with one (`Shift+F7`): keys a
+program in the terminal rarely wants. A key that does not qualify is left
+unbound, with a line in the log.
+
+Tools are offered to the agent sessions of the plugin's project as
+`plugin-<plugin>__<tool>`. The agent's permission rules treat them as MCP
+tools: they are asked about before running unless they are `readOnly`. While
+a tool runs, the plugin may send `tool/progress` `{ "token", "text" }` with
+the `progress` token of the call: the output so far, whole, shown in the
+transcript as it comes. A call the user stops, or one past its ten minutes,
+is followed by `$/cancelRequest`, as is a command past its five.
 
 **plugin → termide**
 
@@ -129,7 +157,36 @@ as MCP tools: they are asked about before running unless they are `readOnly`.
 | `status/set` | request | `id`, `text` (an empty text removes the item) |
 
 A plugin of a project in the background is not shown on screen: its
-notifications go to the log.
+notifications go to the log. termide takes at most 256 messages from all
+plugins per screen refresh; the rest wait for the next.
+
+### The editor
+
+A plugin reaches the editors of its own project, and only those:
+
+| Method | Params | Result |
+|---|---|---|
+| `editor/active` | | `path`, `line`, `col`, `selection` (`{ line, col, end_line, end_col }` or `null`), `modified`, `version` of the active editor; `null` without one, or when the plugin's project is in the background |
+| `editor/read` | `path` | `text`, `version`, `modified` of the open buffer, unsaved changes included |
+| `editor/edit` | `path`, `edits`: `[{ "line", "col"?, "end_line"?, "end_col"?, "text" }]`, `version` (optional) | `{ "version" }` |
+| `editor/open` | `path`, `line`, `col` (optional) | `null`; opens the file in the current project |
+
+Positions count as LSP counts them: lines from 0, columns in UTF-16 code
+units; an edit without an end inserts. `editor/edit` changes the open buffer
+only — termide writes no file for a plugin, which can write files itself —
+and the edits are one undo step, so `Ctrl+Z` takes them back. With `version`
+the edit is refused as `stale` if the buffer changed since that version (as
+`editor/read` or `editor/changed` reported it), so a plugin that computed
+edits from the text does not apply them to a different one. A buffer of an
+editor that only views its file is refused too. `editor/read` hands over at
+most 16 MB, `editor/edit` at most 10 000 edits at once.
+
+### Terminals
+
+`terminal/run` `{ "command", "cwd" }` opens a terminal panel in the plugin's
+project, which must be the current one, and types `command` in it, so the
+user sees what runs; `cwd` (absolute) defaults to the project's root. The
+command is one line.
 
 ### Marks in the editor
 

@@ -11,6 +11,7 @@
 
 pub mod host;
 pub mod manifest;
+pub mod progress;
 pub mod protocol;
 pub mod rpc;
 

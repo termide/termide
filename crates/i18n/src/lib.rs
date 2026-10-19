@@ -832,6 +832,16 @@ pub trait Translation: Send + Sync {
     fn palette_category_application(&self) -> &str;
     fn palette_category_commands(&self) -> &str;
     fn palette_category_plugins(&self) -> &str;
+    fn plugins_title(&self) -> &str;
+    fn palette_plugins_status(&self) -> &str;
+    fn palette_plugins_reload(&self) -> &str;
+    fn plugins_state_ready(&self) -> &str;
+    fn plugins_state_starting(&self) -> &str;
+    fn plugins_state_gave_up(&self) -> &str;
+    fn plugins_state_off(&self) -> &str;
+    fn plugins_none(&self) -> &str;
+    fn palette_plugins_restart_fmt(&self, name: &str) -> String;
+    fn plugins_reloaded_fmt(&self, count: usize) -> String;
     fn command_report_no_output(&self) -> &str;
     fn agent_paste_placeholder_fmt(&self, n: usize, what: &str) -> String;
     fn agent_paste_lines_fmt(&self, count: usize) -> String;
