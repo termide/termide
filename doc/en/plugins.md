@@ -3,7 +3,8 @@
 A plugin is a program that termide runs in the background while a project is
 open and talks to over JSON-RPC on the program's stdin and stdout. It can
 react to files being opened and saved, add commands to the command palette and the Commands menu,
-show items in the status bar, ask in termide's windows, open panels of its
+mark lines in the editor, show items in the status bar, ask in termide's
+windows, open panels of its
 own and give the coding agent tools.
 
 Plugins are global: they are installed in your config directory, and a project
@@ -129,6 +130,28 @@ as MCP tools: they are asked about before running unless they are `readOnly`.
 
 A plugin of a project in the background is not shown on screen: its
 notifications go to the log.
+
+### Marks in the editor
+
+A plugin marks lines of files as a language server does, with
+`editor/diagnostics` (request) `{ "path", "items" }`: the marks show in the
+editor's gutter and under the text, their messages on the lines below, and in
+the diagnostics panel, beside the language servers' and named after the
+plugin. Each call replaces the plugin's marks on that file; an empty `items`
+clears them. `path` is absolute.
+
+```json
+{ "path": "/home/me/proj/src/main.rs", "items": [
+  { "line": 11, "message": "TODO left behind", "severity": "info" },
+  { "line": 40, "col": 8, "end_col": 15, "severity": "error",
+    "message": "unsafe call", "code": "S101" }
+] }
+```
+
+Lines count from 0 and columns as LSP counts them (UTF-16 code units). Without
+`col` the whole line is marked; with `col` alone, the word there. `severity`
+is `error`, `warning` (the default), `info` or `hint`. A file opened later
+shows the marks set before; a plugin's marks go when it stops.
 
 ### Windows
 

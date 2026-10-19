@@ -649,6 +649,11 @@ impl App {
                 if let Some(ref mut lsp_manager) = self.state.lsp_manager {
                     editor_panel.init_lsp(lsp_manager);
                 }
+                // What is known of the file already: a plugin's marks, or a
+                // server's from a file opened before.
+                if let Some(diagnostics) = self.state.all_diagnostics.get(&opened) {
+                    editor_panel.update_diagnostics(diagnostics.clone());
+                }
 
                 self.add_panel(Box::new(editor_panel));
                 self.notify_outline_file_opened();

@@ -138,7 +138,11 @@ Contributions, declared in `initialize` (they can change later):
    plugin and answers the request when the window closes. What tells who
    speaks — a panel's icon and the plugin name leading its title, a window's
    heading — is never the plugin's to set.
-3. Editor decorations.
+3. Editor decorations. Done as diagnostics: `editor/diagnostics` sets the
+   plugin's marks on a file, kept apart from the language servers' (which
+   replace their own set at each publish) and shown together with them in
+   the editor and the diagnostics panel, named after the plugin. They reuse
+   the gutter, underline, message rows and panel the editor already has.
 
 Out of scope: an install command (copying the directory is enough), declared
 capability permissions, and a shared daemon.

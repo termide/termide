@@ -213,6 +213,21 @@ impl App {
                 tool_hub().set(&key, Vec::new());
             }
         }
+        // A plugin stopped by the sync sends no `Stopped`: its marks go here.
+        let marked: Vec<PluginKey> = self
+            .state
+            .plugin_diagnostics
+            .values()
+            .flat_map(|by_plugin| by_plugin.keys())
+            .map(|(project, name)| PluginKey {
+                project: project.clone(),
+                name: name.clone(),
+            })
+            .filter(|key| !alive.iter().any(|(k, _)| k == key))
+            .collect();
+        for key in marked {
+            self.clear_plugin_diagnostics(&key);
+        }
         self.plugins.synced = roots;
         self.refresh_plugin_ui();
     }
@@ -317,6 +332,7 @@ impl App {
                 tool_hub().set(&key, Vec::new());
                 self.orphan_plugin_panels(&key);
                 self.drop_plugin_windows(&key);
+                self.clear_plugin_diagnostics(&key);
                 self.plugins.status.retain(|(k, _), _| *k != key);
                 self.refresh_plugin_ui();
                 if restart_in.is_none() {
@@ -404,6 +420,16 @@ impl App {
                 self.refresh_plugin_ui();
                 Ok(Value::Null)
             }
+            protocol::EDITOR_DIAGNOSTICS => {
+                let path = PathBuf::from(text("path")?);
+                if !path.is_absolute() {
+                    return Err(RpcError::new(INVALID_PARAMS, "`path` must be absolute"));
+                }
+                let items = plugin_diagnostics(&key.name, &params["items"])
+                    .map_err(|e| RpcError::new(INVALID_PARAMS, e))?;
+                self.set_plugin_diagnostics(key, path, items);
+                Ok(Value::Null)
+            }
             protocol::PANEL_OPEN => {
                 if key.project != self.open_projects.current() {
                     return Err(RpcError::new(
@@ -466,6 +492,45 @@ impl App {
                 METHOD_NOT_FOUND,
                 format!("termide offers no method {method}"),
             )),
+        }
+    }
+
+    /// `key`'s marks on the file at `path` are `items` now; none clears them.
+    fn set_plugin_diagnostics(
+        &mut self,
+        key: &PluginKey,
+        path: PathBuf,
+        items: Vec<lsp_types::Diagnostic>,
+    ) {
+        let owner = (key.project.clone(), key.name.clone());
+        let by_plugin = self
+            .state
+            .plugin_diagnostics
+            .entry(path.clone())
+            .or_default();
+        if items.is_empty() {
+            by_plugin.remove(&owner);
+        } else {
+            by_plugin.insert(owner, items);
+        }
+        if by_plugin.is_empty() {
+            self.state.plugin_diagnostics.remove(&path);
+        }
+        self.publish_diagnostics(path);
+    }
+
+    /// The plugin `key` is gone: its marks go with it.
+    fn clear_plugin_diagnostics(&mut self, key: &PluginKey) {
+        let owner = (key.project.clone(), key.name.clone());
+        let paths: Vec<PathBuf> = self
+            .state
+            .plugin_diagnostics
+            .iter()
+            .filter(|(_, by_plugin)| by_plugin.contains_key(&owner))
+            .map(|(path, _)| path.clone())
+            .collect();
+        for path in paths {
+            self.set_plugin_diagnostics(key, path, Vec::new());
         }
     }
 
@@ -565,6 +630,63 @@ impl App {
     pub(super) fn shutdown_plugins(&mut self) {
         self.plugins.host.shutdown();
     }
+}
+
+/// The most marks a plugin sets on one file.
+const MAX_DIAGNOSTICS: usize = 1000;
+
+/// The `items` of `editor/diagnostics` as diagnostics from `plugin`.
+fn plugin_diagnostics(plugin: &str, items: &Value) -> Result<Vec<lsp_types::Diagnostic>, String> {
+    use lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
+    let items = items.as_array().ok_or("`items` must be a list")?;
+    let number = |item: &Value, field: &str| {
+        item[field]
+            .as_u64()
+            .map(|n| u32::try_from(n).unwrap_or(u32::MAX))
+    };
+    items
+        .iter()
+        .take(MAX_DIAGNOSTICS)
+        .map(|item| {
+            let line = number(item, "line").ok_or("an item has no `line`")?;
+            let message = item["message"].as_str().ok_or("an item has no `message`")?;
+            let message = message
+                .lines()
+                .map(|l| protocol::clean_text(l, 500))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let severity = match item["severity"].as_str().unwrap_or("warning") {
+                "error" => DiagnosticSeverity::ERROR,
+                "warning" => DiagnosticSeverity::WARNING,
+                "info" => DiagnosticSeverity::INFORMATION,
+                "hint" => DiagnosticSeverity::HINT,
+                other => return Err(format!("no severity {other}")),
+            };
+            // Without a column the whole line is marked: to the start of the
+            // next one. A column alone marks the word there.
+            let (start, end) = match number(item, "col") {
+                None => (
+                    Position::new(line, 0),
+                    Position::new(line.saturating_add(1), 0),
+                ),
+                Some(col) => {
+                    let end_line = number(item, "end_line").unwrap_or(line);
+                    let end_col = number(item, "end_col").unwrap_or(col);
+                    (Position::new(line, col), Position::new(end_line, end_col))
+                }
+            };
+            Ok(Diagnostic {
+                range: Range::new(start, end),
+                severity: Some(severity),
+                code: item["code"]
+                    .as_str()
+                    .map(|c| NumberOrString::String(c.to_string())),
+                source: Some(plugin.to_string()),
+                message,
+                ..Default::default()
+            })
+        })
+        .collect()
 }
 
 /// A plugin panel's title as termide shows it: the plugin's name, which the
@@ -750,6 +872,30 @@ impl PluginToolHub {
 #[cfg(test)]
 mod tests {
     use super::plugin_title;
+
+    #[test]
+    fn a_plugins_marks_become_diagnostics_of_its_own() {
+        use lsp_types::{DiagnosticSeverity, Position};
+        let marks = super::plugin_diagnostics(
+            "lint",
+            &serde_json::json!([
+                { "line": 3, "message": "whole line" },
+                { "line": 1, "col": 4, "severity": "error", "message": "here", "code": "E1" },
+            ]),
+        )
+        .unwrap();
+        assert_eq!(marks[0].range.start, Position::new(3, 0));
+        assert_eq!(marks[0].range.end, Position::new(4, 0));
+        assert_eq!(marks[0].severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(marks[1].range.end, Position::new(1, 4));
+        assert_eq!(marks[1].source.as_deref(), Some("lint"));
+        assert!(super::plugin_diagnostics("lint", &serde_json::json!([{ "line": 1 }])).is_err());
+        assert!(super::plugin_diagnostics(
+            "lint",
+            &serde_json::json!([{ "line": 1, "message": "x", "severity": "fatal" }])
+        )
+        .is_err());
+    }
 
     #[test]
     fn a_plugin_panel_is_always_headed_by_its_plugin() {

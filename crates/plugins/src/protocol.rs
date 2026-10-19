@@ -25,6 +25,11 @@
 //!   `null`; `window/message` `{ "title", "message" }` → `null`. Requests,
 //!   answered once the user closes the window; one window per plugin at a
 //!   time, shown while its project is current.
+//! - `editor/diagnostics` (request) `{ "path", "items" }`: the plugin's marks
+//!   on the file at `path`, replacing the ones it set before (an empty list
+//!   clears them). Each item is `{ "line", "col"?, "end_line"?, "end_col"?,
+//!   "severity"?, "message", "code"? }`, lines from 0, columns as LSP counts
+//!   them; without `col` the whole line is marked.
 //! - `panel/open` (request) `{ "title", "markdown" }` opens a panel in the
 //!   plugin's project, which must be the current one; the result is
 //!   `{ "panel" }`, its id.
@@ -58,6 +63,7 @@ pub const WINDOW_CHOOSE: &str = "window/choose";
 pub const WINDOW_INPUT: &str = "window/input";
 pub const WINDOW_FORM: &str = "window/form";
 pub const WINDOW_MESSAGE: &str = "window/message";
+pub const EDITOR_DIAGNOSTICS: &str = "editor/diagnostics";
 pub const PANEL_OPEN: &str = "panel/open";
 pub const PANEL_UPDATE: &str = "panel/update";
 pub const PANEL_CLOSE: &str = "panel/close";
