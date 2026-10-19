@@ -51,10 +51,19 @@ pub struct HookConfig {
 }
 
 impl HookConfig {
-    /// What an approval of the hook is given for: what it runs.
+    /// What an approval of the hook is given for: what it runs, and when —
+    /// the event and the tools, so an approved hook cannot later become a
+    /// guard on every call — and how long it may take.
     #[must_use]
     pub fn launch_spec(&self) -> String {
-        serde_json::json!({ "command": self.command, "args": self.args }).to_string()
+        serde_json::json!({
+            "event": self.event,
+            "command": self.command,
+            "args": self.args,
+            "tools": self.tools,
+            "timeout_secs": self.timeout_secs,
+        })
+        .to_string()
     }
 
     /// What the hook runs, for a person to read.

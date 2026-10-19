@@ -699,7 +699,7 @@ url = "https://mcp.example.com/mcp"
 oauth = { client_id = "termide", client_secret = "$JIRA_SECRET", scopes = ["read"], callback_port = 8765 }
 ```
 
-面板工作目录、其上任意一级目录或项目根目录下的 `.mcp.json` 会与它们一并读取，为 Claude Code、Cursor 或 VS Code 配置的仓库无需改动即可带来自己的服务器——这与读取 `CLAUDE.md` 和 `.agents/skills/` 是同样的姿态。这个文件没有标准：MCP 规范把配置留给每个客户端。因此只接受与 termide 相符的部分：`command`、`args`、`env`、`cwd` 和 `tools`，或带 `headers` 和 `oauth`（`clientId`、`clientSecret`、`scopes`、`callbackPort`）的 `url`；根键两者皆可（`mcpServers`，或 VS Code 的 `servers`）；`disabled` 与 `enabled = false` 都读作关闭；`${workspaceFolder}`、`${userHome}` 和 `${env:NAME}` 会被展开。`sse` 服务器会跳过——那是较早的传输方式，请求要发往流先给出的地址，TermIDE 不使用它——带 `${input:…}` 引用的同样跳过：那个引用由另一个工具向你索要密钥，而 termide 只会带着空的密钥启动它。每次跳过都记入日志。同一目录内同名时 `mcp.toml` 胜出；离面板更近的目录优先于两者。因此放在一组仓库之上的一个 `.mcp.json` 会服务于在其中打开的每个面板，这与 Claude Code 的读取方式相同。
+面板工作目录、其上任意一级目录或项目根目录下的 `.mcp.json` 会与它们一并读取，为 Claude Code、Cursor 或 VS Code 配置的仓库无需改动即可带来自己的服务器——这与读取 `CLAUDE.md` 和 `.agents/skills/` 是同样的姿态。这个文件没有标准：MCP 规范把配置留给每个客户端。因此只接受与 termide 相符的部分：`command`、`args`、`env`、`cwd` 和 `tools`，或带 `headers` 和 `oauth`（`clientId`、`clientSecret`、`scopes`、`callbackPort`）的 `url`；根键两者皆可（`mcpServers`，或 VS Code 的 `servers`）；`disabled` 与 `enabled = false` 都读作关闭；`${workspaceFolder}`、`${userHome}` 和 `${env:NAME}` 会被展开。`sse` 服务器会跳过——那是较早的传输方式，请求要发往流先给出的地址，TermIDE 不使用它——带 `${input:…}` 引用的同样跳过：那个引用由另一个工具向你索要密钥，而 termide 只会带着空的密钥启动它。每次跳过都记入日志。同一目录内同名时 `mcp.toml` 胜出；离面板更近的目录优先于两者——但配置层级的服务器除外：项目可以关闭它（`enabled = false`、`disabled`），却不能替换它。因此放在一组仓库之上的一个 `.mcp.json` 会服务于在其中打开的每个面板，这与 Claude Code 的读取方式相同。
 
 来自配置层级以外的服务器——项目的 `mcp.toml`、任何 `.mcp.json`——会启动程序或把你的密钥发往仓库选定的地址，因此它要等你批准：会话会说明它将运行什么（`mcp ext: from the project, runs npx ext-server — /trust ext to start it`），它会被列出但不会启动。`/trust` 列出项目带来的所有这样等待的内容，`/trust <name>`（或在工具清单中其标题上按 `t`）批准并连接它。批准针对的是当前的启动方式——命令、参数、环境、工作目录，或 URL、请求头和 OAuth 客户端——保存在 termide 数据目录中该项目名下（`trust/<项目路径>/approved.toml`），绝不保存在项目中。如果仓库改动了其中任何一项，它会再次等待。
 
@@ -724,7 +724,7 @@ timeout_secs = 30
 
 调用之前，输入为 `{"event","hook","cwd","tool","arguments"}`。程序可以输出 `{"decision": "block", "reason": "…"}` 跳过该调用（原因会交给模型），输出 `{"decision": "allow"}` 不经权限询问直接运行，或输出 `{"arguments": {…}}` 以其他参数运行；没有决定或为 `"ask"` 时由权限规则决定。以代码 2 退出同样会阻止调用，并以标准错误作为原因。调用之后，输入还带有 `"result": {"text", "is_error"}`，`{"text": "…"}` 会改写模型看到的内容；退出代码 2 会把结果变为错误，并以标准错误作为其文本。钩子按名称顺序在权限规则之前运行；以其他方式失败或超时的钩子会被记录并忽略，因此出故障的钩子永远不会让代理停止。
 
-项目的钩子像项目的 MCP 服务器一样等待批准：面板打开时会提示这一点，在 `/trust <name>` 之前它不会运行，只要其命令和参数保持不变，批准就一直有效；它从下一次运行起开始运行。项目既不能关闭也不能替换配置层级的钩子：你的某个钩子可能正是一道防护。
+项目的钩子像项目的 MCP 服务器一样等待批准：面板打开时会提示这一点，在 `/trust <name>` 之前它不会运行，只要其命令、参数、事件、工具和超时保持不变，批准就一直有效；它从下一次运行起开始运行。项目既不能关闭也不能替换配置层级的钩子：你的某个钩子可能正是一道防护。
 
 ### 命令垫片
 

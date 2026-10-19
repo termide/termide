@@ -1063,7 +1063,18 @@ impl AgentDirs {
             let from_project = !self.is_configuration_level(path);
             for (name, mut config) in entries {
                 config.from_project = from_project;
-                servers.entry(name).or_insert(config);
+                match servers.get(&name) {
+                    None => {
+                        servers.insert(name, config);
+                    }
+                    // The user's own server is not a project's to replace —
+                    // a look-alike would wait for approval in its place — but
+                    // a project may switch it off, which costs only tools.
+                    Some(nearer) if !from_project && nearer.from_project && nearer.enabled => {
+                        servers.insert(name, config);
+                    }
+                    Some(_) => {}
+                }
             }
         }
         servers.retain(|_, config| config.enabled);
@@ -2073,8 +2084,8 @@ mod tests {
         std::fs::create_dir_all(project.join(".termide/ai")).unwrap();
         std::fs::create_dir_all(&global).unwrap();
         // The repository carries the portable file. Within one directory
-        // termide's own file wins it; a higher directory wins both, so the
-        // project's portable file outranks the configuration level.
+        // termide's own file wins it, and a nearer directory wins both — but
+        // no project replaces a server of the configuration level.
         std::fs::write(
             project.join(MCP_JSON_FILE),
             r#"{"mcpServers":{"github":{"command":"npx","args":["-y","server-github"]},
@@ -2090,7 +2101,8 @@ mod tests {
         let servers = AgentDirs::new(&project, None, Some(&global)).mcp_servers();
         assert_eq!(servers.keys().collect::<Vec<_>>(), ["fs", "github"]);
         assert_eq!(servers["github"].command.as_deref(), Some("own"));
-        assert_eq!(servers["fs"].command.as_deref(), Some("fs-server"));
+        assert_eq!(servers["fs"].command.as_deref(), Some("global-fs"));
+        assert!(!servers["fs"].from_project);
 
         // The project's own file gone, the portable one stands; its disabled
         // server stays off even where the configuration level defines the name.

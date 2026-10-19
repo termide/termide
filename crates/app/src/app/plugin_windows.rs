@@ -115,7 +115,18 @@ fn parse(method: &str, params: &Value) -> Result<Kind, String> {
                     if param.name.is_empty() {
                         return Err("a field has no `name`".to_string());
                     }
+                    // Everything of the form is the plugin's words on termide's
+                    // window: cleaned like the rest.
                     param.label = protocol::clean_text(&param.label, protocol::MAX_LABEL);
+                    param.options = param
+                        .options
+                        .iter()
+                        .map(|option| protocol::clean_text(option, protocol::MAX_TITLE * 2))
+                        .collect();
+                    param.default = param
+                        .default
+                        .as_deref()
+                        .map(|default| protocol::clean_text(default, MAX_MESSAGE));
                     Ok(param)
                 })
                 .collect::<Result<Vec<_>, String>>()?;

@@ -2229,7 +2229,9 @@ older transport, where requests go to an address a stream names first, is not
 the one TermIDE speaks — and so is one
 holding a `${input:…}` reference: that asks you for a secret in the other
 tool, and termide would start it on an empty one. Every skip is in the log. Within one directory `mcp.toml` wins the
-same name; the directory nearer the panel wins both. One `.mcp.json` above a
+same name; the directory nearer the panel wins both — except over a server of
+the configuration level, which a project may switch off (`enabled = false`,
+`disabled`) but not replace. One `.mcp.json` above a
 group of repositories therefore serves every panel opened inside them, the
 same way Claude Code reads it.
 
@@ -2286,7 +2288,7 @@ and ignored, so a broken hook never stops the agent.
 
 A project's hook waits for approval as a project's MCP server does: the panel
 says so when it opens, it does not run until `/trust <name>`, and the approval
-holds while its command and arguments stay as they were; it then runs from
+holds while its command, arguments, event, tools and timeout stay as they were; it then runs from
 the next run on. A project can neither switch off nor replace a hook of the
 configuration level: one of yours may be a guard.
 

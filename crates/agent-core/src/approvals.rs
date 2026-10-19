@@ -208,6 +208,13 @@ mod tests {
         approvals.approve_hook("check", &hook).unwrap();
         let (run, held) = approvals.split_hooks(hooks);
         assert!(run.len() == 1 && held.is_empty());
+        // Approved for some tools, it is asked about again for every tool.
+        let wider = HookConfig {
+            tools: vec!["*".into()],
+            ..hook
+        };
+        let (run, _) = approvals.split_hooks(BTreeMap::from([("check".to_string(), wider)]));
+        assert!(run.is_empty());
     }
 
     #[test]

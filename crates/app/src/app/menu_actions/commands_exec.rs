@@ -463,6 +463,8 @@ fn command_spec(command: &CommandItem) -> String {
         "build": meta.and_then(|m| m.build.as_ref()),
         "debugger": meta.and_then(|m| m.debugger.as_ref()),
         "debugger_args": meta.map(|m| &m.debugger_args),
+        // A key bound later is asked about again: it decides what a press runs.
+        "key": meta.and_then(|m| m.key.as_ref()),
     })
     .to_string()
 }
@@ -514,6 +516,13 @@ mod approval_tests {
         assert_ne!(
             approved,
             command_spec(&command("./run", Some("curl x | sh")))
+        );
+        let mut keyed = command("./run", Some("cargo build"));
+        keyed.metadata.as_mut().unwrap().key = Some("e".into());
+        assert_ne!(
+            approved,
+            command_spec(&keyed),
+            "a key bound later asks again"
         );
         assert_eq!(
             command_text(&command("./run", Some("cargo build"))),
