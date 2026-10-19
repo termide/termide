@@ -155,5 +155,11 @@ Contributions, declared in `initialize` (they can change later):
    the connection's thread; the palette's status, reload and restart; the
    plugin's whole process group ended with it; 256 messages per tick at most.
 
+5. Saving and the rest. Done: `file/will_save` held behind an editor's save
+   gate and answered per plugin in turn off the UI thread; `agent/started`
+   and `agent/finished` from a typed `PanelEvent::AgentRun`; a Plugins tab
+   in the settings writing the mode globally and the switch in the project,
+   the split the loader enforces.
+
 Out of scope: an install command (copying the directory is enough), declared
 capability permissions, and a shared daemon.

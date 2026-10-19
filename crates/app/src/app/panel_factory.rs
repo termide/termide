@@ -197,7 +197,9 @@ impl App {
             .map(|adapter| (adapter.as_str().to_string(), adapter.default_args()))
             .filter(|(_, args)| !args.is_empty())
             .collect();
+        let plugin_names = self.plugin_names();
         let modal = SettingsModal::new(config, global_layer, in_project)
+            .with_plugins(plugin_names)
             .with_debugger_defaults(debugger_defaults);
         self.settings_model_fetch = None;
         self.state.set_pending_action(

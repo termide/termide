@@ -75,6 +75,10 @@ enabled = false
 | `opt-in` | off | off | runs |
 | `off` | off | off | off |
 
+The **Plugins** tab of the settings (`Alt+P`) lists the installed plugins:
+stored globally, `Enter` on one steps its mode; stored in the project, the
+project's switch.
+
 A `mode` in a project file, and an `enabled` in the global file, are ignored
 with a warning in the log. Give `opt-in` to plugins that act on what is in a
 project, such as one that runs the project's scripts, so that no repository
@@ -112,9 +116,18 @@ The events a plugin subscribes to, notifications about its own project:
 | `editor/focused` | `path` | another file's editor became the active panel |
 | `editor/changed` | `path`, `version` | a buffer changed, once the typing paused for 300 ms |
 | `git/changed` | `root` | a repository's index, HEAD or refs moved: a commit, a checkout, a stage |
+| `agent/started`, `agent/finished` | `panel`, and `ok` when it finished | an agent panel's run started or ended |
 
 The events of the editors are watched only while a plugin of the current
 project has asked for them.
+
+`file/will_save` is a request rather than an event: a plugin that subscribes
+to it is asked `{ "path", "version" }` when `Ctrl+S` is pressed in an editor
+of its project, before the file is written, and may answer `{ "edits": [...] }`
+(as in `editor/edit`) or `null` — formatting on save. termide asks each such
+plugin in turn, three seconds each, applies the edits to the buffer if it has
+not changed meanwhile, then writes the file. Saving on close and Save As do
+not ask.
 
 The result of `initialize`, and the params of a `contributions/changed`
 notification sent later to replace it:

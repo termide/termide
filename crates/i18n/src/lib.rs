@@ -1315,6 +1315,15 @@ pub trait Translation: Send + Sync {
     fn settings_debugger_args(&self) -> &str;
     fn settings_debugger_reset(&self) -> &str;
     fn settings_global_only(&self) -> &str;
+    fn settings_tab_plugins(&self) -> &str;
+    fn settings_header_plugins(&self) -> &str;
+    fn settings_plugin_mode_on(&self) -> &str;
+    fn settings_plugin_mode_opt_in(&self) -> &str;
+    fn settings_plugin_mode_off(&self) -> &str;
+    fn settings_plugin_follow(&self) -> &str;
+    fn settings_plugin_on(&self) -> &str;
+    fn settings_plugin_off(&self) -> &str;
+    fn settings_plugin_blocked(&self) -> &str;
     fn settings_debugger_no_defaults(&self) -> &str;
     fn settings_debugger_bad_args(&self) -> &str;
     fn settings_tab_logging(&self) -> &str;

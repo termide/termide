@@ -46,6 +46,7 @@ impl SettingsModal {
             lsp_server_edit: None,
             debugger_edit: None,
             debugger_defaults: Default::default(),
+            plugin_names: Vec::new(),
             connection_edit: None,
             model_fetch_request: None,
             kb_mode: KbMode::Bindings,
@@ -599,6 +600,7 @@ impl SettingsModal {
             SettingsTab::LspServer => self.lsp_server_page_rows(),
             SettingsTab::Debug => self.debug_tab_rows(),
             SettingsTab::DebuggerPage => self.debugger_page_rows(),
+            SettingsTab::Plugins => self.plugins_tab_rows(),
             SettingsTab::Keybindings => Vec::new(),
         }
     }

@@ -717,6 +717,15 @@ impl App {
         });
     }
 
+    /// The names of the plugins installed, for the settings.
+    pub(super) fn plugin_names(&self) -> Vec<String> {
+        self.plugins
+            .installed
+            .iter()
+            .map(|p| p.name.clone())
+            .collect()
+    }
+
     /// The palette's entries for the plugins themselves: their state, a
     /// fresh read of the directory, and a restart of each the current
     /// project runs.

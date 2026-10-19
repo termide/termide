@@ -160,6 +160,7 @@ impl SettingsModal {
                 }
             }
             Some(ContentRow::DebuggerButtons) => self.press_debugger_button(),
+            Some(ContentRow::Plugin(index)) => self.cycle_plugin(index),
             _ => {}
         }
     }
