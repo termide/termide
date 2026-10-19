@@ -1,11 +1,11 @@
 //! `task`: hand a self-contained piece of work to another agent.
 //!
-//! The agent picks one of the other agent definitions by name and gives it a
-//! prompt; that agent runs its own loop to the end — reading, editing, asking
-//! nothing, since no one is watching a nested run — and its final answer comes
-//! back as the tool result. It keeps a focused sub-task, and the files it read
-//! along the way, out of the main conversation, the way Claude Code's `Task`
-//! and OpenCode's sub-sessions do.
+//! The agent picks an agent definition by name — its own included, for a
+//! fresh copy of itself — and gives it a prompt; that agent runs its own loop
+//! to the end — reading, editing, asking nothing, since no one is watching a
+//! nested run — and its final answer comes back as the tool result. It keeps a
+//! focused sub-task, and the files it read along the way, out of the main
+//! conversation, the way Claude Code's `Task` and OpenCode's sub-sessions do.
 //!
 //! The tool holds no agent machinery of its own: the app supplies a closure
 //! that builds and runs the named agent, so this crate stays free of the

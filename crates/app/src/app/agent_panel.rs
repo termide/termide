@@ -591,13 +591,13 @@ impl AgentCatalog for FsCatalog {
             tools.insert(debug_tool::debug_tool(&self.project_root));
         }
         // The `task` tool lets this agent hand work to the others, and its
-        // `tools` list can leave it out like any other capability; only when
-        // there are custom agents to delegate to, and never for an external
+        // `tools` list can leave it out like any other capability; a lone
+        // agent delegates to a copy of itself. Never for an external
         // agent (it drives its own tools) or a subagent (no nesting: the
         // subagent build path adds no task tool).
         if let Some(subagents) = &self.subagents {
             if backend.is_none() {
-                let delegates = self.delegatable(name);
+                let delegates = self.delegatable();
                 if !delegates.is_empty() {
                     let runner = Arc::clone(subagents);
                     let caller = name.to_string();
@@ -652,14 +652,16 @@ impl AgentCatalog for FsCatalog {
 }
 
 impl FsCatalog {
-    /// The agents `caller` can delegate to with the `task` tool: every
-    /// built-in-loop agent, the default one included, except `caller`
-    /// itself (delegating to yourself is pointless) and external ones.
-    fn delegatable(&self, caller: &str) -> Vec<(String, String)> {
+    /// The agents an agent can delegate to with the `task` tool: every
+    /// built-in-loop agent, the default one and the caller itself included,
+    /// but no external one.
+    fn delegatable(&self) -> Vec<(String, String)> {
         self.dirs
             .agents()
             .into_iter()
-            .filter(|name| name != caller && self.dirs.spec(name).acp.is_none())
+            // The caller itself too: a fresh copy of it, with a clean context,
+            // is as good a delegate as any, and a lone agent can delegate.
+            .filter(|name| self.dirs.spec(name).acp.is_none())
             .map(|name| {
                 let description = self.dirs.spec(&name).description;
                 (name, description)
@@ -3818,6 +3820,31 @@ done"#;
             .tools
             .get("task")
             .is_some());
+    }
+
+    /// An agent may hand a task to a fresh copy of itself, so a lone
+    /// `default` agent has someone to delegate to.
+    #[test]
+    fn an_agent_can_delegate_to_a_copy_of_itself() {
+        let tmp = tempfile::tempdir().unwrap();
+        let global = tmp.path().join("ai");
+        let lone = FsCatalog::with_global(tmp.path(), tmp.path(), Some(global.clone()), None);
+        let names = |catalog: &FsCatalog| -> Vec<String> {
+            catalog
+                .delegatable()
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect()
+        };
+        // The lone default agent delegates to a copy of itself.
+        assert_eq!(names(&lone), [DEFAULT_AGENT]);
+
+        let dir = global.join("agents").join("search");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(AGENT_FILE), "---\ntools: read\n---\n").unwrap();
+        let two = FsCatalog::with_global(tmp.path(), tmp.path(), Some(global), None);
+        // `search` among them, for itself as for `default`.
+        assert_eq!(names(&two), [DEFAULT_AGENT, "search"]);
     }
 
     /// `AGENT.md`'s front matter narrows the tools and names a model and a mode; a name no

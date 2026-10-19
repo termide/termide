@@ -1597,8 +1597,9 @@ remembers it too.
 
 ### Subagents
 
-When there is more than one agent, each built-in-loop agent gets a `task`
-tool that hands a self-contained job to another agent. The delegate runs its
+Each built-in-loop agent gets a `task` tool that hands a self-contained job
+to another agent — or to a fresh copy of itself, so a lone `default` agent
+delegates too. The delegate runs its
 own loop to the end — its own prompt, its own tools, its own model — and its
 final answer comes back as the tool's result; the steps and the files it read
 along the way stay out of the main conversation. It is how a terse reviewer
