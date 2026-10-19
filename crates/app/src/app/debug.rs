@@ -196,10 +196,7 @@ impl App {
         let Some(choices) = self.debug_choices.take() else {
             return Ok(());
         };
-        match value
-            .downcast_ref::<usize>()
-            .and_then(|&i| choices.into_iter().nth(i))
-        {
+        match picked_choice(value.as_ref(), choices) {
             Some(choice) => self.run_debug_choice(choice),
             None => Ok(()),
         }
@@ -748,9 +745,44 @@ fn project_breakpoints(all: &[Breakpoint], root: &Path) -> Vec<Breakpoint> {
         .collect()
 }
 
+/// The launch the list's answer names. A `SelectModal` answers with the
+/// picked indices (`Vec<usize>`), one here; anything else picks nothing.
+fn picked_choice<T>(value: &dyn std::any::Any, choices: Vec<T>) -> Option<T> {
+    let index = value.downcast_ref::<Vec<usize>>()?.first().copied()?;
+    choices.into_iter().nth(index)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_launch_picked_from_the_list_is_the_one_run() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        use termide_core::KeyChord;
+        use termide_modal::{ActiveModal, ModalResult, SelectModal};
+
+        // The answer as the app gets it: through the type-erased modal.
+        let mut modal = ActiveModal::Select(Box::new(SelectModal::single(
+            "Debug",
+            "",
+            vec!["Debug app".into(), "main.py under debugpy".into()],
+        )));
+        let press = |modal: &mut ActiveModal, code| {
+            modal
+                .handle_key_erased(KeyChord::identity(KeyEvent::new(code, KeyModifiers::NONE)))
+                .unwrap()
+        };
+        assert!(press(&mut modal, KeyCode::Down).is_none());
+        let Some(ModalResult::Confirmed(value)) = press(&mut modal, KeyCode::Enter) else {
+            panic!("Enter should confirm the list");
+        };
+        assert_eq!(
+            picked_choice(value.as_ref(), vec!["app", "main.py"]),
+            Some("main.py")
+        );
+        assert_eq!(picked_choice(&7usize, vec!["app"]), None);
+    }
 
     #[test]
     fn only_the_projects_breakpoints_are_set() {
