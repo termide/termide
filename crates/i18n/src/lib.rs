@@ -430,6 +430,8 @@ pub trait Translation: Send + Sync {
     fn command_params_run(&self) -> &str;
     fn command_params_cancel(&self) -> &str;
     fn command_run_label(&self) -> &str;
+    fn command_confirm_project_title(&self) -> &str;
+    fn command_confirm_project_fmt(&self, name: &str, command: &str) -> String;
 
     // Command config modal (create/edit)
     fn command_config_label_name(&self) -> &str;

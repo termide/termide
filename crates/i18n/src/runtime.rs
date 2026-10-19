@@ -467,6 +467,7 @@ impl Translation for RuntimeTranslation {
         command_params_run,
         command_params_cancel,
         command_run_label,
+        command_confirm_project_title,
         command_config_label_name,
         command_config_label_command,
         command_config_label_group,
@@ -1420,6 +1421,13 @@ impl Translation for RuntimeTranslation {
         self.format(
             "agent_notice_mcp_login_started_fmt",
             &[("source", source), ("url", url)],
+        )
+    }
+
+    fn command_confirm_project_fmt(&self, name: &str, command: &str) -> String {
+        self.format(
+            "command_confirm_project_fmt",
+            &[("name", name), ("command", command)],
         )
     }
 

@@ -129,6 +129,8 @@ impl App {
         );
         self.state.cache.commands_registry = None;
         self.state.cache.hotkey_table = None;
+        // The user has just written it: no need to ask about it.
+        self.approve_project_command(&key);
 
         self.start_command(CommandItem {
             name: key,

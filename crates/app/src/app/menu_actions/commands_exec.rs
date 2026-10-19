@@ -27,9 +27,68 @@ impl App {
         }
     }
 
+    /// The approvals of the current project's launches, kept in termide's
+    /// data directory.
+    fn project_approvals(&self) -> termide_agent_core::approvals::Approvals {
+        termide_agent_core::approvals::Approvals::new(
+            termide_project::approvals_path(&self.project_root).ok(),
+        )
+    }
+
+    /// Approve the project's command `key` as the registry has it now: one
+    /// the user has just written in a form.
+    pub(in crate::app) fn approve_project_command(&mut self, key: &str) {
+        self.state.cache.commands_registry = None;
+        let Some(command) = self
+            .commands_registry()
+            .and_then(|registry| registry.find_command_anywhere_scoped(key, true).cloned())
+        else {
+            return;
+        };
+        if let Err(e) = self
+            .project_approvals()
+            .approve_command(key, &command_spec(&command))
+        {
+            log::warn!("Cannot keep the approval of {key}: {e}");
+        }
+        self.state.cache.hotkey_table = None;
+    }
+
+    /// Approve the project's `command` as it is, the user having seen it.
+    /// Its hotkey, if any, takes effect.
+    pub(in crate::app) fn approve_shown_command(&mut self, command: &CommandItem) {
+        if let Err(e) = self
+            .project_approvals()
+            .approve_command(&command.name, &command_spec(command))
+        {
+            log::warn!("Cannot keep the approval of {}: {e}", command.name);
+        }
+        self.state.cache.hotkey_table = None;
+    }
+
+    /// Whether the project's `command` is approved as it is now.
+    pub(in crate::app) fn project_command_approved(&self, command: &CommandItem) -> bool {
+        self.project_approvals()
+            .command_approved(&command.name, &command_spec(command))
+    }
+
     /// Run `command` the way every entry point does — the menu, a hotkey,
-    /// the palette: a command with parameters asks for them first.
+    /// the palette, `F5`: a command the project's `commands.toml` brings is
+    /// shown first, with what it runs, until approved as it is; a command
+    /// with parameters asks for them next.
     pub(in crate::app) fn start_command(&mut self, command: CommandItem) -> Result<()> {
+        if command.is_project && !self.project_command_approved(&command) {
+            let t = termide_i18n::t();
+            let modal = termide_modal::ConfirmModal::new(
+                t.command_confirm_project_title(),
+                t.command_confirm_project_fmt(&command.name, &command_text(&command)),
+            );
+            self.state.set_pending_action(
+                termide_state::PendingAction::ConfirmProjectCommand { command },
+                crate::state::ActiveModal::Confirm(Box::new(modal)),
+            );
+            return Ok(());
+        }
         if let Some(meta) = command.metadata.as_ref().filter(|m| !m.params.is_empty()) {
             let modal =
                 termide_modal::CommandParamsModal::new(command.name.clone(), meta.params.clone());
@@ -393,4 +452,72 @@ fn get_direnv_json(
     _cwd: &std::path::Path,
 ) -> Option<std::collections::HashMap<String, Option<String>>> {
     None
+}
+
+/// Everything a command runs, as one line: what its approval is for.
+fn command_spec(command: &CommandItem) -> String {
+    let meta = command.metadata.as_ref();
+    serde_json::json!({
+        "command": command.command,
+        "mode": command.mode.as_str(),
+        "build": meta.and_then(|m| m.build.as_ref()),
+        "debugger": meta.and_then(|m| m.debugger.as_ref()),
+        "debugger_args": meta.map(|m| &m.debugger_args),
+    })
+    .to_string()
+}
+
+/// What a command runs, for a person to read: its build first, if any.
+fn command_text(command: &CommandItem) -> String {
+    let meta = command.metadata.as_ref();
+    let mut lines = Vec::new();
+    if let Some(build) = meta.and_then(|m| m.build.as_deref()) {
+        lines.push(build.to_string());
+    }
+    let mut run = command.command.clone().unwrap_or_default();
+    if let Some(debugger) = meta.and_then(|m| m.debugger.as_deref()) {
+        run = format!("{debugger}: {run}");
+    }
+    lines.push(run);
+    lines.join("\n")
+}
+
+#[cfg(test)]
+mod approval_tests {
+    use super::*;
+    use termide_config::commands::CommandMetadata;
+
+    fn command(run: &str, build: Option<&str>) -> CommandItem {
+        CommandItem {
+            name: "go".into(),
+            command: Some(run.into()),
+            mode: Default::default(),
+            is_project: true,
+            metadata: Some(CommandMetadata {
+                build: build.map(str::to_string),
+                ..Default::default()
+            }),
+        }
+    }
+
+    #[test]
+    fn an_approval_covers_what_runs_and_nothing_else() {
+        let approved = command_spec(&command("./run", Some("cargo build")));
+        assert_eq!(
+            approved,
+            command_spec(&command("./run", Some("cargo build")))
+        );
+        assert_ne!(
+            approved,
+            command_spec(&command("./run --evil", Some("cargo build")))
+        );
+        assert_ne!(
+            approved,
+            command_spec(&command("./run", Some("curl x | sh")))
+        );
+        assert_eq!(
+            command_text(&command("./run", Some("cargo build"))),
+            "cargo build\n./run"
+        );
+    }
 }

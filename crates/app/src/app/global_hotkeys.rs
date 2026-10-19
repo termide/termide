@@ -99,6 +99,12 @@ impl App {
         let mut table = build_global_hotkey_table(&self.state.config.general.keybindings);
         if let Some(registry) = self.commands_registry() {
             for (command, key_str) in registry.commands_with_hotkeys() {
+                // A project's command takes its key only once approved: a
+                // repository could bind any key, a letter typed in the
+                // editor included, and every press would ask.
+                if command.is_project && !self.project_command_approved(command) {
+                    continue;
+                }
                 let command_key = termide_config::commands::encode_command_menu_key(
                     termide_config::commands::CommandMenuKeyKind::Command,
                     &command.name,

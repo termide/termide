@@ -836,6 +836,14 @@ impl App {
                         self.handle_debug_setup(&result.values)?;
                     }
                 }
+                PendingAction::ConfirmProjectCommand { command } => {
+                    if value.downcast_ref::<bool>().copied().unwrap_or(false) {
+                        // The command as it was shown, not as the file may
+                        // read by now.
+                        self.approve_shown_command(&command);
+                        self.start_command(command)?;
+                    }
+                }
                 PendingAction::RunCommandWithParams { command } => {
                     use termide_modal::CommandParamsResult;
                     if let Some(result) = value.downcast_ref::<CommandParamsResult>() {

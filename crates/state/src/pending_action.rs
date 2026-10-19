@@ -315,6 +315,11 @@ pub enum PendingAction {
     RunCommandWithParams {
         command: termide_config::commands::CommandItem,
     },
+    /// Run a command of the project's `commands.toml` once the user, shown
+    /// what it runs, agrees (and approve it as it is)
+    ConfirmProjectCommand {
+        command: termide_config::commands::CommandItem,
+    },
     /// Delete a command (with confirmation)
     DeleteCommand {
         /// Command name / TOML key.
