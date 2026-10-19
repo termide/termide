@@ -1598,6 +1598,12 @@ mark, control characters — are dropped; an icon with nothing visible left
 keeps 🤖. A key termide does not read — a typo
 such as `descripton:` — is reported under the banner when a panel opens.
 
+An agent a project defines may start only in `plan` or `ask`, and cannot be
+an external agent (`command:`): the model can delegate to it by itself, and a
+repository must not loosen what the agent may do or name a program for
+termide to start. Such a `mode` or `command` is ignored, with a line in the
+log; define those agents in the configuration's `agents/`.
+
 Switching agents mid-session swaps the prompt and the tools for the next
 request; the model and the mode change only when the definition names them,
 and the session log records the switch, as it does for the **Model** chip.

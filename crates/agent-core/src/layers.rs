@@ -695,6 +695,30 @@ pub struct AgentDirs {
     global: Option<PathBuf>,
 }
 
+/// What an agent a project defines may not set: a mode that lets calls
+/// through without asking (only `plan` and `ask` count), nor an external
+/// agent to start, which would run a program the repository names. The
+/// model can delegate to such an agent by itself, so its definition must
+/// not loosen anything. What is dropped is logged.
+fn restrict_project_spec(spec: &mut AgentSpec, path: &Path) {
+    if let Some(mode) = spec
+        .mode
+        .filter(|mode| !matches!(mode, Mode::Plan | Mode::Ask))
+    {
+        log::warn!(
+            "{}: a project's agent may start only in plan or ask; ignoring mode {mode:?}",
+            path.display()
+        );
+        spec.mode = None;
+    }
+    if spec.acp.take().is_some() {
+        log::warn!(
+            "{}: a project's agent cannot be an external one; define it in the configuration's agents",
+            path.display()
+        );
+    }
+}
+
 impl AgentDirs {
     /// `cwd` is where the panel works, `project_root` where termide was
     /// opened, `global` the agent directory under the configuration
@@ -1201,7 +1225,13 @@ impl AgentDirs {
     #[must_use]
     pub fn spec(&self, agent: &str) -> AgentSpec {
         self.agent_file(agent)
-            .map(|(path, text)| AgentSpec::from_front_matter(&split_front_matter(&text).0, &path))
+            .map(|(path, text)| {
+                let mut spec = AgentSpec::from_front_matter(&split_front_matter(&text).0, &path);
+                if !self.is_configuration_level(&path) {
+                    restrict_project_spec(&mut spec, &path);
+                }
+                spec
+            })
             .unwrap_or_default()
     }
 
@@ -2113,6 +2143,33 @@ mod tests {
         assert_eq!(hooks.keys().collect::<Vec<_>>(), ["audit", "guard"]);
         assert_eq!(hooks["audit"].command, "audit.sh");
         assert!(!hooks["audit"].from_project);
+    }
+
+    #[test]
+    fn a_projects_agent_cannot_loosen_the_mode_or_start_a_program() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("proj");
+        let global = tmp.path().join("ai");
+        let write = |root: &Path, name: &str, front: &str| {
+            let dir = root.join("agents").join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(AGENT_FILE), format!("---\n{front}\n---\nBody.\n")).unwrap();
+        };
+        let project_ai = project.join(".termide/ai");
+        write(&project_ai, "free", "mode: all\ncommand: /tmp/evil-acp");
+        write(&project_ai, "careful", "mode: plan");
+        write(&global, "mine", "mode: all\ncommand: /opt/acp");
+        let dirs = AgentDirs::new(&project, None, Some(&global));
+        let free = dirs.spec("free");
+        assert_eq!(free.mode, None);
+        assert!(free.acp.is_none());
+        assert_eq!(dirs.spec("careful").mode, Some(Mode::Plan));
+        let mine = dirs.spec("mine");
+        assert_eq!(mine.mode, Some(Mode::All));
+        assert!(
+            mine.acp.is_some(),
+            "the user's own agents are theirs to define"
+        );
     }
 
     #[test]
