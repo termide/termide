@@ -480,6 +480,44 @@ impl App {
         saved
     }
 
+    /// The plugin panel `id`, in the current project or a parked one.
+    pub(super) fn plugin_panel_mut(
+        &mut self,
+        id: u64,
+    ) -> Option<&mut termide_panel_markdown::MarkdownPanel> {
+        let parked = self
+            .open_projects
+            .parked_mut()
+            .flat_map(|(_, parked)| parked.layout.iter_all_panels_mut());
+        self.layout_manager
+            .iter_all_panels_mut()
+            .chain(parked)
+            .filter_map(|panel| {
+                panel
+                    .as_any_mut()
+                    .downcast_mut::<termide_panel_markdown::MarkdownPanel>()
+            })
+            .find(|panel| panel.plugin_panel_id() == Some(id))
+    }
+
+    /// The ids of every plugin panel open, in any project.
+    pub(super) fn plugin_panel_ids(&mut self) -> Vec<u64> {
+        let parked = self
+            .open_projects
+            .parked_mut()
+            .flat_map(|(_, parked)| parked.layout.iter_all_panels_mut());
+        self.layout_manager
+            .iter_all_panels_mut()
+            .chain(parked)
+            .filter_map(|panel| {
+                panel
+                    .as_any()
+                    .downcast_ref::<termide_panel_markdown::MarkdownPanel>()
+                    .and_then(termide_panel_markdown::MarkdownPanel::plugin_panel_id)
+            })
+            .collect()
+    }
+
     /// The roots of the parked projects.
     pub(super) fn parked_roots(&self) -> Vec<PathBuf> {
         self.open_projects

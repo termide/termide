@@ -18,6 +18,16 @@
 //! - `contributions/changed` (notification): a new [`Contributions`].
 //! - `window/notify` (request) `{ "message", "level"? }`.
 //! - `status/set` (request) `{ "id", "text" }`; an empty text removes it.
+//! - `panel/open` (request) `{ "title", "markdown" }` opens a panel in the
+//!   plugin's project, which must be the current one; the result is
+//!   `{ "panel" }`, its id.
+//! - `panel/update` (request) `{ "panel", "markdown", "title"? }`.
+//! - `panel/close` (request) `{ "panel" }`.
+//!
+//! About its panels, termide → plugin (notifications):
+//! - `panel/action` `{ "panel", "action" }`: a `plugin:<action>` link in
+//!   the panel was followed.
+//! - `panel/closed` `{ "panel" }`: the user closed it.
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -36,6 +46,11 @@ pub const COMMAND_EXECUTE: &str = "command/execute";
 pub const TOOL_CALL: &str = "tool/call";
 pub const WINDOW_NOTIFY: &str = "window/notify";
 pub const STATUS_SET: &str = "status/set";
+pub const PANEL_OPEN: &str = "panel/open";
+pub const PANEL_UPDATE: &str = "panel/update";
+pub const PANEL_CLOSE: &str = "panel/close";
+pub const PANEL_ACTION: &str = "panel/action";
+pub const PANEL_CLOSED: &str = "panel/closed";
 
 /// Events a plugin may subscribe to.
 pub mod events {

@@ -1,6 +1,6 @@
 # 插件
 
-插件是项目打开期间 termide 在后台运行的程序，termide 通过该程序的标准输入和标准输出以 JSON-RPC 与它通信。插件可以响应文件的打开和保存，向命令面板和命令菜单添加命令，在状态栏中显示项目，并为编码代理提供工具。
+插件是项目打开期间 termide 在后台运行的程序，termide 通过该程序的标准输入和标准输出以 JSON-RPC 与它通信。插件可以响应文件的打开和保存，向命令面板和命令菜单添加命令，在状态栏中显示项目，打开自己的面板，并为编码代理提供工具。
 
 插件是全局的：它们安装在你的配置目录中，项目只能关闭你安装的插件，或开启你允许它开启的插件。打开的仓库永远无法决定运行哪个程序。
 
@@ -105,6 +105,33 @@ enabled = false
 | `status/set` | 请求 | `id`、`text`（空文本会移除该项目） |
 
 后台项目的插件不会显示在屏幕上：它的通知会写入日志。
+
+### 面板
+
+插件可以打开自己的面板，按它发送的 Markdown 绘制：标题、列表、表格、代码和链接，与 Markdown 查看器相同，带光标、选择、搜索和复制。指向 `plugin:<动作>` 的链接就是按钮：跟随它（在链接上按 `Enter` 或点击）会把动作发回插件，插件再以更新面板作答。
+
+| 方法 | 类型 | 方向 | 参数 / 结果 |
+|---|---|---|---|
+| `panel/open` | 请求 | 插件 → termide | `title`、`markdown`；结果为 `{ "panel" }`，即其 id |
+| `panel/update` | 请求 | 插件 → termide | `panel`、`markdown`、`title`（可选） |
+| `panel/close` | 请求 | 插件 → termide | `panel` |
+| `panel/action` | 通知 | termide → 插件 | `panel`、`action` |
+| `panel/closed` | 通知 | termide → 插件 | `panel`：用户关闭了它 |
+
+面板在插件所属的项目中打开，该项目必须是当前项目；面板不会随布局保存。更新会尽量让读者停留在原处。插件停止时，它的面板保留并说明这一点；重新启动的插件不会再拿回它们。
+
+```python
+# 位于下方示例的循环中
+elif method == "command/execute":            # 命令“显示报告”
+    send({"jsonrpc": "2.0", "id": id, "result": None})
+    send({"jsonrpc": "2.0", "id": "open", "method": "panel/open",
+          "params": {"title": "Report", "markdown": "# Report\n\n[Refresh](plugin:refresh)"}})
+elif msg.get("id") == "open":                # panel/open 的应答
+    panel = msg["result"]["panel"]
+elif method == "panel/action" and msg["params"]["action"] == "refresh":
+    send({"jsonrpc": "2.0", "id": "upd", "method": "panel/update",
+          "params": {"panel": panel, "markdown": "# Report\n\nUpdated.\n\n[Refresh](plugin:refresh)"}})
+```
 
 ### 示例
 

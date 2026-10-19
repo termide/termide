@@ -349,6 +349,16 @@ impl Host {
         }
     }
 
+    /// Send the notification `method` to `key`, whatever it subscribed to:
+    /// what concerns that plugin alone, such as its own panel.
+    pub fn notify(&self, key: &PluginKey, method: &str, params: &Value) {
+        if let Some(peer) = self.peer(key) {
+            if let Err(e) = peer.notify(method, params.clone()) {
+                log::debug!("plugin {}: {e}", key.name);
+            }
+        }
+    }
+
     /// The connection to `key`, for a request made off the UI thread (a
     /// tool call). `None` while it is not ready.
     #[must_use]

@@ -3,7 +3,8 @@
 A plugin is a program that termide runs in the background while a project is
 open and talks to over JSON-RPC on the program's stdin and stdout. It can
 react to files being opened and saved, add commands to the command palette and the Commands menu,
-show items in the status bar and give the coding agent tools.
+show items in the status bar, open panels of its own and give the coding
+agent tools.
 
 Plugins are global: they are installed in your config directory, and a project
 can only switch off a plugin you installed or switch on one you allowed it to.
@@ -128,6 +129,40 @@ as MCP tools: they are asked about before running unless they are `readOnly`.
 
 A plugin of a project in the background is not shown on screen: its
 notifications go to the log.
+
+### Panels
+
+A plugin can open panels of its own, drawn from Markdown it sends: headings,
+lists, tables, code and links as in the Markdown viewer, with its cursor,
+selection, search and copy. A link to `plugin:<action>` is a button: following
+it (`Enter` on it, or a click) sends the action back to the plugin, which
+answers by updating the panel.
+
+| Method | Kind | Direction | Params / result |
+|---|---|---|---|
+| `panel/open` | request | plugin → termide | `title`, `markdown`; the result is `{ "panel" }`, its id |
+| `panel/update` | request | plugin → termide | `panel`, `markdown`, `title` (optional) |
+| `panel/close` | request | plugin → termide | `panel` |
+| `panel/action` | notification | termide → plugin | `panel`, `action` |
+| `panel/closed` | notification | termide → plugin | `panel`: the user closed it |
+
+A panel opens in the plugin's project, which must be the current one; it is
+not saved with the layout. An update keeps the reader's place as far as the
+new content reaches. When the plugin stops, its panels stay and say so; a
+plugin started again does not get them back.
+
+```python
+# in the loop of the example below
+elif method == "command/execute":            # a command "Show report"
+    send({"jsonrpc": "2.0", "id": id, "result": None})
+    send({"jsonrpc": "2.0", "id": "open", "method": "panel/open",
+          "params": {"title": "Report", "markdown": "# Report\n\n[Refresh](plugin:refresh)"}})
+elif msg.get("id") == "open":                # the answer to panel/open
+    panel = msg["result"]["panel"]
+elif method == "panel/action" and msg["params"]["action"] == "refresh":
+    send({"jsonrpc": "2.0", "id": "upd", "method": "panel/update",
+          "params": {"panel": panel, "markdown": "# Report\n\nUpdated.\n\n[Refresh](plugin:refresh)"}})
+```
 
 ### Example
 

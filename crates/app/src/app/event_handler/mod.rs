@@ -135,6 +135,9 @@ impl App {
                 self.event_swap_active_to_html(path)?;
             }
 
+            PanelEvent::PluginAction { panel, action } => {
+                self.plugin_panel_action(panel, &action);
+            }
             PanelEvent::OpenExternal(path) => {
                 self.event_open_external(path)?;
             }

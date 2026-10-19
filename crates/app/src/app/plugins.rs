@@ -43,6 +43,10 @@ pub(crate) struct PluginRuntime {
     synced: Vec<PathBuf>,
     /// The open projects or a config changed: sync on the next tick.
     dirty: bool,
+    /// The panels plugins opened, by id, with the plugin that owns each.
+    panels: BTreeMap<u64, PluginKey>,
+    /// The id the next plugin panel gets.
+    next_panel: u64,
 }
 
 impl PluginRuntime {
@@ -83,6 +87,8 @@ impl PluginRuntime {
             status: BTreeMap::new(),
             synced: Vec::new(),
             dirty: true,
+            panels: BTreeMap::new(),
+            next_panel: 1,
         }
     }
 
@@ -220,6 +226,59 @@ impl App {
         for event in self.plugins.host.poll() {
             self.handle_plugin_event(event);
         }
+        self.notice_closed_plugin_panels();
+    }
+
+    /// Tell each plugin about its panels the user closed since the last tick.
+    fn notice_closed_plugin_panels(&mut self) {
+        if self.plugins.panels.is_empty() {
+            return;
+        }
+        let open = self.plugin_panel_ids();
+        let closed: Vec<(u64, PluginKey)> = self
+            .plugins
+            .panels
+            .iter()
+            .filter(|(id, _)| !open.contains(id))
+            .map(|(id, key)| (*id, key.clone()))
+            .collect();
+        for (id, key) in closed {
+            self.plugins.panels.remove(&id);
+            self.plugins
+                .host
+                .notify(&key, protocol::PANEL_CLOSED, &json!({ "panel": id }));
+        }
+    }
+
+    /// A `plugin:<action>` link was followed in plugin panel `panel`.
+    pub(super) fn plugin_panel_action(&mut self, panel: u64, action: &str) {
+        let Some(key) = self.plugins.panels.get(&panel) else {
+            return;
+        };
+        self.plugins.host.notify(
+            key,
+            protocol::PANEL_ACTION,
+            &json!({ "panel": panel, "action": action }),
+        );
+    }
+
+    /// The plugin `key` stopped: its panels stay, saying so, and no longer
+    /// belong to anyone — a plugin started again knows nothing of them.
+    fn orphan_plugin_panels(&mut self, key: &PluginKey) {
+        let orphaned: Vec<u64> = self
+            .plugins
+            .panels
+            .iter()
+            .filter(|(_, owner)| *owner == key)
+            .map(|(id, _)| *id)
+            .collect();
+        for id in orphaned {
+            self.plugins.panels.remove(&id);
+            if let Some(panel) = self.plugin_panel_mut(id) {
+                panel.set_plugin_content(None, format!("*The plugin {} stopped.*", key.name));
+            }
+        }
+        self.state.needs_redraw = true;
     }
 
     fn handle_plugin_event(&mut self, event: HostEvent) {
@@ -242,6 +301,7 @@ impl App {
             } => {
                 self.plugins.contributions.remove(&key);
                 tool_hub().set(&key, Vec::new());
+                self.orphan_plugin_panels(&key);
                 self.plugins.status.retain(|(k, _), _| *k != key);
                 self.refresh_plugin_ui();
                 if restart_in.is_none() {
@@ -324,10 +384,76 @@ impl App {
                 self.refresh_plugin_ui();
                 Ok(Value::Null)
             }
+            protocol::PANEL_OPEN => {
+                if key.project != self.open_projects.current() {
+                    return Err(RpcError::new(
+                        INVALID_PARAMS,
+                        "the plugin's project is in the background",
+                    ));
+                }
+                let id = self.plugins.next_panel;
+                self.plugins.next_panel += 1;
+                let title = params["title"].as_str().unwrap_or(&key.name).to_string();
+                let markdown = text("markdown")?;
+                self.add_panel(Box::new(termide_panel_markdown::MarkdownPanel::for_plugin(
+                    id, title, markdown,
+                )));
+                self.plugins.panels.insert(id, key.clone());
+                self.state.needs_redraw = true;
+                Ok(json!({ "panel": id }))
+            }
+            protocol::PANEL_UPDATE => {
+                let id = self.owned_panel(key, params)?;
+                let markdown = text("markdown")?;
+                let title = params["title"].as_str().map(str::to_string);
+                if let Some(panel) = self.plugin_panel_mut(id) {
+                    panel.set_plugin_content(title, markdown);
+                }
+                self.state.needs_redraw = true;
+                Ok(Value::Null)
+            }
+            protocol::PANEL_CLOSE => {
+                let id = self.owned_panel(key, params)?;
+                let position = self.layout_manager.iter_all_panels_mut().position(|panel| {
+                    panel
+                        .as_any()
+                        .downcast_ref::<termide_panel_markdown::MarkdownPanel>()
+                        .and_then(termide_panel_markdown::MarkdownPanel::plugin_panel_id)
+                        == Some(id)
+                });
+                match position {
+                    Some(position) => {
+                        let width = self.state.terminal.width;
+                        self.layout_manager.remove_panel_at(position, width);
+                        self.plugins.panels.remove(&id);
+                        self.state.needs_redraw = true;
+                        Ok(Value::Null)
+                    }
+                    None => Err(RpcError::new(
+                        INVALID_PARAMS,
+                        "the panel is not in the current project",
+                    )),
+                }
+            }
             _ => Err(RpcError::new(
                 METHOD_NOT_FOUND,
                 format!("termide offers no method {method}"),
             )),
+        }
+    }
+
+    /// The panel `params` names, if `key` owns it.
+    fn owned_panel(&self, key: &PluginKey, params: &Value) -> Result<u64, RpcError> {
+        let id = params["panel"]
+            .as_u64()
+            .ok_or_else(|| RpcError::new(INVALID_PARAMS, "`panel` must be a number"))?;
+        if self.plugins.panels.get(&id) == Some(key) {
+            Ok(id)
+        } else {
+            Err(RpcError::new(
+                INVALID_PARAMS,
+                format!("no panel {id} of yours"),
+            ))
         }
     }
 

@@ -126,7 +126,12 @@ Contributions, declared in `initialize` (they can change later):
    notifications, status items, agent tools. Done; see `plugins.md` for the
    protocol as built. The agent announces a plugin's tools as it does an MCP
    server's, named `plugin <name>`.
-2. Custom panels: the plugin sends a rich-text model and termide renders it.
+2. Custom panels. Done: the plugin sends Markdown, termide renders it in a
+   Markdown viewer marked as the plugin's, and a `plugin:<action>` link is
+   handed back as `panel/action`. Markdown was chosen over a model of our own
+   because the viewer already lays out headings, lists, tables, code and
+   links, with the cursor, selection, search and copy, and every plugin
+   author knows it.
 3. Editor decorations.
 
 Out of scope: an install command (copying the directory is enough), declared

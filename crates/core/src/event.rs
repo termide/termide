@@ -571,6 +571,10 @@ pub enum PanelEvent {
     /// `Ctrl+Alt+Click` in the terminal and the agent panel.
     OpenLinkExternal(crate::links::LinkTarget),
 
+    /// A link `plugin:<action>` was followed in the plugin panel `panel`:
+    /// the app hands `action` to the plugin that owns the panel.
+    PluginAction { panel: u64, action: String },
+
     /// Open an `.html` file in the rendered HTML viewer (read-only)
     ViewHtml(PathBuf),
 

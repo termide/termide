@@ -38,6 +38,13 @@ impl MarkdownPanel {
         if href.is_empty() {
             return vec![];
         }
+        // In a plugin's panel, `plugin:<action>` is a button of the plugin's.
+        if let (Some(panel), Some(action)) = (self.plugin_panel, href.strip_prefix("plugin:")) {
+            return vec![PanelEvent::PluginAction {
+                panel,
+                action: action.to_string(),
+            }];
+        }
         // Same-page anchor: scroll to it (don't hand "#" to the system opener).
         if let Some(frag) = href.strip_prefix('#') {
             if !frag.is_empty() {
