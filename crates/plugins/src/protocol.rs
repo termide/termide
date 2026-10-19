@@ -82,6 +82,9 @@ pub const EDITOR_ACTIVE: &str = "editor/active";
 pub const EDITOR_READ: &str = "editor/read";
 pub const EDITOR_EDIT: &str = "editor/edit";
 pub const EDITOR_OPEN: &str = "editor/open";
+pub const EDITOR_COMPLETION: &str = "editor/completion";
+pub const EDITOR_HOVER: &str = "editor/hover";
+pub const EDITOR_CODE_ACTIONS: &str = "editor/code_actions";
 pub const TERMINAL_RUN: &str = "terminal/run";
 pub const PANEL_OPEN: &str = "panel/open";
 pub const PANEL_UPDATE: &str = "panel/update";
@@ -199,6 +202,27 @@ fn empty_schema() -> Value {
     json!({ "type": "object", "properties": {} })
 }
 
+/// The languages a plugin answers for in the editor, by LSP language id
+/// (`rust`, `python`, …); `*` is every one.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Providers {
+    #[serde(default)]
+    pub completion: Vec<String>,
+    #[serde(default)]
+    pub hover: Vec<String>,
+    #[serde(default)]
+    pub code_actions: Vec<String>,
+}
+
+impl Providers {
+    /// Whether `langs` covers `lang`.
+    #[must_use]
+    pub fn covers(langs: &[String], lang: &str) -> bool {
+        langs.iter().any(|l| l == "*" || l == lang)
+    }
+}
+
 /// What a plugin adds to termide.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct Contributions {
@@ -209,6 +233,8 @@ pub struct Contributions {
     pub commands: Vec<CommandInfo>,
     #[serde(default)]
     pub tools: Vec<ToolInfo>,
+    #[serde(default)]
+    pub providers: Providers,
 }
 
 impl Contributions {
@@ -228,6 +254,7 @@ impl Contributions {
             subscriptions: each(value, "subscriptions"),
             commands: each(value, "commands"),
             tools: each(value, "tools"),
+            providers: serde_json::from_value(value["providers"].clone()).unwrap_or_default(),
         }
     }
 }

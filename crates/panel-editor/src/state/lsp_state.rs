@@ -299,7 +299,9 @@ impl LspState {
                     log::info!("LSP enabled for {} ({:?})", lang, file_path);
                 }
                 Err(_e) => {
-                    self.enabled = false;
+                    // Without a server, plugins may still answer for the
+                    // language (`termide_lsp::extra`).
+                    self.enabled = termide_lsp::extra::is_set();
                     self.server_loading = false;
                 }
             }

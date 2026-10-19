@@ -65,7 +65,7 @@ fn position(value: &Value, line: &str, col: &str) -> Option<lsp_types::Position>
 }
 
 /// The `edits` of `editor/edit` as text edits.
-fn text_edits(value: &Value) -> Result<Vec<lsp_types::TextEdit>, String> {
+pub(super) fn text_edits(value: &Value) -> Result<Vec<lsp_types::TextEdit>, String> {
     let edits = value.as_array().ok_or("`edits` must be a list")?;
     if edits.len() > MAX_EDITS {
         return Err(format!("at most {MAX_EDITS} edits at once"));

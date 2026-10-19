@@ -126,6 +126,22 @@ enabled = false
 
 后台项目的插件不会显示在屏幕上：它的通知会写入日志。termide 每次刷新屏幕时最多从所有插件接收 256 条消息，其余的等待下一次刷新。
 
+### 补全、悬停提示与修复
+
+插件可以像语言服务器那样在编辑器中作答：与服务器并列，或为没有服务器的语言作答。它在贡献中的 `providers` 里按 LSP id（`rust`、`python`……——`*` 表示全部）列出语言：
+
+```json
+"providers": { "completion": ["python"], "hover": ["*"], "codeActions": ["python"] }
+```
+
+| 请求 | 参数 | 回答 |
+|---|---|---|
+| `editor/completion` | `path`、`line`、`col` | `{ "items": [...] }`，LSP 的 `CompletionItem`（`label`、`insertText`、`detail`、`kind`……） |
+| `editor/hover` | `path`、`line`、`col` | `{ "markdown" }` |
+| `editor/code_actions` | `path`、`line`、`col`、`end_line`、`end_col`、`diagnostics`（`line`、`col`、`end_line`、`end_col`、`message`、`source`） | `{ "actions": [{ "title", "edits" }] }`，编辑同 `editor/edit` |
+
+termide 会与服务器一起询问文件所属项目的插件，并给出一个合并的回答：补全项合在一起，悬停提示上下排列，修复合成一个列表。插件有 1.5 秒；更晚的回答不会进入这次结果。修复只修改被询问的那个文件，作用于其打开的缓冲区，标题以插件名开头，以便看清是谁的建议。每个插件最多取 500 个补全项、50 个修复和 20 000 个字符的悬停内容。
+
 ### 编辑器
 
 插件可以访问其所属项目的编辑器，且只能访问这些编辑器：

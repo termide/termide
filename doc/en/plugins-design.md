@@ -161,5 +161,13 @@ Contributions, declared in `initialize` (they can change later):
    in the settings writing the mode globally and the switch in the project,
    the split the loader enforces.
 
+6. Language features. Done: plugins as extra sources beside the language
+   servers (`termide_lsp::extra`): the manager asks them with the server and
+   merges the answers on a thread, a plugin that has not answered in 1.5 s
+   left out; with no extra source nothing changes. An editor keeps its
+   language features on without a server while extra sources exist. A
+   plugin's code action edits the file asked about only and is titled with
+   its name.
+
 Out of scope: an install command (copying the directory is enough), declared
 capability permissions, and a shared daemon.

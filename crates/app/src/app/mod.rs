@@ -53,6 +53,7 @@ mod panel_manager;
 mod panel_operations;
 mod parked_projects;
 mod plugin_editor;
+mod plugin_providers;
 mod plugin_windows;
 mod plugins;
 mod project_layout;

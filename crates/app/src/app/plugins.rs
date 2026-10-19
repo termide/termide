@@ -91,6 +91,11 @@ impl PluginRuntime {
     /// Read the plugins directory beside the global config file.
     pub(crate) fn new() -> Self {
         let installed = discover_installed();
+        // Sources of completion, hover and code actions, ready before any
+        // editor opens: one without a server keeps asking them.
+        if !installed.is_empty() {
+            let _ = super::plugin_providers::provider_hub();
+        }
         Self {
             host: Host::new(Arc::new(ProcessLauncher), Timing::default()),
             installed,
@@ -221,8 +226,10 @@ impl App {
         for key in tool_hub().keys() {
             if !alive.iter().any(|(k, _)| *k == key) {
                 tool_hub().set(&key, Vec::new());
+                super::plugin_providers::provider_hub().set(&key, None);
             }
         }
+        super::plugin_providers::provider_hub().retain(|key| alive.iter().any(|(k, _)| k == key));
         // A plugin stopped by the sync sends no `Stopped`: its marks go here.
         let marked: Vec<PluginKey> = self
             .state
@@ -344,6 +351,7 @@ impl App {
             } => {
                 self.plugins.contributions.remove(&key);
                 tool_hub().set(&key, Vec::new());
+                super::plugin_providers::provider_hub().set(&key, None);
                 self.orphan_plugin_panels(&key);
                 self.drop_plugin_windows(&key);
                 self.clear_plugin_diagnostics(&key);
@@ -391,6 +399,10 @@ impl App {
             })
             .collect();
         tool_hub().set(key, tools);
+        super::plugin_providers::provider_hub().set(
+            key,
+            Some((Arc::clone(&peer), contributions.providers.clone())),
+        );
     }
 
     /// Carry out a plugin's request.
@@ -803,6 +815,7 @@ impl App {
         if self.plugins.host.restart(&key) {
             self.plugins.contributions.remove(&key);
             tool_hub().set(&key, Vec::new());
+            super::plugin_providers::provider_hub().set(&key, None);
             self.orphan_plugin_panels(&key);
             self.drop_plugin_windows(&key);
             self.clear_plugin_diagnostics(&key);
