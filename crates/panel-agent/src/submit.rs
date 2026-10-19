@@ -21,7 +21,7 @@ use crate::{
     FORK_COMMAND, GOAL_COMMAND, GOAL_IDLE_TURNS, GOAL_JUDGE_BUSY_DELAY, GOAL_JUDGE_RETRIES,
     GOAL_JUDGE_RETRY_DELAY, HANDOFF_COMMAND, LOOP_COMMAND, LOOP_MAX_ITERATIONS, MCP_COMMAND,
     NAME_COMMAND, NEW_COMMAND, PAUSE_COMMAND, PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND,
-    SHOW_PROMPT_ACTION, UNDO_COMMAND, USAGE_COMMAND,
+    SHOW_PROMPT_ACTION, TRUST_COMMAND, UNDO_COMMAND, USAGE_COMMAND,
 };
 
 /// The opening of [`goal_continuation`], to tell its turns in the transcript.
@@ -294,6 +294,11 @@ impl AgentPanel {
                 self.mcp_command(args);
                 return vec![PanelEvent::NeedsRedraw];
             }
+            Some((TRUST_COMMAND, args)) => {
+                self.clear_input();
+                self.trust_command(args);
+                return vec![PanelEvent::NeedsRedraw];
+            }
             Some((name, args)) => match slash::resolve(
                 name,
                 self.catalog.prompts(),
@@ -345,6 +350,7 @@ impl AgentPanel {
                     names.push(USAGE_COMMAND.to_string());
                     names.push(PROMPT_COMMAND.to_string());
                     names.push(MCP_COMMAND.to_string());
+                    names.push(TRUST_COMMAND.to_string());
                     self.notice(
                         termide_i18n::t().agent_notice_no_command_fmt(name, &names.join(", ")),
                         NoticeKind::Warn,

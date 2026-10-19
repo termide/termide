@@ -956,8 +956,18 @@ impl AgentDirs {
             .unwrap_or_else(|| seed.to_string())
     }
 
+    /// Whether `path` is in the configuration level, the user's own, rather
+    /// than one an opened project brings.
+    fn is_configuration_level(&self, path: &Path) -> bool {
+        self.global
+            .as_ref()
+            .is_some_and(|global| path.starts_with(global))
+    }
+
     /// Command hooks from every root's `hooks.toml`, by name; a higher root's
-    /// table for a name wins, and `enabled = false` there drops the hook.
+    /// table for a name wins, and `enabled = false` there drops the hook —
+    /// except over the configuration level's, which a project neither
+    /// replaces nor switches off. A project's are marked `from_project`.
     /// They run in name order.
     #[must_use]
     pub fn hooks(&self) -> BTreeMap<String, HookConfig> {
@@ -974,8 +984,16 @@ impl AgentDirs {
                     continue;
                 }
             };
-            for (name, config) in parsed {
-                hooks.entry(name).or_insert(config);
+            let from_project = !self.is_configuration_level(root);
+            for (name, mut config) in parsed {
+                config.from_project = from_project;
+                if from_project {
+                    hooks.entry(name).or_insert(config);
+                } else {
+                    // The user's own hook is not a project's to switch off
+                    // or replace: one may be a guard.
+                    hooks.insert(name, config);
+                }
             }
         }
         hooks.retain(|_, config| config.enabled);
@@ -1013,7 +1031,9 @@ impl AgentDirs {
                     }
                 }
             };
-            for (name, config) in entries {
+            let from_project = !self.is_configuration_level(path);
+            for (name, mut config) in entries {
+                config.from_project = from_project;
                 servers.entry(name).or_insert(config);
             }
         }
@@ -2089,7 +2109,35 @@ mod tests {
         )
         .unwrap();
         let hooks = AgentDirs::new(&project, None, Some(&global)).hooks();
-        assert_eq!(hooks.keys().collect::<Vec<_>>(), ["guard"]);
+        // The project cannot switch off the user's own `audit`.
+        assert_eq!(hooks.keys().collect::<Vec<_>>(), ["audit", "guard"]);
+        assert_eq!(hooks["audit"].command, "audit.sh");
+        assert!(!hooks["audit"].from_project);
+    }
+
+    #[test]
+    fn what_a_project_brings_is_marked_as_the_projects() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("proj");
+        let global = tmp.path().join("ai");
+        std::fs::create_dir_all(project.join(".termide/ai")).unwrap();
+        std::fs::create_dir_all(&global).unwrap();
+        std::fs::write(global.join(MCP_FILE), "[mine]\ncommand = \"a\"\n").unwrap();
+        std::fs::write(
+            project.join(MCP_JSON_FILE),
+            r#"{"mcpServers":{"theirs":{"command":"b"}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            project.join(".termide/ai").join(HOOKS_FILE),
+            "[check]\nevent = \"before_tool_call\"\ncommand = \"c\"\n",
+        )
+        .unwrap();
+        let dirs = AgentDirs::new(&project, None, Some(&global));
+        let servers = dirs.mcp_servers();
+        assert!(!servers["mine"].from_project);
+        assert!(servers["theirs"].from_project);
+        assert!(dirs.hooks()["check"].from_project);
     }
     #[cfg(unix)]
     #[test]

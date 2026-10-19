@@ -174,9 +174,12 @@ const PROMPT_COMMAND: &str = "prompt";
 /// The built-in `/mcp` command: the MCP servers' status, a reload of their
 /// configuration, a sign-in or a sign-out.
 const MCP_COMMAND: &str = "mcp";
+/// The built-in `/trust` command: what the project brings that runs
+/// programs and waits for approval, and approving it.
+const TRUST_COMMAND: &str = "trust";
 /// Every built-in `/name`, whatever the state; a template, script or skill
 /// of the same name never runs under it (see `slash`).
-const BUILTIN_COMMANDS: [&str; 15] = [
+const BUILTIN_COMMANDS: [&str; 16] = [
     UNDO_COMMAND,
     COMPACT_COMMAND,
     NEW_COMMAND,
@@ -192,6 +195,7 @@ const BUILTIN_COMMANDS: [&str; 15] = [
     USAGE_COMMAND,
     PROMPT_COMMAND,
     MCP_COMMAND,
+    TRUST_COMMAND,
 ];
 /// Context-menu action (also `Ctrl+S`) that saves the chat as Markdown.
 const SAVE_CHAT_ACTION: &str = "agent_save_chat";
@@ -443,6 +447,22 @@ pub trait AgentCatalog: Send + Sync {
     /// Why it cannot be forgotten.
     fn mcp_logout(&self, server: &str) -> Result<bool, String> {
         Err(format!("no MCP server named {server}"))
+    }
+    /// The hooks the project brings that are held back until approved, by
+    /// name, with what each runs.
+    fn held_hooks(&self) -> Vec<(String, String)> {
+        Vec::new()
+    }
+    /// Approve the MCP server or hook `name` the project brings, as it is
+    /// configured now. A server is connected at once, and its report comes
+    /// back; a hook runs from the next run on.
+    ///
+    /// # Errors
+    ///
+    /// When nothing of that name waits for approval, or the approval cannot
+    /// be kept.
+    fn trust(&self, name: &str) -> Result<Option<McpReload>, String> {
+        Err(termide_i18n::t().agent_notice_trust_unknown_fmt(name))
     }
 }
 
@@ -1294,6 +1314,7 @@ impl AgentPanel {
         // a fresh session's banner the notices sit below it.
         panel.notice_slash_conflicts();
         panel.notice_definition_problems();
+        panel.notice_held_hooks();
         panel.refresh_recent_sessions();
         // The other termide's run may be going on right now: none is offered
         // to carry on here until this panel takes the session up.

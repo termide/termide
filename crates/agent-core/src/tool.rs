@@ -170,6 +170,12 @@ pub enum LateTools {
         source: String,
         url: String,
     },
+    /// The source comes from a project and waits for the user to approve
+    /// what it runs, `launch`.
+    NeedsApproval {
+        source: String,
+        launch: String,
+    },
 }
 
 impl LateTools {
@@ -180,7 +186,8 @@ impl LateTools {
             | Self::Failed { source, .. }
             | Self::Gone { source }
             | Self::NeedsLogin { source }
-            | Self::LoginStarted { source, .. } => source,
+            | Self::LoginStarted { source, .. }
+            | Self::NeedsApproval { source, .. } => source,
         }
     }
 }

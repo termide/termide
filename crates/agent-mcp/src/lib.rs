@@ -50,6 +50,8 @@ enum State {
     Failed(String),
     NeedsLogin,
     SigningIn,
+    /// From a project, not approved: listed, never started.
+    Withheld,
 }
 
 /// One configured server and where its connection stands.
@@ -68,11 +70,21 @@ struct Entry {
     login_cancel: Option<Arc<AtomicBool>>,
 }
 
+/// Where a server stands before its first attempt: held back, or about to
+/// connect.
+fn idle_state(config: &McpServerConfig) -> State {
+    if config.withheld {
+        State::Withheld
+    } else {
+        State::Pending
+    }
+}
+
 impl Entry {
     fn new(config: McpServerConfig) -> Self {
         Self {
+            state: idle_state(&config),
             config,
-            state: State::Pending,
             generation: 0,
             client: None,
             listing: 0,
@@ -196,6 +208,10 @@ impl Connections {
                         error: error.clone(),
                     },
                     State::NeedsLogin => LateTools::NeedsLogin { source },
+                    State::Withheld => LateTools::NeedsApproval {
+                        source,
+                        launch: entry.config.launch_line(),
+                    },
                 };
                 let _ = tx.send(event);
             }
@@ -232,8 +248,16 @@ impl Connections {
     /// one before it, if any, is let go.
     fn spawn_connect(&self, name: &str, entry: &mut Entry) {
         entry.generation += 1;
-        entry.state = State::Pending;
         entry.client = None;
+        if entry.config.withheld {
+            entry.state = State::Withheld;
+            self.broadcast(&LateTools::NeedsApproval {
+                source: name.to_string(),
+                launch: entry.config.launch_line(),
+            });
+            return;
+        }
+        entry.state = State::Pending;
         let generation = entry.generation;
         let config = entry.config.clone();
         // Held to the end of the attempt, so its outcome reaches whoever
@@ -354,6 +378,7 @@ impl Connections {
                     State::Failed(error) => McpStatus::Failed(error.clone()),
                     State::NeedsLogin => McpStatus::NeedsLogin,
                     State::SigningIn => McpStatus::SigningIn,
+                    State::Withheld => McpStatus::NeedsApproval,
                 };
                 (name.clone(), status, entry.config.clone())
             })
@@ -364,6 +389,7 @@ impl Connections {
             .into_iter()
             .map(|(name, status, config)| McpServerState {
                 sign_in: self.sign_in_state(&config),
+                launch: config.launch_line(),
                 name,
                 status,
             })
@@ -412,7 +438,7 @@ impl Connections {
                     if self.started.load(Ordering::Relaxed) {
                         self.spawn_connect(name, entry);
                     } else {
-                        entry.state = State::Pending;
+                        entry.state = idle_state(&entry.config);
                     }
                     report.started.push(name.to_string());
                 }
@@ -463,7 +489,7 @@ impl Connections {
                 if started {
                     self.spawn_connect(&name, entry);
                 } else {
-                    entry.state = State::Pending;
+                    entry.state = idle_state(&entry.config);
                 }
                 report.started.push(name);
             }
@@ -495,6 +521,9 @@ impl Connections {
                 .ok_or_else(|| format!("no MCP server named {name}"))?;
             if !matches!(entry.config.target(), Ok(McpTarget::Http { .. })) {
                 return Err(format!("{name} is not a url server"));
+            }
+            if entry.config.withheld {
+                return Err(format!("{name} comes from the project: approve it first"));
             }
             if matches!(entry.state, State::SigningIn) {
                 return Err(format!("a sign-in to {name} is already waiting"));
@@ -750,5 +779,46 @@ mod tests {
             names,
             ["docs__search", "github__get_issue", "github__create_issue"]
         );
+    }
+}
+
+#[cfg(test)]
+mod withheld_tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// A project's server not approved is listed, never started, and says
+    /// what it would run; approved, it connects like any other.
+    #[test]
+    fn a_withheld_server_waits_for_approval() {
+        let config = McpServerConfig {
+            command: Some("/nonexistent/termide-mcp-withheld".into()),
+            args: vec!["--x".into()],
+            from_project: true,
+            withheld: true,
+            timeout_secs: 2,
+            ..Default::default()
+        };
+        let connections = Connections::new(BTreeMap::from([("p".to_string(), config.clone())]));
+        let events = connections.subscribe();
+        match events.recv_timeout(Duration::from_secs(2)).unwrap() {
+            LateTools::NeedsApproval { source, launch } => {
+                assert_eq!(source, "p");
+                assert_eq!(launch, "/nonexistent/termide-mcp-withheld --x");
+            }
+            _ => panic!("expected a request for approval"),
+        }
+        assert_eq!(connections.status()[0].status, McpStatus::NeedsApproval);
+
+        let approved = McpServerConfig {
+            withheld: false,
+            ..config
+        };
+        connections.reload(BTreeMap::from([("p".to_string(), approved)]));
+        // It is started now: the program is not there, so it fails.
+        match events.recv_timeout(Duration::from_secs(5)).unwrap() {
+            LateTools::Failed { error, .. } => assert!(error.contains("cannot start"), "{error}"),
+            _ => panic!("expected the start to fail"),
+        }
     }
 }

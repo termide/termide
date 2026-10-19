@@ -2226,6 +2226,18 @@ same name; the directory nearer the panel wins both. One `.mcp.json` above a
 group of repositories therefore serves every panel opened inside them, the
 same way Claude Code reads it.
 
+A server that comes from anywhere but the configuration level — a project's
+`mcp.toml`, any `.mcp.json` — starts a program or sends your keys to an
+address the repository chose, so it waits for you: the session says what it
+would run (`mcp ext: from the project, runs npx ext-server — /trust ext to
+start it`) and it is listed but not started. `/trust` lists everything a
+project brings that waits so, `/trust <name>` (or `t` on its heading in the
+toolset list) approves it and connects it. The approval is for the launch as
+it is now — command, arguments, environment, working directory, or URL,
+headers and OAuth client — and is kept in termide's data directory under the
+project (`trust/<project path>/approved.toml`), never in the project. If the
+repository changes any of it, it waits again.
+
 An MCP tool asks for permission like a command: it runs in `all`, goes to
 the reviewer in `auto`, and asks elsewhere unless a rule covers it in
 `configured`. In `plan` the configured rules count in full for it, and a
@@ -2264,6 +2276,12 @@ what the model sees; exit code 2 turns the result into an error with
 standard error as its text. Hooks run in name order before the permission
 rules; a hook that fails in any other way, or exceeds its timeout, is logged
 and ignored, so a broken hook never stops the agent.
+
+A project's hook waits for approval as a project's MCP server does: the panel
+says so when it opens, it does not run until `/trust <name>`, and the approval
+holds while its command and arguments stay as they were; it then runs from
+the next run on. A project can neither switch off nor replace a hook of the
+configuration level: one of yours may be a guard.
 
 ### Command shims
 

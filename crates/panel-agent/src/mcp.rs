@@ -11,6 +11,7 @@ use crate::{AgentPanel, NoticeKind};
 const RELOAD_BUTTON: &str = "mcp-reload:";
 const LOGIN_BUTTON: &str = "mcp-login:";
 const LOGOUT_BUTTON: &str = "mcp-logout:";
+const TRUST_BUTTON: &str = "mcp-trust:";
 
 /// A server's state in words, and how loud to say it.
 fn status_text(status: &McpStatus) -> (String, NoticeKind) {
@@ -30,6 +31,10 @@ fn status_text(status: &McpStatus) -> (String, NoticeKind) {
             t.agent_mcp_status_signing_in().to_string(),
             NoticeKind::Info,
         ),
+        McpStatus::NeedsApproval => (
+            t.agent_mcp_status_needs_approval().to_string(),
+            NoticeKind::Warn,
+        ),
     }
 }
 
@@ -48,6 +53,66 @@ impl AgentPanel {
             ("login", Some(server)) => self.mcp_login(server),
             ("logout", Some(server)) => self.mcp_logout(server),
             _ => self.notice(termide_i18n::t().agent_notice_mcp_usage(), NoticeKind::Warn),
+        }
+    }
+
+    /// `/trust [<name>]`: what the project brings that waits for approval,
+    /// with what each runs; with a name, approve that one.
+    pub(crate) fn trust_command(&mut self, args: &str) {
+        let t = termide_i18n::t();
+        let name = args.trim();
+        if !name.is_empty() {
+            return self.trust(name);
+        }
+        let servers: Vec<(String, String)> = self
+            .catalog
+            .mcp_status()
+            .into_iter()
+            .filter(|server| server.status == McpStatus::NeedsApproval)
+            .map(|server| (server.name, server.launch))
+            .collect();
+        let hooks = self.catalog.held_hooks();
+        if servers.is_empty() && hooks.is_empty() {
+            return self.notice(t.agent_notice_trust_none(), NoticeKind::Info);
+        }
+        for (name, launch) in servers {
+            self.notice(
+                t.agent_notice_mcp_needs_approval_fmt(&name, &launch),
+                NoticeKind::Warn,
+            );
+        }
+        for (name, launch) in hooks {
+            self.notice(
+                t.agent_notice_hook_needs_approval_fmt(&name, &launch),
+                NoticeKind::Warn,
+            );
+        }
+    }
+
+    /// Approve `name`; a server connects at once.
+    fn trust(&mut self, name: &str) {
+        let t = termide_i18n::t();
+        match self.catalog.trust(name) {
+            Ok(report) => {
+                self.notice(t.agent_notice_trusted_fmt(name), NoticeKind::Info);
+                if report.is_some_and(|r| r.started.iter().any(|s| s == name)) {
+                    self.mcp_reconnecting.insert(name.to_string());
+                    let (status, kind) = status_text(&McpStatus::Connecting);
+                    self.mcp_notice(name, t.agent_notice_mcp_status_fmt(name, &status), kind);
+                }
+            }
+            Err(error) => self.notice(error, NoticeKind::Warn),
+        }
+    }
+
+    /// The project's hooks held back, said once when the panel opens.
+    pub(crate) fn notice_held_hooks(&mut self) {
+        let t = termide_i18n::t();
+        for (name, launch) in self.catalog.held_hooks() {
+            self.notice(
+                t.agent_notice_hook_needs_approval_fmt(&name, &launch),
+                NoticeKind::Warn,
+            );
         }
     }
 
@@ -155,6 +220,13 @@ impl AgentPanel {
                     other => status_text(other).0,
                 };
                 let mut buttons = Vec::new();
+                if server.status == McpStatus::NeedsApproval {
+                    buttons.push(ChecklistButton {
+                        id: format!("{TRUST_BUTTON}{}", server.name),
+                        icon: "✓".into(),
+                        key: 't',
+                    });
+                }
                 let sign = match server.sign_in {
                     McpSignIn::None => None,
                     McpSignIn::SignedOut => Some((LOGIN_BUTTON, "⇥")),
@@ -189,6 +261,8 @@ impl AgentPanel {
             self.mcp_login(server);
         } else if let Some(server) = id.strip_prefix(LOGOUT_BUTTON) {
             self.mcp_logout(server);
+        } else if let Some(server) = id.strip_prefix(TRUST_BUTTON) {
+            self.trust(server);
         }
     }
 }

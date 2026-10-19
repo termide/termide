@@ -43,6 +43,28 @@ pub struct HookConfig {
     /// `false` at a higher level switches off a hook a lower level defines.
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    /// The hook comes from a project rather than the configuration level, so
+    /// it runs only once approved (see [`crate::approvals::Approvals`]). Set
+    /// by [`crate::layers::AgentDirs::hooks`]; never read from a file.
+    #[serde(skip)]
+    pub from_project: bool,
+}
+
+impl HookConfig {
+    /// What an approval of the hook is given for: what it runs.
+    #[must_use]
+    pub fn launch_spec(&self) -> String {
+        serde_json::json!({ "command": self.command, "args": self.args }).to_string()
+    }
+
+    /// What the hook runs, for a person to read.
+    #[must_use]
+    pub fn launch_line(&self) -> String {
+        std::iter::once(self.command.as_str())
+            .chain(self.args.iter().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
 }
 
 fn default_timeout() -> u64 {

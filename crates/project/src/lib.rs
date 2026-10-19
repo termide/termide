@@ -236,6 +236,20 @@ pub fn granted_rules_path(project_root: &Path) -> Result<PathBuf> {
         .join("permissions.toml"))
 }
 
+/// The file holding the launches approved for the project at
+/// `project_root`: the MCP servers and hooks it brings (see
+/// `termide_agent_core::approvals`).
+///
+/// # Errors
+///
+/// When there is no data directory.
+pub fn approvals_path(project_root: &Path) -> Result<PathBuf> {
+    Ok(get_data_dir()?
+        .join(TRUST_DIR)
+        .join(project_key(project_root))
+        .join("approved.toml"))
+}
+
 /// Get the data directory for termide.
 pub(crate) fn get_data_dir() -> Result<PathBuf> {
     dirs::data_dir()

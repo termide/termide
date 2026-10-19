@@ -6704,11 +6704,13 @@ impl AgentCatalog for Servers {
                 name: "db".into(),
                 status: McpStatus::Ready { tools: 4 },
                 sign_in: McpSignIn::None,
+                launch: "db-server".into(),
             },
             McpServerState {
                 name: "plane".into(),
                 status: McpStatus::NeedsLogin,
                 sign_in: McpSignIn::SignedOut,
+                launch: "https://plane.example/mcp".into(),
             },
         ]
     }
@@ -7406,6 +7408,7 @@ fn an_agent_that_lists_its_tools_once_is_told_when_the_mcp_servers_answered() {
         name: "db".into(),
         status,
         sign_in: McpSignIn::None,
+        launch: String::new(),
     };
     let statuses = Arc::new(Mutex::new(vec![state(McpStatus::Connecting)]));
     let served = Arc::new(Mutex::new(Vec::new()));
@@ -10982,4 +10985,74 @@ fn the_strip_stop_button_gives_up_a_retry_wait() {
         Rect::new(0, 0, width, height),
     );
     assert!(panel.retry_wait.is_none());
+}
+
+/// A catalog whose project brings a server and a hook not approved yet.
+struct Untrusted(Arc<Mutex<Vec<String>>>);
+
+impl AgentCatalog for Untrusted {
+    fn list(&self) -> Vec<AgentEntry> {
+        Agents.list()
+    }
+    fn resolve(&self, name: &str) -> Option<AgentProfile> {
+        Agents.resolve(name)
+    }
+    fn mcp_status(&self) -> Vec<termide_agent_core::McpServerState> {
+        use termide_agent_core::{McpServerState, McpSignIn, McpStatus};
+        vec![McpServerState {
+            name: "ext".into(),
+            status: McpStatus::NeedsApproval,
+            sign_in: McpSignIn::None,
+            launch: "npx ext-server".into(),
+        }]
+    }
+    fn held_hooks(&self) -> Vec<(String, String)> {
+        vec![("check".into(), "./check.sh".into())]
+    }
+    fn trust(&self, name: &str) -> Result<Option<termide_agent_core::McpReload>, String> {
+        self.0.lock().unwrap().push(format!("trust {name}"));
+        match name {
+            "ext" => Ok(Some(termide_agent_core::McpReload {
+                started: vec!["ext".into()],
+                ..Default::default()
+            })),
+            "check" => Ok(None),
+            _ => Err(format!("Nothing named {name} waits for approval")),
+        }
+    }
+}
+
+#[test]
+fn trust_lists_what_the_project_brings_and_approves_it() {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        catalog: Arc::new(Untrusted(Arc::clone(&asked))),
+        ..setup(vec![])
+    });
+    // The held hook is said when the panel opens.
+    assert_eq!(
+        notices(&panel),
+        ["hook check: from the project, runs `./check.sh` — /trust check to let it run"]
+    );
+    for command in ["/trust", "/trust ext", "/trust check", "/trust nope"] {
+        type_text(&mut panel, command);
+        panel.submit();
+    }
+    assert_eq!(
+        *asked.lock().unwrap(),
+        ["trust ext", "trust check", "trust nope"]
+    );
+    let seen = notices(&panel);
+    assert_eq!(
+        &seen[1..],
+        [
+            "mcp ext: from the project, runs `npx ext-server` — /trust ext to start it",
+            "hook check: from the project, runs `./check.sh` — /trust check to let it run",
+            "ext: approved for this project",
+            "mcp ext: connecting",
+            "check: approved for this project",
+            "Nothing named nope waits for approval",
+        ]
+    );
+    assert!(!panel.is_busy());
 }

@@ -624,6 +624,10 @@ impl Translation for RuntimeTranslation {
         agent_notice_mcp_usage,
         agent_mcp_status_connecting,
         agent_mcp_status_needs_login,
+        agent_cmd_desc_trust,
+        agent_hint_trust,
+        agent_mcp_status_needs_approval,
+        agent_notice_trust_none,
         agent_mcp_status_signing_in,
         agent_cmd_desc_prompt,
         agent_notice_busy,
@@ -1416,6 +1420,28 @@ impl Translation for RuntimeTranslation {
         self.format(
             "agent_notice_mcp_login_started_fmt",
             &[("source", source), ("url", url)],
+        )
+    }
+
+    fn agent_notice_trusted_fmt(&self, name: &str) -> String {
+        self.format("agent_notice_trusted_fmt", &[("name", name)])
+    }
+
+    fn agent_notice_trust_unknown_fmt(&self, name: &str) -> String {
+        self.format("agent_notice_trust_unknown_fmt", &[("name", name)])
+    }
+
+    fn agent_notice_mcp_needs_approval_fmt(&self, source: &str, launch: &str) -> String {
+        self.format(
+            "agent_notice_mcp_needs_approval_fmt",
+            &[("source", source), ("launch", launch)],
+        )
+    }
+
+    fn agent_notice_hook_needs_approval_fmt(&self, name: &str, launch: &str) -> String {
+        self.format(
+            "agent_notice_hook_needs_approval_fmt",
+            &[("name", name), ("launch", launch)],
         )
     }
 

@@ -486,6 +486,11 @@ impl AgentPanel {
                     let text = t.agent_notice_mcp_login_started_fmt(&source, &url);
                     self.mcp_notice(&source, text, NoticeKind::Info);
                 }
+                LateTools::NeedsApproval { source, launch } => {
+                    self.mcp_reconnecting.remove(&source);
+                    let text = t.agent_notice_mcp_needs_approval_fmt(&source, &launch);
+                    self.mcp_notice(&source, text, NoticeKind::Warn);
+                }
             }
         }
         let pending = !self.waiting_tools.is_empty() || !self.leaving_tools.is_empty();

@@ -20,6 +20,7 @@
 
 pub mod acp;
 pub mod agent;
+pub mod approvals;
 pub mod ask;
 pub mod cancel;
 pub mod checkpoints;

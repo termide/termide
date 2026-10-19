@@ -84,6 +84,51 @@ pub struct McpServerConfig {
     /// does not, or that wants a fixed callback port.
     #[serde(default)]
     pub oauth: McpOAuth,
+    /// The server comes from a project rather than the configuration level,
+    /// so it starts only once its launch is approved (see
+    /// [`crate::approvals::Approvals`]). Set by
+    /// [`crate::layers::AgentDirs::mcp_servers`]; never read from a file.
+    #[serde(skip)]
+    pub from_project: bool,
+    /// Held back: from a project, and not approved as it is configured now.
+    /// It is listed, but not started.
+    #[serde(skip)]
+    pub withheld: bool,
+}
+
+impl McpServerConfig {
+    /// Everything that decides what starts and where its keys go, as one
+    /// line: what an approval is given for, and what the user is shown.
+    #[must_use]
+    pub fn launch_spec(&self) -> String {
+        serde_json::json!({
+            "command": self.command,
+            "args": self.args,
+            "env": self.env,
+            "cwd": self.cwd,
+            "url": self.url,
+            "headers": self.headers,
+            "oauth": {
+                "client_id": self.oauth.client_id,
+                "client_secret": self.oauth.client_secret,
+            },
+        })
+        .to_string()
+    }
+
+    /// What the server runs or reaches, for a person to read: the command
+    /// line, or the URL.
+    #[must_use]
+    pub fn launch_line(&self) -> String {
+        match (&self.command, &self.url) {
+            (Some(command), _) => std::iter::once(command.as_str())
+                .chain(self.args.iter().map(String::as_str))
+                .collect::<Vec<_>>()
+                .join(" "),
+            (None, Some(url)) => url.clone(),
+            (None, None) => String::new(),
+        }
+    }
 }
 
 /// The OAuth side of a `url` server: what termide cannot learn from the
@@ -120,6 +165,8 @@ pub enum McpStatus {
     NeedsLogin,
     /// A sign-in waits in the browser.
     SigningIn,
+    /// From a project, waiting for the user to approve its launch.
+    NeedsApproval,
 }
 
 /// Whether a server is one termide signs in to, and whether it is signed in.
@@ -138,6 +185,8 @@ pub struct McpServerState {
     pub name: String,
     pub status: McpStatus,
     pub sign_in: McpSignIn,
+    /// What it runs or reaches, for a person to read.
+    pub launch: String,
 }
 
 /// What a reload of the configuration did, by server name.
@@ -167,6 +216,8 @@ impl Default for McpServerConfig {
             timeout_secs: default_timeout(),
             enabled: true,
             oauth: McpOAuth::default(),
+            from_project: false,
+            withheld: false,
         }
     }
 }
@@ -430,6 +481,9 @@ fn server_from_json(entry: &Value, workspace: &Path) -> Result<McpServerConfig, 
             .unwrap_or_else(default_timeout),
         enabled: !off,
         oauth,
+        // Set by the caller, which knows the level the file is in.
+        from_project: false,
+        withheld: false,
     })
 }
 

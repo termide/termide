@@ -421,6 +421,9 @@ struct FsCatalog {
     dirs: AgentDirs,
     /// The panel's MCP servers; connected once, shared by every agent.
     mcp: Arc<Connections>,
+    /// The project's approved launches: its servers and hooks start only
+    /// once approved.
+    approvals: termide_agent_core::approvals::Approvals,
     /// Builds and runs a named agent as a subagent for the `task` tool;
     /// set once the provider and settings are known.
     subagents: Option<Arc<Subagents>>,
@@ -440,11 +443,16 @@ impl FsCatalog {
                 log::warn!("cannot lay out {}: {error}", global.display());
             }
         }
+        // Kept with termide's own data, where a repository cannot write.
+        let approvals = termide_agent_core::approvals::Approvals::new(
+            termide_project::approvals_path(project_root).ok(),
+        );
         Self::with_global(
             cwd,
             project_root,
             global_agent_dir,
             dirs::home_dir().as_deref(),
+            approvals,
         )
     }
 
@@ -457,22 +465,24 @@ impl FsCatalog {
         project_root: &Path,
         global_agent_dir: Option<PathBuf>,
         home: Option<&Path>,
+        approvals: termide_agent_core::approvals::Approvals,
     ) -> Self {
         let dirs =
             AgentDirs::new(cwd, Some(project_root), global_agent_dir.as_deref()).with_home(home);
+        let servers = mcp_servers(&dirs, &approvals);
         // OAuth sign-ins are the user's, kept beside the user's own agent
         // files rather than in any project.
         let mcp = match &global_agent_dir {
-            Some(global) => Connections::with_tokens(
-                dirs.mcp_servers(),
-                TokenStore::new(global.join(MCP_AUTH_FILE)),
-            ),
-            None => Connections::new(dirs.mcp_servers()),
+            Some(global) => {
+                Connections::with_tokens(servers, TokenStore::new(global.join(MCP_AUTH_FILE)))
+            }
+            None => Connections::new(servers),
         };
         Self {
             cwd: cwd.to_path_buf(),
             project_root: project_root.to_path_buf(),
             mcp,
+            approvals,
             dirs,
             subagents: None,
             web: None,
@@ -493,13 +503,41 @@ impl AgentCatalog for FsCatalog {
     }
 
     fn mcp_reconnect(&self, server: &str) -> Result<termide_agent_core::McpReload, String> {
-        self.mcp.reconnect(server, &self.dirs.mcp_servers())
+        self.mcp
+            .reconnect(server, &mcp_servers(&self.dirs, &self.approvals))
     }
 
     /// The configuration is read from the files again, at every level, so
     /// an edit to any of them is what the reload applies.
     fn mcp_reload(&self) -> Option<termide_agent_core::McpReload> {
-        Some(self.mcp.reload(self.dirs.mcp_servers()))
+        Some(self.mcp.reload(mcp_servers(&self.dirs, &self.approvals)))
+    }
+
+    fn held_hooks(&self) -> Vec<(String, String)> {
+        let (_, held) = self.approvals.split_hooks(self.dirs.hooks());
+        held.into_iter()
+            .map(|(name, hook)| (name, hook.launch_line()))
+            .collect()
+    }
+
+    /// A server is approved as it is configured now and connected; a hook
+    /// as it is configured now, running from the next run on.
+    fn trust(&self, name: &str) -> Result<Option<termide_agent_core::McpReload>, String> {
+        if let Some(server) = self
+            .dirs
+            .mcp_servers()
+            .get(name)
+            .filter(|server| server.from_project)
+        {
+            self.approvals.approve_mcp(name, server)?;
+            let servers = mcp_servers(&self.dirs, &self.approvals);
+            return self.mcp.reconnect(name, &servers).map(Some);
+        }
+        if let Some(hook) = self.dirs.hooks().get(name).filter(|hook| hook.from_project) {
+            self.approvals.approve_hook(name, hook)?;
+            return Ok(None);
+        }
+        Err(termide_i18n::t().agent_notice_trust_unknown_fmt(name))
     }
 
     fn mcp_login(&self, server: &str) -> Result<(), String> {
@@ -2039,6 +2077,17 @@ struct CliSubagent {
     panel: Option<u64>,
 }
 
+/// The MCP servers of `dirs`, a project's held back unless approved as they
+/// are configured now.
+fn mcp_servers(
+    dirs: &AgentDirs,
+    approvals: &termide_agent_core::approvals::Approvals,
+) -> std::collections::BTreeMap<String, termide_agent_core::McpServerConfig> {
+    let mut servers = dirs.mcp_servers();
+    approvals.withhold_mcp(&mut servers);
+    servers
+}
+
 /// How often a subagent on a CLI agent is looked at while it runs.
 const CLI_SUBAGENT_POLL: std::time::Duration = std::time::Duration::from_millis(50);
 
@@ -2102,11 +2151,16 @@ fn agent_setup(
     let loop_prompt = catalog.dirs.loop_prompt();
     let refusals = catalog.dirs.refusals();
     let hooks: Option<HooksFactory> = {
-        let configs = catalog.dirs.hooks();
+        let configured = !catalog.dirs.hooks().is_empty();
         let hook_cwd = cwd.clone();
-        (!configs.is_empty()).then(|| {
+        let dirs = catalog.dirs.clone();
+        let approvals = catalog.approvals.clone();
+        // Read at every run, so a hook approved meanwhile runs from the
+        // next one on, and a project's not approved never does.
+        configured.then(|| {
             Arc::new(move || {
-                Box::new(CommandHooks::new(configs.clone(), hook_cwd.clone()))
+                let (run, _) = approvals.split_hooks(dirs.hooks());
+                Box::new(CommandHooks::new(run, hook_cwd.clone()))
                     as Box<dyn termide_agent_core::Hooks>
             }) as HooksFactory
         })
@@ -2640,6 +2694,50 @@ fn merge_permission_rule(path: &Path, tool: &str, pattern: &str, decision: Decis
 mod tests {
     use super::*;
     use termide_agent_core::{AGENT_FILE, DEFAULT_AGENT_FILE, SEED_TOOLS};
+
+    /// What a project brings that runs programs waits for the user: its
+    /// MCP server is listed but not started, its hook does not run, and
+    /// `/trust` approves each as it is configured now, outside the project.
+    #[test]
+    fn a_projects_servers_and_hooks_wait_for_approval() {
+        use termide_agent_core::McpStatus;
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("proj");
+        let global = tmp.path().join("ai");
+        std::fs::create_dir_all(project.join(".termide/ai")).unwrap();
+        std::fs::create_dir_all(&global).unwrap();
+        std::fs::write(
+            project.join(".mcp.json"),
+            r#"{"mcpServers":{"ext":{"command":"/nonexistent/termide-ext","args":["-x"]}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            project.join(".termide/ai/hooks.toml"),
+            "[check]\nevent = \"before_tool_call\"\ncommand = \"./check.sh\"\n",
+        )
+        .unwrap();
+        let store = tmp.path().join("data/trust/approved.toml");
+        let approvals = termide_agent_core::approvals::Approvals::new(Some(store.clone()));
+        let catalog = FsCatalog::with_global(&project, &project, Some(global), None, approvals);
+
+        let status = catalog.mcp_status();
+        assert_eq!(status[0].status, McpStatus::NeedsApproval);
+        assert_eq!(status[0].launch, "/nonexistent/termide-ext -x");
+        assert_eq!(
+            catalog.held_hooks(),
+            [("check".to_string(), "./check.sh".to_string())]
+        );
+
+        let report = catalog.trust("ext").unwrap().unwrap();
+        assert_eq!(report.started, ["ext"]);
+        assert_ne!(catalog.mcp_status()[0].status, McpStatus::NeedsApproval);
+        assert_eq!(catalog.trust("check").unwrap(), None);
+        assert!(catalog.held_hooks().is_empty());
+        assert!(store.is_file());
+        assert!(catalog.trust("nope").is_err());
+        // Nothing was written into the project.
+        assert!(!project.join(".termide/approved.toml").exists());
+    }
 
     #[test]
     fn a_side_call_runs_on_a_connection_a_subscription_or_the_sessions_model() {
@@ -3734,7 +3832,13 @@ done"#;
         let dir = global.join("agents").join("search");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(AGENT_FILE), "---\ntools: read\n---\n").unwrap();
-        let catalog = FsCatalog::with_global(tmp.path(), tmp.path(), Some(global), None);
+        let catalog = FsCatalog::with_global(
+            tmp.path(),
+            tmp.path(),
+            Some(global),
+            None,
+            Default::default(),
+        );
         let servers = [(
             "docs".to_string(),
             termide_agent_core::McpServerConfig {
@@ -3803,7 +3907,13 @@ done"#;
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(dir.join(AGENT_FILE), format!("---\ntools: {tools}\n---\n")).unwrap();
         }
-        let mut catalog = FsCatalog::with_global(tmp.path(), tmp.path(), Some(global), None);
+        let mut catalog = FsCatalog::with_global(
+            tmp.path(),
+            tmp.path(),
+            Some(global),
+            None,
+            Default::default(),
+        );
         let settings = with_cloud();
         catalog.subagents = Some(Arc::new(Subagents {
             active: Arc::new(std::sync::RwLock::new(active_on(&settings, "local"))),
@@ -3843,7 +3953,13 @@ done"#;
     fn an_agent_can_delegate_to_a_copy_of_itself() {
         let tmp = tempfile::tempdir().unwrap();
         let global = tmp.path().join("ai");
-        let lone = FsCatalog::with_global(tmp.path(), tmp.path(), Some(global.clone()), None);
+        let lone = FsCatalog::with_global(
+            tmp.path(),
+            tmp.path(),
+            Some(global.clone()),
+            None,
+            Default::default(),
+        );
         let names = |catalog: &FsCatalog| -> Vec<String> {
             catalog
                 .delegatable()
@@ -3857,7 +3973,13 @@ done"#;
         let dir = global.join("agents").join("search");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(AGENT_FILE), "---\ntools: read\n---\n").unwrap();
-        let two = FsCatalog::with_global(tmp.path(), tmp.path(), Some(global), None);
+        let two = FsCatalog::with_global(
+            tmp.path(),
+            tmp.path(),
+            Some(global),
+            None,
+            Default::default(),
+        );
         // `search` among them, for itself as for `default`.
         assert_eq!(names(&two), [DEFAULT_AGENT, "search"]);
     }
@@ -3882,7 +4004,13 @@ done"#;
              You review.\n\n{{tools}}\n",
         )
         .unwrap();
-        let catalog = FsCatalog::with_global(tmp.path(), tmp.path(), Some(global.clone()), None);
+        let catalog = FsCatalog::with_global(
+            tmp.path(),
+            tmp.path(),
+            Some(global.clone()),
+            None,
+            Default::default(),
+        );
 
         let entries = catalog.list();
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();

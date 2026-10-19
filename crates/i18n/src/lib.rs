@@ -713,6 +713,10 @@ pub trait Translation: Send + Sync {
     fn agent_notice_mcp_usage(&self) -> &str;
     fn agent_mcp_status_connecting(&self) -> &str;
     fn agent_mcp_status_needs_login(&self) -> &str;
+    fn agent_cmd_desc_trust(&self) -> &str;
+    fn agent_hint_trust(&self) -> &str;
+    fn agent_mcp_status_needs_approval(&self) -> &str;
+    fn agent_notice_trust_none(&self) -> &str;
     fn agent_mcp_status_signing_in(&self) -> &str;
     fn agent_cmd_desc_prompt(&self) -> &str;
 
@@ -956,6 +960,10 @@ pub trait Translation: Send + Sync {
     fn agent_notice_mcp_reload_fmt(&self, started: &str, removed: &str, kept: &str) -> String;
     fn agent_notice_mcp_needs_login_fmt(&self, source: &str) -> String;
     fn agent_notice_mcp_login_started_fmt(&self, source: &str, url: &str) -> String;
+    fn agent_notice_trusted_fmt(&self, name: &str) -> String;
+    fn agent_notice_trust_unknown_fmt(&self, name: &str) -> String;
+    fn agent_notice_mcp_needs_approval_fmt(&self, source: &str, launch: &str) -> String;
+    fn agent_notice_hook_needs_approval_fmt(&self, name: &str, launch: &str) -> String;
     fn agent_notice_mcp_gone_fmt(&self, source: &str) -> String;
     fn agent_notice_mcp_updated_fmt(&self, source: &str, count: usize) -> String;
     fn agent_notice_mcp_logout_fmt(&self, source: &str) -> String;
