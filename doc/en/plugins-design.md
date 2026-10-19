@@ -122,10 +122,10 @@ Contributions, declared in `initialize` (they can change later):
 ## 5. Phases
 
 1. Manifest, enable switches with the project-layer filter, lifecycle,
-   protocol core, events (`file/opened`, `file/saved`), palette commands,
+   protocol core, events (`file/opened`, `file/saved`), commands,
    notifications, status items, agent tools. Done; see `plugins.md` for the
-   protocol as built. The agent shows a plugin's tools with the MCP notices
-   ("MCP server plugin-<name> connected").
+   protocol as built. The agent announces a plugin's tools as it does an MCP
+   server's, named `plugin <name>`.
 2. Custom panels: the plugin sends a rich-text model and termide renders it.
 3. Editor decorations.
 

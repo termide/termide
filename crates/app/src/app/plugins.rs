@@ -426,7 +426,7 @@ impl PluginTool {
             info.description.clone()
         };
         Self {
-            name: termide_agent_mcp::tool_name(&tool_source(plugin), &info.name),
+            name: termide_agent_mcp::tool_name(&format!("plugin-{plugin}"), &info.name),
             description,
             info,
             peer,
@@ -434,9 +434,9 @@ impl PluginTool {
     }
 }
 
-/// The name a plugin's tools are offered under, apart from MCP servers.
+/// The source a plugin's tools arrive from, apart from MCP servers.
 fn tool_source(plugin: &str) -> String {
-    format!("plugin-{plugin}")
+    format!("{}{plugin}", termide_agent_core::PLUGIN_TOOL_SOURCE)
 }
 
 impl Tool for PluginTool {

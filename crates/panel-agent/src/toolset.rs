@@ -376,6 +376,7 @@ impl AgentPanel {
     /// things and not a history; in a conversation every change is a line of
     /// its own.
     pub(crate) fn mcp_notice(&mut self, server: &str, text: String, kind: NoticeKind) {
+        let text = plugin_notice(server, text);
         if self.banner_shown() {
             if let Some(&index) = self.mcp_lines.get(server) {
                 if self.transcript.replace_notice(index, text.clone(), kind) {
@@ -608,5 +609,34 @@ impl AgentPanel {
             }
         }
         !names.is_empty()
+    }
+}
+
+/// A notice about a source of tools names it `mcp <source>` in every
+/// language; a plugin's reads `plugin <name>` instead.
+fn plugin_notice(source: &str, text: String) -> String {
+    let Some(name) = source.strip_prefix(termide_agent_core::PLUGIN_TOOL_SOURCE) else {
+        return text;
+    };
+    match text.strip_prefix(&format!("mcp {source}")) {
+        Some(rest) => format!("plugin {name}{rest}"),
+        None => text,
+    }
+}
+
+#[cfg(test)]
+mod plugin_notice_tests {
+    use super::plugin_notice;
+
+    #[test]
+    fn a_plugin_is_named_as_one() {
+        assert_eq!(
+            plugin_notice("plugin:fmt", "mcp plugin:fmt: 2 tools connected".into()),
+            "plugin fmt: 2 tools connected"
+        );
+        assert_eq!(
+            plugin_notice("github", "mcp github: 2 tools connected".into()),
+            "mcp github: 2 tools connected"
+        );
     }
 }

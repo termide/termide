@@ -124,5 +124,7 @@ pub use shell::{ShellOutput, ShellRunner};
 pub use suggest::{
     suggestion_channel, CommandSuggester, Suggestion, SuggestionEnvelope, SuggestionReply,
 };
-pub use tool::{LateTools, Tool, ToolContext, ToolRegistry, ToolTraits, ToolUpdate};
+pub use tool::{
+    LateTools, Tool, ToolContext, ToolRegistry, ToolTraits, ToolUpdate, PLUGIN_TOOL_SOURCE,
+};
 pub use tool_text::{apply_tool_texts, ToolText, SEED_TOOLS, TOOLS_DIR};

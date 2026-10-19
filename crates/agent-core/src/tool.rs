@@ -142,6 +142,10 @@ pub trait Tool: Send + Sync {
 /// `Ready` is the whole set, the first one or one that replaces the set
 /// before it (the server changed its list, or it was reconnected), and every
 /// other event but `LoginStarted` leaves the source with none.
+/// The `source` of a termide plugin's tools starts with this, then the
+/// plugin's name; any other source is an MCP server.
+pub const PLUGIN_TOOL_SOURCE: &str = "plugin:";
+
 #[derive(Clone)]
 pub enum LateTools {
     Ready {
