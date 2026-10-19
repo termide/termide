@@ -427,6 +427,10 @@ impl App {
             other => {
                 if let Some(key) = other.strip_prefix("run_command:") {
                     self.run_command_by_menu_key(key)?;
+                } else if let Some(action) =
+                    other.strip_prefix(super::plugins::PLUGIN_COMMAND_PREFIX)
+                {
+                    self.run_plugin_command(action);
                 } else {
                     return Ok(false);
                 }

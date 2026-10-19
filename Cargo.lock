@@ -5206,6 +5206,7 @@ dependencies = [
  "termide-panel-operations",
  "termide-panel-outline",
  "termide-panel-terminal",
+ "termide-plugins",
  "termide-project",
  "termide-secrets",
  "termide-state",

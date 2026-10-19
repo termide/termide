@@ -638,8 +638,13 @@ impl App {
             .unwrap_or("?")
             .to_string();
 
+        let opened = file_path.clone();
         match Editor::open_file_with_config(file_path, self.state.editor_config()) {
             Ok(mut editor_panel) => {
+                self.emit_plugin_file_event(
+                    termide_plugins::protocol::events::FILE_OPENED,
+                    &opened,
+                );
                 // Initialize LSP for the editor
                 if let Some(ref mut lsp_manager) = self.state.lsp_manager {
                     editor_panel.init_lsp(lsp_manager);

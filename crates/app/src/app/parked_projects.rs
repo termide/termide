@@ -240,6 +240,7 @@ impl App {
     /// open projects, and save the set for reopening when it changed.
     pub(super) fn sync_open_projects(&mut self) {
         self.save_open_projects();
+        self.plugins.mark_dirty();
         let views: Vec<OpenProjectView> =
             self.open_projects
                 .roots()

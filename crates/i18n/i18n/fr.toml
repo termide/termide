@@ -1033,6 +1033,7 @@ palette_category_navigation = "Navigation"
 palette_category_panel_management = "Gestion des panneaux"
 palette_category_application = "Application"
 palette_category_commands = "Commandes"
+palette_category_plugins = "Extensions"
 command_report_no_output = "(aucune sortie)"
 [formats]
 projects_delete_fmt = "Disposition de {path}"

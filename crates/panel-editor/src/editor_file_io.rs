@@ -81,6 +81,7 @@ impl Editor {
                         // Save and set config update flag
                         self.buffer.save()?;
                         log::info!("Config file saved: {}", path_str);
+                        self.saved_paths.push(path.clone());
                         self.config_update = Some(new_config);
                         // Update file modification time after successful save
                         self.file_state.mtime = file_io::get_file_mtime(&path);
@@ -99,6 +100,7 @@ impl Editor {
 
         if let Some(path) = self.buffer.file_path() {
             log::info!("File saved: {}", path.display());
+            self.saved_paths.push(path.to_path_buf());
             // Update file modification time after successful save
             self.file_state.mtime = file_io::get_file_mtime(path);
             self.file_state.external_change_detected = false;
@@ -189,6 +191,7 @@ impl Editor {
     pub fn save_file_as(&mut self, path: PathBuf) -> Result<()> {
         self.buffer.save_to(&path)?;
         log::info!("File saved as: {}", path.display());
+        self.saved_paths.push(path.clone());
 
         // Update title
         self.file_state.title = file_io::path_to_title(&path);

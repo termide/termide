@@ -1034,6 +1034,7 @@ palette_category_navigation = "Navigation"
 palette_category_panel_management = "Panel-Verwaltung"
 palette_category_application = "Anwendung"
 palette_category_commands = "Befehle"
+palette_category_plugins = "Plugins"
 command_report_no_output = "(keine Ausgabe)"
 [formats]
 projects_delete_fmt = "Layout von {path}"

@@ -22,9 +22,11 @@ Welcome to the TermIDE documentation! This guide covers installation, usage, and
 - [Coding Agent](agent.md) - Built-in AI agent: tools, permissions, project instructions
 - [Themes](themes.md) - Customizing appearance with themes
 - [Custom Commands](actions.md) - Shell commands from `commands.toml` in the Commands menu
+- [Plugins](plugins.md) - Background programs that add commands, status items and agent tools
 
 ### Developer Documentation
 
 - [Developer Guide](developer-guide.md) - Contributing to TermIDE development
 - [Architecture](architecture.md) - Technical architecture and design decisions
 - [Agent Design Notes](agent-design.md) - Why the coding agent works the way it does, argued from a comparison of existing agents
+- [Plugin Design Notes](plugins-design.md) - The plugin system's trust boundary, lifecycle and protocol

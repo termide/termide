@@ -167,13 +167,20 @@ impl Connections {
     /// those already connected immediately, the others when they are, and
     /// every change after.
     pub fn subscribe(&self) -> Receiver<LateTools> {
+        let (tx, rx) = mpsc::channel();
+        self.subscribe_into(tx);
+        rx
+    }
+
+    /// As [`Self::subscribe`], onto a channel the caller made, so that other
+    /// sources of tools can share it.
+    pub fn subscribe_into(&self, tx: Sender<LateTools>) {
         if !self.started.swap(true, Ordering::Relaxed) {
             let mut entries = self.lock();
             for (name, entry) in entries.iter_mut() {
                 self.spawn_connect(name, entry);
             }
         }
-        let (tx, rx) = mpsc::channel();
         {
             let entries = self.lock();
             for (name, entry) in entries.iter() {
@@ -197,7 +204,6 @@ impl Connections {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(tx);
-        rx
     }
 
     /// The tools of every server connected right now, by server name; a

@@ -125,6 +125,8 @@ pub struct Editor {
         termide_vfs::VfsPath,
         std::sync::Arc<termide_vfs::VfsManager>,
     )>,
+    /// Local files written since the app last asked, for plugins.
+    pub(crate) saved_paths: Vec<PathBuf>,
     /// Updated config after save (for applying in AppState)
     config_update: Option<Config>,
     /// Status message to display to user
@@ -610,6 +612,11 @@ impl Editor {
         std::sync::Arc<termide_vfs::VfsManager>,
     )> {
         self.pending_upload.take()
+    }
+
+    /// The local files this editor wrote since the last call, oldest first.
+    pub fn take_saved_paths(&mut self) -> Vec<PathBuf> {
+        std::mem::take(&mut self.saved_paths)
     }
 
     /// Set pending upload operation (called by keyboard handler).

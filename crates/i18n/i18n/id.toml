@@ -1033,6 +1033,7 @@ palette_category_navigation = "Navigasi"
 palette_category_panel_management = "Manajemen panel"
 palette_category_application = "Aplikasi"
 palette_category_commands = "Perintah"
+palette_category_plugins = "Plugin"
 command_report_no_output = "(tidak ada output)"
 [formats]
 projects_delete_fmt = "Tata letak {path}"

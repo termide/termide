@@ -1033,6 +1033,7 @@ palette_category_navigation = "Điều hướng"
 palette_category_panel_management = "Quản lý panel"
 palette_category_application = "Ứng dụng"
 palette_category_commands = "Lệnh"
+palette_category_plugins = "Plugin"
 command_report_no_output = "(không có đầu ra)"
 [formats]
 projects_delete_fmt = "Bố cục của {path}"

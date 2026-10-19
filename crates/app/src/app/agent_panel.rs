@@ -643,7 +643,13 @@ impl AgentCatalog for FsCatalog {
             model: definition.spec.model,
             mode: definition.spec.mode,
             // Subscribed with no servers too: a reload may bring some.
-            late_tools: backend.is_none().then(|| self.mcp.subscribe()),
+            late_tools: backend.is_none().then(|| {
+                // MCP servers and the project's plugins share the channel.
+                let (tx, rx) = std::sync::mpsc::channel();
+                self.mcp.subscribe_into(tx.clone());
+                super::plugins::tool_hub().subscribe(&self.project_root, tx);
+                rx
+            }),
             backend,
             offered,
             skills: skill_names,

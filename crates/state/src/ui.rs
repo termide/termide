@@ -295,6 +295,8 @@ pub struct UiState {
     pub selected_dropdown_item: usize,
     /// Status line message (for displaying errors and notifications)
     pub status_message: Option<(String, bool)>, // (message, is_error)
+    /// The current project's plugin status items, joined; `None` without any.
+    pub plugin_status: Option<String>,
     /// Options submenu state (e.g., Preferences dropdown)
     pub options_submenu: SubmenuState,
     /// Nested submenu state (e.g., Themes list inside Options)

@@ -1,0 +1,167 @@
+# Plugins
+
+A plugin is a program that termide runs in the background while a project is
+open and talks to over JSON-RPC on the program's stdin and stdout. It can
+react to files being opened and saved, add commands to the command palette,
+show items in the status bar and give the coding agent tools.
+
+Plugins are global: they are installed in your config directory, and a project
+can only switch off a plugin you installed or switch on one you allowed it to.
+An opened repository never decides which program runs.
+
+## Installing
+
+Copy the plugin's directory into `plugins/`, beside your `config.toml`:
+
+| Platform | Directory |
+|---|---|
+| Linux | `~/.config/termide/plugins/<name>/` |
+| macOS | `~/Library/Application Support/termide/plugins/<name>/` |
+| Windows | `%APPDATA%\termide\plugins\<name>\` |
+
+The directory's name is the plugin's name: letters, digits, `-` and `_`. It
+holds a `plugin.toml`:
+
+```toml
+description = "Formats on save"
+command = "./run.py"          # relative to this directory
+args = ["--quiet"]
+[env]
+LOG_LEVEL = "info"
+```
+
+`command` is either an absolute path, a path relative to the plugin directory
+(it contains a `/`), or a bare name such as `python3`. A bare name is looked up
+only in the absolute entries of `PATH`. The plugin runs with its own directory
+as the working directory and learns the project's root from `initialize`.
+
+Plugins are read when termide starts. Restart termide after installing or
+removing one.
+
+## Turning plugins on and off
+
+The global `config.toml` sets each plugin's mode:
+
+```toml
+[plugins.formatter]
+mode = "on"       # the default: runs in every project, a project may turn it off
+[plugins.deploy]
+mode = "opt-in"   # runs only in projects that turn it on
+[plugins.experiment]
+mode = "off"      # runs nowhere
+
+[plugins.formatter.settings]
+line_width = 100  # handed to the plugin in `initialize`
+```
+
+A project's `.termide/config.toml` may switch a plugin within its mode, and add
+to its settings:
+
+```toml
+[plugins.deploy]
+enabled = true
+[plugins.formatter]
+enabled = false
+```
+
+| Global `mode` | Project says nothing | `enabled = false` | `enabled = true` |
+|---|---|---|---|
+| `on` (or no entry) | runs | off | runs |
+| `opt-in` | off | off | runs |
+| `off` | off | off | off |
+
+A `mode` in a project file, and an `enabled` in the global file, are ignored
+with a warning in the log. Give `opt-in` to plugins that act on what is in a
+project, such as one that runs the project's scripts, so that no repository
+turns them on without your consent.
+
+Each open project has its own copy of each plugin it runs, including projects
+parked in the background. A plugin that crashes is restarted after 1, 2, 4…
+seconds. After three crashes within a minute it stays off until its settings
+change or termide restarts, and the status bar says so.
+
+## Writing a plugin
+
+Each message is one line of JSON-RPC 2.0. Anything a plugin writes to stderr
+goes to termide's log.
+
+**termide → plugin**
+
+| Method | Kind | Params | Result |
+|---|---|---|---|
+| `initialize` | request | `protocolVersion` (1), `termide.version`, `plugin.name`, `plugin.dir`, `project.root`, `settings` | what the plugin contributes, see below |
+| `initialized` | notification | | |
+| `file/opened`, `file/saved` | notification, only if subscribed | `path` | |
+| `command/execute` | request | `id` | anything |
+| `tool/call` | request | `name`, `arguments` | `text`, `isError` |
+| `shutdown` | request | | `null` |
+| `exit` | notification | | |
+
+The result of `initialize`, and the params of a `contributions/changed`
+notification sent later to replace it:
+
+```json
+{
+  "subscriptions": ["file/saved"],
+  "commands": [{ "id": "check", "title": "Check the project" }],
+  "tools": [{
+    "name": "lookup",
+    "description": "Look a word up in the project glossary",
+    "inputSchema": { "type": "object", "properties": { "word": { "type": "string" } } },
+    "readOnly": true
+  }]
+}
+```
+
+Commands appear in the command palette (`Plugins` category) as
+`<plugin>: <title>`. Tools are offered to the agent sessions of the plugin's
+project as `plugin-<plugin>__<tool>`. The agent's permission rules treat them
+as MCP tools: they are asked about before running unless they are `readOnly`.
+
+**plugin → termide**
+
+| Method | Kind | Params |
+|---|---|---|
+| `contributions/changed` | notification | as the `initialize` result |
+| `window/notify` | request | `message`, `level` (`"info"` or `"error"`) |
+| `status/set` | request | `id`, `text` (an empty text removes the item) |
+
+A plugin of a project in the background is not shown on screen: its
+notifications go to the log.
+
+### Example
+
+A Python plugin that counts saves in the status bar:
+
+```python
+#!/usr/bin/env python3
+import json, sys
+
+def send(message):
+    print(json.dumps(message), flush=True)
+
+saves = 0
+for line in sys.stdin:
+    msg = json.loads(line)
+    method, id = msg.get("method"), msg.get("id")
+    if method == "initialize":
+        send({"jsonrpc": "2.0", "id": id, "result": {
+            "subscriptions": ["file/saved"],
+            "commands": [{"id": "reset", "title": "Reset the save count"}]}})
+    elif method == "file/saved":
+        saves += 1
+        send({"jsonrpc": "2.0", "id": f"s{saves}", "method": "status/set",
+              "params": {"id": "saves", "text": f"saved {saves}×"}})
+    elif method == "command/execute":
+        saves = 0
+        send({"jsonrpc": "2.0", "id": id, "result": None})
+        send({"jsonrpc": "2.0", "id": "r", "method": "status/set",
+              "params": {"id": "saves", "text": ""}})
+    elif method == "shutdown":
+        send({"jsonrpc": "2.0", "id": id, "result": None})
+    elif method == "exit":
+        break
+```
+
+Save it as `plugins/save-count/run.py`, make it executable, and add
+`plugins/save-count/plugin.toml` with `command = "./run.py"`.

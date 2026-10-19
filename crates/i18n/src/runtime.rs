@@ -218,6 +218,7 @@ impl Translation for RuntimeTranslation {
         palette_category_panel_management,
         palette_category_application,
         palette_category_commands,
+        palette_category_plugins,
         command_report_no_output,
         git_operation_cancelled,
         modal_yes,

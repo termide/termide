@@ -813,6 +813,7 @@ fn render_status_bar_for_active(
             recommended_layout: state.get_recommended_layout(),
             background_ops,
             disk_selected,
+            plugin_status: state.ui.plugin_status.as_deref(),
         };
         StatusBar::render(
             frame.buffer_mut(),

@@ -1018,6 +1018,7 @@ palette_category_navigation = "导航"
 palette_category_panel_management = "面板管理"
 palette_category_application = "应用程序"
 palette_category_commands = "命令"
+palette_category_plugins = "插件"
 command_report_no_output = "(无输出)"
 
 help_desc_collapse_dir = "折叠目录"

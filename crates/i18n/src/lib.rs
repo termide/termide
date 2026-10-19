@@ -825,6 +825,7 @@ pub trait Translation: Send + Sync {
     fn palette_category_panel_management(&self) -> &str;
     fn palette_category_application(&self) -> &str;
     fn palette_category_commands(&self) -> &str;
+    fn palette_category_plugins(&self) -> &str;
     fn command_report_no_output(&self) -> &str;
     fn agent_paste_placeholder_fmt(&self, n: usize, what: &str) -> String;
     fn agent_paste_lines_fmt(&self, count: usize) -> String;

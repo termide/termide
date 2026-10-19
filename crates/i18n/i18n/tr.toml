@@ -1033,6 +1033,7 @@ palette_category_navigation = "Gezinme"
 palette_category_panel_management = "Panel yönetimi"
 palette_category_application = "Uygulama"
 palette_category_commands = "Komutlar"
+palette_category_plugins = "Eklentiler"
 command_report_no_output = "(çıktı yok)"
 [formats]
 projects_delete_fmt = "{path} düzeni"

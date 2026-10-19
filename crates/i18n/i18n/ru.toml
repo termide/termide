@@ -1065,6 +1065,7 @@ palette_category_navigation = "Навигация"
 palette_category_panel_management = "Управление панелями"
 palette_category_application = "Приложение"
 palette_category_commands = "Команды"
+palette_category_plugins = "Плагины"
 command_report_no_output = "(нет вывода)"
 
 [formats]

@@ -1033,6 +1033,7 @@ palette_category_navigation = "탐색"
 palette_category_panel_management = "패널 관리"
 palette_category_application = "애플리케이션"
 palette_category_commands = "명령"
+palette_category_plugins = "플러그인"
 command_report_no_output = "(출력 없음)"
 [formats]
 projects_delete_fmt = "{path}의 레이아웃"

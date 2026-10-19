@@ -1065,6 +1065,7 @@ palette_category_navigation = "Navigation"
 palette_category_panel_management = "Panel Management"
 palette_category_application = "Application"
 palette_category_commands = "Commands"
+palette_category_plugins = "Plugins"
 command_report_no_output = "(no output)"
 
 [formats]
