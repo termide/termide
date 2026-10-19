@@ -23,6 +23,9 @@ use serde_json::{json, Value};
 use crate::protocol::{self, Contributions};
 use crate::rpc::{Incoming, Peer, RpcError};
 
+/// The most events [`Host::poll`] hands over at once.
+pub const MAX_EVENTS_PER_POLL: usize = 256;
+
 /// What it takes to start one plugin for one project.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Launch {
@@ -170,7 +173,17 @@ impl ChildProcess for std::process::Child {
         }
     }
 
+    /// The whole process group goes: the plugin's own children too, which
+    /// would otherwise outlive termide.
     fn kill(&mut self) {
+        #[cfg(unix)]
+        if let Ok(pid) = i32::try_from(self.id()) {
+            // SAFETY: `killpg` only sends a signal; the group is the one the
+            // plugin was started in (`process_group(0)`), led by its pid.
+            unsafe {
+                libc::killpg(pid, libc::SIGKILL);
+            }
+        }
         let _ = std::process::Child::kill(self);
         let _ = self.wait();
     }
@@ -300,7 +313,12 @@ impl Host {
     /// replaced since are dropped.
     pub fn poll(&mut self) -> Vec<HostEvent> {
         let mut events = Vec::new();
-        while let Ok(tagged) = self.rx.try_recv() {
+        // A plugin that floods termide with messages must not hold the UI
+        // thread: the rest wait for the next tick.
+        while events.len() < MAX_EVENTS_PER_POLL {
+            let Ok(tagged) = self.rx.try_recv() else {
+                break;
+            };
             let current = self
                 .plugins
                 .get(tagged.event.key())

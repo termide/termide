@@ -16,6 +16,12 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+/// Sent when a request is given up on — cancelled, or past its timeout —
+/// so the other side can stop working on it: `{ "id" }`, as LSP does.
+pub const CANCEL_REQUEST: &str = "$/cancelRequest";
+const ABORTED: &str = "aborted";
+const NO_REPLY: &str = "no reply within";
+
 /// JSON-RPC's "method not found".
 pub const METHOD_NOT_FOUND: i64 = -32601;
 /// JSON-RPC's "invalid params".
@@ -107,8 +113,12 @@ impl Peer {
             "jsonrpc": "2.0", "id": id, "method": method, "params": params
         }));
         let outcome = sent.and_then(|()| wait(&rx, timeout, cancelled));
-        if outcome.is_err() {
+        if let Err(error) = &outcome {
             self.pending_map().remove(&id);
+            // Given up on, not failed: the plugin may stop the work.
+            if error.starts_with(ABORTED) || error.starts_with(NO_REPLY) {
+                let _ = self.notify(CANCEL_REQUEST, json!({ "id": id }));
+            }
         }
         outcome.map_err(|error| format!("{method}: {error}"))
     }
@@ -163,11 +173,11 @@ fn wait(
     let deadline = Instant::now() + timeout;
     loop {
         if cancelled() {
-            return Err("aborted".to_string());
+            return Err(ABORTED.to_string());
         }
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
-            return Err(format!("no reply within {} ms", timeout.as_millis()));
+            return Err(format!("{NO_REPLY} {} ms", timeout.as_millis()));
         }
         match rx.recv_timeout(left.min(Duration::from_millis(50))) {
             Ok(reply) => return reply,
@@ -333,11 +343,16 @@ mod tests {
     }
 
     #[test]
-    fn a_request_gives_up_when_cancelled() {
+    fn a_request_gives_up_when_cancelled_and_says_so() {
         let (a_in, _b_out) = pipe().unwrap();
-        let (_b_in, a_out) = pipe().unwrap();
+        let (b_in, a_out) = pipe().unwrap();
         let a = Peer::new(a_in, a_out, |_| {}, || {});
         let error = a.request("x", json!({}), SECOND * 5, &|| true).unwrap_err();
         assert!(error.contains("aborted"), "{error}");
+        let mut lines = BufReader::new(b_in).lines();
+        let request: Value = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+        let cancel: Value = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+        assert_eq!(cancel["method"], CANCEL_REQUEST);
+        assert_eq!(cancel["params"]["id"], request["id"]);
     }
 }

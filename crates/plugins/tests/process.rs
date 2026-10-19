@@ -15,6 +15,8 @@ use termide_plugins::{discover, Host, HostEvent, Launch, ProcessLauncher, Timing
 /// directory it runs in and every line it is sent.
 const SCRIPT: &str = r#"#!/bin/sh
 pwd > "$OUT/cwd"
+sleep 300 &
+echo $! > "$OUT/child"
 read -r line
 echo "$line" >> "$OUT/received"
 echo '{"jsonrpc":"2.0","id":1,"result":{"subscriptions":["file/saved"],"commands":[{"id":"hi","title":"Hi"}]}}'
@@ -100,4 +102,14 @@ fn a_script_plugin_runs_in_its_directory_and_stops_cleanly() {
     host.shutdown();
     assert!(received().contains("\"shutdown\""), "{}", received());
     assert!(received().contains("\"exit\""), "{}", received());
+
+    // What the plugin started went with it.
+    let child = std::fs::read_to_string(out.join("child")).unwrap();
+    let alive = || {
+        std::process::Command::new("kill")
+            .args(["-0", child.trim()])
+            .status()
+            .is_ok_and(|status| status.success())
+    };
+    wait_until("the plugin's child to end", || !alive());
 }

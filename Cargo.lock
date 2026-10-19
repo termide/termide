@@ -5871,6 +5871,7 @@ dependencies = [
 name = "termide-plugins"
 version = "0.44.0"
 dependencies = [
+ "libc",
  "log",
  "serde",
  "serde_json",
