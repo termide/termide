@@ -341,16 +341,22 @@ impl App {
         );
     }
 
-    /// Hand the paths the current project's editors saved to its plugins.
+    /// Hand the paths the editors saved to their project's plugins, the
+    /// parked projects' as well as the current one's.
     pub(super) fn emit_plugin_saves(&mut self) {
-        let saved: Vec<PathBuf> = self
+        let current = self.open_projects.current().to_path_buf();
+        let mut saved: Vec<(PathBuf, PathBuf)> = self
             .layout_manager
             .iter_all_panels_mut()
             .filter_map(|panel| panel.as_editor_mut())
             .flat_map(termide_panel_editor::Editor::take_saved_paths)
+            .map(|path| (current.clone(), path))
             .collect();
-        for path in saved {
-            self.emit_plugin_file_event(events::FILE_SAVED, &path);
+        saved.extend(self.take_parked_saved_paths());
+        for (project, path) in saved {
+            self.plugins
+                .host
+                .emit(&project, events::FILE_SAVED, &json!({ "path": path }));
         }
     }
 

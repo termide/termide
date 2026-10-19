@@ -461,6 +461,25 @@ impl App {
         }
     }
 
+    /// The files the parked projects' editors wrote since the last call,
+    /// with the root of the project each belongs to.
+    pub(super) fn take_parked_saved_paths(&mut self) -> Vec<(PathBuf, PathBuf)> {
+        let mut saved = Vec::new();
+        for (root, parked) in self.open_projects.parked_mut() {
+            for panel in parked.layout.iter_all_panels_mut() {
+                if let Some(editor) = panel.as_editor_mut() {
+                    saved.extend(
+                        editor
+                            .take_saved_paths()
+                            .into_iter()
+                            .map(|path| (root.to_path_buf(), path)),
+                    );
+                }
+            }
+        }
+        saved
+    }
+
     /// The roots of the parked projects.
     pub(super) fn parked_roots(&self) -> Vec<PathBuf> {
         self.open_projects
