@@ -1589,14 +1589,22 @@ impl Subagents {
         // Stops a run that will not stop itself; the parent's cancel stops
         // it too.
         let budget = CancelToken::new();
-        let permissions = PermissionHooks::new(
-            rules.clone(),
-            Box::new(AutoDenyPrompter::new(
+        // What the rules do not settle goes to the user of its parent's
+        // panel, on a card headed with its name; with no one there it is
+        // refused with a reason the model reads.
+        let prompter = ctx
+            .prompter
+            .as_ref()
+            .map(|prompter| prompter.for_delegate(name, budget.clone()));
+        let asks: Box<dyn termide_agent_core::PermissionPrompter> = match &prompter {
+            Some(prompter) => Box::new(prompter.clone()),
+            None => Box::new(AutoDenyPrompter::new(
                 self.refusals.unattended_subagent.clone(),
             )),
-        )
-        .with_classifier(Box::new(reviewer.classifier(budget.clone())))
-        .with_refusals(self.refusals.clone());
+        };
+        let permissions = PermissionHooks::new(rules.clone(), asks)
+            .with_classifier(Box::new(reviewer.classifier(budget.clone())))
+            .with_refusals(self.refusals.clone());
         // The guard goes first, as in the panel's own chain: in plan mode a
         // session answer must not let a change through.
         // A delegate's reads and changes count as its parent panel's: a
@@ -1725,6 +1733,7 @@ impl Subagents {
                     hooks,
                     rules,
                     asker,
+                    prompter,
                     panel: ctx.panel,
                 };
                 return self
@@ -1856,7 +1865,15 @@ impl Subagents {
     ) -> Result<SubagentOutcome, String> {
         let config = cli_acp_config(&run.connection)
             .ok_or_else(|| format!("{} is not a CLI agent", run.connection.provider))?;
-        let (prompter, permission_rx) = permission_channel(budget.clone());
+        // The agent's own requests go where its parent's panel asks; with
+        // no one there they come here, and are refused.
+        let (prompter, permission_rx) = match run.prompter {
+            Some(prompter) => (prompter, None),
+            None => {
+                let (prompter, rx) = permission_channel(budget.clone());
+                (prompter, Some(rx))
+            }
+        };
         let setup = BackendSetup {
             cwd: self.cwd.clone(),
             prompter,
@@ -1887,7 +1904,7 @@ impl Subagents {
         let drive = CliDrive {
             name: &run.name,
             model: run.connection.model.trim(),
-            permission_rx: &permission_rx,
+            permission_rx: permission_rx.as_ref(),
             refusal: &self.refusals.unattended_subagent,
             max_turns: run.max_turns,
             cwd: &self.cwd,
@@ -1911,8 +1928,9 @@ struct CliDrive<'a> {
     name: &'a str,
     /// The model to pick for the task, empty for the agent's own.
     model: &'a str,
-    /// The agent's own permission requests, refused: nobody watches.
-    permission_rx: &'a std::sync::mpsc::Receiver<termide_agent_core::PermissionEnvelope>,
+    /// The agent's own permission requests, refused: nobody watches. `None`
+    /// when they go to the user of its parent's panel instead.
+    permission_rx: Option<&'a std::sync::mpsc::Receiver<termide_agent_core::PermissionEnvelope>>,
     refusal: &'a str,
     /// The model calls it may take before it is cut off.
     max_turns: usize,
@@ -1969,7 +1987,7 @@ impl CliDrive<'_> {
         let mut aborted: Option<std::time::Instant> = None;
         let mut idle = 0;
         'run: loop {
-            for envelope in self.permission_rx.try_iter() {
+            for envelope in self.permission_rx.into_iter().flat_map(|rx| rx.try_iter()) {
                 let _ = envelope
                     .reply
                     .send(PermissionAnswer::DenyWithReason(self.refusal.to_string()));
@@ -2029,6 +2047,8 @@ struct CliSubagent {
     rules: PermissionRules,
     /// Puts its questions to the user of its parent's panel.
     asker: Option<termide_agent_core::UserAsker>,
+    /// Puts its permission requests to that user.
+    prompter: Option<termide_agent_core::ChannelPrompter>,
     /// Its parent's panel, whose reads and changes its own count as.
     panel: Option<u64>,
 }
@@ -3036,7 +3056,7 @@ mod tests {
         let drive = CliDrive {
             name: "claude:search",
             model: "haiku",
-            permission_rx: &permission_rx,
+            permission_rx: Some(&permission_rx),
             refusal: "nobody to ask",
             max_turns: SUBAGENT_MAX_TURNS,
             cwd: Path::new("/proj"),

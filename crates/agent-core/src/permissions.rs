@@ -567,6 +567,9 @@ pub struct PermissionEnvelope {
     /// Cancelled once no one waits for the answer any more — the call was
     /// given up — so the panel takes the card down.
     pub withdrawn: CancelToken,
+    /// The delegate that asks, when it is not the panel's own agent: its
+    /// card is headed with its name, and what it grants stays with its task.
+    pub delegate: Option<String>,
 }
 
 /// Cloneable, so the hooks of calls that come in another way — tools served
@@ -576,6 +579,34 @@ pub struct ChannelPrompter {
     tx: Sender<PermissionEnvelope>,
     cancel: CancelToken,
     next_id: u64,
+    /// Who asks, when it is not the panel's own agent.
+    delegate: Option<String>,
+    /// Ends the wait besides `cancel`: a delegate's own stop, which the
+    /// panel's run does not see.
+    stop: Option<CancelToken>,
+}
+
+impl std::fmt::Debug for ChannelPrompter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChannelPrompter").finish_non_exhaustive()
+    }
+}
+
+impl ChannelPrompter {
+    /// This prompter for the delegate `agent`, whose run ends with `stop`:
+    /// its requests reach the same user, on cards headed with its name.
+    #[must_use]
+    pub fn for_delegate(&self, agent: &str, stop: CancelToken) -> Self {
+        Self {
+            delegate: Some(agent.to_string()),
+            stop: Some(stop),
+            ..self.clone()
+        }
+    }
+
+    fn stopped(&self) -> bool {
+        self.cancel.is_cancelled() || self.stop.as_ref().is_some_and(CancelToken::is_cancelled)
+    }
 }
 
 /// Build a prompter and the receiver the panel polls from `tick()`.
@@ -586,6 +617,8 @@ pub fn permission_channel(cancel: CancelToken) -> (ChannelPrompter, Receiver<Per
             tx,
             cancel,
             next_id: 0,
+            delegate: None,
+            stop: None,
         },
         rx,
     )
@@ -610,6 +643,7 @@ impl PermissionPrompter for ChannelPrompter {
             request: request.clone(),
             reply,
             withdrawn: withdrawn.clone(),
+            delegate: self.delegate.clone(),
         };
         if self.tx.send(envelope).is_err() {
             // The panel is gone; nobody can approve anything.
@@ -618,9 +652,7 @@ impl PermissionPrompter for ChannelPrompter {
         loop {
             match answer.recv_timeout(Duration::from_millis(100)) {
                 Ok(answer) => return answer,
-                Err(RecvTimeoutError::Timeout)
-                    if self.cancel.is_cancelled() || withdrawn.is_cancelled() =>
-                {
+                Err(RecvTimeoutError::Timeout) if self.stopped() || withdrawn.is_cancelled() => {
                     withdrawn.cancel();
                     return PermissionAnswer::Deny;
                 }
@@ -4117,5 +4149,25 @@ mod prompter_tests {
         let (mut prompter, rx) = permission_channel(CancelToken::new());
         drop(rx);
         assert_eq!(prompter.ask(&request()), PermissionAnswer::Deny);
+    }
+
+    #[test]
+    fn a_delegates_request_names_it_and_ends_with_its_task() {
+        let (panel, rx) = permission_channel(CancelToken::new());
+        let mut delegate = panel.for_delegate("search", CancelToken::new());
+        let worker = std::thread::spawn(move || delegate.ask(&request()));
+        let envelope = rx.recv().unwrap();
+        assert_eq!(envelope.delegate.as_deref(), Some("search"));
+        envelope.reply.send(PermissionAnswer::AllowOnce).unwrap();
+        assert_eq!(worker.join().unwrap(), PermissionAnswer::AllowOnce);
+
+        // The task stopped, the panel's run did not: the card is withdrawn.
+        let stop = CancelToken::new();
+        let mut delegate = panel.for_delegate("search", stop.clone());
+        let worker = std::thread::spawn(move || delegate.ask(&request()));
+        let envelope = rx.recv().unwrap();
+        stop.cancel();
+        assert_eq!(worker.join().unwrap(), PermissionAnswer::Deny);
+        assert!(envelope.withdrawn.is_cancelled());
     }
 }

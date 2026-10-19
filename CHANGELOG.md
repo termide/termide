@@ -5,6 +5,11 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **A delegate asks you instead of being refused.** A delegated task running out of sight could do only what the rules and the mode already allowed: anything that would have asked was refused, though you were right there in the panel that delegated it. Its permission requests now come to that panel on the usual card, headed `& <delegate> ·` as its questions are, for termide's own loop and for a copy of Claude Code alike; only a `termide --prompt` run, with no one to ask, still refuses them. Delegates working side by side ask in turn, one card at a time, where a second question at once used to be turned away. What you grant a delegate for the session holds for its task alone, and "always" is not offered it.
+
 ## [0.44.0] - 2026-10-19
 
 [0.44.0]: https://github.com/termide/termide/releases/tag/0.44.0

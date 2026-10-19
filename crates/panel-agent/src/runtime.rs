@@ -222,6 +222,9 @@ pub(crate) fn spawn_runtime(
     // permission requests get the built-in agent's treatment (read-only
     // commands and matching rules pass without a prompt).
     let backend_rules = rules.clone();
+    // The delegates of the panel's `task` calls ask its user on the same
+    // channel, on cards headed with their names.
+    let delegate_prompter = prompter.clone();
     let mut hooks = PermissionHooks::new(rules, Box::new(prompter))
         .with_classifier(Box::new(reviewer.classifier(cancel.clone())))
         .with_refusals(refusals.clone());
@@ -285,7 +288,7 @@ pub(crate) fn spawn_runtime(
         host_chain.push(Box::new(host_permissions));
         match factory(BackendSetup {
             cwd: cwd.to_path_buf(),
-            prompter: external_prompter,
+            prompter: external_prompter.clone(),
             cancel: cancel.clone(),
             rules: backend_rules,
             persist: persist_rule.map(|f| Box::new(f) as PersistRule),
@@ -300,6 +303,7 @@ pub(crate) fn spawn_runtime(
                 hooks: Box::new(ChainedHooks::new(host_chain)),
                 context: ToolContext {
                     asker: Some(asker.clone()),
+                    prompter: Some(external_prompter),
                     suggester: Some(suggester.clone()),
                     shell_run: shell_run.clone(),
                     panel: Some(panel),
@@ -347,6 +351,7 @@ pub(crate) fn spawn_runtime(
     .with_session_id(session.map(|s| s.id().to_string()))
     .with_panel(panel)
     .with_asker(asker)
+    .with_prompter(delegate_prompter)
     .with_suggester(suggester);
     if let Some(intent) = inherited_intent {
         agent = agent.with_inherited_intent(intent);

@@ -9,6 +9,7 @@ use crate::ask::UserAsker;
 use crate::cancel::CancelToken;
 use crate::classifier::SessionView;
 use crate::message::{ToolCall, ToolResultMessage};
+use crate::permissions::ChannelPrompter;
 use crate::provider::ToolSpec;
 use crate::shell::ShellRunner;
 use crate::suggest::CommandSuggester;
@@ -21,6 +22,10 @@ pub struct ToolContext {
     /// Someone to put a question to; `None` when no one is watching the run
     /// (a subagent, headless mode).
     pub asker: Option<UserAsker>,
+    /// Whom a delegate's permission requests go to: the user of the panel
+    /// the call comes from. `None` when no one is watching, and a delegate
+    /// is refused what would ask.
+    pub prompter: Option<ChannelPrompter>,
     /// Someone to offer a command to; `None` when no one is watching to
     /// confirm one (a subagent, headless mode).
     pub suggester: Option<CommandSuggester>,
@@ -60,6 +65,7 @@ impl ToolContext {
         Self {
             cwd: cwd.into(),
             asker: None,
+            prompter: None,
             suggester: None,
             shell_run: None,
             session: None,

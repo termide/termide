@@ -4800,6 +4800,60 @@ fn a_withdrawn_permission_question_comes_down() {
     assert_eq!(worker.join().unwrap(), PermissionAnswer::AllowOnce);
 }
 
+/// Delegates working side by side ask at once: each request gets its card in
+/// turn, headed with the delegate's name, none turned away.
+#[test]
+fn delegates_asking_at_once_take_turns_on_the_card() {
+    let mut panel = panel(vec![]);
+    let (prompter, rx) = permission_channel(CancelToken::new());
+    panel.permission_rx = rx;
+    let ask = |agent: &str, command: &str| {
+        let mut delegate = prompter.for_delegate(agent, CancelToken::new());
+        let request = termide_agent_core::PermissionRequest {
+            tool: "bash".into(),
+            subject: command.into(),
+            call: termide_agent_core::ToolCall {
+                id: "c".into(),
+                name: "bash".into(),
+                arguments: serde_json::json!({ "command": command }),
+                extra_content: None,
+            },
+            suggested_pattern: String::new(),
+            can_persist: false,
+            can_allow_session: false,
+            parts: Vec::new(),
+        };
+        std::thread::spawn(move || delegate.ask(&request))
+    };
+    let card = |panel: &mut AgentPanel| {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            panel.tick();
+            if let Some(Pending::Permission { form, envelope, .. }) = &panel.pending {
+                return (form.title().to_string(), envelope.request.subject.clone());
+            }
+            assert!(Instant::now() < deadline, "no card");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+    let first = ask("search", "git fetch");
+    let (title, subject) = card(&mut panel);
+    assert!(title.starts_with("& search · "), "{title}");
+    let second = ask("review", "git push");
+    // The second waits while the first is on screen.
+    std::thread::sleep(Duration::from_millis(50));
+    panel.tick();
+    let (_, still) = card(&mut panel);
+    assert_eq!(still, subject);
+    assert!(panel.answer_permission(PermissionAnswer::AllowOnce));
+    assert_eq!(first.join().unwrap(), PermissionAnswer::AllowOnce);
+    let (title, subject) = card(&mut panel);
+    assert!(title.starts_with("& review · "), "{title}");
+    assert_eq!(subject, "git push");
+    assert!(panel.answer_permission(PermissionAnswer::Deny));
+    assert_eq!(second.join().unwrap(), PermissionAnswer::Deny);
+}
+
 #[test]
 fn permission_prompt_is_answered_in_the_panel() {
     let mut panel = panel(vec![]);
@@ -5511,6 +5565,7 @@ fn a_permission_wait_is_timed_apart_from_the_call() {
             },
             reply,
             withdrawn: termide_agent_core::CancelToken::default(),
+            delegate: None,
         },
         form: ChoiceForm::new("", vec![]),
         answers: Vec::new(),
@@ -5551,7 +5606,7 @@ fn a_permission_wait_is_timed_apart_from_the_call() {
 
 #[test]
 fn a_grant_reaches_the_panel_rules_so_it_survives_a_rebuild() {
-    let pending = |panel: &mut AgentPanel| {
+    let pending_from = |panel: &mut AgentPanel, delegate: Option<&str>| {
         let (reply, _rx) = std::sync::mpsc::channel();
         panel.pending = Some(Pending::Permission {
             envelope: PermissionEnvelope {
@@ -5575,11 +5630,13 @@ fn a_grant_reaches_the_panel_rules_so_it_survives_a_rebuild() {
                 },
                 reply,
                 withdrawn: termide_agent_core::CancelToken::default(),
+                delegate: delegate.map(str::to_string),
             },
             form: ChoiceForm::new("", vec![]),
             answers: Vec::new(),
         });
     };
+    let pending = |panel: &mut AgentPanel| pending_from(panel, None);
 
     // "Allow for the session" lands in the session rules, which
     // `effective_rules` — what every rebuilt agent starts from — carries
@@ -5606,6 +5663,18 @@ fn a_grant_reaches_the_panel_rules_so_it_survives_a_rebuild() {
     assert_eq!(
         always.rules.evaluate("bash", "cat x"),
         Some(Decision::Allow)
+    );
+
+    // What a delegate is granted stays with its task: the panel's own
+    // rules are left as they were.
+    let mut delegated = panel(vec![]);
+    pending_from(&mut delegated, Some("search"));
+    assert!(delegated.answer_permission(PermissionAnswer::AllowSession));
+    assert_eq!(
+        delegated
+            .effective_rules()
+            .evaluate_session("bash", "cat x"),
+        None
     );
 }
 

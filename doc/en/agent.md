@@ -1184,7 +1184,7 @@ configuration; answers for the session live until the panel closes.
 
 Every call keeps who decided it, in the session log and so across a resume:
 the rules, plan mode, a hook, the auto mode reviewer with its reason, no one
-(a subagent or a headless run that had no one to ask), or you — with the
+(a headless run, or a subagent of one, with no one to ask), or you — with the
 answer you gave and how long it holds. An unfolded call shows it on a line
 of its own (`✓ you allowed it for this session`, `✗ the auto mode reviewer
 blocked it: …`); a call the rules allowed without asking, the common case,
@@ -1613,12 +1613,15 @@ Claude Code's `Task` tool and OpenCode's sub-sessions do.
 The delegate does not see the conversation, so the calling agent must put
 everything into the prompt. It runs in the session's current mode, unless its
 `AGENT.md` names one (plan mode overrides that: a delegate of a planning
-agent only reads), with no one to prompt, so it can only do what the
-rules and that mode already allow: anything that would otherwise ask is
-refused with a reason it reads. In `auto` the reviewer decides those calls
-instead. What it wants to know it may still ask: its `question` cards come to
-the panel that delegated the task, headed `& <delegate> ·`, as long as that
-panel has you to ask. External agents (those with a `command`) can be delegates only in a
+agent only reads). What the rules and that mode do not settle is put to you
+in the panel that delegated the task, on the usual permission card headed
+`& <delegate> ·`; so are its `question` cards. In `auto` the reviewer
+decides those calls first, as for the panel's own agent. Delegates working
+side by side ask in turn: one card at a time, the next once it is
+answered. What you grant a delegate for the session holds for its task
+alone, not for the panel's agent, and "always" is not offered it. With no
+one to ask — a `termide --prompt` run — anything that would ask is refused
+with a reason the delegate reads. External agents (those with a `command`) can be delegates only in a
 panel (below), and a
 subagent gets no `task` tool of its own, so delegation does not nest. An agent whose `tools` list leaves out `task`
 cannot delegate. Besides its own tools, a delegate gets those of the MCP
@@ -1652,8 +1655,8 @@ changes your layout; `panel` does the same, but when no panel is free it
 opens a new one beside the others, without taking the focus. In a panel the
 task is an ordinary session of that panel, on the delegate's agent,
 connection and mode: you watch it work, and what it would have to ask is put
-to you on the usual cards instead of being refused — which is why an
-external agent can be a delegate there. In `auto` the reviewer judges its
+to you on that panel's cards — which is why an external agent can be a
+delegate there. In `auto` the reviewer judges its
 calls by what you asked the delegating agent and the task, as for a hidden
 delegate (not yet for an external agent). The delegating panel's block shows
 its progress as for a hidden one, and a click on the task's row above that
@@ -1684,8 +1687,8 @@ it runs termide's own loop, on that connection's model; the `model` its
 for. On a Claude Code connection it is a copy of Claude Code: a session of its
 own, started for the task and ended with it, with the delegate's prompt and
 tools as Claude Code takes the panel's, the connection's model picked before
-the task goes out, and the same checks — its own permission requests, with
-nobody to ask, are refused with the reason the model reads. So a Claude Code
+the task goes out, and the same checks — its own permission requests go to
+you in the delegating panel as the built-in delegate's do. So a Claude Code
 session delegates to copies of itself unless its connection names another, and
 a local model's session can hand its tasks to Claude Code. Codex and Gemini CLI
 keep tools of their own and run no delegates: their **Subagents** reads

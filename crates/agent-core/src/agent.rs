@@ -21,7 +21,7 @@ use crate::message::{
     AssistantContent, AssistantMessage, Message, StopReason, ToolCall, ToolResultMessage, Usage,
     UserMessage,
 };
-use crate::permissions::{DecidedBy, PermissionNote};
+use crate::permissions::{ChannelPrompter, DecidedBy, PermissionNote};
 use crate::provider::{ModelSpec, Provider, Request, StreamEvent, ThinkingLevel};
 use crate::shell::ShellRunner;
 use crate::suggest::CommandSuggester;
@@ -549,6 +549,9 @@ pub struct Agent {
     loop_prompt: LoopPrompt,
     /// Whom the `question` tool asks; `None` when no one is watching.
     asker: Option<UserAsker>,
+    /// Whom a delegate's permission requests go to; `None` when no one is
+    /// watching.
+    prompter: Option<ChannelPrompter>,
     /// Whom the `suggest_command` tool offers commands to; `None` when no one
     /// is watching to confirm one.
     suggester: Option<CommandSuggester>,
@@ -592,6 +595,7 @@ impl Agent {
             handoff_prompt: HandoffPrompt::default(),
             loop_prompt: LoopPrompt::default(),
             asker: None,
+            prompter: None,
             suggester: None,
             shell_run: None,
             intent: IntentLog::new(),
@@ -634,6 +638,14 @@ impl Agent {
     #[must_use]
     pub fn with_asker(mut self, asker: UserAsker) -> Self {
         self.asker = Some(asker);
+        self
+    }
+
+    /// Let the delegates of this loop's `task` calls ask the user through
+    /// `prompter` what the rules do not settle.
+    #[must_use]
+    pub fn with_prompter(mut self, prompter: ChannelPrompter) -> Self {
+        self.prompter = Some(prompter);
         self
     }
 
@@ -1217,6 +1229,7 @@ impl Agent {
         ToolContext {
             cwd: self.cwd.clone(),
             asker: self.asker.clone(),
+            prompter: self.prompter.clone(),
             suggester: self.suggester.clone(),
             shell_run: self.shell_run.clone(),
             session: Some(SessionView {

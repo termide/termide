@@ -258,16 +258,34 @@ impl AgentPanel {
         withdrawn
     }
 
+    /// Turn away the requests and questions still waiting their turn behind
+    /// the card on screen: the run they belong to is stopping, so none of
+    /// them must show up after it.
+    pub(crate) fn drop_waiting_cards(&mut self) {
+        for envelope in self.permission_rx.try_iter() {
+            let _ = envelope.reply.send(PermissionAnswer::Deny);
+        }
+        for envelope in self.question_rx.try_iter() {
+            let _ = envelope.reply.send(QuestionReply::Declined);
+        }
+    }
+
     pub(crate) fn poll_permissions(&mut self) -> Vec<PanelEvent> {
         let mut events = Vec::new();
-        while let Ok(envelope) = self.permission_rx.try_recv() {
+        loop {
             // The card before may have been given up just now: its prompter
             // returned before this question could be sent.
             self.drop_withdrawn_permission();
+            // Delegates working side by side ask at once: the next request
+            // waits in the channel until the card on screen is answered.
             if self.pending.is_some() {
-                // Prompts are sequential on the agent thread; a second one
-                // cannot arrive before the first is answered. Deny defensively.
-                let _ = envelope.reply.send(PermissionAnswer::Deny);
+                break;
+            }
+            let Ok(envelope) = self.permission_rx.try_recv() else {
+                break;
+            };
+            if envelope.withdrawn.is_cancelled() {
+                // Given up while it waited its turn.
                 continue;
             }
             // The question is asked in the panel, not in an app-wide modal:
@@ -279,7 +297,12 @@ impl AgentPanel {
             // without a path or command have no subject, so no detail.
             let has_subject = !request.subject.is_empty();
             let t = termide_i18n::t();
-            let base = t.agent_permission_run_fmt(&request.tool);
+            let mut base = t.agent_permission_run_fmt(&request.tool);
+            // A delegate's request is headed with its name, as its questions
+            // are, so it never reads as the panel's own agent's.
+            if let Some(delegate) = &envelope.delegate {
+                base = format!("& {delegate} · {base}");
+            }
             let title = if has_subject {
                 format!("{base}:")
             } else {
@@ -369,10 +392,13 @@ impl AgentPanel {
     /// permission prompt, they pause the running call until answered.
     pub(crate) fn poll_questions(&mut self) -> Vec<PanelEvent> {
         let mut events = Vec::new();
-        while let Ok(envelope) = self.question_rx.try_recv() {
-            if self.pending.is_some() || envelope.questions.is_empty() {
-                // Calls run one at a time, so a second set cannot arrive
-                // while one is shown; decline it defensively.
+        // Delegates working side by side ask at once: the next set waits in
+        // the channel until the card on screen is answered.
+        while self.pending.is_none() {
+            let Ok(envelope) = self.question_rx.try_recv() else {
+                break;
+            };
+            if envelope.questions.is_empty() {
                 let _ = envelope.reply.send(QuestionReply::Declined);
                 continue;
             }
@@ -561,8 +587,15 @@ impl AgentPanel {
         // by the persist callback, where it is on offer; "for this session"
         // lives only here. Neither is recorded where the request does not
         // offer it, so an answer cannot smuggle a grant the card withheld.
+        // What a delegate is granted stays with its task, in its own hooks:
+        // the panel's agent never asked for it.
         let request = &envelope.request;
-        for pattern in request.patterns() {
+        let patterns = if envelope.delegate.is_some() {
+            Vec::new()
+        } else {
+            request.patterns()
+        };
+        for pattern in patterns {
             match answer {
                 PermissionAnswer::AllowAlways | PermissionAnswer::AllowAlwaysGlobal
                     if request.can_persist =>
