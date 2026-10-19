@@ -640,6 +640,17 @@ impl TextBuffer {
         self.edit_version
     }
 
+    /// Record the edits that follow, until [`TextBuffer::end_undo_group`],
+    /// as one undo step.
+    pub fn begin_undo_group(&mut self) {
+        self.history.begin_group();
+    }
+
+    /// Close the undo step [`TextBuffer::begin_undo_group`] opened.
+    pub fn end_undo_group(&mut self) {
+        self.history.end_group();
+    }
+
     /// Undo last action
     pub fn undo(&mut self) -> Result<Option<Cursor>> {
         if let Some(action) = self.history.undo() {
@@ -682,6 +693,13 @@ impl TextBuffer {
                 self.rope.remove(char_idx..end_idx);
                 Ok(*position)
             }
+            Action::Group(actions) => {
+                let mut cursor = Cursor::default();
+                for action in actions {
+                    cursor = self.apply_action(action)?;
+                }
+                Ok(cursor)
+            }
         }
     }
 }
@@ -695,6 +713,23 @@ impl Default for TextBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_group_of_edits_is_one_undo_step() {
+        let mut buffer = TextBuffer::from_text("one two three");
+        buffer.begin_undo_group();
+        buffer
+            .delete_range(&Cursor::at(0, 4), &Cursor::at(0, 7))
+            .unwrap();
+        buffer.insert(&Cursor::at(0, 4), "2").unwrap();
+        buffer.insert(&Cursor::at(0, 0), ">> ").unwrap();
+        buffer.end_undo_group();
+        assert_eq!(buffer.text(), ">> one 2 three");
+        buffer.undo().unwrap();
+        assert_eq!(buffer.text(), "one two three");
+        buffer.redo().unwrap();
+        assert_eq!(buffer.text(), ">> one 2 three");
+    }
 
     #[test]
     fn test_empty_buffer() {
