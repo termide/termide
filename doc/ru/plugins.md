@@ -93,7 +93,9 @@ enabled = false
 ## Как написать плагин
 
 Каждое сообщение — одна строка JSON-RPC 2.0. Всё, что плагин пишет в stderr,
-попадает в журнал termide.
+попадает в журнал termide. На Python протокол берёт на себя
+`examples/plugins/sdk/termide_plugin.py` из репозитория, а в `examples/plugins/`
+лежат плагины, написанные с ним.
 
 **termide → плагин**
 

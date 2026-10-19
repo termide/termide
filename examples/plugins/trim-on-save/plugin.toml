@@ -1,0 +1,2 @@
+description = "Takes the spaces off the ends of lines before Ctrl+S writes a file"
+command = "./run.py"

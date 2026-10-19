@@ -92,7 +92,9 @@ change or termide restarts, and the status bar says so.
 ## Writing a plugin
 
 Each message is one line of JSON-RPC 2.0. Anything a plugin writes to stderr
-goes to termide's log.
+goes to termide's log. In Python, `examples/plugins/sdk/termide_plugin.py` in
+the repository speaks it for you, and `examples/plugins/` holds plugins built
+with it.
 
 **termide → plugin**
 

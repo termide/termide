@@ -67,7 +67,7 @@ enabled = false
 
 ## 编写插件
 
-每条消息是一行 JSON-RPC 2.0。插件写到标准错误的任何内容都会进入 termide 的日志。
+每条消息是一行 JSON-RPC 2.0。插件写到标准错误的任何内容都会进入 termide 的日志。用 Python 编写时，仓库中的 `examples/plugins/sdk/termide_plugin.py` 会替你处理协议，`examples/plugins/` 中有用它写成的插件。
 
 **termide → 插件**
 
