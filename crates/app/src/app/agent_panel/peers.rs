@@ -48,13 +48,19 @@ enum Request {
     },
     /// A background task's answer, for the panel that handed it over.
     Report {
-        /// The project of both panels.
+        /// The project of the panel.
         project_root: PathBuf,
         to: u64,
-        /// The delegate, and the panel it ran in.
+        /// The delegate.
         agent: String,
-        panel: u64,
         text: String,
+    },
+    /// How many messages agents passed one another to get the run of a
+    /// panel going.
+    Hops {
+        project_root: PathBuf,
+        panel: u64,
+        reply: Sender<Result<u32, String>>,
     },
 }
 
@@ -127,15 +133,36 @@ pub(super) fn peer_tools(caller: &str, project_root: &Path) -> [Arc<dyn Tool>; 2
     ]
 }
 
-/// Hand the answer of a background task the delegate `agent` ran in
-/// `panel` to the panel `to` that handed it over; the app delivers it on
-/// its tick. Nobody waits for it: one that cannot be delivered is logged.
-pub(super) fn report(project_root: &Path, to: u64, agent: &str, panel: u64, text: String) {
+/// Whether panel `panel` may hand a task over in the background: its
+/// answer is one more message passed without the user, refused past
+/// [`MAX_HOPS`] as any other.
+pub(super) fn may_hand_over(project_root: &Path, panel: u64) -> Result<(), String> {
+    let (reply, answer) = mpsc::channel();
+    let hops = ask(
+        Request::Hops {
+            project_root: project_root.to_path_buf(),
+            panel,
+            reply,
+        },
+        &answer,
+    )?;
+    next_hops(hops).map(drop).map_err(|_| {
+        format!(
+            "the agents have passed {MAX_HOPS} messages to one another without the user: \
+             hand nothing more over in the background, finish what you can and tell the user \
+             where things stand"
+        )
+    })
+}
+
+/// Hand the answer of a background task the delegate `agent` ran to the
+/// panel `to` that handed it over; the app delivers it on its tick. Nobody
+/// waits for it: one that cannot be delivered is logged.
+pub(super) fn report(project_root: &Path, to: u64, agent: &str, text: String) {
     let request = Request::Report {
         project_root: project_root.to_path_buf(),
         to,
         agent: agent.to_string(),
-        panel,
         text,
     };
     if !SERVED.load(Ordering::Acquire) || port().0.send(request).is_err() {
@@ -200,16 +227,21 @@ impl App {
                     }
                     let _ = reply.send(result);
                 }
+                Request::Hops {
+                    project_root,
+                    panel,
+                    reply,
+                } => {
+                    let hops = self.in_project(&project_root, |app| app.agent_hops_of(panel));
+                    let _ = reply.send(hops);
+                }
                 Request::Report {
                     project_root,
                     to,
                     agent,
-                    panel,
                     text,
                 } => match self
-                    .in_project(&project_root, |app| {
-                        app.report_to_panel(to, agent, panel, text)
-                    })
+                    .in_project(&project_root, |app| app.report_to_panel(to, agent, text))
                     .and_then(|delivered| delivered)
                 {
                     Ok(()) => self.state.needs_redraw = true,
@@ -251,13 +283,7 @@ impl App {
     /// Deliver a background task's answer to the panel `to` that handed it
     /// over, as the delegate's reply: one more message passed without the
     /// user.
-    fn report_to_panel(
-        &mut self,
-        to: u64,
-        agent: String,
-        panel: u64,
-        text: String,
-    ) -> Result<(), String> {
+    fn report_to_panel(&mut self, to: u64, agent: String, text: String) -> Result<(), String> {
         let Some(target) = self.agent_panels().find(|p| p.panel_id() == to) else {
             return Err(format!("panel {to} that handed it over is closed"));
         };
@@ -266,7 +292,7 @@ impl App {
             session: String::new(),
             agent,
             kind: OriginKind::Reply,
-            panel: Some(panel),
+            panel: None,
             hops,
         }))
     }

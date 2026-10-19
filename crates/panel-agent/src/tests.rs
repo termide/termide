@@ -11111,3 +11111,71 @@ fn a_followed_task_shows_its_log_and_opens_when_over() {
     assert!(!panel.is_watching() && !panel.is_delegate());
     assert_eq!(panel.session_path(), Some(path.as_path()));
 }
+
+/// A task handed over in the background has no running block: the strip
+/// lists it from the registry, its `✕` stops it, a click elsewhere asks for
+/// a panel following it, and closing the panel asks first.
+#[test]
+fn a_background_task_has_a_row_that_stops_or_follows_it() {
+    let mut panel = panel(vec![]);
+    let id = panel.panel_id();
+    let registration = crate::live::register(crate::live::LiveTask {
+        panel: Some(id),
+        call: "bg-1",
+        from: "default",
+        agent: "search",
+        task: "find the loader\nin src/",
+        session: None,
+        background: true,
+    });
+    registration.set_status("· read src/main.rs");
+    let (width, height) = (80, 30);
+    let rows = render_text(&mut panel, width, height);
+    let row = strip_row(&panel, crate::strip::StripTarget::Delegate(0));
+    let line = &rows[row as usize];
+    assert!(line.starts_with("& "), "{line}");
+    assert!(
+        line.contains("search") && line.contains("find the loader"),
+        "{line}"
+    );
+    assert!(line.contains("· read src/main.rs"), "{line}");
+    assert!(line.trim_end().ends_with('✕'), "{line}");
+    assert!(panel
+        .needs_close_confirmation()
+        .is_some_and(|text| text.contains('1')));
+
+    // Elsewhere on the row: a panel following it is asked for.
+    let events = panel.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 2,
+            row,
+            modifiers: KeyModifiers::NONE,
+        },
+        Rect::new(0, 0, width, height),
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        PanelEvent::FocusDelegate { panel, call } if *panel == id && call == "bg-1"
+    )));
+    // `✕` stops it.
+    render_text(&mut panel, width, height);
+    panel.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: panel.strip_stop_x,
+            row,
+            modifiers: KeyModifiers::NONE,
+        },
+        Rect::new(0, 0, width, height),
+    );
+    assert_eq!(
+        registration.control().ended_by_user(),
+        Some("the user stopped the subagent")
+    );
+    // Over: the row and the question on closing go.
+    drop(registration);
+    let rows = render_text(&mut panel, width, height);
+    assert!(rows.iter().all(|line| !line.contains("find the loader")));
+    assert!(panel.needs_close_confirmation().is_none());
+}

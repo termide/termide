@@ -12,6 +12,7 @@ mod export;
 mod failure;
 mod held;
 mod input;
+pub mod live;
 mod mcp;
 mod peers;
 mod pending;
@@ -956,6 +957,9 @@ pub struct AgentPanel {
     /// The state strip's rows as last drawn: each one's screen row, what it
     /// stands for and whether it has a `✕`; a click maps back to one.
     strip_hits: Vec<(u16, strip::StripTarget, bool)>,
+    /// The calls of the tasks handed over in the background, as the strip
+    /// last listed them: a click on one of their rows maps back to one.
+    strip_delegates: Vec<String>,
     /// The column of the strip's `✕` buttons as last drawn.
     strip_stop_x: u16,
     /// The run controls last put on the prompt's border, in order, so a
@@ -1268,6 +1272,7 @@ impl AgentPanel {
             permission_wait: None,
             task_clocks: HashMap::new(),
             strip_hits: Vec::new(),
+            strip_delegates: Vec::new(),
             strip_stop_x: 0,
             run_buttons: Vec::new(),
             queued_texts: VecDeque::new(),
@@ -1730,6 +1735,11 @@ impl Panel for AgentPanel {
         // Another agent waits for the task this panel runs, busy or not.
         if let Some(text) = self.delegate_close_confirmation() {
             return Some(text);
+        }
+        // The tasks it handed over in the background stop with it.
+        let delegates = live::background_of(self.panel_id).len();
+        if delegates > 0 {
+            return Some(termide_i18n::t().agent_close_confirm_delegates_fmt(delegates));
         }
         self.work_under_way()
             .then(|| termide_i18n::t().agent_close_confirm_working().to_string())

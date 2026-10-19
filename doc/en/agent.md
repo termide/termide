@@ -1711,20 +1711,25 @@ to their own connection.
 
 #### In the background
 
-A `task` call with `background` does not wait: the task goes to an agent
-panel — a free one, else a new one beside the others — whatever
-`subagent_run` says, and the call returns as soon as a panel has taken it,
-naming that panel. The delegating agent carries on, and when the task is over
-its answer reaches the agent as a message of the delegate's, a step reading
-`& Receiving reply from <delegate> · …`, the way an answer to `send_message`
-does: an idle
-agent starts a turn on it, a busy one reads it at its next step. Several
-background tasks can run at once, each in its panel. Closing that panel ends
-the task, and the agent hears so; stopping the delegating panel's run does
-not reach a task it handed over in the background. Each answer counts among
-the messages agents pass one another without you, so a chain of background
-tasks is cut off as such messages are. Only an agent in a panel can hand a
-task over in the background: a headless run has nowhere to take the answer.
+A `task` call with `background` does not wait: the task runs out of sight
+as a delegate the call waits for does, whatever `subagent_run` says, and the
+call returns at once. The delegating agent carries on, and when the task is
+over its answer reaches the agent as a message of the delegate's, a step
+reading `& Receiving reply from <delegate> · …`, the way an answer to
+`send_message` does: an idle agent starts a turn on it, a busy one reads it
+at its next step. Several background tasks can run at once. With no block
+running for it, each has a row above the delegating panel's input
+(`& Delegating to · agent  task`, what it did last and its time) with a `✕`
+that stops it; a click elsewhere on the row, or `o` on the `task` block,
+opens a panel following it, as for any delegate (above). Its permission
+requests and questions come to the delegating panel as a delegate's do, and
+stay up when that panel's own run stops: stopping the run does not reach a
+task handed over in the background. Closing the delegating panel stops its
+tasks, after a confirmation that counts them, and the agent hears that each
+was stopped. Each answer counts among the messages agents pass one another
+without you, so a chain of background tasks is cut off as such messages
+are. Only an agent in a panel can hand a task over in the background: a
+headless run has nowhere to take the answer.
 
 ### Talking to other panels
 

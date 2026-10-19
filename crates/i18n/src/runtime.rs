@@ -1259,6 +1259,13 @@ impl Translation for RuntimeTranslation {
         self.format("agent_close_confirm_delegate_fmt", &[("agent", agent)])
     }
 
+    fn agent_close_confirm_delegates_fmt(&self, count: usize) -> String {
+        self.format(
+            "agent_close_confirm_delegates_fmt",
+            &[("count", &count.to_string())],
+        )
+    }
+
     fn agent_take_over_confirm_fmt(&self, agent: &str) -> String {
         self.format("agent_take_over_confirm_fmt", &[("agent", agent)])
     }

@@ -27,6 +27,9 @@ pub(crate) enum StripTarget {
     Autorun(Autorun),
     /// A running subagent, by its block's index.
     Task(usize),
+    /// A task handed over in the background that still runs, by its place
+    /// among the strip's last such rows.
+    Delegate(usize),
     /// A command the agent moved to the background, by its block's index.
     Background(usize),
     /// The count of rows left out.
@@ -244,7 +247,8 @@ impl AgentPanel {
             }
             rows.push(row);
         }
-        let tasks = self.running_tasks();
+        let mut tasks = self.running_tasks();
+        tasks.extend(self.background_tasks());
         let more = tasks.len().saturating_sub(STATE_QUEUED_ROWS);
         rows.extend(tasks.into_iter().take(STATE_QUEUED_ROWS));
         if more > 0 {
@@ -291,6 +295,39 @@ impl AgentPanel {
         }
         self.task_clocks.retain(|id, _| seen.contains(id));
         rows
+    }
+
+    /// The rows of the tasks this panel handed over in the background that
+    /// still run: worded as a running subagent's, with a `✕` that stops it.
+    /// Their calls have returned, so no running block stands for them.
+    fn background_tasks(&mut self) -> Vec<StripRow> {
+        let t = termide_i18n::t();
+        let tasks = crate::live::background_of(self.panel_id);
+        self.strip_delegates = tasks.iter().map(|task| task.call.clone()).collect();
+        tasks
+            .into_iter()
+            .enumerate()
+            .map(|(index, task)| {
+                let first = task
+                    .task
+                    .lines()
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                let mut row = StripRow::new(
+                    "&",
+                    t.agent_tool_task().to_string(),
+                    first,
+                    StripTarget::Delegate(index),
+                )
+                .since(task.started)
+                .stoppable();
+                row.notes.push(task.agent);
+                row.status = task.status;
+                row
+            })
+            .collect()
     }
 
     /// The rows of the commands the agent moved to the background that
@@ -377,6 +414,24 @@ impl AgentPanel {
                     });
                 }
                 return events;
+            }
+            // `✕` stops a task handed over in the background; elsewhere on
+            // the row a panel following it comes forward.
+            StripTarget::Delegate(index) => {
+                let Some(call) = self.strip_delegates.get(index).cloned() else {
+                    return vec![PanelEvent::NeedsRedraw];
+                };
+                if on_stop {
+                    crate::live::stop(self.panel_id, &call);
+                    return vec![PanelEvent::NeedsRedraw];
+                }
+                return vec![
+                    PanelEvent::NeedsRedraw,
+                    PanelEvent::FocusDelegate {
+                        panel: self.panel_id,
+                        call,
+                    },
+                ];
             }
             StripTarget::Background(index) => select(self, index),
             // `✕` takes the queue back into the input, as `↑` does: it goes

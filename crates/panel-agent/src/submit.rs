@@ -891,7 +891,6 @@ impl AgentPanel {
             self.history_pos = None;
             self.unqueue();
             self.note_delegate_stopped();
-            self.drop_waiting_cards();
             self.runtime.abort();
             self.stop_requested = Some(Instant::now());
         }

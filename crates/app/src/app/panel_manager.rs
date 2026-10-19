@@ -65,6 +65,15 @@ impl App {
             }
         }
 
+        // An agent panel's delegated tasks are its own: they stop with it.
+        if let Some(agent) = self.layout_manager.active_panel_mut().and_then(|panel| {
+            panel
+                .as_any()
+                .downcast_ref::<termide_panel_agent::AgentPanel>()
+        }) {
+            termide_panel_agent::live::stop_all(agent.panel_id());
+        }
+
         // Calculate available width for panel groups
         let terminal_width = self.state.terminal.width;
 

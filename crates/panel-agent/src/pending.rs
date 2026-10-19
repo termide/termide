@@ -243,14 +243,18 @@ pub(crate) fn suggestion_form(
 }
 
 impl AgentPanel {
-    /// Take down a permission card no one waits for any more — the external
-    /// agent gave the call up, or the run stopped — so it neither lingers
-    /// nor turns away the next call's question. Whether one was taken down.
-    pub(crate) fn drop_withdrawn_permission(&mut self) -> bool {
-        let withdrawn = matches!(
-            &self.pending,
-            Some(Pending::Permission { envelope, .. }) if envelope.withdrawn.is_cancelled()
-        );
+    /// Take down a permission or question card no one waits for any more —
+    /// the external agent gave the call up, the run or the delegate's task
+    /// stopped — so it neither lingers nor holds up the next one. Whether one
+    /// was taken down.
+    pub(crate) fn drop_withdrawn_card(&mut self) -> bool {
+        // The model's questions too: a delegate's are taken back when its
+        // task stops.
+        let withdrawn = match &self.pending {
+            Some(Pending::Permission { envelope, .. }) => envelope.withdrawn.is_cancelled(),
+            Some(Pending::Question { envelope, .. }) => envelope.withdrawn.is_cancelled(),
+            _ => false,
+        };
         if withdrawn {
             self.pending = None;
             self.end_permission_wait();
@@ -258,24 +262,12 @@ impl AgentPanel {
         withdrawn
     }
 
-    /// Turn away the requests and questions still waiting their turn behind
-    /// the card on screen: the run they belong to is stopping, so none of
-    /// them must show up after it.
-    pub(crate) fn drop_waiting_cards(&mut self) {
-        for envelope in self.permission_rx.try_iter() {
-            let _ = envelope.reply.send(PermissionAnswer::Deny);
-        }
-        for envelope in self.question_rx.try_iter() {
-            let _ = envelope.reply.send(QuestionReply::Declined);
-        }
-    }
-
     pub(crate) fn poll_permissions(&mut self) -> Vec<PanelEvent> {
         let mut events = Vec::new();
         loop {
             // The card before may have been given up just now: its prompter
             // returned before this question could be sent.
-            self.drop_withdrawn_permission();
+            self.drop_withdrawn_card();
             // Delegates working side by side ask at once: the next request
             // waits in the channel until the card on screen is answered.
             if self.pending.is_some() {
@@ -394,10 +386,18 @@ impl AgentPanel {
         let mut events = Vec::new();
         // Delegates working side by side ask at once: the next set waits in
         // the channel until the card on screen is answered.
-        while self.pending.is_none() {
+        loop {
+            self.drop_withdrawn_card();
+            if self.pending.is_some() {
+                break;
+            }
             let Ok(envelope) = self.question_rx.try_recv() else {
                 break;
             };
+            if envelope.withdrawn.is_cancelled() {
+                // Given up while it waited its turn.
+                continue;
+            }
             if envelope.questions.is_empty() {
                 let _ = envelope.reply.send(QuestionReply::Declined);
                 continue;

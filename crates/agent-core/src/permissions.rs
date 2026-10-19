@@ -604,6 +604,16 @@ impl ChannelPrompter {
         }
     }
 
+    /// This prompter, no longer ending with the panel's run: for a delegate
+    /// handed over in the background, which only its own stop ends.
+    #[must_use]
+    pub fn detached(&self) -> Self {
+        Self {
+            cancel: CancelToken::new(),
+            ..self.clone()
+        }
+    }
+
     fn stopped(&self) -> bool {
         self.cancel.is_cancelled() || self.stop.as_ref().is_some_and(CancelToken::is_cancelled)
     }

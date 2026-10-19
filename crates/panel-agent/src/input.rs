@@ -625,9 +625,12 @@ impl AgentPanel {
             Item::Tool {
                 call, result, live, ..
             } => {
-                // A delegated task still running is followed in a panel of
-                // its own, or the panel running it comes forward.
-                if call.name == "task" && result.is_none() {
+                // A delegated task still running — the call waiting for it,
+                // or handed over in the background — is followed in a panel
+                // of its own, or the panel running it comes forward.
+                if call.name == "task"
+                    && (result.is_none() || crate::live::is_running(self.panel_id, &call.id))
+                {
                     return vec![PanelEvent::FocusDelegate {
                         panel: self.panel_id,
                         call: call.id.clone(),

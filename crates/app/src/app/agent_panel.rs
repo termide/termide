@@ -603,6 +603,9 @@ impl AgentCatalog for FsCatalog {
                     let runner = Arc::clone(subagents);
                     let caller = name.to_string();
                     let run: SubagentRun = Arc::new(move |task, ctx, cancel, on_update| {
+                        if task.background {
+                            return runner.start_background(&caller, task, ctx).into();
+                        }
                         runner.run(&caller, task, ctx, cancel, on_update)
                     });
                     tools.insert(Arc::new(TaskTool::new(delegates, run)));
@@ -1551,6 +1554,60 @@ impl Subagents {
         (tools, skills, system_prompt)
     }
 
+    /// Hand `task`, the agent `caller`'s, over in the background: it runs
+    /// out of sight on a thread of its own, as a task a call waits for
+    /// does, and its answer reaches the delegating panel as a message of the
+    /// delegate's. What to tell the delegating agent, or why not.
+    fn start_background(
+        self: &Arc<Self>,
+        caller: &str,
+        task: &SubagentTask,
+        ctx: &ToolContext,
+    ) -> Result<String, String> {
+        let Some(parent) = ctx.panel else {
+            return Err(
+                "a background task reports to an agent panel, and this agent runs in none; \
+                 run it without `background`"
+                    .into(),
+            );
+        };
+        // Its answer starts the delegating agent anew, so it counts among the
+        // messages agents pass one another.
+        peers::may_hand_over(&self.project_root, parent)?;
+        let this = Arc::clone(self);
+        let ctx = ctx.clone();
+        let (caller, agent, prompt, call) = (
+            caller.to_string(),
+            task.agent.to_string(),
+            task.prompt.to_string(),
+            task.call.to_string(),
+        );
+        let thread_agent = agent.clone();
+        std::thread::Builder::new()
+            .name(format!("background-{agent}"))
+            .spawn(move || {
+                let task = SubagentTask {
+                    agent: &thread_agent,
+                    prompt: &prompt,
+                    call: &call,
+                    background: true,
+                };
+                // Nobody waits on the call: the user stops the task, from its
+                // row or a panel following it, or by closing its panel.
+                let outcome = this
+                    .delegate(&caller, &task, &ctx, &CancelToken::new(), &mut |_| {})
+                    .unwrap_or_else(|error| Err(error).into());
+                let text = background_report(&prompt, &thread_agent, &outcome);
+                peers::report(&this.project_root, parent, &thread_agent, text);
+            })
+            .map_err(|error| format!("cannot start the task: {error}"))?;
+        Ok(format!(
+            "{agent} took the task and works on it out of sight. Carry on: its answer comes \
+             to you later as a message of its own. Do not wait for it with tools, and do not \
+             hand the same task over again."
+        ))
+    }
+
     /// Run `task`, which the agent `caller` handed over.
     fn run(
         &self,
@@ -1607,10 +1664,20 @@ impl Subagents {
         // What the rules do not settle goes to the user of its parent's
         // panel, on a card headed with its name; with no one there it is
         // refused with a reason the model reads.
-        let prompter = ctx
-            .prompter
-            .as_ref()
-            .map(|prompter| prompter.for_delegate(name, budget.clone()));
+        // A task handed over in the background is no run's to stop: a stop
+        // of its panel's run leaves its cards up, its own takes them back.
+        let prompter = ctx.prompter.as_ref().map(|prompter| {
+            let prompter = prompter.for_delegate(name, budget.clone());
+            if task.background {
+                prompter.detached()
+            } else {
+                prompter
+            }
+        });
+        let asker = match asker {
+            Some(asker) if task.background => Some(asker.detached(budget.clone())),
+            asker => asker,
+        };
         let asks: Box<dyn termide_agent_core::PermissionPrompter> = match &prompter {
             Some(prompter) => Box::new(prompter.clone()),
             None => Box::new(AutoDenyPrompter::new(
@@ -1655,48 +1722,22 @@ impl Subagents {
             .as_ref()
             .map(|session| IntentLog::delegated(&session.intent))
             .unwrap_or_default();
-        // In the background the task always runs in a panel, whatever the
-        // settings say: the user sees the work no call waits on, and stops it
-        // by closing that panel. The call returns once a panel took it.
-        if task.background {
-            let Some(parent) = ctx.panel else {
-                return Err(
-                    "a background task reports to an agent panel, and this agent runs in none; \
-                     run it without `background`"
-                        .into(),
-                );
-            };
-            let request = in_panel::PanelDelegation {
-                place: SubagentPlace::Panel,
-                project_root: self.project_root.clone(),
-                cwd: self.cwd.clone(),
-                agent: name.to_string(),
-                connection,
-                mode: rules.mode,
-                lineage,
-                message,
-                cancel: CancelToken::new(),
-                intent,
-                report_to: Some(parent),
-            };
-            return in_panel::start_in_background(request, &self.cwd, max_turns)
-                .map(|started| Ok(started).into());
-        }
-
         // In a panel, when the settings say so and one takes the task: the
-        // user watches it there and answers what it asks, so an external
-        // agent can be a delegate too.
+        // user watches it there and answers what it asks. A task handed over
+        // in the background runs out of sight, on its thread, whatever they
+        // say: it is followed from its row in the delegating panel.
         let place = match definition
             .spec
             .subagent_run
             .unwrap_or(settings.subagent_run)
         {
-            SubagentPlace::Ask => self
-                .asks
-                .place(name, task.prompt, ctx.asker.as_ref(), cancel),
+            SubagentPlace::Ask if !task.background => {
+                self.asks
+                    .place(name, task.prompt, ctx.asker.as_ref(), cancel)
+            }
             place => place,
         };
-        if place.in_panel() {
+        if place.in_panel() && !task.background {
             let request = in_panel::PanelDelegation {
                 place,
                 project_root: self.project_root.clone(),
@@ -1708,7 +1749,6 @@ impl Subagents {
                 message: message.clone(),
                 cancel: CancelToken::new(),
                 intent: intent.clone(),
-                report_to: None,
             };
             if let Some(outcome) =
                 in_panel::run_in_panel(request, &self.cwd, max_turns, cancel, on_update)
@@ -1846,8 +1886,10 @@ impl Subagents {
         }
 
         // Followed from its parent's panel while it runs.
-        let live = live::register(ctx.panel, task.call, caller, task.prompt, log.path());
+        let live = register_live(ctx.panel, caller, task, &log);
         let user_stop = live.control().stop_token().clone();
+        let mut noted = noting(&live, on_update);
+        let on_update: &mut dyn FnMut(ToolUpdate) = &mut noted;
         let mut hooks = hooks;
         let mut report = SubagentReport::new(max_turns);
         let finished = std::sync::atomic::AtomicBool::new(false);
@@ -1921,7 +1963,9 @@ impl Subagents {
         on_update: &mut dyn FnMut(ToolUpdate),
     ) -> Result<SubagentOutcome, String> {
         // Followed from its parent's panel while it runs.
-        let live = live::register(run.panel, task.call, caller, task.prompt, log.path());
+        let live = register_live(run.panel, caller, task, &log);
+        let mut noted = noting(&live, on_update);
+        let on_update: &mut dyn FnMut(ToolUpdate) = &mut noted;
         let config = run.config;
         // The agent's own requests go where its parent's panel asks; with
         // no one there they come here, and are refused.
@@ -1979,6 +2023,65 @@ impl Subagents {
             on_update,
         );
         outcome.map(|outcome| log.into_outcome(outcome))
+    }
+}
+
+/// The message a background task's answer reaches the delegating agent as:
+/// which task it answers, then the delegate's last words or what went wrong.
+fn background_report(prompt: &str, agent: &str, outcome: &SubagentOutcome) -> String {
+    let task: String = prompt
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .take(120)
+        .collect();
+    let ellipsis = if task.len() < prompt.trim_end().len() {
+        "…"
+    } else {
+        ""
+    };
+    let head = format!(
+        "The background task you handed to {agent} is over (\"{task}{ellipsis}\"); \
+         do not reply to this message."
+    );
+    match &outcome.answer {
+        Ok(answer) => format!("{head}\n\nIts answer:\n\n{answer}"),
+        Err(error) => format!("{head}\n\nIt failed: {error}"),
+    }
+}
+
+/// Register the task `task` the agent `caller` of panel `panel` handed
+/// over, logged in `log`, for as long as it runs.
+fn register_live(
+    panel: Option<u64>,
+    caller: &str,
+    task: &SubagentTask,
+    log: &DelegateLog,
+) -> termide_panel_agent::live::Registration {
+    termide_panel_agent::live::register(termide_panel_agent::live::LiveTask {
+        panel,
+        call: task.call,
+        from: caller,
+        agent: task.agent,
+        task: task.prompt,
+        session: log.path(),
+        background: task.background,
+    })
+}
+
+/// `on_update`, noting each update's last line in `live` for the task's row:
+/// what the delegate did last.
+fn noting<'a>(
+    live: &'a termide_panel_agent::live::Registration,
+    on_update: &'a mut dyn FnMut(ToolUpdate),
+) -> impl FnMut(ToolUpdate) + 'a {
+    move |update| {
+        let ToolUpdate::Output(text) = &update;
+        if let Some(last) = text.lines().rev().find(|line| !line.trim().is_empty()) {
+            live.set_status(last.trim());
+        }
+        on_update(update);
     }
 }
 
@@ -3925,6 +4028,26 @@ done"#;
             .tools
             .get("task")
             .is_some());
+    }
+
+    #[test]
+    fn a_background_answer_names_its_task_and_says_how_it_ended() {
+        let done = background_report(
+            "find the parser\nin src/",
+            "search",
+            &Ok("in lex.rs".into()).into(),
+        );
+        assert!(
+            done.contains("handed to search") && done.contains("\"find the parser…\""),
+            "{done}"
+        );
+        assert!(done.ends_with("in lex.rs"), "{done}");
+        let failed = background_report(
+            "x",
+            "search",
+            &Err("the user stopped the subagent".into()).into(),
+        );
+        assert!(failed.contains("\"x\"") && failed.contains("It failed: the user stopped"));
     }
 
     /// An agent may hand a task to a fresh copy of itself, so a lone
