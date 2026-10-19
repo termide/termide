@@ -442,6 +442,9 @@ fn render_overlay(
         terminal_width: state.terminal.width,
         terminal_height: state.terminal.height,
         omit_bottom_border: false,
+        // Its controls are on the prompt's border; there is no layout here
+        // for the menu to act on.
+        omit_menu_button: true,
     };
     render_expanded_panel(
         panel,
@@ -737,6 +740,7 @@ fn render_panel_group(
                 // Bottom border is only skipped when there's no room
                 // for it; expanded panels always render `Block::ALL`.
                 omit_bottom_border: false,
+                omit_menu_button: false,
             };
             render_expanded_panel(
                 panel,

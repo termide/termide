@@ -335,6 +335,34 @@ mod tests {
     }
 
     #[test]
+    fn a_panel_over_the_layout_has_no_menu_button() {
+        let theme = Theme::default();
+        let config = Arc::new(Config::default());
+        let header = |omit_menu_button: bool| {
+            let mut panel: Box<dyn Panel> = Box::new(Waiting(false));
+            let area = Rect::new(0, 0, 30, 4);
+            let mut buf = Buffer::empty(area);
+            let params = ExpandedPanelParams {
+                tab_size: 4,
+                word_wrap: false,
+                terminal_width: 30,
+                terminal_height: 4,
+                omit_bottom_border: false,
+                omit_menu_button,
+            };
+            render_expanded_panel(
+                &mut panel, area, &mut buf, true, 0, &theme, &config, params, 1,
+            );
+            (0..30)
+                .map(|x| buf[(x, 0)].symbol().to_string())
+                .collect::<String>()
+        };
+        assert!(header(false).contains("[≡] waiting"), "{}", header(false));
+        let bare = header(true);
+        assert!(!bare.contains('≡') && bare.contains(" waiting"), "{bare}");
+    }
+
+    #[test]
     fn test_truncate_only_status_no_main() {
         // Edge case: title that's mostly status
         let title = "x (very long status message here)";
@@ -432,6 +460,9 @@ pub struct ExpandedPanelParams {
     /// (with its title) acts as a visual separator, saving one row that
     /// would otherwise be wasted on the duplicated divider line.
     pub omit_bottom_border: bool,
+    /// Leave the `[≡]` menu button out of the header: a panel shown over the
+    /// layout has its controls elsewhere, and no layout to act on.
+    pub omit_menu_button: bool,
 }
 
 /// Style of a panel's border: accented when focused, dimmed otherwise.
@@ -574,6 +605,15 @@ pub fn render_expanded_panel(
     // Create title: [≡] icon Title (with emoji) or [≡] Title (unicode mode)
     // Smart truncate title to fit within panel width
     let (mut title_spans, buttons_width) = header_buttons(&**panel, is_focused, style, theme, " ");
+    if params.omit_menu_button && !title_spans.is_empty() {
+        // `[≡]` is the first span; the icon and its spacing stay.
+        title_spans.remove(0);
+    }
+    let buttons_width = if params.omit_menu_button {
+        buttons_width.saturating_sub(3)
+    } else {
+        buttons_width
+    };
     // Available width: panel width - 2 (borders) - buttons - 1 (trailing space)
     let available_for_title = (area.width as usize).saturating_sub(2 + buttons_width + 1);
     let truncated_title = smart_truncate_title(&title, available_for_title, panel.title_cut());
