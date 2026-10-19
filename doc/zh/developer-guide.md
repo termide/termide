@@ -153,6 +153,7 @@ termide/
 │   ├── panel-operations/     # 后台操作面板
 │   ├── panel-outline/        # 大纲面板
 │   ├── panel-terminal/       # 终端模拟器面板（PTY）
+│   ├── plugins/              # 插件：清单、JSON-RPC 与进程宿主
 │   ├── project/              # 已保存的项目布局
 │   ├── richtext/             # 富文本布局引擎（样式片段转为自动换行的行）
 │   ├── state/                # 应用状态（batch、layout、operations、ui）

@@ -157,6 +157,7 @@ termide/
 │   ├── panel-operations/     # Background operations panel
 │   ├── panel-outline/        # Outline panel
 │   ├── panel-terminal/       # Terminal emulator panel (PTY)
+│   ├── plugins/              # Plugins: manifests, the JSON-RPC peer and the process host
 │   ├── project/              # Saved project layouts
 │   ├── richtext/             # Rich-text layout engine (styled runs to wrapped lines)
 │   ├── state/                # Application state (batch, layout, operations, ui)
