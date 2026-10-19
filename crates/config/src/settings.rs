@@ -93,6 +93,11 @@ pub struct Config {
     /// AI settings (model access and the coding agent panel).
     #[serde(default)]
     pub ai: AiSettings,
+
+    /// Plugin switches and settings, by plugin name. The plugins themselves
+    /// live in the global plugins directory, never in config.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub plugins: std::collections::BTreeMap<String, crate::PluginSettings>,
 }
 
 /// AI settings: the connections to models and what the agent may do.
@@ -1289,6 +1294,7 @@ impl From<LegacyConfig> for Config {
             vault: VaultSettings::default(),
             highlight: HighlightSettings::default(),
             ai: AiSettings::default(),
+            plugins: std::collections::BTreeMap::new(),
         }
     }
 }

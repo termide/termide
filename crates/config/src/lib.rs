@@ -10,6 +10,7 @@ pub mod constants;
 pub mod diff;
 pub mod keybindings;
 mod overrides;
+mod plugins;
 mod settings;
 mod words;
 mod xdg;
@@ -28,6 +29,8 @@ pub use keybindings::{
     ViewerKeybindings,
 };
 pub use overrides::{RuntimeOverrides, CONSOLE_THEME};
+use plugins::Layer;
+pub use plugins::{plugin_enabled, PluginMode, PluginSettings};
 pub use settings::{builtin_web_engines, WEB_BACKENDS, WEB_DISPLAYS};
 pub use settings::{is_cli_provider, permission_modes};
 pub use settings::{
@@ -222,8 +225,9 @@ pub struct LayeredConfig {
 
 /// Overlay the config file at `path`, if it exists, on `value`, keeping
 /// only what still parses. What was left out is reported in `warnings`,
-/// after the file is copied aside.
-fn overlay_file(value: &mut toml::Value, path: &Path, warnings: &mut Vec<String>) {
+/// after the file is copied aside. Keys the file's `layer` may not set
+/// (see [`plugins::restrict_layer`]) are dropped and reported too.
+fn overlay_file(value: &mut toml::Value, path: &Path, layer: Layer, warnings: &mut Vec<String>) {
     if !path.exists() {
         return;
     }
@@ -233,6 +237,14 @@ fn overlay_file(value: &mut toml::Value, path: &Path, warnings: &mut Vec<String>
     let problem = match parsed {
         Ok(mut overlay) => {
             migrate_legacy(&mut overlay);
+            let dropped = plugins::restrict_layer(&mut overlay, layer);
+            if !dropped.is_empty() {
+                warnings.push(format!(
+                    "Config {}: ignored {}, which this file may not set",
+                    path.display(),
+                    dropped.join(", ")
+                ));
+            }
             let rejected = overlay_valid(value, &overlay);
             if rejected.is_empty() {
                 return;
@@ -428,12 +440,12 @@ impl Config {
         let mut warnings = Vec::new();
 
         if let Some(path) = global_path {
-            overlay_file(&mut value, path, &mut warnings);
+            overlay_file(&mut value, path, Layer::Global, &mut warnings);
         }
         // The global layer (defaults + global) is the baseline for
         // diff-saving the project file later.
         let global_layer_value = value.clone();
-        overlay_file(&mut value, project_path, &mut warnings);
+        overlay_file(&mut value, project_path, Layer::Project, &mut warnings);
 
         // Every overlaid key was checked, so both layers parse.
         let mut effective: Self = value.try_into()?;
@@ -519,9 +531,13 @@ impl Config {
     ) -> Result<(Config, Vec<String>)> {
         let mut value = toml::Value::try_from(global_layer)?;
         let mut warnings = Vec::new();
+        // A global layer read straight from its file (saved in the editor)
+        // has not been through `overlay_file`.
+        plugins::restrict_layer(&mut value, Layer::Global);
         overlay_file(
             &mut value,
             &project_config_path(project_root),
+            Layer::Project,
             &mut warnings,
         );
         let mut effective: Self = value.try_into()?;
@@ -777,6 +793,35 @@ mod layered_load_tests {
 
     fn binding(text: &str) -> Option<KeyBinding> {
         Some(KeyBinding::Single(text.to_string()))
+    }
+
+    #[test]
+    fn plugin_mode_comes_from_the_global_file_and_the_switch_from_the_project() {
+        let (loaded, _dir) = layered(
+            "[plugins.deploy]\nmode = \"opt-in\"\nenabled = true\n\
+             [plugins.risky]\nmode = \"off\"\n\
+             [plugins.fmt.settings]\nwidth = 80\n",
+            Some(
+                "[plugins.deploy]\nenabled = true\n\
+                 [plugins.risky]\nmode = \"on\"\nenabled = true\n\
+                 [plugins.fmt]\nenabled = false\n[plugins.fmt.settings]\nwidth = 100\n",
+            ),
+        );
+        let plugins = &loaded.effective.plugins;
+        assert!(plugin_enabled(plugins, "deploy"));
+        assert!(
+            !plugin_enabled(plugins, "risky"),
+            "a project cannot lift `off`"
+        );
+        assert!(!plugin_enabled(plugins, "fmt"));
+        assert!(plugin_enabled(plugins, "unlisted"));
+        assert_eq!(plugins["fmt"].settings["width"], toml::Value::Integer(100));
+        // The global file's own switch is ignored: without the project,
+        // `deploy` stays asleep.
+        assert!(!plugin_enabled(&loaded.global_layer.plugins, "deploy"));
+        assert_eq!(loaded.warnings.len(), 2, "{:?}", loaded.warnings);
+        assert!(loaded.warnings[0].contains("plugins.deploy.enabled"));
+        assert!(loaded.warnings[1].contains("plugins.risky.mode"));
     }
 
     #[test]
