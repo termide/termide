@@ -85,6 +85,8 @@ pub const EDITOR_OPEN: &str = "editor/open";
 pub const EDITOR_COMPLETION: &str = "editor/completion";
 pub const EDITOR_HOVER: &str = "editor/hover";
 pub const EDITOR_CODE_ACTIONS: &str = "editor/code_actions";
+pub const EDITOR_DEFINITION: &str = "editor/definition";
+pub const EDITOR_REFERENCES: &str = "editor/references";
 pub const TERMINAL_RUN: &str = "terminal/run";
 pub const PANEL_OPEN: &str = "panel/open";
 pub const PANEL_UPDATE: &str = "panel/update";
@@ -213,6 +215,10 @@ pub struct Providers {
     pub hover: Vec<String>,
     #[serde(default)]
     pub code_actions: Vec<String>,
+    #[serde(default)]
+    pub definition: Vec<String>,
+    #[serde(default)]
+    pub references: Vec<String>,
 }
 
 impl Providers {

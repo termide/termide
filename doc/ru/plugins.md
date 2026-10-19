@@ -182,7 +182,8 @@ enabled = false
 `python`, … — `*` для всех), он называет в `providers` среди своих добавлений:
 
 ```json
-"providers": { "completion": ["python"], "hover": ["*"], "codeActions": ["python"] }
+"providers": { "completion": ["python"], "hover": ["*"], "codeActions": ["python"],
+               "definition": ["python"], "references": ["python"] }
 ```
 
 | Запрос | Параметры | Ответ |
@@ -190,10 +191,12 @@ enabled = false
 | `editor/completion` | `path`, `line`, `col` | `{ "items": [...] }`, `CompletionItem` из LSP (`label`, `insertText`, `detail`, `kind`, …) |
 | `editor/hover` | `path`, `line`, `col` | `{ "markdown" }` |
 | `editor/code_actions` | `path`, `line`, `col`, `end_line`, `end_col`, `diagnostics` (`line`, `col`, `end_line`, `end_col`, `message`, `source`) | `{ "actions": [{ "title", "edits" }] }`, правки как в `editor/edit` |
+| `editor/definition`, `editor/references` | `path`, `line`, `col` | `{ "locations": [{ "path", "line", "col", "end_line"?, "end_col"? }] }`, пути абсолютные |
 
 termide спрашивает плагины проекта файла вместе с сервером и показывает один
 ответ: пункты дополнения вместе, подсказки одну под другой, исправления одним
-списком. У плагина есть 1,5 секунды; ответивший позже в этот ответ не
+списком, места для перехода (`F12`) и ссылки вместе. У плагина есть
+1,5 секунды; ответивший позже в этот ответ не
 попадает. Исправление меняет только файл, о котором спрашивали, в его
 открытом буфере, а его название начинается с имени плагина, чтобы было видно,
 кто его предлагает. От плагина берётся не больше 500 пунктов, 50 исправлений и

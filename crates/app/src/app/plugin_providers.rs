@@ -15,8 +15,8 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionResponse, CompletionItem,
-    CompletionResponse, Diagnostic, Hover, HoverContents, MarkupContent, MarkupKind, Position,
-    Range, WorkspaceEdit,
+    CompletionResponse, Diagnostic, GotoDefinitionResponse, Hover, HoverContents, Location,
+    MarkupContent, MarkupKind, Position, Range, WorkspaceEdit,
 };
 use serde_json::{json, Value};
 use termide_lsp::extra::{ExtraProviders, EXTRA_WAIT};
@@ -183,6 +183,36 @@ fn read_actions(plugin: &str, path: &Path, answer: &Value) -> Option<CodeActionR
     (!actions.is_empty()).then_some(actions)
 }
 
+/// The most places one plugin points at.
+const MAX_LOCATIONS: usize = 1000;
+
+/// Places from a plugin's answer `{ "locations": [{ "path", "line", "col",
+/// "end_line"?, "end_col"? }] }`; a path must be absolute.
+fn read_locations(answer: &Value) -> Option<Vec<Location>> {
+    let locations: Vec<Location> = answer["locations"]
+        .as_array()?
+        .iter()
+        .take(MAX_LOCATIONS)
+        .filter_map(|place| {
+            let path = Path::new(place["path"].as_str()?);
+            if !path.is_absolute() {
+                return None;
+            }
+            let number = |field: &str| place[field].as_u64().and_then(|n| u32::try_from(n).ok());
+            let start = Position::new(number("line")?, number("col").unwrap_or(0));
+            let end = Position::new(
+                number("end_line").unwrap_or(start.line),
+                number("end_col").unwrap_or(start.character),
+            );
+            Some(Location::new(
+                termide_lsp::path_to_uri(path)?,
+                Range::new(start, end),
+            ))
+        })
+        .collect();
+    (!locations.is_empty()).then_some(locations)
+}
+
 /// What the plugin is told of a diagnostic in a code-action request.
 fn diagnostic_param(diagnostic: &Diagnostic) -> Value {
     json!({
@@ -262,6 +292,44 @@ impl ExtraProviders for ProviderHub {
             })
             .collect()
     }
+
+    fn definition(
+        &self,
+        lang: &str,
+        file_path: &Path,
+        position: Position,
+    ) -> Vec<Receiver<Option<GotoDefinitionResponse>>> {
+        self.answering(file_path, lang, |p| &p.definition)
+            .into_iter()
+            .map(|(_, peer)| {
+                ask(
+                    peer,
+                    protocol::EDITOR_DEFINITION,
+                    at(file_path, position),
+                    |answer| read_locations(&answer).map(GotoDefinitionResponse::Array),
+                )
+            })
+            .collect()
+    }
+
+    fn references(
+        &self,
+        lang: &str,
+        file_path: &Path,
+        position: Position,
+    ) -> Vec<Receiver<Option<Vec<Location>>>> {
+        self.answering(file_path, lang, |p| &p.references)
+            .into_iter()
+            .map(|(_, peer)| {
+                ask(
+                    peer,
+                    protocol::EDITOR_REFERENCES,
+                    at(file_path, position),
+                    |answer| read_locations(&answer),
+                )
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -306,5 +374,13 @@ mod tests {
         assert_eq!(action.title, "lint: Fix it");
         let changes = action.edit.as_ref().unwrap().changes.as_ref().unwrap();
         assert_eq!(changes.len(), 1, "the file asked about and no other");
+
+        let places = read_locations(&json!({ "locations": [
+            { "path": "/p/lib.rs", "line": 3, "col": 4 },
+            { "path": "relative.rs", "line": 1 },
+        ] }))
+        .unwrap();
+        assert_eq!(places.len(), 1, "a relative path is no place");
+        assert_eq!(places[0].range.start, Position::new(3, 4));
     }
 }

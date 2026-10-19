@@ -376,9 +376,14 @@ impl LspManager {
         file_path: &Path,
         position: Position,
     ) -> Option<mpsc::Receiver<Option<GotoDefinitionResponse>>> {
-        let server = self.get_server(lang, file_path)?;
-        let uri = path_to_uri(file_path)?;
-        Some(server.goto_definition(uri, position))
+        let from_server = self.get_server(lang, file_path).and_then(|server| {
+            let uri = path_to_uri(file_path)?;
+            Some(server.goto_definition(uri, position))
+        });
+        let extras = extra::extra()
+            .map(|extra| extra.definition(lang, file_path, position))
+            .unwrap_or_default();
+        extra::merged(from_server, extras, extra::merge_definitions)
     }
 
     /// Request find-references at position
@@ -389,9 +394,14 @@ impl LspManager {
         position: Position,
         include_declaration: bool,
     ) -> Option<mpsc::Receiver<Option<Vec<Location>>>> {
-        let server = self.get_server(lang, file_path)?;
-        let uri = path_to_uri(file_path)?;
-        Some(server.references(uri, position, include_declaration))
+        let from_server = self.get_server(lang, file_path).and_then(|server| {
+            let uri = path_to_uri(file_path)?;
+            Some(server.references(uri, position, include_declaration))
+        });
+        let extras = extra::extra()
+            .map(|extra| extra.references(lang, file_path, position))
+            .unwrap_or_default();
+        extra::merged(from_server, extras, extra::merge_references)
     }
 
     /// Request rename symbol at position

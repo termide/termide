@@ -131,7 +131,8 @@ enabled = false
 插件可以像语言服务器那样在编辑器中作答：与服务器并列，或为没有服务器的语言作答。它在贡献中的 `providers` 里按 LSP id（`rust`、`python`……——`*` 表示全部）列出语言：
 
 ```json
-"providers": { "completion": ["python"], "hover": ["*"], "codeActions": ["python"] }
+"providers": { "completion": ["python"], "hover": ["*"], "codeActions": ["python"],
+               "definition": ["python"], "references": ["python"] }
 ```
 
 | 请求 | 参数 | 回答 |
@@ -139,8 +140,9 @@ enabled = false
 | `editor/completion` | `path`、`line`、`col` | `{ "items": [...] }`，LSP 的 `CompletionItem`（`label`、`insertText`、`detail`、`kind`……） |
 | `editor/hover` | `path`、`line`、`col` | `{ "markdown" }` |
 | `editor/code_actions` | `path`、`line`、`col`、`end_line`、`end_col`、`diagnostics`（`line`、`col`、`end_line`、`end_col`、`message`、`source`） | `{ "actions": [{ "title", "edits" }] }`，编辑同 `editor/edit` |
+| `editor/definition`、`editor/references` | `path`、`line`、`col` | `{ "locations": [{ "path", "line", "col", "end_line"?, "end_col"? }] }`，路径为绝对路径 |
 
-termide 会与服务器一起询问文件所属项目的插件，并给出一个合并的回答：补全项合在一起，悬停提示上下排列，修复合成一个列表。插件有 1.5 秒；更晚的回答不会进入这次结果。修复只修改被询问的那个文件，作用于其打开的缓冲区，标题以插件名开头，以便看清是谁的建议。每个插件最多取 500 个补全项、50 个修复和 20 000 个字符的悬停内容。
+termide 会与服务器一起询问文件所属项目的插件，并给出一个合并的回答：补全项合在一起，悬停提示上下排列，修复合成一个列表，跳转位置（`F12`）和引用也合在一起。插件有 1.5 秒；更晚的回答不会进入这次结果。修复只修改被询问的那个文件，作用于其打开的缓冲区，标题以插件名开头，以便看清是谁的建议。每个插件最多取 500 个补全项、50 个修复和 20 000 个字符的悬停内容。
 
 ### 编辑器
 

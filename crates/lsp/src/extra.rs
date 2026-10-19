@@ -11,8 +11,9 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use lsp_types::{
-    CodeActionResponse, CompletionItem, CompletionList, CompletionResponse, Diagnostic, Hover,
-    HoverContents, MarkupContent, MarkupKind, Position, Range,
+    CodeActionResponse, CompletionItem, CompletionList, CompletionResponse, Diagnostic,
+    GotoDefinitionResponse, Hover, HoverContents, Location, MarkupContent, MarkupKind, Position,
+    Range,
 };
 
 /// How long the extra sources have, counted from the request.
@@ -39,6 +40,22 @@ pub trait ExtraProviders: Send + Sync {
         range: Range,
         diagnostics: &[Diagnostic],
     ) -> Vec<Receiver<Option<CodeActionResponse>>>;
+    fn definition(
+        &self,
+        _lang: &str,
+        _file_path: &Path,
+        _position: Position,
+    ) -> Vec<Receiver<Option<GotoDefinitionResponse>>> {
+        Vec::new()
+    }
+    fn references(
+        &self,
+        _lang: &str,
+        _file_path: &Path,
+        _position: Position,
+    ) -> Vec<Receiver<Option<Vec<Location>>>> {
+        Vec::new()
+    }
 }
 
 static EXTRA: OnceLock<Arc<dyn ExtraProviders>> = OnceLock::new();
@@ -142,6 +159,29 @@ fn marked_text(marked: lsp_types::MarkedString) -> String {
             format!("```{}\n{}\n```", code.language, code.value)
         }
     }
+}
+
+pub(crate) fn merge_definitions(
+    answers: Vec<GotoDefinitionResponse>,
+) -> Option<GotoDefinitionResponse> {
+    let mut locations = Vec::new();
+    for answer in answers {
+        match answer {
+            GotoDefinitionResponse::Scalar(location) => locations.push(location),
+            GotoDefinitionResponse::Array(more) => locations.extend(more),
+            GotoDefinitionResponse::Link(links) => locations.extend(
+                links
+                    .into_iter()
+                    .map(|link| Location::new(link.target_uri, link.target_selection_range)),
+            ),
+        }
+    }
+    (!locations.is_empty()).then_some(GotoDefinitionResponse::Array(locations))
+}
+
+pub(crate) fn merge_references(answers: Vec<Vec<Location>>) -> Option<Vec<Location>> {
+    let locations: Vec<Location> = answers.into_iter().flatten().collect();
+    (!locations.is_empty()).then_some(locations)
 }
 
 pub(crate) fn merge_actions(answers: Vec<CodeActionResponse>) -> Option<CodeActionResponse> {

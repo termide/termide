@@ -180,7 +180,8 @@ servers or for a language that has none. It names the languages, by LSP id
 (`rust`, `python`, … — `*` for all), in `providers` among its contributions:
 
 ```json
-"providers": { "completion": ["python"], "hover": ["*"], "codeActions": ["python"] }
+"providers": { "completion": ["python"], "hover": ["*"], "codeActions": ["python"],
+               "definition": ["python"], "references": ["python"] }
 ```
 
 | Request | Params | Answer |
@@ -188,10 +189,12 @@ servers or for a language that has none. It names the languages, by LSP id
 | `editor/completion` | `path`, `line`, `col` | `{ "items": [...] }`, LSP `CompletionItem`s (`label`, `insertText`, `detail`, `kind`, …) |
 | `editor/hover` | `path`, `line`, `col` | `{ "markdown" }` |
 | `editor/code_actions` | `path`, `line`, `col`, `end_line`, `end_col`, `diagnostics` (`line`, `col`, `end_line`, `end_col`, `message`, `source`) | `{ "actions": [{ "title", "edits" }] }`, edits as in `editor/edit` |
+| `editor/definition`, `editor/references` | `path`, `line`, `col` | `{ "locations": [{ "path", "line", "col", "end_line"?, "end_col"? }] }`, paths absolute |
 
 termide asks the plugins of the file's project with the server and shows one
 answer: the completion items together, the hovers one under the other, the
-fixes in one list. A plugin has 1.5 seconds; one that answers later is left
+fixes in one list, the places to go to (`F12`) and the references together. A
+plugin has 1.5 seconds; one that answers later is left
 out of that answer. A fix applies to the file asked about and nothing else,
 in its open buffer, and its title starts with the plugin's name, so it is
 clear who suggests it. At most 500 items, 50 fixes and 20 000 characters of
