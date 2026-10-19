@@ -5270,6 +5270,7 @@ dependencies = [
  "tempfile",
  "termide-agent-core",
  "termide-keyboard",
+ "termide-project",
  "toml",
  "toml_edit",
 ]

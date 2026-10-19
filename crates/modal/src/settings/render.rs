@@ -385,6 +385,15 @@ impl SettingsModal {
                             fit_width(error.to_string(), room),
                             Style::default().fg(theme.error),
                         );
+                    } else if self.is_global_only(field_idx) {
+                        let x = value_x + display_value.width() + 2;
+                        let room = (area.x as usize + area.width as usize).saturating_sub(x);
+                        buf.set_string(
+                            x as u16,
+                            y,
+                            fit_width(i18n::t().settings_global_only().to_string(), room),
+                            Style::default().fg(theme.disabled),
+                        );
                     }
                 }
                 ContentRow::ConnectionButtons

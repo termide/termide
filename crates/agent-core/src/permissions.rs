@@ -306,6 +306,12 @@ pub struct PermissionRules {
     /// rules because they count in modes those do not; never written out.
     #[serde(skip)]
     pub session: RuleTables,
+    /// "Allow always" answers given for the project, kept in termide's own
+    /// data rather than in the repository (whose config may not allow
+    /// anything); they count as the configured rules do. Never written out
+    /// with the config.
+    #[serde(skip)]
+    pub granted: RuleTables,
 }
 
 impl PermissionRules {
@@ -322,7 +328,9 @@ impl PermissionRules {
     /// `subject`.
     #[must_use]
     pub fn evaluate(&self, tool: &str, subject: &str) -> Option<Decision> {
-        evaluate_rules(&self.tools, tool, subject)
+        let configured = evaluate_rules(&self.tools, tool, subject);
+        let granted = evaluate_rules(&self.granted, tool, subject);
+        configured.max(granted)
     }
 
     /// Strictest decision among this session's answers for `tool` that match
@@ -336,9 +344,10 @@ impl PermissionRules {
     /// mode sets aside.
     #[must_use]
     pub fn evaluate_narrow(&self, tool: &str, subject: &str) -> Option<Decision> {
-        self.tools
-            .get(tool)?
-            .iter()
+        [&self.tools, &self.granted]
+            .into_iter()
+            .filter_map(|tables| tables.get(tool))
+            .flatten()
             .filter(|(pattern, decision)| {
                 **decision != Decision::Allow || !broad_allow(tool, pattern)
             })
@@ -4117,5 +4126,27 @@ mod prompter_tests {
         let (mut prompter, rx) = permission_channel(CancelToken::new());
         drop(rx);
         assert_eq!(prompter.ask(&request()), PermissionAnswer::Deny);
+    }
+}
+
+#[cfg(test)]
+mod granted_tests {
+    use super::*;
+
+    #[test]
+    fn granted_rules_count_beside_the_configured_ones_and_stay_out_of_the_file() {
+        let mut rules = PermissionRules::default();
+        rules.add("bash", "rm *", Decision::Deny);
+        add_rule(&mut rules.granted, "bash", "cargo *", Decision::Allow);
+        add_rule(&mut rules.granted, "bash", "*", Decision::Allow);
+        assert_eq!(rules.evaluate("bash", "cargo test"), Some(Decision::Allow));
+        // The strictest still wins.
+        assert_eq!(rules.evaluate("bash", "rm -rf x"), Some(Decision::Deny));
+        assert_eq!(
+            rules.evaluate_narrow("bash", "cargo test"),
+            Some(Decision::Allow)
+        );
+        let text = toml::to_string(&rules).unwrap();
+        assert!(!text.contains("cargo"), "{text}");
     }
 }

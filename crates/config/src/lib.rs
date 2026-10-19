@@ -9,6 +9,7 @@ pub mod conflicts;
 pub mod constants;
 pub mod diff;
 pub mod keybindings;
+mod layer_rules;
 mod overrides;
 mod plugins;
 mod settings;
@@ -28,8 +29,8 @@ pub use keybindings::{
     GitStatusKeybindings, GlobalKeybindings, KeyBinding, ParsedKeyBinding, TerminalKeybindings,
     ViewerKeybindings,
 };
+use layer_rules::Layer;
 pub use overrides::{RuntimeOverrides, CONSOLE_THEME};
-use plugins::Layer;
 pub use plugins::{plugin_enabled, PluginMode, PluginSettings};
 pub use settings::{builtin_web_engines, WEB_BACKENDS, WEB_DISPLAYS};
 pub use settings::{is_cli_provider, permission_modes};
@@ -211,6 +212,52 @@ fn migrate_ai_connection(value: &mut toml::Value) {
         .or_insert_with(|| toml::Value::String(LEGACY_AI_CONNECTION.to_string()));
 }
 
+/// The "allow always" rules given for the project at `project_root`, kept
+/// in termide's data directory (see [`termide_project::granted_rules_path`]).
+/// A file that is missing holds none; one that does not parse is reported.
+fn granted_rules(
+    project_root: &Path,
+    warnings: &mut Vec<String>,
+) -> termide_agent_core::permissions::RuleTables {
+    let Ok(path) = termide_project::granted_rules_path(project_root) else {
+        return Default::default();
+    };
+    granted_rules_from(&path, warnings)
+}
+
+fn granted_rules_from(
+    path: &Path,
+    warnings: &mut Vec<String>,
+) -> termide_agent_core::permissions::RuleTables {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Default::default(),
+        Err(e) => {
+            warnings.push(format!("Permissions {}: not read: {e}", path.display()));
+            return Default::default();
+        }
+    };
+    let parsed = toml::from_str::<toml::Value>(&text)
+        .map_err(|e| e.message().to_string())
+        .and_then(|value| {
+            let permissions = value
+                .get("ai")
+                .and_then(|ai| ai.get("permissions"))
+                .cloned()
+                .unwrap_or_else(|| toml::Value::Table(Default::default()));
+            permissions
+                .try_into::<termide_agent_core::PermissionRules>()
+                .map_err(|e| e.message().to_string())
+        });
+    match parsed {
+        Ok(rules) => rules.tools,
+        Err(e) => {
+            warnings.push(format!("Permissions {}: not read: {e}", path.display()));
+            Default::default()
+        }
+    }
+}
+
 /// What [`Config::load_layered`] produced.
 #[derive(Debug, Clone)]
 pub struct LayeredConfig {
@@ -226,7 +273,7 @@ pub struct LayeredConfig {
 /// Overlay the config file at `path`, if it exists, on `value`, keeping
 /// only what still parses. What was left out is reported in `warnings`,
 /// after the file is copied aside. Keys the file's `layer` may not set
-/// (see [`plugins::restrict_layer`]) are dropped and reported too.
+/// (see [`layer_rules::restrict_layer`]) are dropped and reported too.
 fn overlay_file(value: &mut toml::Value, path: &Path, layer: Layer, warnings: &mut Vec<String>) {
     if !path.exists() {
         return;
@@ -237,7 +284,7 @@ fn overlay_file(value: &mut toml::Value, path: &Path, layer: Layer, warnings: &m
     let problem = match parsed {
         Ok(mut overlay) => {
             migrate_legacy(&mut overlay);
-            let dropped = plugins::restrict_layer(&mut overlay, layer);
+            let dropped = layer_rules::restrict_layer(&mut overlay, layer);
             if !dropped.is_empty() {
                 warnings.push(format!(
                     "Config {}: ignored {}, which this file may not set",
@@ -417,7 +464,8 @@ impl Config {
     pub fn load_layered(project_root: &Path) -> Result<LayeredConfig> {
         let global_path = Self::config_file_path()?;
         let global_existed = global_path.exists();
-        let loaded = Self::load_layers(Some(&global_path), &project_config_path(project_root))?;
+        let mut loaded = Self::load_layers(Some(&global_path), &project_config_path(project_root))?;
+        loaded.effective.ai.permissions.granted = granted_rules(project_root, &mut loaded.warnings);
 
         // Make sure the themes directory exists on first run.
         if !global_existed {
@@ -533,7 +581,7 @@ impl Config {
         let mut warnings = Vec::new();
         // A global layer read straight from its file (saved in the editor)
         // has not been through `overlay_file`.
-        plugins::restrict_layer(&mut value, Layer::Global);
+        layer_rules::restrict_layer(&mut value, Layer::Global);
         overlay_file(
             &mut value,
             &project_config_path(project_root),
@@ -542,6 +590,7 @@ impl Config {
         );
         let mut effective: Self = value.try_into()?;
         effective.normalize();
+        effective.ai.permissions.granted = granted_rules(project_root, &mut warnings);
         Ok((effective, warnings))
     }
 
@@ -825,22 +874,30 @@ mod layered_load_tests {
     }
 
     #[test]
-    fn debugger_settings_layer_per_debugger() {
+    fn debugger_programs_and_flags_come_from_the_global_file_only() {
         let (loaded, _dir) = layered(
             "[debug.debuggers.lldb-dap]\ncommand = \"/opt/llvm/bin/lldb-dap\"\n\
              [debug.debuggers.dlv-dap]\nargs = [\"--log\"]\n",
-            Some("[debug]\nconsole = \"panel\"\n[debug.debuggers.dlv-dap]\nargs = []\n"),
+            Some(
+                "[debug]\nconsole = \"panel\"\n[debug.debuggers.dlv-dap]\nargs = []\n\
+                 [debug.debuggers.lldb-dap]\ncommand = \"./evil\"\n",
+            ),
         );
         let debug = &loaded.effective.debug;
         assert_eq!(debug.console, "panel");
         assert_eq!(debug.native, ["lldb-dap", "gdb-dap", "lldb"]);
+        // A project names neither the program nor its flags: the global
+        // file's stand.
         assert_eq!(
             debug.debugger("lldb-dap").command.as_deref(),
             Some("/opt/llvm/bin/lldb-dap")
         );
-        // `[]` in the project drops the flags, which is not the same as unset.
-        assert_eq!(debug.debugger("dlv-dap").args, Some(Vec::new()));
+        assert_eq!(
+            debug.debugger("dlv-dap").args,
+            Some(vec!["--log".to_string()])
+        );
         assert_eq!(debug.debugger("gdb").args, None);
+        assert_eq!(loaded.warnings.len(), 1, "{:?}", loaded.warnings);
         assert_eq!(
             loaded.global_layer.debug.debugger("dlv-dap").args,
             Some(vec!["--log".to_string()])

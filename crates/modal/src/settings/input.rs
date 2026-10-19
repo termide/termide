@@ -124,6 +124,8 @@ impl SettingsModal {
         };
 
         match self.current_row() {
+            // Shown, with why it cannot change here.
+            Some(ContentRow::Field(field_idx)) if self.is_global_only(field_idx) => {}
             Some(ContentRow::Field(field_idx)) => {
                 if let Some(d) = field_desc {
                     match d.field_type {
@@ -371,6 +373,9 @@ impl SettingsModal {
 
     /// Step an enum field of the tab the content shows.
     fn cycle(&mut self, index: usize, forward: bool) {
+        if self.is_global_only(index) {
+            return;
+        }
         match self.field_tab() {
             SettingsTab::Connection => self.cycle_connection_field(index, forward),
             tab if forward => cycle_enum_forward(&mut self.config, tab, index),

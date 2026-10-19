@@ -218,6 +218,24 @@ pub fn project_key(project_root: &Path) -> PathBuf {
         .collect()
 }
 
+/// Where termide keeps what the user decided about a project, apart from
+/// the project itself: a repository's own files must not be able to grant
+/// anything.
+const TRUST_DIR: &str = "trust";
+
+/// The file holding the "allow always" permission rules given for the
+/// project at `project_root`, in the shape of `[ai.permissions]`.
+///
+/// # Errors
+///
+/// When there is no data directory.
+pub fn granted_rules_path(project_root: &Path) -> Result<PathBuf> {
+    Ok(get_data_dir()?
+        .join(TRUST_DIR)
+        .join(project_key(project_root))
+        .join("permissions.toml"))
+}
+
 /// Get the data directory for termide.
 pub(crate) fn get_data_dir() -> Result<PathBuf> {
     dirs::data_dir()

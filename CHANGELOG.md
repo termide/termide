@@ -5,6 +5,15 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Plugins.** A program copied into `plugins/<name>/` beside the global `config.toml`, with a `plugin.toml` naming it, runs in the background for each open project and speaks JSON-RPC on its stdin and stdout: it hears files opened and saved, adds commands to the palette and the Commands menu, shows items in the status bar, notifies, and gives the agent tools. The global `config.toml` gives each plugin a mode — `on`, `opt-in` or `off` — and a project's `.termide/config.toml` can only switch it within that mode, so no repository wakes a plugin you did not allow. A plugin that keeps crashing is restarted with backoff and given up on after three crashes in a minute. See `doc/en/plugins.md`.
+
+### Security
+- **A project's config can no longer name what termide runs or loosen the agent.** `.termide/config.toml` comes with the repository, and it could set a debugger's or an LSP server's `command` and `args`, the terminal's `default_shell`, the web tools' `chrome_path`, the log `file_path`, a connection's `base_url` and `api_key_env` (sending a key from any variable to any server), and the agent's permission `mode` and `allow` rules. These now come from the global file only; in a project file they are ignored with a line in the log, and the settings window shows them as set in the global settings when it stores in the project. A project may still make the agent ask or refuse. A shell picked from the menu is now saved globally.
+- **"Allow always in this project" is kept outside the project.** The rule goes to `trust/<project path>/permissions.toml` in termide's data directory instead of the project's `.termide/config.toml`. Rules an earlier version wrote there are now ignored, since termide cannot tell yours from a repository's: answer "allow always" again once, or move them to the global file.
+
 ## [0.44.0] - 2026-10-19
 
 [0.44.0]: https://github.com/termide/termide/releases/tag/0.44.0

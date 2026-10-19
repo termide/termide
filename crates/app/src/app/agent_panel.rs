@@ -2559,9 +2559,18 @@ fn default_openai_base_url() -> String {
 /// layout intact.
 fn persist_rule(tool: &str, pattern: &str, decision: Decision, scope: PersistScope) {
     let path = match scope {
-        PersistScope::Project => match std::env::current_dir() {
-            Ok(cwd) => termide_config::project_config_path(&cwd),
-            Err(_) => return,
+        // Not the project's own `.termide/config.toml`: the repository's
+        // config may not allow anything, so the user's grants for it are
+        // kept in termide's data instead.
+        PersistScope::Project => match std::env::current_dir()
+            .map_err(anyhow::Error::from)
+            .and_then(|cwd| termide_project::granted_rules_path(&cwd))
+        {
+            Ok(path) => path,
+            Err(error) => {
+                log::warn!("cannot find where to keep the project's rules: {error}");
+                return;
+            }
         },
         PersistScope::Global => match termide_config::Config::config_file_path() {
             Ok(path) => path,

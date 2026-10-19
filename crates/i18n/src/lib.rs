@@ -1294,6 +1294,7 @@ pub trait Translation: Send + Sync {
     fn settings_debugger_command(&self) -> &str;
     fn settings_debugger_args(&self) -> &str;
     fn settings_debugger_reset(&self) -> &str;
+    fn settings_global_only(&self) -> &str;
     fn settings_debugger_no_defaults(&self) -> &str;
     fn settings_debugger_bad_args(&self) -> &str;
     fn settings_tab_logging(&self) -> &str;

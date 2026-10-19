@@ -4,7 +4,7 @@
 //! decides only whether an installed plugin runs. The global file gives each
 //! plugin a [`PluginMode`], and a project file may switch the plugin within
 //! that mode with `enabled`. Each key is honoured from its own layer only —
-//! [`restrict_layer`] drops `mode` from a project file and `enabled` from the
+//! `layer_rules` drops `mode` from a project file and `enabled` from the
 //! global one — so a repository can never wake a plugin the user did not mark
 //! `opt-in`.
 
@@ -58,35 +58,6 @@ pub fn plugin_enabled(plugins: &BTreeMap<String, PluginSettings>, name: &str) ->
     plugins.get(name).is_none_or(PluginSettings::is_enabled)
 }
 
-/// Which config file a layer comes from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Layer {
-    Global,
-    Project,
-}
-
-/// Drop from a parsed config file the plugin keys its layer may not set:
-/// `mode` from a project file, `enabled` from the global one. Returns one
-/// line per key dropped.
-pub(crate) fn restrict_layer(value: &mut toml::Value, layer: Layer) -> Vec<String> {
-    let forbidden = match layer {
-        Layer::Global => "enabled",
-        Layer::Project => "mode",
-    };
-    let mut dropped = Vec::new();
-    let Some(plugins) = value.get_mut("plugins").and_then(toml::Value::as_table_mut) else {
-        return dropped;
-    };
-    for (name, entry) in plugins.iter_mut() {
-        if let Some(entry) = entry.as_table_mut() {
-            if entry.remove(forbidden).is_some() {
-                dropped.push(format!("plugins.{name}.{forbidden}"));
-            }
-        }
-    }
-    dropped
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,38 +98,5 @@ mod tests {
     #[test]
     fn a_plugin_without_an_entry_runs() {
         assert!(plugin_enabled(&BTreeMap::new(), "any"));
-    }
-
-    #[test]
-    fn each_layer_loses_the_key_it_may_not_set() {
-        let text = r#"
-            [plugins.a]
-            mode = "off"
-            enabled = true
-            [plugins.a.settings]
-            level = 2
-        "#;
-        let mut project: toml::Value = toml::from_str(text).unwrap();
-        assert_eq!(
-            restrict_layer(&mut project, Layer::Project),
-            ["plugins.a.mode"]
-        );
-        assert!(project["plugins"]["a"].get("mode").is_none());
-        assert_eq!(
-            project["plugins"]["a"]["enabled"],
-            toml::Value::Boolean(true)
-        );
-        assert_eq!(
-            project["plugins"]["a"]["settings"]["level"],
-            toml::Value::Integer(2)
-        );
-
-        let mut global: toml::Value = toml::from_str(text).unwrap();
-        assert_eq!(
-            restrict_layer(&mut global, Layer::Global),
-            ["plugins.a.enabled"]
-        );
-        assert!(global["plugins"]["a"].get("enabled").is_none());
-        assert!(global["plugins"]["a"].get("mode").is_some());
     }
 }

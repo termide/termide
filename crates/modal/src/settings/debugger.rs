@@ -431,6 +431,21 @@ mod tests {
         );
     }
 
+    /// Stored in the project, the program and flags are the global
+    /// settings' to set: the page shows them and says so, and leaves them be.
+    #[test]
+    fn a_project_cannot_set_a_debugger_program() {
+        let mut modal = debug_modal();
+        modal.in_project = true;
+        focus(&mut modal, dlv_row());
+        press(&mut modal, KeyCode::Enter);
+        edit(&mut modal, COMMAND, "/tmp/evil");
+        assert!(!modal.editing);
+        assert_eq!(modal.debugger_settings("dlv-dap").command, None);
+        let shown = screen(&mut modal);
+        assert!(shown.contains(i18n::t().settings_global_only()), "{shown}");
+    }
+
     #[test]
     fn the_list_shows_every_debugger_and_the_defaults_it_gets() {
         let mut modal = debug_modal();

@@ -49,14 +49,18 @@ impl App {
         Ok(())
     }
 
-    /// Save shell preference to the active config target (project file
-    /// when one exists, global otherwise). The in-memory `state.config`
-    /// is updated so newly-spawned terminals see the new default shell
-    /// without a restart.
+    /// Save shell preference to the global settings, even with a project
+    /// file: a project's file may not name the shell (it is a program
+    /// termide starts), so it would be dropped there at the next load. The
+    /// global layer is saved, not the running config, which carries the
+    /// project's settings. Callers have already set it in `state.config`, so
+    /// newly-spawned terminals see the new default shell without a restart.
     pub(super) fn save_shell_preference(&mut self, shell_path: &str) -> Result<()> {
-        let mut config = (*self.state.config).clone();
-        config.terminal.default_shell = Some(shell_path.to_string());
-        self.save_config_to_active_target(config)
+        let mut global = (*self.state.global_baseline).clone();
+        global.terminal.default_shell = Some(shell_path.to_string());
+        global.save_global()?;
+        self.state.global_baseline = std::sync::Arc::new(global);
+        Ok(())
     }
 
     /// Create new file manager

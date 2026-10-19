@@ -230,7 +230,7 @@ When a file could be debugged but its debugger is missing (no LLDB or GDB for Ru
 
 ### Debugger settings
 
-How each debugger starts is set in `config.toml` (global, or `.termide/config.toml` for one project), apart from what is debugged:
+How each debugger starts is set in `config.toml`, apart from what is debugged. A project's `.termide/config.toml` may set `native` and `console`; the debuggers' `command` and `args` come from the global file only, since they name the program termide starts:
 
 ```toml
 [debug]

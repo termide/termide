@@ -1082,6 +1082,7 @@ impl Translation for RuntimeTranslation {
         settings_debugger_command,
         settings_debugger_args,
         settings_debugger_reset,
+        settings_global_only,
         settings_debugger_no_defaults,
         settings_debugger_bad_args,
         settings_tab_logging,

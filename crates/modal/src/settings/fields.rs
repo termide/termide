@@ -733,6 +733,8 @@ fn cycle_on_limit(config: &mut Config, forward: bool) {
 }
 
 /// The AI tab's field for the permission mode new sessions start in.
+/// The AI tab's browser program field.
+pub(super) const AI_CHROME_PATH_FIELD: usize = 6;
 pub(super) const AI_PERMISSION_MODE_FIELD: usize = 7;
 
 /// A permission mode's localized name, as the agent panel's mode picker
