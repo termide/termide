@@ -1569,6 +1569,14 @@ impl Panel for AgentPanel {
         // model/agent/mode pickers are status-bar chips — none is repeated here.
         // Session info also answers F3 and `/usage`; the assembled prompt is
         // reached with `/prompt`, so neither needs another menu slot beyond this.
+        // While the panel follows another agent's task the session is that
+        // agent's: only what reads it is offered.
+        if self.is_delegate() {
+            return vec![
+                (t.agent_session_info().to_string(), SESSION_INFO_ACTION),
+                (t.agent_save_chat().to_string(), SAVE_CHAT_ACTION),
+            ];
+        }
         vec![
             (t.agent_session_info().to_string(), SESSION_INFO_ACTION),
             (t.agent_rename().to_string(), RENAME_ACTION),

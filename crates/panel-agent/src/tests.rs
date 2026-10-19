@@ -11178,3 +11178,26 @@ fn a_delegates_cards_follow_the_view_of_its_task() {
     assert_eq!(worker.join().unwrap(), PermissionAnswer::AllowOnce);
     drop(registration);
 }
+
+/// While the panel follows another agent's task, its `[≡]` menu offers only
+/// what reads the session: the rest would do nothing.
+#[test]
+fn a_panel_following_a_task_offers_only_what_reads_its_session() {
+    let mut panel = panel(vec![]);
+    let full = panel.context_menu_items().len();
+    assert!(full > 2);
+    panel.start_watch(Watch::new(
+        "lead",
+        "find it",
+        std::path::PathBuf::from("/nonexistent/x.jsonl"),
+        DelegateControl::new(),
+        5,
+        "call-menu",
+    ));
+    let actions: Vec<&str> = panel
+        .context_menu_items()
+        .into_iter()
+        .map(|(_, action)| action)
+        .collect();
+    assert_eq!(actions, [SESSION_INFO_ACTION, SAVE_CHAT_ACTION]);
+}
