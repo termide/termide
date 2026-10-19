@@ -1,6 +1,6 @@
 # 插件
 
-插件是项目打开期间 termide 在后台运行的程序，termide 通过该程序的标准输入和标准输出以 JSON-RPC 与它通信。插件可以响应文件的打开和保存，向命令面板和命令菜单添加命令，在编辑器中标记行，在状态栏中显示项目，在 termide 的窗口中提问，打开自己的面板，并为编码代理提供工具。
+插件是项目打开期间 termide 在后台运行的程序，termide 通过该程序的标准输入和标准输出以 JSON-RPC 与它通信。插件能获知项目的编辑器和仓库中发生的事，读取和编辑打开的缓冲区，添加带有自己快捷键的命令，在编辑器中标记行，在状态栏中显示项目，在 termide 的窗口中提问，打开自己的面板和终端，并为编码代理提供工具。
 
 插件是全局的：它们安装在你的配置目录中，项目只能关闭你安装的插件，或开启你允许它开启的插件。打开的仓库永远无法决定运行哪个程序。
 
@@ -26,7 +26,7 @@ LOG_LEVEL = "info"
 
 `command` 可以是绝对路径、相对于插件目录的路径（包含 `/`），或者像 `python3` 这样的裸名称。裸名称只在 `PATH` 的绝对路径项中查找。插件以自己的目录作为工作目录运行，并从 `initialize` 得知项目的根目录。
 
-插件在 termide 启动时读取。安装或删除插件后请重启 termide。
+插件在 termide 启动时读取。安装、删除或修改插件后，在命令面板（`Ctrl+P`）中执行 **插件：重新读取插件目录** 即可无需重启地载入它。**插件：显示状态** 列出已安装的插件及其在当前项目中的状态，**插件：重启 <名称>** 会重新启动某个插件。
 
 ## 开启和关闭插件
 
@@ -73,18 +73,31 @@ enabled = false
 |---|---|---|---|
 | `initialize` | 请求 | `protocolVersion`（1）、`termide.version`、`plugin.name`、`plugin.dir`、`project.root`、`settings` | 插件提供的内容，见下文 |
 | `initialized` | 通知 | | |
-| `file/opened`、`file/saved` | 通知，仅在订阅时发送 | `path` | |
 | `command/execute` | 请求 | `id` | 任意 |
-| `tool/call` | 请求 | `name`、`arguments` | `text`、`isError` |
+| `tool/call` | 请求 | `name`、`arguments`、`progress` | `text`、`isError` |
+| `$/cancelRequest` | 通知 | termide 已放弃的请求的 `id` | |
 | `shutdown` | 请求 | | `null` |
 | `exit` | 通知 | | |
+
+插件可订阅的事件，即关于其自身项目的通知：
+
+| 事件 | 参数 | 时机 |
+|---|---|---|
+| `file/opened` | `path` | 文件在编辑器中打开 |
+| `file/saved` | `path` | 编辑器写入了它的文件 |
+| `file/closed` | `path` | 当前项目的某个编辑器关闭 |
+| `editor/focused` | `path` | 另一个文件的编辑器成为活动面板 |
+| `editor/changed` | `path`、`version` | 缓冲区发生变化，并在输入停顿 300 毫秒后发送 |
+| `git/changed` | `root` | 仓库的索引、HEAD 或引用发生变动：提交、检出、暂存 |
+
+只有当前项目的某个插件请求了编辑器事件时，termide 才会监视这些事件。
 
 `initialize` 的结果，以及之后为替换它而发送的 `contributions/changed` 通知的参数：
 
 ```json
 {
   "subscriptions": ["file/saved"],
-  "commands": [{ "id": "check", "title": "Check the project" }],
+  "commands": [{ "id": "check", "title": "Check the project", "key": "Ctrl+Alt+K" }],
   "tools": [{
     "name": "lookup",
     "description": "Look a word up in the project glossary",
@@ -94,7 +107,9 @@ enabled = false
 }
 ```
 
-命令以 `<plugin>: <title>` 的形式出现在命令面板（`Plugins` 类别）中以及命令菜单的末尾。工具以 `plugin-<plugin>__<tool>` 的名称提供给插件所属项目的代理会话。代理的权限规则把它们当作 MCP 工具对待：除非标为 `readOnly`，运行前都会询问。
+命令以 `<plugin>: <title>` 的形式出现在命令面板（`Plugins` 类别）中以及命令菜单的末尾。命令的 `key` 可以在任何地方运行它，前提是 termide 没有在任何地方绑定该键（包括用户自己的命令），并且它是 `Ctrl` 或 `Alt` 加另一个修饰键（`Ctrl+Alt+K`、`Ctrl+Shift+K`、`Alt+Shift+K`），或 F 键加一个修饰键（`Shift+F7`）：这些是终端中的程序很少需要的键。不符合条件的键不会被绑定，并在日志中留下一行记录。
+
+工具以 `plugin-<plugin>__<tool>` 的名称提供给插件所属项目的代理会话。代理的权限规则把它们当作 MCP 工具对待：除非标为 `readOnly`，运行前都会询问。工具运行期间，插件可以带上调用中的 `progress` 令牌发送 `tool/progress` `{ "token", "text" }`：即到目前为止的完整输出，会随到随显示在对话记录中。用户停止的调用，或超过十分钟的调用，之后会收到 `$/cancelRequest`；超过五分钟的命令也是如此。
 
 **插件 → termide**
 
@@ -104,7 +119,24 @@ enabled = false
 | `window/notify` | 请求 | `message`、`level`（`"info"` 或 `"error"`） |
 | `status/set` | 请求 | `id`、`text`（空文本会移除该项目） |
 
-后台项目的插件不会显示在屏幕上：它的通知会写入日志。
+后台项目的插件不会显示在屏幕上：它的通知会写入日志。termide 每次刷新屏幕时最多从所有插件接收 256 条消息，其余的等待下一次刷新。
+
+### 编辑器
+
+插件可以访问其所属项目的编辑器，且只能访问这些编辑器：
+
+| 方法 | 参数 | 结果 |
+|---|---|---|
+| `editor/active` | | 活动编辑器的 `path`、`line`、`col`、`selection`（`{ line, col, end_line, end_col }` 或 `null`）、`modified`、`version`；没有活动编辑器或插件所属项目在后台时为 `null` |
+| `editor/read` | `path` | 打开的缓冲区的 `text`、`version`、`modified`，包括未保存的更改 |
+| `editor/edit` | `path`、`edits`：`[{ "line", "col"?, "end_line"?, "end_col"?, "text" }]`、`version`（可选） | `{ "version" }` |
+| `editor/open` | `path`、`line`、`col`（可选） | `null`；在当前项目中打开该文件 |
+
+位置按 LSP 的方式计数：行号从 0 开始，列以 UTF-16 码元计；没有结束位置的编辑即为插入。`editor/edit` 只修改打开的缓冲区——termide 不会替插件写文件，插件可以自己写——并且这些编辑构成一个撤销步骤，因此 `Ctrl+Z` 可以撤回它们。带上 `version` 时，如果缓冲区在该版本（由 `editor/read` 或 `editor/changed` 报告）之后发生了变化，编辑会以 `stale` 被拒绝，这样根据文本计算出编辑的插件就不会把它们应用到另一份文本上。仅用于查看文件的编辑器的缓冲区同样会被拒绝。`editor/read` 最多交出 16 MB，`editor/edit` 一次最多接受 10 000 处编辑。
+
+### 终端
+
+`terminal/run` `{ "command", "cwd" }` 在插件所属项目（必须是当前项目）中打开一个终端面板，并在其中键入 `command`，让用户看到运行的内容；`cwd`（绝对路径）默认为项目根目录。命令只能是一行。
 
 ### 编辑器中的标记
 
