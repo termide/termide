@@ -5866,6 +5866,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "termide-plugins"
+version = "0.44.0"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
 name = "termide-project"
 version = "0.44.0"
 dependencies = [
