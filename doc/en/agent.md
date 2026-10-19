@@ -1621,10 +1621,11 @@ side by side ask in turn: one card at a time, the next once it is
 answered. What you grant a delegate for the session holds for its task
 alone, not for the panel's agent, and "always" is not offered it. With no
 one to ask — a `termide --prompt` run — anything that would ask is refused
-with a reason the delegate reads. External agents (those with a `command`) can be delegates only in a
-panel (below), and a
-subagent gets no `task` tool of its own, so delegation does not nest. An agent whose `tools` list leaves out `task`
-cannot delegate. Besides its own tools, a delegate gets those of the MCP
+with a reason the delegate reads. External agents (those with a `command`)
+are delegates too: one runs its own program for the task, with its own
+tools, as it does in a panel, and its permission requests reach you the same
+way. A subagent gets no `task` tool of its own, so delegation does not nest. An agent whose `tools` list leaves out `task`
+cannot delegate. Besides its own tools, a built-in-loop delegate gets those of the MCP
 servers connected when its task starts — like the panel's agent, whatever
 its `tools` list says; a server still connecting then is left out of that
 task. A run that will not stop is cut off after fifty
@@ -1655,8 +1656,7 @@ changes your layout; `panel` does the same, but when no panel is free it
 opens a new one beside the others, without taking the focus. In a panel the
 task is an ordinary session of that panel, on the delegate's agent,
 connection and mode: you watch it work, and what it would have to ask is put
-to you on that panel's cards — which is why an external agent can be a
-delegate there. In `auto` the reviewer judges its
+to you on that panel's cards. In `auto` the reviewer judges its
 calls by what you asked the delegating agent and the task, as for a hidden
 delegate (not yet for an external agent). The delegating panel's block shows
 its progress as for a hidden one, and a click on the task's row above that

@@ -653,15 +653,15 @@ impl AgentCatalog for FsCatalog {
 
 impl FsCatalog {
     /// The agents an agent can delegate to with the `task` tool: every
-    /// built-in-loop agent, the default one and the caller itself included,
-    /// but no external one.
+    /// agent, the default one, the caller itself and the external ones
+    /// included.
     fn delegatable(&self) -> Vec<(String, String)> {
         self.dirs
             .agents()
             .into_iter()
             // The caller itself too: a fresh copy of it, with a clean context,
             // is as good a delegate as any, and a lone agent can delegate.
-            .filter(|name| self.dirs.spec(name).acp.is_none())
+            // External agents too: they run their own program for the task.
             .map(|name| {
                 let description = self.dirs.spec(&name).description;
                 (name, description)
@@ -1513,13 +1513,20 @@ impl Subagents {
         definition: &termide_agent_core::AgentDefinition,
         asks: bool,
     ) -> (ToolRegistry, Vec<termide_agent_core::SkillInfo>, String) {
-        let mut tools = base_tools(&self.dirs, Some(&self.web), Some(&self.recall));
-        if asks {
+        // An external agent drives its own tools, as in a panel: none of
+        // ours, so its prompt lists none.
+        let external = definition.spec.acp.is_some();
+        let mut tools = if external {
+            ToolRegistry::new()
+        } else {
+            base_tools(&self.dirs, Some(&self.web), Some(&self.recall))
+        };
+        if asks && !external {
             tools.insert(Arc::new(QuestionTool));
         }
         restrict_tools(&mut tools, &definition.spec.tools, name);
         let skills = self.dirs.model_skills();
-        if !skills.is_empty() {
+        if !skills.is_empty() && !external {
             tools.insert(Arc::new(SkillTool::new(skills.clone())));
         }
         apply_tool_texts(&mut tools, &self.dirs.tool_texts());
@@ -1530,8 +1537,10 @@ impl Subagents {
         let system_prompt = build_system_prompt(&options);
         // As for the panel's agent, the MCP servers' tools are neither listed
         // in the prompt nor narrowed by the agent's `tools` list.
-        for tool in self.mcp.ready_tools() {
-            tools.insert(tool);
+        if !external {
+            for tool in self.mcp.ready_tools() {
+                tools.insert(tool);
+            }
         }
         (tools, skills, system_prompt)
     }
@@ -1701,15 +1710,47 @@ impl Subagents {
                 return Ok(outcome);
             }
         }
-        // Out of sight an external agent has no one to answer what it asks.
-        if definition.spec.acp.is_some() {
-            return Err(format!(
-                "{name} is an external agent, which runs as a subagent only in a panel"
-            ));
+        // An external agent runs its own program, whatever the session's
+        // connection: out of sight as a Claude Code copy does, asking the
+        // user of its parent's panel what its rules leave open.
+        if let Some(config) = definition.spec.acp.clone() {
+            let log = DelegateLog::start(
+                self.session_dir.as_deref(),
+                &self.cwd,
+                lineage,
+                &DelegateRun {
+                    connection: name,
+                    provider: termide_agent_core::ACP_PROVIDER,
+                    model: "",
+                    context_window: None,
+                    agent: name,
+                },
+            );
+            let run = CliSubagent {
+                name: name.to_string(),
+                max_turns,
+                reviewer,
+                config,
+                model: String::new(),
+                system_prompt,
+                // It drives its own tools, as in a panel.
+                tools,
+                skills,
+                hooks,
+                rules,
+                asker,
+                prompter,
+                panel: ctx.panel,
+            };
+            return self
+                .run_cli(run, message, log, &budget, cancel, on_update)
+                .map(with_reviews);
         }
 
         let (provider, requested, context_window, connection_name, kind) = match target {
             SubagentTarget::Cli(connection_name, connection) => {
+                let config = cli_acp_config(&connection)
+                    .ok_or_else(|| format!("{} is not a CLI agent", connection.provider))?;
                 let log = DelegateLog::start(
                     self.session_dir.as_deref(),
                     &self.cwd,
@@ -1726,7 +1767,8 @@ impl Subagents {
                     name: format!("{connection_name}:{name}"),
                     max_turns,
                     reviewer,
-                    connection,
+                    config,
+                    model: connection.model.trim().to_string(),
                     system_prompt,
                     tools,
                     skills,
@@ -1863,8 +1905,7 @@ impl Subagents {
         cancel: &CancelToken,
         on_update: &mut dyn FnMut(ToolUpdate),
     ) -> Result<SubagentOutcome, String> {
-        let config = cli_acp_config(&run.connection)
-            .ok_or_else(|| format!("{} is not a CLI agent", run.connection.provider))?;
+        let config = run.config;
         // The agent's own requests go where its parent's panel asks; with
         // no one there they come here, and are refused.
         let (prompter, permission_rx) = match run.prompter {
@@ -1903,7 +1944,7 @@ impl Subagents {
         let runtime = AcpRuntime::start(&run.name, &config, setup)?;
         let drive = CliDrive {
             name: &run.name,
-            model: run.connection.model.trim(),
+            model: &run.model,
             permission_rx: permission_rx.as_ref(),
             refusal: &self.refusals.unattended_subagent,
             max_turns: run.max_turns,
@@ -2039,7 +2080,10 @@ struct CliSubagent {
     max_turns: usize,
     /// Reviews its requests in `auto` mode.
     reviewer: ReviewerSetup,
-    connection: Connection,
+    /// How its process runs.
+    config: AcpConfig,
+    /// The model to pick for the task, empty for the agent's own.
+    model: String,
     system_prompt: String,
     tools: ToolRegistry,
     skills: Vec<termide_agent_core::SkillInfo>,
@@ -3797,6 +3841,18 @@ done"#;
             .0
             .get("question")
             .is_none());
+        // An external delegate drives its own tools: none of ours, nor the
+        // MCP servers'.
+        let outside = tmp.path().join("ai/agents/outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(
+            outside.join(AGENT_FILE),
+            "---\ncommand: my-agent --acp\n---\n",
+        )
+        .unwrap();
+        let external = catalog.dirs.agent("outside");
+        let (tools, _, _) = subagents.toolset("outside", &external, true);
+        assert!(tools.is_empty(), "{:?}", tools.names());
     }
 
     #[test]
@@ -3865,6 +3921,14 @@ done"#;
         let two = FsCatalog::with_global(tmp.path(), tmp.path(), Some(global), None);
         // `search` among them, for itself as for `default`.
         assert_eq!(names(&two), [DEFAULT_AGENT, "search"]);
+
+        // An external agent is a delegate too.
+        let dir = tmp.path().join("ai").join("agents").join("outside");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(AGENT_FILE), "---\ncommand: my-agent --acp\n---\n").unwrap();
+        let three =
+            FsCatalog::with_global(tmp.path(), tmp.path(), Some(tmp.path().join("ai")), None);
+        assert_eq!(names(&three), [DEFAULT_AGENT, "outside", "search"]);
     }
 
     /// `AGENT.md`'s front matter narrows the tools and names a model and a mode; a name no

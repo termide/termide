@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **External agents as delegates.** An agent with a `command` was never among those `task` could hand work to, and the docs' "only in a panel" had no way in. It is now listed with the others, and its task runs out of sight like any delegate's: its own program, started for the task and ended with it, with its own tools, its progress in the task's block, its session kept, and its permission requests put to you in the delegating panel.
+
 ### Changed
 - **A delegate asks you instead of being refused.** A delegated task running out of sight could do only what the rules and the mode already allowed: anything that would have asked was refused, though you were right there in the panel that delegated it. Its permission requests now come to that panel on the usual card, headed `& <delegate> ·` as its questions are, for termide's own loop and for a copy of Claude Code alike; only a `termide --prompt` run, with no one to ask, still refuses them. Delegates working side by side ask in turn, one card at a time, where a second question at once used to be turned away. What you grant a delegate for the session holds for its task alone, and "always" is not offered it.
 
