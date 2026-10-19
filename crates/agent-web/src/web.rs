@@ -200,10 +200,12 @@ impl Web {
         }
     }
 
-    /// Whether `web_search` can work: it needs the browser and an engine.
+    /// Whether `web_search` can work: it needs an engine. Without the
+    /// browser the results page is fetched over plain HTTP, which only an
+    /// engine serving plain markup (DuckDuckGo, the default) answers well.
     #[must_use]
     pub fn can_search(&self) -> bool {
-        self.chrome.is_some() && self.engine.is_some()
+        self.engine.is_some()
     }
 
     /// The name of the backend in use, for messages.
@@ -244,10 +246,10 @@ impl Web {
             .engine
             .as_ref()
             .ok_or("no search engine is configured")?;
-        if self.chrome.is_none() {
-            return Err("searching needs Chrome or Chromium, and none was found".into());
-        }
         let url = engine.search_url(query);
+        if self.chrome.is_none() {
+            return search_over_http(engine, &url, limit);
+        }
         let raw = self.with_browser(cancel, |browser, display| {
             results_page(browser, display, engine, &url, cancel, on_wait)
         });
@@ -477,6 +479,21 @@ fn fetch_in_browser(
     ))
 }
 
+/// The search without a browser: the results page over plain HTTP, read
+/// with the engine's selectors.
+fn search_over_http(engine: &Engine, url: &str, limit: usize) -> Result<Vec<SearchResult>, String> {
+    let fetched = termide_fetch::fetch(url)?;
+    let results = engine.results_from_html(&fetched.text(), &fetched.final_url, limit)?;
+    if results.is_empty() {
+        return Err(format!(
+            "{} returned no results for this query without a browser; an engine that \
+             builds its results with JavaScript needs Chrome or Chromium, DuckDuckGo does not",
+            engine.name
+        ));
+    }
+    Ok(results)
+}
+
 fn fetch_over_http(url: &str) -> Result<FetchedPage, String> {
     let fetched = termide_fetch::fetch(url)?;
     let content_type = fetched.content_type.as_str();
@@ -579,15 +596,26 @@ mod tests {
     }
 
     #[test]
-    fn the_http_backend_cannot_search() {
-        let web = Web::new(WebConfig {
+    fn the_http_backend_searches_with_an_engine() {
+        let config = WebConfig {
             backend: Backend::Http,
             engine: None,
             chrome_path: None,
             display: Display::Headless,
             profile: std::env::temp_dir(),
+        };
+        let web = Web::new(config.clone());
+        assert!(!web.can_search(), "no engine, no search");
+        assert_eq!(web.backend_name(), "http");
+        let engine = Engine::from_toml(include_str!(
+            "../../agent-core/assets/web/engines/duckduckgo.toml"
+        ))
+        .unwrap();
+        let web = Web::new(WebConfig {
+            engine: Some(engine),
+            ..config
         });
-        assert!(!web.can_search());
+        assert!(web.can_search());
         assert_eq!(web.backend_name(), "http");
     }
 

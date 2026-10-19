@@ -989,7 +989,11 @@ clearance, so it is not asked for on every search, and the browser goes back
 to running without a window once it has been idle.
 
 Without such a browser, `fetch` still reads pages over plain HTTP (pages built
-by JavaScript then come back mostly empty), and `web_search` is not offered.
+by JavaScript then come back mostly empty), and `web_search` asks the engine
+over plain HTTP too. DuckDuckGo, the default, answers that well; an engine
+that builds its results with JavaScript (Google, Bing) returns none, and a
+search engine's check that a human is searching cannot be solved without a
+window, so the call fails and says why.
 
 ```toml
 [ai.web]

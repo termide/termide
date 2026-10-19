@@ -19,7 +19,7 @@ pub use tools::{FetchTool, WebSearchTool};
 pub use web::{Backend, FetchedPage, Web, WebConfig};
 
 /// The web tools `web` can back, in prompt order: `web_search` only when it
-/// can search (a browser and an engine), `fetch` always.
+/// has an engine (over the browser or plain HTTP), `fetch` always.
 #[must_use]
 pub fn web_tools(web: &Arc<Web>) -> Vec<Arc<dyn Tool>> {
     let mut tools: Vec<Arc<dyn Tool>> = Vec::new();

@@ -344,7 +344,7 @@ mod tests {
     }
 
     #[test]
-    fn search_without_a_browser_explains_itself() {
+    fn search_without_an_engine_explains_itself() {
         let tool = WebSearchTool::new(http_web());
         let result = tool.execute(
             &call("web_search", json!({ "query": "rust" })),

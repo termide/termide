@@ -2687,7 +2687,7 @@ mod tests {
         });
         let recall = recall_tool(&AiSettings::default(), &dirs, tmp.path(), tmp.path());
         let mut tools = base_tools(&dirs, Some(&web), Some(&recall));
-        // Offered only with a browser to search in, which a test has not.
+        // Offered only with a search engine, which this test leaves out.
         tools.insert(Arc::new(termide_agent_web::WebSearchTool::new(web)));
         tools.insert(Arc::new(QuestionTool));
         tools.insert(Arc::new(SuggestCommandTool));

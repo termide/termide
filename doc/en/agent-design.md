@@ -307,8 +307,13 @@ display = "headless"     # headless | minimized | visible
 ```
 
 - `http` loads pages with `termide-fetch` (GET only, time and size limits, no
-  https downgrade). It cannot search, so `web_search` is not registered: the
-  model never sees a tool that cannot work.
+  https downgrade). It searches the same way: the engine's results page over
+  plain HTTP, read with the engine's selectors by `scraper` in place of the
+  page's DOM. Only an engine whose results page is plain markup answers that
+  well — DuckDuckGo's HTML endpoint, the default, does; one that builds its
+  results with JavaScript returns none and the call says so, and a challenge
+  is an error, there being no window to solve it in. This is what makes
+  `web_search` work where no browser runs (Termux, a server without a GUI).
 - `chrome` drives a local Chrome or Chromium over the DevTools protocol.
 - `auto` is `chrome` when a browser is found and `http` otherwise.
 

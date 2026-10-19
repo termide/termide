@@ -1,8 +1,9 @@
 //! Search engines as data: where to send the query and how to read the
-//! results page. The selectors run inside the page, so no CSS engine is
-//! linked in; a markup change is fixed by editing the engine's file.
+//! results page. The selectors run inside the browser's page, or over a page
+//! fetched without one; a markup change is fixed by editing the engine's file.
 
 use base64::Engine as _;
+use scraper::{ElementRef, Html, Selector};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use url::Url;
@@ -125,6 +126,86 @@ impl Engine {
         )
     }
 
+    /// Read the results out of a page fetched without a browser, the way
+    /// [`Engine::extract_script`] reads them in one: the same selectors, hrefs
+    /// resolved against `page_url`, then [`Engine::results`]. Only an engine
+    /// whose results page is plain markup (DuckDuckGo's HTML endpoint) has
+    /// anything to read here; a challenge page is an error.
+    pub fn results_from_html(
+        &self,
+        html: &str,
+        page_url: &str,
+        limit: usize,
+    ) -> Result<Vec<SearchResult>, String> {
+        let selector = |s: &str| {
+            Selector::parse(s).map_err(|error| {
+                format!(
+                    "{}: selector `{s}` cannot be read without a browser: {error}",
+                    self.name
+                )
+            })
+        };
+        let document = Html::parse_document(html);
+        let challenged = self
+            .challenge_url
+            .iter()
+            .any(|u| page_url.contains(u.as_str()))
+            || self
+                .challenge
+                .iter()
+                .filter_map(|s| Selector::parse(s).ok())
+                .any(|s| document.select(&s).next().is_some());
+        if challenged {
+            return Err(format!(
+                "{} asks to confirm a human is searching, and without a browser there is no \
+                 window to do that in; try again later",
+                self.name
+            ));
+        }
+        let item = selector(&self.item)?;
+        let title = (!self.title.is_empty())
+            .then(|| selector(&self.title))
+            .transpose()?;
+        let link = (!self.link.is_empty())
+            .then(|| selector(&self.link))
+            .transpose()?;
+        let snippet = self.snippet.as_deref().map(selector).transpose()?;
+        let base = Url::parse(page_url).ok();
+        fn text(element: Option<ElementRef<'_>>) -> String {
+            element.map_or_else(String::new, |e| {
+                e.text()
+                    .collect::<String>()
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+        }
+        fn pick<'a>(root: ElementRef<'a>, s: Option<&Selector>) -> Option<ElementRef<'a>> {
+            match s {
+                Some(s) => root.select(s).next(),
+                None => Some(root),
+            }
+        }
+        let raw: Vec<Value> = document
+            .select(&item)
+            .map(|item| {
+                let href = pick(item, link.as_ref())
+                    .and_then(|a| a.value().attr("href"))
+                    .unwrap_or("");
+                let url = base
+                    .as_ref()
+                    .and_then(|base| base.join(href).ok())
+                    .map_or_else(|| href.to_string(), |url| url.to_string());
+                json!({
+                    "title": text(pick(item, title.as_ref())),
+                    "url": url,
+                    "snippet": text(snippet.as_ref().and_then(|s| item.select(s).next())),
+                })
+            })
+            .collect();
+        Ok(self.results(&Value::Array(raw), limit))
+    }
+
     /// Clean up what [`Engine::extract_script`] returned: unwrap redirect
     /// links, drop results without a title or a web URL, excluded and
     /// repeated URLs, and keep at most `limit`.
@@ -209,6 +290,68 @@ challenge = ["#challenge-form"]
 "##,
         )
         .unwrap()
+    }
+
+    /// DuckDuckGo's HTML endpoint, cut down to two results and an ad.
+    const DUCKDUCKGO_PAGE: &str = r#"<html><body>
+<div class="result results_links web-result result--ad">
+  <h2 class="result__title"><a class="result__a" href="https://ads.example/x">Ad</a></h2>
+</div>
+<div class="result results_links web-result">
+  <h2 class="result__title">
+    <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Fservo%2Fhtml5ever&amp;rut=2e87">GitHub - servo/html5ever:
+      <b>HTML5</b> parser</a>
+  </h2>
+  <a class="result__snippet" href="//duckduckgo.com/l/?uddg=x">High-performance   browser-grade
+    <b>HTML5</b> parser.</a>
+</div>
+<div class="result results_links web-result">
+  <h2 class="result__title"><a class="result__a" href="/l/?uddg=https%3A%2F%2Fdocs.rs%2Fhtml5ever">html5ever - Rust</a></h2>
+</div>
+</body></html>"#;
+
+    #[test]
+    fn a_page_fetched_without_a_browser_reads_like_one_in_it() {
+        let shipped = Engine::from_toml(include_str!(
+            "../../agent-core/assets/web/engines/duckduckgo.toml"
+        ))
+        .unwrap();
+        let results = shipped
+            .results_from_html(
+                DUCKDUCKGO_PAGE,
+                "https://html.duckduckgo.com/html/?q=html5ever",
+                10,
+            )
+            .unwrap();
+        assert_eq!(
+            results,
+            vec![
+                SearchResult {
+                    title: "GitHub - servo/html5ever: HTML5 parser".into(),
+                    url: "https://github.com/servo/html5ever".into(),
+                    snippet: "High-performance browser-grade HTML5 parser.".into()
+                },
+                SearchResult {
+                    title: "html5ever - Rust".into(),
+                    url: "https://docs.rs/html5ever".into(),
+                    snippet: String::new()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_challenge_without_a_browser_is_an_error() {
+        let page = r#"<html><body><form id="challenge-form"></form></body></html>"#;
+        let error = duckduckgo()
+            .results_from_html(page, "https://html.duckduckgo.com/html/?q=x", 10)
+            .unwrap_err();
+        assert!(error.contains("confirm a human"), "{error}");
+        let bad = Engine {
+            item: "div[".into(),
+            ..duckduckgo()
+        };
+        assert!(bad.results_from_html("<p></p>", "https://a/", 10).is_err());
     }
 
     #[test]

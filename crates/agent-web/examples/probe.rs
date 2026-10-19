@@ -5,7 +5,8 @@
 //! cargo run -p termide-agent-web --example probe -- fetch <url> [http]
 //! ```
 //!
-//! `PROBE_DISPLAY=headless|minimized|visible` picks the browser display.
+//! `PROBE_DISPLAY=headless|minimized|visible` picks the browser display;
+//! `PROBE_BACKEND=http` searches without the browser.
 
 use termide_agent_core::{CancelToken, SEED_ENGINES};
 use termide_agent_web::{Backend, Display, Engine, Web, WebConfig};
@@ -29,11 +30,12 @@ fn main() {
         .iter()
         .find(|(name, _)| *name == engine_name)
         .map(|(_, text)| Engine::from_toml(text).expect("seed parses"));
-    let backend = if extra == Some("http") {
-        Backend::Http
-    } else {
-        Backend::Auto
-    };
+    let backend =
+        if extra == Some("http") || std::env::var("PROBE_BACKEND").as_deref() == Ok("http") {
+            Backend::Http
+        } else {
+            Backend::Auto
+        };
     if command == "js" {
         // Raw page access: open the URL and print the value of a script.
         let chrome = termide_agent_web::find_chrome().expect("no browser found");
