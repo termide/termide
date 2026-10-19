@@ -49,6 +49,21 @@ pub enum RamUnit {
     Megabytes,
 }
 
+/// Format used/total RAM bytes as "used/total" in whole units.
+///
+/// Gigabytes from 2 GiB of total RAM up; below that whole gigabytes are too
+/// coarse (a 1 GB board would read "0/1"), so megabytes.
+pub fn format_ram_bytes(used: u64, total: u64) -> (String, RamUnit) {
+    let (divisor, unit) = if total as f64 >= 2.0 * BYTES_PER_GB {
+        (BYTES_PER_GB, RamUnit::Gigabytes)
+    } else {
+        (BYTES_PER_MB, RamUnit::Megabytes)
+    };
+    let used = (used as f64 / divisor).round() as u64;
+    let total = (total as f64 / divisor).round() as u64;
+    (format!("{used}/{total}"), unit)
+}
+
 /// Battery information.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BatteryInfo {
@@ -319,13 +334,8 @@ impl SystemMonitor {
 
     /// Format RAM info with automatic unit selection.
     pub fn format_ram(&self) -> (String, RamUnit) {
-        let (used_gb, total_gb) = self.ram_info_gb();
-        if total_gb >= 1 {
-            (format!("{}/{}", used_gb, total_gb), RamUnit::Gigabytes)
-        } else {
-            let (used_mb, total_mb) = self.ram_info_mb();
-            (format!("{}/{}", used_mb, total_mb), RamUnit::Megabytes)
-        }
+        let (used, total) = self.with_system(|sys| (sys.used_memory(), sys.total_memory()));
+        format_ram_bytes(used, total)
     }
 
     /// Get network download rate in bytes per second.
@@ -619,6 +629,36 @@ impl DiskSpaceInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // =========================================================================
+    // format_ram_bytes()
+    // =========================================================================
+
+    const MIB: u64 = 1024 * 1024;
+    const GIB: u64 = 1024 * MIB;
+
+    #[test]
+    fn test_format_ram_one_gig_board_uses_megabytes() {
+        // Raspberry Pi 3: ~0.9 GiB visible, ~300 MiB used (issue #64).
+        assert_eq!(
+            format_ram_bytes(300 * MIB, 922 * MIB),
+            ("300/922".to_string(), RamUnit::Megabytes)
+        );
+    }
+
+    #[test]
+    fn test_format_ram_just_under_two_gig_uses_megabytes() {
+        assert_eq!(format_ram_bytes(GIB, 2 * GIB - MIB).1, RamUnit::Megabytes);
+    }
+
+    #[test]
+    fn test_format_ram_two_gig_and_up_uses_gigabytes() {
+        assert_eq!(
+            format_ram_bytes(5 * GIB, 16 * GIB),
+            ("5/16".to_string(), RamUnit::Gigabytes)
+        );
+        assert_eq!(format_ram_bytes(GIB, 2 * GIB).1, RamUnit::Gigabytes);
+    }
 
     // =========================================================================
     // SystemStats::memory_percent()
