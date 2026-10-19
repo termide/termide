@@ -4,10 +4,10 @@
 //! call that handed it over. The panel that delegated it lists the ones it
 //! handed over in the background in its state strip, since their calls have
 //! returned and no running block stands for them; a click on a row, or `o`
-//! on the block, opens a panel following the task's session log (see
-//! [`crate::Watch`]); closing the panel that delegated them stops them. The
-//! registration ends with the task, which marks it over for the panels
-//! following it.
+//! on the block, shows a view following the task's session log (see
+//! [`crate::Watch`]); closing the panel that delegated them stops them.
+//! While a view follows a task, its cards go there. The registration ends
+//! with the task, which marks it over for the views following it.
 
 use std::collections::HashMap;
 use std::path::PathBuf;

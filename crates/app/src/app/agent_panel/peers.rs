@@ -1,7 +1,6 @@
 //! `agents` and `send_message` for the agents in the panels: the calls run on
 //! the agents' threads, the panels live on the UI thread, so a call sends its
-//! request down a process-wide channel and the app answers it on its tick,
-//! as for delegated tasks run in panels (see `in_panel`).
+//! request down a process-wide channel and the app answers it on its tick.
 //!
 //! A message goes in as the sending agent's, headed with its name and panel,
 //! and counts how many messages agents have passed one another since the user

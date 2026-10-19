@@ -437,8 +437,8 @@ impl AgentPanel {
                 }
                 return events;
             }
-            // `✕` stops a task handed over in the background; elsewhere on
-            // the row a panel following it comes forward.
+            // `✕` stops a task handed over in the background, once
+            // confirmed; elsewhere on the row a view of it is shown.
             StripTarget::Delegate(index) => {
                 let Some(call) = self.strip_delegates.get(index).cloned() else {
                     return vec![PanelEvent::NeedsRedraw];
