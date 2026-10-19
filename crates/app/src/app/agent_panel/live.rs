@@ -4,14 +4,16 @@
 //! click on a task's row, or `o` on its block, asks the app for a view of it
 //! (`PanelEvent::FocusDelegate`). The view is an agent panel following the
 //! task's session log, shown over the layout (`LayoutManager::overlay`) so
-//! that it moves no column: it takes the keys and the mouse while it is up,
-//! `Esc` or a click outside closes it, and `F9` or its `[⧉]` moves it into a
-//! panel of its own beside the others. The delegate's cards follow the view:
+//! that it moves no column. Like any modal, it holds the rest of the window
+//! while it is up: every key but quitting and detaching goes to it, the
+//! mouse reaches nothing outside it, and only `Esc` or the panel-close key
+//! closes it — or `F9` and its `[⧉]`, which move it into a panel of its own
+//! beside the others. The delegate's cards follow the view:
 //! the panel that delegated the task sets them aside while one is open, and
 //! gets back those still unanswered when it closes.
 
 use anyhow::Result;
-use crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyEvent, MouseEvent};
 use termide_core::{CommandResult, PanelCommand, PanelEvent};
 use termide_panel_agent::{AgentPanel, Card};
 
@@ -199,7 +201,8 @@ impl App {
     }
 
     /// A mouse event while a view is shown over the layout: inside it, the
-    /// view's; a click outside closes it. `false` when no view is up.
+    /// view's; outside it, nothing's — the view holds the window as a modal
+    /// does. `false` when no view is up.
     pub(in crate::app) fn overlay_mouse(&mut self, event: MouseEvent) -> Result<bool> {
         let main = self.main_area();
         let Some(panel) = self.layout_manager.overlay.as_mut() else {
@@ -211,9 +214,6 @@ impl App {
             && event.row >= area.y
             && event.row < area.y + area.height;
         if !inside {
-            if matches!(event.kind, MouseEventKind::Down(_)) {
-                self.close_overlay();
-            }
             return Ok(true);
         }
         let events = panel.handle_mouse(event, area);

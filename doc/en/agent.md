@@ -1656,9 +1656,10 @@ session entries do nothing; scrolling, the blocks, copying, `F3` and
 into a panel of its own beside the others (`F9` too), `[✎]`, which takes the
 task over, and `[■]`, which stops it; both of those ask first, as does
 `Ctrl+T`, and the delegating agent hears that you took the task or stopped
-it, with what was said so far. `Esc`, the panel-close key or a click outside
-the view closes it, and `Esc` in a panel following the task goes back to the
-delegating panel: neither stops the task, and the cards still unanswered go
+it, with what was said so far. Like a modal, the view holds the window while
+it is up: every key but quitting goes to it, and the mouse reaches nothing
+outside it. `Esc` or the panel-close key closes it, and `Esc` in a panel
+following the task goes back to the delegating panel: neither stops the task, and the cards still unanswered go
 back to the delegating panel. Once the task is over, the view shows it as it
 ended, to read, with `[⧉]` alone; in a panel — or once moved into one — its
 session opens as any other, to go on talking to. A task taken over in the

@@ -116,8 +116,9 @@ impl App {
             }
         }
 
-        // A view shown over the layout takes the mouse; a click outside
-        // closes it. The wheel is coalesced and reaches it apart.
+        // A view shown over the layout holds the mouse, as a modal does:
+        // nothing outside it is reached. The wheel is coalesced and reaches
+        // it apart.
         if !matches!(
             mouse.kind,
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown

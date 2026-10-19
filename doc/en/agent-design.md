@@ -281,12 +281,20 @@ Claude Code is.
 
 A delegate registers while it runs (`panel-agent/src/live.rs`) under the
 panel and the `task` call that handed it over. A click on its row, or `o`
-on its block, opens a panel following it (`watch.rs`): the panel reads the
+on its block, shows a view of it over the layout (`LayoutManager::overlay`,
+`app/agent_panel/live.rs`) — a panel in a new column would move every other
+one — that holds the window as a modal does, and that `F9` moves into a
+panel of its own. The view is an agent panel following the task
+(`watch.rs`): the panel reads the
 task's session log and rebuilds its transcript when the log grows, so it
 takes nothing from the task, and closing it stops nothing. The panel is
 the delegating agent's while the task runs — input off, session keys off,
-`Esc` stops the task and `Ctrl+T` takes it over through the registry's
-`DelegateControl` — and opens the task's session once it is over. It stays
+`[■]` stops the task and `[✎]` or `Ctrl+T` takes it over, each once
+confirmed, through the registry's `DelegateControl`; `Esc` only steps away —
+and opens the task's session once it is over and in a panel. The task's
+cards follow the view: while one is up the delegating panel sets them aside
+(the envelopes name their `task` call) for the app to hand over, and those
+unanswered go back when it closes. It stays
 on the default agent until then: built on the delegate's, an external one
 would start a process of its own.
 
