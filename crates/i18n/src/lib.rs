@@ -718,6 +718,7 @@ pub trait Translation: Send + Sync {
 
     // Agent panel — transient notices (static)
     fn agent_notice_busy(&self) -> &str;
+    fn agent_notice_delegates_running_fmt(&self, count: usize) -> String;
     fn agent_notice_no_log_to_name(&self) -> &str;
     fn agent_notice_will_pause(&self) -> &str;
     fn agent_notice_nothing_to_pause(&self) -> &str;

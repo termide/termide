@@ -1142,6 +1142,7 @@ agent_notice_cannot_start_fmt = "शुरू नहीं कर सकते: 
 agent_input_placeholder_delegate_fmt = "{agent} का प्रतिनिधि: {task} · Esc रोकें · Ctrl+T अपने हाथ लें"
 agent_notice_taken_over_fmt = "आपने कार्य अपने हाथ ले लिया; {agent} को अब तक कहा गया मिल गया"
 agent_close_confirm_delegates_fmt = "इस पैनल के एजेंट के {count} सौंपे गए कार्य अभी चल रहे हैं। पैनल बंद करने से वे रुक जाएँगे।"
+agent_notice_delegates_running_fmt = "पहले अभी चल रहे सौंपे गए कार्य पूरे करें या रोकें ({count})"
 agent_stop_task_confirm_fmt = "{agent} का यह कार्य रोकें? {agent} को अब तक कहा गया मिलेगा।"
 agent_stop_background_confirm_fmt = "{agent} का पृष्ठभूमि कार्य रोकें? इसे सौंपने वाले एजेंट को अब तक कहा गया मिलेगा।"
 agent_take_over_confirm_fmt = "{agent} से यह कार्य अपने हाथ लें? {agent} के लिए यह अब तक कहे गए के साथ समाप्त होगा, और बातचीत आपकी होगी।"

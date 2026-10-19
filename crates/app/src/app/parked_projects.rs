@@ -583,6 +583,16 @@ impl App {
             self.switch_to_project(successor)?;
         }
         if let Some(mut parked) = self.open_projects.close(root) {
+            // Its agent panels go with it, and the tasks they handed over
+            // stop with them, as when a panel is closed.
+            for panel in parked.layout.iter_all_panels_mut() {
+                if let Some(agent) = panel
+                    .as_any()
+                    .downcast_ref::<termide_panel_agent::AgentPanel>()
+                {
+                    termide_panel_agent::live::stop_all(agent.panel_id());
+                }
+            }
             // As closing an editor panel does: the server forgets the file.
             if let Some(lsp_manager) = self.state.lsp_manager.as_ref() {
                 for panel in parked.layout.iter_all_panels_mut() {

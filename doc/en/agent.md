@@ -1700,7 +1700,10 @@ requests and questions come to the delegating panel as a delegate's do, and
 stay up when that panel's own run stops: stopping the run does not reach a
 task handed over in the background. Closing the delegating panel stops its
 tasks, after a confirmation that counts them, and the agent hears that each
-was stopped. Each answer counts among the messages agents pass one another
+was stopped; so does closing its project. They ask and answer through the
+panel's session, so the session stays while they run, as it does during a
+run: a new session, another one opened, a switch of model or agent wait for
+them, with a notice saying how many still run. Each answer counts among the messages agents pass one another
 without you, so a chain of background tasks is cut off as such messages
 are. Only an agent in a panel can hand a task over in the background: a
 headless run has nowhere to take the answer.

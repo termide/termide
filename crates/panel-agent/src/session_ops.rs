@@ -53,6 +53,16 @@ impl AgentPanel {
             self.notice(termide_i18n::t().agent_notice_busy(), NoticeKind::Warn);
             return false;
         }
+        // Tasks handed over in the background ask through this session's
+        // channels and answer into it: they finish first, as a run does.
+        let delegates = crate::live::background_of(self.panel_id).len();
+        if delegates > 0 {
+            self.notice(
+                termide_i18n::t().agent_notice_delegates_running_fmt(delegates),
+                NoticeKind::Warn,
+            );
+            return false;
+        }
         // A search in the banner's list ends with the banner it searched,
         // and the prompt box gets its own text back.
         self.end_session_search();

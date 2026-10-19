@@ -1142,6 +1142,7 @@ agent_notice_cannot_start_fmt = "শুরু করা যাচ্ছে ন�
 agent_input_placeholder_delegate_fmt = "{agent}-এর প্রতিনিধি: {task} · Esc থামান · Ctrl+T নিজের হাতে নিন"
 agent_notice_taken_over_fmt = "আপনি কাজটি নিজের হাতে নিয়েছেন; {agent} এখন পর্যন্ত যা বলা হয়েছে তা পেয়েছে"
 agent_close_confirm_delegates_fmt = "এই প্যানেলের এজেন্টের {count}টি অর্পিত কাজ এখনও চলছে। প্যানেল বন্ধ করলে সেগুলো থেমে যাবে।"
+agent_notice_delegates_running_fmt = "আগে এখনও চলমান অর্পিত কাজগুলো শেষ করুন বা থামান ({count})"
 agent_stop_task_confirm_fmt = "{agent}-এর এই কাজটি থামাবেন? {agent} এখন পর্যন্ত যা বলা হয়েছে তা পাবে।"
 agent_stop_background_confirm_fmt = "{agent}-এর পটভূমির কাজটি থামাবেন? যে এজেন্ট এটি অর্পণ করেছে সে এখন পর্যন্ত যা বলা হয়েছে তা পাবে।"
 agent_take_over_confirm_fmt = "{agent}-এর কাছ থেকে কাজটি নিজের হাতে নেবেন? {agent}-এর জন্য এটি এখন পর্যন্ত যা বলা হয়েছে তা নিয়ে শেষ হবে, আর কথোপকথন আপনার।"

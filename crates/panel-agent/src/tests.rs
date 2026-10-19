@@ -11201,3 +11201,27 @@ fn a_panel_following_a_task_offers_only_what_reads_its_session() {
         .collect();
     assert_eq!(actions, [SESSION_INFO_ACTION, SAVE_CHAT_ACTION]);
 }
+
+/// A task handed over in the background asks and answers through the
+/// panel's session: the session does not change under it, as it does not
+/// under a run.
+#[test]
+fn the_session_waits_for_the_tasks_handed_over_in_the_background() {
+    let mut panel = panel(vec![]);
+    let registration = crate::live::register(crate::live::LiveTask {
+        panel: Some(panel.panel_id()),
+        call: "bg-session",
+        from: "default",
+        agent: "search",
+        task: "find it",
+        session: None,
+        background: true,
+    });
+    assert!(!panel.switch_session(None));
+    assert!(panel.transcript.items().iter().any(|item| matches!(
+        item,
+        Item::Notice { text, .. } if text.contains('1')
+    )));
+    drop(registration);
+    assert!(panel.switch_session(None));
+}

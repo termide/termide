@@ -1180,6 +1180,7 @@ agent_notice_cannot_start_fmt = "не удалось запустить: {error}
 agent_input_placeholder_delegate_fmt = "Делегат агента {agent}: {task} · Esc — прервать · Ctrl+T — забрать"
 agent_notice_taken_over_fmt = "Вы забрали задачу; {agent} получил то, что было сказано"
 agent_close_confirm_delegates_fmt = "У агента этой панели ещё работают поручённые задачи: {count}. Закрытие панели их остановит."
+agent_notice_delegates_running_fmt = "сначала дождитесь или остановите поручённые задачи, которые ещё идут ({count})"
 agent_stop_task_confirm_fmt = "Остановить эту задачу агента {agent}? {agent} получит то, что уже сказано."
 agent_stop_background_confirm_fmt = "Остановить фоновую задачу {agent}? Поручивший её агент получит то, что уже сказано."
 agent_take_over_confirm_fmt = "Забрать задачу у агента {agent}? Для {agent} она закончится тем, что уже сказано, а разговор перейдёт к вам."
