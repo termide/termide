@@ -11056,3 +11056,19 @@ fn trust_lists_what_the_project_brings_and_approves_it() {
     );
     assert!(!panel.is_busy());
 }
+
+#[test]
+fn a_run_is_told_as_it_starts_and_ends() {
+    let mut panel = AgentPanel::new(setup(vec![]));
+    panel.apply(AgentEvent::AgentStart);
+    panel.apply(AgentEvent::AgentEnd);
+    let runs: Vec<Option<bool>> = panel
+        .pending_events
+        .iter()
+        .filter_map(|event| match event {
+            PanelEvent::AgentRun { finished, .. } => Some(*finished),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(runs, [None, Some(true)]);
+}

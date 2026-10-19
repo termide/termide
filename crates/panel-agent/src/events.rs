@@ -81,6 +81,10 @@ impl AgentPanel {
         }
         match event {
             AgentEvent::AgentStart => {
+                self.pending_events.push(PanelEvent::AgentRun {
+                    panel: self.panel_id,
+                    finished: None,
+                });
                 self.busy = true;
                 self.paused = false;
                 // A resumed run keeps its start, so its clock counts from the
@@ -106,6 +110,10 @@ impl AgentPanel {
                 self.pause_requested = false;
             }
             AgentEvent::AgentEnd => {
+                self.pending_events.push(PanelEvent::AgentRun {
+                    panel: self.panel_id,
+                    finished: Some(!self.run_failed && self.last_failure.is_none()),
+                });
                 self.busy = false;
                 self.activity = None;
                 self.log_run_end();

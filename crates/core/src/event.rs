@@ -571,6 +571,10 @@ pub enum PanelEvent {
     /// `Ctrl+Alt+Click` in the terminal and the agent panel.
     OpenLinkExternal(crate::links::LinkTarget),
 
+    /// The agent of panel `panel` started a run (`finished: None`) or ended
+    /// one, `Some(true)` when it went well: for the plugins that listen.
+    AgentRun { panel: u64, finished: Option<bool> },
+
     /// A link `plugin:<action>` was followed in the plugin panel `panel`:
     /// the app hands `action` to the plugin that owns the panel.
     PluginAction { panel: u64, action: String },

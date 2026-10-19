@@ -135,6 +135,18 @@ impl App {
                 self.event_swap_active_to_html(path)?;
             }
 
+            PanelEvent::AgentRun { panel, finished } => {
+                use termide_plugins::protocol::events;
+                let (method, params) = match finished {
+                    None => (events::AGENT_STARTED, serde_json::json!({ "panel": panel })),
+                    Some(ok) => (
+                        events::AGENT_FINISHED,
+                        serde_json::json!({ "panel": panel, "ok": ok }),
+                    ),
+                };
+                let project = self.open_projects.current().to_path_buf();
+                self.plugins.host.emit(&project, method, &params);
+            }
             PanelEvent::PluginAction { panel, action } => {
                 self.plugin_panel_action(panel, &action);
             }
