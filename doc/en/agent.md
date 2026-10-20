@@ -329,8 +329,12 @@ has a heading, one that has not connected too — with its state beside the
 name (`needs sign-in`, `failed: …`) — and buttons at its right end, standing
 in one column: `[↻]` connects it again (`r` on the heading), and on a server
 that signs in with OAuth `[⇥]` signs in or `[⇤]` signs out (`l`) to its left.
-A button applies the ticks as `Enter` does, closes the list and does what it
-says. A server that connects while the list is open appears in it there and
+A button does what it says and leaves the list open, brought up to date. A
+server the project brings that waits for approval (see below) has a checkbox
+of its own on its heading, unticked, and says what it would run
+(`[ ] MCP ext — from the project, runs npx ext-server`): ticked, the list
+approves it as it closes, the server connects, and its tools come on even if
+the session had switched them off. A server that connects while the list is open appears in it there and
 then — its heading loses its remark and its tools come under it — so you do
 not have to close the list and open it again to see where a server stands;
 what you had ticked stays ticked.
@@ -2236,8 +2240,8 @@ A server that comes from anywhere but the configuration level — a project's
 address the repository chose, so it waits for you: the session says what it
 would run (`mcp ext: from the project, runs npx ext-server — /trust ext to
 start it`) and it is listed but not started. `/trust` lists everything a
-project brings that waits so, `/trust <name>` (or `t` on its heading in the
-toolset list) approves it and connects it. The approval is for the launch as
+project brings that waits so, `/trust <name>` (or a tick on its heading in
+the toolset list) approves it and connects it. The approval is for the launch as
 it is now — command, arguments, environment, working directory, or URL,
 headers and OAuth client — and is kept in termide's data directory under the
 project (`trust/<project path>/approved.toml`), never in the project. If the

@@ -9,7 +9,9 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use termide_core::{ChecklistButton, ChecklistGroup, ChecklistItem, ChecklistOutcome};
+use termide_core::{
+    ChecklistButton, ChecklistGroup, ChecklistItem, ChecklistOutcome, ChecklistSwitch,
+};
 use termide_theme::Theme;
 
 use crate::{
@@ -30,7 +32,8 @@ const LEAD: usize = 3;
 
 /// A run of consecutive items with the same group. One with no name has no
 /// heading, and its items are always shown; one with no items is a heading
-/// alone, with nothing to open.
+/// alone, with nothing to open, and a checkbox of its own when it has a
+/// switch.
 #[derive(Debug, Clone, PartialEq)]
 struct Group {
     name: String,
@@ -38,6 +41,7 @@ struct Group {
     expanded: bool,
     note: String,
     buttons: Vec<ChecklistButton>,
+    switch: Option<ChecklistSwitch>,
 }
 
 /// One row of the list: a group's heading, or the item at an index.
@@ -51,12 +55,13 @@ enum Row {
 /// its heading shows the group's mark and how many of its items are on.
 /// `→` (or a click on the arrow) opens a group and `←` closes it, or goes
 /// from an item to its heading. `Space` (or a click) toggles the item under
-/// the cursor, or every item of the group when the cursor is on its heading;
-/// closing the list in any way — `Enter`, `Esc`, a click beside it — applies
-/// them all, so a choice made is never lost to the key that ends it. A locked item
-/// is shown greyed and keeps its state. A heading's buttons sit at its right
-/// end; a click on one, or its key on the heading, applies the list as
-/// `Enter` does and names the button.
+/// the cursor, or every item of the group when the cursor is on its heading,
+/// or the heading's own checkbox when it heads no items; closing the list in
+/// any way — `Enter`, `Esc`, a click beside it — applies them all, so a
+/// choice made is never lost to the key that ends it. A locked item is shown
+/// greyed and keeps its state. A heading's buttons sit at its right end; a
+/// click on one, or its key on the heading, leaves the list open and is taken
+/// by [`ChecklistModal::take_pressed`].
 #[derive(Debug)]
 pub struct ChecklistModal {
     title: String,
@@ -74,6 +79,8 @@ pub struct ChecklistModal {
     list_area: Option<Rect>,
     /// The buttons drawn by the last render: the row, the columns, the id.
     button_areas: Vec<(usize, std::ops::Range<u16>, String)>,
+    /// Buttons pressed and not yet taken, in order.
+    pressed: Vec<String>,
 }
 
 impl ChecklistModal {
@@ -96,27 +103,42 @@ impl ChecklistModal {
             modal_area: None,
             list_area: None,
             button_areas: Vec::new(),
+            pressed: Vec::new(),
         };
         modal.rebuild_rows();
         modal
     }
 
-    /// What `Enter` applies, with the button that closed the list, if any.
-    fn outcome(&self, pressed: Option<String>) -> ChecklistOutcome {
+    /// What `Enter` applies.
+    fn outcome(&self) -> ChecklistOutcome {
         ChecklistOutcome {
             checked: self.checked(),
-            pressed,
         }
     }
 
-    /// The keys of the items checked now, in list order.
+    /// The keys of the items checked now, in list order, then those of the
+    /// headings' own checkboxes.
     #[must_use]
     pub fn checked(&self) -> Vec<String> {
-        self.items
+        let items = self
+            .items
             .iter()
             .filter(|item| item.checked)
-            .map(|item| item.key.clone())
-            .collect()
+            .map(|item| item.key.clone());
+        let switches = self
+            .groups
+            .iter()
+            .filter(|group| group.items.is_empty())
+            .filter_map(|group| group.switch.as_ref())
+            .filter(|switch| switch.checked)
+            .map(|switch| switch.key.clone());
+        items.chain(switches).collect()
+    }
+
+    /// The buttons pressed since the last call, in order: the list stays
+    /// open, and the app hands them to the panel that raised it.
+    pub fn take_pressed(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pressed)
     }
 
     /// Bring the list up to date with what the panel knows now, keeping the
@@ -124,7 +146,8 @@ impl ChecklistModal {
     /// or closed as it is, and the cursor stays on its row. An item that was
     /// locked, and one that is new, take the state the panel brings — the
     /// first was never the user's to change, the second has no tick of its
-    /// own yet. `true` when anything changed, so a caller redraws only then.
+    /// own yet. A heading's own checkbox keeps the user's tick as an item
+    /// does. `true` when anything changed, so a caller redraws only then.
     pub fn refresh(
         &mut self,
         items: Vec<ChecklistItem>,
@@ -142,6 +165,11 @@ impl ChecklistModal {
                 Row::Heading(group) => self.groups.get(group).map(|g| (true, g.name.clone())),
                 Row::Item(item) => self.items.get(item).map(|i| (false, i.key.clone())),
             });
+        let switches: Vec<ChecklistSwitch> = self
+            .groups
+            .iter()
+            .filter_map(|group| group.switch.clone())
+            .collect();
         let open: Vec<(String, bool)> = self
             .groups
             .iter()
@@ -171,6 +199,12 @@ impl ChecklistModal {
             }
         }
 
+        for switch in self.groups.iter_mut().filter_map(|g| g.switch.as_mut()) {
+            if let Some(kept) = switches.iter().find(|old| old.key == switch.key) {
+                switch.checked = kept.checked;
+            }
+        }
+
         self.rebuild_rows();
         if let Some((headed, name)) = cursor {
             if let Some(row) = self.rows.iter().position(|row| match row {
@@ -196,6 +230,7 @@ impl ChecklistModal {
                     expanded: false,
                     note: String::new(),
                     buttons: Vec::new(),
+                    switch: None,
                 }),
             }
         }
@@ -209,12 +244,14 @@ impl ChecklistModal {
                         expanded: false,
                         note: String::new(),
                         buttons: Vec::new(),
+                        switch: None,
                     });
                     groups.last_mut().expect("just pushed")
                 }
             };
             group.note = heading.note;
             group.buttons = heading.buttons;
+            group.switch = heading.switch;
         }
         groups
     }
@@ -267,19 +304,28 @@ impl ChecklistModal {
         }
     }
 
-    /// Whether any item of `group` can be toggled.
+    /// Whether any item of `group`, or its own checkbox, can be toggled.
     fn group_enabled(&self, group: usize) -> bool {
-        self.items[self.groups[group].items.clone()]
-            .iter()
-            .any(|item| item.enabled)
+        self.own_switch(group).is_some()
+            || self.items[self.groups[group].items.clone()]
+                .iter()
+                .any(|item| item.enabled)
+    }
+
+    /// The checkbox of a heading alone, if it has one.
+    fn own_switch(&self, group: usize) -> Option<&ChecklistSwitch> {
+        let group = &self.groups[group];
+        group.items.is_empty().then_some(group.switch.as_ref())?
     }
 
     /// The heading's mark: checked when every item of the group is, empty
-    /// when none is, partial otherwise.
+    /// when none is, partial otherwise; a heading alone shows its own
+    /// checkbox, or none.
     fn group_mark(&self, group: usize) -> &'static str {
         let items = &self.items[self.groups[group].items.clone()];
         if items.is_empty() {
-            ""
+            self.own_switch(group)
+                .map_or("", |switch| termide_ui::checkbox(switch.checked))
         } else if items.iter().all(|item| item.checked) {
             termide_ui::checkbox(true)
         } else if items.iter().any(|item| item.checked) {
@@ -300,8 +346,12 @@ impl ChecklistModal {
             .count();
         let Group { name, note, .. } = &self.groups[group];
         let mut text = if range.is_empty() {
-            // Nothing to switch: no mark, no count, room for the remark.
-            name.clone()
+            // No items: no count, room for the remark; the mark only when the
+            // heading has a checkbox of its own.
+            match self.own_switch(group) {
+                Some(_) => format!("{} {name}", self.group_mark(group)),
+                None => name.clone(),
+            }
         } else {
             format!("{} {name}  {on}/{}", self.group_mark(group), range.len())
         };
@@ -318,10 +368,16 @@ impl ChecklistModal {
     }
 
     /// Toggles the row under the cursor: an item, or all the unlocked items
-    /// of a group — on unless every one of them is on already.
+    /// of a group — on unless every one of them is on already —, or the
+    /// checkbox of a heading alone.
     fn toggle_row(&mut self, row: usize) {
         match self.rows.get(row).copied() {
             Some(Row::Item(index)) => self.toggle(index),
+            Some(Row::Heading(group)) if self.groups[group].items.is_empty() => {
+                if let Some(switch) = self.groups[group].switch.as_mut() {
+                    switch.checked = !switch.checked;
+                }
+            }
             Some(Row::Heading(group)) => {
                 let range = self.groups[group].items.clone();
                 let items = &mut self.items[range];
@@ -413,7 +469,7 @@ impl ChecklistModal {
 }
 
 impl Modal for ChecklistModal {
-    /// The keys left checked, and the button pressed.
+    /// The keys left checked.
     type Result = ChecklistOutcome;
 
     fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
@@ -531,7 +587,7 @@ impl Modal for ChecklistModal {
     ) -> Result<Option<ModalResult<Self::Result>>> {
         match chord.canonical.code {
             KeyCode::Esc | KeyCode::Enter => {
-                return Ok(Some(ModalResult::Confirmed(self.outcome(None))))
+                return Ok(Some(ModalResult::Confirmed(self.outcome())))
             }
             KeyCode::Char(' ') => self.toggle_row(self.cursor),
             KeyCode::Char(c) => {
@@ -541,9 +597,7 @@ impl Modal for ChecklistModal {
                         .iter()
                         .find(|button| button.key == c)
                         .map(|button| button.id.clone());
-                    if pressed.is_some() {
-                        return Ok(Some(ModalResult::Confirmed(self.outcome(pressed))));
-                    }
+                    self.pressed.extend(pressed);
                 }
             }
             KeyCode::Right => self.expand(),
@@ -566,7 +620,7 @@ impl Modal for ChecklistModal {
     ) -> Result<Option<ModalResult<Self::Result>>> {
         // A click beside the modal closes it, and applies it as Esc does.
         if is_click_outside(&mouse, self.modal_area) {
-            return Ok(Some(ModalResult::Confirmed(self.outcome(None))));
+            return Ok(Some(ModalResult::Confirmed(self.outcome())));
         }
         match mouse.kind {
             MouseEventKind::ScrollUp => self.move_by(-3),
@@ -587,7 +641,8 @@ impl Modal for ChecklistModal {
                         .find(|(at, columns, _)| *at == row && columns.contains(&mouse.column));
                     if let Some((_, _, id)) = pressed {
                         let id = id.clone();
-                        return Ok(Some(ModalResult::Confirmed(self.outcome(Some(id)))));
+                        self.pressed.push(id);
+                        return Ok(None);
                     }
                     // A click on a heading's arrow opens or closes the group;
                     // anywhere else on a row it moves the cursor there and
@@ -706,7 +761,6 @@ mod tests {
             panic!("Enter applies");
         };
         assert_eq!(outcome.checked, vec!["read".to_string()]);
-        assert_eq!(outcome.pressed, None);
     }
 
     #[test]
@@ -783,6 +837,7 @@ mod tests {
                     key: *key,
                 })
                 .collect(),
+            switch: None,
         }
     }
 
@@ -793,7 +848,7 @@ mod tests {
     }
 
     #[test]
-    fn heading_buttons_close_the_list_and_an_empty_group_is_a_heading_alone() {
+    fn heading_buttons_leave_the_list_open_and_an_empty_group_is_a_heading_alone() {
         let mut modal = ChecklistModal::new(
             "Tools",
             "",
@@ -832,17 +887,15 @@ mod tests {
         // `→` on a heading with nothing under it stays put.
         modal.handle_key(key(KeyCode::Right)).unwrap();
         assert_eq!(modal.rows.len(), 2);
-        // Unchecked first, then the button: the list goes back with both.
+        // Unchecked first, then the button: the list stays open with the
+        // tick, and the press waits to be taken.
         modal.handle_key(key(KeyCode::Up)).unwrap();
         modal.handle_key(key(KeyCode::Char(' '))).unwrap();
         modal.handle_key(key(KeyCode::Down)).unwrap();
-        let Some(ModalResult::Confirmed(outcome)) =
-            modal.handle_key(key(KeyCode::Char('l'))).unwrap()
-        else {
-            panic!("the button closes the list");
-        };
-        assert_eq!(outcome.pressed.as_deref(), Some("login:plane"));
-        assert!(outcome.checked.is_empty());
+        assert!(modal.handle_key(key(KeyCode::Char('l'))).unwrap().is_none());
+        assert_eq!(modal.take_pressed(), ["login:plane"]);
+        assert!(modal.take_pressed().is_empty());
+        assert!(modal.checked().is_empty());
 
         // A click on a button presses it.
         let shown = rows(&mut modal);
@@ -854,12 +907,78 @@ mod tests {
             row: y as u16,
             modifiers: KeyModifiers::NONE,
         };
-        let Some(ModalResult::Confirmed(outcome)) =
-            modal.handle_mouse(click, Rect::default()).unwrap()
-        else {
-            panic!("a click on the button closes the list");
+        assert!(modal
+            .handle_mouse(click, Rect::default())
+            .unwrap()
+            .is_none());
+        assert_eq!(modal.take_pressed(), ["reload:db"]);
+        // Pressing toggled nothing.
+        assert!(modal.checked().is_empty());
+    }
+
+    #[test]
+    fn a_heading_alone_with_a_switch_is_a_checkbox_of_its_own() {
+        let held = |checked: bool| ChecklistGroup {
+            switch: Some(ChecklistSwitch {
+                key: "trust:plane".into(),
+                checked,
+            }),
+            ..heading("MCP plane", "runs `npx`", &[("reload:plane", "↻", 'r')])
         };
-        assert_eq!(outcome.pressed.as_deref(), Some("reload:db"));
+        let mut modal = ChecklistModal::new(
+            "Tools",
+            "",
+            vec![item("read", "Built-in", true, true)],
+            vec![held(false)],
+        );
+        let shown = rows(&mut modal);
+        let plane = shown.iter().find(|r| r.contains("MCP plane")).unwrap();
+        // A mark, no arrow and no count.
+        assert!(plane.contains("   [ ] MCP plane — runs `npx`"), "{shown:?}");
+        assert!(!plane.contains(ARROW_COLLAPSED) && !plane.contains("0/0"));
+        assert_eq!(modal.checked(), ["read"]);
+
+        // Space on it ticks it; its key comes after the items'.
+        modal.handle_key(key(KeyCode::Down)).unwrap();
+        modal.handle_key(key(KeyCode::Char(' '))).unwrap();
+        assert_eq!(modal.checked(), ["read", "trust:plane"]);
+        assert!(rows(&mut modal).iter().any(|r| r.contains("[✓] MCP plane")));
+
+        // A refresh that still reports it unticked keeps the user's tick.
+        modal.refresh(
+            vec![item("read", "Built-in", true, true)],
+            vec![held(false)],
+            None,
+        );
+        assert_eq!(modal.checked(), ["read", "trust:plane"]);
+
+        // A click on the heading toggles it back; Enter applies.
+        let shown = rows(&mut modal);
+        let y = shown.iter().position(|r| r.contains("MCP plane")).unwrap();
+        let x = shown[y][..shown[y].find("MCP plane").unwrap()]
+            .chars()
+            .count() as u16;
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: x,
+            row: y as u16,
+            modifiers: KeyModifiers::NONE,
+        };
+        modal.handle_mouse(click, Rect::default()).unwrap();
+        let Some(ModalResult::Confirmed(outcome)) = modal.handle_key(key(KeyCode::Enter)).unwrap()
+        else {
+            panic!("Enter applies");
+        };
+        assert_eq!(outcome.checked, ["read"]);
+
+        // Once it heads items — the server connected — their mark is shown,
+        // and the switch is neither drawn nor returned.
+        modal.refresh(
+            vec![item("plane__q", "MCP plane", true, true)],
+            vec![held(true)],
+            None,
+        );
+        assert_eq!(modal.checked(), ["plane__q"]);
     }
 
     #[test]
@@ -1009,7 +1128,7 @@ mod tests {
         else {
             panic!("Esc applies");
         };
-        assert!(outcome.checked.is_empty() && outcome.pressed.is_none());
+        assert!(outcome.checked.is_empty());
         let beside = MouseEvent {
             column: 0,
             row: 0,

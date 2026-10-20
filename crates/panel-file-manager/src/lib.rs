@@ -889,6 +889,7 @@ impl Panel for FileManager {
             | PanelCommand::ShowGitLog { .. }
             | PanelCommand::SelectionMade { .. }
             | PanelCommand::ChecklistDone { .. }
+            | PanelCommand::ChecklistButton { .. }
             | PanelCommand::InputSubmitted { .. }
             | PanelCommand::Confirmed { .. } => CommandResult::None,
         }

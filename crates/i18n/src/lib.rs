@@ -978,6 +978,7 @@ pub trait Translation: Send + Sync {
     fn agent_notice_trust_unknown_fmt(&self, name: &str) -> String;
     fn agent_notice_mcp_needs_approval_fmt(&self, source: &str, launch: &str) -> String;
     fn agent_notice_hook_needs_approval_fmt(&self, name: &str, launch: &str) -> String;
+    fn agent_toolset_needs_approval_fmt(&self, launch: &str) -> String;
     fn agent_notice_mcp_gone_fmt(&self, source: &str) -> String;
     fn agent_notice_mcp_updated_fmt(&self, source: &str, count: usize) -> String;
     fn agent_notice_mcp_logout_fmt(&self, source: &str) -> String;

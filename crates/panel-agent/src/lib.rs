@@ -740,6 +740,9 @@ pub struct AgentPanel {
     /// Servers asked to connect again, so their next set reads "reconnected"
     /// rather than "changed".
     mcp_reconnecting: BTreeSet<String>,
+    /// Servers approved by a tick in the toolset list: their tools come on
+    /// when they arrive, whatever the session had switched off.
+    mcp_enable: BTreeSet<String>,
     /// Whether this panel is the one whose toolset checklist stands open.
     /// Only then does a tick ask the app to refresh it: with two agent panels
     /// open, the other one has nothing to say about this one's list. It is
@@ -1201,6 +1204,7 @@ impl AgentPanel {
             leaving_tools: Vec::new(),
             mcp_lines: std::collections::HashMap::new(),
             mcp_reconnecting: BTreeSet::new(),
+            mcp_enable: BTreeSet::new(),
             toolset_list_open: false,
             mcp_settled_told: false,
             toolset_off,
@@ -1891,17 +1895,20 @@ impl Panel for AgentPanel {
             PanelCommand::Cut if !self.chat_focus => {
                 CommandResult::Handled(self.cut_input_selection())
             }
-            PanelCommand::ChecklistDone {
-                action,
-                checked,
-                pressed,
-            } if action == TOOLSET_ACTION => {
-                // The ticks first, as `Enter` would have applied them; then
-                // what the button asks for.
+            PanelCommand::ChecklistDone { action, checked } if action == TOOLSET_ACTION => {
                 self.toolset_list_open = false;
                 self.apply_toolset(&checked);
-                if let Some(id) = pressed {
-                    self.press_toolset_button(&id);
+                self.trust_ticked(&checked);
+                self.pending_events.push(PanelEvent::NeedsRedraw);
+                CommandResult::Handled(true)
+            }
+            PanelCommand::ChecklistButton { action, id } if action == TOOLSET_ACTION => {
+                // The list stays open: it is brought up to date with what the
+                // button did.
+                self.press_toolset_button(&id);
+                if self.toolset_list_open {
+                    let refresh = self.toolset_refresh();
+                    self.pending_events.push(refresh);
                 }
                 self.pending_events.push(PanelEvent::NeedsRedraw);
                 CommandResult::Handled(true)

@@ -188,9 +188,39 @@ impl App {
                 }
             }
         }
+        // A button pressed on a checklist leaves it open: handed over now.
+        self.deliver_checklist_presses();
         self.flush_settings_save();
         self.try_apply_permissions_live();
         Ok(())
+    }
+
+    /// Hand the buttons pressed on an open panel checklist to the focused
+    /// panel that raised it, the list staying open: the panel acts and
+    /// brings the list up to date with a refresh.
+    fn deliver_checklist_presses(&mut self) {
+        let Some(termide_state::PendingAction::PanelChecklist { action }) =
+            self.state.pending_action.as_ref()
+        else {
+            return;
+        };
+        let action = action.clone();
+        let Some(ActiveModal::Checklist(modal)) = self.state.active_modal.as_mut() else {
+            return;
+        };
+        let pressed = modal.take_pressed();
+        if pressed.is_empty() {
+            return;
+        }
+        if let Some(panel) = self.layout_manager.active_panel_mut() {
+            for id in pressed {
+                panel.handle_command(termide_core::PanelCommand::ChecklistButton {
+                    action: action.clone(),
+                    id,
+                });
+            }
+        }
+        self.state.needs_redraw = true;
     }
 
     /// Hand a bracketed paste to the open modal; `false` when none is open
@@ -246,6 +276,8 @@ impl App {
                 }
             }
         }
+        // A button pressed on a checklist leaves it open: handed over now.
+        self.deliver_checklist_presses();
         self.flush_settings_save();
         self.try_apply_permissions_live();
         Ok(())
@@ -289,7 +321,6 @@ impl App {
                             panel.handle_command(termide_core::PanelCommand::ChecklistDone {
                                 action,
                                 checked: outcome.checked.clone(),
-                                pressed: outcome.pressed.clone(),
                             });
                         }
                         self.state.needs_redraw = true;

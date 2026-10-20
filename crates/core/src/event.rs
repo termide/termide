@@ -419,8 +419,8 @@ pub struct ChecklistItem {
 }
 
 /// A group heading of [`PanelEvent::ShowChecklist`] with more to it than its
-/// name: a remark, and buttons. A group no item names is still listed, as a
-/// heading alone, after the groups the items make.
+/// name: a remark, buttons, a checkbox of its own. A group no item names is
+/// still listed, as a heading alone, after the groups the items make.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChecklistGroup {
     /// The `group` of the items it heads.
@@ -428,11 +428,25 @@ pub struct ChecklistGroup {
     /// A dim remark after the heading (a state, a reason), or empty.
     pub note: String,
     pub buttons: Vec<ChecklistButton>,
+    /// The heading's own checkbox, for a group no item names: toggled as an
+    /// item is, and its key returned with the items' when left checked. A
+    /// group with items has their mark instead, and this is not shown.
+    pub switch: Option<ChecklistSwitch>,
+}
+
+/// The checkbox of a heading alone (see [`ChecklistGroup::switch`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChecklistSwitch {
+    /// What the panel knows it by; returned when it is left checked.
+    pub key: String,
+    pub checked: bool,
 }
 
 /// A button on a checklist heading. Pressing it — a click, or its key while
-/// the cursor is on the heading — applies the list as `Enter` does and names
-/// the button in [`crate::PanelCommand::ChecklistDone`].
+/// the cursor is on the heading — leaves the list open and names the button
+/// to the panel in [`crate::PanelCommand::ChecklistButton`]; the panel brings
+/// the list up to date with what it did through
+/// [`PanelEvent::RefreshChecklist`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChecklistButton {
     /// What the panel knows the button by.
@@ -457,12 +471,11 @@ pub struct ChecklistRefresh {
     pub groups: Vec<ChecklistGroup>,
 }
 
-/// What a checklist came back with: the keys left checked, and the button
-/// that closed it, if one did.
+/// What a checklist came back with: the keys left checked, the items' and
+/// the headings' own.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ChecklistOutcome {
     pub checked: Vec<String>,
-    pub pressed: Option<String>,
 }
 
 /// Events emitted by panels to communicate with the application.

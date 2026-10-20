@@ -1550,6 +1550,7 @@ impl Panel for Terminal {
             | PanelCommand::SetGitOperationInProgress { .. }
             | PanelCommand::SelectionMade { .. }
             | PanelCommand::ChecklistDone { .. }
+            | PanelCommand::ChecklistButton { .. }
             | PanelCommand::InputSubmitted { .. }
             | PanelCommand::Confirmed { .. }
             | PanelCommand::UpdateRepoPaths { .. }

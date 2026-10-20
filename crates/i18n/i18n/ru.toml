@@ -1234,6 +1234,7 @@ agent_notice_trusted_fmt = "{name}: одобрено для этого прое�
 agent_notice_trust_unknown_fmt = "Ничто с именем {name} не ждёт одобрения"
 agent_notice_mcp_needs_approval_fmt = "mcp {source}: из проекта, запускает `{launch}` — /trust {source}, чтобы запустить"
 agent_notice_hook_needs_approval_fmt = "хук {name}: из проекта, запускает `{launch}` — /trust {name}, чтобы разрешить"
+agent_toolset_needs_approval_fmt = "из проекта, запускает `{launch}` — отметьте, чтобы одобрить и запустить"
 palette_plugins_restart_fmt = "Плагины: перезапустить {name}"
 plugins_reloaded_fmt = "Плагины перечитаны: установлено {count}"
 command_confirm_project_fmt = "{name} из commands.toml проекта запускает:\n{command}\n\nЗапустить сейчас и впредь, пока она не изменится?"

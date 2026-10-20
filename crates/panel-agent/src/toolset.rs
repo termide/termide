@@ -299,6 +299,25 @@ impl AgentPanel {
         self.announce_toolset(&before);
     }
 
+    /// Take `names` off what the session switched off, the change written
+    /// to the session. They are not in the context yet: they are arriving.
+    fn switch_on<'a>(&mut self, names: impl Iterator<Item = &'a str>) {
+        let mut changed = false;
+        for name in names {
+            changed |= self.toolset_off.remove(name);
+            self.context_off.remove(name);
+        }
+        if !changed {
+            return;
+        }
+        if let Some(session) = &mut self.session {
+            let disabled: Vec<String> = self.toolset_off.iter().cloned().collect();
+            if let Err(error) = session.append_toolset(&disabled) {
+                log::warn!("agent session write failed: {error}");
+            }
+        }
+    }
+
     /// Say what a change of the toolset did. A server whose tools changed
     /// gets its line — rewritten in place under the banner, a new one in a
     /// conversation, since from here on the model has a different set; the
@@ -437,6 +456,10 @@ impl AgentPanel {
                     } else {
                         t.agent_notice_mcp_connected_fmt(&source, tools.len())
                     };
+                    // A server ticked on in the list brings its tools on.
+                    if self.mcp_enable.remove(&source) {
+                        self.switch_on(tools.iter().map(|tool| tool.name()));
+                    }
                     // Every one is listed in the checklist; one switched off
                     // stays out of the registry, and so out of the context.
                     for tool in tools {

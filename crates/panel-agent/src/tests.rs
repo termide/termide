@@ -6884,17 +6884,22 @@ fn the_toolset_list_heads_every_server_with_its_buttons() {
             ),
         ]
     );
-    // A button applies the ticks and does what it says.
-    panel.handle_command(PanelCommand::ChecklistDone {
+    // A button does what it says and leaves the list open, brought up to
+    // date.
+    panel.pending_events.clear();
+    panel.handle_command(PanelCommand::ChecklistButton {
         action: crate::toolset::TOOLSET_ACTION.into(),
-        checked: Vec::new(),
-        pressed: Some("mcp-login:plane".into()),
+        id: "mcp-login:plane".into(),
     });
-    panel.handle_command(PanelCommand::ChecklistDone {
+    panel.handle_command(PanelCommand::ChecklistButton {
         action: crate::toolset::TOOLSET_ACTION.into(),
-        checked: Vec::new(),
-        pressed: Some("mcp-reload:db".into()),
+        id: "mcp-reload:db".into(),
     });
+    assert!(panel.toolset_list_open);
+    assert!(panel
+        .pending_events
+        .iter()
+        .any(|e| matches!(e, PanelEvent::RefreshChecklist(_))));
     // The same one server from the input.
     type_text(&mut panel, "/mcp reload db");
     panel.submit();
@@ -6971,7 +6976,6 @@ fn tools_that_arrive_while_the_list_is_open_refresh_it() {
     panel.handle_command(PanelCommand::ChecklistDone {
         action: crate::toolset::TOOLSET_ACTION.into(),
         checked: Vec::new(),
-        pressed: None,
     });
     tx.send(LateTools::Ready {
         source: "db".into(),
@@ -11312,6 +11316,84 @@ fn trust_lists_what_the_project_brings_and_approves_it() {
         ]
     );
     assert!(!panel.is_busy());
+}
+
+#[test]
+fn a_held_server_ticked_in_the_toolset_list_is_approved_and_comes_on() {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let (tx, rx) = mpsc::channel();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        catalog: Arc::new(Untrusted(Arc::clone(&asked))),
+        late_tools: Some(rx),
+        ..setup(vec![])
+    });
+    // The session had switched the server's tools off, and something else.
+    panel.toolset_off = ["ext__a", "ext__b", "read"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    let events = panel.handle_status_action(crate::toolset::TOOLSET_ACTION);
+    let Some(PanelEvent::ShowChecklist { groups, .. }) = events.first() else {
+        panic!("the toolset list opens: {events:?}");
+    };
+    // The held server's heading: a checkbox, unticked, what it would run,
+    // and no approve button.
+    let ext = groups.iter().find(|g| g.name == "MCP: ext").unwrap();
+    assert_eq!(
+        ext.switch,
+        Some(termide_core::ChecklistSwitch {
+            key: "mcp-trust:ext".into(),
+            checked: false,
+        })
+    );
+    assert!(ext.note.contains("npx ext-server"), "{}", ext.note);
+    assert!(
+        ext.buttons.iter().all(|b| b.key != 't'),
+        "{:?}",
+        ext.buttons
+    );
+
+    // Left unticked, nothing is approved.
+    panel.handle_command(PanelCommand::ChecklistDone {
+        action: crate::toolset::TOOLSET_ACTION.into(),
+        checked: Vec::new(),
+    });
+    assert!(asked.lock().unwrap().is_empty());
+
+    // Ticked: approved, and its tools come on as they arrive; the rest of
+    // what the session switched off stays off.
+    panel.handle_status_action(crate::toolset::TOOLSET_ACTION);
+    panel.handle_command(PanelCommand::ChecklistDone {
+        action: crate::toolset::TOOLSET_ACTION.into(),
+        checked: vec!["mcp-trust:ext".into()],
+    });
+    assert_eq!(*asked.lock().unwrap(), ["trust ext"]);
+    tx.send(LateTools::Ready {
+        source: "ext".into(),
+        tools: vec![
+            Arc::new(Late("ext__a")) as Arc<dyn termide_agent_core::Tool>,
+            Arc::new(Late("ext__b")) as Arc<dyn termide_agent_core::Tool>,
+        ],
+    })
+    .unwrap();
+    panel.tick();
+    assert_eq!(
+        panel.toolset_off.iter().collect::<Vec<_>>(),
+        ["read"],
+        "{:?}",
+        panel.toolset_off
+    );
+    assert!(!panel.blocked.read().unwrap().contains("ext__a"));
+
+    // Its next set, after a reconnect, keeps what the user chooses then.
+    panel.toolset_off.insert("ext__a".into());
+    tx.send(LateTools::Ready {
+        source: "ext".into(),
+        tools: vec![Arc::new(Late("ext__a")) as Arc<dyn termide_agent_core::Tool>],
+    })
+    .unwrap();
+    panel.tick();
+    assert!(panel.toolset_off.contains("ext__a"));
 }
 
 #[test]
