@@ -1026,7 +1026,7 @@ impl Tool for PluginTool {
         };
         // The request waits on a thread of its own, so that the progress the
         // plugin sends meanwhile reaches the transcript as it comes.
-        let (token, progress) = termide_plugins::progress::register();
+        let (token, progress) = termide_plugins::progress::register(&self.peer);
         let (done_tx, done) = std::sync::mpsc::channel();
         let peer = Arc::clone(&self.peer);
         let params = json!({ "name": self.info.name, "arguments": arguments, "progress": token });

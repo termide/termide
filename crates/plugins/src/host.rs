@@ -669,10 +669,11 @@ impl Supervisor {
                     Incoming::Notification { method, params }
                         if method == protocol::TOOL_PROGRESS =>
                     {
-                        if let (Some(token), Some(text)) =
-                            (params["token"].as_u64(), params["text"].as_str())
+                        let peer = lock(&live).as_ref().map(|live| Arc::clone(&live.peer));
+                        if let (Some(peer), Some(token), Some(text)) =
+                            (peer, params["token"].as_u64(), params["text"].as_str())
                         {
-                            crate::progress::deliver(token, text.to_string());
+                            crate::progress::deliver(&peer, token, text.to_string());
                         }
                         return;
                     }
