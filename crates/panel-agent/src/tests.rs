@@ -11231,7 +11231,7 @@ fn a_view_over_the_layout_docks_and_keeps_an_ended_task() {
                 && line.contains("[ Close Esc ]")
         })
         .expect("the buttons are under the view");
-    assert!(rows[buttons - 1].contains("& lead · find the loader"));
+    assert!(rows[buttons - 1].chars().all(|c| c == '─'));
     assert!(!rows
         .iter()
         .any(|line| line.contains("[✎]") || line.contains("[■]")));

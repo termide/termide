@@ -6,9 +6,9 @@
 //! task's session log, shown over the layout (`LayoutManager::overlay`) so
 //! that it moves no column. Like any modal, it holds the rest of the window
 //! while it is up: every key but quitting and detaching goes to it, the
-//! mouse reaches nothing outside it, and only `Esc` or the panel-close key
-//! closes it — or `F9` and its `[⧉]`, which move it into a panel of its own
-//! beside the others. The delegate's cards follow the view:
+//! mouse reaches nothing outside it, and only `Esc`, the panel-close key or
+//! its Close button closes it — or `F9` and its In a panel button, which
+//! move it into a panel of its own beside the others. The delegate's cards follow the view:
 //! the panel that delegated the task sets them aside while one is open, and
 //! gets back those still unanswered when it closes.
 

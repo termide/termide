@@ -1665,7 +1665,7 @@ The view shows the delegate's steps as its log gains them, and what the
 delegate asks — its permission requests and questions — comes to the view
 while it is up, rather than to the delegating panel under it. It belongs to
 the delegating agent while the task runs: in place of the prompt it has a
-rule naming the task (`& <agent> · <task>`) and a row of buttons —
+row of buttons —
 **In a panel F9**, which moves the view into a panel of its own beside the
 others, **Take over Ctrl+T**, **Stop** and **Close Esc** — and the session
 keys (`F2`, `F4`–`F8`), the chips and the menu's session entries do nothing;

@@ -721,8 +721,9 @@ impl AgentPanel {
     }
 
     /// The bottom of a delegate's view over the layout, in place of the
-    /// prompt it could not type into: a rule naming whose task it is, then
-    /// a row of buttons, centred, each with the key that does the same.
+    /// prompt it could not type into: a rule, then a row of buttons,
+    /// centred, each with the key that does the same. Whose task it is
+    /// the panel's title says.
     fn render_view_buttons(&mut self, area: Rect, buf: &mut Buffer, focused: bool) {
         if area.height == 0 || area.width == 0 {
             return;
@@ -735,15 +736,6 @@ impl AgentPanel {
         });
         for dx in 0..area.width {
             buf[(area.x + dx, area.y)].set_symbol("─").set_style(rule);
-        }
-        if let Some(label) = self.watched_label() {
-            let line = Line::from(Span::styled(
-                format!(" {label} "),
-                Style::default()
-                    .fg(colors.info)
-                    .add_modifier(Modifier::BOLD),
-            ));
-            buf.set_line(area.x + 1, area.y, &line, area.width.saturating_sub(2));
         }
         if area.height < 2 {
             return;

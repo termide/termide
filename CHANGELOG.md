@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
-- **A delegate's view has buttons in place of the prompt.** The view of a delegate shown over the layout kept the prompt of an agent panel, which took nothing, with its controls as icons on its border (`[⧉]`, `[✎]`, `[■]`). It now ends in a rule naming the task and a row of buttons, each with its key: **In a panel F9**, **Take over Ctrl+T**, **Stop** and **Close Esc**; once the task is over, only the first and the last. A panel following a task keeps its prompt, with `[✎]` and `[■]` on the border.
+- **A delegate's view has buttons in place of the prompt.** The view of a delegate shown over the layout kept the prompt of an agent panel, which took nothing, with its controls as icons on its border (`[⧉]`, `[✎]`, `[■]`). It now ends in a row of buttons, each with its key: **In a panel F9**, **Take over Ctrl+T**, **Stop** and **Close Esc**; once the task is over, only the first and the last. A panel following a task keeps its prompt, with `[✎]` and `[■]` on the border.
 
 ### Fixed
 - **A delegate's view had its frame in the terminal's colors.** The view of a delegate shown over the layout cleared its area to the terminal's own colors before drawing, and only its inside was painted again, so under a theme whose background differs from the terminal's the frame and the title looked inverted. The area is now painted in the theme's background, as a modal's is.
