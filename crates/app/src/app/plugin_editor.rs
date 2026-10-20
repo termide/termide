@@ -58,6 +58,20 @@ pub(crate) struct EditorWatch {
     saves: Vec<SaveJob>,
 }
 
+impl EditorWatch {
+    /// Start afresh on a switch to `project`. The saves under way stay: each
+    /// names its own project, and its editor already gave its Ctrl+S over.
+    fn follow_project(&mut self, project: &Path) {
+        if self.project.as_deref() != Some(project) {
+            *self = Self {
+                project: Some(project.to_path_buf()),
+                saves: std::mem::take(&mut self.saves),
+                ..Self::default()
+            };
+        }
+    }
+}
+
 /// A position from a request: `line`/`col`, LSP-counted.
 fn position(value: &Value, line: &str, col: &str) -> Option<lsp_types::Position> {
     let get = |field: &str| value[field].as_u64().and_then(|n| u32::try_from(n).ok());
@@ -363,12 +377,7 @@ impl App {
         if !(wants_focus || wants_change || wants_close) {
             return;
         }
-        if self.plugins.editors.project.as_ref() != Some(&project) {
-            self.plugins.editors = EditorWatch {
-                project: Some(project.clone()),
-                ..Default::default()
-            };
-        }
+        self.plugins.editors.follow_project(&project);
 
         let focused = self
             .layout_manager
@@ -439,5 +448,22 @@ mod tests {
         assert_eq!(edits[1].range.start, edits[1].range.end, "an insertion");
         assert!(text_edits(&json!([{ "line": 1 }])).is_err());
         assert!(text_edits(&json!("x")).is_err());
+    }
+
+    #[test]
+    fn a_switch_of_project_keeps_the_saves_the_plugins_hold() {
+        let mut watch = EditorWatch::default();
+        watch.follow_project(Path::new("/a"));
+        watch.focused = Some(PathBuf::from("/a/x.rs"));
+        watch.saves.push(SaveJob {
+            project: PathBuf::from("/a"),
+            path: PathBuf::from("/a/x.rs"),
+            queue: VecDeque::new(),
+            waiting: None,
+        });
+        watch.follow_project(Path::new("/b"));
+        assert_eq!(watch.project.as_deref(), Some(Path::new("/b")));
+        assert_eq!(watch.focused, None, "what was told of /a is forgotten");
+        assert_eq!(watch.saves.len(), 1, "the Ctrl+S held for /a still goes");
     }
 }
