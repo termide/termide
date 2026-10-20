@@ -74,9 +74,12 @@ impl AgentPanel {
         summaries
             .into_iter()
             .filter_map(|summary| {
-                // The label first: taking the parent out of the summary
-                // leaves it only partly there, and the label reads the rest.
+                // Read what is taken out of the summary before taking it:
+                // the label and the agent's name need the whole there.
                 let task = summary.label();
+                // The delegate's own name, as its log has it: the parent
+                // names the agent that delegated, not the one that ran.
+                let agent = summary.agent;
                 let parent = summary.parent?;
                 if !summary.unfinished
                     || parent.session.as_deref() != Some(id.as_str())
@@ -85,7 +88,7 @@ impl AgentPanel {
                     return None;
                 }
                 Some(RestoredDelegate {
-                    agent: parent.agent,
+                    agent: agent.unwrap_or(parent.agent),
                     session: summary.path,
                     call: parent.call,
                     task,

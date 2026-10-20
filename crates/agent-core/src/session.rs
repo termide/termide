@@ -1633,6 +1633,9 @@ pub struct SessionSummary {
     pub unfinished: bool,
     /// Where a delegate's session came from.
     pub parent: Option<SessionParent>,
+    /// The agent the session runs on, as its log records it last; `None`
+    /// for a log written before agents were recorded.
+    pub agent: Option<String>,
 }
 
 impl From<&Session> for SessionSummary {
@@ -1678,6 +1681,7 @@ impl From<&Session> for SessionSummary {
                 || !session.autorun().is_empty()
                 || session.pending_retry().is_some(),
             parent: session.header.parent.clone(),
+            agent: session.current_agent(),
         }
     }
 }
