@@ -119,6 +119,49 @@ fn classify_rpc_error(error: &Value) -> Failure {
 }
 type SharedWriter = Arc<Mutex<Option<Box<dyn Write + Send>>>>;
 
+/// How long a request that saw the agent hang up waits for the rest of what
+/// it printed on stderr, which says why.
+const STDERR_GRACE: Duration = Duration::from_millis(300);
+
+/// The last line the agent's process printed on stderr. "Closed the
+/// connection" alone does not say why it went: a launcher refused to run it
+/// (`Permission denied`), a missing login, a crash — the line does.
+#[derive(Default)]
+struct StderrTail {
+    /// The last non-empty line, and whether the stream has ended.
+    state: Mutex<(Option<String>, bool)>,
+    ended: Condvar,
+}
+
+impl StderrTail {
+    /// Read `stderr` to its end on a thread of its own, logging each line.
+    fn follow(self: &Arc<Self>, agent: String, stderr: impl Read + Send + 'static) {
+        let tail = Arc::clone(self);
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                log::debug!("acp {agent}: {line}");
+                let line = line.trim();
+                if !line.is_empty() {
+                    tail.state.lock().unwrap_or_else(PoisonError::into_inner).0 =
+                        Some(line.to_string());
+                }
+            }
+            tail.state.lock().unwrap_or_else(PoisonError::into_inner).1 = true;
+            tail.ended.notify_all();
+        });
+    }
+
+    /// The last line, once the stream has ended or `grace` has passed.
+    fn last(&self, grace: Duration) -> Option<String> {
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let (state, _) = self
+            .ended
+            .wait_timeout_while(state, grace, |(_, ended)| !*ended)
+            .unwrap_or_else(PoisonError::into_inner);
+        state.0.clone()
+    }
+}
+
 /// Where the connection stands.
 enum Conn {
     Starting,
@@ -148,6 +191,8 @@ struct Shared {
     /// the built-in loop keeps its own.
     open_thought: Mutex<String>,
     child: Mutex<Option<Child>>,
+    /// What the agent's process prints on stderr, when termide started it.
+    stderr: Option<Arc<StderrTail>>,
     /// Models the agent advertised at `session/new`, for the picker; empty when
     /// it advertises none.
     models: Mutex<Vec<BackendModel>>,
@@ -363,14 +408,11 @@ impl AcpRuntime {
             .map_err(|error| format!("cannot start {}: {error}", config.command))?;
         let stdin = child.stdin.take().ok_or("no stdin")?;
         let stdout = child.stdout.take().ok_or("no stdout")?;
-        if let Some(stderr) = child.stderr.take() {
-            let agent = name.to_string();
-            std::thread::spawn(move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                    log::debug!("acp {agent}: {line}");
-                }
-            });
-        }
+        let stderr = child.stderr.take().map(|stderr| {
+            let tail = Arc::new(StderrTail::default());
+            tail.follow(name.to_string(), stderr);
+            tail
+        });
         let cwd = setup.cwd.clone();
         let runtime = Self::connect(
             name,
@@ -380,6 +422,7 @@ impl AcpRuntime {
             config.timeout_secs,
             config.flavor,
             service,
+            stderr,
         );
         runtime
             .shared
@@ -410,10 +453,21 @@ impl AcpRuntime {
         timeout_secs: u64,
         flavor: AcpFlavor,
     ) -> Self {
-        Self::connect(name, reader, writer, setup, timeout_secs, flavor, false)
+        Self::connect(
+            name,
+            reader,
+            writer,
+            setup,
+            timeout_secs,
+            flavor,
+            false,
+            None,
+        )
     }
 
-    /// [`Self::from_streams`], as a service when `service` says so.
+    /// [`Self::from_streams`], as a service when `service` says so, with the
+    /// process's `stderr` when there is one.
+    #[allow(clippy::too_many_arguments)]
     fn connect(
         name: &str,
         reader: impl Read + Send + 'static,
@@ -422,6 +476,7 @@ impl AcpRuntime {
         timeout_secs: u64,
         flavor: AcpFlavor,
         service: bool,
+        stderr: Option<Arc<StderrTail>>,
     ) -> Self {
         let (events_tx, events) = mpsc::channel();
         let shared = Arc::new(Shared {
@@ -447,6 +502,7 @@ impl AcpRuntime {
             open_message: Mutex::new(None),
             open_thought: Mutex::new(String::new()),
             child: Mutex::new(None),
+            stderr,
             models: Mutex::new(Vec::new()),
             current_model: Mutex::new(None),
             model_option: Mutex::new(None),
@@ -2291,10 +2347,11 @@ impl Shared {
                 }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => {
-                    return Err(RpcFailure::new(
-                        format!("{method}: the agent closed the connection"),
-                        FailureKind::AgentDied,
-                    ))
+                    let mut text = format!("{method}: the agent closed the connection");
+                    if let Some(line) = self.stderr.as_ref().and_then(|t| t.last(STDERR_GRACE)) {
+                        text = format!("{text}: {line}");
+                    }
+                    return Err(RpcFailure::new(text, FailureKind::AgentDied));
                 }
             }
         }

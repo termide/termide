@@ -446,7 +446,32 @@ mod tests {
             5,
             AcpFlavor::ClaudeCode,
             true,
+            None,
         )
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_agent_that_hangs_up_at_once_says_why_with_its_last_stderr_line() {
+        // As npx does when the package it unpacked lost its executable bit.
+        let config = AcpConfig {
+            command: "sh".into(),
+            args: vec![
+                "-c".into(),
+                "echo starting >&2; echo 'sh: claude-agent-acp: Permission denied' >&2; exit 126"
+                    .into(),
+            ],
+            env: std::collections::BTreeMap::new(),
+            timeout_secs: 5,
+            flavor: AcpFlavor::Generic,
+            context_limit: None,
+        };
+        let provider = AcpProvider::new("broken", config, std::env::temp_dir());
+        let error = provider.list_models().unwrap_err();
+        assert!(
+            error.contains("closed the connection: sh: claude-agent-acp: Permission denied"),
+            "{error}"
+        );
     }
 
     #[test]
