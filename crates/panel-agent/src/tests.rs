@@ -11303,14 +11303,16 @@ fn the_carry_on_card_names_the_delegates_left_behind() {
             dir.path(),
             dir.path(),
             termide_agent_core::SessionParent {
+                // The parent names the agent that delegated, not the delegate.
                 session: Some(id.clone()),
-                agent: "search".into(),
+                agent: "default".into(),
                 call: "call-1".into(),
             },
         )
         .unwrap();
         log.append_message(&Message::User(UserMessage::text("find the loader")))
             .unwrap();
+        log.append_agent_change("search").unwrap();
         log.append_run_start().unwrap();
     }
     // Another panel's delegate, and this panel's finished one: neither shows.
@@ -11320,7 +11322,7 @@ fn the_carry_on_card_names_the_delegates_left_behind() {
             dir.path(),
             termide_agent_core::SessionParent {
                 session: Some("elsewhere".into()),
-                agent: "reviewer".into(),
+                agent: "default".into(),
                 call: "call-9".into(),
             },
         )
@@ -11343,8 +11345,9 @@ fn the_carry_on_card_names_the_delegates_left_behind() {
         ("search", "call-1")
     );
     let detail = carry_on_card(&panel);
+    // The delegate's own name, not the delegating agent's.
     assert!(detail.contains("search"), "{detail}");
-    assert!(!detail.contains("reviewer"), "another panel's: {detail}");
+    assert!(!detail.contains("default"), "{detail}");
 }
 
 /// A session whose own run ended cleanly, but which left a delegated task
@@ -11374,14 +11377,16 @@ fn a_finished_panel_still_tells_of_its_unfinished_delegates() {
             dir.path(),
             dir.path(),
             termide_agent_core::SessionParent {
+                // The parent names the agent that delegated, not the delegate.
                 session: Some(id.clone()),
-                agent: "search".into(),
+                agent: "default".into(),
                 call: "call-1".into(),
             },
         )
         .unwrap();
         log.append_message(&Message::User(UserMessage::text("find the loader")))
             .unwrap();
+        log.append_agent_change("search").unwrap();
         log.append_run_start().unwrap();
     }
 
@@ -11397,7 +11402,11 @@ fn a_finished_panel_still_tells_of_its_unfinished_delegates() {
     );
     assert!(panel.transcript.items().iter().any(|item| matches!(
         item,
-        Item::Notice { text, .. } if text.contains("search") && text.contains("find the loader")
+        Item::Notice { text, .. }
+            if text.contains("search")
+                && text.contains("find the loader")
+                // The delegate's own name, not the delegating agent's.
+                && !text.contains("default")
     )));
 }
 
