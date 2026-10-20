@@ -706,16 +706,6 @@ impl AgentPanel {
     /// The body of [`Panel::tick`]: drain the runtime's events, poll the
     /// cards, pickers and probes, and run a due `/loop` or `/goal` step.
     pub(crate) fn on_tick(&mut self) -> Vec<PanelEvent> {
-        // Sessions queued when this panel took up a session termide closed
-        // upon: the app opens each as a panel of its own. They ride with the
-        // tick's other events rather than standing in for them.
-        if !self.open_delegates.is_empty() {
-            self.pending_events.extend(
-                self.open_delegates
-                    .drain(..)
-                    .map(PanelEvent::OpenAgentSession),
-            );
-        }
         let mut changed = false;
         // A pause's line ticks its length, redrawn once a second; so does a
         // call's wait on a permission question, until the question is gone.

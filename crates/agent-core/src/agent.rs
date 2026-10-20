@@ -1259,6 +1259,7 @@ impl Agent {
             withdrawn: None,
             panel: self.panel,
             tool: crate::ToolTraits::default(),
+            resume: None,
         }
     }
 

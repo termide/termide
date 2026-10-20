@@ -46,6 +46,10 @@ pub struct ToolContext {
     /// What the tool the call is for says of itself; filled from the
     /// registry by [`crate::judge_tool_call`] before the hooks judge it.
     pub tool: ToolTraits,
+    /// The session log a delegated task runs out of again: the delegate takes
+    /// its steps back from there and goes on from where they stopped, instead
+    /// of starting a log of its own. `None` starts a fresh run.
+    pub resume: Option<PathBuf>,
 }
 
 /// What a tool says of itself that the permission hooks weigh.
@@ -72,6 +76,7 @@ impl ToolContext {
             withdrawn: None,
             panel: None,
             tool: ToolTraits::default(),
+            resume: None,
         }
     }
 }

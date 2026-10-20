@@ -396,6 +396,22 @@ pub trait AgentCatalog: Send + Sync {
         }
         Some(profile)
     }
+    /// Carry an unfinished delegated task on: run `agent` again out of its
+    /// own session log, out of sight, under the `task` call `call` that
+    /// handed it over, answering the panel `parent` when it is done. Its
+    /// permission requests come to that panel as cards, since it has none of
+    /// its own. False when this catalog runs no subagents or the log is gone.
+    fn restart_delegate(
+        &self,
+        _parent: u64,
+        _caller: &str,
+        _agent: &str,
+        _task: &str,
+        _call: &str,
+        _session: &std::path::Path,
+    ) -> bool {
+        false
+    }
     /// Prompt templates (`prompts/<name>.md`), for `/<name>` in the input.
     fn prompts(&self) -> Vec<PromptTemplate> {
         Vec::new()
@@ -976,11 +992,12 @@ pub struct AgentPanel {
     /// The pause was taken up from the log: the panel or termide closed
     /// while work was under way; how `/continue` carries it on.
     restored: Option<unfinished::Restored>,
-    /// The sessions of the delegated tasks this session left unfinished, to
-    /// open as panels of their own: each asks there whether to carry its run
-    /// on, with a prompter of its own. Queued when the session is taken up,
-    /// handed to the app on the panel's next tick.
-    open_delegates: Vec<PathBuf>,
+    /// The delegated tasks this session left unfinished in their own logs,
+    /// as the panel found them when it took the session up. Each holds a row
+    /// above the input until the user carries it on or gives it up; the panel
+    /// restarts them on its own runner, so they ask through its prompter and
+    /// answer back here.
+    restored_delegates: Vec<unfinished::RestoredDelegate>,
     /// Set while the panel carries on a task another session delegated: its
     /// run's answer goes back to the panel holding that session, which is
     /// what the `task` call was made for.
@@ -1075,6 +1092,18 @@ pub struct AgentPanel {
 
 impl AgentPanel {
     #[must_use]
+    /// The agent this panel runs as, the name its `task` calls were made by.
+    pub fn agent(&self) -> &str {
+        &self.agent
+    }
+
+    /// The catalog the panel's agents come from: the app carries the
+    /// delegated tasks this panel left unfinished on it, so they run with the
+    /// panel's own connections, rules and working directory.
+    pub fn catalog(&self) -> Arc<dyn AgentCatalog> {
+        Arc::clone(&self.catalog)
+    }
+
     pub fn new(mut setup: AgentPanelSetup) -> Self {
         // Numbered from 1 in the order panels open, for other agents to
         // address it by.
@@ -1322,7 +1351,7 @@ impl AgentPanel {
             pause_start: None,
             resuming: false,
             restored: None,
-            open_delegates: Vec::new(),
+            restored_delegates: Vec::new(),
             carry_back: None,
             held,
             logged_autorun: Autorun::default(),

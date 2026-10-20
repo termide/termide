@@ -33,6 +33,10 @@ pub(crate) enum StripTarget {
     Delegate(usize),
     /// A command the agent moved to the background, by its block's index.
     Background(usize),
+    /// A delegated task left unfinished when termide closed, by its place
+    /// among the panel's restored delegates: the row above the input, which
+    /// opens that session, where its own card asks to carry it on.
+    DelegateSession(usize),
     /// The count of rows left out.
     More,
     /// The count of subagents' rows left out, which shows them all; or,
@@ -290,7 +294,31 @@ impl AgentPanel {
             }
         }
         rows.extend(self.background_rows(width));
+        rows.extend(self.restored_rows());
         rows
+    }
+
+    /// The rows of the delegated tasks this session left unfinished: each
+    /// `⏸ & task · agent · left unfinished`, opening that session when
+    /// clicked. They hold there until the panel's carry-on card is answered;
+    /// a task carried on leaves its row, and the strip's live rows take it.
+    fn restored_rows(&self) -> Vec<StripRow> {
+        let t = termide_i18n::t();
+        self.restored_delegates
+            .iter()
+            .enumerate()
+            .map(|(index, delegate)| {
+                let mut row = StripRow::new(
+                    "&",
+                    t.agent_tool_task().to_string(),
+                    single_line(&delegate.task),
+                    StripTarget::DelegateSession(index),
+                );
+                row.notes.push(delegate.agent.clone());
+                row.notes.push(t.agent_strip_left_unfinished().to_string());
+                row
+            })
+            .collect()
     }
 
     /// The running subagents' rows: `& Delegating to · agent  prompt`, its
@@ -513,6 +541,14 @@ impl AgentPanel {
                         call,
                     },
                 ];
+            }
+            // A delegated task left unfinished: its session, where the card
+            // asks there to carry it on.
+            StripTarget::DelegateSession(index) => {
+                let Some(delegate) = self.restored_delegates.get(index).cloned() else {
+                    return vec![PanelEvent::NeedsRedraw];
+                };
+                return vec![PanelEvent::OpenAgentSession(delegate.session)];
             }
             // `✕` stops a command in the background, once confirmed.
             StripTarget::Background(index) if on_stop => {

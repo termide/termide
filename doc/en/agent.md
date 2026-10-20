@@ -549,18 +549,24 @@ left so are marked `⏸` in the session lists, and a panel that reopens one is
 highlighted until seen and rings the bell, as a panel waiting for you does.
 A delegated task's own log records its run the same way, so a task termide
 quit upon is left unfinished there too: its session shows `⏸ &` in the lists,
-and opening it asks to carry the task on as any other session does. The
-carry-on card names each such delegate of the session it reopens
-(`& search · find the loader — unfinished`). Each unfinished delegate's own
-session then opens as a panel of its own, up to three at once, and asks there
-whether to carry its run on: opened that way it has a prompter of its own, so
-it asks permissions as any other panel does. **Continue** in such a panel
-carries the task on and, when the run is over, sends its answer back to the
-panel that delegated it — by the delegating session's id, since panel numbers
-are born anew each start of termide — which takes it as a reply and works on
-it, as it takes a background task's answer. With no panel holding that session
-the delegate says its answer has nowhere to go, and it stays in its log. More
-than three unfinished delegates wait in the session lists (`F6`), marked `⏸ &`.
+and opening it asks to carry the task on as any other session does. The panel
+that delegated it is the one to carry them on, so it keeps the unfinished ones
+in view instead: each holds a row above the input
+(`& task · find the loader · search — unfinished`), and clicking that row
+opens the delegate's session, where its own card asks. No panel of a delegate
+opens by itself.
+
+**Continue** on the carry-on card carries the panel's own work on and, with
+it, every delegate it left behind: each runs again out of sight under the
+`task` call that handed it over, taking its steps back from its own log —
+what it did before stands there, so it goes on rather than starts over — and
+answering the panel that delegated it when it is over. Its permission requests
+come to that panel as cards, since a task run out of sight has none of its
+own. A panel with nothing of its own left unfinished asks about its delegates
+alone, and there **Continue** starts only those. **Decide later** leaves the
+rows above the input and the tasks waiting in the session lists (`F6`), marked
+`⏸ &`; a delegate whose runner is gone — one that cannot be carried on here —
+says so in the panel that asked and stays in those lists.
 
 A session is held by one termide at a time. Another termide opening the same
 project — while the first still runs, maybe in a terminal window out of sight

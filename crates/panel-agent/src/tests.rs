@@ -11396,22 +11396,116 @@ fn a_finished_panel_opens_the_sessions_of_its_unfinished_delegates() {
         session: Some(Session::open(&parent_path).unwrap()),
         ..setup(vec![reply("ok")])
     });
-    // No carry-on card: the panel's own run is over.
-    assert!(
-        !matches!(panel.pending, Some(Pending::Unfinished { .. })),
-        "the panel's own work ended"
-    );
-    // The delegate's session opens as a panel of its own on the next tick.
+    // The panel's own run is over, so no card asks about it; the delegate
+    // holds a row above the input instead of opening a panel of its own.
     let events = panel.tick();
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, PanelEvent::OpenAgentSession(_))),
+        "{events:?}"
+    );
+    assert_eq!(
+        panel.restored_delegates.len(),
+        1,
+        "the delegate holds a row"
+    );
+    assert_eq!(panel.restored_delegates[0].agent, "search");
+    // The idle panel asks about the delegates alone.
+    assert!(
+        matches!(panel.pending, Some(Pending::Unfinished { .. })),
+        "the delegates are asked about"
+    );
+    // Continue carries them on: the app restarts each on the panel's runner,
+    // under the `task` call that handed it over.
+    panel.apply_form_action(ChoiceAction::Chosen(0));
+    let events = panel.tick();
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            PanelEvent::RestartDelegates { panel: _, items }
+                if items.len() == 1
+                    && items[0].0 == "search"
+                    && items[0].1 == delegate_path
+                    && items[0].2 == "call-1"
+        )),
+        "{events:?}"
+    );
+    assert!(
+        panel.restored_delegates.is_empty(),
+        "a task carried on leaves its row"
+    );
+}
+
+/// A delegate row above the input opens the session it waits in, where that
+/// session's own card asks to carry it on; `Later` leaves the rows there.
+#[test]
+fn a_row_of_an_unfinished_delegate_opens_its_session_and_later_keeps_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let parent_path = {
+        let log = Session::create(dir.path(), dir.path()).unwrap();
+        log.path().to_path_buf()
+    };
+    let delegate_path = {
+        let mut log = Session::create_delegate(
+            dir.path(),
+            dir.path(),
+            termide_agent_core::SessionParent {
+                session: Some(
+                    Session::open_read_only(&parent_path)
+                        .unwrap()
+                        .id()
+                        .to_string(),
+                ),
+                agent: "default".into(),
+                call: "call-1".into(),
+            },
+        )
+        .unwrap();
+        log.append_message(&Message::User(UserMessage::text("find the loader")))
+            .unwrap();
+        log.append_agent_change("search").unwrap();
+        log.append_run_start().unwrap();
+        log.path().to_path_buf()
+    };
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        session: Some(Session::open(&parent_path).unwrap()),
+        ..setup(vec![reply("ok")])
+    });
+    panel.tick();
+    // Later: nothing runs, and the row stays for another time.
+    panel.apply_form_action(ChoiceAction::Chosen(1));
+    let events = panel.tick();
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, PanelEvent::RestartDelegates { .. })),
+        "{events:?}"
+    );
+    assert_eq!(panel.restored_delegates.len(), 1, "the row waits on");
+    // A click on the row opens the session the delegate waits in.
+    let rows = render_text(&mut panel, 80, 30);
+    let row = strip_row(&panel, crate::strip::StripTarget::DelegateSession(0));
+    let line = &rows[row as usize];
+    assert!(
+        line.contains("search") && line.contains("find the loader"),
+        "{line}"
+    );
+    let events = panel.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 2,
+            row,
+            modifiers: KeyModifiers::NONE,
+        },
+        Rect::new(0, 0, 80, 30),
+    );
     assert!(
         events.iter().any(
             |event| matches!(event, PanelEvent::OpenAgentSession(path) if path == &delegate_path)
         ),
         "{events:?}"
-    );
-    assert!(
-        panel.tick().is_empty(),
-        "each unfinished delegate opens once"
     );
 }
 

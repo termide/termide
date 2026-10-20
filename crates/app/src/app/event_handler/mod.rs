@@ -457,6 +457,47 @@ impl App {
                 self.ai_open_session(path)?;
             }
 
+            PanelEvent::RestartDelegates { panel, items } => {
+                // The panel's own runner carries its delegates on, so they run
+                // on its connections and rules and ask through its prompter.
+                let catalog = self
+                    .layout_manager
+                    .iter_all_panels_mut()
+                    .find_map(|candidate| {
+                        candidate
+                            .as_any_mut()
+                            .downcast_mut::<termide_panel_agent::AgentPanel>()
+                            .filter(|agent| agent.panel_id() == panel)
+                            .map(|agent| (agent.catalog(), agent.agent().to_string()))
+                    });
+                let Some((catalog, caller)) = catalog else {
+                    log::warn!("panel {panel} is gone: its delegates stay unfinished");
+                    return Ok(());
+                };
+                let mut failed: Vec<String> = Vec::new();
+                for (agent, session, call) in &items {
+                    if !catalog.restart_delegate(panel, &caller, agent, "", call, session) {
+                        failed.push(agent.clone());
+                    }
+                }
+                if !failed.is_empty() {
+                    let t = termide_i18n::t();
+                    let text = t.agent_carry_failed_fmt(&failed.join(", "));
+                    log::warn!("{text}");
+                    if let Some(target) =
+                        self.layout_manager
+                            .iter_all_panels_mut()
+                            .find_map(|candidate| {
+                                candidate
+                                    .as_any_mut()
+                                    .downcast_mut::<termide_panel_agent::AgentPanel>()
+                                    .filter(|agent| agent.panel_id() == panel)
+                            })
+                    {
+                        target.notice(text, termide_panel_agent::NoticeKind::Warn);
+                    }
+                }
+            }
             PanelEvent::DelegateAnswerToParent {
                 parent_session,
                 from,

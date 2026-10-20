@@ -194,6 +194,7 @@ mod tests {
             withdrawn: None,
             panel: None,
             tool: Default::default(),
+            resume: None,
         }
     }
 
@@ -215,6 +216,7 @@ mod tests {
             withdrawn: None,
             panel: None,
             tool: Default::default(),
+            resume: None,
         }
     }
 
@@ -273,6 +275,7 @@ mod tests {
             withdrawn: None,
             panel: None,
             tool: Default::default(),
+            resume: None,
         };
         let answerer = std::thread::spawn(move || {
             let envelope = rx.recv().unwrap();
@@ -364,6 +367,7 @@ mod tests {
             withdrawn: None,
             panel: None,
             tool: Default::default(),
+            resume: None,
         };
         let answerer = std::thread::spawn(move || {
             let envelope = rx.recv().unwrap();
@@ -408,6 +412,7 @@ mod tests {
             withdrawn: None,
             panel: None,
             tool: Default::default(),
+            resume: None,
         };
         let result = SuggestCommandTool.execute(
             &call(json!({ "command": "gh issue comment 59" })),
@@ -440,6 +445,7 @@ mod tests {
             withdrawn: None,
             panel: None,
             tool: Default::default(),
+            resume: None,
         };
         let result = SuggestCommandTool.execute(
             &call(json!({ "command": "ls" })),

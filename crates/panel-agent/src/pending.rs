@@ -956,12 +956,23 @@ impl AgentPanel {
             (Some(Pending::Unfinished { .. }), ChoiceAction::Chosen(index)) => {
                 self.pending = None;
                 if index == 0 {
-                    self.resume();
-                } else {
+                    // Continue: the panel's own run, and with it whatever it
+                    // left delegated tasks unfinished — a panel idle at a
+                    // delegates-only card has no run to resume, so there the
+                    // tasks go alone.
+                    if self.restored.is_some() {
+                        self.resume();
+                    }
+                    let events = self.restart_delegates(None);
+                    self.pending_events.extend(events);
+                } else if self.restored.is_some() {
+                    // Give up the panel's own run; the delegates' rows stay,
+                    // and their tasks wait in the session lists (`F6`).
                     self.stop_paused();
                 }
             }
-            // Later: the pause stays, with `/continue`, `[▶]` and `[■]`.
+            // Later: the pause stays, with `/continue`, `[▶]` and `[■]`, and
+            // so do the rows of the delegates left unfinished.
             (
                 Some(Pending::Unfinished { .. }),
                 ChoiceAction::Cancelled | ChoiceAction::Custom(_),
