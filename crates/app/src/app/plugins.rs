@@ -799,6 +799,18 @@ impl App {
     /// since takes effect — and run what the projects now want.
     pub(super) fn reload_plugins(&mut self) {
         self.plugins.installed = discover_installed();
+        // The first plugins installed since termide started may answer for
+        // a language: editors opened from now on ask them.
+        if !self.plugins.installed.is_empty() {
+            let _ = super::plugin_providers::provider_hub();
+        }
+        // A plugin's code may have changed with nothing in its launch to
+        // show it: every one starts afresh, one given up on included.
+        for root in self.plugins.synced.clone() {
+            for key in self.plugins.host.close_project(&root) {
+                self.forget_plugin(&key);
+            }
+        }
         self.sync_plugins();
         let count = self.plugins.installed.len();
         self.state

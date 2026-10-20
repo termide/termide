@@ -39,7 +39,9 @@ as the working directory and learns the project's root from `initialize`.
 
 Plugins are read when termide starts. After installing, removing or changing
 one, **Plugins: read the plugins directory again** in the command palette
-(`Ctrl+P`) takes it in without a restart. **Plugins: show where each stands**
+(`Ctrl+P`) takes it in without a restart: every plugin starts afresh, and the
+language features of one installed since reach the editors opened after it.
+**Plugins: show where each stands**
 lists the installed plugins and their state in the current project, and
 **Plugins: restart <name>** starts one afresh.
 
@@ -87,7 +89,8 @@ turns them on without your consent.
 Each open project has its own copy of each plugin it runs, including projects
 parked in the background. A plugin that crashes is restarted after 1, 2, 4…
 seconds. After three crashes within a minute it stays off until its settings
-change or termide restarts, and the status bar says so.
+change, it is restarted, the plugins directory is read again or termide
+restarts, and its project's status bar says so.
 
 ## Writing a plugin
 
