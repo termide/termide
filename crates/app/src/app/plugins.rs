@@ -5,7 +5,7 @@
 //! tells it which plugins each project wants, drains what they send on the
 //! tick, answers their requests and passes them the events they asked for.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
@@ -41,6 +41,9 @@ pub(crate) struct PluginRuntime {
     contributions: BTreeMap<PluginKey, Contributions>,
     /// Status items, by plugin and item id.
     status: BTreeMap<(PluginKey, String), String>,
+    /// Plugins given up on after crashing: marked in their project's status
+    /// bar until they run again.
+    gave_up: BTreeSet<PluginKey>,
     /// The projects the host was last told about.
     synced: Vec<PathBuf>,
     /// The open projects or a config changed: sync on the next tick.
@@ -101,6 +104,7 @@ impl PluginRuntime {
             installed,
             contributions: BTreeMap::new(),
             status: BTreeMap::new(),
+            gave_up: BTreeSet::new(),
             synced: Vec::new(),
             dirty: true,
             panels: BTreeMap::new(),
@@ -114,14 +118,22 @@ impl PluginRuntime {
         self.dirty = true;
     }
 
-    /// The status items of `project`'s plugins, in plugin and id order,
-    /// joined for the status bar; `None` without any.
+    /// The status items of `project`'s plugins, in plugin and id order, then
+    /// a mark for each of its plugins given up on, joined for the status
+    /// bar; `None` without any.
     fn status_line(&self, project: &Path) -> Option<String> {
-        let items: Vec<&str> = self
+        let gave_up = termide_i18n::t().plugins_state_gave_up();
+        let items: Vec<String> = self
             .status
             .iter()
             .filter(|((key, _), _)| key.project == project)
-            .map(|(_, text)| text.as_str())
+            .map(|(_, text)| text.clone())
+            .chain(
+                self.gave_up
+                    .iter()
+                    .filter(|key| key.project == project)
+                    .map(|key| format!("⚠ {}: {gave_up}", key.name)),
+            )
             .collect();
         (!items.is_empty()).then(|| items.join(" · "))
     }
@@ -227,6 +239,7 @@ impl App {
         tool_hub().set(key, Vec::new());
         super::plugin_providers::provider_hub().set(key, None);
         self.plugins.status.retain(|(k, _), _| k != key);
+        self.plugins.gave_up.remove(key);
         self.orphan_plugin_panels(key);
         self.drop_plugin_windows(key);
         self.clear_plugin_diagnostics(key);
@@ -319,6 +332,7 @@ impl App {
         match event {
             HostEvent::Ready { key, contributions } => {
                 log::info!("plugin {} ready for {}", key.name, key.project.display());
+                self.plugins.gave_up.remove(&key);
                 self.publish_plugin_tools(&key, &contributions);
                 self.plugins.contributions.insert(key, contributions);
                 self.refresh_plugin_ui();
@@ -335,11 +349,16 @@ impl App {
             } => {
                 self.forget_plugin(&key);
                 if restart_in.is_none() {
-                    self.state.set_error(format!(
-                        "Plugin {} stopped and will not be restarted: {reason}",
-                        key.name
-                    ));
-                    self.state.needs_redraw = true;
+                    // Marked in its project's status bar for as long as it
+                    // stays off; the message only where the user is.
+                    if key.project == self.open_projects.current() {
+                        self.state.set_error(format!(
+                            "Plugin {} stopped and will not be restarted: {reason}",
+                            key.name
+                        ));
+                    }
+                    self.plugins.gave_up.insert(key);
+                    self.refresh_plugin_ui();
                 }
             }
             HostEvent::Request {
@@ -1106,6 +1125,37 @@ impl PluginToolHub {
 mod tests {
     use super::{agent_run_event, is_one_command_line, plugin_title, projects_of_repo};
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn a_plugin_given_up_on_is_marked_in_its_own_projects_status_bar() {
+        use super::{Host, PluginKey, PluginRuntime, ProcessLauncher, Timing};
+        use std::collections::{BTreeMap, BTreeSet};
+        use std::sync::Arc;
+        let key = |project: &str, name: &str| PluginKey {
+            project: PathBuf::from(project),
+            name: name.into(),
+        };
+        let mut plugins = PluginRuntime {
+            host: Host::new(Arc::new(ProcessLauncher), Timing::default()),
+            installed: Vec::new(),
+            contributions: BTreeMap::new(),
+            status: BTreeMap::new(),
+            gave_up: BTreeSet::new(),
+            synced: Vec::new(),
+            dirty: false,
+            panels: BTreeMap::new(),
+            next_panel: 1,
+            windows: Default::default(),
+            editors: Default::default(),
+        };
+        plugins
+            .status
+            .insert((key("/a", "clock"), "t".into()), "12:00".into());
+        plugins.gave_up.insert(key("/a", "lint"));
+        let line = plugins.status_line(Path::new("/a")).unwrap();
+        assert!(line.starts_with("12:00 · ⚠ lint: "), "{line}");
+        assert_eq!(plugins.status_line(Path::new("/b")), None);
+    }
 
     #[test]
     fn a_repository_change_reaches_each_open_project_it_concerns() {
