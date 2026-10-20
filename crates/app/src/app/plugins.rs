@@ -879,6 +879,26 @@ fn plugin_diagnostics(plugin: &str, items: &Value) -> Result<Vec<lsp_types::Diag
         .collect()
 }
 
+/// The plugin event an agent panel's `PanelEvent::AgentRun` is told as.
+pub(super) fn agent_run_event(panel: u64, finished: Option<bool>) -> (&'static str, Value) {
+    match finished {
+        None => (events::AGENT_STARTED, json!({ "panel": panel })),
+        Some(ok) => (events::AGENT_FINISHED, json!({ "panel": panel, "ok": ok })),
+    }
+}
+
+/// The open projects a change of the repository at `repo` concerns: the one
+/// it is in, or is the root of, and those inside it.
+pub(super) fn projects_of_repo<'a>(
+    roots: impl Iterator<Item = &'a Path>,
+    repo: &Path,
+) -> Vec<PathBuf> {
+    roots
+        .filter(|root| repo.starts_with(root) || root.starts_with(repo))
+        .map(Path::to_path_buf)
+        .collect()
+}
+
 /// Whether `command` is what `terminal/run` may type: one line the user
 /// sees whole. A `\r` would run a second command after it, and other control
 /// characters (`Ctrl+U`, escape sequences) rewrite the line out of sight.
@@ -1084,7 +1104,45 @@ impl PluginToolHub {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_one_command_line, plugin_title};
+    use super::{agent_run_event, is_one_command_line, plugin_title, projects_of_repo};
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn a_repository_change_reaches_each_open_project_it_concerns() {
+        let roots = [
+            Path::new("/w/app"),
+            Path::new("/w/app/crates/core"),
+            Path::new("/w/other"),
+            Path::new("/w/application"),
+        ];
+        assert_eq!(
+            projects_of_repo(roots.into_iter(), Path::new("/w/app")),
+            [PathBuf::from("/w/app"), PathBuf::from("/w/app/crates/core")]
+        );
+        // A project inside a repository that holds more than it.
+        assert_eq!(
+            projects_of_repo(roots.into_iter(), Path::new("/w")),
+            roots.map(PathBuf::from)
+        );
+        assert!(projects_of_repo(roots.into_iter(), Path::new("/elsewhere")).is_empty());
+    }
+
+    #[test]
+    fn an_agent_run_is_told_as_started_then_finished() {
+        let (method, params) = agent_run_event(7, None);
+        assert_eq!(
+            (method, params),
+            ("agent/started", serde_json::json!({ "panel": 7 }))
+        );
+        let (method, params) = agent_run_event(7, Some(false));
+        assert_eq!(
+            (method, params),
+            (
+                "agent/finished",
+                serde_json::json!({ "panel": 7, "ok": false })
+            )
+        );
+    }
 
     #[test]
     fn a_plugin_runs_one_visible_line_and_nothing_hidden() {

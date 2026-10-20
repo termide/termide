@@ -136,14 +136,7 @@ impl App {
             }
 
             PanelEvent::AgentRun { panel, finished } => {
-                use termide_plugins::protocol::events;
-                let (method, params) = match finished {
-                    None => (events::AGENT_STARTED, serde_json::json!({ "panel": panel })),
-                    Some(ok) => (
-                        events::AGENT_FINISHED,
-                        serde_json::json!({ "panel": panel, "ok": ok }),
-                    ),
-                };
+                let (method, params) = super::plugins::agent_run_event(panel, finished);
                 let project = self.open_projects.current().to_path_buf();
                 self.plugins.host.emit(&project, method, &params);
             }

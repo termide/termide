@@ -368,11 +368,17 @@ impl App {
         }
         let mut ring = false;
         let mut attention_changed = false;
+        let mut agent_runs = Vec::new();
         for (root, parked) in self.open_projects.parked_mut() {
             for panel in parked.layout.iter_all_panels_mut() {
                 for event in panel.tick() {
                     match event {
                         PanelEvent::RequestAttention => ring = true,
+                        // The project's plugins hear it now, as they would
+                        // with the project in front, not when it comes back.
+                        PanelEvent::AgentRun { panel, finished } => {
+                            agent_runs.push((root.to_path_buf(), panel, finished));
+                        }
                         event => queue_parked_event(&mut parked.events, event),
                     }
                 }
@@ -385,6 +391,10 @@ impl App {
                 .find(|view| view.root == root)
                 .is_some_and(|view| view.attention);
             attention_changed |= shown != parked.needs_attention();
+        }
+        for (root, panel, finished) in agent_runs {
+            let (method, params) = super::plugins::agent_run_event(panel, finished);
+            self.plugins.host.emit(&root, method, &params);
         }
         if ring {
             self.state.attention_bell();
