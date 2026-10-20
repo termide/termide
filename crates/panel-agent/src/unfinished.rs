@@ -18,7 +18,9 @@ use termide_ui::ChoiceForm;
 use crate::pending::Pending;
 use crate::runtime::{hms_from_millis, push_history};
 use crate::transcript::Item;
-use crate::{single_line, truncate_title, AgentPanel, GoalTask, LoopTask, LOOP_MAX_ITERATIONS};
+use crate::{
+    single_line, truncate_title, AgentPanel, GoalTask, LoopTask, NoticeKind, LOOP_MAX_ITERATIONS,
+};
 
 /// What a call a cut-off run left without a result is told: it may have run
 /// in part, so the model looks before it runs it again.
@@ -298,13 +300,22 @@ impl AgentPanel {
             self.retry_attempts = 0;
             self.retry_ready = true;
             self.offer_failure(failure);
+            // The card asks about the request, not about the delegates: they
+            // are said below it, where they can still be read.
+            self.notice_unfinished_delegates();
             return;
         }
         let restored = match mark {
             Some(_) if self.runtime.can_pause() => Restored::Resume,
             Some(_) if self.external => Restored::Prompt,
             _ if !autorun.is_empty() => Restored::Autorun,
-            _ => return,
+            // Nothing of the panel's own is left unfinished. Its delegated
+            // tasks may well be: they ran out of sight and their logs stand
+            // where termide stopped them, so the panel says so on a line.
+            _ => {
+                self.notice_unfinished_delegates();
+                return;
+            }
         };
         if let Some(mark) = mark {
             if mark.state == LastRun::CutOff {
@@ -316,6 +327,24 @@ impl AgentPanel {
         self.paused = true;
         self.restored = Some(restored);
         self.ask_carry_on(mark, &autorun);
+    }
+
+    /// One line per delegated task this session left unfinished in its own
+    /// log, naming the way to it: the panel carries on its own run, and each
+    /// delegate is carried on by opening its session (`F6`), where it asks
+    /// what it needs as any other panel does. Shown when no carry-on card is
+    /// up, so what was handed over is never left unsaid.
+    fn notice_unfinished_delegates(&mut self) {
+        let t = termide_i18n::t();
+        for delegate in self.unfinished_delegates() {
+            self.notice(
+                t.agent_unfinished_delegate_fmt(
+                    &delegate.agent,
+                    &truncate_title(&single_line(&delegate.task)),
+                ),
+                NoticeKind::Info,
+            );
+        }
     }
 
     /// Take the log's `/goal` and `/loop` back as the panel's tasks, their

@@ -11347,6 +11347,60 @@ fn the_carry_on_card_names_the_delegates_left_behind() {
     assert!(!detail.contains("reviewer"), "another panel's: {detail}");
 }
 
+/// A session whose own run ended cleanly, but which left a delegated task
+/// unfinished in its log, says so on a line: nothing is carried on by itself,
+/// and the way to the delegate is its own session.
+#[test]
+fn a_finished_panel_still_tells_of_its_unfinished_delegates() {
+    let dir = tempfile::tempdir().unwrap();
+    let parent_path = {
+        let mut session = Session::create(dir.path(), dir.path()).unwrap();
+        session
+            .append_message(&Message::User(UserMessage::text("build it")))
+            .unwrap();
+        session.append_run_start().unwrap();
+        session
+            .append_message(&Message::Assistant(reply("done")))
+            .unwrap();
+        session.append_run_end(false).unwrap();
+        session.path().to_path_buf()
+    };
+    let id = Session::open_read_only(&parent_path)
+        .unwrap()
+        .id()
+        .to_string();
+    {
+        let mut log = Session::create_delegate(
+            dir.path(),
+            dir.path(),
+            termide_agent_core::SessionParent {
+                session: Some(id.clone()),
+                agent: "search".into(),
+                call: "call-1".into(),
+            },
+        )
+        .unwrap();
+        log.append_message(&Message::User(UserMessage::text("find the loader")))
+            .unwrap();
+        log.append_run_start().unwrap();
+    }
+
+    let panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        session: Some(Session::open(&parent_path).unwrap()),
+        ..setup(vec![reply("ok")])
+    });
+    // No carry-on card: the panel's own run is over.
+    assert!(
+        !matches!(panel.pending, Some(Pending::Unfinished { .. })),
+        "the panel's own work ended"
+    );
+    assert!(panel.transcript.items().iter().any(|item| matches!(
+        item,
+        Item::Notice { text, .. } if text.contains("search") && text.contains("find the loader")
+    )));
+}
+
 /// The panel's pause holds the tasks it handed over, and its resume lets
 /// them go; a task an external agent runs keeps going, and the pause's row
 /// says which is which.
