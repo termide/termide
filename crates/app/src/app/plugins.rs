@@ -16,7 +16,7 @@ use termide_agent_core::{
 };
 use termide_config::{plugin_enabled, Config, PluginSettings};
 use termide_plugins::protocol::{self, events};
-use termide_plugins::rpc::{RpcError, INVALID_PARAMS, METHOD_NOT_FOUND};
+use termide_plugins::rpc::{RpcError, INTERNAL_ERROR, INVALID_PARAMS, METHOD_NOT_FOUND};
 use termide_plugins::{
     Contributions, Host, HostEvent, Installed, Launch, PluginKey, ProcessLauncher, Timing,
 };
@@ -436,16 +436,19 @@ impl App {
                     ));
                 }
                 let command = text("command")?;
-                if command.contains('\n') || command.trim().is_empty() {
-                    return Err(RpcError::new(INVALID_PARAMS, "`command` must be one line"));
+                if !is_one_command_line(&command) {
+                    return Err(RpcError::new(
+                        INVALID_PARAMS,
+                        "`command` must be one line with no control characters",
+                    ));
                 }
                 let cwd = match params["cwd"].as_str() {
                     Some(cwd) if Path::new(cwd).is_absolute() => PathBuf::from(cwd),
                     Some(_) => return Err(RpcError::new(INVALID_PARAMS, "`cwd` must be absolute")),
                     None => key.project.clone(),
                 };
-                self.event_run_command(command, Some(cwd))
-                    .map_err(|e| RpcError::new(INVALID_PARAMS, e.to_string()))?;
+                self.run_in_new_terminal(&command, Some(cwd))
+                    .map_err(|e| RpcError::new(INTERNAL_ERROR, e.to_string()))?;
                 self.state.needs_redraw = true;
                 Ok(Value::Null)
             }
@@ -876,6 +879,13 @@ fn plugin_diagnostics(plugin: &str, items: &Value) -> Result<Vec<lsp_types::Diag
         .collect()
 }
 
+/// Whether `command` is what `terminal/run` may type: one line the user
+/// sees whole. A `\r` would run a second command after it, and other control
+/// characters (`Ctrl+U`, escape sequences) rewrite the line out of sight.
+fn is_one_command_line(command: &str) -> bool {
+    !command.trim().is_empty() && !command.chars().any(char::is_control)
+}
+
 /// A plugin panel's title as termide shows it: the plugin's name, which the
 /// plugin cannot choose, then its own title, cleaned. Nothing a plugin sends
 /// can make its panel pass for one of termide's.
@@ -1074,7 +1084,22 @@ impl PluginToolHub {
 
 #[cfg(test)]
 mod tests {
-    use super::plugin_title;
+    use super::{is_one_command_line, plugin_title};
+
+    #[test]
+    fn a_plugin_runs_one_visible_line_and_nothing_hidden() {
+        assert!(is_one_command_line("cargo test -p x"));
+        for hidden in [
+            "ls\rrm -rf ~",
+            "ls\n",
+            "ls\u{15}rm x",
+            "ls\u{1b}[2K",
+            "a\tb",
+            "  ",
+        ] {
+            assert!(!is_one_command_line(hidden), "{hidden:?}");
+        }
+    }
 
     #[test]
     fn a_plugins_marks_become_diagnostics_of_its_own() {

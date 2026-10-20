@@ -123,19 +123,25 @@ impl App {
         command: String,
         cwd: Option<PathBuf>,
     ) -> Result<()> {
-        self.close_help_panels();
-
-        match self.create_terminal_panel(cwd) {
-            Ok(mut terminal) => {
-                let _ = terminal.send_command(&command);
-                self.add_panel(Box::new(terminal));
-                self.auto_save_layout();
-            }
-            Err(e) => {
-                log::error!("Failed to create terminal for command '{}': {}", command, e);
-            }
+        if let Err(e) = self.run_in_new_terminal(&command, cwd) {
+            log::error!("Failed to run command '{}' in a terminal: {}", command, e);
         }
         Ok(())
+    }
+
+    /// Open a terminal panel in `cwd` and type `command` in it; the error
+    /// when no terminal opened or the command could not be typed.
+    pub(in crate::app) fn run_in_new_terminal(
+        &mut self,
+        command: &str,
+        cwd: Option<PathBuf>,
+    ) -> Result<()> {
+        self.close_help_panels();
+        let mut terminal = self.create_terminal_panel(cwd)?;
+        let typed = terminal.send_command(command);
+        self.add_panel(Box::new(terminal));
+        self.auto_save_layout();
+        typed
     }
 
     /// Handle PreviewMedia event - preview image/video using native graphics or system viewer

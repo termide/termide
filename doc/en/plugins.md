@@ -228,7 +228,8 @@ most 16 MB, `editor/edit` at most 10 000 edits at once.
 `terminal/run` `{ "command", "cwd" }` opens a terminal panel in the plugin's
 project, which must be the current one, and types `command` in it, so the
 user sees what runs; `cwd` (absolute) defaults to the project's root. The
-command is one line.
+command is one line with no control characters, and an error comes back
+when no terminal could be opened.
 
 ### Marks in the editor
 

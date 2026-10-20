@@ -26,6 +26,8 @@ const NO_REPLY: &str = "no reply within";
 pub const METHOD_NOT_FOUND: i64 = -32601;
 /// JSON-RPC's "invalid params".
 pub const INVALID_PARAMS: i64 = -32602;
+/// JSON-RPC's "internal error": the request was fine, carrying it out failed.
+pub const INTERNAL_ERROR: i64 = -32603;
 
 /// A message the other side sent unasked.
 #[derive(Debug, Clone, PartialEq)]
