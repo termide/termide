@@ -547,6 +547,9 @@ pause, and a new request takes over, as it does over any pause. A goal or loop
 keeps its count of turns across the reopen, so its cap still holds. Sessions
 left so are marked `⏸` in the session lists, and a panel that reopens one is
 highlighted until seen and rings the bell, as a panel waiting for you does.
+A delegated task's own log records its run the same way, so a task termide
+quit upon is left unfinished there too: its session shows `⏸ &` in the lists,
+and opening it asks to carry the task on as any other session does.
 
 A session is held by one termide at a time. Another termide opening the same
 project — while the first still runs, maybe in a terminal window out of sight
