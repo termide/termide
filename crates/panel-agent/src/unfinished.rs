@@ -13,6 +13,7 @@ use termide_agent_core::{
     GoalRecord, LastRun, LoggedMessage, LoopRecord, Message, RunMark, Session, StopReason,
     ToolCall, ToolResultMessage, Usage, ACP_PROVIDER,
 };
+use termide_core::PanelEvent;
 use termide_ui::ChoiceForm;
 
 use crate::pending::Pending;
@@ -40,10 +41,6 @@ pub struct CarryBack {
     /// The run that carries the task on is under way; its end reports back.
     pub running: bool,
 }
-
-/// How many sessions of unfinished delegated tasks a reopened panel opens at
-/// once: more than that crowd the layout, and the rest wait in the lists.
-const MAX_OPENED_DELEGATES: usize = 3;
 
 /// A delegated task left unfinished in its own log when termide closed: it
 /// stands where it stopped, with its transcript, and waits to be carried on.
@@ -319,9 +316,9 @@ impl AgentPanel {
             self.retry_attempts = 0;
             self.retry_ready = true;
             self.offer_failure(failure);
-            // The card asks about the request; the delegates open as panels
-            // of their own, where each is asked in its own turn.
-            self.queue_opening_delegates();
+            // The card asks about the request; the delegates hold rows above
+            // the input, where they can still be carried on.
+            self.adopt_unfinished_delegates();
             return;
         }
         let restored = match mark {
@@ -330,10 +327,12 @@ impl AgentPanel {
             _ if !autorun.is_empty() => Restored::Autorun,
             // Nothing of the panel's own is left unfinished. Its delegated
             // tasks may well be: they ran out of sight and their logs stand
-            // where termide stopped them, so each opens as a panel of its own
-            // and is asked there.
+            // where termide stopped them, so the panel asks about those alone.
             _ => {
-                self.queue_opening_delegates();
+                self.adopt_unfinished_delegates();
+                if !self.restored_delegates.is_empty() {
+                    self.ask_carrying_delegates();
+                }
                 return;
             }
         };
@@ -346,6 +345,7 @@ impl AgentPanel {
         self.restore_autorun_tasks(&autorun);
         self.paused = true;
         self.restored = Some(restored);
+        self.adopt_unfinished_delegates();
         // A delegate's own session: whatever this run ends on is the answer
         // the panel that delegated the task is waiting for.
         self.carry_back = self.session.as_ref().and_then(|session| {
@@ -382,22 +382,85 @@ impl AgentPanel {
             .unwrap_or_default()
     }
 
-    /// Queue the sessions of the delegated tasks this session left unfinished
-    /// to open as panels of their own: each asks there on its own card
-    /// whether to carry its run on, with a prompter of its own — which is
-    /// what the panel that delegated it cannot offer. A few at a time, so a
-    /// session that lost many does not fill the layout at once; the rest stay
-    /// in the session lists (`F6`), marked `⏸ &`.
-    fn queue_opening_delegates(&mut self) {
-        for delegate in self
-            .unfinished_delegates()
-            .into_iter()
-            .take(MAX_OPENED_DELEGATES)
-        {
-            if !self.open_delegates.contains(&delegate.session) {
-                self.open_delegates.push(delegate.session);
+    /// Take the delegated tasks this session left unfinished as the panel's
+    /// own: each holds a row above the input until the user carries it on or
+    /// leaves it. Nothing runs by itself here.
+    fn adopt_unfinished_delegates(&mut self) {
+        for delegate in self.unfinished_delegates() {
+            if !self
+                .restored_delegates
+                .iter()
+                .any(|kept| kept.session == delegate.session)
+            {
+                self.restored_delegates.push(delegate);
             }
         }
+    }
+
+    /// Carry the unfinished delegated tasks on, all of them or the one at
+    /// `index`: each runs again out of sight under the `task` call that handed
+    /// it over, asking through this panel's prompter and answering back here,
+    /// as any background task does. What is carried on leaves the rows.
+    pub(crate) fn restart_delegates(&mut self, index: Option<usize>) -> Vec<PanelEvent> {
+        let chosen: Vec<RestoredDelegate> = match index {
+            Some(index) => self
+                .restored_delegates
+                .get(index)
+                .cloned()
+                .into_iter()
+                .collect(),
+            None => self.restored_delegates.clone(),
+        };
+        if chosen.is_empty() {
+            return vec![PanelEvent::NeedsRedraw];
+        }
+        let items: Vec<(String, std::path::PathBuf, String)> = chosen
+            .iter()
+            .map(|delegate| {
+                (
+                    delegate.agent.clone(),
+                    delegate.session.clone(),
+                    delegate.call.clone(),
+                )
+            })
+            .collect();
+        self.restored_delegates
+            .retain(|kept| !chosen.iter().any(|c| c.session == kept.session));
+        vec![
+            PanelEvent::RestartDelegates {
+                panel: self.panel_id,
+                items,
+            },
+            PanelEvent::NeedsRedraw,
+        ]
+    }
+
+    /// The panel is idle and has nothing of its own to carry on, but it left
+    /// delegated tasks unfinished: ask whether to carry those on. Continue
+    /// runs them out of sight, and their answers come back here; Later leaves
+    /// the rows, and the tasks wait in the session lists (`F6`), `⏸ &`.
+    fn ask_carrying_delegates(&mut self) {
+        let t = termide_i18n::t();
+        let detail: Vec<String> = self
+            .restored_delegates
+            .iter()
+            .map(|delegate| {
+                t.agent_unfinished_delegate_fmt(
+                    &delegate.agent,
+                    &truncate_title(&single_line(&delegate.task)),
+                )
+            })
+            .collect();
+        let form = ChoiceForm::new(
+            t.agent_unfinished_delegates_title(),
+            vec![
+                t.agent_unfinished_continue().to_string(),
+                t.agent_unfinished_later().to_string(),
+            ],
+        )
+        .with_detail(detail.join("\n"));
+        self.pending = Some(Pending::Unfinished { form });
+        self.raise_attention(true);
     }
 
     /// Take the log's `/goal` and `/loop` back as the panel's tasks, their

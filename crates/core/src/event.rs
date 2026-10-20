@@ -823,6 +823,14 @@ pub enum PanelEvent {
     /// it comes to the front, else a new agent panel opens on it. Emitted by
     /// the agent panel for a delegated task's session.
     OpenAgentSession(PathBuf),
+    /// The user asked, from the panel that delegated them, to carry these
+    /// unfinished delegated tasks on: each runs again out of sight on the
+    /// panel's own runner, under the `task` call that handed it over, and
+    /// answers back there as any background task does.
+    RestartDelegates {
+        panel: u64,
+        items: Vec<(String, PathBuf, String)>,
+    },
     /// A delegated task carried on in a panel of its own after termide closed
     /// is over: its answer goes back to the panel holding the session that
     /// delegated it. `parent_session` names that session, since panel numbers

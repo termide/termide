@@ -41,7 +41,7 @@ use super::App;
 mod debug_tool;
 pub(in crate::app) use debug_tool::Waiter as DebugWaiter;
 mod headless;
-mod live;
+pub(crate) mod live;
 mod peers;
 pub use headless::{run_agent_headless, run_recall, HeadlessOutput};
 pub(super) use peers::same_dir;
@@ -491,6 +491,20 @@ impl FsCatalog {
 }
 
 impl AgentCatalog for FsCatalog {
+    fn restart_delegate(
+        &self,
+        parent: u64,
+        caller: &str,
+        agent: &str,
+        task: &str,
+        call: &str,
+        session: &std::path::Path,
+    ) -> bool {
+        self.subagents.as_ref().is_some_and(|runner| {
+            runner.restart_background(parent, caller, agent, task, call, session)
+        })
+    }
+
     fn set_mode(&self, mode: Mode) {
         if let Some(subagents) = &self.subagents {
             subagents.mode.set(mode);
@@ -1520,6 +1534,12 @@ impl DelegateLog {
         Self(Some(session))
     }
 
+    /// The log a delegated task already made, taken up to be run on: its
+    /// header and its steps stay as they are, and the run goes on from there.
+    fn resume(session: Session) -> Self {
+        Self(Some(session))
+    }
+
     /// Write a finished message of the task's.
     fn note(&mut self, message: &Message) {
         if let Some(session) = &mut self.0 {
@@ -1668,6 +1688,70 @@ impl Subagents {
              to you later as a message of its own. Do not wait for it with tools, and do not \
              hand the same task over again."
         ))
+    }
+
+    /// Carry an unfinished delegated task on: run `agent` again out of its
+    /// own session log, out of sight, under the `task` call `call`, asking
+    /// through the panel `parent` and answering it when done. False when the
+    /// log cannot be read: the task then stays where it is, in the lists.
+    fn restart_background(
+        self: &Arc<Self>,
+        parent: u64,
+        caller: &str,
+        agent: &str,
+        task: &str,
+        call: &str,
+        session: &std::path::Path,
+    ) -> bool {
+        let Ok(log) = termide_agent_core::Session::open(session) else {
+            log::warn!(
+                "cannot take up the delegate's session {}: no run",
+                session.display()
+            );
+            return false;
+        };
+        // The task's own words, asked again of where its run stopped.
+        let carried = format!(
+            "Carry this task on from where you stopped. What you did before is in your log; \
+             do not start it over.\n\n{task}"
+        );
+        let this = Arc::clone(self);
+        let cwd = log.header().cwd.clone();
+        let (caller, agent, task, call, session) = (
+            caller.to_string(),
+            agent.to_string(),
+            carried,
+            call.to_string(),
+            session.to_path_buf(),
+        );
+        let thread_agent = agent.clone();
+        std::thread::Builder::new()
+            .name(format!("carried-{thread_agent}"))
+            .spawn(move || {
+                // Nobody waits on the call, as for any task handed over in the
+                // background: its cards stay up until the user answers them.
+                let (prompter, rx) = permission_channel(CancelToken::new());
+                live::carry_cards(parent, rx);
+                let ctx = ToolContext {
+                    prompter: Some(prompter),
+                    panel: Some(parent),
+                    resume: Some(session),
+                    ..ToolContext::new(cwd)
+                };
+                let task = SubagentTask {
+                    agent: &thread_agent,
+                    prompt: &task,
+                    call: &call,
+                    background: true,
+                };
+                let outcome = this
+                    .delegate(&caller, &task, &ctx, &CancelToken::new(), &mut |_| {})
+                    .unwrap_or_else(|error| Err(error).into());
+                let text = background_report(task.prompt, &thread_agent, &outcome);
+                peers::report(&this.project_root, parent, &thread_agent, text);
+            })
+            .map_err(|error| log::warn!("cannot carry the task on: {error}"))
+            .is_ok()
     }
 
     /// Run `task`, which the agent `caller` handed over.
@@ -1889,24 +1973,46 @@ impl Subagents {
             max_tokens: self.max_tokens,
             thinking: self.reasoning,
         };
-        let mut log = DelegateLog::start(
-            self.session_dir.as_deref(),
-            &self.cwd,
-            lineage,
-            &DelegateRun {
-                connection: &connection_name,
-                provider: &kind,
-                model: &model.id,
-                context_window: Some(model.context_window),
-                agent: name,
-            },
-        );
+        // A task carried on runs out of the log it already made: what it did
+        // stands there, and the run goes on from where it stopped, in the
+        // directory it worked in then.
+        let resumed = ctx
+            .resume
+            .as_ref()
+            .and_then(|path| Session::open(path).ok());
+        let cwd = resumed
+            .as_ref()
+            .map(|session| session.header().cwd.clone())
+            .unwrap_or_else(|| self.cwd.clone());
+        let mut log = match resumed {
+            Some(session) => DelegateLog::resume(session),
+            None => DelegateLog::start(
+                self.session_dir.as_deref(),
+                &self.cwd,
+                lineage,
+                &DelegateRun {
+                    connection: &connection_name,
+                    provider: &kind,
+                    model: &model.id,
+                    context_window: Some(model.context_window),
+                    agent: name,
+                },
+            ),
+        };
+        let carried = log
+            .0
+            .as_ref()
+            .map(|session| session.context_messages())
+            .unwrap_or_default();
         // The reviewer judges the subagent's calls against what the user asked
         // the delegating agent; the task itself counts as that agent's words.
-        let mut agent = Agent::new(provider, tools, model, self.cwd.clone())
+        let mut agent = Agent::new(provider, tools, model, cwd)
             .with_system_prompt(system_prompt)
             .with_compaction(self.compaction)
             .with_delegated_intent(intent);
+        if !carried.is_empty() {
+            agent = agent.with_messages(carried);
+        }
         if let Some(asker) = asker {
             agent = agent.with_asker(asker);
         }

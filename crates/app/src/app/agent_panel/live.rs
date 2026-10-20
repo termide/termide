@@ -17,6 +17,65 @@ use crossterm::event::{KeyEvent, MouseEvent};
 use termide_core::{CommandResult, PanelCommand, PanelEvent};
 use termide_panel_agent::{AgentPanel, Card};
 
+/// The delegated tasks carried on out of their own logs, each with the panel
+/// that delegated it and the channel its permission requests come back on. A
+/// carried task has no panel of its own, so its cards go to that one; they
+/// wait there until its `tick` takes them.
+static CARRIED: std::sync::Mutex<
+    Vec<(
+        u64,
+        std::sync::mpsc::Receiver<termide_agent_core::PermissionEnvelope>,
+    )>,
+> = std::sync::Mutex::new(Vec::new());
+
+/// Where a carried delegate's cards wait: the panel `parent`, on `rx`.
+pub(in crate::app) fn carry_cards(
+    parent: u64,
+    rx: std::sync::mpsc::Receiver<termide_agent_core::PermissionEnvelope>,
+) {
+    CARRIED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push((parent, rx));
+}
+
+/// Hand the cards the carried delegates have asked for to the panels that
+/// delegated them; a run that has ended leaves its channel behind.
+pub(in crate::app) fn route_carried(app: &mut App) {
+    let mut held = CARRIED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut gone = Vec::new();
+    let mut out: Vec<(u64, Vec<Card>)> = Vec::new();
+    let mut give = |parent: u64, cards: Vec<Card>| {
+        if !cards.is_empty() {
+            out.push((parent, cards));
+        }
+    };
+    let _ = &give;
+    for (index, (parent, rx)) in held.iter_mut().enumerate() {
+        let mut cards = Vec::new();
+        loop {
+            match rx.try_recv() {
+                Ok(envelope) => cards.push(Card::Permission(Box::new(envelope))),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    gone.push(index);
+                    break;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+            }
+        }
+        give(*parent, cards);
+    }
+    for index in gone.into_iter().rev() {
+        held.remove(index);
+    }
+    drop(held);
+    for (parent, cards) in out {
+        app.give_cards(parent, cards);
+    }
+}
+
 use super::{agent_setup, DEFAULT_AGENT};
 use crate::app::App;
 

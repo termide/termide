@@ -737,6 +737,13 @@ pub trait Translation: Send + Sync {
     fn agent_unfinished_title(&self) -> &str;
     /// The carry-on card: a delegated task left unfinished in its own log.
     fn agent_unfinished_delegate_fmt(&self, agent: &str, task: &str) -> String;
+    /// The card asking to carry on the delegated tasks a panel left behind.
+    fn agent_unfinished_delegates_title(&self) -> &str;
+    /// The panel asked to carry its delegates on, and cannot: they stay where
+    /// they are, in the session lists.
+    fn agent_carry_failed_fmt(&self, agents: &str) -> String;
+    /// The state strip: a delegated task left unfinished when termide closed.
+    fn agent_strip_left_unfinished(&self) -> &str;
     /// A delegated task carried on after termide closed, answered at last.
     fn agent_restored_report_fmt(&self, agent: &str, text: &str) -> String;
     /// A delegated task carried on after termide closed, which failed.

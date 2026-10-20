@@ -1086,6 +1086,8 @@ plugins_state_gave_up = "остановлен после падений"
 plugins_state_off = "выключен в этом проекте"
 plugins_none = "Плагины не установлены"
 command_report_no_output = "(нет вывода)"
+agent_unfinished_delegates_title = "Панель закрылась с незавершёнными задачами делегатов. Поднять их?"
+agent_strip_left_unfinished = "незавершена"
 
 [formats]
 projects_delete_fmt = "Раскладка {path}"
@@ -1207,6 +1209,7 @@ agent_state_retry_at_fmt = "{reason}: повтор в {time} (через {left})
 agent_strip_pause_held_fmt = "ждут {count}"
 agent_strip_pause_running_fmt = "продолжают {count}"
 agent_unfinished_delegate_fmt = "& {agent} · {task} — незавершённая; открой её сессию, чтобы продолжить"
+agent_carry_failed_fmt = "Незавершённые задачи делегатов ({agents}) нельзя поднять здесь. Они ждут в списках сессий (F6)."
 agent_restored_report_fmt = "Задача, которую ты продолжил у {agent} после закрытия termide, закончена.\n\nЕё ответ:\n\n{text}"
 agent_restored_failed_fmt = "Задача, которую ты продолжил у {agent} после закрытия termide, не удалась.\n\nПоследнее, что она сказала:\n\n{text}"
 agent_strip_retry_at_fmt = "повтор в {time} (через {left}); /continue — сейчас"

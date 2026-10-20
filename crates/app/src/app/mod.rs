@@ -1146,6 +1146,9 @@ impl App {
                 log::error!("Error processing the overlay's events: {}", e);
             }
             self.route_delegate_cards();
+            // The cards of the delegates carried on out of their own logs,
+            // which have no panel of their own to show them.
+            agent_panel::live::route_carried(self);
             // What agents ask of the other panels.
             self.serve_peers();
             self.tick_parked_projects();

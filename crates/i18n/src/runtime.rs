@@ -650,6 +650,8 @@ impl Translation for RuntimeTranslation {
         agent_strip_paused,
         agent_strip_keeps_running,
         agent_notice_no_parent_panel,
+        agent_unfinished_delegates_title,
+        agent_strip_left_unfinished,
         agent_strip_checking,
         agent_notice_nothing_to_pause,
         agent_notice_already_running,
@@ -1708,6 +1710,10 @@ impl Translation for RuntimeTranslation {
             "agent_restored_failed_fmt",
             &[("agent", agent), ("text", text)],
         )
+    }
+
+    fn agent_carry_failed_fmt(&self, agents: &str) -> String {
+        self.format("agent_carry_failed_fmt", &[("agents", agents)])
     }
 
     fn agent_unfinished_delegate_fmt(&self, agent: &str, task: &str) -> String {
