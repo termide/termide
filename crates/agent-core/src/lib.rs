@@ -62,7 +62,7 @@ pub use ask::{
     question_channel, Question, QuestionAnswer, QuestionEnvelope, QuestionOption, QuestionReply,
     UserAsker,
 };
-pub use cancel::CancelToken;
+pub use cancel::{CancelToken, PauseGate};
 pub use checkpoints::{Checkpoint, CheckpointHooks, CheckpointStore, SavedFile, Undone};
 pub use classifier::{
     parse_classification, Classifier, ClassifyPrompt, IntentEntry, IntentLog, ModelChoice,

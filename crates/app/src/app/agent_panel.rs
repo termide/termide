@@ -1893,7 +1893,9 @@ impl Subagents {
         }
 
         // Followed from its parent's panel while it runs.
-        let live = register_live(ctx.panel, caller, task, &log);
+        let live = register_live(ctx.panel, caller, task, &log, true);
+        // The panel's pause holds this run at its step boundaries.
+        agent = agent.with_pause_gate(live.control().gate());
         let user_stop = live.control().stop_token().clone();
         let mut noted = noting(&live, on_update);
         let on_update: &mut dyn FnMut(ToolUpdate) = &mut noted;
@@ -1970,7 +1972,9 @@ impl Subagents {
         on_update: &mut dyn FnMut(ToolUpdate),
     ) -> Result<SubagentOutcome, String> {
         // Followed from its parent's panel while it runs.
-        let live = register_live(run.panel, caller, task, &log);
+        // An external agent runs its own program: the panel's pause cannot
+        // hold it, only stop it.
+        let live = register_live(run.panel, caller, task, &log, false);
         let mut noted = noting(&live, on_update);
         let on_update: &mut dyn FnMut(ToolUpdate) = &mut noted;
         let config = run.config;
@@ -2065,6 +2069,7 @@ fn register_live(
     caller: &str,
     task: &SubagentTask,
     log: &DelegateLog,
+    pausable: bool,
 ) -> termide_panel_agent::live::Registration {
     termide_panel_agent::live::register(termide_panel_agent::live::LiveTask {
         panel,
@@ -2074,6 +2079,7 @@ fn register_live(
         task: task.prompt,
         session: log.path(),
         background: task.background,
+        pausable,
     })
 }
 

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::Value;
 
 use crate::ask::UserAsker;
-use crate::cancel::CancelToken;
+use crate::cancel::{CancelToken, PauseGate};
 use crate::classifier::{IntentEntry, IntentLog, SessionView};
 use crate::compaction::{
     context_tokens, is_context_overflow_error, should_compact, split_point, CompactionCall,
@@ -570,6 +570,10 @@ pub struct Agent {
     session_id: Option<String>,
     /// The agent panel the loop runs in, by its number.
     panel: Option<u64>,
+    /// A pause held by another — the panel that delegated this loop's task,
+    /// or none when nothing else holds it. The loop waits at its step
+    /// boundaries while it is set, and goes on where it stood once lifted.
+    pause_gate: Option<PauseGate>,
 }
 
 impl Agent {
@@ -603,7 +607,17 @@ impl Agent {
             delegated: false,
             session_id: None,
             panel: None,
+            pause_gate: None,
         }
+    }
+
+    /// Hold the loop at its step boundaries while `gate` is paused: a panel
+    /// that delegated this task pauses it with the panel's own pause, and
+    /// lifts it with the panel's resume.
+    #[must_use]
+    pub fn with_pause_gate(mut self, gate: PauseGate) -> Self {
+        self.pause_gate = Some(gate);
+        self
     }
 
     /// Work on a task another agent delegated: the reviewer judges this
@@ -961,6 +975,14 @@ impl Agent {
         cancel: &CancelToken,
         emit: &mut dyn FnMut(AgentEvent),
     ) -> TurnOutcome {
+        // A pause held by the panel that delegated this task stops the loop
+        // here, before the next request goes out; lifted, it goes on where it
+        // stood. A stop while it waits ends the turn.
+        if let Some(gate) = &self.pause_gate {
+            if !gate.wait(cancel) {
+                return TurnOutcome::Halt;
+            }
+        }
         emit(AgentEvent::TurnStart);
         for message in pending {
             self.push(Message::User(message), emit);
@@ -1090,6 +1112,13 @@ impl Agent {
         while start < calls.len() {
             if !cancel.is_cancelled() && self.queues.is_paused() {
                 return true;
+            }
+            // Held by the panel that delegated the task: wait here, before the
+            // next call, rather than stop and need a resume of our own.
+            if let Some(gate) = &self.pause_gate {
+                if !gate.wait(cancel) {
+                    return true;
+                }
             }
             let together = calls[start..]
                 .iter()

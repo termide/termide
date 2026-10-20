@@ -10896,6 +10896,7 @@ fn a_running_task_is_stopped_from_its_row() {
         task: "find the loader",
         session: None,
         background: false,
+        pausable: true,
     });
     let (width, height) = (80, 20);
     let rows = render_text(&mut panel, width, height);
@@ -11063,6 +11064,7 @@ fn a_background_task_has_a_row_that_stops_or_follows_it() {
         task: "find the loader\nin src/",
         session: None,
         background: true,
+        pausable: true,
     });
     registration.set_status("· read src/main.rs");
     let (width, height) = (80, 30);
@@ -11146,6 +11148,7 @@ fn the_strip_count_of_subagents_unfolds_and_folds_back() {
                 task,
                 session: None,
                 background: true,
+                pausable: true,
             })
         })
         .collect();
@@ -11278,6 +11281,64 @@ fn a_view_over_the_layout_docks_and_keeps_an_ended_task() {
     assert_eq!(panel.session_path(), Some(path.as_path()));
 }
 
+/// The panel's pause holds the tasks it handed over, and its resume lets
+/// them go; a task an external agent runs keeps going, and the pause's row
+/// says which is which.
+#[test]
+fn pausing_the_panel_holds_its_delegates_and_resumes_them() {
+    let mut panel = panel(vec![]);
+    let id = panel.panel_id();
+    let held = crate::live::register(crate::live::LiveTask {
+        panel: Some(id),
+        call: "call-hold",
+        from: "default",
+        agent: "search",
+        task: "find the loader",
+        session: None,
+        background: true,
+        pausable: true,
+    });
+    let external = crate::live::register(crate::live::LiveTask {
+        panel: Some(id),
+        call: "call-ext",
+        from: "default",
+        agent: "claude",
+        task: "review the diff",
+        session: None,
+        background: true,
+        pausable: false,
+    });
+
+    panel.busy = true;
+    assert!(panel.request_pause());
+    assert!(
+        held.control().is_paused(),
+        "the delegate waits with the run"
+    );
+    assert!(
+        !external.control().is_paused(),
+        "an external agent runs its own program"
+    );
+    let rows = panel.strip_rows(80);
+    let notes = &rows
+        .iter()
+        .find(|r| r.target == crate::strip::StripTarget::Pause)
+        .expect("the pause row")
+        .notes;
+    assert_eq!(notes.len(), 2, "{notes:?}: one held, one still going");
+
+    panel.cancel_pause();
+    assert!(!held.control().is_paused(), "withdrawing frees it");
+
+    panel.request_pause();
+    assert!(held.control().is_paused());
+    panel.stop_paused();
+    assert!(
+        !held.control().is_paused(),
+        "a stopped run frees what it held"
+    );
+}
+
 /// While a view follows a task, the panel that delegated it sets the task's
 /// cards aside for it; the view shows them, and gives back what it holds
 /// when it goes.
@@ -11295,6 +11356,7 @@ fn a_delegates_cards_follow_the_view_of_its_task() {
         task: "find it",
         session: Some(std::path::PathBuf::from("/nonexistent/x.jsonl")),
         background: false,
+        pausable: true,
     });
     let watch = crate::live::watch(id, "call-cards").unwrap();
     let mut view = panel(vec![]);
@@ -11385,6 +11447,7 @@ fn the_session_waits_for_the_tasks_handed_over_in_the_background() {
         task: "find it",
         session: None,
         background: true,
+        pausable: true,
     });
     assert!(!panel.switch_session(None));
     assert!(panel.transcript.items().iter().any(|item| matches!(

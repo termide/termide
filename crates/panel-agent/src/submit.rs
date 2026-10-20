@@ -877,6 +877,10 @@ impl AgentPanel {
     }
 
     pub fn abort(&mut self) {
+        // A task held at the pause is released rather than left waiting: a
+        // sync one stops with this run, one handed over in the background
+        // goes on with it, as it does when nothing held it.
+        crate::live::resume_all(self.panel_id);
         // Stopping also ends any running loop or goal, and withdraws what
         // the loop still has waiting in the queue, so it does not reach the
         // model later as a plain message.
@@ -950,13 +954,19 @@ impl AgentPanel {
         self.runtime.pause();
         self.pause_requested = true;
         self.pause_requested_at = Instant::now();
+        // The work handed to delegates waits with the run. An external
+        // agent's task runs its own program and cannot be held, so the strip
+        // says which of the two it is looking at.
+        crate::live::pause_all(self.panel_id);
         true
     }
 
-    /// Withdraw a pause asked for that the run has not reached yet.
+    /// Withdraw a pause asked for that the run has not reached yet: the
+    /// delegates it had already held go on with it.
     pub(crate) fn cancel_pause(&mut self) {
         self.runtime.cancel_pause();
         self.pause_requested = false;
+        crate::live::resume_all(self.panel_id);
     }
 
     /// Resume the paused run. Its clock goes on from the request, and the
@@ -965,10 +975,14 @@ impl AgentPanel {
         // A pause taken up from the log that is not a run to resume here:
         // the external agent is told to go on, or the goal or loop steps.
         if self.carry_on_restored() {
+            // It carries on: what the pause held goes with it.
+            crate::live::resume_all(self.panel_id);
             return;
         }
         match self.runtime.resume() {
             Ok(()) => {
+                // The delegates held at the pause go on with the run.
+                crate::live::resume_all(self.panel_id);
                 self.busy = true;
                 self.paused = false;
                 self.resuming = true;
@@ -985,6 +999,9 @@ impl AgentPanel {
     /// abort; the pause ends where it stood, and so do a loop or goal it was
     /// part of. The calls it left unrun are closed by the next request.
     pub(crate) fn stop_paused(&mut self) {
+        // The pause is over with the run: what it held is released, a task
+        // handed over in the background going on as it would have.
+        crate::live::resume_all(self.panel_id);
         self.paused = false;
         self.restored = None;
         self.run_start = None;
