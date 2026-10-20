@@ -18,9 +18,7 @@ use termide_ui::ChoiceForm;
 use crate::pending::Pending;
 use crate::runtime::{hms_from_millis, push_history};
 use crate::transcript::Item;
-use crate::{
-    single_line, truncate_title, AgentPanel, GoalTask, LoopTask, NoticeKind, LOOP_MAX_ITERATIONS,
-};
+use crate::{single_line, truncate_title, AgentPanel, GoalTask, LoopTask, LOOP_MAX_ITERATIONS};
 
 /// What a call a cut-off run left without a result is told: it may have run
 /// in part, so the model looks before it runs it again.
@@ -28,6 +26,24 @@ const CUT_OFF_CALL: &str = "Not finished: termide closed during this run, while 
 
 /// The message that carries on a run an external agent was cut off in.
 const CARRY_ON_PROMPT: &str = "termide closed while you were working on the request above, so your last run was cut off. Carry on from where you stopped; check the effects of any step that may have run only in part before repeating it.";
+
+/// The run a reopened delegate's session carries on answers a task another
+/// session delegated: the answer goes back there once the run is over, as a
+/// background task's answer does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CarryBack {
+    /// The delegating session's id: panel numbers are born anew each run of
+    /// termide, so the session is what still names the panel.
+    pub parent_session: String,
+    /// The delegate's own name, for the answer's heading.
+    pub agent: String,
+    /// The run that carries the task on is under way; its end reports back.
+    pub running: bool,
+}
+
+/// How many sessions of unfinished delegated tasks a reopened panel opens at
+/// once: more than that crowd the layout, and the rest wait in the lists.
+const MAX_OPENED_DELEGATES: usize = 3;
 
 /// A delegated task left unfinished in its own log when termide closed: it
 /// stands where it stopped, with its transcript, and waits to be carried on.
@@ -303,9 +319,9 @@ impl AgentPanel {
             self.retry_attempts = 0;
             self.retry_ready = true;
             self.offer_failure(failure);
-            // The card asks about the request, not about the delegates: they
-            // are said below it, where they can still be read.
-            self.notice_unfinished_delegates();
+            // The card asks about the request; the delegates open as panels
+            // of their own, where each is asked in its own turn.
+            self.queue_opening_delegates();
             return;
         }
         let restored = match mark {
@@ -314,9 +330,10 @@ impl AgentPanel {
             _ if !autorun.is_empty() => Restored::Autorun,
             // Nothing of the panel's own is left unfinished. Its delegated
             // tasks may well be: they ran out of sight and their logs stand
-            // where termide stopped them, so the panel says so on a line.
+            // where termide stopped them, so each opens as a panel of its own
+            // and is asked there.
             _ => {
-                self.notice_unfinished_delegates();
+                self.queue_opening_delegates();
                 return;
             }
         };
@@ -329,24 +346,57 @@ impl AgentPanel {
         self.restore_autorun_tasks(&autorun);
         self.paused = true;
         self.restored = Some(restored);
+        // A delegate's own session: whatever this run ends on is the answer
+        // the panel that delegated the task is waiting for.
+        self.carry_back = self.session.as_ref().and_then(|session| {
+            let parent = session.header().parent.as_ref()?;
+            Some(CarryBack {
+                parent_session: parent.session.clone()?,
+                agent: session
+                    .current_agent()
+                    .unwrap_or_else(|| parent.agent.clone()),
+                running: false,
+            })
+        });
         self.ask_carry_on(mark, &autorun);
     }
 
-    /// One line per delegated task this session left unfinished in its own
-    /// log, naming the way to it: the panel carries on its own run, and each
-    /// delegate is carried on by opening its session (`F6`), where it asks
-    /// what it needs as any other panel does. Shown when no carry-on card is
-    /// up, so what was handed over is never left unsaid.
-    fn notice_unfinished_delegates(&mut self) {
-        let t = termide_i18n::t();
-        for delegate in self.unfinished_delegates() {
-            self.notice(
-                t.agent_unfinished_delegate_fmt(
-                    &delegate.agent,
-                    &truncate_title(&single_line(&delegate.task)),
-                ),
-                NoticeKind::Info,
-            );
+    /// The run's last words, as its log has them: what the panel that
+    /// delegated the task is told when this one finishes carrying it on.
+    pub(crate) fn last_answer(&self) -> String {
+        self.session
+            .as_ref()
+            .and_then(|session| {
+                session
+                    .branch()
+                    .into_iter()
+                    .rev()
+                    .find_map(|entry| match &entry.kind {
+                        termide_agent_core::EntryKind::Message {
+                            message: Message::Assistant(reply),
+                            ..
+                        } => Some(reply.plain_text()),
+                        _ => None,
+                    })
+            })
+            .unwrap_or_default()
+    }
+
+    /// Queue the sessions of the delegated tasks this session left unfinished
+    /// to open as panels of their own: each asks there on its own card
+    /// whether to carry its run on, with a prompter of its own — which is
+    /// what the panel that delegated it cannot offer. A few at a time, so a
+    /// session that lost many does not fill the layout at once; the rest stay
+    /// in the session lists (`F6`), marked `⏸ &`.
+    fn queue_opening_delegates(&mut self) {
+        for delegate in self
+            .unfinished_delegates()
+            .into_iter()
+            .take(MAX_OPENED_DELEGATES)
+        {
+            if !self.open_delegates.contains(&delegate.session) {
+                self.open_delegates.push(delegate.session);
+            }
         }
     }
 

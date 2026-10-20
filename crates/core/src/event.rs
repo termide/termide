@@ -823,6 +823,17 @@ pub enum PanelEvent {
     /// it comes to the front, else a new agent panel opens on it. Emitted by
     /// the agent panel for a delegated task's session.
     OpenAgentSession(PathBuf),
+    /// A delegated task carried on in a panel of its own after termide closed
+    /// is over: its answer goes back to the panel holding the session that
+    /// delegated it. `parent_session` names that session, since panel numbers
+    /// do not survive a restart; `from` is the delegate's own session, where
+    /// the answer stays if no panel holds the parent.
+    DelegateAnswerToParent {
+        parent_session: String,
+        from: PathBuf,
+        agent: String,
+        text: String,
+    },
 
     /// Bring forward the agent panel following the task that the `task`
     /// call `call` of the agent panel `panel` handed over, else open one on

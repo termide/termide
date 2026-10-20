@@ -110,6 +110,27 @@ impl AgentPanel {
                 self.pause_requested = false;
             }
             AgentEvent::AgentEnd => {
+                // A delegated task this session carried on is over: its answer
+                // goes back to the panel that delegated it, which is what the
+                // `task` call was made for.
+                if let Some(carry) = self.carry_back.take().filter(|carry| carry.running) {
+                    if let Some(from) = self.session_path() {
+                        let answer = self.last_answer();
+                        let t = termide_i18n::t();
+                        let text = if self.run_failed {
+                            t.agent_restored_failed_fmt(&carry.agent, &answer)
+                        } else {
+                            t.agent_restored_report_fmt(&carry.agent, &answer)
+                        };
+                        self.pending_events
+                            .push(PanelEvent::DelegateAnswerToParent {
+                                parent_session: carry.parent_session,
+                                from: from.to_path_buf(),
+                                agent: carry.agent,
+                                text,
+                            });
+                    }
+                }
                 self.pending_events.push(PanelEvent::AgentRun {
                     panel: self.panel_id,
                     finished: Some(!self.run_failed && self.last_failure.is_none()),
@@ -685,6 +706,16 @@ impl AgentPanel {
     /// The body of [`Panel::tick`]: drain the runtime's events, poll the
     /// cards, pickers and probes, and run a due `/loop` or `/goal` step.
     pub(crate) fn on_tick(&mut self) -> Vec<PanelEvent> {
+        // Sessions queued when this panel took up a session termide closed
+        // upon: the app opens each as a panel of its own. They ride with the
+        // tick's other events rather than standing in for them.
+        if !self.open_delegates.is_empty() {
+            self.pending_events.extend(
+                self.open_delegates
+                    .drain(..)
+                    .map(PanelEvent::OpenAgentSession),
+            );
+        }
         let mut changed = false;
         // A pause's line ticks its length, redrawn once a second; so does a
         // call's wait on a permission question, until the question is gone.

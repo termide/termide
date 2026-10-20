@@ -976,6 +976,15 @@ pub struct AgentPanel {
     /// The pause was taken up from the log: the panel or termide closed
     /// while work was under way; how `/continue` carries it on.
     restored: Option<unfinished::Restored>,
+    /// The sessions of the delegated tasks this session left unfinished, to
+    /// open as panels of their own: each asks there whether to carry its run
+    /// on, with a prompter of its own. Queued when the session is taken up,
+    /// handed to the app on the panel's next tick.
+    open_delegates: Vec<PathBuf>,
+    /// Set while the panel carries on a task another session delegated: its
+    /// run's answer goes back to the panel holding that session, which is
+    /// what the `task` call was made for.
+    carry_back: Option<unfinished::CarryBack>,
     /// The session is another termide's, shown read-only until it lets it
     /// go; see [`held`].
     held: Option<held::HeldSession>,
@@ -1313,6 +1322,8 @@ impl AgentPanel {
             pause_start: None,
             resuming: false,
             restored: None,
+            open_delegates: Vec::new(),
+            carry_back: None,
             held,
             logged_autorun: Autorun::default(),
             logged_retry: None,
@@ -1386,6 +1397,15 @@ impl AgentPanel {
         self.session.as_ref().map(Session::path)
     }
 
+    /// The session's id, which another session names when it delegated this
+    /// one's task; `None` while the panel holds no session.
+    #[must_use]
+    pub fn session_id(&self) -> Option<String> {
+        self.session
+            .as_ref()
+            .map(|session| session.id().to_string())
+    }
+
     /// What was set up on a session nothing was sent in yet: the
     /// connection, the model when it is not the one the panel was configured
     /// with (a model left to the provider stays so), and what the log
@@ -1405,7 +1425,7 @@ impl AgentPanel {
         }
     }
 
-    fn notice(&mut self, text: impl Into<String>, kind: NoticeKind) {
+    pub fn notice(&mut self, text: impl Into<String>, kind: NoticeKind) {
         self.transcript.push(Item::Notice {
             text: text.into(),
             kind,
