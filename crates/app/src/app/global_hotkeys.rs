@@ -90,6 +90,18 @@ pub(super) fn build_global_hotkey_table(kb: &GlobalKeybindings) -> HotkeyTable {
     t
 }
 
+/// Whether the key `key_str` names may ask to approve a project's command:
+/// one held with Ctrl or Alt, or an F-key, never a key text is typed with.
+fn asks_without_typing(key_str: &str) -> bool {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    termide_config::parse_keybinding(key_str).is_ok_and(|binding| {
+        binding
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+            || matches!(binding.key, KeyCode::F(_))
+    })
+}
+
 impl App {
     /// Build the hotkey table when the cache holds none.
     pub(super) fn ensure_hotkey_table(&mut self) {
@@ -99,10 +111,15 @@ impl App {
         let mut table = build_global_hotkey_table(&self.state.config.general.keybindings);
         if let Some(registry) = self.commands_registry() {
             for (command, key_str) in registry.commands_with_hotkeys() {
-                // A project's command takes its key only once approved: a
+                // A project's command not yet approved takes only a key no
+                // text is typed with — one with Ctrl or Alt, or an F-key —
+                // and pressing it asks first, as the menu does: a
                 // repository could bind any key, a letter typed in the
                 // editor included, and every press would ask.
-                if command.is_project && !self.project_command_approved(command) {
+                if command.is_project
+                    && !asks_without_typing(key_str)
+                    && !self.project_command_approved(command)
+                {
                     continue;
                 }
                 let command_key = termide_config::commands::encode_command_menu_key(
@@ -602,3 +619,20 @@ impl App {
 /// `panel_shrink_vertical` press. Mirrors horizontal resize which
 /// also moves by a single unit per chord.
 const PANEL_VERTICAL_RESIZE_STEP: u16 = 1;
+
+#[cfg(test)]
+mod asks_without_typing_tests {
+    use super::asks_without_typing;
+
+    #[test]
+    fn only_a_key_no_text_is_typed_with_asks() {
+        assert!(asks_without_typing("Ctrl+Alt+B"));
+        assert!(asks_without_typing("Alt+B"));
+        assert!(asks_without_typing("Ctrl+B"));
+        assert!(asks_without_typing("F7"));
+        assert!(!asks_without_typing("b"));
+        assert!(!asks_without_typing("Shift+B"));
+        assert!(!asks_without_typing("Enter"));
+        assert!(!asks_without_typing("not a key"));
+    }
+}
