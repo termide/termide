@@ -1695,6 +1695,13 @@ impl Translation for RuntimeTranslation {
         )
     }
 
+    fn agent_unfinished_delegate_fmt(&self, agent: &str, task: &str) -> String {
+        self.format(
+            "agent_unfinished_delegate_fmt",
+            &[("agent", agent), ("task", task)],
+        )
+    }
+
     fn agent_strip_pause_held_fmt(&self, count: usize) -> String {
         self.format(
             "agent_strip_pause_held_fmt",

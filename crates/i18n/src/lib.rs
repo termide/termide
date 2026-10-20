@@ -735,6 +735,8 @@ pub trait Translation: Send + Sync {
     fn agent_notice_already_running(&self) -> &str;
     fn agent_notice_nothing_to_continue(&self) -> &str;
     fn agent_unfinished_title(&self) -> &str;
+    /// The carry-on card: a delegated task left unfinished in its own log.
+    fn agent_unfinished_delegate_fmt(&self, agent: &str, task: &str) -> String;
     fn agent_unfinished_continue(&self) -> &str;
     fn agent_unfinished_drop(&self) -> &str;
     fn agent_unfinished_later(&self) -> &str;

@@ -27,6 +27,20 @@ const CUT_OFF_CALL: &str = "Not finished: termide closed during this run, while 
 /// The message that carries on a run an external agent was cut off in.
 const CARRY_ON_PROMPT: &str = "termide closed while you were working on the request above, so your last run was cut off. Carry on from where you stopped; check the effects of any step that may have run only in part before repeating it.";
 
+/// A delegated task left unfinished in its own log when termide closed: it
+/// stands where it stopped, with its transcript, and waits to be carried on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RestoredDelegate {
+    /// The delegate's name.
+    pub agent: String,
+    /// Its session log, which holds the task's transcript.
+    pub session: std::path::PathBuf,
+    /// The `task` call that handed it over.
+    pub call: String,
+    /// The task's first line, for the card.
+    pub task: String,
+}
+
 /// How work taken up from the log goes on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Restored {
@@ -40,6 +54,44 @@ pub(crate) enum Restored {
 }
 
 impl AgentPanel {
+    /// The tasks this panel delegated and left unfinished in their own logs:
+    /// each was running when termide closed, and stands with its transcript
+    /// where it stopped. Newest first, as the session lists are.
+    pub(crate) fn unfinished_delegates(&self) -> Vec<RestoredDelegate> {
+        let (Some(dir), Some(id)) = (
+            self.session_dir.as_deref(),
+            self.session
+                .as_ref()
+                .map(|session| session.id().to_string()),
+        ) else {
+            return Vec::new();
+        };
+        let Ok(summaries) = Session::list(dir) else {
+            return Vec::new();
+        };
+        summaries
+            .into_iter()
+            .filter_map(|summary| {
+                // The label first: taking the parent out of the summary
+                // leaves it only partly there, and the label reads the rest.
+                let task = summary.label();
+                let parent = summary.parent?;
+                if !summary.unfinished
+                    || parent.session.as_deref() != Some(id.as_str())
+                    || crate::live::is_running(self.panel_id, &parent.call)
+                {
+                    return None;
+                }
+                Some(RestoredDelegate {
+                    agent: parent.agent,
+                    session: summary.path,
+                    call: parent.call,
+                    task,
+                })
+            })
+            .collect()
+    }
+
     /// The unattended work going now, as the log records it.
     fn current_autorun(&self) -> Autorun {
         Autorun {
@@ -354,7 +406,14 @@ impl AgentPanel {
     fn ask_carry_on(&mut self, mark: Option<RunMark>, autorun: &Autorun) {
         let t = termide_i18n::t();
         let now = now_millis();
+        let delegates = self.unfinished_delegates();
         let mut detail: Vec<String> = Vec::new();
+        for delegate in &delegates {
+            detail.push(t.agent_unfinished_delegate_fmt(
+                &delegate.agent,
+                &truncate_title(&single_line(&delegate.task)),
+            ));
+        }
         if let Some(mark) = mark {
             let age = termide_i18n::relative_age(now.saturating_sub(mark.stopped) / 1000);
             detail.push(match mark.state {

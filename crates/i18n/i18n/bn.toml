@@ -1167,6 +1167,7 @@ agent_notice_cannot_retry_fmt = "আবার চেষ্টা করা য�
 agent_state_retry_at_fmt = "{reason}: {time}-এ আবার চেষ্টা ({left} পরে); /continue এখনই"
 agent_strip_pause_held_fmt = "{count} অপেক্ষায়"
 agent_strip_pause_running_fmt = "{count} চলছে"
+agent_unfinished_delegate_fmt = "& {agent} · {task} — অসম্পূর্ণ; চালিয়ে নিতে সেশন খুলুন"
 agent_strip_retry_at_fmt = "{time}-এ আবার চেষ্টা ({left} পরে); /continue এখনই"
 agent_strip_next_fmt = "{wait} পরে"
 agent_notice_cannot_start_fmt = "শুরু করা যাচ্ছে না: {error}"

@@ -11281,6 +11281,72 @@ fn a_view_over_the_layout_docks_and_keeps_an_ended_task() {
     assert_eq!(panel.session_path(), Some(path.as_path()));
 }
 
+/// A session reopened after termide closed names the delegated tasks left
+/// unfinished in their own logs on the card that asks to carry the work on.
+#[test]
+fn the_carry_on_card_names_the_delegates_left_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let parent_path = {
+        let mut session = Session::create(dir.path(), dir.path()).unwrap();
+        session
+            .append_message(&Message::User(UserMessage::text("build it")))
+            .unwrap();
+        session.append_run_start().unwrap();
+        session.path().to_path_buf()
+    };
+    let id = Session::open_read_only(&parent_path)
+        .unwrap()
+        .id()
+        .to_string();
+    {
+        let mut log = Session::create_delegate(
+            dir.path(),
+            dir.path(),
+            termide_agent_core::SessionParent {
+                session: Some(id.clone()),
+                agent: "search".into(),
+                call: "call-1".into(),
+            },
+        )
+        .unwrap();
+        log.append_message(&Message::User(UserMessage::text("find the loader")))
+            .unwrap();
+        log.append_run_start().unwrap();
+    }
+    // Another panel's delegate, and this panel's finished one: neither shows.
+    {
+        let mut other = Session::create_delegate(
+            dir.path(),
+            dir.path(),
+            termide_agent_core::SessionParent {
+                session: Some("elsewhere".into()),
+                agent: "reviewer".into(),
+                call: "call-9".into(),
+            },
+        )
+        .unwrap();
+        other
+            .append_message(&Message::User(UserMessage::text("read it")))
+            .unwrap();
+        other.append_run_start().unwrap();
+    }
+
+    let panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        session: Some(Session::open(&parent_path).unwrap()),
+        ..setup(vec![reply("ok")])
+    });
+    let left = panel.unfinished_delegates();
+    assert_eq!(left.len(), 1, "{left:?}");
+    assert_eq!(
+        (left[0].agent.as_str(), left[0].call.as_str()),
+        ("search", "call-1")
+    );
+    let detail = carry_on_card(&panel);
+    assert!(detail.contains("search"), "{detail}");
+    assert!(!detail.contains("reviewer"), "another panel's: {detail}");
+}
+
 /// The panel's pause holds the tasks it handed over, and its resume lets
 /// them go; a task an external agent runs keeps going, and the pause's row
 /// says which is which.

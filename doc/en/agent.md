@@ -549,7 +549,12 @@ left so are marked `⏸` in the session lists, and a panel that reopens one is
 highlighted until seen and rings the bell, as a panel waiting for you does.
 A delegated task's own log records its run the same way, so a task termide
 quit upon is left unfinished there too: its session shows `⏸ &` in the lists,
-and opening it asks to carry the task on as any other session does.
+and opening it asks to carry the task on as any other session does. The
+carry-on card names each such delegate of the session it reopens
+(`& search · find the loader — unfinished; open its session to carry it on`);
+**Continue** carries on the panel's own run, and each delegate is carried on
+by opening its session — a resumed delegate asks nothing of the panel that
+delegated it, so termide does not start one behind the panel's back.
 
 A session is held by one termide at a time. Another termide opening the same
 project — while the first still runs, maybe in a terminal window out of sight
