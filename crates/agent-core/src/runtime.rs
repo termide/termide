@@ -342,6 +342,11 @@ pub trait Backend: Send {
     fn background_calls(&self) -> Vec<BackgroundCall> {
         Vec::new()
     }
+    /// Stop the call in the background known as `id`, as the user's stop
+    /// stops a call; whether there was one.
+    fn stop_background_call(&self, _id: &str) -> bool {
+        false
+    }
     /// Stop and hand the built-in agent back, when there is one.
     fn into_agent(self: Box<Self>) -> Option<Agent>;
 }

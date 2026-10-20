@@ -1273,8 +1273,8 @@ impl Translation for RuntimeTranslation {
         self.format("agent_stop_task_confirm_fmt", &[("agent", agent)])
     }
 
-    fn agent_stop_background_confirm_fmt(&self, agent: &str) -> String {
-        self.format("agent_stop_background_confirm_fmt", &[("agent", agent)])
+    fn agent_stop_command_confirm_fmt(&self, command: &str) -> String {
+        self.format("agent_stop_command_confirm_fmt", &[("command", command)])
     }
 
     fn agent_notice_delegates_running_fmt(&self, count: usize) -> String {

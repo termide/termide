@@ -666,9 +666,10 @@ latest run into view; and, closest to the input, each subagent still running
 or its wait for a slot before its time; after three, `& +N`, which a click
 unfolds into all of them, with a `& ▴` row after them that folds them back) and each command
 the agent moved to the background (`$ Running  cargo test`), so one whose
-block has scrolled out of view still shows it works — a click on its row
-selects the block and brings it into view, and for a subagent opens the panel
-following it or running it (see [Subagents](#subagents)). Everything queued
+block has scrolled out of view still shows it works. Each of these has a `✕`
+that stops it, after a confirmation; a click elsewhere on its row selects the
+block and brings it into view, and for a subagent opens the panel following
+it or running it (see [Subagents](#subagents)). Everything queued
 goes to the agent at once, as a single message with the pieces joined by a
 blank line — messages typed while the agent works are usually one thought
 added to — and leaves the strip then, showing up in the conversation as your
@@ -1710,7 +1711,7 @@ reading `& Receiving reply from <delegate> · …`, the way an answer to
 at its next step. Several background tasks can run at once. With no block
 running for it, each has a row above the delegating panel's input
 (`& Delegating to · agent  task`, what it did last and its time) with a `✕`
-that stops it, after a confirmation; a click elsewhere on the row, or `o` on the `task` block,
+that stops it, after a confirmation, as a waited-for task's row has; a click elsewhere on the row, or `o` on the `task` block,
 shows a view of it, as for any delegate (above). Its permission
 requests and questions come to the delegating panel as a delegate's do, and
 stay up when that panel's own run stops: stopping the run does not reach a
@@ -1821,7 +1822,8 @@ command of termide's tools the agent moved to the background keeps such a run
 on after the answer to your message, as long as it runs, so the clock shows
 it is not done, and the state strip above the input pins a row for it — its
 headline as the block's, `$ Running cargo test`, with its own ticking clock;
-a click on the row brings the block into view. `Esc` stops the command too.
+a click on the row brings the block into view, and its `✕` stops the
+command alone, after a confirmation. `Esc` stops the command too.
 The run ends once the agent has no call open, termide runs none for it, and
 it stays quiet — 5 seconds after its answer text, 30 after anything else; a
 message you type meanwhile ends it and goes as the next request.

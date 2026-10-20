@@ -195,6 +195,20 @@ pub(crate) fn is_viewed(panel: u64, call: &str) -> bool {
         .is_some_and(|live| live.viewed)
 }
 
+/// Ask before stopping the task the `task` call `call` of panel `panel`
+/// handed over, naming its delegate; `action` stops it once confirmed. Its
+/// row, the view following it and any other place ask alike.
+pub(crate) fn ask_stop(panel: u64, call: &str, action: String) -> termide_core::PanelEvent {
+    let agent = lock()
+        .get(&(panel, call.to_string()))
+        .map(|live| live.agent.clone())
+        .unwrap_or_default();
+    termide_core::PanelEvent::ShowConfirm {
+        message: termide_i18n::t().agent_stop_task_confirm_fmt(&agent),
+        on_confirm: termide_core::ConfirmAction::Custom(action),
+    }
+}
+
 /// Stop the task the `task` call `call` of panel `panel` handed over.
 pub(crate) fn stop(panel: u64, call: &str) {
     if let Some(live) = lock().get(&(panel, call.to_string())) {

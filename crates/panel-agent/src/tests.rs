@@ -1,7 +1,7 @@
 use super::*;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 use termide_agent_core::FitStep;
 
@@ -10715,8 +10715,9 @@ fn clicking_a_running_tasks_row_asks_for_its_panel() {
 }
 
 /// A backend whose agent moved one command to the background, which
-/// termide still runs.
-struct Backgrounded;
+/// termide still runs; it notes the ids of the calls it is asked to stop.
+#[derive(Default)]
+struct Backgrounded(Arc<Mutex<Vec<String>>>);
 
 impl Backend for Backgrounded {
     fn prompt(&self, _message: UserMessage) -> Result<(), PromptError> {
@@ -10749,6 +10750,10 @@ impl Backend for Backgrounded {
             },
             elapsed: std::time::Duration::from_secs(134),
         }]
+    }
+    fn stop_background_call(&self, id: &str) -> bool {
+        self.0.lock().unwrap().push(id.to_string());
+        true
     }
     fn into_agent(self: Box<Self>) -> Option<Agent> {
         None
@@ -10790,7 +10795,7 @@ fn a_command_moved_to_the_background_shows_in_the_state_strip() {
         waiting: false,
     });
     panel.selected = 1;
-    panel.runtime = Box::new(Backgrounded);
+    panel.runtime = Box::<Backgrounded>::default();
     let rows = render_text(&mut panel, 80, 20);
     let head = format!(
         "$ {}  cargo test --workspace",
@@ -10799,7 +10804,7 @@ fn a_command_moved_to_the_background_shows_in_the_state_strip() {
     let clock = crate::transcript::fmt_dur(134_000);
     let y = rows
         .iter()
-        .rposition(|row| row.starts_with(&head) && row.trim_end().ends_with(&clock))
+        .rposition(|row| row.starts_with(&head) && row.contains(&clock))
         .unwrap_or_else(|| panic!("the command's row: {rows:#?}")) as u16;
     panel.handle_mouse(
         MouseEvent {
@@ -10812,6 +10817,114 @@ fn a_command_moved_to_the_background_shows_in_the_state_strip() {
     );
     assert_eq!(panel.selected, 0);
     assert!(panel.chat_focus);
+}
+
+/// The `✕` of a command's row in the background stops it, once confirmed.
+#[test]
+fn a_command_in_the_background_is_stopped_from_its_row() {
+    let mut panel = panel(vec![]);
+    let call = ToolCall {
+        id: "t1".into(),
+        name: "bash".into(),
+        arguments: serde_json::json!({ "command": "cargo test --workspace" }),
+        extra_content: None,
+    };
+    panel.transcript.push(Item::Tool {
+        call: call.clone(),
+        result: Some(ToolResultMessage::text(&call, "moved to the background")),
+        live: None,
+        at: String::new(),
+        duration_ms: Some(10),
+        waited_ms: None,
+        waiting: false,
+    });
+    let stopped = Arc::new(Mutex::new(Vec::new()));
+    panel.runtime = Box::new(Backgrounded(Arc::clone(&stopped)));
+    let (width, height) = (80, 20);
+    let rows = render_text(&mut panel, width, height);
+    let row = strip_row(&panel, crate::strip::StripTarget::Background(0));
+    let line = &rows[row as usize];
+    assert!(line.trim_end().ends_with('✕'), "{line}");
+    let events = panel.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: panel.strip_stop_x,
+            row,
+            modifiers: KeyModifiers::NONE,
+        },
+        Rect::new(0, 0, width, height),
+    );
+    let Some(PanelEvent::ShowConfirm {
+        message,
+        on_confirm: ConfirmAction::Custom(action),
+    }) = events.into_iter().next()
+    else {
+        panic!("no confirmation");
+    };
+    assert!(message.contains("cargo test --workspace"), "{message}");
+    assert!(stopped.lock().unwrap().is_empty(), "asked first");
+    panel.handle_command(PanelCommand::Confirmed { action });
+    assert_eq!(*stopped.lock().unwrap(), ["t1"]);
+}
+
+/// A subagent the agent waits on has a row with a `✕` as one handed over
+/// in the background does: it stops it once confirmed.
+#[test]
+fn a_running_task_is_stopped_from_its_row() {
+    let mut panel = panel(vec![]);
+    let id = panel.panel_id();
+    let call = ToolCall {
+        id: "call-5".into(),
+        name: "task".into(),
+        arguments: serde_json::json!({ "agent": "search", "prompt": "find the loader" }),
+        extra_content: None,
+    };
+    panel.transcript.push(Item::Tool {
+        call,
+        result: None,
+        live: Some("working".into()),
+        at: String::new(),
+        duration_ms: None,
+        waited_ms: None,
+        waiting: false,
+    });
+    let registration = crate::live::register(crate::live::LiveTask {
+        panel: Some(id),
+        call: "call-5",
+        from: "default",
+        agent: "search",
+        task: "find the loader",
+        session: None,
+        background: false,
+    });
+    let (width, height) = (80, 20);
+    let rows = render_text(&mut panel, width, height);
+    let row = strip_row(&panel, crate::strip::StripTarget::Task(0));
+    let line = &rows[row as usize];
+    assert!(line.trim_end().ends_with('✕'), "{line}");
+    let events = panel.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: panel.strip_stop_x,
+            row,
+            modifiers: KeyModifiers::NONE,
+        },
+        Rect::new(0, 0, width, height),
+    );
+    let Some(PanelEvent::ShowConfirm {
+        message,
+        on_confirm: ConfirmAction::Custom(action),
+    }) = events.into_iter().next()
+    else {
+        panic!("no confirmation");
+    };
+    assert!(message.contains("search"), "{message}");
+    assert!(registration.control().ended_by_user().is_none());
+    panel.handle_command(PanelCommand::Confirmed { action });
+    assert_eq!(
+        registration.control().ended_by_user(),
+        Some("the user stopped the subagent")
+    );
 }
 
 /// A retry waited for is a row like any other: the failure, when it goes,

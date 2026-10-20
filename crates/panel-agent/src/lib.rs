@@ -87,9 +87,12 @@ const DELETE_SESSION_ACTION: &str = "agent_delete_session";
 const TAKE_OVER_ACTION: &str = "agent_take_over";
 /// Stop the task this panel follows, once confirmed.
 const STOP_WATCHED_ACTION: &str = "agent_stop_watched";
-/// Stop a task this panel handed over in the background, once confirmed;
-/// the `task` call's id follows the colon.
+/// Stop a task this panel handed over, once confirmed; the `task` call's id
+/// follows the colon.
 const STOP_TASK_ACTION: &str = "agent_stop_task:";
+/// Stop a call the agent moved to the background, once confirmed; its id
+/// follows the colon.
+const STOP_CALL_ACTION: &str = "agent_stop_call:";
 /// Confirmation action that forks the session into a new panel (also `F5`).
 const FORK_SESSION_ACTION: &str = "agent_fork_session";
 /// Confirmation action that deletes the recent session picked in the banner.
@@ -2018,6 +2021,11 @@ impl Panel for AgentPanel {
             }
             PanelCommand::Confirmed { action } if action.starts_with(STOP_TASK_ACTION) => {
                 live::stop(self.panel_id, &action[STOP_TASK_ACTION.len()..]);
+                CommandResult::Handled(true)
+            }
+            PanelCommand::Confirmed { action } if action.starts_with(STOP_CALL_ACTION) => {
+                self.runtime
+                    .stop_background_call(&action[STOP_CALL_ACTION.len()..]);
                 CommandResult::Handled(true)
             }
             PanelCommand::Confirmed { action } if action == DELETE_SESSION_ACTION => {
