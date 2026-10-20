@@ -1529,6 +1529,28 @@ impl DelegateLog {
         }
     }
 
+    /// Record that the task's run started, after its first message, as a
+    /// panel's does: from here the log reads as a run under way, so a task
+    /// cut off by termide quitting is known as unfinished and its session
+    /// offers to carry on.
+    fn note_run_start(&mut self) {
+        if let Some(session) = &mut self.0 {
+            if let Err(error) = session.append_run_start() {
+                log::warn!("delegate session write failed: {error}");
+            }
+        }
+    }
+
+    /// Record that the task's run ended, `paused` when it stands at a pause
+    /// rather than an answer: the reopened session then asks to carry it on.
+    fn note_run_end(&mut self, paused: bool) {
+        if let Some(session) = &mut self.0 {
+            if let Err(error) = session.append_run_end(paused) {
+                log::warn!("delegate session write failed: {error}");
+            }
+        }
+    }
+
     /// The log's path, when there is one.
     fn path(&self) -> Option<PathBuf> {
         self.0.as_ref().map(|session| session.path().to_path_buf())
@@ -1893,12 +1915,15 @@ impl Subagents {
         }
 
         // Followed from its parent's panel while it runs.
-        let live = register_live(ctx.panel, caller, task, &log);
+        let live = register_live(ctx.panel, caller, task, &log, true);
+        // The panel's pause holds this run at its step boundaries.
+        agent = agent.with_pause_gate(live.control().gate());
         let user_stop = live.control().stop_token().clone();
         let mut noted = noting(&live, on_update);
         let on_update: &mut dyn FnMut(ToolUpdate) = &mut noted;
         let mut hooks = hooks;
         let mut report = SubagentReport::new(max_turns);
+        let mut noted = false;
         let finished = std::sync::atomic::AtomicBool::new(false);
         std::thread::scope(|scope| {
             // The parent's stop reaches the run at once, not at its next
@@ -1914,7 +1939,14 @@ impl Subagents {
             });
             let mut emit = |event: AgentEvent| match &event {
                 AgentEvent::MessageEnd(message) => {
+                    let first = !noted;
+                    noted = true;
                     log.note(message);
+                    // The run's mark goes after its first message, as a
+                    // panel's does; the task's words are that message.
+                    if first {
+                        log.note_run_start();
+                    }
                     if let Message::Assistant(message) = message {
                         report.said(message, on_update);
                     }
@@ -1944,6 +1976,9 @@ impl Subagents {
         if report.answer.is_none() && report.error.is_none() {
             report.error = run_error(agent.messages());
         }
+        // Held at its panel's pause when termide stopped it: the reopened
+        // session asks to carry the task on.
+        log.note_run_end(live.control().is_paused());
         Ok(with_reviews(log.into_outcome(
             match live.control().ended_by_user() {
                 Some(why) if !cancel.is_cancelled() => report.ended_by_user(why),
@@ -1970,7 +2005,9 @@ impl Subagents {
         on_update: &mut dyn FnMut(ToolUpdate),
     ) -> Result<SubagentOutcome, String> {
         // Followed from its parent's panel while it runs.
-        let live = register_live(run.panel, caller, task, &log);
+        // An external agent runs its own program: the panel's pause cannot
+        // hold it, only stop it.
+        let live = register_live(run.panel, caller, task, &log, false);
         let mut noted = noting(&live, on_update);
         let on_update: &mut dyn FnMut(ToolUpdate) = &mut noted;
         let config = run.config;
@@ -2010,6 +2047,10 @@ impl Subagents {
             history: Vec::new(),
         };
         let runtime = AcpRuntime::start(&run.name, &config, setup)?;
+        // The task's run is recorded in its own log, as a panel's is: cut
+        // off by termide quitting, the session reads as unfinished and offers
+        // to carry on when it is opened again.
+        log.note_run_start();
         let drive = CliDrive {
             control: live.control(),
             name: &run.name,
@@ -2029,6 +2070,7 @@ impl Subagents {
             &mut log,
             on_update,
         );
+        log.note_run_end(false);
         outcome.map(|outcome| log.into_outcome(outcome))
     }
 }
@@ -2065,6 +2107,7 @@ fn register_live(
     caller: &str,
     task: &SubagentTask,
     log: &DelegateLog,
+    pausable: bool,
 ) -> termide_panel_agent::live::Registration {
     termide_panel_agent::live::register(termide_panel_agent::live::LiveTask {
         panel,
@@ -2074,6 +2117,7 @@ fn register_live(
         task: task.prompt,
         session: log.path(),
         background: task.background,
+        pausable,
     })
 }
 
@@ -3911,6 +3955,55 @@ mod tests {
             } if user.plain_text() == "look around"
                 && user.origin.as_ref().is_some_and(|o| o.kind == OriginKind::Task)
         )));
+        // The task's run is recorded in its own log, so a task cut off by
+        // termide quitting reads as unfinished there and offers to carry on.
+        let kinds: Vec<_> = logged
+            .entries()
+            .iter()
+            .map(|entry| match entry.kind {
+                termide_agent_core::EntryKind::RunStart => "start",
+                termide_agent_core::EntryKind::RunEnd { paused: true } => "paused",
+                termide_agent_core::EntryKind::RunEnd { paused: false } => "end",
+                _ => "",
+            })
+            .filter(|kind| !kind.is_empty())
+            .collect();
+        assert_eq!(kinds, vec!["start", "end"]);
+    }
+
+    /// A task held at its panel's pause when termide quits leaves its log
+    /// standing at a pause: opened again, the session asks to carry it on.
+    #[test]
+    fn a_held_task_is_left_paused_in_its_log() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut log = DelegateLog::start(
+            Some(tmp.path()),
+            tmp.path(),
+            termide_agent_core::SessionParent {
+                session: Some("p1".into()),
+                agent: "lead".into(),
+                call: "c1".into(),
+            },
+            &DelegateRun {
+                connection: "default",
+                provider: "openai",
+                model: "gpt",
+                context_window: None,
+                agent: DEFAULT_AGENT,
+            },
+        );
+        log.note_run_start();
+        log.note(&Message::User(UserMessage::text("look around")));
+        assert!(
+            Session::open_read_only(&log.path().unwrap())
+                .unwrap()
+                .unfinished_run()
+                .is_some(),
+            "a run with no end is unfinished"
+        );
+        log.note_run_end(true);
+        let reopened = Session::open_read_only(&log.path().unwrap()).unwrap();
+        assert_eq!(reopened.last_run(), termide_agent_core::LastRun::Paused);
     }
 
     /// A subagent may take as many model calls as its limit says; the one

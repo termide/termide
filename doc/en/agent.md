@@ -490,7 +490,12 @@ last block, with the time it ended and how: `✻ 3m41s · 21:03:41 ✗`.
 
 `/pause` takes effect as soon as the tool call or model reply in progress
 finishes — not at the end of the whole step, so a step that fetches several
-pages stops after the current one. The calls it leaves unrun wait for
+pages stops after the current one. The tasks the panel handed to delegates
+wait with it: each holds before its next request or call, and `/continue`
+lets every one of them go on where it stood. The pause's row in the state
+strip counts them (`‖ Paused · 2 waiting`); a delegate run by an external
+agent runs its own program, which no pause can hold, so it is counted apart
+(`· 1 keeps running`) and only stops. The calls it leaves unrun wait for
 `/continue`, which runs them first; a new request instead closes them as not
 run. A run stopped with `/pause` gets a pause line instead, `‖ 1m12s`: it counts
 how long the pause has lasted, its `‖` marked while the pause is on, and
@@ -542,6 +547,14 @@ pause, and a new request takes over, as it does over any pause. A goal or loop
 keeps its count of turns across the reopen, so its cap still holds. Sessions
 left so are marked `⏸` in the session lists, and a panel that reopens one is
 highlighted until seen and rings the bell, as a panel waiting for you does.
+A delegated task's own log records its run the same way, so a task termide
+quit upon is left unfinished there too: its session shows `⏸ &` in the lists,
+and opening it asks to carry the task on as any other session does. The
+carry-on card names each such delegate of the session it reopens
+(`& search · find the loader — unfinished; open its session to carry it on`);
+**Continue** carries on the panel's own run, and each delegate is carried on
+by opening its session — a resumed delegate asks nothing of the panel that
+delegated it, so termide does not start one behind the panel's back.
 
 A session is held by one termide at a time. Another termide opening the same
 project — while the first still runs, maybe in a terminal window out of sight

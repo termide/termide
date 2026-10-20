@@ -33,6 +33,9 @@ struct Live {
     /// A panel follows it: its cards go there rather than to the panel that
     /// delegated it.
     viewed: bool,
+    /// Whether a pause can hold it at all: an external agent runs its own
+    /// program, so pausing the panel leaves that going.
+    pausable: bool,
 }
 
 /// The tasks running out of sight, by the panel and the `task` call that
@@ -61,6 +64,9 @@ pub struct LiveTask<'a> {
     pub session: Option<PathBuf>,
     /// Handed over in the background.
     pub background: bool,
+    /// Whether a pause can hold it: `false` for an external agent, which
+    /// runs its own program and only stops.
+    pub pausable: bool,
 }
 
 /// A task's place in the registry, for as long as it runs: dropped, the
@@ -113,6 +119,7 @@ pub fn register(task: LiveTask<'_>) -> Registration {
                 started: Instant::now(),
                 status: Arc::clone(&status),
                 viewed: false,
+                pausable: task.pausable,
             },
         );
         key
@@ -155,6 +162,10 @@ pub(crate) struct BackgroundTask {
     pub task: String,
     pub status: String,
     pub started: Instant,
+    /// Held at the panel's pause.
+    pub paused: bool,
+    /// A pause cannot hold it: an external agent runs its own program.
+    pub pausable: bool,
 }
 
 /// The tasks panel `panel` handed over in the background that still run,
@@ -173,6 +184,8 @@ pub(crate) fn background_of(panel: u64) -> Vec<BackgroundTask> {
                 .unwrap_or_else(PoisonError::into_inner)
                 .clone(),
             started: live.started,
+            paused: live.control.is_paused(),
+            pausable: live.pausable,
         })
         .collect();
     tasks.sort_by_key(|task| task.started);
@@ -225,6 +238,68 @@ pub fn stop_all(panel: u64) {
     }
 }
 
+/// How the tasks of one panel stand at a pause.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PauseState {
+    /// Held at the pause, ready to go on where each stood.
+    pub held: usize,
+    /// Still going, because a pause cannot hold them: an external agent runs
+    /// its own program and only stops.
+    pub running: usize,
+}
+
+/// Hold every task panel `panel` handed over at its next step, as the panel
+/// paused its own run.
+pub fn pause_all(panel: u64) -> PauseState {
+    let mut state = PauseState::default();
+    for ((owner, _), live) in lock().iter() {
+        if *owner != panel {
+            continue;
+        }
+        if live.pausable {
+            live.control.pause();
+            state.held += 1;
+        } else {
+            state.running += 1;
+        }
+    }
+    state
+}
+
+/// Lift the pause on every task panel `panel` handed over: none waits any
+/// longer, each goes on where it stood.
+pub fn resume_all(panel: u64) {
+    for ((owner, _), live) in lock().iter() {
+        if *owner == panel {
+            live.control.resume();
+        }
+    }
+}
+
+/// How the tasks panel `panel` handed over stand now.
+pub fn state_of(panel: u64) -> PauseState {
+    let mut state = PauseState::default();
+    for ((owner, _), live) in lock().iter() {
+        if *owner != panel {
+            continue;
+        }
+        if live.control.is_paused() {
+            state.held += 1;
+        } else if !live.pausable {
+            state.running += 1;
+        }
+    }
+    state
+}
+
+/// Whether the task the `task` call `call` of panel `panel` handed over is
+/// held at a pause.
+pub fn is_paused(panel: u64, call: &str) -> bool {
+    lock()
+        .get(&(panel, call.to_string()))
+        .is_some_and(|live| live.control.is_paused())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,6 +313,7 @@ mod tests {
             task: "find it",
             session: Some(PathBuf::from("/tmp/x.jsonl")),
             background,
+            pausable: true,
         }
     }
 
@@ -277,5 +353,41 @@ mod tests {
         stop_all(7002);
         assert!(sync.control().ended_by_user().is_some());
         assert!(other.control().ended_by_user().is_none());
+    }
+
+    /// The panel's pause holds the tasks it handed over, and its resume lets
+    /// them go; an external agent's task is left going and counted, so the
+    /// panel can say so.
+    #[test]
+    fn a_panels_pause_holds_its_tasks_and_lets_them_go() {
+        let held = register(task(Some(7004), "a", true));
+        let mut external = task(Some(7004), "b", true);
+        external.pausable = false;
+        let running = register(external);
+        let other = register(task(Some(7005), "c", true));
+
+        assert_eq!(
+            pause_all(7004),
+            PauseState {
+                held: 1,
+                running: 1
+            },
+            "the external task keeps going"
+        );
+        assert!(held.control().is_paused());
+        assert!(!running.control().is_paused());
+        assert!(is_paused(7004, "a"));
+        assert!(!is_paused(7004, "b"));
+        assert!(!other.control().is_paused(), "another panel is its own");
+
+        resume_all(7004);
+        assert!(!held.control().is_paused());
+        assert_eq!(
+            state_of(7004),
+            PauseState {
+                held: 0,
+                running: 1
+            }
+        );
     }
 }

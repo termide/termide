@@ -647,6 +647,8 @@ impl Translation for RuntimeTranslation {
         agent_notice_will_pause,
         agent_strip_pause,
         agent_strip_after_step,
+        agent_strip_paused,
+        agent_strip_keeps_running,
         agent_strip_checking,
         agent_notice_nothing_to_pause,
         agent_notice_already_running,
@@ -1690,6 +1692,27 @@ impl Translation for RuntimeTranslation {
                 ("turn", &turn.to_string()),
                 ("max", &max.to_string()),
             ],
+        )
+    }
+
+    fn agent_unfinished_delegate_fmt(&self, agent: &str, task: &str) -> String {
+        self.format(
+            "agent_unfinished_delegate_fmt",
+            &[("agent", agent), ("task", task)],
+        )
+    }
+
+    fn agent_strip_pause_held_fmt(&self, count: usize) -> String {
+        self.format(
+            "agent_strip_pause_held_fmt",
+            &[("count", &count.to_string())],
+        )
+    }
+
+    fn agent_strip_pause_running_fmt(&self, count: usize) -> String {
+        self.format(
+            "agent_strip_pause_running_fmt",
+            &[("count", &count.to_string())],
         )
     }
 

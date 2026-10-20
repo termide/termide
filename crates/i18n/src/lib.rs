@@ -735,6 +735,8 @@ pub trait Translation: Send + Sync {
     fn agent_notice_already_running(&self) -> &str;
     fn agent_notice_nothing_to_continue(&self) -> &str;
     fn agent_unfinished_title(&self) -> &str;
+    /// The carry-on card: a delegated task left unfinished in its own log.
+    fn agent_unfinished_delegate_fmt(&self, agent: &str, task: &str) -> String;
     fn agent_unfinished_continue(&self) -> &str;
     fn agent_unfinished_drop(&self) -> &str;
     fn agent_unfinished_later(&self) -> &str;
@@ -755,6 +757,14 @@ pub trait Translation: Send + Sync {
     fn agent_strip_pause(&self) -> &str;
     /// Agent panel state strip: when a pause asked for takes effect.
     fn agent_strip_after_step(&self) -> &str;
+    /// Agent panel state strip: a delegated task held at the panel's pause.
+    fn agent_strip_paused(&self) -> &str;
+    /// Agent panel state strip: a delegated task a pause cannot hold.
+    fn agent_strip_keeps_running(&self) -> &str;
+    /// Agent panel state strip: the delegates held at the panel's pause.
+    fn agent_strip_pause_held_fmt(&self, count: usize) -> String;
+    /// Agent panel state strip: the delegated tasks still going at it.
+    fn agent_strip_pause_running_fmt(&self, count: usize) -> String;
     /// Agent panel state strip: a goal's judge deciding whether it is reached.
     fn agent_strip_checking(&self) -> &str;
     /// Agent panel state strip: when a failed request is tried again; the

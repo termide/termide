@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use termide_agent_core::{CancelToken, Session};
+use termide_agent_core::{CancelToken, PauseGate, Session};
 use termide_core::{ConfirmAction, PanelEvent};
 
 use crate::runtime::push_history;
@@ -30,12 +30,38 @@ pub struct DelegateControl {
     taken: Arc<AtomicBool>,
     /// The task is over.
     done: Arc<AtomicBool>,
+    /// Held while the panel that delegated the task is paused: the delegate's
+    /// loop waits at its step boundaries and goes on where it stood once the
+    /// pause is lifted.
+    pause: PauseGate,
 }
 
 impl DelegateControl {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The gate the delegate's loop waits at; handed to the loop when the
+    /// task starts.
+    #[must_use]
+    pub fn gate(&self) -> PauseGate {
+        self.pause.clone()
+    }
+
+    /// Hold the task at its next step boundary.
+    pub fn pause(&self) {
+        self.pause.pause();
+    }
+
+    /// Lift the pause: the task goes on where it stood.
+    pub fn resume(&self) {
+        self.pause.resume();
+    }
+
+    #[must_use]
+    pub fn is_paused(&self) -> bool {
+        self.pause.is_paused()
     }
 
     /// Cancelled once the user stopped the task or took it over: the task
@@ -130,6 +156,13 @@ impl Watch {
             seen: None,
             looked: None,
         }
+    }
+
+    /// Whether the task is held at the pause of the panel that delegated it:
+    /// it writes nothing until that run is resumed.
+    #[must_use]
+    pub fn is_paused(&self) -> bool {
+        self.control.is_paused()
     }
 }
 
