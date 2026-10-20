@@ -34,7 +34,9 @@ fn trim_on_save_reads_the_buffer_back_and_answers_with_edits() {
         eprintln!("no python3: skipped");
         return;
     };
+    // `-B`: importing the library must leave no `__pycache__` in the tree.
     let mut child = Command::new(python)
+        .arg("-B")
         .arg(examples().join("trim-on-save/run.py"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
