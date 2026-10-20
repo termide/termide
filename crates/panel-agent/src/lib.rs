@@ -500,9 +500,20 @@ enum RunButton {
     Stop,
     /// `[✎]`: take the task this panel follows over, once confirmed.
     TakeOver,
-    /// `[⧉]`: move the view of a task, shown over the layout, into a panel
-    /// of its own.
+}
+
+/// A button under the view of a delegate shown over the layout, which has
+/// them in place of the prompt it could not type into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ViewButton {
+    /// Move the view into a panel of its own, as `F9` does.
     Dock,
+    /// Take the task over, once confirmed, as `Ctrl+T` does.
+    TakeOver,
+    /// Stop the task, once confirmed.
+    Stop,
+    /// Close the view, the task going on, as `Esc` does.
+    Close,
 }
 
 /// Live state of the current run: the phase, when it started, and enough to
@@ -1009,6 +1020,9 @@ pub struct AgentPanel {
     watch: Option<watch::Watch>,
     /// The panel is shown over the layout, not in it.
     in_overlay: bool,
+    /// The buttons under a delegate's view over the layout as last drawn,
+    /// each with its cells, so a click maps back to one.
+    view_buttons: Vec<(Rect, ViewButton)>,
     /// Delegates' cards handed here by another panel, shown in their turn.
     cards_in: VecDeque<pending::Card>,
     /// Delegates' cards set aside for the panels following their tasks,
@@ -1313,6 +1327,7 @@ impl AgentPanel {
             queued_texts: VecDeque::new(),
             watch: None,
             in_overlay: false,
+            view_buttons: Vec::new(),
             cards_in: VecDeque::new(),
             cards_out: Vec::new(),
             panel_id,

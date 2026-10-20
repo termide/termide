@@ -1664,20 +1664,23 @@ column moves; with a panel already following it, that panel comes forward.
 The view shows the delegate's steps as its log gains them, and what the
 delegate asks — its permission requests and questions — comes to the view
 while it is up, rather than to the delegating panel under it. It belongs to
-the delegating agent while the task runs: the input takes nothing and reads
+the delegating agent while the task runs: in place of the prompt it has a
+rule naming the task (`& <agent> · <task>`) and a row of buttons —
+**In a panel F9**, which moves the view into a panel of its own beside the
+others, **Take over Ctrl+T**, **Stop** and **Close Esc** — and the session
+keys (`F2`, `F4`–`F8`), the chips and the menu's session entries do nothing;
+scrolling, the blocks, copying, `F3` and `Ctrl+S` still work. In a panel
+following the task the input takes nothing and reads
 `& Delegate of <agent>: <task>` — a click on it goes back to the delegating
-panel — and the session keys (`F2`, `F4`–`F8`), the chips and the menu's
-session entries do nothing; scrolling, the blocks, copying, `F3` and
-`Ctrl+S` still work. The prompt's border carries `[⧉]`, which moves the view
-into a panel of its own beside the others (`F9` too), `[✎]`, which takes the
-task over, and `[■]`, which stops it; both of those ask first, as does
-`Ctrl+T`, and the delegating agent hears that you took the task or stopped
+panel — and its border carries `[✎]`, which takes the task over, and `[■]`,
+which stops it. Taking over and stopping ask first, whichever way you ask
+for them, and the delegating agent hears that you took the task or stopped
 it, with what was said so far. Like a modal, the view holds the window while
 it is up: every key but quitting goes to it, and the mouse reaches nothing
 outside it. `Esc` or the panel-close key closes it, and `Esc` in a panel
 following the task goes back to the delegating panel: neither stops the task, and the cards still unanswered go
 back to the delegating panel. Once the task is over, the view shows it as it
-ended, to read, with `[⧉]` alone; in a panel — or once moved into one — its
+ended, to read, with **In a panel** and **Close** alone; in a panel — or once moved into one — its
 session opens as any other, to go on talking to. A task taken over in the
 view moves into a panel at once. `o` on a finished `task` block opens its
 session in a panel.

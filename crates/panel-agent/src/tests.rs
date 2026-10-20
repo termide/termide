@@ -11194,8 +11194,9 @@ fn the_strip_count_of_subagents_unfolds_and_folds_back() {
     drop(registrations);
 }
 
-/// Shown over the layout, a view offers to move into a panel (`[⧉]`, `F9`),
-/// and a task that ended stays as it ended, to read, until it does.
+/// Shown over the layout, a view has buttons in place of the prompt — into
+/// a panel (`F9`), take over, stop, close — and a task that ended stays as
+/// it ended, to read, with only the way into a panel and out.
 #[test]
 fn a_view_over_the_layout_docks_and_keeps_an_ended_task() {
     let dir = tempfile::tempdir().unwrap();
@@ -11221,11 +11222,42 @@ fn a_view_over_the_layout_docks_and_keeps_an_ended_task() {
     ));
     let (width, height) = (80, 30);
     let rows = render_text(&mut panel, width, height);
-    assert!(rows
+    let buttons = rows
         .iter()
-        .any(|line| line.contains("[⧉]") && line.contains("[✎]") && line.contains("[■]")));
+        .position(|line| {
+            line.contains("[ In a panel F9 ]")
+                && line.contains("[ Take over Ctrl+T ]")
+                && line.contains("[ Stop ]")
+                && line.contains("[ Close Esc ]")
+        })
+        .expect("the buttons are under the view");
+    assert!(rows[buttons - 1].contains("& lead · find the loader"));
+    assert!(!rows
+        .iter()
+        .any(|line| line.contains("[✎]") || line.contains("[■]")));
     let events = panel.handle_key(chord(KeyCode::F(9), KeyModifiers::NONE));
     assert!(matches!(events.as_slice(), [PanelEvent::DockOverlay]));
+    let click = |panel: &mut AgentPanel, label: &str| {
+        let row = &rows[buttons];
+        let column = row[..row.find(label).unwrap()].chars().count() as u16 + 2;
+        panel.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column,
+                row: buttons as u16,
+                modifiers: KeyModifiers::NONE,
+            },
+            Rect::new(0, 0, width, height),
+        )
+    };
+    assert!(matches!(
+        click(&mut panel, "[ In a panel").as_slice(),
+        [PanelEvent::DockOverlay]
+    ));
+    assert!(matches!(
+        click(&mut panel, "[ Close").as_slice(),
+        [PanelEvent::FocusAgentPanel(4)]
+    ));
 
     // Over: still the task as it ended, with only the way into a panel.
     drop(log);
@@ -11233,10 +11265,12 @@ fn a_view_over_the_layout_docks_and_keeps_an_ended_task() {
     panel.tick();
     assert!(panel.is_delegate());
     let rows = render_text(&mut panel, width, height);
-    assert!(rows.iter().any(|line| line.contains("[⧉]")));
+    assert!(rows
+        .iter()
+        .any(|line| line.contains("[ In a panel F9 ]") && line.contains("[ Close Esc ]")));
     assert!(!rows
         .iter()
-        .any(|line| line.contains("[■]") || line.contains("[✎]")));
+        .any(|line| line.contains("[ Stop ]") || line.contains("Take over")));
     // In a panel, its session opens.
     panel.set_in_overlay(false);
     panel.tick();

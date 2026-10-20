@@ -592,6 +592,10 @@ pub trait Translation: Send + Sync {
     fn agent_show_prompt(&self) -> &str;
     /// Agent panel context menu and `/usage`: the session-info modal title
     fn agent_session_info(&self) -> &str;
+    /// Buttons under the view of a delegate shown over the layout.
+    fn agent_view_dock(&self) -> &str;
+    fn agent_view_take_over(&self) -> &str;
+    fn agent_view_stop(&self) -> &str;
 
     // Agent panel — permission card
     /// The permission card's title: what the agent wants to run (`{tool}`)

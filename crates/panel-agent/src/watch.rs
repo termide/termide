@@ -281,6 +281,14 @@ impl AgentPanel {
         })
     }
 
+    /// Whose task the panel follows and what it is, on one line, for the
+    /// rule above a view's buttons.
+    pub(crate) fn watched_label(&self) -> Option<String> {
+        self.watch
+            .as_ref()
+            .map(|watch| format!("& {} · {}", watch.from, crate::single_line(&watch.task)))
+    }
+
     /// The panel whose task this one follows.
     #[must_use]
     pub fn delegated_by(&self) -> Option<u64> {

@@ -10,10 +10,10 @@ use termide_ui::{ChoiceAction, CompletionAction, CompletionItem, CompletionList,
 use crate::slash::user_skill_description;
 use crate::{
     select, transcript, AgentPanel, BannerHit, FoldMode, Item, NoticeKind, Paste, RunButton,
-    CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND, FORK_COMMAND, GOAL_COMMAND, HANDOFF_COMMAND,
-    LOOP_COMMAND, MCP_COMMAND, NAME_COMMAND, NEW_COMMAND, NEW_SESSION_ACTION, PAUSE_COMMAND,
-    PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND, RESUME_ACTION, TRUST_COMMAND, UNDO_COMMAND,
-    USAGE_COMMAND,
+    ViewButton, CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND, FORK_COMMAND, GOAL_COMMAND,
+    HANDOFF_COMMAND, LOOP_COMMAND, MCP_COMMAND, NAME_COMMAND, NEW_COMMAND, NEW_SESSION_ACTION,
+    PAUSE_COMMAND, PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND, RESUME_ACTION, TRUST_COMMAND,
+    UNDO_COMMAND, USAGE_COMMAND,
 };
 
 /// A paste past either bound is held as a short placeholder rather than
@@ -1530,6 +1530,15 @@ impl AgentPanel {
         // the transcript. A pending question keeps its clicks to itself.
         // A run control on the prompt's border acts on the press.
         if matches!(event.kind, MouseEventKind::Down(MouseButton::Left)) {
+            // The buttons under a delegate's view over the layout.
+            if let Some(button) = self.view_button_at(event.column, event.row) {
+                return match button {
+                    ViewButton::Dock => vec![PanelEvent::DockOverlay],
+                    ViewButton::TakeOver => self.ask_take_over(),
+                    ViewButton::Stop => self.ask_stop_watched(),
+                    ViewButton::Close => self.leave_watched(),
+                };
+            }
             let button = self
                 .input
                 .border_button_at(event.column, event.row)
@@ -1540,7 +1549,6 @@ impl AgentPanel {
                     return match button {
                         RunButton::Stop => self.ask_stop_watched(),
                         RunButton::TakeOver => self.ask_take_over(),
-                        RunButton::Dock => vec![PanelEvent::DockOverlay],
                         RunButton::Pause | RunButton::Continue => Vec::new(),
                     };
                 }
@@ -1558,7 +1566,7 @@ impl AgentPanel {
                         self.cancel_retry_wait()
                     }
                     RunButton::Stop => self.abort(),
-                    RunButton::TakeOver | RunButton::Dock => {}
+                    RunButton::TakeOver => {}
                 }
                 return vec![PanelEvent::NeedsRedraw];
             }

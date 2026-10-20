@@ -16,8 +16,9 @@ use termide_ui::ScrollBar;
 use crate::toolset::TOOLSET_ACTION;
 use crate::{
     format_tokens, provider_label, shorten_path, single_line, transcript, truncate_title,
-    AgentEntry, AgentPanel, BannerHit, Phase, RunButton, AGENT_ACTION, CONNECTION_ACTION,
-    CWD_ACTION, LOOP_MAX_ITERATIONS, MODEL_ACTION, MODE_ACTION, OPTIONS_ACTION, REASONING_ACTION,
+    AgentEntry, AgentPanel, BannerHit, Phase, RunButton, ViewButton, AGENT_ACTION,
+    CONNECTION_ACTION, CWD_ACTION, LOOP_MAX_ITERATIONS, MODEL_ACTION, MODE_ACTION, OPTIONS_ACTION,
+    REASONING_ACTION,
 };
 
 /// Rows of the welcome banner's logo.
@@ -588,18 +589,15 @@ impl AgentPanel {
     /// has taken effect, stop alone while a stop is under way, none while
     /// idle.
     pub(crate) fn run_buttons(&self) -> Vec<RunButton> {
-        // Following another agent's task: move the view into a panel when it
-        // is shown over the layout, take the task over, stop it.
+        // Following another agent's task in a panel: take it over, stop it.
+        // A view over the layout has its controls as buttons in place of the
+        // prompt (`render_view_buttons`).
         if self.is_delegate() {
-            let mut buttons = Vec::new();
-            if self.in_overlay {
-                buttons.push(RunButton::Dock);
-            }
             // A task that is over has nothing left to stop or take.
-            if !self.watched_task_over() {
-                buttons.extend([RunButton::TakeOver, RunButton::Stop]);
+            if self.in_overlay || self.watched_task_over() {
+                return Vec::new();
             }
-            return buttons;
+            return vec![RunButton::TakeOver, RunButton::Stop];
         }
         let paused = (self.paused || self.retry_wait.is_some()) && !self.is_busy();
         if self.is_busy() && self.stop_requested.is_some() {
@@ -629,7 +627,7 @@ impl AgentPanel {
             RunButton::Pause => self.colors.border_focused,
             RunButton::Continue => self.colors.success,
             RunButton::Stop if self.stop_requested.is_some() => self.colors.error,
-            RunButton::Stop | RunButton::TakeOver | RunButton::Dock => self.colors.border_focused,
+            RunButton::Stop | RunButton::TakeOver => self.colors.border_focused,
         }
     }
 
@@ -643,6 +641,12 @@ impl AgentPanel {
         panel_focused: bool,
     ) {
         let colors = self.colors;
+        self.view_buttons.clear();
+        if self.in_overlay && self.is_delegate() {
+            self.run_buttons.clear();
+            self.render_view_buttons(area, buf, panel_focused);
+            return;
+        }
         // The run controls sit at the right end of the top border, always in
         // view whatever the transcript's scroll.
         self.run_buttons = self.run_buttons();
@@ -655,7 +659,6 @@ impl AgentPanel {
                     RunButton::Continue => "[▶]",
                     RunButton::Stop => "[■]",
                     RunButton::TakeOver => "[✎]",
-                    RunButton::Dock => "[⧉]",
                 };
                 (
                     label.to_string(),
@@ -715,6 +718,84 @@ impl AgentPanel {
         // agent's task runs here — shows no cursor, and its placeholder.
         let focused = focused && !self.is_delegate();
         self.input.render(area, buf, &colors, focused);
+    }
+
+    /// The bottom of a delegate's view over the layout, in place of the
+    /// prompt it could not type into: a rule naming whose task it is, then
+    /// a row of buttons, centred, each with the key that does the same.
+    fn render_view_buttons(&mut self, area: Rect, buf: &mut Buffer, focused: bool) {
+        if area.height == 0 || area.width == 0 {
+            return;
+        }
+        let colors = self.colors;
+        let rule = Style::default().fg(if focused {
+            colors.border_focused
+        } else {
+            colors.disabled
+        });
+        for dx in 0..area.width {
+            buf[(area.x + dx, area.y)].set_symbol("─").set_style(rule);
+        }
+        if let Some(label) = self.watched_label() {
+            let line = Line::from(Span::styled(
+                format!(" {label} "),
+                Style::default()
+                    .fg(colors.info)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            buf.set_line(area.x + 1, area.y, &line, area.width.saturating_sub(2));
+        }
+        if area.height < 2 {
+            return;
+        }
+        let t = termide_i18n::t();
+        let mut buttons = vec![(ViewButton::Dock, format!("{} F9", t.agent_view_dock()))];
+        if !self.watched_task_over() {
+            buttons.push((
+                ViewButton::TakeOver,
+                format!("{} Ctrl+T", t.agent_view_take_over()),
+            ));
+            buttons.push((ViewButton::Stop, t.agent_view_stop().to_string()));
+        }
+        buttons.push((ViewButton::Close, format!("{} Esc", t.ui_close())));
+        let labels: Vec<(ViewButton, String)> = buttons
+            .into_iter()
+            .map(|(button, label)| (button, format!("[ {label} ]")))
+            .collect();
+        const GAP: u16 = 2;
+        let width: u16 = labels
+            .iter()
+            .map(|(_, label)| Span::raw(label.as_str()).width() as u16)
+            .sum::<u16>()
+            + GAP * labels.len().saturating_sub(1) as u16;
+        let y = area.y + 1;
+        let mut x = area.x + area.width.saturating_sub(width) / 2;
+        let end = area.x + area.width;
+        for (button, label) in labels {
+            if x >= end {
+                break;
+            }
+            let style = Style::default().fg(colors.fg);
+            let (next, _) = buf.set_stringn(x, y, &label, (end - x) as usize, style);
+            self.view_buttons.push((
+                Rect {
+                    x,
+                    y,
+                    width: next - x,
+                    height: 1,
+                },
+                button,
+            ));
+            x = next + GAP;
+        }
+    }
+
+    /// The button under the view of a delegate at a cell, if any.
+    pub(crate) fn view_button_at(&self, column: u16, row: u16) -> Option<ViewButton> {
+        self.view_buttons
+            .iter()
+            .find(|(rect, _)| row == rect.y && column >= rect.x && column < rect.x + rect.width)
+            .map(|&(_, button)| button)
     }
 
     /// The body of [`Panel::render`].
