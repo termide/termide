@@ -72,10 +72,19 @@ struct Shared {
     stop: AtomicBool,
     /// [`KEEPALIVE`]; shorter in tests.
     keepalive: Duration,
+    /// The agent's ids for a call, by its tool's name and arguments.
+    call_ids: RwLock<Option<CallIds>>,
 }
+
+/// The ids the agent gave its calls of tool `name` with `arguments` that it
+/// has announced: a call the server runs is known by the first of them
+/// not yet taken, as the panel's block of it is.
+pub type CallIds = Box<dyn Fn(&str, &Value) -> Vec<String> + Send + Sync>;
 
 /// A call in flight.
 struct Running {
+    /// The call's id, as the agent knows it or as the server made it up.
+    id: String,
     cancel: CancelToken,
     name: String,
     arguments: Value,
@@ -86,6 +95,8 @@ struct Running {
 /// it has run.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunningCall {
+    /// As the agent knows it, when it said; else made up by the server.
+    pub id: String,
     pub name: String,
     pub arguments: Value,
     pub elapsed: Duration,
@@ -128,6 +139,7 @@ impl McpServer {
             details: Mutex::new(VecDeque::new()),
             stop: AtomicBool::new(false),
             keepalive,
+            call_ids: RwLock::new(None),
         });
         let serving = Arc::clone(&shared);
         let thread = std::thread::Builder::new()
@@ -226,6 +238,7 @@ impl McpServer {
             .unwrap_or_else(PoisonError::into_inner)
             .values()
             .map(|call| RunningCall {
+                id: call.id.clone(),
                 name: call.name.clone(),
                 arguments: call.arguments.clone(),
                 elapsed: call.started.elapsed(),
@@ -233,6 +246,30 @@ impl McpServer {
             .collect();
         calls.sort_by(|a, b| b.elapsed.cmp(&a.elapsed));
         calls
+    }
+
+    /// Know each call by the id the agent gave it, from `ids`.
+    pub fn set_call_ids(&self, ids: CallIds) {
+        *self
+            .shared
+            .call_ids
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = Some(ids);
+    }
+
+    /// Cancel the call in flight known as `id`, as the user's stop does;
+    /// whether one was.
+    pub fn cancel_call(&self, id: &str) -> bool {
+        let running = self
+            .shared
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let call = running.values().find(|call| call.id == id);
+        if let Some(call) = call {
+            call.cancel.cancel();
+        }
+        call.is_some()
     }
 
     /// Cancel every call in flight, as the user's stop does.
@@ -590,7 +627,7 @@ fn client_gone(stream: &TcpStream) -> bool {
 /// Run a `tools/call` the way the built-in loop runs a call; `cancel` stops
 /// it, and is cancelled too by a `notifications/cancelled` for its id.
 fn call_tool(shared: &Shared, id: &Value, params: &Value, cancel: CancelToken) -> Value {
-    let call = ToolCall {
+    let mut call = ToolCall {
         id: format!("mcp-{}", id.to_string().trim_matches('"')),
         name: params["name"].as_str().unwrap_or("").to_string(),
         arguments: match &params["arguments"] {
@@ -600,19 +637,37 @@ fn call_tool(shared: &Shared, id: &Value, params: &Value, cancel: CancelToken) -
         extra_content: None,
     };
     let key = id.to_string();
-    shared
-        .running
-        .lock()
+    let known = shared
+        .call_ids
+        .read()
         .unwrap_or_else(PoisonError::into_inner)
-        .insert(
+        .as_ref()
+        .map(|ids| ids(&call.name, &call.arguments))
+        .unwrap_or_default();
+    {
+        let mut running = shared
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        // Known by the agent's id, so what follows it — a panel following a
+        // delegate, a stop — finds it by its block's.
+        if let Some(agents) = known
+            .into_iter()
+            .find(|known| !running.values().any(|call| call.id == *known))
+        {
+            call.id = agents;
+        }
+        running.insert(
             key.clone(),
             Running {
+                id: call.id.clone(),
                 cancel: cancel.clone(),
                 name: call.name.clone(),
                 arguments: call.arguments.clone(),
                 started: Instant::now(),
             },
         );
+    }
     let ctx = ToolContext {
         withdrawn: Some(cancel.clone()),
         ..shared.context.clone()
@@ -832,6 +887,50 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert!(done.load(Ordering::Acquire));
+    }
+
+    /// Calls the agent announced are known by its ids, each id by one call;
+    /// one of them is stopped alone, by its id.
+    #[test]
+    fn a_call_is_known_by_the_agents_id_and_stopped_by_it() {
+        let done = Arc::new(AtomicBool::new(false));
+        let mut tools = ToolRegistry::new();
+        tools.insert(Arc::new(UntilCancelled(Arc::clone(&done))));
+        let server = McpServer::start(tools, Box::new(Guard), ToolContext::new("/tmp")).unwrap();
+        server.set_call_ids(Box::new(|name, _| {
+            if name == "wait" {
+                vec!["toolu_a".to_string(), "toolu_b".to_string()]
+            } else {
+                Vec::new()
+            }
+        }));
+        let call = |id: u64| {
+            json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call",
+                     "params": { "name": "wait", "arguments": {} } })
+        };
+        let _first = post_streamed(&server, &call(1));
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while server.running_calls().is_empty() {
+            assert!(std::time::Instant::now() < deadline, "the call never ran");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let _second = post_streamed(&server, &call(2));
+        while server.running_calls().len() < 2 {
+            assert!(std::time::Instant::now() < deadline, "the call never ran");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let mut ids: Vec<String> = server.running_calls().into_iter().map(|c| c.id).collect();
+        ids.sort();
+        assert_eq!(ids, ["toolu_a", "toolu_b"]);
+
+        assert!(server.cancel_call("toolu_a"));
+        assert!(!server.cancel_call("toolu_x"));
+        while server.running_calls().len() > 1 {
+            assert!(std::time::Instant::now() < deadline, "the call went on");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(server.running_calls()[0].id, "toolu_b");
+        server.cancel_running();
     }
 
     /// Says which of the context's people a call was given.

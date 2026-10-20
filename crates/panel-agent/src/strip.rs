@@ -10,6 +10,7 @@ use std::time::Instant;
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use termide_agent_core::ToolCall;
 use termide_core::ThemeColors;
 
 use crate::render::{capitalized, Autorun, GOAL_GLYPH, LOOP_GLYPH, STATE_QUEUED_ROWS};
@@ -92,6 +93,9 @@ impl StripRow {
 
 /// The columns a row's body keeps before its notes are cut.
 const MIN_BODY: usize = 10;
+
+/// How wide a command's name may be in the question before stopping it.
+const STOP_NAME_WIDTH: u16 = 120;
 
 /// The column of a row's `✕`, from the strip's left edge, for a strip
 /// `width` cells wide: the row's last cell is left blank.
@@ -311,6 +315,10 @@ impl AgentPanel {
                 StripTarget::Task(index),
             )
             .since(start);
+            // Stopped from its row as one handed over in the background is.
+            if crate::live::is_running(self.panel_id, &call.id) {
+                row = row.stoppable();
+            }
             row.notes.push(arg("agent"));
             row.status = last_line(live.unwrap_or(""), true);
             rows.push(row);
@@ -371,7 +379,8 @@ impl AgentPanel {
                     text(head.get(1)),
                     body.trim().to_string(),
                     StripTarget::Background(index),
-                );
+                )
+                .stoppable();
                 row.time = Some(u32::try_from(background.elapsed.as_millis()).unwrap_or(u32::MAX));
                 Some(row)
             })
@@ -394,6 +403,30 @@ impl AgentPanel {
         let mut lines = vec![transcript::separator(width, &self.colors)];
         lines.extend(strip_lines(rows, width, &self.colors));
         lines
+    }
+
+    /// Ask before stopping the subagent the `task` call `call` handed over.
+    fn ask_stop_task(&self, call: &str) -> PanelEvent {
+        crate::live::ask_stop(
+            self.panel_id,
+            call,
+            format!("{}{call}", crate::STOP_TASK_ACTION),
+        )
+    }
+
+    /// Ask before stopping the command in the background of call `call`,
+    /// named as its row names it.
+    fn ask_stop_command(&self, call: &ToolCall) -> PanelEvent {
+        let head = transcript::call_headline(call, STOP_NAME_WIDTH, &self.colors);
+        let named: String = head.iter().skip(2).map(|s| s.content.as_ref()).collect();
+        PanelEvent::ShowConfirm {
+            message: termide_i18n::t().agent_stop_command_confirm_fmt(named.trim()),
+            on_confirm: termide_core::ConfirmAction::Custom(format!(
+                "{}{}",
+                crate::STOP_CALL_ACTION,
+                call.id
+            )),
+        }
     }
 
     /// A click on the strip's row `target`, on its `✕` when `on_stop`.
@@ -422,8 +455,15 @@ impl AgentPanel {
                     select(self, index);
                 }
             }
-            // A subagent's block; a task running in a panel of its own
-            // brings that panel forward.
+            // `✕` stops a running subagent, once confirmed; elsewhere on
+            // the row its block is selected and a view of it shown.
+            StripTarget::Task(index) if on_stop => {
+                if let Some(transcript::Item::Tool { call, .. }) =
+                    self.transcript.items().get(index)
+                {
+                    return vec![self.ask_stop_task(&call.id)];
+                }
+            }
             StripTarget::Task(index) => {
                 select(self, index);
                 let mut events = vec![PanelEvent::NeedsRedraw];
@@ -444,18 +484,7 @@ impl AgentPanel {
                     return vec![PanelEvent::NeedsRedraw];
                 };
                 if on_stop {
-                    let agent = crate::live::background_of(self.panel_id)
-                        .into_iter()
-                        .find(|task| task.call == call)
-                        .map(|task| task.agent)
-                        .unwrap_or_default();
-                    return vec![PanelEvent::ShowConfirm {
-                        message: termide_i18n::t().agent_stop_background_confirm_fmt(&agent),
-                        on_confirm: termide_core::ConfirmAction::Custom(format!(
-                            "{}{call}",
-                            crate::STOP_TASK_ACTION
-                        )),
-                    }];
+                    return vec![self.ask_stop_task(&call)];
                 }
                 return vec![
                     PanelEvent::NeedsRedraw,
@@ -464,6 +493,14 @@ impl AgentPanel {
                         call,
                     },
                 ];
+            }
+            // `✕` stops a command in the background, once confirmed.
+            StripTarget::Background(index) if on_stop => {
+                if let Some(transcript::Item::Tool { call, .. }) =
+                    self.transcript.items().get(index)
+                {
+                    return vec![self.ask_stop_command(call)];
+                }
             }
             StripTarget::Background(index) => select(self, index),
             // `✕` takes the queue back into the input, as `↑` does: it goes

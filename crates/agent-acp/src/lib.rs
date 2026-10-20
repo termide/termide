@@ -186,8 +186,9 @@ struct Shared {
     /// The running calls of termide's own tools, by id, with the tool's name
     /// and arguments: the agent may still ask for their permission, which
     /// termide judges on its server, their end may not name the tool again,
-    /// and the details the server kept for the UI are found by them.
-    host_calls: Mutex<HashMap<String, (String, Value)>>,
+    /// and the details the server kept for the UI are found by them. The
+    /// server knows each call it runs by its id here.
+    host_calls: Arc<Mutex<HashMap<String, (String, Value)>>>,
     /// The calls on their way into the session log.
     calls: Mutex<CallLog>,
     /// The context's fill and size, `(used, size)`, as `usage_update` last
@@ -477,7 +478,7 @@ impl AcpRuntime {
             mcp_settled: Mutex::new(false),
             mcp_settled_changed: Condvar::new(),
             announced: Mutex::new(HashMap::new()),
-            host_calls: Mutex::new(HashMap::new()),
+            host_calls: Arc::default(),
             calls: Mutex::new(CallLog::default()),
             context: Mutex::new(None),
             context_limit: AtomicU64::new(0),
@@ -686,6 +687,30 @@ impl Backend for AcpRuntime {
 
     fn background_calls(&self) -> Vec<BackgroundCall> {
         self.shared.background_calls()
+    }
+
+    fn stop_background_call(&self, id: &str) -> bool {
+        let Some(call) = self
+            .shared
+            .background
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .find(|call| call.id == id)
+            .cloned()
+        else {
+            return false;
+        };
+        let server = self
+            .shared
+            .mcp_server
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let Some(server) = server.as_ref() else {
+            return false;
+        };
+        let running = server.running_calls();
+        running_one(&call, &running).is_some_and(|at| server.cancel_call(&running[at].id))
     }
 
     fn drain(&self) -> Vec<AgentEvent> {
@@ -1231,6 +1256,18 @@ impl Shared {
         });
         let served = server.is_some();
         if let Some(server) = server {
+            // A call is known by the id of its block in the panel, so the
+            // panel's stop and a view of a delegate reach it.
+            let calls = Arc::clone(&self.host_calls);
+            server.set_call_ids(Box::new(move |name, arguments| {
+                calls
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .iter()
+                    .filter(|(_, (known, args))| known == name && args == arguments)
+                    .map(|(id, _)| id.clone())
+                    .collect()
+            }));
             params["mcpServers"] = json!([{
                 "type": "http",
                 "name": SERVER_NAME,
@@ -2036,10 +2073,7 @@ impl Shared {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .retain(|call| {
-                let Some(at) = running
-                    .iter()
-                    .position(|r| r.name == call.name && r.arguments == call.arguments)
-                else {
+                let Some(at) = running_one(call, &running) else {
                     return false;
                 };
                 let elapsed = running.remove(at).elapsed;
@@ -2894,6 +2928,17 @@ impl Shared {
     }
 }
 
+/// Where among the server's `running` calls the call `call` is: by its id,
+/// which the server knows it by once the agent announced it before it ran;
+/// else by its tool and arguments.
+fn running_one(call: &ToolCall, running: &[termide_agent_mcp::RunningCall]) -> Option<usize> {
+    running.iter().position(|r| r.id == call.id).or_else(|| {
+        running
+            .iter()
+            .position(|r| r.name == call.name && r.arguments == call.arguments)
+    })
+}
+
 /// The ACP tool call as the panel's [`ToolCall`]: the kind stands as the
 /// name (`edit`, `execute`, `read`, …), so the transcript line and the
 /// editor reload behave as for built-in tools, and the title travels in the
@@ -3593,7 +3638,8 @@ mod tests {
             _on_update: &mut dyn FnMut(termide_agent_core::ToolUpdate),
             _cancel: &CancelToken,
         ) -> ToolResultMessage {
-            ToolResultMessage::text(call, "echoed").with_details(json!({ "said": "echoed" }))
+            ToolResultMessage::text(call, "echoed")
+                .with_details(json!({ "said": "echoed", "call": call.id }))
         }
     }
 
@@ -3672,7 +3718,11 @@ mod tests {
         });
         let ended = ended.expect("the call ends");
         assert_eq!(ended.tool_name, "echo");
-        assert_eq!(ended.details, Some(json!({ "said": "echoed" })));
+        // The server ran it as the call the agent announced, by its id.
+        assert_eq!(
+            ended.details,
+            Some(json!({ "said": "echoed", "call": "t1" }))
+        );
     }
 
     #[test]
@@ -6041,8 +6091,11 @@ mod tests {
         assert_eq!(background.len(), 1, "{background:?}");
         assert_eq!(background[0].call.id, "t1");
         assert_eq!(background[0].call.name, "held");
-        release.store(true, Ordering::Release);
+        // Its row's stop reaches it, by the block's id.
+        assert!(!runtime.stop_background_call("t2"));
+        assert!(runtime.stop_background_call("t1"));
         call.join().unwrap();
+        assert!(!release.load(Ordering::Acquire), "stopped, not released");
         assert!(runtime.background_calls().is_empty());
         events_until(&runtime, |e| matches!(e, AgentEvent::AgentEnd));
         assert!(!runtime.is_busy());

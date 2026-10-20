@@ -949,7 +949,7 @@ pub trait Translation: Send + Sync {
     fn agent_notice_taken_over_fmt(&self, agent: &str) -> String;
     fn agent_close_confirm_delegates_fmt(&self, count: usize) -> String;
     fn agent_stop_task_confirm_fmt(&self, agent: &str) -> String;
-    fn agent_stop_background_confirm_fmt(&self, agent: &str) -> String;
+    fn agent_stop_command_confirm_fmt(&self, command: &str) -> String;
     fn agent_take_over_confirm_fmt(&self, agent: &str) -> String;
     /// Agent transcript: who sent a message, and from which panel.
     fn agent_peer_from_panel_fmt(&self, agent: &str, panel: &str) -> String;

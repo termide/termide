@@ -238,10 +238,11 @@ impl AgentPanel {
         let Some(watch) = self.watch.as_ref().filter(|_| !self.watched_task_over()) else {
             return Vec::new();
         };
-        vec![PanelEvent::ShowConfirm {
-            message: termide_i18n::t().agent_stop_task_confirm_fmt(&watch.from),
-            on_confirm: ConfirmAction::Custom(STOP_WATCHED_ACTION.to_string()),
-        }]
+        vec![crate::live::ask_stop(
+            watch.by_panel,
+            &watch.call,
+            STOP_WATCHED_ACTION.to_string(),
+        )]
     }
 
     /// Stop the task, once confirmed.
