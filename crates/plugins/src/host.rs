@@ -545,6 +545,11 @@ impl Supervisor {
             }
             let now = Instant::now();
             failures.retain(|at| now.duration_since(*at) < self.timing.crash_window);
+            // A crash with none before it in the window starts a new run of
+            // waits, from the first one again.
+            if failures.is_empty() {
+                backoff = self.timing.first_backoff;
+            }
             failures.push(now);
             let give_up = failures.len() >= self.timing.max_crashes;
             log::warn!("plugin {}: {reason}", self.key.name);
@@ -611,6 +616,8 @@ impl Supervisor {
 
         loop {
             if let Some(status) = process.child.try_wait() {
+                // What it started goes with it, as when it is stopped.
+                process.child.kill();
                 return format!("exited: {status}");
             }
             if self.stopping() {
@@ -808,11 +815,15 @@ mod tests {
     }
 
     fn host() -> (Events, Arc<Log>) {
+        host_with(timing())
+    }
+
+    fn host_with(timing: Timing) -> (Events, Arc<Log>) {
         let log = Arc::new(Log::default());
         let launcher = Arc::new(FakeLauncher {
             log: Arc::clone(&log),
         });
-        let host = Host::new(launcher, timing());
+        let host = Host::new(launcher, timing);
         (
             Events {
                 host,
@@ -927,6 +938,29 @@ mod tests {
         events.wait_for(|event| matches!(event, HostEvent::Ready { .. }).then_some(()));
         events.host.shutdown();
         assert!(lock(&log.received).contains(&"shutdown".to_string()));
+    }
+
+    #[test]
+    fn crashes_far_apart_each_wait_the_first_delay() {
+        // Each crash is alone in its window: never given up on, and never
+        // waiting longer than the first time.
+        let (mut events, _log) = host_with(Timing {
+            crash_window: Duration::from_millis(1),
+            ..timing()
+        });
+        events
+            .host
+            .set_project(Path::new("/projects/a"), vec![launch("crash")]);
+        let mut restarts = Vec::new();
+        events.wait_for(|event| match event {
+            HostEvent::Stopped { restart_in, .. } => {
+                restarts.push(*restart_in);
+                (restarts.len() == 4).then_some(())
+            }
+            _ => None,
+        });
+        events.host.shutdown();
+        assert_eq!(restarts, [Some(timing().first_backoff); 4]);
     }
 
     #[test]
