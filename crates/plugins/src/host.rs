@@ -253,6 +253,9 @@ pub struct Host {
     tx: Sender<Tagged>,
     rx: Receiver<Tagged>,
     plugins: BTreeMap<PluginKey, Handle>,
+    /// Supervisors asked to stop and not yet finished: [`Self::shutdown`]
+    /// waits for them too, so none is cut off before it ends its process.
+    draining: Vec<JoinHandle<()>>,
     next_generation: u64,
 }
 
@@ -266,6 +269,7 @@ impl Host {
             tx,
             rx,
             plugins: BTreeMap::new(),
+            draining: Vec::new(),
             next_generation: 1,
         }
     }
@@ -315,6 +319,7 @@ impl Host {
             return false;
         };
         handle.stop.store(true, Ordering::Relaxed);
+        self.draining.push(handle.thread);
         self.start(key.clone(), handle.launch);
         true
     }
@@ -327,6 +332,7 @@ impl Host {
     /// What happened since the last call. Events of plugins stopped or
     /// replaced since are dropped.
     pub fn poll(&mut self) -> Vec<HostEvent> {
+        self.draining.retain(|thread| !thread.is_finished());
         let mut events = Vec::new();
         // A plugin that floods termide with messages must not hold the UI
         // thread: the rest wait for the next tick.
@@ -446,20 +452,28 @@ impl Host {
         }
     }
 
-    /// Stop every plugin and wait for them to end, up to the shutdown
-    /// timeout and a little more.
+    /// Stop every plugin and wait for them to end, those stopped earlier
+    /// included, up to the shutdown timeout and a little more: a supervisor
+    /// kills its process within the timeout.
     pub fn shutdown(&mut self) {
         let handles: Vec<Handle> = std::mem::take(&mut self.plugins).into_values().collect();
         for handle in &handles {
             handle.stop.store(true, Ordering::Relaxed);
         }
-        let deadline = Instant::now() + self.timing.shutdown + Duration::from_secs(1);
-        for handle in handles {
-            while !handle.thread.is_finished() && Instant::now() < deadline {
+        let threads = handles
+            .into_iter()
+            .map(|handle| handle.thread)
+            .chain(std::mem::take(&mut self.draining));
+        let deadline =
+            Instant::now() + self.timing.shutdown + self.timing.poll + Duration::from_secs(1);
+        for thread in threads {
+            while !thread.is_finished() && Instant::now() < deadline {
                 std::thread::sleep(Duration::from_millis(10));
             }
-            if handle.thread.is_finished() {
-                let _ = handle.thread.join();
+            if thread.is_finished() {
+                let _ = thread.join();
+            } else {
+                log::warn!("a plugin did not stop in time");
             }
         }
     }
@@ -499,6 +513,7 @@ impl Host {
     fn stop(&mut self, key: &PluginKey) {
         if let Some(handle) = self.plugins.remove(key) {
             handle.stop.store(true, Ordering::Relaxed);
+            self.draining.push(handle.thread);
         }
     }
 }
@@ -621,11 +636,14 @@ impl Supervisor {
                 return format!("exited: {status}");
             }
             if self.stopping() {
+                // One budget for the answer and the exit both: a plugin that
+                // hangs is killed within `shutdown`, which the host's wait at
+                // quit covers, rather than outliving termide.
+                let until = Instant::now() + self.timing.shutdown;
                 let _ = peer.request(protocol::SHUTDOWN, json!({}), self.timing.shutdown, &|| {
                     false
                 });
                 let _ = peer.notify(protocol::EXIT, json!({}));
-                let until = Instant::now() + self.timing.shutdown;
                 while process.child.try_wait().is_none() && Instant::now() < until {
                     std::thread::sleep(Duration::from_millis(20));
                 }
@@ -700,10 +718,13 @@ mod tests {
     struct Log {
         launches: AtomicUsize,
         received: Mutex<Vec<String>>,
+        /// Kills of a process still running.
+        kills: AtomicUsize,
     }
 
     struct FakeChild {
         exited: Arc<AtomicBool>,
+        log: Arc<Log>,
     }
 
     impl ChildProcess for FakeChild {
@@ -713,7 +734,9 @@ mod tests {
                 .then(|| "exit status: 0".to_string())
         }
         fn kill(&mut self) {
-            self.exited.store(true, Ordering::Relaxed);
+            if !self.exited.swap(true, Ordering::Relaxed) {
+                self.log.kills.fetch_add(1, Ordering::Relaxed);
+            }
         }
     }
 
@@ -773,6 +796,8 @@ mod tests {
                                 "params": { "id": "x", "text": "on" }
                             }),
                         ),
+                        // Hung: it hears neither shutdown nor exit.
+                        "shutdown" | "exit" if part == "hang" => {}
                         "shutdown" => reply(
                             &mut plugin_out,
                             json!({ "jsonrpc": "2.0", "id": message["id"], "result": null }),
@@ -786,7 +811,10 @@ mod tests {
             Ok(Process {
                 stdout: Box::new(termide_in),
                 stdin: Box::new(termide_out),
-                child: Box::new(FakeChild { exited }),
+                child: Box::new(FakeChild {
+                    exited,
+                    log: Arc::clone(&self.log),
+                }),
             })
         }
     }
@@ -938,6 +966,41 @@ mod tests {
         events.wait_for(|event| matches!(event, HostEvent::Ready { .. }).then_some(()));
         events.host.shutdown();
         assert!(lock(&log.received).contains(&"shutdown".to_string()));
+    }
+
+    #[test]
+    fn shutdown_kills_a_hung_plugin_one_stopped_before_included() {
+        let (mut events, log) = host();
+        let (a, b) = (Path::new("/projects/a"), Path::new("/projects/b"));
+        events.host.set_project(a, vec![launch("hang")]);
+        events.host.set_project(b, vec![launch("hang")]);
+        for _ in 0..2 {
+            events.wait_for(|event| matches!(event, HostEvent::Ready { .. }).then_some(()));
+        }
+        // /a's plugin is stopped first, with its project; termide then quits
+        // while its supervisor still waits on it.
+        events.host.close_project(a);
+        let started = Instant::now();
+        events.host.shutdown();
+        assert_eq!(
+            log.kills.load(Ordering::Relaxed),
+            2,
+            "neither outlives termide"
+        );
+        // One timeout for the answer and the exit together, not one each
+        // (which took twice the timeout); the margin is for a loaded machine.
+        assert!(started.elapsed() < timing().shutdown * 2 - Duration::from_millis(150));
+    }
+
+    #[test]
+    fn shutdown_waits_for_a_plugin_stopped_before() {
+        let (mut events, log) = host();
+        let a = Path::new("/projects/a");
+        events.host.set_project(a, vec![launch("hang")]);
+        events.wait_for(|event| matches!(event, HostEvent::Ready { .. }).then_some(()));
+        events.host.close_project(a);
+        events.host.shutdown();
+        assert_eq!(log.kills.load(Ordering::Relaxed), 1);
     }
 
     #[test]
