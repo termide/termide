@@ -1,6 +1,7 @@
 # Plugin design notes
 
-Working notes for the plugin system. Status: agreed design, not implemented.
+Working notes for the plugin system. Status: implemented, phases as in §5;
+`doc/en/plugins.md` describes what the code does.
 
 ## 1. What a plugin is
 
@@ -22,9 +23,10 @@ add, replace nor locate a plugin.
 - **The manifest is read only from there.** The project layer never reads
   `plugin.toml` or any file in that directory.
 - **The command is resolved against the plugin directory**, as an absolute path
-  or one relative to `plugins/<name>/`. It is never looked up through the
-  project's cwd or a project-supplied `PATH`, so a planted `./plugin-bin` in a
-  repository cannot stand in for it.
+  or one relative to `plugins/<name>/`; a bare name (`python3`) is looked up
+  only in the absolute entries of termide's `PATH`. It is never looked up
+  through the project's cwd or a relative `PATH` entry, so a planted
+  `./plugin-bin` in a repository cannot stand in for it.
 - **The process starts with cwd set to the plugin directory.** It learns the
   project root from `initialize`, not from its working directory.
 - **Config holds only switches and data.** The global `config.toml` sets each
@@ -72,7 +74,8 @@ enabled = false
   the project file, and an `enabled` in the global file is ignored with a
   warning. Both layers are in `LayeredConfig`, so the generic merge and the
   project file's diff-saving stay untouched.
-- **Unknown names** in either layer, naming no installed plugin, get a warning.
+- **Unknown names** in either layer, naming no installed plugin, are ignored.
+  (A warning for them was planned and is not implemented.)
 - **Use `opt-in` for plugins that act on project content**, such as one that
   runs project scripts on save. Then no repository turns them on unasked.
 
@@ -115,7 +118,6 @@ Contributions, declared in `initialize` (they can change later):
 
 - commands for the palette and the Commands menu, which termide invokes as
   `command/execute`;
-- status bar items;
 - agent tools, which the agent calls as `tool/call` over the same connection.
   The usual permission rules and hooks apply to them as to built-in tools.
 
