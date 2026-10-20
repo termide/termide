@@ -553,8 +553,11 @@ and opening it asks to carry the task on as any other session does. The
 carry-on card names each such delegate of the session it reopens
 (`& search · find the loader — unfinished; open its session to carry it on`);
 **Continue** carries on the panel's own run, and each delegate is carried on
-by opening its session — a resumed delegate asks nothing of the panel that
-delegated it, so termide does not start one behind the panel's back.
+by opening its session (`F6`) — a resumed delegate asks nothing of the panel
+that delegated it, so termide does not start one behind the panel's back. A
+task handed over in the background can outlive the panel's own run: when the
+reopened session has nothing of its own to carry on, there is no card, and the
+panel says the same thing on a line in its transcript instead.
 
 A session is held by one termide at a time. Another termide opening the same
 project — while the first still runs, maybe in a terminal window out of sight
