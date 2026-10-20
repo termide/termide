@@ -649,6 +649,7 @@ impl Translation for RuntimeTranslation {
         agent_strip_after_step,
         agent_strip_paused,
         agent_strip_keeps_running,
+        agent_notice_no_parent_panel,
         agent_strip_checking,
         agent_notice_nothing_to_pause,
         agent_notice_already_running,
@@ -1692,6 +1693,20 @@ impl Translation for RuntimeTranslation {
                 ("turn", &turn.to_string()),
                 ("max", &max.to_string()),
             ],
+        )
+    }
+
+    fn agent_restored_report_fmt(&self, agent: &str, text: &str) -> String {
+        self.format(
+            "agent_restored_report_fmt",
+            &[("agent", agent), ("text", text)],
+        )
+    }
+
+    fn agent_restored_failed_fmt(&self, agent: &str, text: &str) -> String {
+        self.format(
+            "agent_restored_failed_fmt",
+            &[("agent", agent), ("text", text)],
         )
     }
 

@@ -551,13 +551,16 @@ A delegated task's own log records its run the same way, so a task termide
 quit upon is left unfinished there too: its session shows `⏸ &` in the lists,
 and opening it asks to carry the task on as any other session does. The
 carry-on card names each such delegate of the session it reopens
-(`& search · find the loader — unfinished; open its session to carry it on`);
-**Continue** carries on the panel's own run, and each delegate is carried on
-by opening its session (`F6`) — a resumed delegate asks nothing of the panel
-that delegated it, so termide does not start one behind the panel's back. A
-task handed over in the background can outlive the panel's own run: when the
-reopened session has nothing of its own to carry on, there is no card, and the
-panel says the same thing on a line in its transcript instead.
+(`& search · find the loader — unfinished`). Each unfinished delegate's own
+session then opens as a panel of its own, up to three at once, and asks there
+whether to carry its run on: opened that way it has a prompter of its own, so
+it asks permissions as any other panel does. **Continue** in such a panel
+carries the task on and, when the run is over, sends its answer back to the
+panel that delegated it — by the delegating session's id, since panel numbers
+are born anew each start of termide — which takes it as a reply and works on
+it, as it takes a background task's answer. With no panel holding that session
+the delegate says its answer has nowhere to go, and it stays in its log. More
+than three unfinished delegates wait in the session lists (`F6`), marked `⏸ &`.
 
 A session is held by one termide at a time. Another termide opening the same
 project — while the first still runs, maybe in a terminal window out of sight

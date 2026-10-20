@@ -11350,11 +11350,11 @@ fn the_carry_on_card_names_the_delegates_left_behind() {
     assert!(!detail.contains("default"), "{detail}");
 }
 
-/// A session whose own run ended cleanly, but which left a delegated task
-/// unfinished in its log, says so on a line: nothing is carried on by itself,
-/// and the way to the delegate is its own session.
+/// A session whose own run ended cleanly, but which left delegated tasks
+/// unfinished in their logs, opens those sessions as panels of their own:
+/// each asks there whether to carry its run on, with a prompter of its own.
 #[test]
-fn a_finished_panel_still_tells_of_its_unfinished_delegates() {
+fn a_finished_panel_opens_the_sessions_of_its_unfinished_delegates() {
     let dir = tempfile::tempdir().unwrap();
     let parent_path = {
         let mut session = Session::create(dir.path(), dir.path()).unwrap();
@@ -11372,7 +11372,7 @@ fn a_finished_panel_still_tells_of_its_unfinished_delegates() {
         .unwrap()
         .id()
         .to_string();
-    {
+    let delegate_path = {
         let mut log = Session::create_delegate(
             dir.path(),
             dir.path(),
@@ -11388,9 +11388,10 @@ fn a_finished_panel_still_tells_of_its_unfinished_delegates() {
             .unwrap();
         log.append_agent_change("search").unwrap();
         log.append_run_start().unwrap();
-    }
+        log.path().to_path_buf()
+    };
 
-    let panel = AgentPanel::new(AgentPanelSetup {
+    let mut panel = AgentPanel::new(AgentPanelSetup {
         session_dir: Some(dir.path().to_path_buf()),
         session: Some(Session::open(&parent_path).unwrap()),
         ..setup(vec![reply("ok")])
@@ -11400,14 +11401,79 @@ fn a_finished_panel_still_tells_of_its_unfinished_delegates() {
         !matches!(panel.pending, Some(Pending::Unfinished { .. })),
         "the panel's own work ended"
     );
-    assert!(panel.transcript.items().iter().any(|item| matches!(
-        item,
-        Item::Notice { text, .. }
-            if text.contains("search")
-                && text.contains("find the loader")
-                // The delegate's own name, not the delegating agent's.
-                && !text.contains("default")
-    )));
+    // The delegate's session opens as a panel of its own on the next tick.
+    let events = panel.tick();
+    assert!(
+        events.iter().any(
+            |event| matches!(event, PanelEvent::OpenAgentSession(path) if path == &delegate_path)
+        ),
+        "{events:?}"
+    );
+    assert!(
+        panel.tick().is_empty(),
+        "each unfinished delegate opens once"
+    );
+}
+
+/// A delegate's session reopened and carried on answers the panel that
+/// delegated the task: its last words go back there at the run's end, which
+/// is what the `task` call was made for.
+#[test]
+fn a_carried_on_delegate_answers_the_panel_that_delegated_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = {
+        let mut log = Session::create_delegate(
+            dir.path(),
+            Path::new("/tmp"),
+            termide_agent_core::SessionParent {
+                session: Some("parent-1".into()),
+                // The parent names the agent that delegated, not the delegate.
+                agent: "default".into(),
+                call: "call-1".into(),
+            },
+        )
+        .unwrap();
+        log.append_message(&Message::User(UserMessage::text("find the loader")))
+            .unwrap();
+        log.append_agent_change("search").unwrap();
+        log.append_run_start().unwrap();
+        log.path().to_path_buf()
+    };
+    let mut panel = reopen(
+        &path,
+        dir.path(),
+        vec![reply("the loader is in src/loader.rs")],
+    );
+    assert_eq!(panel.restored, Some(Restored::Resume));
+    // Whose task this run answers, and that nothing has answered yet.
+    assert_eq!(
+        panel.carry_back.as_ref().map(|carry| (
+            carry.parent_session.as_str(),
+            carry.agent.as_str(),
+            carry.running
+        )),
+        Some(("parent-1", "search", false)),
+    );
+
+    panel.apply_form_action(ChoiceAction::Chosen(0));
+    let event = wait_for(&mut panel, |event| {
+        matches!(event, PanelEvent::DelegateAnswerToParent { .. })
+    });
+    match event {
+        PanelEvent::DelegateAnswerToParent {
+            parent_session,
+            agent,
+            text,
+            ..
+        } => {
+            assert_eq!(parent_session, "parent-1");
+            // The delegate's own name, not the delegating agent's.
+            assert_eq!(agent, "search");
+            assert!(text.contains("src/loader.rs"), "{text}");
+        }
+        other => panic!("not a carried-on answer: {other:?}"),
+    }
+    assert!(panel.carry_back.is_none(), "the answer is owed once");
 }
 
 /// The panel's pause holds the tasks it handed over, and its resume lets

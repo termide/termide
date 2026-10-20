@@ -296,6 +296,40 @@ impl App {
         }))
     }
 
+    /// A delegated task carried on in a panel of its own after termide closed
+    /// is over: its answer goes back to the panel that delegated it, which is
+    /// what the `task` call was made for. Panel numbers are born anew each
+    /// start of termide, so the delegating session names its panel here; with
+    /// no panel holding that session, the delegate's own panel says the
+    /// answer has nowhere to go, and it stays in its log.
+    pub(in crate::app) fn delegate_answer_to_parent(
+        &mut self,
+        parent_session: String,
+        from: PathBuf,
+        agent: String,
+        text: String,
+    ) {
+        let target = self
+            .agent_panels()
+            .find(|panel| panel.session_id().as_deref() == Some(parent_session.as_str()))
+            .map(|panel| panel.panel_id());
+        let missed = match target {
+            // Reported: the panel takes it as a reply and works on it.
+            Some(to) => self.report_to_panel(to, agent.clone(), text).err(),
+            None => Some(termide_i18n::t().agent_notice_no_parent_panel().to_string()),
+        };
+        if let Some(notice) = missed {
+            log::warn!("a carried-on delegate's answer was lost: {notice}");
+            if let Some(panel) = self
+                .agent_panels()
+                .find(|panel| panel.session_path() == Some(from.as_path()))
+            {
+                panel.notice(notice, termide_panel_agent::NoticeKind::Warn);
+            }
+        }
+        self.state.needs_redraw = true;
+    }
+
     fn send_to_peer(&mut self, message: Outgoing) -> Result<String, String> {
         if Some(message.to) == message.from {
             return Err(format!("panel {} is this one", message.to));

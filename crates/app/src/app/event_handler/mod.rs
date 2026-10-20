@@ -457,6 +457,15 @@ impl App {
                 self.ai_open_session(path)?;
             }
 
+            PanelEvent::DelegateAnswerToParent {
+                parent_session,
+                from,
+                agent,
+                text,
+            } => {
+                self.delegate_answer_to_parent(parent_session, from, agent, text);
+            }
+
             PanelEvent::FocusDelegate { panel, call } => {
                 let found = self.layout_manager.focus_panel_where(|candidate| {
                     candidate
