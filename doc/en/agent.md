@@ -331,11 +331,10 @@ in one column: `[↻]` connects it again (`r` on the heading), and on a server
 that signs in with OAuth `[⇥]` signs in or `[⇤]` signs out (`l`) to its left.
 A button does what it says and leaves the list open, brought up to date. A
 server the project brings that waits for approval (see below) has a checkbox
-of its own on its heading, unticked, and says what it would run
-(`[ ] MCP ext — from the project, runs npx ext-server`): ticked, the list
-approves it as it closes, the server connects, and its tools come on even if
-the session had switched them off. A server that connects while the list is open appears in it there and
-then — its heading loses its remark and its tools come under it — so you do
+of its own on its heading, unticked, and no buttons (`[ ] MCP: ext`): ticked,
+it is approved at once, the list staying open: the server connects and its
+tools come under the heading, on, even if the session had switched them off.
+A server that connects while the list is open appears in it there and then — its heading loses its remark and its tools come under it — so you do
 not have to close the list and open it again to see where a server stands;
 what you had ticked stays ticked.
 Unchecking an item before the first request keeps

@@ -177,12 +177,12 @@ pub enum PanelCommand<'a> {
     ChecklistDone {
         /// The `action` the panel raised the checklist with.
         action: String,
-        /// Keys of the items left checked, in list order, then those of the
-        /// headings' own checkboxes.
+        /// Keys of the items left checked, in list order.
         checked: Vec<String>,
     },
 
-    /// A heading button was pressed on a checklist the panel raised with
+    /// A heading button was pressed, or a heading's own checkbox ticked, on
+    /// a checklist the panel raised with
     /// [`crate::PanelEvent::ShowChecklist`], which stays open. Same delivery
     /// rule as [`PanelCommand::SelectionMade`].
     ChecklistButton {

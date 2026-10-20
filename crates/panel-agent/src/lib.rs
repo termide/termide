@@ -1901,7 +1901,6 @@ impl Panel for AgentPanel {
             PanelCommand::ChecklistDone { action, checked } if action == TOOLSET_ACTION => {
                 self.toolset_list_open = false;
                 self.apply_toolset(&checked);
-                self.trust_ticked(&checked);
                 self.pending_events.push(PanelEvent::NeedsRedraw);
                 CommandResult::Handled(true)
             }

@@ -1481,9 +1481,6 @@ impl Translation for RuntimeTranslation {
             &[("name", name), ("launch", launch)],
         )
     }
-    fn agent_toolset_needs_approval_fmt(&self, launch: &str) -> String {
-        self.format("agent_toolset_needs_approval_fmt", &[("launch", launch)])
-    }
 
     fn agent_notice_mcp_gone_fmt(&self, source: &str) -> String {
         self.format("agent_notice_mcp_gone_fmt", &[("source", source)])

@@ -1196,7 +1196,6 @@ agent_notice_trusted_fmt = "{name}: อนุมัติสำหรับโ�
 agent_notice_trust_unknown_fmt = "ไม่มีสิ่งใดชื่อ {name} รอการอนุมัติ"
 agent_notice_mcp_needs_approval_fmt = "mcp {source}: จากโปรเจกต์ รัน `{launch}` — /trust {source} เพื่อเริ่ม"
 agent_notice_hook_needs_approval_fmt = "ฮุก {name}: จากโปรเจกต์ รัน `{launch}` — /trust {name} เพื่ออนุญาต"
-agent_toolset_needs_approval_fmt = "จากโปรเจกต์ เรียกใช้ `{launch}` — ทำเครื่องหมายเพื่ออนุมัติและเริ่ม"
 palette_plugins_restart_fmt = "ปลั๊กอิน: เริ่ม {name} ใหม่"
 plugins_reloaded_fmt = "อ่านปลั๊กอินใหม่แล้ว: ติดตั้ง {count} ตัว"
 command_confirm_project_fmt = "{name} จาก commands.toml ของโปรเจกต์ รัน:\n{command}\n\nรันตอนนี้และต่อไปตราบที่ไม่เปลี่ยนไหม?"

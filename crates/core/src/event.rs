@@ -428,16 +428,18 @@ pub struct ChecklistGroup {
     /// A dim remark after the heading (a state, a reason), or empty.
     pub note: String,
     pub buttons: Vec<ChecklistButton>,
-    /// The heading's own checkbox, for a group no item names: toggled as an
-    /// item is, and its key returned with the items' when left checked. A
-    /// group with items has their mark instead, and this is not shown.
+    /// The heading's own checkbox, for a group no item names: ticked once,
+    /// it acts at once as a button does — its key handed to the panel in
+    /// [`crate::PanelCommand::ChecklistButton`], the list staying open — and
+    /// cannot be unticked. A group with items has their mark instead, and
+    /// this is not shown.
     pub switch: Option<ChecklistSwitch>,
 }
 
 /// The checkbox of a heading alone (see [`ChecklistGroup::switch`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChecklistSwitch {
-    /// What the panel knows it by; returned when it is left checked.
+    /// What the panel knows it by, as a button's `id`.
     pub key: String,
     pub checked: bool,
 }
@@ -471,8 +473,7 @@ pub struct ChecklistRefresh {
     pub groups: Vec<ChecklistGroup>,
 }
 
-/// What a checklist came back with: the keys left checked, the items' and
-/// the headings' own.
+/// What a checklist came back with: the keys of the items left checked.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ChecklistOutcome {
     pub checked: Vec<String>,

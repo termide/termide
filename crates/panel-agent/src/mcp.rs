@@ -112,19 +112,6 @@ impl AgentPanel {
         }
     }
 
-    /// Approve the held servers ticked in the toolset list. Ticking one says
-    /// "on": its tools come on when they arrive, though the session had
-    /// switched them off before.
-    pub(crate) fn trust_ticked(&mut self, checked: &[String]) {
-        for key in checked {
-            if let Some(server) = key.strip_prefix(TRUST_SWITCH) {
-                if self.trust(server) {
-                    self.mcp_enable.insert(server.to_string());
-                }
-            }
-        }
-    }
-
     /// The project's hooks held back, said once when the panel opens.
     pub(crate) fn notice_held_hooks(&mut self) {
         let t = termide_i18n::t();
@@ -228,7 +215,8 @@ impl AgentPanel {
     /// button to connect it again, and one to sign in or out where that
     /// applies. A server with no tools is listed by its heading alone; one
     /// the project brings that waits for approval has a checkbox there,
-    /// unticked, and says what it would run. The buttons are right-aligned,
+    /// unticked, and nothing else: until it is approved there is nothing to
+    /// reconnect or sign in to. The buttons are right-aligned,
     /// so the reload comes last: every server has it, and only some have the
     /// sign-in, so that one keeps its column.
     pub(crate) fn toolset_groups(&self) -> Vec<ChecklistGroup> {
@@ -238,15 +226,21 @@ impl AgentPanel {
             .into_iter()
             .map(|server| {
                 let held = server.status == McpStatus::NeedsApproval;
+                if held {
+                    return ChecklistGroup {
+                        name: t.agent_toolset_mcp_fmt(&server.name),
+                        note: String::new(),
+                        buttons: Vec::new(),
+                        switch: Some(ChecklistSwitch {
+                            key: format!("{TRUST_SWITCH}{}", server.name),
+                            checked: false,
+                        }),
+                    };
+                }
                 let note = match &server.status {
                     McpStatus::Ready { .. } => String::new(),
-                    McpStatus::NeedsApproval => t.agent_toolset_needs_approval_fmt(&server.launch),
                     other => status_text(other).0,
                 };
-                let switch = held.then(|| ChecklistSwitch {
-                    key: format!("{TRUST_SWITCH}{}", server.name),
-                    checked: false,
-                });
                 let mut buttons = Vec::new();
                 let sign = match server.sign_in {
                     McpSignIn::None => None,
@@ -269,15 +263,23 @@ impl AgentPanel {
                     name: t.agent_toolset_mcp_fmt(&server.name),
                     note,
                     buttons,
-                    switch,
+                    switch: None,
                 }
             })
             .collect()
     }
 
-    /// A heading button of the toolset list was pressed; the list stays
-    /// open.
+    /// A heading button of the toolset list was pressed, or a held server's
+    /// checkbox ticked; the list stays open. Ticking a server approves it
+    /// and says "on": its tools come on when they arrive, though the
+    /// session had switched them off before.
     pub(crate) fn press_toolset_button(&mut self, id: &str) {
+        if let Some(server) = id.strip_prefix(TRUST_SWITCH) {
+            if self.trust(server) {
+                self.mcp_enable.insert(server.to_string());
+            }
+            return;
+        }
         if let Some(server) = id.strip_prefix(RELOAD_BUTTON) {
             self.mcp_reload(Some(server));
         } else if let Some(server) = id.strip_prefix(LOGIN_BUTTON) {

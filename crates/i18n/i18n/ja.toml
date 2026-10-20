@@ -1196,7 +1196,6 @@ agent_notice_trusted_fmt = "{name}: このプロジェクトで承認しまし�
 agent_notice_trust_unknown_fmt = "{name} という承認待ちのものはありません"
 agent_notice_mcp_needs_approval_fmt = "mcp {source}: プロジェクト由来、`{launch}` を実行 — /trust {source} で起動"
 agent_notice_hook_needs_approval_fmt = "フック {name}: プロジェクト由来、`{launch}` を実行 — /trust {name} で許可"
-agent_toolset_needs_approval_fmt = "プロジェクト由来、`{launch}` を実行 — チェックで承認して起動"
 palette_plugins_restart_fmt = "プラグイン: {name} を再起動"
 plugins_reloaded_fmt = "プラグインを再読み込みしました: {count} 件"
 command_confirm_project_fmt = "プロジェクトの commands.toml の {name} は次を実行します:\n{command}\n\n変更されない限り、今後も実行しますか？"

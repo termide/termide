@@ -11449,8 +11449,7 @@ fn a_held_server_ticked_in_the_toolset_list_is_approved_and_comes_on() {
     let Some(PanelEvent::ShowChecklist { groups, .. }) = events.first() else {
         panic!("the toolset list opens: {events:?}");
     };
-    // The held server's heading: a checkbox, unticked, what it would run,
-    // and no approve button.
+    // The held server's heading: a checkbox, unticked, and nothing else.
     let ext = groups.iter().find(|g| g.name == "MCP: ext").unwrap();
     assert_eq!(
         ext.switch,
@@ -11459,12 +11458,8 @@ fn a_held_server_ticked_in_the_toolset_list_is_approved_and_comes_on() {
             checked: false,
         })
     );
-    assert!(ext.note.contains("npx ext-server"), "{}", ext.note);
-    assert!(
-        ext.buttons.iter().all(|b| b.key != 't'),
-        "{:?}",
-        ext.buttons
-    );
+    assert!(ext.note.is_empty(), "{}", ext.note);
+    assert!(ext.buttons.is_empty(), "{:?}", ext.buttons);
 
     // Left unticked, nothing is approved.
     panel.handle_command(PanelCommand::ChecklistDone {
@@ -11473,14 +11468,21 @@ fn a_held_server_ticked_in_the_toolset_list_is_approved_and_comes_on() {
     });
     assert!(asked.lock().unwrap().is_empty());
 
-    // Ticked: approved, and its tools come on as they arrive; the rest of
-    // what the session switched off stays off.
+    // Ticked: approved at once, the list staying open and brought up to
+    // date; its tools come on as they arrive and are drawn into the open
+    // list; the rest of what the session switched off stays off.
     panel.handle_status_action(crate::toolset::TOOLSET_ACTION);
-    panel.handle_command(PanelCommand::ChecklistDone {
+    panel.pending_events.clear();
+    panel.handle_command(PanelCommand::ChecklistButton {
         action: crate::toolset::TOOLSET_ACTION.into(),
-        checked: vec!["mcp-trust:ext".into()],
+        id: "mcp-trust:ext".into(),
     });
     assert_eq!(*asked.lock().unwrap(), ["trust ext"]);
+    assert!(panel.toolset_list_open);
+    assert!(panel
+        .pending_events
+        .iter()
+        .any(|e| matches!(e, PanelEvent::RefreshChecklist(_))));
     tx.send(LateTools::Ready {
         source: "ext".into(),
         tools: vec![
@@ -11489,7 +11491,21 @@ fn a_held_server_ticked_in_the_toolset_list_is_approved_and_comes_on() {
         ],
     })
     .unwrap();
-    panel.tick();
+    let events = panel.tick();
+    let Some(PanelEvent::RefreshChecklist(refresh)) = events
+        .iter()
+        .rev()
+        .find(|e| matches!(e, PanelEvent::RefreshChecklist(_)))
+    else {
+        panic!("the open list is brought up to date: {events:?}");
+    };
+    let ext: Vec<(&str, bool)> = refresh
+        .items
+        .iter()
+        .filter(|i| i.key.starts_with("ext__"))
+        .map(|i| (i.key.as_str(), i.checked))
+        .collect();
+    assert_eq!(ext, [("ext__a", true), ("ext__b", true)]);
     assert_eq!(
         panel.toolset_off.iter().collect::<Vec<_>>(),
         ["read"],

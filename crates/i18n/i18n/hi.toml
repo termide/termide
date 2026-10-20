@@ -1196,7 +1196,6 @@ agent_notice_trusted_fmt = "{name}: इस प्रोजेक्ट के �
 agent_notice_trust_unknown_fmt = "{name} नाम का कुछ भी स्वीकृति की प्रतीक्षा में नहीं है"
 agent_notice_mcp_needs_approval_fmt = "mcp {source}: प्रोजेक्ट से, `{launch}` चलाता है — चलाने के लिए /trust {source}"
 agent_notice_hook_needs_approval_fmt = "हुक {name}: प्रोजेक्ट से, `{launch}` चलाता है — अनुमति के लिए /trust {name}"
-agent_toolset_needs_approval_fmt = "प्रोजेक्ट से, `{launch}` चलाता है — स्वीकृत कर शुरू करने के लिए चुनें"
 palette_plugins_restart_fmt = "प्लगइन: {name} पुनः आरंभ करें"
 plugins_reloaded_fmt = "प्लगइन फिर से पढ़े गए: {count} इंस्टॉल"
 command_confirm_project_fmt = "प्रोजेक्ट की commands.toml का {name} चलाता है:\n{command}\n\nजब तक यह न बदले, अभी और आगे चलाएँ?"
