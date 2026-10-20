@@ -490,7 +490,12 @@ last block, with the time it ended and how: `✻ 3m41s · 21:03:41 ✗`.
 
 `/pause` takes effect as soon as the tool call or model reply in progress
 finishes — not at the end of the whole step, so a step that fetches several
-pages stops after the current one. The calls it leaves unrun wait for
+pages stops after the current one. The tasks the panel handed to delegates
+wait with it: each holds before its next request or call, and `/continue`
+lets every one of them go on where it stood. The pause's row in the state
+strip counts them (`‖ Paused · 2 waiting`); a delegate run by an external
+agent runs its own program, which no pause can hold, so it is counted apart
+(`· 1 keeps running`) and only stops. The calls it leaves unrun wait for
 `/continue`, which runs them first; a new request instead closes them as not
 run. A run stopped with `/pause` gets a pause line instead, `‖ 1m12s`: it counts
 how long the pause has lasted, its `‖` marked while the pause is on, and

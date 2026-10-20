@@ -157,6 +157,13 @@ impl Watch {
             looked: None,
         }
     }
+
+    /// Whether the task is held at the pause of the panel that delegated it:
+    /// it writes nothing until that run is resumed.
+    #[must_use]
+    pub fn is_paused(&self) -> bool {
+        self.control.is_paused()
+    }
 }
 
 impl Drop for Watch {

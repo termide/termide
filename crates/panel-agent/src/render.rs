@@ -737,6 +737,27 @@ impl AgentPanel {
         for dx in 0..area.width {
             buf[(area.x + dx, area.y)].set_symbol("─").set_style(rule);
         }
+        // Held at its panel's pause: the view says so where it stands still,
+        // since nothing else on screen tells why the log stopped growing.
+        if self.watch.as_ref().is_some_and(|watch| watch.is_paused()) {
+            let held = format!(
+                " {} {} ",
+                transcript::PAUSED_GLYPH,
+                termide_i18n::t().agent_strip_paused()
+            );
+            let line = Line::from(Span::styled(
+                held,
+                Style::default()
+                    .fg(colors.info)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            buf.set_line(
+                area.x + area.width.saturating_sub(1) / 2,
+                area.y,
+                &line,
+                area.width.saturating_sub(1),
+            );
+        }
         if area.height < 2 {
             return;
         }

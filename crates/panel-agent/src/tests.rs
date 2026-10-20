@@ -11339,6 +11339,46 @@ fn pausing_the_panel_holds_its_delegates_and_resumes_them() {
     );
 }
 
+/// Held at its panel's pause, a view says so on the rule above its buttons:
+/// the log stops growing, and nothing else on screen tells why.
+#[test]
+fn a_held_delegate_says_it_stands_still() {
+    let dir = tempfile::tempdir().unwrap();
+    let parent = termide_agent_core::SessionParent {
+        session: Some("p1".into()),
+        agent: "lead".into(),
+        call: "call-hold".into(),
+    };
+    let mut log = Session::create_delegate(dir.path(), dir.path(), parent).unwrap();
+    log.append_message(&Message::User(UserMessage::text("find the loader")))
+        .unwrap();
+    let mut panel = panel(vec![]);
+    let control = DelegateControl::new();
+    panel.set_in_overlay(true);
+    panel.start_watch(Watch::new(
+        "lead",
+        "find the loader",
+        log.path().to_path_buf(),
+        control.clone(),
+        4,
+        "call-hold",
+    ));
+    let rows = render_text(&mut panel, 80, 30);
+    let rule = rows
+        .iter()
+        .position(|line| line.contains("[ In a panel F9 ]"))
+        .expect("the buttons are under the view")
+        - 1;
+    assert!(!rows[rule].contains("paused"));
+
+    control.pause();
+    let rows = render_text(&mut panel, 80, 30);
+    assert!(rows[rule].contains("paused"), "{:?}", rows[rule]);
+
+    control.resume();
+    assert!(!render_text(&mut panel, 80, 30)[rule].contains("paused"));
+}
+
 /// While a view follows a task, the panel that delegated it sets the task's
 /// cards aside for it; the view shows them, and gives back what it holds
 /// when it goes.
