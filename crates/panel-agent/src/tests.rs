@@ -7410,6 +7410,21 @@ fn an_external_agent_on_termides_tools_lists_gets_and_refuses_them() {
 }
 
 #[test]
+fn the_tools_chip_counts_only_what_the_list_offers() {
+    // A resumed session switched off the tools of an MCP server that has not
+    // connected (yet): they are not in the list, so not in the count either.
+    let mut panel = AgentPanel::new(setup(vec![]));
+    panel.offered_tools = vec!["read".into(), "bash".into()];
+    panel.toolset_off = ["gone__a", "gone__b", "gone__c"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    assert_eq!(chip(&panel, TOOLSET_ACTION), "2/2");
+    panel.toolset_off.insert("bash".into());
+    assert_eq!(chip(&panel, TOOLSET_ACTION), "1/2");
+}
+
+#[test]
 fn an_external_agent_on_its_own_tools_gets_and_lists_the_mcp_servers_alone() {
     let served = Arc::new(Mutex::new(Vec::new()));
     let (tx, rx) = mpsc::channel();

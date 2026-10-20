@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **An external agent that fails to start says why.** When its program went away at once — `npx` refusing to run an adapter whose cached copy had lost its executable bit, a missing login, a crash — the panel, a delegated task or the auto mode's review showed only `initialize: the agent closed the connection`, and the reason went to the log at `debug`. The failure now ends with the last line the program printed, as a debug adapter's does: `initialize: the agent closed the connection: sh: …/claude-agent-acp: Permission denied`.
+- **The `Tools` chip agrees with the list.** A session that had switched off the tools of an MCP server took them all off the count, offered or not: resumed while that server had not connected — a project's server waiting for `/trust`, one gone from the configuration — it showed `0/25` with every box in the list checked. The chip and the banner now count the list's items and the checked ones among them.
 - **`install.sh` on systems without glibc.** The installer always picked the gnu build on Linux, which needs the system's glibc loader; where there is none — a 32-bit Raspberry Pi OS booted with a 64-bit kernel (`arm_64bit=1`), Alpine, NixOS — the installed binary failed with "No such file or directory". It now checks for the loader and installs the fully static musl build when it is missing.
 
 ### Security

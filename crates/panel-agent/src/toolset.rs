@@ -389,23 +389,15 @@ impl AgentPanel {
         self.notice(text, kind);
     }
 
-    /// `on/all` of what the session offers, for the banner and the chip.
+    /// `on/all` of what the session offers, for the banner and the chip:
+    /// the checklist's items and how many of them are checked. What the
+    /// session switched off but is not offered now — the tools of an MCP
+    /// server that has not connected, or no longer exists — counts neither
+    /// way.
     pub(crate) fn toolset_counts(&self) -> (usize, usize) {
-        let is_mcp = |key: &str| self.mcp_arrived.iter().any(|(_, tool)| tool.name() == key);
-        if !self.toolset_lists_own() {
-            let all = self.mcp_arrived.len();
-            let off = self.toolset_off.iter().filter(|key| is_mcp(key)).count();
-            return (all.saturating_sub(off), all);
-        }
-        let all = self
-            .offered_tools
-            .iter()
-            .filter(|name| name.as_str() != "skill")
-            .count()
-            + self.offered_skills.len()
-            + self.mcp_arrived.len();
-        let off = self.toolset_off.len();
-        (all.saturating_sub(off), all)
+        let items = self.toolset_items();
+        let on = items.iter().filter(|item| item.checked).count();
+        (on, items.len())
     }
 
     /// Take in tools that finished connecting and hand them to the worker as
