@@ -5,6 +5,11 @@ All notable changes to TermIDE will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **A delegate's view had its frame in the terminal's colors.** The view of a delegate shown over the layout cleared its area to the terminal's own colors before drawing, and only its inside was painted again, so under a theme whose background differs from the terminal's the frame and the title looked inverted. The area is now painted in the theme's background, as a modal's is.
+
 ## [0.45.0] - 2026-10-20
 
 [0.45.0]: https://github.com/termide/termide/releases/tag/0.45.0

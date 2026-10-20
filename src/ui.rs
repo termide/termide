@@ -435,7 +435,13 @@ fn render_overlay(
         return;
     };
     let area = termide_layout::overlay_area(main);
+    // Cleared, then painted in the theme's background: a cleared cell alone
+    // takes the terminal's own colors, which the frame and its title keep.
     frame.render_widget(ratatui::widgets::Clear, area);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(state.theme.bg)),
+        area,
+    );
     let params = ExpandedPanelParams {
         tab_size: state.config.editor.tab_size,
         word_wrap: state.config.editor.word_wrap,
