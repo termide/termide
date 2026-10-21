@@ -475,9 +475,9 @@ impl App {
                     return Ok(());
                 };
                 let mut failed: Vec<String> = Vec::new();
-                for (agent, session, call) in &items {
-                    if !catalog.restart_delegate(panel, &caller, agent, "", call, session) {
-                        failed.push(agent.clone());
+                for item in &items {
+                    if !catalog.restart_delegate(panel, &caller, item) {
+                        failed.push(item.agent.clone());
                     }
                 }
                 if !failed.is_empty() {

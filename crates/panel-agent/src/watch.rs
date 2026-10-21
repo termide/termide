@@ -71,8 +71,20 @@ impl DelegateControl {
         &self.stop
     }
 
-    /// Stop the task.
+    /// Stop the task. A task held at a pause is let go of first: stopped,
+    /// it is over, and its log must not read as paused, waiting to be
+    /// carried on.
     pub fn stop(&self) {
+        // Cancelled first, so a gate it waits at gives up rather than lets
+        // it take one more step.
+        self.stop.cancel();
+        self.pause.resume();
+    }
+
+    /// Stop the task with the panel that delegated it, which is closing: a
+    /// pause holding it stays in its log, as the panel's own pause stays in
+    /// the panel's, so both are offered to carry on together.
+    pub fn close(&self) {
         self.stop.cancel();
     }
 
@@ -80,6 +92,7 @@ impl DelegateControl {
     pub fn take_over(&self) {
         self.taken.store(true, Ordering::Release);
         self.stop.cancel();
+        self.pause.resume();
     }
 
     /// Why the task ended, when the user ended it: what the delegating

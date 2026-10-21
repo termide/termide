@@ -982,9 +982,7 @@ impl AgentPanel {
         match self.runtime.resume() {
             Ok(()) => {
                 // Carrying a delegated task on: its answer is owed back.
-                if let Some(carry) = &mut self.carry_back {
-                    carry.running = true;
-                }
+                self.owe_carry_back();
                 // The delegates held at the pause go on with the run.
                 crate::live::resume_all(self.panel_id);
                 self.busy = true;

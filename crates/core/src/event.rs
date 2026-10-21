@@ -829,7 +829,7 @@ pub enum PanelEvent {
     /// answers back there as any background task does.
     RestartDelegates {
         panel: u64,
-        items: Vec<(String, PathBuf, String)>,
+        items: Vec<DelegateRestart>,
     },
     /// A delegated task carried on in a panel of its own after termide closed
     /// is over: its answer goes back to the panel holding the session that
@@ -880,6 +880,19 @@ pub enum PanelEvent {
 }
 
 /// A single file location from LSP find-references.
+/// An unfinished delegated task to carry on, as its own log left it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DelegateRestart {
+    /// The delegate's name.
+    pub agent: String,
+    /// Its session log, which holds what it did before.
+    pub session: PathBuf,
+    /// The id of the `task` call that handed it over.
+    pub call: String,
+    /// The task as it was handed over, asked again and named in the answer.
+    pub task: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct ReferenceLocation {
     pub path: PathBuf,

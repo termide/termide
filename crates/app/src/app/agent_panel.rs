@@ -495,14 +495,11 @@ impl AgentCatalog for FsCatalog {
         &self,
         parent: u64,
         caller: &str,
-        agent: &str,
-        task: &str,
-        call: &str,
-        session: &std::path::Path,
+        delegate: &termide_core::DelegateRestart,
     ) -> bool {
-        self.subagents.as_ref().is_some_and(|runner| {
-            runner.restart_background(parent, caller, agent, task, call, session)
-        })
+        self.subagents
+            .as_ref()
+            .is_some_and(|runner| runner.restart_background(parent, caller, delegate))
     }
 
     fn set_mode(&self, mode: Mode) {
@@ -1698,11 +1695,22 @@ impl Subagents {
         self: &Arc<Self>,
         parent: u64,
         caller: &str,
-        agent: &str,
-        task: &str,
-        call: &str,
-        session: &std::path::Path,
+        delegate: &termide_core::DelegateRestart,
     ) -> bool {
+        let termide_core::DelegateRestart {
+            agent,
+            session,
+            call,
+            task,
+        } = delegate;
+        // A panel took the session up meanwhile: it carries the task on there.
+        if termide_agent_core::Session::is_open(session) {
+            log::warn!(
+                "the delegate's session {} is open in a panel: not carried on twice",
+                session.display()
+            );
+            return false;
+        }
         let Ok(log) = termide_agent_core::Session::open(session) else {
             log::warn!(
                 "cannot take up the delegate's session {}: no run",
@@ -1717,12 +1725,13 @@ impl Subagents {
         );
         let this = Arc::clone(self);
         let cwd = log.header().cwd.clone();
-        let (caller, agent, task, call, session) = (
+        let (caller, agent, carried, call, session, original) = (
             caller.to_string(),
             agent.to_string(),
             carried,
             call.to_string(),
-            session.to_path_buf(),
+            session.clone(),
+            task.clone(),
         );
         let thread_agent = agent.clone();
         std::thread::Builder::new()
@@ -1731,7 +1740,7 @@ impl Subagents {
                 // Nobody waits on the call, as for any task handed over in the
                 // background: its cards stay up until the user answers them.
                 let (prompter, rx) = permission_channel(CancelToken::new());
-                live::carry_cards(parent, rx);
+                live::carry_cards(this.project_root.clone(), parent, rx);
                 let ctx = ToolContext {
                     prompter: Some(prompter),
                     panel: Some(parent),
@@ -1740,14 +1749,16 @@ impl Subagents {
                 };
                 let task = SubagentTask {
                     agent: &thread_agent,
-                    prompt: &task,
+                    prompt: &carried,
                     call: &call,
                     background: true,
                 };
                 let outcome = this
                     .delegate(&caller, &task, &ctx, &CancelToken::new(), &mut |_| {})
                     .unwrap_or_else(|error| Err(error).into());
-                let text = background_report(task.prompt, &thread_agent, &outcome);
+                // The report names the task as it was handed over, not the
+                // words that carried it on.
+                let text = background_report(&original, &thread_agent, &outcome);
                 peers::report(&this.project_root, parent, &thread_agent, text);
             })
             .map_err(|error| log::warn!("cannot carry the task on: {error}"))
@@ -1975,11 +1986,14 @@ impl Subagents {
         };
         // A task carried on runs out of the log it already made: what it did
         // stands there, and the run goes on from where it stopped, in the
-        // directory it worked in then.
-        let resumed = ctx
-            .resume
-            .as_ref()
-            .and_then(|path| Session::open(path).ok());
+        // directory it worked in then. It holds the log as a panel does: a
+        // log open in a panel, or in another termide, is not run twice.
+        let resumed = match ctx.resume.as_ref() {
+            Some(path) => Some(Session::open_exclusive(path).map_err(|error| {
+                format!("cannot carry the task on from {}: {error}", path.display())
+            })?),
+            None => None,
+        };
         let cwd = resumed
             .as_ref()
             .map(|session| session.header().cwd.clone())
@@ -2082,9 +2096,10 @@ impl Subagents {
         if report.answer.is_none() && report.error.is_none() {
             report.error = run_error(agent.messages());
         }
-        // Held at its panel's pause when termide stopped it: the reopened
-        // session asks to carry the task on.
-        log.note_run_end(live.control().is_paused());
+        // Held at its panel's pause when termide or the panel stopped it: the
+        // reopened session asks to carry the task on. One that answered is
+        // over, whatever pause came after its last step.
+        log.note_run_end(live.control().is_paused() && report.answer.is_none());
         Ok(with_reviews(log.into_outcome(
             match live.control().ended_by_user() {
                 Some(why) if !cancel.is_cancelled() => report.ended_by_user(why),

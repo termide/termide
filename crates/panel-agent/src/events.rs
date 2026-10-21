@@ -86,7 +86,11 @@ impl AgentPanel {
                     finished: None,
                 });
                 self.busy = true;
-                self.paused = false;
+                // A new request over a pause takes the pause's place, and the
+                // delegates it held go on with the new run.
+                if std::mem::take(&mut self.paused) {
+                    crate::live::resume_all(self.panel_id);
+                }
                 // A resumed run keeps its start, so its clock counts from the
                 // request; anything else (a new prompt over a pause) starts
                 // afresh.
@@ -110,27 +114,6 @@ impl AgentPanel {
                 self.pause_requested = false;
             }
             AgentEvent::AgentEnd => {
-                // A delegated task this session carried on is over: its answer
-                // goes back to the panel that delegated it, which is what the
-                // `task` call was made for.
-                if let Some(carry) = self.carry_back.take().filter(|carry| carry.running) {
-                    if let Some(from) = self.session_path() {
-                        let answer = self.last_answer();
-                        let t = termide_i18n::t();
-                        let text = if self.run_failed {
-                            t.agent_restored_failed_fmt(&carry.agent, &answer)
-                        } else {
-                            t.agent_restored_report_fmt(&carry.agent, &answer)
-                        };
-                        self.pending_events
-                            .push(PanelEvent::DelegateAnswerToParent {
-                                parent_session: carry.parent_session,
-                                from: from.to_path_buf(),
-                                agent: carry.agent,
-                                text,
-                            });
-                    }
-                }
                 self.pending_events.push(PanelEvent::AgentRun {
                     panel: self.panel_id,
                     finished: Some(!self.run_failed && self.last_failure.is_none()),
@@ -161,6 +144,12 @@ impl AgentPanel {
                         !self.run_failed,
                         false,
                     );
+                }
+                // A run that ended on its own before reaching the pause asked
+                // for — its turn finished with nothing left to do — leaves no
+                // pause to continue from: the delegates held for it go on.
+                if !self.run_paused {
+                    crate::live::resume_all(self.panel_id);
                 }
                 self.pause_requested = false;
                 if self.external && self.stop_requested.is_some() && !self.run_heard {
@@ -198,6 +187,14 @@ impl AgentPanel {
                         false
                     }
                 };
+                // A delegated task this session carried on is over: its answer
+                // goes back to the panel that delegated it, which is what the
+                // `task` call was made for. A run that stops at a pause, or on
+                // a failure that is retried, waited on or asked about, is not
+                // over: the answer is owed at its real end.
+                if !self.run_paused && !held {
+                    self.report_carried_back();
+                }
                 self.offer_plan();
                 // A loop schedules its next iteration once the run ends, unless
                 // it was paused (then it waits for `/continue`), a card is up

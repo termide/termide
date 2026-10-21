@@ -391,6 +391,8 @@ impl AgentPanel {
             Ok(()) => {
                 // The request is on its way: no choice waits for the user.
                 self.sync_retry();
+                // Carrying a delegated task on: the try's end owes the answer.
+                self.owe_carry_back();
                 self.retry_attempts = self.retry_attempts.saturating_add(1);
                 self.busy = true;
                 self.goal_errored = false;

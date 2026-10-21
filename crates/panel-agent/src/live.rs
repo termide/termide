@@ -229,11 +229,12 @@ pub(crate) fn stop(panel: u64, call: &str) {
     }
 }
 
-/// Stop every task panel `panel` handed over: it is closing.
+/// Stop every task panel `panel` handed over: it is closing. A pause that
+/// holds them stays in their logs, with the panel's own.
 pub fn stop_all(panel: u64) {
     for ((owner, _), live) in lock().iter() {
         if *owner == panel {
-            live.control.stop();
+            live.control.close();
         }
     }
 }
@@ -248,12 +249,14 @@ pub struct PauseState {
     pub running: usize,
 }
 
-/// Hold every task panel `panel` handed over at its next step, as the panel
-/// paused its own run.
+/// Hold every task panel `panel` handed over in the background at its next
+/// step, as the panel paused its own run. A task the run waits on is the
+/// call in progress, which the panel's pause waits for: held, it would never
+/// return, and the pause never come.
 pub fn pause_all(panel: u64) -> PauseState {
     let mut state = PauseState::default();
     for ((owner, _), live) in lock().iter() {
-        if *owner != panel {
+        if *owner != panel || !live.background {
             continue;
         }
         if live.pausable {
@@ -280,7 +283,7 @@ pub fn resume_all(panel: u64) {
 pub fn state_of(panel: u64) -> PauseState {
     let mut state = PauseState::default();
     for ((owner, _), live) in lock().iter() {
-        if *owner != panel {
+        if *owner != panel || !live.background {
             continue;
         }
         if live.control.is_paused() {
@@ -365,6 +368,8 @@ mod tests {
         external.pausable = false;
         let running = register(external);
         let other = register(task(Some(7005), "c", true));
+        // The call the run waits on: the pause comes once it returns.
+        let sync = register(task(Some(7004), "d", false));
 
         assert_eq!(
             pause_all(7004),
@@ -374,11 +379,24 @@ mod tests {
             },
             "the external task keeps going"
         );
+        // Stopped from its row, a held task is over, not paused; with its
+        // panel closing, it keeps the pause the panel's log keeps too.
+        let stopped = register(task(Some(7006), "e", true));
+        let closed = register(task(Some(7007), "f", true));
+        pause_all(7006);
+        pause_all(7007);
+        stop(7006, "e");
+        stop_all(7007);
+        assert!(stopped.control().stop_token().is_cancelled());
+        assert!(!stopped.control().is_paused());
+        assert!(closed.control().stop_token().is_cancelled());
+        assert!(closed.control().is_paused());
         assert!(held.control().is_paused());
         assert!(!running.control().is_paused());
         assert!(is_paused(7004, "a"));
         assert!(!is_paused(7004, "b"));
         assert!(!other.control().is_paused(), "another panel is its own");
+        assert!(!sync.control().is_paused(), "the call in progress runs on");
 
         resume_all(7004);
         assert!(!held.control().is_paused());

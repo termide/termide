@@ -396,19 +396,16 @@ pub trait AgentCatalog: Send + Sync {
         }
         Some(profile)
     }
-    /// Carry an unfinished delegated task on: run `agent` again out of its
-    /// own session log, out of sight, under the `task` call `call` that
-    /// handed it over, answering the panel `parent` when it is done. Its
-    /// permission requests come to that panel as cards, since it has none of
-    /// its own. False when this catalog runs no subagents or the log is gone.
+    /// Carry an unfinished delegated task on: run its delegate again out of
+    /// its own session log, out of sight, under the `task` call that handed
+    /// it over, answering the panel `parent` when it is done. Its permission
+    /// requests come to that panel as cards, since it has none of its own.
+    /// False when this catalog runs no subagents or the log is gone.
     fn restart_delegate(
         &self,
         _parent: u64,
         _caller: &str,
-        _agent: &str,
-        _task: &str,
-        _call: &str,
-        _session: &std::path::Path,
+        _delegate: &termide_core::DelegateRestart,
     ) -> bool {
         false
     }

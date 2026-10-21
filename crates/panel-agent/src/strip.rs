@@ -299,9 +299,10 @@ impl AgentPanel {
     }
 
     /// The rows of the delegated tasks this session left unfinished: each
-    /// `⏸ & task · agent · left unfinished`, opening that session when
-    /// clicked. They hold there until the panel's carry-on card is answered;
-    /// a task carried on leaves its row, and the strip's live rows take it.
+    /// `& Delegating to · agent · left unfinished  task`, opening that
+    /// session when clicked. They hold there until the panel's carry-on card
+    /// is answered; a task carried on leaves its row, and the strip's live
+    /// rows take it.
     fn restored_rows(&self) -> Vec<StripRow> {
         let t = termide_i18n::t();
         self.restored_delegates

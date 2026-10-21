@@ -13,7 +13,7 @@ use termide_agent_core::{
     GoalRecord, LastRun, LoggedMessage, LoopRecord, Message, RunMark, Session, StopReason,
     ToolCall, ToolResultMessage, Usage, ACP_PROVIDER,
 };
-use termide_core::PanelEvent;
+use termide_core::{DelegateRestart, PanelEvent};
 use termide_ui::ChoiceForm;
 
 use crate::pending::Pending;
@@ -94,9 +94,12 @@ impl AgentPanel {
                 // names the agent that delegated, not the one that ran.
                 let agent = summary.agent;
                 let parent = summary.parent?;
+                // A log open in a panel — or carried on out of sight — is
+                // already in hand there.
                 if !summary.unfinished
                     || parent.session.as_deref() != Some(id.as_str())
                     || crate::live::is_running(self.panel_id, &parent.call)
+                    || Session::is_open(&summary.path)
                 {
                     return None;
                 }
@@ -300,6 +303,9 @@ impl AgentPanel {
             return;
         };
         let autorun = self.logged_autorun.clone();
+        // A delegate's own session: whatever the run carrying it on ends on
+        // is the answer the panel that delegated the task is waiting for.
+        self.carry_back = self.carry_back_from_log();
         // A request a card asked about is asked again first, ahead of any
         // carry-on: it is the nearer decision, and a limit wants its retry,
         // wait or switch rather than a judge over work that never ran. The
@@ -346,19 +352,54 @@ impl AgentPanel {
         self.paused = true;
         self.restored = Some(restored);
         self.adopt_unfinished_delegates();
-        // A delegate's own session: whatever this run ends on is the answer
-        // the panel that delegated the task is waiting for.
-        self.carry_back = self.session.as_ref().and_then(|session| {
-            let parent = session.header().parent.as_ref()?;
-            Some(CarryBack {
-                parent_session: parent.session.clone()?,
-                agent: session
-                    .current_agent()
-                    .unwrap_or_else(|| parent.agent.clone()),
-                running: false,
-            })
-        });
         self.ask_carry_on(mark, &autorun);
+    }
+
+    /// What this session owes the panel that delegated it, when it is a
+    /// delegate's own: the answer of the run that carries its task on.
+    fn carry_back_from_log(&self) -> Option<CarryBack> {
+        let session = self.session.as_ref()?;
+        let parent = session.header().parent.as_ref()?;
+        Some(CarryBack {
+            parent_session: parent.session.clone()?,
+            agent: session
+                .current_agent()
+                .unwrap_or_else(|| parent.agent.clone()),
+            running: false,
+        })
+    }
+
+    /// The run carrying a delegated task on is under way — resumed, told to
+    /// go on or tried again: its end owes the delegating panel the answer.
+    pub(crate) fn owe_carry_back(&mut self) {
+        if let Some(carry) = &mut self.carry_back {
+            carry.running = true;
+        }
+    }
+
+    /// The run carrying a delegated task on is over: its answer goes back to
+    /// the panel that delegated it, by that session's id.
+    pub(crate) fn report_carried_back(&mut self) {
+        let Some(carry) = self.carry_back.take().filter(|carry| carry.running) else {
+            return;
+        };
+        let Some(from) = self.session_path().map(std::path::Path::to_path_buf) else {
+            return;
+        };
+        let answer = self.last_answer();
+        let t = termide_i18n::t();
+        let text = if self.run_failed {
+            t.agent_restored_failed_fmt(&carry.agent, &answer)
+        } else {
+            t.agent_restored_report_fmt(&carry.agent, &answer)
+        };
+        self.pending_events
+            .push(PanelEvent::DelegateAnswerToParent {
+                parent_session: carry.parent_session,
+                from,
+                agent: carry.agent,
+                text,
+            });
     }
 
     /// The run's last words, as its log has them: what the panel that
@@ -397,35 +438,24 @@ impl AgentPanel {
         }
     }
 
-    /// Carry the unfinished delegated tasks on, all of them or the one at
-    /// `index`: each runs again out of sight under the `task` call that handed
-    /// it over, asking through this panel's prompter and answering back here,
-    /// as any background task does. What is carried on leaves the rows.
-    pub(crate) fn restart_delegates(&mut self, index: Option<usize>) -> Vec<PanelEvent> {
-        let chosen: Vec<RestoredDelegate> = match index {
-            Some(index) => self
-                .restored_delegates
-                .get(index)
-                .cloned()
-                .into_iter()
-                .collect(),
-            None => self.restored_delegates.clone(),
-        };
+    /// Carry the unfinished delegated tasks on: each runs again out of sight
+    /// under the `task` call that handed it over, asking through this panel's
+    /// prompter and answering back here, as any background task does. The
+    /// rows they held go.
+    pub(crate) fn restart_delegates(&mut self) -> Vec<PanelEvent> {
+        let chosen = std::mem::take(&mut self.restored_delegates);
         if chosen.is_empty() {
             return vec![PanelEvent::NeedsRedraw];
         }
-        let items: Vec<(String, std::path::PathBuf, String)> = chosen
+        let items: Vec<DelegateRestart> = chosen
             .iter()
-            .map(|delegate| {
-                (
-                    delegate.agent.clone(),
-                    delegate.session.clone(),
-                    delegate.call.clone(),
-                )
+            .map(|delegate| DelegateRestart {
+                agent: delegate.agent.clone(),
+                session: delegate.session.clone(),
+                call: delegate.call.clone(),
+                task: delegate.task.clone(),
             })
             .collect();
-        self.restored_delegates
-            .retain(|kept| !chosen.iter().any(|c| c.session == kept.session));
         vec![
             PanelEvent::RestartDelegates {
                 panel: self.panel_id,
@@ -615,6 +645,7 @@ impl AgentPanel {
             Some(Restored::Prompt) => {
                 self.restored = None;
                 self.paused = false;
+                self.owe_carry_back();
                 let events = self.send_as(CARRY_ON_PROMPT.to_string(), Some("/continue".into()));
                 self.pending_events.extend(events);
                 true

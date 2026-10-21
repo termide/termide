@@ -174,6 +174,10 @@ impl AgentPanel {
         // taken the session out, so there is nothing to leave here.
         if let Some(old) = self.session.take() {
             discard_if_empty(old);
+            // The unfinished delegates and the answer owed to a delegating
+            // panel were the session left's, not the next one's.
+            self.restored_delegates.clear();
+            self.carry_back = None;
         }
         self.session = session;
         self.model = model;

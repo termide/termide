@@ -11425,9 +11425,10 @@ fn a_finished_panel_opens_the_sessions_of_its_unfinished_delegates() {
             event,
             PanelEvent::RestartDelegates { panel: _, items }
                 if items.len() == 1
-                    && items[0].0 == "search"
-                    && items[0].1 == delegate_path
-                    && items[0].2 == "call-1"
+                    && items[0].agent == "search"
+                    && items[0].session == delegate_path
+                    && items[0].call == "call-1"
+                    && !items[0].task.is_empty()
         )),
         "{events:?}"
     );
@@ -11965,4 +11966,79 @@ fn a_run_is_told_as_it_starts_and_ends() {
         })
         .collect();
     assert_eq!(runs, [None, Some(true)]);
+}
+
+/// A pause asked for on a run that then ends on its own — its last reply
+/// left nothing to do — leaves no pause to continue from: the delegates it
+/// held go on, rather than wait for a `/continue` that has nothing to resume.
+#[test]
+fn a_pause_the_run_never_reached_frees_its_delegates() {
+    let mut panel = panel(vec![]);
+    let id = panel.panel_id();
+    let held = crate::live::register(crate::live::LiveTask {
+        panel: Some(id),
+        call: "call-free",
+        from: "default",
+        agent: "search",
+        task: "find the loader",
+        session: None,
+        background: true,
+        pausable: true,
+    });
+    panel.apply(AgentEvent::AgentStart);
+    assert!(panel.request_pause());
+    assert!(held.control().is_paused());
+    panel.apply(AgentEvent::AgentEnd);
+    assert!(!panel.paused, "the run ended, not paused");
+    assert!(
+        !held.control().is_paused(),
+        "nothing holds the delegate now"
+    );
+}
+
+/// A carried-on delegate paused on the way owes its answer still: only the
+/// run's real end reports back to the panel that delegated it.
+#[test]
+fn a_carried_on_delegate_paused_on_the_way_still_owes_its_answer() {
+    let mut panel = panel(vec![]);
+    panel.carry_back = Some(crate::unfinished::CarryBack {
+        parent_session: "parent-1".into(),
+        agent: "search".into(),
+        running: true,
+    });
+    panel.apply(AgentEvent::AgentStart);
+    panel.apply(AgentEvent::Paused);
+    panel.apply(AgentEvent::AgentEnd);
+    assert!(panel.carry_back.is_some(), "a pause is not the task's end");
+    panel.apply(AgentEvent::AgentStart);
+    panel.apply(AgentEvent::AgentEnd);
+    assert!(panel.carry_back.is_none(), "the real end settles it");
+}
+
+/// Leaving a session leaves its unfinished delegates and the answer it owed
+/// behind: a new session's carry-on must not restart another's tasks.
+#[test]
+fn a_new_session_forgets_the_unfinished_delegates_of_the_last() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = {
+        let log = Session::create(dir.path(), Path::new("/tmp")).unwrap();
+        log.path().to_path_buf()
+    };
+    let mut panel = reopen(&path, dir.path(), vec![]);
+    panel
+        .restored_delegates
+        .push(crate::unfinished::RestoredDelegate {
+            agent: "search".into(),
+            session: dir.path().join("delegate.jsonl"),
+            call: "call-1".into(),
+            task: "find the loader".into(),
+        });
+    panel.carry_back = Some(crate::unfinished::CarryBack {
+        parent_session: "parent-1".into(),
+        agent: "search".into(),
+        running: false,
+    });
+    assert!(panel.switch_session(None));
+    assert!(panel.restored_delegates.is_empty());
+    assert!(panel.carry_back.is_none());
 }

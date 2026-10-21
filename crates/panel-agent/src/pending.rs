@@ -963,7 +963,7 @@ impl AgentPanel {
                     if self.restored.is_some() {
                         self.resume();
                     }
-                    let events = self.restart_delegates(None);
+                    let events = self.restart_delegates();
                     self.pending_events.extend(events);
                 } else if self.restored.is_some() {
                     // Give up the panel's own run; the delegates' rows stay,
