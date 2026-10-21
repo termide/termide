@@ -119,6 +119,7 @@ impl App {
                         let git_status_panel =
                             termide_panel_git_status::GitStatusPanel::new_for_repo(
                                 repo_path.to_path_buf(),
+                                Some(&self.project_root),
                             );
                         self.add_panel(Box::new(git_status_panel));
                         self.auto_save_layout();

@@ -205,9 +205,11 @@ impl GitLogPanel {
         Self::create(RepoManager::new(paths, project_root))
     }
 
-    /// Create panel for a specific repository (used for layout restore)
-    pub fn new_for_repo(repo_path: PathBuf) -> Self {
-        Self::create(RepoManager::for_repo(repo_path))
+    /// Create panel for a specific repository (used for layout restore),
+    /// keeping the project's repositories in the dropdown when a
+    /// `project_root` is known.
+    pub fn new_for_repo(repo_path: PathBuf, project_root: Option<&Path>) -> Self {
+        Self::create(RepoManager::for_repo(repo_path, project_root))
     }
 
     /// Index into `self.branches` of the branch whose history is shown.

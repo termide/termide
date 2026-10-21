@@ -41,6 +41,7 @@ impl App {
         self.layout_manager = LayoutManager::from_layout(
             layout,
             &project_dir,
+            &self.project_root,
             term_height,
             term_width,
             self.state.editor_config(),

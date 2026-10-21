@@ -185,6 +185,9 @@ inside it (`github.com/owner/owner`) writes no row of its own. A project that is
 a folder of checkouts therefore reads as `<host>/<group>/<repo>` instead of a run
 of folder names that repeat themselves; the closed selector shows the same path.
 The filter scores that path, so a host or a group finds the repositories inside it.
+A panel restored from the layout opens on the repository it was saved with, and its
+list still holds the rest of the project: one path was stored, but the plane around
+it is rediscovered.
 Choosing a branch never checks it out — it only changes what the panel shows:
 
 - a branch checked out in the main copy or a worktree shows that working copy's

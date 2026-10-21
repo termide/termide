@@ -343,7 +343,7 @@ mod tests {
     }
 
     fn panel(repo: &Path) -> GitLogPanel {
-        let mut panel = GitLogPanel::new_for_repo(repo.to_path_buf());
+        let mut panel = GitLogPanel::new_for_repo(repo.to_path_buf(), None);
         panel.last_area = Rect::new(0, 0, 80, 22);
         panel
     }

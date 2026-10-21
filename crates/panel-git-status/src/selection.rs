@@ -492,7 +492,7 @@ mod tests {
     fn panel_with_files() -> (tempfile::TempDir, GitStatusPanel) {
         let dir = tempfile::tempdir().unwrap();
         termide_git::init_repo(dir.path()).unwrap();
-        let mut panel = GitStatusPanel::new_for_repo(dir.path().to_path_buf());
+        let mut panel = GitStatusPanel::new_for_repo(dir.path().to_path_buf(), None);
         assert!(panel.repo_manager.current().is_some(), "tempdir is a repo");
         panel.unstaged_files = vec![UnstagedFile {
             path: PathBuf::from("src/lib.rs"),

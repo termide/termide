@@ -178,10 +178,21 @@ impl GitStatusPanel {
         Self::create(RepoManager::new(paths, project_root), paths.to_vec())
     }
 
-    /// Create panel for a specific repository
-    pub fn new_for_repo(repo_path: PathBuf) -> Self {
-        let initial_paths = vec![repo_path.clone()];
-        Self::create(RepoManager::for_repo(repo_path), initial_paths)
+    /// Create panel for a specific repository, keeping the project's plane in
+    /// the dropdown when `project_root` is one of its ancestors or a container
+    /// around it. The panel opens on `repo_path`; the rest of the project is
+    /// one keystroke away.
+    pub fn new_for_repo(repo_path: PathBuf, project_root: Option<&Path>) -> Self {
+        let mut initial_paths = vec![repo_path.clone()];
+        if let Some(root) = project_root {
+            if !initial_paths.contains(&root.to_path_buf()) {
+                initial_paths.push(root.to_path_buf());
+            }
+        }
+        Self::create(
+            RepoManager::for_repo(repo_path, project_root),
+            initial_paths,
+        )
     }
 
     fn create(repo_manager: RepoManager, initial_paths: Vec<PathBuf>) -> Self {

@@ -56,9 +56,14 @@ pub trait LayoutPersistence {
     fn to_state(&mut self, project_dir: &Path) -> ProjectLayout;
 
     /// Restore layout from ProjectLayout.
+    ///
+    /// `project_root` is the project on disk (not its state directory): a
+    /// restored Git panel opens on the repository it was saved with, but
+    /// lists the whole project's plane in its dropdown.
     fn from_layout(
         layout: ProjectLayout,
         project_dir: &Path,
+        project_root: &Path,
         term_height: u16,
         term_width: u16,
         editor_config: EditorConfig,
@@ -99,6 +104,7 @@ impl LayoutPersistence for LayoutManager {
     fn from_layout(
         layout: ProjectLayout,
         project_dir: &Path,
+        project_root: &Path,
         term_height: u16,
         term_width: u16,
         editor_config: EditorConfig,
@@ -119,17 +125,20 @@ impl LayoutPersistence for LayoutManager {
             // per worker; everything else is move-by-value out of the
             // saved layout.
             let project_dir_owned: PathBuf = project_dir.to_path_buf();
+            let project_root_owned: PathBuf = project_root.to_path_buf();
             let handles: Vec<_> = saved_group
                 .panels
                 .into_iter()
                 .map(|saved_panel| {
                     let project_dir = project_dir_owned.clone();
+                    let project_root = project_root_owned.clone();
                     let editor_config = editor_config.clone();
                     let agent_settings = agent_settings.clone();
                     std::thread::spawn(move || {
                         construct_panel(
                             saved_panel,
                             &project_dir,
+                            &project_root,
                             term_height,
                             term_width,
                             editor_config,
@@ -228,6 +237,7 @@ impl LayoutPersistence for LayoutManager {
 fn construct_panel(
     saved_panel: PanelState,
     project_dir: &Path,
+    project_root: &Path,
     term_height: u16,
     term_width: u16,
     editor_config: EditorConfig,
@@ -318,10 +328,10 @@ fn construct_panel(
             .ok()
             .map(|p| Box::new(p) as Box<dyn Panel + Send>),
         PanelState::GitStatus { repo_path } => Some(Box::new(
-            termide_panel_git_status::GitStatusPanel::new_for_repo(repo_path),
+            termide_panel_git_status::GitStatusPanel::new_for_repo(repo_path, Some(project_root)),
         )),
         PanelState::GitLog { repo_path } => Some(Box::new(
-            termide_panel_git_log::GitLogPanel::new_for_repo(repo_path),
+            termide_panel_git_log::GitLogPanel::new_for_repo(repo_path, Some(project_root)),
         )),
         PanelState::GitDiff {
             repo_path,

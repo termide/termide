@@ -119,18 +119,30 @@ impl RepoManager {
     /// same way [`Self::new`] does, then spawns the submodule walk in
     /// the background. Returns an empty manager if `repo_path` does
     /// not live under a git repository.
-    pub fn for_repo(repo_path: PathBuf) -> Self {
+    ///
+    /// With a `project_root`, the panel still opens on that repository,
+    /// but the walk also scans the project's plane from the project root,
+    /// so the dropdown offers the sibling repositories too. Without one,
+    /// only this repository and its submodules are ever in the list.
+    pub fn for_repo(repo_path: PathBuf, project_root: Option<&Path>) -> Self {
         let roots = match find_toplevel_repo(&repo_path) {
             Some(root) => vec![root],
             None => Vec::new(),
         };
-        // `repo_path` is a specific repo; no downward nested-repo scan needed.
-        let submodule_rx = spawn_repo_walk(&roots, &[], None);
+        // Scan downward from the project root, never from `repo_path`: that
+        // is a repository itself, and the walk skips repo roots, so passing
+        // it would find nothing beyond this repo's own submodules.
+        let scan_paths: Vec<PathBuf> = match project_root {
+            Some(root) if root != repo_path.as_path() => vec![root.to_path_buf()],
+            _ => Vec::new(),
+        };
+        let project_root = project_root.map(|p| p.to_path_buf());
+        let submodule_rx = spawn_repo_walk(&roots, &scan_paths, project_root.as_deref());
         Self {
             repos: roots,
             selected: 0,
             submodule_rx,
-            project_root: None,
+            project_root,
         }
     }
 
@@ -468,7 +480,7 @@ mod tests {
     #[test]
     fn test_for_repo() {
         // for_repo now searches for submodules, so with a non-existent path it returns empty
-        let manager = RepoManager::for_repo(PathBuf::from("/test/repo"));
+        let manager = RepoManager::for_repo(PathBuf::from("/test/repo"), None);
         assert!(manager.is_empty()); // No actual git repo at this path
     }
 
@@ -537,7 +549,7 @@ mod tests {
         let container = dunce::canonicalize(tmp.join("container")).unwrap();
         let deep = dunce::canonicalize(&deep).unwrap();
 
-        let mut mgr = RepoManager::for_repo(deep.clone());
+        let mut mgr = RepoManager::for_repo(deep.clone(), None);
         assert_eq!(mgr.current(), Some(deep.as_path()));
 
         // Panel paths for a directory that only *contains* the repo, deeper
@@ -561,6 +573,49 @@ mod tests {
             current.as_deref(),
             Some(deep.as_path()),
             "selection moved off the panel's own repo"
+        );
+    }
+
+    // A panel restored for one repository of a project still shows that
+    // project's other repositories: the layout saved a single path, but the
+    // dropdown is the project's plane, and the saved repository stays chosen.
+    #[test]
+    fn for_repo_in_a_project_lists_the_sibling_repositories() {
+        use std::fs;
+        let tmp = std::env::temp_dir().join(format!("termide-rm-restored-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let project = tmp.join("project");
+        fs::create_dir_all(project.join("host/group/one/.git")).unwrap();
+        fs::create_dir_all(project.join("host/group/two/.git")).unwrap();
+        let project = dunce::canonicalize(&project).unwrap();
+        let one = dunce::canonicalize(project.join("host/group/one")).unwrap();
+        let two = dunce::canonicalize(project.join("host/group/two")).unwrap();
+
+        let mut mgr = RepoManager::for_repo(two.clone(), Some(&project));
+        assert_eq!(
+            mgr.current(),
+            Some(two.as_path()),
+            "the panel opens on the repository the layout named"
+        );
+
+        let mut tries = 0;
+        while mgr.submodule_rx.is_some() && tries < 300 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            mgr.poll();
+            tries += 1;
+        }
+
+        let repos = mgr.repos().to_vec();
+        let current = mgr.current().map(|p| p.to_path_buf());
+        let _ = fs::remove_dir_all(&tmp);
+        assert!(
+            repos.contains(&one),
+            "the sibling repository of the project never arrived: {repos:?}"
+        );
+        assert_eq!(
+            current.as_deref(),
+            Some(two.as_path()),
+            "the fold moved the selection off the saved repository"
         );
     }
 

@@ -804,7 +804,10 @@ impl App {
             let mut g2 = PanelGroup::new(Box::new(FileManager::new()));
             if let Some(repo) = repo_root {
                 g2.add_panel(Box::new(
-                    termide_panel_git_status::GitStatusPanel::new_for_repo(repo),
+                    termide_panel_git_status::GitStatusPanel::new_for_repo(
+                        repo,
+                        Some(&self.project_root),
+                    ),
                 ));
             }
             g2.width = Some(40);
@@ -821,7 +824,10 @@ impl App {
 
             let mut g3 = if let Some(repo) = repo_root {
                 let mut g = PanelGroup::new(Box::new(
-                    termide_panel_git_status::GitStatusPanel::new_for_repo(repo),
+                    termide_panel_git_status::GitStatusPanel::new_for_repo(
+                        repo,
+                        Some(&self.project_root),
+                    ),
                 ));
                 g.add_panel(Box::new(termide_panel_outline::OutlinePanel::new(
                     *self.state.theme,
@@ -846,7 +852,10 @@ impl App {
 
             let mut g3 = if let Some(repo) = repo_root {
                 let mut g = PanelGroup::new(Box::new(
-                    termide_panel_git_status::GitStatusPanel::new_for_repo(repo),
+                    termide_panel_git_status::GitStatusPanel::new_for_repo(
+                        repo,
+                        Some(&self.project_root),
+                    ),
                 ));
                 g.add_panel(Box::new(termide_panel_outline::OutlinePanel::new(
                     *self.state.theme,
