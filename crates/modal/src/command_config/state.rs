@@ -163,8 +163,8 @@ impl CommandConfigModal {
             FocusArea::DisplayName,
             FocusArea::Command,
             FocusArea::Mode,
-            FocusArea::CwdCheckbox,
             FocusArea::Hotkey,
+            FocusArea::CwdCheckbox,
             FocusArea::ProjectCheckbox,
             FocusArea::Buttons,
         ]
@@ -475,7 +475,7 @@ mod tests {
     #[test]
     fn edit_mode_focus_includes_project_checkbox() {
         let mut modal = edit_modal(false);
-        modal.focus = FocusArea::Hotkey;
+        modal.focus = FocusArea::CwdCheckbox;
         modal.next_focus();
         assert_eq!(modal.focus, FocusArea::ProjectCheckbox);
         modal.next_focus();
@@ -520,16 +520,17 @@ mod tests {
         assert_eq!(result.group.as_deref(), Some("qa"));
     }
 
-    // The place a command runs is a field of its own, between how it runs
-    // and its hotkey: Tab reaches it, Space moves the box, Save carries it.
+    // The place a command runs is a box of its own, grouped with the other box
+    // right above "project command": Tab reaches it after the hotkey, Space
+    // moves the box, Save carries it.
     #[test]
-    fn the_cwd_box_sits_between_the_mode_and_the_hotkey() {
+    fn the_cwd_box_sits_above_the_project_box() {
         let mut modal = edit_modal(false);
-        modal.focus = FocusArea::Mode;
+        modal.focus = FocusArea::Hotkey;
         modal.next_focus();
         assert_eq!(modal.focus, FocusArea::CwdCheckbox);
         modal.next_focus();
-        assert_eq!(modal.focus, FocusArea::Hotkey);
+        assert_eq!(modal.focus, FocusArea::ProjectCheckbox);
         modal.prev_focus();
         assert_eq!(modal.focus, FocusArea::CwdCheckbox);
     }

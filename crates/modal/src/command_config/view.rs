@@ -50,11 +50,11 @@ impl Modal for CommandConfigModal {
             constraints.push(Constraint::Length(3)); // command
             constraints.push(Constraint::Length(3)); // display name
             constraints.push(Constraint::Length(2)); // mode selector
-            constraints.push(Constraint::Length(1)); // cwd checkbox
             constraints.push(Constraint::Length(3)); // hotkey
             if self.hotkey_error || self.hotkey_conflict.is_some() {
                 constraints.push(Constraint::Length(1)); // error hint
             }
+            constraints.push(Constraint::Length(1)); // cwd checkbox
             constraints.push(Constraint::Length(1)); // checkbox
             constraints.push(Constraint::Length(1)); // spacer
             constraints.push(Constraint::Length(1)); // buttons
@@ -66,11 +66,11 @@ impl Modal for CommandConfigModal {
             constraints.push(Constraint::Length(3)); // display name
             constraints.push(Constraint::Length(3)); // command
             constraints.push(Constraint::Length(2)); // mode selector
-            constraints.push(Constraint::Length(1)); // cwd checkbox
             constraints.push(Constraint::Length(3)); // hotkey
             if self.hotkey_error || self.hotkey_conflict.is_some() {
                 constraints.push(Constraint::Length(1)); // error hint
             }
+            constraints.push(Constraint::Length(1)); // cwd checkbox
             constraints.push(Constraint::Length(1)); // checkbox
             constraints.push(Constraint::Length(1)); // spacer
             constraints.push(Constraint::Length(1)); // buttons
@@ -316,30 +316,6 @@ impl Modal for CommandConfigModal {
             chunk_idx += 1;
         }
 
-        // Where the command runs: checked is the project root, unchecked the
-        // folder of the focused panel.
-        {
-            let cwd_chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Length(15), Constraint::Min(1)])
-                .split(chunks[chunk_idx]);
-            let is_focused = self.focus == FocusArea::CwdCheckbox;
-            let cwd_text = format!(
-                " [{}] {}",
-                termide_ui::checkbox_mark(self.cwd == CommandCwd::Project),
-                t.command_config_cwd_checkbox()
-            );
-            Paragraph::new(cwd_text)
-                .style(Style::default().fg(if is_focused {
-                    theme.accented_fg
-                } else {
-                    theme.fg
-                }))
-                .render(cwd_chunks[1], buf);
-            self.last_cwd_area = Some(cwd_chunks[1]);
-            chunk_idx += 1;
-        }
-
         // 4. Hotkey field
         self.last_hotkey_text_area = Some(Self::render_labeled_input_field(
             buf,
@@ -369,6 +345,30 @@ impl Modal for CommandConfigModal {
         // Hotkey hint (when focused, no error)
         if self.focus == FocusArea::Hotkey && !self.hotkey_error && self.hotkey_conflict.is_none() {
             // Could render a hint below the input
+        }
+
+        // Where the command runs: checked is the project root, unchecked the
+        // folder of the focused panel.
+        {
+            let cwd_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Length(15), Constraint::Min(1)])
+                .split(chunks[chunk_idx]);
+            let is_focused = self.focus == FocusArea::CwdCheckbox;
+            let cwd_text = format!(
+                " [{}] {}",
+                termide_ui::checkbox_mark(self.cwd == CommandCwd::Project),
+                t.command_config_cwd_checkbox()
+            );
+            Paragraph::new(cwd_text)
+                .style(Style::default().fg(if is_focused {
+                    theme.accented_fg
+                } else {
+                    theme.fg
+                }))
+                .render(cwd_chunks[1], buf);
+            self.last_cwd_area = Some(cwd_chunks[1]);
+            chunk_idx += 1;
         }
 
         // Project checkbox
