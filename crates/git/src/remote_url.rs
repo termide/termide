@@ -25,6 +25,56 @@ pub fn get_commit_web_url(repo: &Path, hash: &str) -> Option<String> {
     Some(format!("{}/commit/{}", base, hash))
 }
 
+/// Host of the remote a bare `git fetch`/`pull`/`push` talks to: the current
+/// branch's configured remote, else `origin`. Used to say which server a
+/// failed or timed-out network operation was waiting on.
+///
+/// Returns `None` for a detached or remote-less repository, or a local-path
+/// remote, which has no host.
+pub fn remote_host(repo: &Path) -> Option<String> {
+    let remote = git_command_stdout(repo, &["symbolic-ref", "--short", "-q", "HEAD"])
+        .map(|branch| branch.trim().to_string())
+        .filter(|branch| !branch.is_empty())
+        .and_then(|branch| {
+            git_command_stdout(
+                repo,
+                &["config", "--get", &format!("branch.{branch}.remote")],
+            )
+        })
+        .map(|remote| remote.trim().to_string())
+        .filter(|remote| !remote.is_empty() && remote != ".")
+        .unwrap_or_else(|| "origin".to_string());
+    let raw = git_command_stdout(repo, &["remote", "get-url", &remote])?;
+    parse_remote_host(raw.trim())
+}
+
+/// Host part of a remote URL: `scheme://[user@]host[:port]/path` or the scp
+/// form `[user@]host:path`. `None` for local paths and `file://` URLs.
+fn parse_remote_host(url: &str) -> Option<String> {
+    let authority = if let Some((scheme, rest)) = url.split_once("://") {
+        if scheme == "file" {
+            return None;
+        }
+        let authority = rest.split('/').next()?;
+        let authority = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+        // Drop a port, keeping a bracketed IPv6 address whole.
+        match authority.strip_prefix('[') {
+            Some(v6) => v6.split(']').next()?,
+            None => authority.split(':').next()?,
+        }
+    } else {
+        // scp-like syntax needs a colon before any slash; otherwise a path
+        // (a Windows drive letter `C:\…` included).
+        let colon = url.find(':')?;
+        if colon == 1 || url[..colon].contains(['/', '\\']) {
+            return None;
+        }
+        let host = &url[..colon];
+        host.rsplit_once('@').map_or(host, |(_, h)| h)
+    };
+    (!authority.is_empty()).then(|| authority.to_string())
+}
+
 /// Parse a git remote URL into a web URL.
 fn parse_remote_url(url: &str) -> Option<String> {
     let url = url.trim();
@@ -114,6 +164,29 @@ mod tests {
             parse_remote_url("http://example.com/user/repo.git"),
             Some("http://example.com/user/repo".to_string())
         );
+    }
+
+    #[test]
+    fn remote_host_comes_from_every_url_form() {
+        let cases = [
+            ("git@github.com:user/repo.git", Some("github.com")),
+            ("github.com:user/repo", Some("github.com")),
+            (
+                "ssh://git@gitlab.corp:2222/team/repo.git",
+                Some("gitlab.corp"),
+            ),
+            (
+                "https://user@bitbucket.org/user/repo",
+                Some("bitbucket.org"),
+            ),
+            ("https://[::1]:8080/repo.git", Some("::1")),
+            ("file:///srv/git/repo.git", None),
+            ("/srv/git/repo.git", None),
+            ("../repo", None),
+        ];
+        for (url, host) in cases {
+            assert_eq!(parse_remote_host(url).as_deref(), host, "{url}");
+        }
     }
 
     #[test]

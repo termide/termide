@@ -35,9 +35,10 @@ impl App {
                 if result.operation == "fetch" {
                     if !result.success {
                         let repo = handle.repo_path;
+                        let target = self.git_target(&repo);
                         if !self.vault_git_auth_failed("fetch", repo, &result.stderr) {
                             let msg = format!(
-                                "git fetch failed: {}",
+                                "git fetch {target}: {}",
                                 result.stderr.lines().next().unwrap_or("unknown error")
                             );
                             self.state.set_error(msg);
@@ -147,8 +148,9 @@ impl App {
 
                     let t = termide_i18n::t();
                     self.show_error_modal(format!(
-                        "git {} {}",
+                        "git {} {}: {}",
                         handle.operation,
+                        self.git_target(&handle.repo_path),
                         t.git_operation_timed_out()
                     ));
                     return;
@@ -195,5 +197,37 @@ impl App {
                 self.vault_git_finished(false);
             }
         }
+    }
+
+    /// Which repository and server a network operation ran against, for its
+    /// failure message: `services/api (gitlab.corp)`, or just the repository
+    /// when its remote has no host. A project may hold many repositories on
+    /// different servers, so the operation name alone does not say which.
+    fn git_target(&self, repo: &std::path::Path) -> String {
+        git_target_label(
+            &termide_git::relative_name(repo, Some(&self.state.project_root)),
+            termide_git::remote_host(repo).as_deref(),
+        )
+    }
+}
+
+fn git_target_label(repo: &str, host: Option<&str>) -> String {
+    match host {
+        Some(host) => format!("{repo} ({host})"),
+        None => repo.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::git_target_label;
+
+    #[test]
+    fn the_target_names_the_repository_and_its_server() {
+        assert_eq!(
+            git_target_label("services/api", Some("gitlab.corp")),
+            "services/api (gitlab.corp)"
+        );
+        assert_eq!(git_target_label("termide", None), "termide");
     }
 }

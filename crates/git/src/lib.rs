@@ -46,7 +46,7 @@ pub use operations::{
     commit, init_repo, revert_all, revert_file, stage_all, stage_file, stage_files, unstage_all,
     unstage_file, unstage_files,
 };
-pub use remote_url::get_commit_web_url;
+pub use remote_url::{get_commit_web_url, remote_host};
 pub use repo_manager::{project_repos, RepoManager};
 pub use repo_tree::{flat_rows, relative_name, repo_tree, repo_tree_indexed, RepoRow};
 pub use stash::{
