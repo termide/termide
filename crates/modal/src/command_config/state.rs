@@ -3,7 +3,7 @@
 
 use crate::{ModalResult, TextInputHandler};
 use ratatui::layout::Rect;
-use termide_config::commands::{CommandMetadata, CommandMode};
+use termide_config::commands::{CommandCwd, CommandMetadata, CommandMode};
 use termide_config::constants::{
     MODAL_MAX_WIDTH_PERCENTAGE_DEFAULT, MODAL_MIN_WIDTH_WIDE, MODAL_PADDING_WITH_DOUBLE_BORDER,
 };
@@ -27,6 +27,7 @@ impl CommandConfigModal {
             command_input: TextInputHandler::new(),
             display_name_input: TextInputHandler::new(),
             command_mode: CommandMode::Terminal,
+            cwd: CommandCwd::Panel,
             hotkey_input: TextInputHandler::new(),
             is_project: false,
             selected_button: 0,
@@ -38,6 +39,7 @@ impl CommandConfigModal {
             last_group_dropdown_area: None,
             last_mode_area: None,
             last_checkbox_area: None,
+            last_cwd_area: None,
             last_group_text_area: None,
             last_command_text_area: None,
             last_display_name_text_area: None,
@@ -66,6 +68,7 @@ impl CommandConfigModal {
         }
 
         let command_mode = metadata.as_ref().and_then(|m| m.mode).unwrap_or_default();
+        let cwd = metadata.as_ref().and_then(|m| m.cwd).unwrap_or_default();
 
         let hotkey_text = metadata
             .as_ref()
@@ -99,6 +102,7 @@ impl CommandConfigModal {
             command_input,
             display_name_input,
             command_mode,
+            cwd,
             hotkey_input,
             is_project,
             selected_button: 0,
@@ -110,6 +114,7 @@ impl CommandConfigModal {
             last_group_dropdown_area: None,
             last_mode_area: None,
             last_checkbox_area: None,
+            last_cwd_area: None,
             last_group_text_area: None,
             last_command_text_area: None,
             last_display_name_text_area: None,
@@ -158,6 +163,7 @@ impl CommandConfigModal {
             FocusArea::DisplayName,
             FocusArea::Command,
             FocusArea::Mode,
+            FocusArea::CwdCheckbox,
             FocusArea::Hotkey,
             FocusArea::ProjectCheckbox,
             FocusArea::Buttons,
@@ -186,8 +192,8 @@ impl CommandConfigModal {
                 0
             };
 
-        // Create: Border(1) + Group(3) + [Dropdown] + Command(3) + DisplayName(3) + Mode(2) + Hotkey(3) + [HotkeyError(1)] + Checkbox(1) + Empty(1) + Buttons(1) + Border(1)
-        // Edit:   Border(1) + Group(3) + DisplayName(3) + Command(3) + Mode(2) + Hotkey(3) + [HotkeyError(1)] + Checkbox(1) + Empty(1) + Buttons(1) + Border(1)
+        // Create: Border(1) + Group(3) + [Dropdown] + Command(3) + DisplayName(3) + Mode(2) + Hotkey(3) + [HotkeyError(1)] + Cwd(1) + Checkbox(1) + Empty(1) + Buttons(1) + Border(1)
+        // Edit:   Border(1) + Group(3) + DisplayName(3) + Command(3) + Mode(2) + Hotkey(3) + [HotkeyError(1)] + Cwd(1) + Checkbox(1) + Empty(1) + Buttons(1) + Border(1)
         let mut height = if self.is_create() {
             1 + 3 + dropdown_height + 3 + 3 + 2 + 3
         } else {
@@ -196,7 +202,7 @@ impl CommandConfigModal {
         if self.hotkey_error || self.hotkey_conflict.is_some() {
             height += 1;
         }
-        height += 4;
+        height += 5;
         height = height.min(screen_height);
 
         (width, height)
@@ -278,6 +284,7 @@ impl CommandConfigModal {
                 display_name,
                 group,
                 mode: self.command_mode,
+                cwd: self.cwd,
                 hotkey: self.hotkey_value(),
                 is_project: self.is_project,
                 action: CommandConfigAction::Save,
@@ -313,6 +320,7 @@ impl CommandConfigModal {
                     }
                 },
                 mode: self.command_mode,
+                cwd: self.cwd,
                 hotkey: self.hotkey_value(),
                 is_project: self.is_project,
                 action: CommandConfigAction::Save,
@@ -510,6 +518,105 @@ mod tests {
             panic!("expected confirmed result");
         };
         assert_eq!(result.group.as_deref(), Some("qa"));
+    }
+
+    // The place a command runs is a field of its own, between how it runs
+    // and its hotkey: Tab reaches it, Space moves the box, Save carries it.
+    #[test]
+    fn the_cwd_box_sits_between_the_mode_and_the_hotkey() {
+        let mut modal = edit_modal(false);
+        modal.focus = FocusArea::Mode;
+        modal.next_focus();
+        assert_eq!(modal.focus, FocusArea::CwdCheckbox);
+        modal.next_focus();
+        assert_eq!(modal.focus, FocusArea::Hotkey);
+        modal.prev_focus();
+        assert_eq!(modal.focus, FocusArea::CwdCheckbox);
+    }
+
+    #[test]
+    fn space_and_a_click_move_the_cwd_box() {
+        setup_i18n();
+        use crate::base::test_mouse::press;
+        use ratatui::buffer::Buffer;
+        let mut modal = edit_modal(false);
+        assert_eq!(modal.cwd, CommandCwd::Panel);
+
+        modal.focus = FocusArea::CwdCheckbox;
+        modal
+            .handle_key(termide_core::KeyChord::identity(KeyEvent::new(
+                KeyCode::Char(' '),
+                KeyModifiers::empty(),
+            )))
+            .expect("space is handled");
+        assert_eq!(modal.cwd, CommandCwd::Project);
+
+        // Rendered, the row is where the click has to land.
+        let area = Rect::new(0, 0, 100, 40);
+        let mut buf = Buffer::empty(area);
+        modal.render(area, &mut buf, &termide_theme::Theme::default());
+        let row = modal.last_cwd_area.expect("the row is drawn");
+        let drawn = |buf: &Buffer| -> String {
+            (row.x..row.right())
+                .map(|x| buf[(x, row.y)].symbol().to_string())
+                .collect::<String>()
+                .trim()
+                .to_string()
+        };
+        assert!(
+            drawn(&buf).starts_with("[✓]"),
+            "the box is ticked once the project root is chosen: {:?}",
+            drawn(&buf)
+        );
+        modal.handle_mouse(press(row.x + 1, row.y), area).unwrap();
+        assert_eq!(modal.cwd, CommandCwd::Panel);
+        modal.render(area, &mut buf, &termide_theme::Theme::default());
+        assert!(
+            drawn(&buf).starts_with("[ ]"),
+            "the click unticked it: {:?}",
+            drawn(&buf)
+        );
+    }
+
+    #[test]
+    fn the_saved_place_comes_back_and_is_carried_to_save() {
+        let metadata = CommandMetadata {
+            cwd: Some(CommandCwd::Project),
+            ..Default::default()
+        };
+        let mut modal = CommandConfigModal::new_edit(
+            "Edit command",
+            "build".to_string(),
+            Some("dev".to_string()),
+            true,
+            None,
+            vec![],
+            Some(metadata),
+        );
+        assert_eq!(
+            modal.cwd,
+            CommandCwd::Project,
+            "the box opens as the file has it"
+        );
+
+        let result = modal.try_confirm().expect("the modal confirms");
+        let ModalResult::Confirmed(result) = result else {
+            panic!("expected confirmed result");
+        };
+        assert_eq!(result.cwd, CommandCwd::Project);
+
+        modal.focus = FocusArea::CwdCheckbox;
+        modal
+            .handle_key(termide_core::KeyChord::identity(KeyEvent::new(
+                KeyCode::Char(' '),
+                KeyModifiers::empty(),
+            )))
+            .unwrap();
+        let result = modal.try_confirm().expect("the modal confirms");
+        let ModalResult::Confirmed(result) = result else {
+            panic!("expected confirmed result");
+        };
+        assert_eq!(result.cwd, CommandCwd::Panel);
     }
 
     #[test]

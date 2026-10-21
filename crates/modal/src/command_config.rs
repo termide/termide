@@ -1,11 +1,11 @@
 //! Unified modal dialog for creating and editing commands.
 //!
-//! In both modes the Group, Display Name, Command, Mode, Hotkey, and Project
-//! fields are editable.
+//! In both modes the Group, Display Name, Command, Mode, Hotkey, Project
+//! folder, and Project fields are editable.
 
 use ratatui::layout::Rect;
 
-use termide_config::commands::CommandMode;
+use termide_config::commands::{CommandCwd, CommandMode};
 use termide_config::ParsedKeyBinding;
 use termide_ui::SuggestionInput;
 
@@ -46,6 +46,8 @@ pub struct CommandConfigResult {
     pub display_name: Option<String>,
     pub group: Option<String>,
     pub mode: CommandMode,
+    /// Where the command runs: the focused panel's folder, or the project root.
+    pub cwd: CommandCwd,
     pub hotkey: Option<String>,
     pub is_project: bool,
     pub action: CommandConfigAction,
@@ -65,6 +67,9 @@ enum FocusArea {
     Command,
     DisplayName,
     Mode,
+    /// Where the command runs: checked is the project root, unchecked the
+    /// focused panel's folder.
+    CwdCheckbox,
     Hotkey,
     ProjectCheckbox,
     Buttons,
@@ -83,6 +88,8 @@ pub struct CommandConfigModal {
     command_input: TextInputHandler,
     display_name_input: TextInputHandler,
     command_mode: CommandMode,
+    /// Where the command runs; unchecked is the focused panel's folder.
+    cwd: CommandCwd,
     hotkey_input: TextInputHandler,
     is_project: bool,
     // Button selection: 0=Save/Create, 1=Cancel
@@ -97,6 +104,8 @@ pub struct CommandConfigModal {
     last_group_dropdown_area: Option<Rect>,
     last_mode_area: Option<Rect>,
     last_checkbox_area: Option<Rect>,
+    /// The row the "run from the project root" checkbox is drawn in.
+    last_cwd_area: Option<Rect>,
     /// The text of the group, command, display name and hotkey fields as last
     /// drawn, for the mouse.
     last_group_text_area: Option<Rect>,

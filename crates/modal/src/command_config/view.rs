@@ -10,7 +10,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Widget},
 };
-use termide_config::commands::CommandMode;
+use termide_config::commands::{CommandCwd, CommandMode};
 use termide_config::constants::MODAL_BUTTON_SPACING;
 use termide_i18n as i18n;
 use termide_theme::Theme;
@@ -50,6 +50,7 @@ impl Modal for CommandConfigModal {
             constraints.push(Constraint::Length(3)); // command
             constraints.push(Constraint::Length(3)); // display name
             constraints.push(Constraint::Length(2)); // mode selector
+            constraints.push(Constraint::Length(1)); // cwd checkbox
             constraints.push(Constraint::Length(3)); // hotkey
             if self.hotkey_error || self.hotkey_conflict.is_some() {
                 constraints.push(Constraint::Length(1)); // error hint
@@ -65,6 +66,7 @@ impl Modal for CommandConfigModal {
             constraints.push(Constraint::Length(3)); // display name
             constraints.push(Constraint::Length(3)); // command
             constraints.push(Constraint::Length(2)); // mode selector
+            constraints.push(Constraint::Length(1)); // cwd checkbox
             constraints.push(Constraint::Length(3)); // hotkey
             if self.hotkey_error || self.hotkey_conflict.is_some() {
                 constraints.push(Constraint::Length(1)); // error hint
@@ -314,6 +316,30 @@ impl Modal for CommandConfigModal {
             chunk_idx += 1;
         }
 
+        // Where the command runs: checked is the project root, unchecked the
+        // folder of the focused panel.
+        {
+            let cwd_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Length(15), Constraint::Min(1)])
+                .split(chunks[chunk_idx]);
+            let is_focused = self.focus == FocusArea::CwdCheckbox;
+            let cwd_text = format!(
+                " [{}] {}",
+                termide_ui::checkbox_mark(self.cwd == CommandCwd::Project),
+                t.command_config_cwd_checkbox()
+            );
+            Paragraph::new(cwd_text)
+                .style(Style::default().fg(if is_focused {
+                    theme.accented_fg
+                } else {
+                    theme.fg
+                }))
+                .render(cwd_chunks[1], buf);
+            self.last_cwd_area = Some(cwd_chunks[1]);
+            chunk_idx += 1;
+        }
+
         // 4. Hotkey field
         self.last_hotkey_text_area = Some(Self::render_labeled_input_field(
             buf,
@@ -495,6 +521,17 @@ impl Modal for CommandConfigModal {
                 KeyCode::Up => self.prev_focus(),
                 _ => {}
             },
+            FocusArea::CwdCheckbox => match key.code {
+                KeyCode::Char(' ') => {
+                    self.cwd = match self.cwd {
+                        CommandCwd::Panel => CommandCwd::Project,
+                        CommandCwd::Project => CommandCwd::Panel,
+                    };
+                }
+                KeyCode::Down | KeyCode::Enter => self.next_focus(),
+                KeyCode::Up => self.prev_focus(),
+                _ => {}
+            },
             FocusArea::Hotkey => match handle_input_key(&mut self.hotkey_input, key) {
                 InputKeyResult::Handled | InputKeyResult::TextModified => self.validate_hotkey(),
                 InputKeyResult::NotHandled => match key.code {
@@ -622,6 +659,21 @@ impl Modal for CommandConfigModal {
                 if idx < self.group_suggestion.suggestions().len() {
                     self.group_suggestion.select_and_confirm(idx);
                 }
+                return Ok(None);
+            }
+        }
+
+        if let Some(area) = self.last_cwd_area {
+            if col >= area.x
+                && col < area.x + area.width
+                && row >= area.y
+                && row < area.y + area.height
+            {
+                self.focus = FocusArea::CwdCheckbox;
+                self.cwd = match self.cwd {
+                    CommandCwd::Panel => CommandCwd::Project,
+                    CommandCwd::Project => CommandCwd::Panel,
+                };
                 return Ok(None);
             }
         }

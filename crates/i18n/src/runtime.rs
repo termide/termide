@@ -484,6 +484,7 @@ impl Translation for RuntimeTranslation {
         command_config_label_hotkey,
         command_config_label_project,
         command_config_project_checkbox,
+        command_config_cwd_checkbox,
         command_config_hotkey_hint,
         command_config_hotkey_invalid,
         command_config_hotkey_conflict,

@@ -98,10 +98,11 @@ The menu rereads both files every time it opens, so commands added to a file by 
 | `Menu item:` | Menu label (`name`) |
 | `Command:` | Shell command line (`command`); required when creating |
 | `Mode:` | `Terminal`, `Background` or `Report`; switch with `←` / `→` or `1`–`3` |
+| `Run from the project folder` | `cwd`: ticked runs the command in the project root, left empty in the working directory of the focused panel |
 | `Hotkey:` | Optional hotkey (`key`) |
 | `Project command` | Checked: the command is saved to the project's `.termide/commands.toml`; unchecked: to the global file |
 
-A new command's identifier is derived from `Menu item:`, or from `Command:` when the label is empty; the characters `/ \ : * ? " < > | .` are replaced with `-`. If a command with that identifier already exists, the new one gets a free variant (`build-2`) instead of replacing it. Emptying `Menu item:` while editing removes the label, so the menu shows the identifier. Toggling `Project command` while editing moves the command to the other file. The form does not edit `params` or `cwd`; they are kept as they are in the file. Renaming (`F2`) onto the identifier of another command is refused.
+A new command's identifier is derived from `Menu item:`, or from `Command:` when the label is empty; the characters `/ \ : * ? " < > | .` are replaced with `-`. If a command with that identifier already exists, the new one gets a free variant (`build-2`) instead of replacing it. Emptying `Menu item:` while editing removes the label, so the menu shows the identifier. Toggling `Project command` while editing moves the command to the other file. The `Run from the project folder` box is `cwd`: ticked writes `cwd = "project"`, left empty the key is dropped and the command follows the focused panel. The form does not edit `params`; it is kept as it is in the file. Renaming (`F2`) onto the identifier of another command is refused.
 
 Saving from the form, renaming or deleting edits `commands.toml` in place: the other commands, their order and the comments around them stay as they are, only the fields that changed are rewritten, and a new command is added at the end. A renamed command moves to the end of the file.
 

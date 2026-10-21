@@ -442,6 +442,9 @@ pub trait Translation: Send + Sync {
     fn command_config_label_hotkey(&self) -> &str;
     fn command_config_label_project(&self) -> &str;
     fn command_config_project_checkbox(&self) -> &str;
+    /// Where the command runs: checked is the project root, unchecked the
+    /// focused panel's folder.
+    fn command_config_cwd_checkbox(&self) -> &str;
     fn command_config_hotkey_hint(&self) -> &str;
     fn command_config_hotkey_invalid(&self) -> &str;
     fn command_config_hotkey_conflict(&self) -> &str;
