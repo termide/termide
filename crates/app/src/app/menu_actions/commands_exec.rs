@@ -108,19 +108,25 @@ impl App {
         command: &CommandItem,
         params: &HashMap<String, String>,
     ) -> Result<()> {
-        use termide_config::commands::CommandMode;
+        use termide_config::commands::{CommandCwd, CommandMode};
         use termide_panel_terminal::Terminal;
 
         let env = param_env(params);
         if command.debugger().is_some() {
             return self.run_debug_command(command, &env);
         }
-        let cwd = self.get_focused_panel_cwd();
+        // A command runs where it says: the focused panel's directory, or the
+        // project root — the static point its relative paths are written against.
+        let cwd = match command.cwd {
+            CommandCwd::Project => self.project_root.clone(),
+            CommandCwd::Panel => self.get_focused_panel_cwd(),
+        };
         log::info!(
-            "Running {} command '{}' in {:?} with {} params",
+            "Running {} command '{}' in {:?} (cwd: {}) with {} params",
             command.mode.as_str(),
             command.name,
             cwd,
+            command.cwd.as_str(),
             env.len()
         );
 
@@ -460,6 +466,9 @@ fn command_spec(command: &CommandItem) -> String {
     serde_json::json!({
         "command": command.command,
         "mode": command.mode.as_str(),
+        // Where it runs is part of what was approved: the same line in another
+        // directory builds, deploys and deletes something else.
+        "cwd": command.cwd.as_str(),
         "build": meta.and_then(|m| m.build.as_ref()),
         "debugger": meta.and_then(|m| m.debugger.as_ref()),
         "debugger_args": meta.map(|m| &m.debugger_args),
@@ -487,19 +496,33 @@ fn command_text(command: &CommandItem) -> String {
 #[cfg(test)]
 mod approval_tests {
     use super::*;
-    use termide_config::commands::CommandMetadata;
+    use termide_config::commands::{CommandCwd, CommandMetadata};
 
     fn command(run: &str, build: Option<&str>) -> CommandItem {
         CommandItem {
             name: "go".into(),
             command: Some(run.into()),
             mode: Default::default(),
+            cwd: CommandCwd::Panel,
             is_project: true,
             metadata: Some(CommandMetadata {
                 build: build.map(str::to_string),
                 ..Default::default()
             }),
         }
+    }
+
+    // The same line run from the project root is a different thing: it must not
+    // pass under an approval given for the focused panel's directory.
+    #[test]
+    fn a_different_cwd_is_a_different_approval() {
+        let mut from_project = command("./run", None);
+        from_project.cwd = CommandCwd::Project;
+        assert_ne!(
+            command_spec(&command("./run", None)),
+            command_spec(&from_project),
+            "cwd is not part of the approved spec"
+        );
     }
 
     #[test]

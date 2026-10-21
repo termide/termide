@@ -1424,12 +1424,13 @@ mod menu_shortcut_tests {
     /// colour from every other menu.
     #[test]
     fn command_hotkeys_move_out_of_the_label() {
-        use termide_config::commands::{CommandItem, CommandMetadata, CommandMode};
+        use termide_config::commands::{CommandCwd, CommandItem, CommandMetadata, CommandMode};
 
         let command = CommandItem {
             name: "deploy".to_string(),
             command: Some("make deploy".to_string()),
             mode: CommandMode::Terminal,
+            cwd: CommandCwd::Panel,
             is_project: false,
             metadata: Some(CommandMetadata {
                 key: Some("Ctrl+Shift+D".to_string()),
@@ -1448,12 +1449,13 @@ mod menu_shortcut_tests {
 
     #[test]
     fn a_command_without_a_hotkey_has_no_shortcut() {
-        use termide_config::commands::{CommandItem, CommandMode};
+        use termide_config::commands::{CommandCwd, CommandItem, CommandMode};
 
         let command = CommandItem {
             name: "build".to_string(),
             command: Some("make".to_string()),
             mode: CommandMode::Background,
+            cwd: CommandCwd::Panel,
             is_project: false,
             metadata: None,
         };

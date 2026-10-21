@@ -8,7 +8,7 @@ use std::path::Path;
 
 use anyhow::Result;
 use termide_config::commands::{
-    CommandItem, CommandMetadata, CommandParam, CommandParamType, CommandsMetadata,
+    CommandCwd, CommandItem, CommandMetadata, CommandParam, CommandParamType, CommandsMetadata,
 };
 use termide_debug::dap::{self, Adapter};
 use termide_debug::{shell_quote, Debugger};
@@ -116,6 +116,9 @@ impl App {
             debugger: Some(debugger),
             debugger_args,
             build: get("build"),
+            // A debug launch runs in the project root whatever mode says; the
+            // command says so, so the saved file matches what happens.
+            cwd: Some(CommandCwd::Project),
             ..Default::default()
         };
         metadata.entries.insert(key.clone(), meta.clone());
@@ -136,6 +139,7 @@ impl App {
             name: key,
             command: Some(program),
             mode: Default::default(),
+            cwd: CommandCwd::Project,
             is_project: true,
             metadata: Some(meta),
         })

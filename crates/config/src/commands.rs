@@ -43,6 +43,37 @@ impl CommandMode {
     }
 }
 
+/// Where a command runs: the directory it starts in.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CommandCwd {
+    /// The working directory of the focused panel, or the project root when the
+    /// panel has none (default): a command follows where the user is looking.
+    #[default]
+    Panel,
+    /// The project root, whatever panel is focused: the static point a command's
+    /// relative paths are written against — the folder its `commands.toml` sits in.
+    Project,
+}
+
+impl CommandCwd {
+    /// The spelling `commands.toml` uses.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Panel => "panel",
+            Self::Project => "project",
+        }
+    }
+
+    fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "panel" => Some(Self::Panel),
+            "project" => Some(Self::Project),
+            _ => None,
+        }
+    }
+}
+
 /// Parameter type for command launch forms.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -106,6 +137,10 @@ pub struct CommandMetadata {
     /// Execution mode override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<CommandMode>,
+    /// Where the command runs; `panel` (the default) is the focused panel's
+    /// directory, `project` the project root.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<CommandCwd>,
     /// Hotkey binding string like "Ctrl+Shift+D".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
@@ -223,6 +258,7 @@ impl CommandsMetadata {
             let debugger_args = Self::parse_words(section, "debugger_args", section_name);
             let build = text("build");
             let console = text("console");
+            let cwd = Self::parse_cwd(section, section_name);
 
             entries.insert(
                 section_name.clone(),
@@ -230,6 +266,7 @@ impl CommandsMetadata {
                     command,
                     display_name,
                     mode,
+                    cwd,
                     key,
                     params,
                     group,
@@ -242,6 +279,25 @@ impl CommandsMetadata {
         }
 
         Self { entries }
+    }
+
+    /// `cwd` of a section; an unknown value is reported and left out, so a typo
+    /// runs the command where the user did not mean it to.
+    fn parse_cwd(
+        section: &toml::map::Map<String, toml::Value>,
+        command: &str,
+    ) -> Option<CommandCwd> {
+        let raw = section.get("cwd").and_then(|v| v.as_str()).map(str::trim)?;
+        if raw.is_empty() {
+            return None;
+        }
+        CommandCwd::from_str(raw).or_else(|| {
+            log::warn!(
+                "commands.toml: `cwd` of `{command}` must be \"panel\" or \"project\", \
+                 not {raw:?}; the focused panel's directory is used"
+            );
+            None
+        })
     }
 
     /// An array of strings under `key`; anything else is reported and left
@@ -414,6 +470,7 @@ fn write_fields(
     set(table, "name", meta.display_name.as_deref());
     set(table, "command", meta.command.as_deref());
     set(table, "mode", meta.mode.map(CommandMode::as_str));
+    set(table, "cwd", meta.cwd.map(CommandCwd::as_str));
     set(table, "group", meta.group.as_deref());
     set(table, "key", meta.key.as_deref());
     set(table, "debugger", meta.debugger.as_deref());
@@ -475,6 +532,9 @@ pub struct CommandItem {
     pub command: Option<String>,
     /// Execution mode.
     pub mode: CommandMode,
+    /// Where this command runs; see [`CommandCwd`]. `cwd` in `commands.toml`,
+    /// the focused panel's directory when unset.
+    pub cwd: CommandCwd,
     /// Whether this command comes from a project-local `.termide/` directory.
     pub is_project: bool,
     /// Metadata from commands.toml.
@@ -644,6 +704,7 @@ impl CommandsRegistry {
                 name: name.clone(),
                 command: meta.command.clone(),
                 mode,
+                cwd: meta.cwd.unwrap_or_default(),
                 is_project: false,
                 metadata: Some(meta.clone()),
             };
@@ -892,6 +953,45 @@ console = "panel"
             .map(|c| c.name.as_str())
             .collect();
         assert_eq!(debug, ["debug-app"]);
+    }
+
+    // `cwd` names where a command runs: unset is the focused panel's directory,
+    // and a value that is neither of the two is a mistake, not a third place.
+    #[test]
+    fn cwd_names_where_a_command_runs() {
+        let original = r#"[build]
+command = "cargo build"
+cwd = "project"
+
+[test]
+command = "cargo test"
+"#;
+        let meta = CommandsMetadata::parse(original);
+        assert_eq!(meta.entries["build"].cwd, Some(CommandCwd::Project));
+        assert_eq!(meta.entries["test"].cwd, None);
+        // Saving untouched entries leaves the file as it was.
+        assert_eq!(meta.render_over(original), original);
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("commands.toml"), original).unwrap();
+        let registry = CommandsRegistry::load_from_dir(dir.path()).unwrap();
+        let cwd = |name: &str| {
+            registry
+                .root_items
+                .iter()
+                .find(|c| c.name == name)
+                .map(|c| c.cwd)
+        };
+        assert_eq!(cwd("build"), Some(CommandCwd::Project));
+        assert_eq!(cwd("test"), Some(CommandCwd::Panel));
+
+        // A value that is not `panel` or `project` is reported at parse and the
+        // command runs in the panel's directory; the line itself is left alone —
+        // saving an unchanged entry does not rewrite what termide did not change.
+        let stray = "[stray]\ncommand = \"ls\"\ncwd = \"home\"\n";
+        let meta = CommandsMetadata::parse(stray);
+        assert_eq!(meta.entries["stray"].cwd, None);
+        assert_eq!(meta.render_over(stray), stray);
     }
 
     #[test]

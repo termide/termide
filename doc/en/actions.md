@@ -57,6 +57,7 @@ mode = "background"
 | `command` | yes | Shell command line to run |
 | `name` | no | Label in the menu; the identifier is shown when it is absent |
 | `mode` | no | `terminal` (default), `background` or `report`, see [Execution modes](#execution-modes) |
+| `cwd` | no | `panel` (default) runs in the working directory of the focused panel; `project` runs in the project root |
 | `group` | no | Puts the command into a submenu with this name |
 | `key` | no | Hotkey that runs the command, e.g. `Ctrl+Shift+D`, see [Hotkeys](#hotkeys) |
 | `params` | no | Values asked for before the command runs, see [Parameters](#parameters) |
@@ -100,13 +101,13 @@ The menu rereads both files every time it opens, so commands added to a file by 
 | `Hotkey:` | Optional hotkey (`key`) |
 | `Project command` | Checked: the command is saved to the project's `.termide/commands.toml`; unchecked: to the global file |
 
-A new command's identifier is derived from `Menu item:`, or from `Command:` when the label is empty; the characters `/ \ : * ? " < > | .` are replaced with `-`. If a command with that identifier already exists, the new one gets a free variant (`build-2`) instead of replacing it. Emptying `Menu item:` while editing removes the label, so the menu shows the identifier. Toggling `Project command` while editing moves the command to the other file. The form does not edit `params`; they are kept as they are in the file. Renaming (`F2`) onto the identifier of another command is refused.
+A new command's identifier is derived from `Menu item:`, or from `Command:` when the label is empty; the characters `/ \ : * ? " < > | .` are replaced with `-`. If a command with that identifier already exists, the new one gets a free variant (`build-2`) instead of replacing it. Emptying `Menu item:` while editing removes the label, so the menu shows the identifier. Toggling `Project command` while editing moves the command to the other file. The form does not edit `params` or `cwd`; they are kept as they are in the file. Renaming (`F2`) onto the identifier of another command is refused.
 
 Saving from the form, renaming or deleting edits `commands.toml` in place: the other commands, their order and the comments around them stay as they are, only the fields that changed are rewritten, and a new command is added at the end. A renamed command moves to the end of the file.
 
 ## Execution modes
 
-A command with a `debugger` runs in the project root, in the debug panel or a terminal panel, whatever its `mode`, see [Debugging](#debugging). Every other command runs in the working directory of the focused panel (for example, the directory shown in a file manager or the current directory of a terminal), or in the project root if the panel has none.
+A command with a `debugger` runs in the project root, in the debug panel or a terminal panel, whatever its `mode`, see [Debugging](#debugging). Every other command runs in the working directory of the focused panel (for example, the directory shown in a file manager or the current directory of a terminal), or in the project root if the panel has none. With `cwd = "project"` a command runs in the project root whatever panel is focused: that is the static point its relative paths are written against, the folder its own `commands.toml` sits in. Where a command runs is part of what an approval covers — changing `cwd` asks for the project's command again.
 
 | Mode | How it runs | Output |
 |------|-------------|--------|
