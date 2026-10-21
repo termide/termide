@@ -198,6 +198,14 @@ impl GitStatusPanel {
                     self.ensure_cursor_visible();
                 }
             }
+            // In the open repository tree, ←/→ close and open the folder under
+            // the cursor, as in the file tree; they do not walk the selectors.
+            KeyCode::Left if self.repo_dropdown_open && !self.show_repo_filter => {
+                self.set_repo_dir_open(self.dropdown_cursor, Some(false));
+            }
+            KeyCode::Right if self.repo_dropdown_open && !self.show_repo_filter => {
+                self.set_repo_dir_open(self.dropdown_cursor, Some(true));
+            }
             KeyCode::Left => match self.current_section {
                 Section::BranchSelector => {
                     self.current_section = Section::RepoSelector;

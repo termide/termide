@@ -179,9 +179,13 @@ branch. The branch list holds local branches and remote ones without a local
 twin; `●` marks the branch checked out in the repository's main copy, `⧉` one
 checked out in a linked worktree (worktree directories are not listed as
 repositories of their own). The repository list is the tree the project holds:
-directories appear as dim rows that name where the repositories under them live,
-each repository indented one step deeper, and a folder named like the repository
-inside it (`github.com/owner/owner`) writes no row of its own. A project that is
+drawn with the lines of the file tree, directories appear as dim rows that name
+where the repositories under them live, and a folder named like the repository
+inside it (`github.com/owner/owner`) writes no row of its own. A directory folds
+like a folder of the file tree: `▼`/`▶` before its name, `Enter` or a click turns
+it over, `←`/`→` close and open it; a directory cannot be chosen, and the folds
+last as long as the panel. Opening the list opens the folders above the current
+repository. The list scrolls only when the cursor leaves the visible rows. A project that is
 a folder of checkouts therefore reads as `<host>/<group>/<repo>` instead of a run
 of folder names that repeat themselves; the closed selector shows the same path.
 The filter scores that path, so a host or a group finds the repositories inside it.

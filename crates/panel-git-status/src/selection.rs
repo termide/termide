@@ -201,7 +201,7 @@ impl GitStatusPanel {
             if self.show_repo_filter {
                 self.filtered_repo_indices().len()
             } else {
-                self.repo_manager.len()
+                self.repo_rows().len()
             }
         } else if self.branch_dropdown_open {
             if self.show_branch_filter {
@@ -289,11 +289,7 @@ impl GitStatusPanel {
         match self.current_section {
             Section::RepoSelector => {
                 if self.repo_dropdown_open {
-                    let len = if self.show_repo_filter {
-                        self.filtered_repo_indices().len()
-                    } else {
-                        self.repo_manager.len()
-                    };
+                    let len = self.open_dropdown_len();
                     if self.dropdown_cursor + 1 < len {
                         self.dropdown_cursor += 1;
                     }
@@ -376,17 +372,23 @@ impl GitStatusPanel {
                             .get(self.dropdown_cursor)
                             .copied()
                     } else {
-                        Some(self.dropdown_cursor)
+                        // A folder opens or closes, as in the file tree; the
+                        // dropdown stays.
+                        if self.set_repo_dir_open(self.dropdown_cursor, None) {
+                            return vec![];
+                        }
+                        self.repo_rows()
+                            .get(self.dropdown_cursor)
+                            .and_then(|row| row.repo)
                     };
                     let events = idx.map(|idx| self.select_repo(idx)).unwrap_or_default();
                     self.repo_dropdown_open = false;
                     self.reset_repo_filter();
                     return events;
                 } else {
-                    self.repo_dropdown_open = true;
                     self.branch_dropdown_open = false;
                     self.reset_branch_filter();
-                    self.dropdown_cursor = self.repo_manager.selected_index();
+                    self.open_repo_dropdown();
                 }
                 vec![]
             }
@@ -411,6 +413,7 @@ impl GitStatusPanel {
                     self.repo_dropdown_open = false;
                     self.reset_repo_filter();
                     self.dropdown_cursor = self.shown_branch_index();
+                    self.dropdown_scroll = 0;
                 }
                 vec![]
             }

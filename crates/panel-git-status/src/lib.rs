@@ -84,8 +84,12 @@ pub struct GitStatusPanel {
     repo_dropdown_open: bool,
     /// Is branch dropdown expanded
     branch_dropdown_open: bool,
-    /// Cursor position in open dropdown
+    /// Cursor position in open dropdown: a row of the repository tree (folders
+    /// included) or, behind a filter, a match; a branch in the branch dropdown.
     dropdown_cursor: usize,
+    /// Folders of the repository tree closed in the dropdown, kept while the
+    /// panel lives; not saved.
+    repo_folds: termide_git::RepoFolds,
     // Layout zones for mouse handling
     /// Selector row Y position
     selector_y: u16,
@@ -101,7 +105,8 @@ pub struct GitStatusPanel {
     repo_dropdown_area: Option<Rect>,
     /// Branch dropdown area (for mouse click detection)
     branch_dropdown_area: Option<Rect>,
-    /// Scroll offset in dropdown
+    /// Scroll offset in dropdown, kept from frame to frame so the window moves
+    /// only when the cursor leaves it
     dropdown_scroll: usize,
     /// Branch filter text (hidden filter row in dropdown)
     branch_filter: termide_ui::TextInput,
@@ -218,6 +223,7 @@ impl GitStatusPanel {
             repo_dropdown_open: false,
             branch_dropdown_open: false,
             dropdown_cursor: 0,
+            repo_folds: termide_git::RepoFolds::default(),
             selector_y: 0,
             branch_selector_x: 0,
             files_area: Rect::default(),

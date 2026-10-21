@@ -62,10 +62,36 @@ impl GitStatusPanel {
     }
 
     /// The project's repositories as the tree the dropdown draws: directories as
-    /// dim headings, each repository under them. Recomputed rather than stored, so
-    /// the renderer and the mouse hit-test can never disagree about a row.
+    /// dim rows, each repository under them, the closed folders' contents left
+    /// out. Recomputed rather than stored, so the renderer and the mouse hit-test
+    /// can never disagree about a row.
     pub(crate) fn repo_rows(&self) -> Vec<git::RepoRow> {
-        git::repo_tree(self.repo_manager.repos(), self.repo_manager.project_root())
+        self.repo_folds
+            .rows(self.repo_manager.repos(), self.repo_manager.project_root())
+    }
+
+    /// Open the repository dropdown on the panel's repository: the folders above
+    /// it open, the cursor on its row, the window from the top.
+    pub(crate) fn open_repo_dropdown(&mut self) {
+        self.dropdown_cursor = self.repo_folds.reveal(
+            self.repo_manager.repos(),
+            self.repo_manager.project_root(),
+            self.repo_manager.selected_index(),
+        );
+        self.dropdown_scroll = 0;
+        self.repo_dropdown_open = true;
+    }
+
+    /// Open or close the folder at `row` of the repository tree, leaving the
+    /// cursor on it; `open` says which, `None` turns it over. `false` when the
+    /// row is not a folder, or already as asked.
+    pub(crate) fn set_repo_dir_open(&mut self, row: usize, open: Option<bool>) -> bool {
+        let rows = self.repo_rows();
+        let changed = self.repo_folds.set_open(&rows, row, open);
+        if changed {
+            self.dropdown_cursor = row;
+        }
+        changed
     }
 
     /// The same tree, holding only the repositories that match the filter, best
@@ -260,5 +286,112 @@ mod tests {
         assert!(matches!(result, termide_core::CommandResult::Handled(true)));
         assert_eq!(p.repo_filter.text(), "api");
         assert!(p.show_repo_filter);
+    }
+
+    /// A project of `host/devops/{multica,tardis}` and `host/sigma/crm`, its panel
+    /// with every repository found.
+    fn grouped_project(name: &str) -> (std::path::PathBuf, GitStatusPanel) {
+        let tmp =
+            std::env::temp_dir().join(format!("termide-gs-tree-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        for repo in [
+            "host/devops/multica",
+            "host/devops/tardis",
+            "host/sigma/crm",
+        ] {
+            std::fs::create_dir_all(tmp.join(repo).join(".git")).unwrap();
+        }
+        let root = dunce::canonicalize(&tmp).unwrap();
+        let mut p = GitStatusPanel::new(std::slice::from_ref(&root), Some(&root));
+        for _ in 0..300 {
+            p.repo_manager.poll();
+            if p.repo_manager.len() == 3 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(p.repo_manager.len(), 3, "the walk found the repositories");
+        p.current_section = crate::types::Section::RepoSelector;
+        (tmp, p)
+    }
+
+    fn labels(p: &GitStatusPanel) -> Vec<(String, bool)> {
+        p.repo_rows()
+            .into_iter()
+            .map(|r| (r.label, r.expanded))
+            .collect()
+    }
+
+    // The folders of the repository tree behave as in the file tree: the cursor
+    // reaches them, Enter or ←/→ close and open them, a closed one hides what is
+    // under it — and only a repository is ever chosen.
+    #[test]
+    fn the_repository_tree_folds_like_the_file_tree() {
+        let (tmp, mut p) = grouped_project("fold");
+        press(&mut p, KeyCode::Enter, KeyModifiers::NONE);
+        assert!(p.repo_dropdown_open);
+        let rows = p.repo_rows();
+        assert_eq!(
+            rows.len(),
+            6,
+            "host, devops, two repos, sigma, crm: {rows:?}"
+        );
+
+        // Up to `devops`, the second row: a folder takes the cursor.
+        while p.dropdown_cursor > 1 {
+            press(&mut p, KeyCode::Up, KeyModifiers::NONE);
+        }
+        press(&mut p, KeyCode::Enter, KeyModifiers::NONE);
+        assert!(p.repo_dropdown_open, "a folder is not a choice");
+        assert_eq!(
+            labels(&p),
+            [
+                ("host".to_string(), true),
+                ("devops".to_string(), false),
+                ("sigma".to_string(), true),
+                ("crm".to_string(), true),
+            ]
+        );
+        assert_eq!(p.dropdown_cursor, 1, "the cursor stays on the folder");
+        press(&mut p, KeyCode::Right, KeyModifiers::NONE);
+        assert_eq!(p.repo_rows().len(), 6, "→ opens it again");
+        press(&mut p, KeyCode::Left, KeyModifiers::NONE);
+        assert_eq!(p.repo_rows().len(), 4, "← closes it");
+
+        // Down to `crm`, the last row, and choose it.
+        press(&mut p, KeyCode::Down, KeyModifiers::NONE);
+        press(&mut p, KeyCode::Down, KeyModifiers::NONE);
+        press(&mut p, KeyCode::Enter, KeyModifiers::NONE);
+        let chosen = p.repo_manager.current().map(|c| c.to_path_buf());
+        let _ = std::fs::remove_dir_all(&tmp);
+        assert!(!p.repo_dropdown_open);
+        assert!(
+            chosen.is_some_and(|c| c.ends_with("host/sigma/crm")),
+            "the repository under the cursor was chosen"
+        );
+    }
+
+    // A list opened on a repository inside a closed folder opens that folder, so
+    // the cursor rests on the repository and not on a row that hides it.
+    #[test]
+    fn opening_on_a_hidden_repository_opens_its_folder() {
+        let (tmp, mut p) = grouped_project("reveal");
+        let tardis = p
+            .repo_manager
+            .repos()
+            .iter()
+            .position(|r| r.ends_with("tardis"))
+            .unwrap();
+        p.select_repo(tardis);
+        let rows = p.repo_rows();
+        let devops = rows.iter().position(|r| r.label == "devops").unwrap();
+        p.repo_folds.set_open(&rows, devops, Some(false));
+        press(&mut p, KeyCode::Enter, KeyModifiers::NONE);
+        let _ = std::fs::remove_dir_all(&tmp);
+        let rows = p.repo_rows();
+        assert_eq!(
+            rows.get(p.dropdown_cursor).and_then(|r| r.repo),
+            Some(tardis)
+        );
     }
 }

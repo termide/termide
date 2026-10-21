@@ -60,8 +60,15 @@ pub struct GitLogPanel {
     repo_dropdown_open: bool,
     /// Whether the branch dropdown is open
     branch_dropdown_open: bool,
-    /// Cursor position in the open dropdown
+    /// Cursor position in the open dropdown: a row of the repository tree,
+    /// folders included, or a branch
     dropdown_cursor: usize,
+    /// First row the open dropdown shows, kept from frame to frame so the window
+    /// moves only when the cursor leaves it
+    dropdown_scroll: usize,
+    /// Folders of the repository tree closed in the dropdown, kept while the
+    /// panel lives; not saved
+    repo_folds: git::RepoFolds,
     /// Cached area of the open dropdown for click detection
     dropdown_area: Option<Rect>,
     /// Cached area of the repo selector widget
@@ -166,6 +173,8 @@ impl GitLogPanel {
             repo_dropdown_open: false,
             branch_dropdown_open: false,
             dropdown_cursor: 0,
+            dropdown_scroll: 0,
+            repo_folds: git::RepoFolds::default(),
             dropdown_area: None,
             repo_selector_area: None,
             branch_selector_area: None,
@@ -516,7 +525,7 @@ impl GitLogPanel {
         }
         if is_move_down(&key, self.vim_mode) {
             if self.repo_dropdown_open {
-                let max = self.repo_manager.len().saturating_sub(1);
+                let max = self.open_dropdown_len().saturating_sub(1);
                 if self.dropdown_cursor < max {
                     self.dropdown_cursor += 1;
                 }
@@ -580,15 +589,19 @@ impl GitLogPanel {
                 match self.current_section {
                     Section::RepoSelector => {
                         if self.repo_dropdown_open {
-                            // Confirm repo selection
-                            let idx = self.dropdown_cursor;
-                            self.repo_manager.select(idx);
-                            self.repo_dropdown_open = false;
-                            self.selected_branch = None;
-                            self.refresh();
+                            // A folder opens or closes, as in the file tree, and
+                            // the dropdown stays; a repository is chosen.
+                            if !self.set_repo_dir_open(self.dropdown_cursor, None) {
+                                let row = self.repo_rows().into_iter().nth(self.dropdown_cursor);
+                                if let Some(idx) = row.and_then(|row| row.repo) {
+                                    self.repo_manager.select(idx);
+                                    self.repo_dropdown_open = false;
+                                    self.selected_branch = None;
+                                    self.refresh();
+                                }
+                            }
                         } else {
-                            self.dropdown_cursor = self.repo_manager.selected_index();
-                            self.repo_dropdown_open = true;
+                            self.open_repo_dropdown();
                         }
                     }
                     Section::BranchSelector => {
@@ -601,6 +614,7 @@ impl GitLogPanel {
                             self.refresh();
                         } else {
                             self.dropdown_cursor = self.shown_branch_index();
+                            self.dropdown_scroll = 0;
                             self.branch_dropdown_open = true;
                         }
                     }
@@ -613,6 +627,14 @@ impl GitLogPanel {
                         }
                     }
                 }
+            }
+            // In the open repository tree, ←/→ close and open the folder under
+            // the cursor, as in the file tree.
+            KeyCode::Left if self.repo_dropdown_open => {
+                self.set_repo_dir_open(self.dropdown_cursor, Some(false));
+            }
+            KeyCode::Right if self.repo_dropdown_open => {
+                self.set_repo_dir_open(self.dropdown_cursor, Some(true));
             }
             KeyCode::Char('d') => {
                 return self.view_diff();
@@ -642,41 +664,27 @@ impl GitLogPanel {
                     {
                         // Click inside dropdown: select item (skip border rows)
                         if row > area.y && row < area.y + area.height - 1 {
-                            let visible_rows = (area.height as usize).saturating_sub(2);
+                            // The rows the dropdown drew, from the row it drew
+                            // first: the line clicked is the one under the mouse.
+                            let clicked_row = self.dropdown_scroll + (row - area.y - 1) as usize;
                             if self.repo_dropdown_open {
-                                // The same rows the dropdown drew, scrolled the same
-                                // way: the line clicked is the repository it names,
-                                // and a directory row selects nothing.
-                                let rows = git::repo_tree(
-                                    self.repo_manager.repos(),
-                                    self.repo_manager.project_root(),
-                                );
-                                let cursor_row = rows
-                                    .iter()
-                                    .position(|r| r.repo == Some(self.dropdown_cursor))
-                                    .unwrap_or(0);
-                                let scroll_offset = if cursor_row >= visible_rows {
-                                    cursor_row - visible_rows + 1
-                                } else {
-                                    0
-                                };
-                                let clicked_row = scroll_offset + (row - area.y - 1) as usize;
-                                // A heading, or a row past the list, selects nothing.
-                                if let Some(repo_idx) = rows.get(clicked_row).and_then(|r| r.repo) {
-                                    self.repo_manager.select(repo_idx);
-                                    self.repo_dropdown_open = false;
-                                    self.selected_branch = None;
-                                    self.refresh();
+                                let rows = self.repo_rows();
+                                match rows.get(clicked_row).map(|r| r.repo) {
+                                    Some(Some(repo_idx)) => {
+                                        self.repo_manager.select(repo_idx);
+                                        self.repo_dropdown_open = false;
+                                        self.selected_branch = None;
+                                        self.refresh();
+                                    }
+                                    // A folder opens or closes, and the list stays.
+                                    Some(None) => {
+                                        self.set_repo_dir_open(clicked_row, None);
+                                    }
+                                    None => {}
                                 }
                             } else if self.branch_dropdown_open {
                                 // Branches are a flat list: the row is the branch.
-                                let scroll_offset = if self.dropdown_cursor >= visible_rows {
-                                    self.dropdown_cursor - visible_rows + 1
-                                } else {
-                                    0
-                                };
-                                let item_idx = scroll_offset + (row - area.y - 1) as usize;
-                                let selected = self.branches.get(item_idx).cloned();
+                                let selected = self.branches.get(clicked_row).cloned();
                                 let is_current = selected.as_deref() == self.branch.as_deref();
                                 self.selected_branch = if is_current { None } else { selected };
                                 self.branch_dropdown_open = false;
@@ -698,8 +706,7 @@ impl GitLogPanel {
                         if row == area.y && col >= area.x && col < area.x + area.width {
                             self.current_section = Section::RepoSelector;
                             if !was_repo_open {
-                                self.dropdown_cursor = self.repo_manager.selected_index();
-                                self.repo_dropdown_open = true;
+                                self.open_repo_dropdown();
                             }
                             return vec![];
                         }
@@ -709,6 +716,7 @@ impl GitLogPanel {
                             self.current_section = Section::BranchSelector;
                             if !was_branch_open {
                                 self.dropdown_cursor = self.shown_branch_index();
+                                self.dropdown_scroll = 0;
                                 self.branch_dropdown_open = true;
                             }
                             return vec![];
@@ -724,8 +732,7 @@ impl GitLogPanel {
                         if self.repo_dropdown_open {
                             self.repo_dropdown_open = false;
                         } else {
-                            self.dropdown_cursor = self.repo_manager.selected_index();
-                            self.repo_dropdown_open = true;
+                            self.open_repo_dropdown();
                         }
                         return vec![];
                     }
@@ -739,6 +746,7 @@ impl GitLogPanel {
                             self.branch_dropdown_open = false;
                         } else {
                             self.dropdown_cursor = self.shown_branch_index();
+                            self.dropdown_scroll = 0;
                             self.branch_dropdown_open = true;
                         }
                         return vec![];

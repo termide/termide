@@ -10,42 +10,45 @@ use termide_core::ThemeColors;
 use termide_git::RepoRow;
 use termide_ui::ScrollBar;
 
-/// The two characters a row is indented per level of the tree.
-const INDENT: &str = "  ";
+/// The mark of an open directory, and of a closed one: the arrows of the file tree.
+const DIR_EXPANDED: &str = "▼";
+const DIR_COLLAPSED: &str = if cfg!(windows) { "►" } else { "▶" };
 
 /// Render a bordered dropdown list overlay directly into the buffer.
 ///
-/// The dropdown draws a box at `(x, y)` and lists `rows`, highlighting the row of
-/// the `cursor` repository with selection colors and the row of the `selected` one
-/// with cursor color. Both are indices into the repositories, not into the rows: a
-/// row that names a directory (`repo: None`) is drawn dim and indented, takes no
-/// selection, and the cursor never rests on it — so a caller that moves the cursor
-/// over its repositories keeps doing exactly that.
+/// The dropdown draws a box at `(x, y)` and lists `rows` from `scroll` on, the row
+/// at `cursor` in selection colors and the repository `selected` (an index into
+/// the repositories, not the rows) in cursor color. A directory row is drawn dim,
+/// with the arrow that says whether it is open, and the tree lines before every
+/// row are dim too: the shape of the tree, not things to choose.
 ///
-/// Width auto-fits to the widest row as drawn (indent and heading mark included),
-/// clamped to `max_width`. Height is clamped to `max_height` rows; the list
-/// scrolls to keep the cursor's row visible.
+/// Width auto-fits to the widest row as drawn, clamped to `max_width`. Height is
+/// clamped to `max_height` rows. Returns the scroll actually used — `scroll`, moved
+/// only as far as it takes to keep the cursor in a window the buffer may have made
+/// smaller — for the caller to keep for the next frame and its mouse hit-tests.
 #[allow(clippy::too_many_arguments)]
 pub fn render_simple_dropdown(
     rows: &[RepoRow],
     selected: usize,
     cursor: usize,
+    scroll: usize,
     x: u16,
     y: u16,
     max_width: u16,
     max_height: u16,
     buf: &mut Buffer,
     theme: &ThemeColors,
-) {
+) -> usize {
     if rows.is_empty() {
-        return;
+        return 0;
     }
 
+    let lines = dropdown_lines(rows);
     // Auto-fit width to the widest row as it will be drawn, plus padding + borders.
-    let item_max_width = rows.iter().map(dropdown_row_width).max().unwrap_or(10);
+    let item_max_width = lines_width(&lines);
     let width = ((item_max_width + 4).min(max_width as usize) as u16)
         .min(buf.area.width)
-        .max(1);
+        .max(2);
 
     // Clamp the box to the buffer: this function indexes `buf` directly, so a
     // box taller/wider than the terminal would write out of bounds and panic
@@ -57,17 +60,7 @@ pub fn render_simple_dropdown(
     let y = y.min(buf.area.height.saturating_sub(dropdown_height));
 
     let visible_count = dropdown_height.saturating_sub(2) as usize;
-    // The cursor is a repository, and the rows hold headings between them: scroll
-    // by the row the cursor rests on, not by its index in the repository list.
-    let cursor_row = rows
-        .iter()
-        .position(|row| row.repo == Some(cursor))
-        .unwrap_or(0);
-    let scroll_offset = if visible_count > 0 && cursor_row >= visible_count {
-        cursor_row - visible_count + 1
-    } else {
-        0
-    };
+    let scroll_offset = follow_scroll(scroll, cursor, visible_count, rows.len());
 
     let border_style = Style::default().fg(theme.border_focused);
     let bg_style = Style::default()
@@ -96,57 +89,29 @@ pub fn render_simple_dropdown(
         }
     }
 
-    // Draw rows
-    for (i, row) in rows
+    for (i, (row, (prefix, text))) in rows
         .iter()
+        .zip(&lines)
+        .enumerate()
         .skip(scroll_offset)
         .take(visible_count)
-        .enumerate()
+        .map(|(i, pair)| (i - scroll_offset, pair))
     {
-        let item_y = y + 1 + i as u16;
-        let is_cursor = row.repo == Some(cursor);
-        let is_selected = row.repo == Some(selected);
-
-        let style = if is_cursor {
-            Style::default()
-                .fg(theme.selection_fg)
-                .bg(theme.selection_bg)
-                .remove_modifier(Modifier::all())
-        } else if row.is_selectable() {
-            Style::default()
-                .fg(if is_selected { theme.cursor } else { theme.fg })
-                .remove_modifier(Modifier::all())
-        } else {
-            // A directory: the shape of the tree, not a thing to choose.
-            Style::default()
-                .fg(theme.disabled)
-                .remove_modifier(Modifier::all())
-        };
-
-        let text = dropdown_row_label(row);
-        // Truncate to fit inside borders, by display width.
-        let max_item_width = (width - 2) as usize;
-        let display: std::borrow::Cow<str> = if text.width() > max_item_width {
-            let mut end = 0;
-            let mut w = 0;
-            for ch in text.chars() {
-                let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-                if w + cw > max_item_width {
-                    break;
-                }
-                w += cw;
-                end += ch.len_utf8();
-            }
-            std::borrow::Cow::Borrowed(&text[..end])
-        } else {
-            std::borrow::Cow::Borrowed(&text)
-        };
-
-        // Clear line and draw the row
-        for dx in 1..width - 1 {
-            buf[(x + dx, item_y)].set_symbol(" ").set_style(style);
-        }
-        buf.set_string(x + 1, item_y, display, style);
+        let (style, line_style) = dropdown_row_styles(
+            row,
+            scroll_offset + i == cursor,
+            row.repo == Some(selected),
+            theme,
+        );
+        draw_dropdown_row(
+            buf,
+            x + 1,
+            y + 1 + i as u16,
+            width - 2,
+            (prefix, text),
+            style,
+            line_style,
+        );
     }
 
     // Scrollbar on the right border when the list overflows the visible window.
@@ -161,28 +126,117 @@ pub fn render_simple_dropdown(
         theme,
         true,
     );
+    scroll_offset
 }
 
-/// The text of a row: a directory with its mark, a repository indented under it.
-/// A caller that draws these rows elsewhere — behind a filter field, say — uses the
-/// same function, so the two never drift apart.
-pub fn dropdown_row_label(row: &RepoRow) -> String {
-    let indent = INDENT.repeat(row.depth);
-    match row.repo {
-        Some(_) => format!("{indent}{}", row.label),
-        None => format!("{indent}▾ {}", row.label),
+/// The scroll that keeps the row at `cursor` in a window of `visible` rows over
+/// `total`, moved from `scroll` no further than that takes: the list stays where
+/// it is while the cursor walks inside it, and steps one row when the cursor
+/// steps past an edge — never jumps back so the cursor sits pinned to the bottom.
+pub fn follow_scroll(scroll: usize, cursor: usize, visible: usize, total: usize) -> usize {
+    if visible == 0 {
+        return 0;
     }
+    let mut scroll = scroll.min(total.saturating_sub(visible));
+    if cursor < scroll {
+        scroll = cursor;
+    } else if cursor >= scroll + visible {
+        scroll = cursor + 1 - visible;
+    }
+    scroll
 }
 
-/// The width [`dropdown_row_label`] takes on the screen. A caller that sizes a box
-/// around these rows measures them the same way, so the two never disagree.
-pub fn dropdown_row_width(row: &RepoRow) -> usize {
-    dropdown_row_label(row).width()
+/// Each row as drawn: the tree lines before it, then its text — a directory with
+/// the arrow that says whether it is open. A caller that draws these rows
+/// elsewhere — behind a filter field, say — uses the same function, so the two
+/// never drift apart.
+pub fn dropdown_lines(rows: &[RepoRow]) -> Vec<(String, String)> {
+    termide_git::tree_prefixes(rows)
+        .into_iter()
+        .zip(rows)
+        .map(|(prefix, row)| {
+            let text = match row.repo {
+                Some(_) => row.label.clone(),
+                None => {
+                    let mark = if row.expanded {
+                        DIR_EXPANDED
+                    } else {
+                        DIR_COLLAPSED
+                    };
+                    format!("{mark} {}", row.label)
+                }
+            };
+            (prefix, text)
+        })
+        .collect()
+}
+
+/// The width the widest of [`dropdown_lines`] takes on the screen. A caller that
+/// sizes a box around these rows measures them the same way, so the two never
+/// disagree.
+pub fn dropdown_rows_width(rows: &[RepoRow]) -> usize {
+    lines_width(&dropdown_lines(rows))
+}
+
+fn lines_width(lines: &[(String, String)]) -> usize {
+    lines
+        .iter()
+        .map(|(prefix, text)| prefix.width() + text.width())
+        .max()
+        .unwrap_or(10)
+}
+
+/// The style of a row's text and of the tree lines before it. The cursor row is
+/// in selection colors whole; otherwise a repository is in the foreground (the
+/// chosen one in cursor color), a directory dim, and the lines dim.
+pub fn dropdown_row_styles(
+    row: &RepoRow,
+    is_cursor: bool,
+    is_selected: bool,
+    theme: &ThemeColors,
+) -> (Style, Style) {
+    let plain = Style::default().remove_modifier(Modifier::all());
+    if is_cursor {
+        let style = plain.fg(theme.selection_fg).bg(theme.selection_bg);
+        return (style, style);
+    }
+    let dim = plain.fg(theme.disabled);
+    let style = if row.is_selectable() {
+        plain.fg(if is_selected { theme.cursor } else { theme.fg })
+    } else {
+        dim
+    };
+    (style, dim)
+}
+
+/// Draw one row `width` cells wide at `(x, y)`: the line cleared in `style`, the
+/// tree lines in `line_style`, the text in `style`, cut to fit by display width.
+pub fn draw_dropdown_row(
+    buf: &mut Buffer,
+    x: u16,
+    y: u16,
+    width: u16,
+    (prefix, text): (&str, &str),
+    style: Style,
+    line_style: Style,
+) {
+    for dx in 0..width {
+        buf[(x + dx, y)].set_symbol(" ").set_style(style);
+    }
+    let (after_prefix, _) = buf.set_stringn(x, y, prefix, width as usize, line_style);
+    let used = after_prefix.saturating_sub(x);
+    buf.set_stringn(
+        after_prefix,
+        y,
+        text,
+        width.saturating_sub(used) as usize,
+        style,
+    );
 }
 
 #[cfg(test)]
 mod overflow_tests {
-    use super::{dropdown_row_width, render_simple_dropdown};
+    use super::{dropdown_rows_width, follow_scroll, render_simple_dropdown};
     use ratatui::{buffer::Buffer, layout::Rect};
     use termide_core::ThemeColors;
     use termide_git::RepoRow;
@@ -198,38 +252,53 @@ mod overflow_tests {
             .collect();
         let mut buf = Buffer::empty(Rect::new(0, 0, 57, 15));
         // max_height larger than the buffer, anchored near the bottom-right.
-        render_simple_dropdown(&rows, 29, 29, 50, 13, 80, 25, &mut buf, &colors);
+        render_simple_dropdown(&rows, 29, 29, 0, 50, 13, 80, 25, &mut buf, &colors);
     }
 
-    // Headings take no selection and the cursor rests on repositories alone: a
-    // row between them must never be drawn as the chosen one.
+    // A directory is drawn dim with its arrow, under the lines of the tree, and it
+    // takes the cursor without ever being the chosen repository.
     #[test]
-    fn a_heading_takes_neither_the_cursor_nor_the_selection() {
+    fn a_directory_is_dim_and_the_tree_has_its_lines() {
         let colors = ThemeColors::from(Theme::get_by_name("default"));
         let rows = vec![
-            RepoRow::heading("sigma", 0),
-            RepoRow::repo("crm", 1, 0),
-            RepoRow::repo("dcb", 1, 1),
+            RepoRow::heading("sigma", 0).at("sigma"),
+            RepoRow::repo("crm", 1, 0).at("sigma/crm"),
+            RepoRow::repo("dcb", 1, 1).at("sigma/dcb"),
         ];
         let mut buf = Buffer::empty(Rect::new(0, 0, 24, 8));
-        render_simple_dropdown(&rows, 1, 1, 0, 0, 24, 6, &mut buf, &colors);
+        render_simple_dropdown(&rows, 1, 2, 0, 0, 0, 24, 6, &mut buf, &colors);
 
-        // The box fits the widest row as drawn, plus borders and padding.
-        let width = (rows.iter().map(dropdown_row_width).max().unwrap_or(0) + 4) as u16;
-        // One row per entry below the top border: the heading, then the two
-        // repositories indented under it.
+        let width = (dropdown_rows_width(&rows) + 4) as u16;
         let row = |y: u16| -> String {
             (1..width - 1)
                 .map(|x| buf[(x, y)].symbol().to_string())
                 .collect::<String>()
         };
-        assert_eq!(row(1).trim_end(), "▾ sigma");
-        assert_eq!(row(2).trim_end(), "  crm");
-        assert_eq!(row(3).trim_end(), "  dcb");
+        assert_eq!(row(1).trim_end(), "▼ sigma");
+        assert_eq!(row(2).trim_end(), "├─ crm");
+        assert_eq!(row(3).trim_end(), "└─ dcb");
         // The cursor is on `dcb`: its row carries the selection background, while
-        // the heading stays dim and unselected.
-        assert_eq!(buf[(4, 3)].style().bg, Some(colors.selection_bg));
-        assert_eq!(buf[(2, 1)].style().fg, Some(colors.disabled));
-        assert_ne!(buf[(2, 1)].style().bg, Some(colors.selection_bg));
+        // the directory and the lines of the other rows stay dim.
+        assert_eq!(buf[(5, 3)].style().bg, Some(colors.selection_bg));
+        assert_eq!(buf[(3, 1)].style().fg, Some(colors.disabled));
+        assert_eq!(buf[(1, 2)].style().fg, Some(colors.disabled));
+        assert_ne!(buf[(4, 2)].style().fg, Some(colors.disabled));
+    }
+
+    // The window holds still while the cursor moves inside it and steps a row at a
+    // time past its edges: walking back up must not drag the list along.
+    #[test]
+    fn the_window_moves_only_when_the_cursor_leaves_it() {
+        // Down past the bottom: one row at a time.
+        assert_eq!(follow_scroll(0, 4, 5, 20), 0);
+        assert_eq!(follow_scroll(0, 5, 5, 20), 1);
+        assert_eq!(follow_scroll(1, 6, 5, 20), 2);
+        // Back up inside the window: it stays.
+        assert_eq!(follow_scroll(2, 5, 5, 20), 2);
+        assert_eq!(follow_scroll(2, 2, 5, 20), 2);
+        // Up past the top: one row at a time.
+        assert_eq!(follow_scroll(2, 1, 5, 20), 1);
+        // A list that shrank under the window: the window comes back to fit it.
+        assert_eq!(follow_scroll(15, 3, 5, 6), 1);
     }
 }

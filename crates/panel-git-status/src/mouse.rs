@@ -73,8 +73,12 @@ impl GitStatusPanel {
                                     return events;
                                 }
                                 if rows.get(clicked_row).is_some() {
-                                    // A heading: the click lands on the tree, not on a
-                                    // repository. Leave the dropdown where it is.
+                                    // A folder: the click opens or closes it, as in
+                                    // the file tree, and the dropdown stays. Behind a
+                                    // filter the tree is the matches, always open.
+                                    if !self.show_repo_filter {
+                                        self.set_repo_dir_open(clicked_row, None);
+                                    }
                                     return vec![];
                                 }
                             }
@@ -191,9 +195,10 @@ impl GitStatusPanel {
                         self.current_section = Section::RepoSelector;
                         // Toggle repo dropdown (close branch if open)
                         self.branch_dropdown_open = false;
-                        self.repo_dropdown_open = !self.repo_dropdown_open;
                         if self.repo_dropdown_open {
-                            self.dropdown_cursor = self.repo_manager.selected_index();
+                            self.repo_dropdown_open = false;
+                        } else {
+                            self.open_repo_dropdown();
                         }
                     } else {
                         self.current_section = Section::BranchSelector;
@@ -202,6 +207,7 @@ impl GitStatusPanel {
                         self.branch_dropdown_open = !self.branch_dropdown_open;
                         if self.branch_dropdown_open {
                             self.dropdown_cursor = self.shown_branch_index();
+                            self.dropdown_scroll = 0;
                         }
                     }
                     // Reset click state for non-file areas

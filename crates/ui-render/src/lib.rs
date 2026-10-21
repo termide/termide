@@ -46,7 +46,10 @@ pub use panel_rendering::{
     render_v_divider_ghost, ExpandedPanelParams,
 };
 pub use project_strip::ProjectButton;
-pub use simple_dropdown::{dropdown_row_label, dropdown_row_width, render_simple_dropdown};
+pub use simple_dropdown::{
+    draw_dropdown_row, dropdown_lines, dropdown_row_styles, dropdown_rows_width, follow_scroll,
+    render_simple_dropdown,
+};
 pub use status_bar::{
     segment_hit_areas, status_trailing_width, BackgroundOpsSummary, SegmentHit, StatusBar,
     StatusBarParams,

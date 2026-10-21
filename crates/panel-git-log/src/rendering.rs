@@ -288,7 +288,7 @@ impl GitLogPanel {
             // The project's repositories as the tree they live in: directories as
             // dim headings, each repository under them. Flat when there is nothing
             // between the project root and its repositories to name.
-            let rows = git::repo_tree(self.repo_manager.repos(), self.repo_manager.project_root());
+            let rows = self.repo_rows();
             let dropdown_y = content_area.y + 1;
             let max_h = content_area.height.saturating_sub(3);
             let selected_idx = self.repo_manager.selected_index();
@@ -299,10 +299,11 @@ impl GitLogPanel {
                 width: content_area.width / 2,
                 height: visible_count as u16 + 2,
             });
-            render_simple_dropdown(
+            self.dropdown_scroll = render_simple_dropdown(
                 &rows,
                 selected_idx,
                 self.dropdown_cursor,
+                self.dropdown_scroll,
                 content_area.x,
                 dropdown_y,
                 content_area.width / 2,
@@ -330,10 +331,11 @@ impl GitLogPanel {
                 width: dropdown_w,
                 height: visible_count as u16 + 2,
             });
-            render_simple_dropdown(
+            self.dropdown_scroll = render_simple_dropdown(
                 &branches,
                 current_branch_idx,
                 self.dropdown_cursor,
+                self.dropdown_scroll,
                 branch_x,
                 dropdown_y,
                 dropdown_w,

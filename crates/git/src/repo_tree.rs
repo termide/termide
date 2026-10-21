@@ -13,6 +13,7 @@
 //! repository it shows. A heading row carries `None` and is not selectable, so
 //! ↑/↓ keep moving over repositories alone.
 
+use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 
 use crate::get_repo_name;
@@ -26,6 +27,12 @@ pub struct RepoRow {
     pub depth: usize,
     /// Index into the flat list of repositories, or `None` for a directory row.
     pub repo: Option<usize>,
+    /// The row's path inside the project, `/`-separated: what a collapsed
+    /// directory is remembered by, and how a repository finds the directories
+    /// above it. Empty for a row that has no place in the tree.
+    pub key: String,
+    /// For a directory: whether the rows under it are shown.
+    pub expanded: bool,
 }
 
 impl RepoRow {
@@ -35,6 +42,8 @@ impl RepoRow {
             label: label.into(),
             depth,
             repo: Some(index),
+            key: String::new(),
+            expanded: true,
         }
     }
 
@@ -44,13 +53,145 @@ impl RepoRow {
             label: label.into(),
             depth,
             repo: None,
+            key: String::new(),
+            expanded: true,
         }
+    }
+
+    /// The same row, placed at `key` in the project.
+    pub fn at(mut self, key: impl Into<String>) -> Self {
+        self.key = key.into();
+        self
     }
 
     /// Whether the row takes the selection.
     pub fn is_selectable(&self) -> bool {
         self.repo.is_some()
     }
+
+    /// Whether `self` is a directory that holds `other` somewhere below it.
+    fn holds(&self, other: &RepoRow) -> bool {
+        !self.is_selectable()
+            && !self.key.is_empty()
+            && other
+                .key
+                .strip_prefix(self.key.as_str())
+                .is_some_and(|rest| rest.starts_with('/'))
+    }
+}
+
+/// The folders a user closed in a repository tree, and the tree as it then
+/// shows. Each panel keeps one for as long as it lives; nothing is saved.
+#[derive(Debug, Default, Clone)]
+pub struct RepoFolds {
+    collapsed: HashSet<String>,
+}
+
+impl RepoFolds {
+    /// The tree of `repos` in `project_root` as [`repo_tree`] builds it, the
+    /// contents of the closed folders left out.
+    pub fn rows(&self, repos: &[PathBuf], project_root: Option<&Path>) -> Vec<RepoRow> {
+        collapse(repo_tree(repos, project_root), &self.collapsed)
+    }
+
+    /// Open the folders above the repository at `index` and return the row it
+    /// then sits at: where a list opened on it puts its cursor.
+    pub fn reveal(
+        &mut self,
+        repos: &[PathBuf],
+        project_root: Option<&Path>,
+        index: usize,
+    ) -> usize {
+        reveal(&mut self.collapsed, &repo_tree(repos, project_root), index);
+        self.rows(repos, project_root)
+            .iter()
+            .position(|row| row.repo == Some(index))
+            .unwrap_or(0)
+    }
+
+    /// Open or close the folder at `row` of `rows`, as this shows them; `open`
+    /// says which, `None` turns it over. `false` when the row is no folder, or
+    /// is already as asked.
+    pub fn set_open(&mut self, rows: &[RepoRow], row: usize, open: Option<bool>) -> bool {
+        let Some(dir) = rows.get(row) else {
+            return false;
+        };
+        if dir.is_selectable() || open == Some(dir.expanded) {
+            return false;
+        }
+        if dir.expanded {
+            self.collapsed.insert(dir.key.clone());
+        } else {
+            self.collapsed.remove(&dir.key);
+        }
+        true
+    }
+}
+
+/// The rows as a collapsible tree shows them: a directory in `collapsed` is
+/// marked closed and the rows under it are left out.
+fn collapse(rows: Vec<RepoRow>, collapsed: &HashSet<String>) -> Vec<RepoRow> {
+    let mut shown = Vec::with_capacity(rows.len());
+    // The depth of the closed directory whose subtree is being skipped.
+    let mut hidden_below: Option<usize> = None;
+    for mut row in rows {
+        if let Some(depth) = hidden_below {
+            if row.depth > depth {
+                continue;
+            }
+            hidden_below = None;
+        }
+        if !row.is_selectable() && collapsed.contains(&row.key) {
+            row.expanded = false;
+            hidden_below = Some(row.depth);
+        }
+        shown.push(row);
+    }
+    shown
+}
+
+/// Open every directory above the repository at `index`, so a list opened on it
+/// shows it instead of the closed folder it sits in.
+fn reveal(collapsed: &mut HashSet<String>, rows: &[RepoRow], index: usize) {
+    if let Some(repo) = rows.iter().find(|row| row.repo == Some(index)) {
+        rows.iter().filter(|row| row.holds(repo)).for_each(|dir| {
+            collapsed.remove(&dir.key);
+        });
+    }
+}
+
+/// The connector drawn before each row — `├─ `, `└─ `, `│  ` — the same lines the
+/// file tree of the Git status panel draws. A row at depth 0 has none.
+pub fn tree_prefixes(rows: &[RepoRow]) -> Vec<String> {
+    let max_depth = rows.iter().map(|row| row.depth).max().unwrap_or(0);
+    // Whether a later row sits at that depth before a shallower one cuts it off.
+    let mut has_next = vec![false; max_depth + 1];
+    let mut prefixes = Vec::with_capacity(rows.len());
+    for row in rows.iter().rev() {
+        let depth = row.depth;
+        if depth == 0 {
+            has_next.fill(false);
+            has_next[0] = true;
+            prefixes.push(String::new());
+            continue;
+        }
+        let mut prefix = String::with_capacity(depth * 3);
+        for (level, next) in has_next.iter().enumerate().take(depth + 1).skip(1) {
+            prefix.push_str(match (level == depth, *next) {
+                (true, true) => "├─ ",
+                (true, false) => "└─ ",
+                (false, true) => "│  ",
+                (false, false) => "   ",
+            });
+        }
+        prefixes.push(prefix);
+        for next in &mut has_next[depth + 1..] {
+            *next = false;
+        }
+        has_next[depth] = true;
+    }
+    prefixes.reverse();
+    prefixes
 }
 
 /// The path of `repo` inside `project_root`, as the segments it is nested in.
@@ -154,11 +295,14 @@ fn tree_rows(nested: &[(usize, Vec<String>)], repos: &[(usize, PathBuf)]) -> Vec
             Some((name, dirs)) => (name.clone(), dirs.to_vec()),
             None => continue,
         };
-        tree.insert(&dirs, RepoRow::repo(name, dirs.len(), *index));
+        tree.insert(
+            &dirs,
+            RepoRow::repo(name, dirs.len(), *index).at(segments.join("/")),
+        );
     }
 
     let mut rows = Vec::new();
-    tree.write(0, &mut rows);
+    tree.write("", 0, &mut rows);
     let placed: std::collections::HashSet<usize> = rows.iter().filter_map(|r| r.repo).collect();
     let orphans = repos
         .iter()
@@ -216,15 +360,23 @@ impl Node {
 
     /// Write the subtree, directories before the repositories beside them: the
     /// order a file manager lists them in.
-    fn write(&self, depth: usize, rows: &mut Vec<RepoRow>) {
+    fn write(&self, parent: &str, depth: usize, rows: &mut Vec<RepoRow>) {
         for (name, node) in &self.dirs {
+            let key = if parent.is_empty() {
+                name.clone()
+            } else {
+                format!("{parent}/{name}")
+            };
             match node.single_namesake(name) {
                 // No heading; the repository takes the place of the folder that
-                // adds nothing, one step under this directory.
-                Some(index) => rows.push(RepoRow::repo(name, depth + 1, index)),
+                // adds nothing, at the folder's own depth, so the lines of the
+                // tree run straight through it.
+                Some(index) => {
+                    rows.push(RepoRow::repo(name, depth, index).at(format!("{key}/{name}")))
+                }
                 None => {
-                    rows.push(RepoRow::heading(name, depth));
-                    node.write(depth + 1, rows);
+                    rows.push(RepoRow::heading(name, depth).at(key.clone()));
+                    node.write(&key, depth + 1, rows);
                 }
             }
         }
@@ -280,8 +432,8 @@ mod tests {
                 (false, "github.com", 0),
                 // `github.com/termide/termide`: the folder named like its repository
                 // writes no heading — it would name twice over what the row below it
-                // says — while the repository keeps the indent of its true depth.
-                (true, "termide", 2),
+                // says — and the repository takes the folder's place in the tree.
+                (true, "termide", 1),
             ],
             "{tree:?}"
         );
@@ -365,8 +517,8 @@ mod tests {
                 .filter(|r| r.is_selectable() && r.label == "termide")
                 .map(|r| r.depth)
                 .collect::<Vec<_>>(),
-            vec![2],
-            "the repository lost its place in the tree: {rows:?}"
+            vec![1],
+            "the repository did not take the place of its folder: {rows:?}"
         );
     }
 
@@ -431,6 +583,93 @@ mod tests {
         assert_eq!(
             relative_name(Path::new("/elsewhere/repo"), Some(&root)),
             "repo"
+        );
+    }
+
+    fn grouped(root: &Path) -> Vec<RepoRow> {
+        let repos: Vec<PathBuf> = [
+            "git.example.com/devops/multica",
+            "git.example.com/devops/tardis",
+            "git.example.com/sigma/crm",
+            "github.com/termide/termide",
+        ]
+        .iter()
+        .map(|rel| root.join(rel))
+        .collect();
+        repo_tree(&repos, Some(root))
+    }
+
+    // The lines are the ones the file tree of the status panel draws: a branch for
+    // a row with a sibling below, a corner for the last, a bar through the levels
+    // that still go on.
+    #[test]
+    fn the_tree_is_drawn_with_the_lines_of_the_file_tree() {
+        let rows = grouped(&root("lines"));
+        let drawn: Vec<String> = tree_prefixes(&rows)
+            .iter()
+            .zip(&rows)
+            .map(|(prefix, row)| format!("{prefix}{}", row.label))
+            .collect();
+        assert_eq!(
+            drawn,
+            [
+                "git.example.com",
+                "├─ devops",
+                "│  ├─ multica",
+                "│  └─ tardis",
+                "└─ sigma",
+                "   └─ crm",
+                "github.com",
+                "└─ termide",
+            ]
+        );
+    }
+
+    // A closed directory keeps its row, marked closed, and hides everything under
+    // it; its siblings and the rest of the tree stay.
+    #[test]
+    fn a_collapsed_directory_hides_what_is_under_it() {
+        let rows = grouped(&root("collapse"));
+        let collapsed: HashSet<String> = ["git.example.com/devops".to_string()].into();
+        let shown = collapse(rows, &collapsed);
+        let labels: Vec<(&str, bool)> = shown
+            .iter()
+            .map(|r| (r.label.as_str(), r.expanded))
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                ("git.example.com", true),
+                ("devops", false),
+                ("sigma", true),
+                ("crm", true),
+                ("github.com", true),
+                ("termide", true),
+            ]
+        );
+    }
+
+    // Opening the list on a repository inside closed folders opens those folders,
+    // and those alone.
+    #[test]
+    fn revealing_a_repository_opens_the_folders_above_it() {
+        let rows = grouped(&root("reveal"));
+        let crm = rows
+            .iter()
+            .find(|r| r.label == "crm")
+            .and_then(|r| r.repo)
+            .unwrap();
+        let mut collapsed: HashSet<String> = [
+            "git.example.com".to_string(),
+            "git.example.com/sigma".to_string(),
+            "git.example.com/devops".to_string(),
+        ]
+        .into();
+        reveal(&mut collapsed, &rows, crm);
+        assert_eq!(
+            collapsed,
+            ["git.example.com/devops".to_string()].into(),
+            "only the folders holding the repository open"
         );
     }
 
