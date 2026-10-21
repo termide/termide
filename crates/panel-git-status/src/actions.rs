@@ -514,8 +514,9 @@ impl GitStatusPanel {
                 if let Some(path) = self.initial_paths.first().cloned() {
                     match git::init_repo(&path) {
                         Ok(()) => {
-                            // Refresh to detect the new repo
-                            self.repo_manager = git::RepoManager::new(&self.initial_paths);
+                            // Refresh to detect the new repo, through the manager
+                            // that already holds the project's scope.
+                            self.repo_manager.update(&self.initial_paths);
                             self.refresh();
                             let t = termide_i18n::t();
                             self.status_message =

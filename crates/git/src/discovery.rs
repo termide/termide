@@ -52,6 +52,43 @@ pub fn find_toplevel_repo(path: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Drop the repositories that *contain* `project_root` rather than living in it,
+/// unless they are all the list has.
+///
+/// A project is a plane of its own and often not a repository at all — a folder
+/// holding many checkouts and a `.termide/`. A repository above such a root (a
+/// whole-home dotfiles repo, a parent monorepo) is not the project's: left in the
+/// list it competes with the project's own repositories and, since the list sorts
+/// by folder name, can become the panel's default repository for a project it has
+/// nothing to do with. Two cases are deliberately kept:
+/// - nothing at or below the root is a repository, so the project lives *inside*
+///   one and that ancestor is its repository — the only way a project opened at
+///   `repo/src` reaches `repo`;
+/// - a repository in neither relation, reached from a panel the user navigated
+///   outside the project: it is that panel's repository and stays.
+///
+/// A linked worktree resolves to its main working copy before this runs (see
+/// [`find_toplevel_repo`]), so a worktree inside the project whose main copy is
+/// outside it loses that entry here; the branch is still reached from the main
+/// copy, which is where termide lists worktrees.
+pub fn without_ancestor_repos(repos: &[PathBuf], project_root: &Path) -> Vec<PathBuf> {
+    let canonical = |path: &Path| dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let root = canonical(project_root);
+    let is_above = |repo: &Path| {
+        let repo = canonical(repo);
+        repo != root && root.starts_with(&repo)
+    };
+    if !repos.iter().any(|r| is_above(r)) {
+        return repos.to_vec();
+    }
+    let kept: Vec<PathBuf> = repos.iter().filter(|r| !is_above(r)).cloned().collect();
+    if kept.is_empty() {
+        repos.to_vec()
+    } else {
+        kept
+    }
+}
+
 /// Find all git repositories under a root directory up to max_depth
 pub fn find_all_repos(root: &Path, max_depth: usize) -> Vec<PathBuf> {
     let mut repos = Vec::new();
@@ -195,6 +232,65 @@ pub fn get_repo_name(repo: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A project that is a folder of repositories: the repository enclosing it
+    // (a whole-home dotfiles repo, say) is not its own and must not be listed.
+    #[test]
+    fn drops_the_repository_enclosing_a_project_that_holds_repos() {
+        use std::fs;
+        let tmp = std::env::temp_dir().join(format!("termide-disc-scope-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let home = tmp.join("home");
+        let proj = home.join("proj");
+        fs::create_dir_all(home.join(".git")).unwrap();
+        fs::create_dir_all(proj.join("repo-a/.git")).unwrap();
+        let home = dunce::canonicalize(&home).unwrap();
+        let proj = dunce::canonicalize(&proj).unwrap();
+        let repo_a = dunce::canonicalize(proj.join("repo-a")).unwrap();
+
+        let kept = without_ancestor_repos(&[home.clone(), repo_a.clone()], &proj);
+        let _ = fs::remove_dir_all(&tmp);
+        assert_eq!(kept, vec![repo_a], "the enclosing repo was not dropped");
+    }
+
+    // A project inside a repository, with no repository of its own: that ancestor
+    // IS its repository — the only way a project opened at `repo/src` reaches it.
+    #[test]
+    fn keeps_the_ancestor_when_it_is_the_only_repository() {
+        use std::fs;
+        let tmp = std::env::temp_dir().join(format!("termide-disc-inside-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let home = tmp.join("home");
+        let proj = home.join("proj");
+        fs::create_dir_all(home.join(".git")).unwrap();
+        fs::create_dir_all(proj.join("src")).unwrap();
+        let home = dunce::canonicalize(&home).unwrap();
+        let proj = dunce::canonicalize(&proj).unwrap();
+
+        let kept = without_ancestor_repos(std::slice::from_ref(&home), &proj);
+        let _ = fs::remove_dir_all(&tmp);
+        assert_eq!(kept, vec![home], "the project's own repository was dropped");
+    }
+
+    // A repository in a sibling subtree, reached from a panel the user navigated
+    // outside the project, is that panel's repository and stays.
+    #[test]
+    fn keeps_a_repository_outside_the_project_that_does_not_enclose_it() {
+        use std::fs;
+        let tmp = std::env::temp_dir().join(format!("termide-disc-sibling-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let proj = tmp.join("proj");
+        let sibling = tmp.join("other/repo-b");
+        fs::create_dir_all(proj.join("repo-a/.git")).unwrap();
+        fs::create_dir_all(sibling.join(".git")).unwrap();
+        let proj = dunce::canonicalize(&proj).unwrap();
+        let repo_a = dunce::canonicalize(proj.join("repo-a")).unwrap();
+        let sibling = dunce::canonicalize(&sibling).unwrap();
+
+        let kept = without_ancestor_repos(&[repo_a.clone(), sibling.clone()], &proj);
+        let _ = fs::remove_dir_all(&tmp);
+        assert_eq!(kept, vec![repo_a, sibling], "a sibling repo was dropped");
+    }
 
     #[test]
     fn test_find_repo_root() {

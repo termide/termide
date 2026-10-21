@@ -37,7 +37,7 @@ pub use commits::{
 };
 pub use discovery::{
     find_all_repos, find_repo_root, find_repos_from_paths, find_toplevel_repo, find_toplevel_repos,
-    get_repo_name, repo_paths_overlap,
+    get_repo_name, repo_paths_overlap, without_ancestor_repos,
 };
 pub use files::{get_staged_files, get_unstaged_files, StagedFile, UnstagedFile};
 pub use log_stream::{LogChunk, LogStream};

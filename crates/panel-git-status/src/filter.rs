@@ -127,7 +127,7 @@ mod tests {
     use super::*;
 
     fn panel() -> GitStatusPanel {
-        GitStatusPanel::new(&[])
+        GitStatusPanel::new(&[], None)
     }
 
     #[test]

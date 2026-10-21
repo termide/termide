@@ -334,7 +334,8 @@ impl App {
         self.close_help_panels();
 
         let paths = self.collect_repo_search_paths();
-        let git_status_panel = termide_panel_git_status::GitStatusPanel::new(&paths);
+        let git_status_panel =
+            termide_panel_git_status::GitStatusPanel::new(&paths, Some(&self.project_root));
         self.add_panel(Box::new(git_status_panel));
         self.auto_save_layout();
         Ok(())
@@ -346,7 +347,8 @@ impl App {
 
         if !self.find_and_focus_panel_by_name("git_log") {
             let paths = self.collect_repo_search_paths();
-            let git_log_panel = termide_panel_git_log::GitLogPanel::new(&paths);
+            let git_log_panel =
+                termide_panel_git_log::GitLogPanel::new(&paths, Some(&self.project_root));
             self.add_panel(Box::new(git_log_panel));
         }
         self.auto_save_layout();

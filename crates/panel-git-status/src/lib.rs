@@ -172,9 +172,10 @@ fn build_git_status_hotkey_table(config: &Config) -> HotkeyTable {
 }
 
 impl GitStatusPanel {
-    /// Create a new Git Status panel from a list of paths (from panels/layout)
-    pub fn new(paths: &[PathBuf]) -> Self {
-        Self::create(RepoManager::new(paths), paths.to_vec())
+    /// Create a new Git Status panel from a list of paths (from panels/layout),
+    /// scoped to the project at `project_root` when one is known.
+    pub fn new(paths: &[PathBuf], project_root: Option<&Path>) -> Self {
+        Self::create(RepoManager::new(paths, project_root), paths.to_vec())
     }
 
     /// Create panel for a specific repository

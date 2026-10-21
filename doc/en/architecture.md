@@ -598,7 +598,7 @@ lives.
 | FileManager subtree expand            | `crates/panel-file-manager/src/lib.rs` (`start_listing`)        | `poll_pending_expansions` from same path; placeholder rows show `…` until resolved |
 | FileManager per-entry git status      | `crates/panel-file-manager/src/git_status.rs`                   | `check_git_status_async`; `apply_git_statuses` reapplies if dir read raced ahead   |
 | Git status / log panel refresh        | `crates/panel-git-status/src/lib.rs`, `panel-git-log/src/lib.rs`| `poll_refresh` in each panel's `tick`                                              |
-| Git submodule discovery (RepoManager) | `crates/git/src/repo_manager.rs` (`spawn_submodule_walk`)       | `RepoManager::poll` from git panel `tick`                                          |
+| Git repo discovery (RepoManager)    | `crates/git/src/repo_manager.rs` (`spawn_repo_walk`)            | `RepoManager::poll` from git panel `tick`; nested repos and submodules to depth 3, repositories enclosing the project dropped once the walk lands |
 | Layout restore — panels in parallel   | `crates/app/src/layout_store.rs` (`construct_panel` per panel)| Joined synchronously after spawn so the slowest panel still gates the first frame  |
 | Watcher repo registration             | `crates/watcher/src/lib.rs` (`watch_repository`)                | `poll_pending` in app main loop; inotify installs chunked at `INSTALL_CHUNK`/tick, FSEvents (macOS) one recursive root watch with `.gitignore` filtering on delivery |
 | Directory size walk (wide-view)       | `crates/panel-file-manager/src/utils.rs` (`shared_dir_size_cache`) | Per-frame `try_recv` against shared cache; budget enforced per walk             |
