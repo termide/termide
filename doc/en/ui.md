@@ -178,8 +178,14 @@ The **git status** panel has two selectors on top: the repository and the
 branch. The branch list holds local branches and remote ones without a local
 twin; `●` marks the branch checked out in the repository's main copy, `⧉` one
 checked out in a linked worktree (worktree directories are not listed as
-repositories of their own). Choosing a branch never checks it out — it only
-changes what the panel shows:
+repositories of their own). The repository list is the tree the project holds:
+directories appear as dim rows that name where the repositories under them live,
+each repository indented one step deeper, and a folder named like the repository
+inside it (`github.com/owner/owner`) writes no row of its own. A project that is
+a folder of checkouts therefore reads as `<host>/<group>/<repo>` instead of a run
+of folder names that repeat themselves; the closed selector shows the same path.
+The filter scores that path, so a host or a group finds the repositories inside it.
+Choosing a branch never checks it out — it only changes what the panel shows:
 
 - a branch checked out in the main copy or a worktree shows that working copy's
   changes, and staging, committing, diff, push and pull act in it;

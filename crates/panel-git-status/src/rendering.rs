@@ -11,7 +11,9 @@ use termide_core::ThemeColors;
 use termide_git::{self as git, truncate_left};
 use termide_ui::path_utils::truncate_to_width_str;
 use termide_ui::ScrollBar;
-use termide_ui_render::{render_simple_dropdown, InlineSelector};
+use termide_ui_render::{
+    dropdown_row_label, dropdown_row_width, render_simple_dropdown, InlineSelector,
+};
 
 use crate::types::Section;
 use crate::GitStatusPanel;
@@ -20,8 +22,10 @@ use crate::GitStatusPanel;
 /// Tries to expand rightward first (up to `max_right`), then leftward
 /// (clamped to the screen edge). Falls back to the available space if neither
 /// direction has enough room.
-fn expand_dropdown(x: u16, max_width: u16, max_right: u16, items: &[String]) -> (u16, u16) {
-    let max_item_width = items.iter().map(|s| s.width()).max().unwrap_or(10);
+fn expand_dropdown(x: u16, max_width: u16, max_right: u16, rows: &[git::RepoRow]) -> (u16, u16) {
+    // Measured as the renderer draws them — indent and heading mark included — so
+    // the box is never narrower than its widest row.
+    let max_item_width = rows.iter().map(dropdown_row_width).max().unwrap_or(10);
     // +4 for borders (2) + inner padding (2)
     let needed = (max_item_width + 4) as u16;
     if needed <= max_width {
@@ -99,23 +103,28 @@ fn render_filtered_dropdown(
     max_right: u16,
     dropdown_y: u16,
     max_dropdown_height: usize,
-    items: &[String],
+    rows: &[git::RepoRow],
     filter: &mut termide_ui::TextInput,
-    cursor: usize,
-    selected_pos: Option<usize>,
+    cursor_repo: Option<usize>,
+    selected_repo: Option<usize>,
 ) -> (Rect, usize) {
     // Reserve 1 row for filter input, 1 for separator.
     let filter_rows: u16 = 2;
     let list_max_height = max_dropdown_height.saturating_sub(filter_rows as usize);
-    let visible_count = items.len().min(list_max_height);
-    let scroll_offset = if cursor >= visible_count {
-        cursor - visible_count + 1
+    let visible_count = rows.len().min(list_max_height);
+    // The cursor is a repository; the rows hold headings between them, so the
+    // window scrolls by the row the cursor rests on.
+    let cursor_row = cursor_repo
+        .and_then(|cursor| rows.iter().position(|row| row.repo == Some(cursor)))
+        .unwrap_or(0);
+    let scroll_offset = if cursor_row >= visible_count {
+        cursor_row - visible_count + 1
     } else {
         0
     };
 
     let total_height = (visible_count as u16) + filter_rows + 2; // +2 for borders
-    let (dropdown_x, dropdown_width) = expand_dropdown(anchor_x, max_width, max_right, items);
+    let (dropdown_x, dropdown_width) = expand_dropdown(anchor_x, max_width, max_right, rows);
     let area = Rect {
         x: dropdown_x,
         y: dropdown_y,
@@ -179,32 +188,36 @@ fn render_filtered_dropdown(
             .set_style(Style::default().fg(theme.border));
     }
 
-    // Item list (below separator)
+    // Row list (below separator): repositories and the directories above them.
     let list_y = dropdown_y + filter_rows + 1;
-    for (i, item) in items
+    for (i, row) in rows
         .iter()
         .skip(scroll_offset)
         .take(visible_count)
         .enumerate()
     {
         let item_y = list_y + i as u16;
-        let item_idx = scroll_offset + i;
-        let style = if item_idx == cursor {
+        let style = if row.is_selectable() && row.repo == cursor_repo {
             Style::default()
                 .fg(theme.selection_fg)
                 .bg(theme.selection_bg)
                 .remove_modifier(Modifier::all())
-        } else if selected_pos == Some(item_idx) {
+        } else if row.is_selectable() {
             Style::default()
-                .fg(theme.cursor)
+                .fg(if selected_repo.is_some() && row.repo == selected_repo {
+                    theme.cursor
+                } else {
+                    theme.fg
+                })
                 .remove_modifier(Modifier::all())
         } else {
+            // A directory: the shape of the tree, not a thing to choose.
             Style::default()
-                .fg(theme.fg)
+                .fg(theme.disabled)
                 .remove_modifier(Modifier::all())
         };
 
-        // Clear line and draw item
+        // Clear line and draw the row
         for dx in 1..dropdown_width - 1 {
             buf[(dropdown_x + dx, item_y)]
                 .set_symbol(" ")
@@ -213,13 +226,13 @@ fn render_filtered_dropdown(
         buf.set_string(
             dropdown_x + 1,
             item_y,
-            truncate_to_width_str(item, inner_width),
+            truncate_to_width_str(&dropdown_row_label(row), inner_width),
             style,
         );
     }
 
     // Scrollbar
-    if visible_count < items.len() {
+    if visible_count < rows.len() {
         ScrollBar::render(
             buf,
             dropdown_x + dropdown_width - 1,
@@ -227,7 +240,7 @@ fn render_filtered_dropdown(
             visible_count as u16,
             scroll_offset,
             visible_count,
-            items.len(),
+            rows.len(),
             theme,
             true,
         );
@@ -289,10 +302,12 @@ impl GitStatusPanel {
 
         let t = termide_i18n::t();
 
+        // The path inside the project, not the folder alone: in a project that
+        // groups its checkouts by host and team, `crm` names two repositories.
         let repo_name = self
             .repo_manager
             .current()
-            .map(git::get_repo_name)
+            .map(|repo| git::relative_name(repo, self.repo_manager.project_root()))
             .unwrap_or_else(|| t.git_no_repo().to_string());
         let repo_focused = self.current_section == Section::RepoSelector && is_focused;
         let repo_selector =
@@ -475,22 +490,17 @@ impl GitStatusPanel {
         if self.repo_dropdown_open {
             let dropdown_y = content_area.y + 1;
             let max_dropdown_height = content_area.height.saturating_sub(3) as usize;
-            let repo_names: Vec<String> = self
-                .repo_manager
-                .repos()
-                .iter()
-                .map(|p| git::get_repo_name(p))
-                .collect();
+            let selected_idx = self.repo_manager.selected_index();
 
             if self.show_repo_filter {
-                // Filtered dropdown: render filter row + filtered repo list
+                // Filtered dropdown: filter row, then the tree of what matches —
+                // best match first, each under the directories it lives in.
                 let filtered_indices = self.filtered_repo_indices();
-                let filtered_repos: Vec<String> = filtered_indices
-                    .iter()
-                    .map(|&i| repo_names[i].clone())
-                    .collect();
-                let selected_idx = self.repo_manager.selected_index();
-                let selected_pos = filtered_indices.iter().position(|&i| i == selected_idx);
+                let rows = self.filtered_repo_rows();
+                let cursor_repo = filtered_indices.get(self.dropdown_cursor).copied();
+                let selected_repo = filtered_indices
+                    .contains(&selected_idx)
+                    .then_some(selected_idx);
                 let (area, scroll_offset) = render_filtered_dropdown(
                     buf,
                     &theme,
@@ -499,18 +509,25 @@ impl GitStatusPanel {
                     content_area.x + content_area.width,
                     dropdown_y,
                     max_dropdown_height,
-                    &filtered_repos,
+                    &rows,
                     &mut self.repo_filter,
-                    self.dropdown_cursor,
-                    selected_pos,
+                    cursor_repo,
+                    selected_repo,
                 );
                 self.dropdown_scroll = scroll_offset;
                 self.repo_dropdown_area = Some(area);
             } else {
-                // Normal dropdown (no filter)
-                let visible_count = repo_names.len().min(max_dropdown_height);
-                let scroll_offset = if self.dropdown_cursor >= visible_count {
-                    self.dropdown_cursor - visible_count + 1
+                // The project's repositories as the tree they live in.
+                let rows = self.repo_rows();
+                let visible_count = rows.len().min(max_dropdown_height);
+                // The window scrolls by the row the cursor rests on: headings sit
+                // between the repositories, so its index is not its row.
+                let cursor_row = rows
+                    .iter()
+                    .position(|row| row.repo == Some(self.dropdown_cursor))
+                    .unwrap_or(0);
+                let scroll_offset = if cursor_row >= visible_count {
+                    cursor_row - visible_count + 1
                 } else {
                     0
                 };
@@ -519,7 +536,7 @@ impl GitStatusPanel {
                     content_area.x,
                     content_area.width / 2,
                     content_area.x + content_area.width,
-                    &repo_names,
+                    &rows,
                 );
                 self.repo_dropdown_area = Some(Rect {
                     x: dropdown_x,
@@ -528,8 +545,8 @@ impl GitStatusPanel {
                     height: visible_count as u16 + 2,
                 });
                 render_simple_dropdown(
-                    &repo_names,
-                    self.repo_manager.selected_index(),
+                    &rows,
+                    selected_idx,
                     self.dropdown_cursor,
                     dropdown_x,
                     dropdown_y,
@@ -565,9 +582,9 @@ impl GitStatusPanel {
                     content_area.x + content_area.width,
                     dropdown_y,
                     max_dropdown_height,
-                    &filtered_branches,
+                    &git::flat_rows(&filtered_branches),
                     &mut self.branch_filter,
-                    self.dropdown_cursor,
+                    Some(self.dropdown_cursor),
                     selected_pos,
                 );
                 self.dropdown_scroll = scroll_offset;
@@ -584,11 +601,12 @@ impl GitStatusPanel {
                     0
                 };
                 self.dropdown_scroll = scroll_offset;
+                let rows = git::flat_rows(&labels);
                 let (dropdown_x, dropdown_width) = expand_dropdown(
                     branch_x,
                     branch_max_width,
                     content_area.x + content_area.width,
-                    &labels,
+                    &rows,
                 );
                 self.branch_dropdown_area = Some(Rect {
                     x: dropdown_x,
@@ -597,7 +615,7 @@ impl GitStatusPanel {
                     height: visible_count as u16 + 2,
                 });
                 render_simple_dropdown(
-                    &labels,
+                    &rows,
                     current_branch_idx,
                     self.dropdown_cursor,
                     dropdown_x,

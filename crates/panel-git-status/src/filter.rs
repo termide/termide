@@ -45,11 +45,39 @@ impl GitStatusPanel {
         self.show_branch_filter = false;
     }
 
-    /// Return indices into repo list that match the current filter.
+    /// Return indices into repo list that match the current filter, best first.
+    ///
+    /// The whole path inside the project is scored, not the folder alone: in a
+    /// project that groups its checkouts by host and team, `sigma/crm` or even
+    /// `devops` has to find the repository its folder name cannot distinguish.
     pub(crate) fn filtered_repo_indices(&self) -> Vec<usize> {
         let repos = self.repo_manager.repos();
+        let root = self.repo_manager.project_root();
         let mut query = Query::fuzzy_path(self.repo_filter.text());
-        rank(repos.iter().map(|p| query.score(&git::get_repo_name(p))))
+        rank(
+            repos
+                .iter()
+                .map(|p| query.score(&git::relative_name(p, root))),
+        )
+    }
+
+    /// The project's repositories as the tree the dropdown draws: directories as
+    /// dim headings, each repository under them. Recomputed rather than stored, so
+    /// the renderer and the mouse hit-test can never disagree about a row.
+    pub(crate) fn repo_rows(&self) -> Vec<git::RepoRow> {
+        git::repo_tree(self.repo_manager.repos(), self.repo_manager.project_root())
+    }
+
+    /// The same tree, holding only the repositories that match the filter, best
+    /// match first; each row still names its index into the full list.
+    pub(crate) fn filtered_repo_rows(&self) -> Vec<git::RepoRow> {
+        let repos = self.repo_manager.repos();
+        let matched: Vec<(usize, std::path::PathBuf)> = self
+            .filtered_repo_indices()
+            .into_iter()
+            .map(|index| (index, repos[index].clone()))
+            .collect();
+        git::repo_tree_indexed(&matched, self.repo_manager.project_root())
     }
 
     /// Reset the repo filter state.

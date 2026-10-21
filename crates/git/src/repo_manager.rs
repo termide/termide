@@ -193,6 +193,12 @@ impl RepoManager {
         &self.repos
     }
 
+    /// The project the list is scoped to, if the panel was given one: the root
+    /// the dropdown nests its repositories under.
+    pub fn project_root(&self) -> Option<&Path> {
+        self.project_root.as_deref()
+    }
+
     /// Get the index of the selected repository.
     pub fn selected_index(&self) -> usize {
         self.selected

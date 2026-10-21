@@ -285,16 +285,14 @@ impl GitLogPanel {
 
         // Dropdown overlays (rendered last so they appear on top)
         if self.repo_dropdown_open {
-            let repo_names: Vec<String> = self
-                .repo_manager
-                .repos()
-                .iter()
-                .map(|p| git::get_repo_name(p))
-                .collect();
+            // The project's repositories as the tree they live in: directories as
+            // dim headings, each repository under them. Flat when there is nothing
+            // between the project root and its repositories to name.
+            let rows = git::repo_tree(self.repo_manager.repos(), self.repo_manager.project_root());
             let dropdown_y = content_area.y + 1;
             let max_h = content_area.height.saturating_sub(3);
             let selected_idx = self.repo_manager.selected_index();
-            let visible_count = repo_names.len().min(max_h as usize);
+            let visible_count = rows.len().min(max_h as usize);
             self.dropdown_area = Some(Rect {
                 x: content_area.x,
                 y: dropdown_y,
@@ -302,7 +300,7 @@ impl GitLogPanel {
                 height: visible_count as u16 + 2,
             });
             render_simple_dropdown(
-                &repo_names,
+                &rows,
                 selected_idx,
                 self.dropdown_cursor,
                 content_area.x,
@@ -313,7 +311,7 @@ impl GitLogPanel {
                 &theme,
             );
         } else if self.branch_dropdown_open {
-            let branches = self.branch_labels();
+            let branches = git::flat_rows(&self.branch_labels());
             let current_branch_idx = self.shown_branch_index();
             let dropdown_y = content_area.y + 1;
             let max_h = content_area.height.saturating_sub(3);

@@ -641,18 +641,39 @@ impl GitLogPanel {
                         // Click inside dropdown: select item (skip border rows)
                         if row > area.y && row < area.y + area.height - 1 {
                             let visible_rows = (area.height as usize).saturating_sub(2);
-                            let scroll_offset = if self.dropdown_cursor >= visible_rows {
-                                self.dropdown_cursor - visible_rows + 1
-                            } else {
-                                0
-                            };
-                            let item_idx = scroll_offset + (row - area.y - 1) as usize;
                             if self.repo_dropdown_open {
-                                self.repo_manager.select(item_idx);
-                                self.repo_dropdown_open = false;
-                                self.selected_branch = None;
-                                self.refresh();
+                                // The same rows the dropdown drew, scrolled the same
+                                // way: the line clicked is the repository it names,
+                                // and a directory row selects nothing.
+                                let rows = git::repo_tree(
+                                    self.repo_manager.repos(),
+                                    self.repo_manager.project_root(),
+                                );
+                                let cursor_row = rows
+                                    .iter()
+                                    .position(|r| r.repo == Some(self.dropdown_cursor))
+                                    .unwrap_or(0);
+                                let scroll_offset = if cursor_row >= visible_rows {
+                                    cursor_row - visible_rows + 1
+                                } else {
+                                    0
+                                };
+                                let clicked_row = scroll_offset + (row - area.y - 1) as usize;
+                                // A heading, or a row past the list, selects nothing.
+                                if let Some(repo_idx) = rows.get(clicked_row).and_then(|r| r.repo) {
+                                    self.repo_manager.select(repo_idx);
+                                    self.repo_dropdown_open = false;
+                                    self.selected_branch = None;
+                                    self.refresh();
+                                }
                             } else if self.branch_dropdown_open {
+                                // Branches are a flat list: the row is the branch.
+                                let scroll_offset = if self.dropdown_cursor >= visible_rows {
+                                    self.dropdown_cursor - visible_rows + 1
+                                } else {
+                                    0
+                                };
+                                let item_idx = scroll_offset + (row - area.y - 1) as usize;
                                 let selected = self.branches.get(item_idx).cloned();
                                 let is_current = selected.as_deref() == self.branch.as_deref();
                                 self.selected_branch = if is_current { None } else { selected };

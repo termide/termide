@@ -17,6 +17,7 @@ mod log_stream;
 mod operations;
 mod remote_url;
 mod repo_manager;
+mod repo_tree;
 mod stash;
 mod status;
 mod utils;
@@ -47,6 +48,7 @@ pub use operations::{
 };
 pub use remote_url::get_commit_web_url;
 pub use repo_manager::{project_repos, RepoManager};
+pub use repo_tree::{flat_rows, relative_name, repo_tree, repo_tree_indexed, RepoRow};
 pub use stash::{
     stash_apply, stash_diff, stash_drop, stash_info, stash_list, stash_pop, stash_push,
     stash_rename, StashEntry, StashInfo,
