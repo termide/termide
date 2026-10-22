@@ -42,6 +42,7 @@ impl GitLogPanel {
         if let Some(name) = name {
             let is_focused = self.current_section == Section::RepoSelector;
             let w = InlineSelector::new(&name, self.repo_dropdown_open, is_focused, theme)
+                .keep_end()
                 .render(x, y, max_width, buf);
             self.repo_selector_area = Some(Rect {
                 x,
@@ -75,6 +76,7 @@ impl GitLogPanel {
         let name = self.branch_selector_label();
         let is_focused = self.current_section == Section::BranchSelector;
         let w = InlineSelector::new(&name, self.branch_dropdown_open, is_focused, theme)
+            .keep_end()
             .render(x, y, max_width, buf);
         self.branch_selector_area = Some(Rect {
             x,

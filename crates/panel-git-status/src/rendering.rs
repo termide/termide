@@ -278,7 +278,8 @@ impl GitStatusPanel {
         let branch_focused = self.current_section == Section::BranchSelector && is_focused;
         let repo_focused = self.current_section == Section::RepoSelector && is_focused;
         let repo_selector =
-            InlineSelector::new(&repo_name, self.repo_dropdown_open, repo_focused, &theme);
+            InlineSelector::new(&repo_name, self.repo_dropdown_open, repo_focused, &theme)
+                .keep_end();
         // The branch is drawn after the repository, but measured first: what a
         // short branch name does not need goes to the repository.
         let branch_width = InlineSelector::new(&branch_name, false, false, &theme).full_width();
@@ -296,7 +297,8 @@ impl GitStatusPanel {
             self.branch_dropdown_open,
             branch_focused,
             &theme,
-        );
+        )
+        .keep_end();
         branch_selector.render(branch_x, y, branch_max_width, buf);
 
         y += selector_height;
