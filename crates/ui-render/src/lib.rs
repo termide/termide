@@ -29,7 +29,7 @@ pub use dropdown::{
     TOOLS_SUBMENU_JOURNAL, TOOLS_SUBMENU_OPEN, TOOLS_SUBMENU_OPERATIONS, TOOLS_SUBMENU_OUTLINE,
     TOOLS_SUBMENU_SEPARATOR, TOOLS_SUBMENU_TERMINAL,
 };
-pub use inline_selector::InlineSelector;
+pub use inline_selector::{leading_selector_max_width, InlineSelector};
 pub use language_dropdown::{
     find_current_language_index, language_dropdown_geometry, LanguageDropdown,
 };
@@ -47,8 +47,8 @@ pub use panel_rendering::{
 };
 pub use project_strip::ProjectButton;
 pub use simple_dropdown::{
-    draw_dropdown_row, dropdown_lines, dropdown_row_styles, dropdown_rows_width, follow_scroll,
-    render_simple_dropdown,
+    draw_dropdown_row, dropdown_lines, dropdown_row_styles, dropdown_rows_width, dropdown_span,
+    follow_scroll, render_simple_dropdown,
 };
 pub use status_bar::{
     segment_hit_areas, status_trailing_width, BackgroundOpsSummary, SegmentHit, StatusBar,

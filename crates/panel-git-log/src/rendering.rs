@@ -6,7 +6,10 @@ use unicode_width::UnicodeWidthStr;
 use termide_core::ThemeColors;
 use termide_git::{self as git, truncate_right, truncate_to_width};
 use termide_ui::ScrollBar;
-use termide_ui_render::{render_simple_dropdown, InlineSelector};
+use termide_ui_render::{
+    dropdown_rows_width, dropdown_span, leading_selector_max_width, render_simple_dropdown,
+    InlineSelector,
+};
 
 use crate::{GitLogPanel, Section};
 
@@ -51,6 +54,15 @@ impl GitLogPanel {
         0
     }
 
+    /// The label of the branch selector: the branch shown, or a dash.
+    fn branch_selector_label(&self) -> String {
+        self.selected_branch
+            .as_deref()
+            .or(self.branch.as_deref())
+            .unwrap_or("—")
+            .to_owned()
+    }
+
     /// Render branch selector
     fn render_branch_selector(
         &mut self,
@@ -60,12 +72,7 @@ impl GitLogPanel {
         buf: &mut Buffer,
         theme: &ThemeColors,
     ) {
-        let name: String = self
-            .selected_branch
-            .as_deref()
-            .or(self.branch.as_deref())
-            .unwrap_or("—")
-            .to_owned();
+        let name = self.branch_selector_label();
         let is_focused = self.current_section == Section::BranchSelector;
         let w = InlineSelector::new(&name, self.branch_dropdown_open, is_focused, theme)
             .render(x, y, max_width, buf);
@@ -96,11 +103,15 @@ impl GitLogPanel {
         // width and no blank row is left at the bottom.
         let content_area = area;
 
-        // Always render header row: [repo ▼] [branch ▼] (branch follows repo with 2-char gap)
+        // Always render header row: [repo ▼] [branch ▼] (branch follows repo with 2-char gap).
+        // The branch is measured first: what a short branch name does not need
+        // goes to the repository.
+        let branch_label = self.branch_selector_label();
+        let branch_w = InlineSelector::new(&branch_label, false, false, &theme).full_width();
         let repo_w = self.render_repo_selector(
             content_area.x,
             content_area.y,
-            content_area.width / 2,
+            leading_selector_max_width(content_area.width, branch_w),
             buf,
             &theme,
         );
@@ -293,10 +304,16 @@ impl GitLogPanel {
             let max_h = content_area.height.saturating_sub(3);
             let selected_idx = self.repo_manager.selected_index();
             let visible_count = rows.len().min(max_h as usize);
+            let (dropdown_x, dropdown_w) = dropdown_span(
+                content_area.x,
+                dropdown_rows_width(&rows),
+                content_area.x,
+                content_area.x + content_area.width,
+            );
             self.dropdown_area = Some(Rect {
-                x: content_area.x,
+                x: dropdown_x,
                 y: dropdown_y,
-                width: content_area.width / 2,
+                width: dropdown_w,
                 height: visible_count as u16 + 2,
             });
             self.dropdown_scroll = render_simple_dropdown(
@@ -304,9 +321,9 @@ impl GitLogPanel {
                 selected_idx,
                 self.dropdown_cursor,
                 self.dropdown_scroll,
-                content_area.x,
+                dropdown_x,
                 dropdown_y,
-                content_area.width / 2,
+                dropdown_w,
                 max_h,
                 buf,
                 &theme,
@@ -321,12 +338,15 @@ impl GitLogPanel {
                 .branch_selector_area
                 .map(|a| a.x)
                 .unwrap_or(content_area.x);
-            let dropdown_w = content_area
-                .width
-                .saturating_sub(branch_x.saturating_sub(content_area.x));
+            let (dropdown_x, dropdown_w) = dropdown_span(
+                branch_x,
+                dropdown_rows_width(&branches),
+                content_area.x,
+                content_area.x + content_area.width,
+            );
             let visible_count = branches.len().min(max_h as usize);
             self.dropdown_area = Some(Rect {
-                x: branch_x,
+                x: dropdown_x,
                 y: dropdown_y,
                 width: dropdown_w,
                 height: visible_count as u16 + 2,
@@ -336,7 +356,7 @@ impl GitLogPanel {
                 current_branch_idx,
                 self.dropdown_cursor,
                 self.dropdown_scroll,
-                branch_x,
+                dropdown_x,
                 dropdown_y,
                 dropdown_w,
                 max_h,

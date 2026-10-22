@@ -178,6 +178,18 @@ pub fn dropdown_rows_width(rows: &[RepoRow]) -> usize {
     lines_width(&dropdown_lines(rows))
 }
 
+/// Where a dropdown box goes and how wide it is: as wide as its content of
+/// `content_width` cells plus borders and padding, never wider than the span
+/// `left..right`. It opens at `anchor_x` — under its selector — and moves left
+/// only as far as it must to stay inside the span.
+pub fn dropdown_span(anchor_x: u16, content_width: usize, left: u16, right: u16) -> (u16, u16) {
+    let span = right.saturating_sub(left);
+    // +4: two borders and a cell of padding on each side.
+    let width = (content_width.saturating_add(4).min(span as usize) as u16).max(2.min(span));
+    let x = anchor_x.max(left).min(right.saturating_sub(width));
+    (x, width)
+}
+
 fn lines_width(lines: &[(String, String)]) -> usize {
     lines
         .iter()
@@ -236,11 +248,23 @@ pub fn draw_dropdown_row(
 
 #[cfg(test)]
 mod overflow_tests {
-    use super::{dropdown_rows_width, follow_scroll, render_simple_dropdown};
+    use super::{dropdown_rows_width, dropdown_span, follow_scroll, render_simple_dropdown};
     use ratatui::{buffer::Buffer, layout::Rect};
     use termide_core::ThemeColors;
     use termide_git::RepoRow;
     use termide_theme::Theme;
+
+    // The box fits its widest row, not the panel: narrow rows give a narrow box,
+    // wide ones grow it to the right and then move it left, never past the span.
+    #[test]
+    fn the_box_fits_its_widest_row_within_the_span() {
+        // Fits where it opens.
+        assert_eq!(dropdown_span(10, 6, 10, 50), (10, 10));
+        // Too wide to open at the anchor: moved left just enough.
+        assert_eq!(dropdown_span(30, 20, 10, 50), (26, 24));
+        // Wider than the span: the whole span.
+        assert_eq!(dropdown_span(30, 80, 10, 50), (10, 40));
+    }
 
     // Regression for #25: a simple dropdown taller/wider than the terminal must
     // not write out of bounds (this function indexes the buffer directly).
