@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use serde_json::{json, Value};
 use termide_agent_core::{
-    CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate, Usage,
+    CancelToken, Failure, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate, Usage,
 };
 use termide_agent_core::{ToolText, SUBAGENT_SESSION_KEY};
 
@@ -30,6 +30,13 @@ pub struct SubagentOutcome {
     pub answer: Result<String, String>,
     pub spent: Usage,
     pub session: Option<PathBuf>,
+    /// The task is parked at a limit that passes on its own: `answer` only
+    /// says where it waits and when it goes again, so nothing is reported to
+    /// the panel that delegated it — its real answer is still owed there.
+    pub parked: bool,
+    /// What stopped it, when its last reply says: a limit and the moment it
+    /// resets, so the runner can wait for that rather than guess.
+    pub failure: Option<Failure>,
 }
 
 impl From<Result<String, String>> for SubagentOutcome {
@@ -39,6 +46,8 @@ impl From<Result<String, String>> for SubagentOutcome {
             answer,
             spent: Usage::default(),
             session: None,
+            parked: false,
+            failure: None,
         }
     }
 }
@@ -241,6 +250,8 @@ mod tests {
                 answer,
                 spent,
                 session,
+                parked: false,
+                failure: None,
             }
         });
         let tool = TaskTool::new(

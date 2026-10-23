@@ -690,6 +690,7 @@ impl App {
                     .downcast_ref::<termide_panel_agent::AgentPanel>()
                 {
                     termide_panel_agent::live::stop_all(agent.panel_id());
+                    termide_panel_agent::live::clear_parked_of(agent.panel_id());
                 }
             }
             // As closing an editor panel does: the server forgets the file.

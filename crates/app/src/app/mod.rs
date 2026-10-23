@@ -1160,6 +1160,9 @@ impl App {
             agent_panel::live::route_carried(self);
             // What agents ask of the other panels.
             self.serve_peers();
+            // The delegates parked at a limit whose wait is over, or whose
+            // panel has moved to another connection since.
+            self.wake_parked_delegates();
             self.tick_parked_projects();
             self.vault_tick();
         } else {

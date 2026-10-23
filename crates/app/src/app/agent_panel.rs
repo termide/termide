@@ -12,11 +12,12 @@ use termide_agent_core::{
     apply_tool_texts, build_system_prompt, discover_context_files, ensure_global_layout,
     permission_channel, AcpConfig, AcpFlavor, Agent, AgentDirs, AgentEvent, AssistantMessage,
     AutoDenyPrompter, Backend, BackendSetup, CancelToken, ChainedHooks, CompactionPolicy, Decision,
-    HostTools, IntentLog, Message, MessageOrigin, ModeHandle, ModelChoice, ModelSpec, OriginKind,
-    PermissionAnswer, PermissionHooks, PermissionRules, PersistScope, PlanGuard, PromptOptions,
-    Provider, Refusals, ReviewerSetup, Session, SessionParent, SessionSummary, ShellOutput,
-    ShellRunner, StreamEvent, ThinkingLevel, Tool, ToolCall, ToolContext, ToolRegistry, ToolUpdate,
-    Usage, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
+    Failure, FailureKind, HostTools, IntentLog, LimitPolicy, Message, MessageOrigin, ModeHandle,
+    ModelChoice, ModelSpec, OriginKind, PermissionAnswer, PermissionHooks, PermissionRules,
+    PersistScope, PlanGuard, PromptOptions, Provider, Refusals, ReviewerSetup, Session,
+    SessionParent, SessionSummary, ShellOutput, ShellRunner, StreamEvent, ThinkingLevel, Tool,
+    ToolCall, ToolContext, ToolRegistry, ToolUpdate, Usage, UserMessage, DEFAULT_AGENT,
+    GLOBAL_AGENT_DIR, SESSIONS_DIR,
 };
 use termide_agent_hooks::CommandHooks;
 use termide_agent_mcp::{Connections, TokenStore};
@@ -1232,6 +1233,19 @@ fn subagent_mode(parent: Mode, own: Option<Mode>) -> Mode {
 /// `AGENT.md` names another number (`max_turns`).
 const SUBAGENT_MAX_TURNS: usize = 50;
 
+/// How many times one delegated task is parked at a limit before it is given
+/// up. The waits double between tries, so six of them already cover most of a
+/// day; past that the limit is the task's answer, and the user hears it with
+/// the reset named.
+const MAX_PARK_ATTEMPTS: u32 = 6;
+
+/// Now, Unix seconds.
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs())
+}
+
 /// Where a task delegated from a session runs.
 #[derive(Debug, PartialEq)]
 enum SubagentTarget {
@@ -1326,22 +1340,30 @@ struct SubagentReport {
     steps: Vec<Step>,
     answer: Option<String>,
     error: Option<String>,
+    /// What stopped it, when its last reply says: a limit and the moment it
+    /// resets, rather than the limit's text alone.
+    failure: Option<Failure>,
     turns: usize,
     /// The model calls it may take before it is cut off.
     max_turns: usize,
     /// What its model calls spent so far.
     spent: Usage,
+    /// The connection its model calls went to, named in what the delegating
+    /// agent is told when the task stops: another is what gets past a limit.
+    connection: String,
 }
 
 impl SubagentReport {
-    fn new(max_turns: usize) -> Self {
+    fn new(max_turns: usize, connection: &str) -> Self {
         Self {
             steps: Vec::new(),
             answer: None,
             error: None,
+            failure: None,
             turns: 0,
             max_turns,
             spent: Usage::default(),
+            connection: connection.to_string(),
         }
     }
 
@@ -1359,9 +1381,11 @@ impl SubagentReport {
         let text = text.trim();
         if text.is_empty() {
             self.error = message.error_message.clone();
+            self.failure = message.classify_failure();
             return;
         }
         self.error = None;
+        self.failure = None;
         self.steps.push(Step::Said(text.to_string()));
         self.answer = Some(text.to_string());
         on_update(ToolUpdate::Output(self.progress()));
@@ -1461,6 +1485,7 @@ impl SubagentReport {
     /// The delegating call's result.
     fn into_outcome(self, stopped: bool) -> SubagentOutcome {
         let spent = self.spent;
+        let failure = self.failure;
         let answer = match self.answer {
             Some(text) if self.turns > self.max_turns => Ok(format!(
                 "{text}\n\n(subagent stopped after {} steps)",
@@ -1468,15 +1493,22 @@ impl SubagentReport {
             )),
             Some(text) => Ok(text),
             None if stopped => Err("the subagent was stopped".into()),
-            None => Err(self.error.map_or_else(
-                || "the subagent produced no answer".to_string(),
-                |error| format!("the subagent failed: {error}"),
+            None => Err(self.give_up(
+                self.error
+                    .as_deref()
+                    .map_or_else(
+                        || "the subagent produced no answer".to_string(),
+                        |error| format!("the subagent failed: {error}"),
+                    )
+                    .as_str(),
             )),
         };
         SubagentOutcome {
             answer,
             spent,
             session: None,
+            parked: false,
+            failure: (!stopped).then_some(failure).flatten(),
         }
     }
 
@@ -1492,8 +1524,64 @@ impl SubagentReport {
             answer,
             spent: self.spent,
             session: None,
+            parked: false,
+            failure: None,
         }
     }
+
+    /// What the delegating agent reads when the task ends without an answer:
+    /// the failure's own words, then where it stopped and what can still be
+    /// done. A limit's text alone is worth nothing there — the agent repeats
+    /// it to the user and stops — so the connection it stopped on and the
+    /// moment its limit resets go with it: another connection, or the same one
+    /// after that moment, is what gets the task done.
+    fn give_up(&self, why: &str) -> String {
+        let Some(failure) = self.failure else {
+            return why.to_string();
+        };
+        let mut text = format!("{why} (connection {conn}", conn = self.connection);
+        if let Some(at) = failure.resets_at {
+            text.push_str(&format!(", resets {}", termide_panel_agent::clock(at)));
+        }
+        text.push_str(if failure.kind.passes() {
+            "; the task was not carried on — re-issue it, or switch the connection"
+        } else {
+            "; repeating it as it is changes nothing"
+        });
+        text.push(')');
+        text
+    }
+}
+
+/// The moment a parked task goes again: the reset its limit named, or a
+/// backoff that grows with the tries it has made.
+fn wake_at(failure: &Failure, attempts: u32, now: u64) -> u64 {
+    failure
+        .retry_delay(attempts, now)
+        .map_or(now, |delay| now + delay.as_secs())
+}
+
+/// What the delegating agent is told when its delegate's task is parked at a
+/// limit: not a failure, and not an answer either — the task waits, and its
+/// answer arrives later as a message of its own.
+fn parked_words(agent: &str, failure: &Failure, connection: &str, wake: u64) -> String {
+    let limit = match failure.kind {
+        FailureKind::QuotaExhausted => "usage limit",
+        FailureKind::RateLimited => "rate limit",
+        _ => "temporary failure",
+    };
+    let waits = match failure.resets_at {
+        Some(at) => format!("until {limit} resets {}", termide_panel_agent::clock(at)),
+        None => format!(
+            "and goes again after a wait that grows ({})",
+            termide_panel_agent::clock(wake)
+        ),
+    };
+    format!(
+        "{agent} stopped on a {limit} of connection \"{connection}\" and is parked {waits}; \
+         it goes again by itself then, at once if you switch the connection or ask its row to. \
+         Its answer will reach you as a message of its own. Do not re-issue this task."
+    )
 }
 
 /// The log of a delegated task's session, written as the task runs, so what
@@ -1676,6 +1764,11 @@ impl Subagents {
                 let outcome = this
                     .delegate(&caller, &task, &ctx, &CancelToken::new(), &mut |_| {})
                     .unwrap_or_else(|error| Err(error).into());
+                // Parked at a limit: nothing is owed yet. The answer goes back
+                // when the parked task has really run to its end.
+                if outcome.parked {
+                    return;
+                }
                 let text = background_report(&prompt, &thread_agent, &outcome);
                 peers::report(&this.project_root, parent, &thread_agent, text);
             })
@@ -1756,6 +1849,11 @@ impl Subagents {
                 let outcome = this
                     .delegate(&caller, &task, &ctx, &CancelToken::new(), &mut |_| {})
                     .unwrap_or_else(|error| Err(error).into());
+                // Parked at a limit again: the tick parks it afresh with a
+                // longer wait, and the answer stays owed to this panel.
+                if outcome.parked {
+                    return;
+                }
                 // The report names the task as it was handed over, not the
                 // words that carried it on.
                 let text = background_report(&original, &thread_agent, &outcome);
@@ -1778,6 +1876,86 @@ impl Subagents {
             .unwrap_or_else(|error| Err(error).into())
     }
 
+    /// `[ai] on_limit` as it stands now: a change in the settings reaches a
+    /// delegated task's next limit without the panel being reopened.
+    fn on_limit(&self) -> LimitPolicy {
+        applied_ai_settings(&self.settings).on_limit
+    }
+
+    /// What a delegated run's end means for the task, by `[ai] on_limit` as
+    /// it stands now.
+    fn after_run(
+        &self,
+        panel: Option<u64>,
+        task: &SubagentTask,
+        outcome: SubagentOutcome,
+        connection: &str,
+        session: Option<&Path>,
+    ) -> SubagentOutcome {
+        park_or_answer(self.on_limit(), panel, task, outcome, connection, session)
+    }
+}
+
+/// What a delegated run's end means for the task. A limit that passes on its
+/// own is not its answer: the task is parked, and goes again when its wait is
+/// over — at the reset it named, or at once when the panel moves to another
+/// connection, which is how a spent subscription is got past. An answer, a stop
+/// and a failure waiting does not cure end the task, and the park it was in
+/// with them.
+fn park_or_answer(
+    policy: LimitPolicy,
+    panel: Option<u64>,
+    task: &SubagentTask,
+    mut outcome: SubagentOutcome,
+    connection: &str,
+    session: Option<&Path>,
+) -> SubagentOutcome {
+    let parking = panel.filter(|_| {
+        outcome.answer.is_err()
+            && policy != LimitPolicy::Stop
+            && outcome.failure.is_some_and(|failure| failure.kind.passes())
+    });
+    let Some(panel) = parking else {
+        if let Some(panel) = panel {
+            termide_panel_agent::live::unpark(panel, task.call);
+        }
+        return outcome;
+    };
+    let failure = outcome.failure.unwrap_or_default();
+    let now = unix_now();
+    let attempts = termide_panel_agent::live::parked_of(panel)
+        .into_iter()
+        .find(|parked| parked.call == task.call)
+        .map_or(1, |parked| parked.attempts + 1);
+    // A task parked too many times is not going to answer: the limit's own
+    // words go back to the delegating agent, with what can be done.
+    if attempts > MAX_PARK_ATTEMPTS {
+        termide_panel_agent::live::unpark(panel, task.call);
+        return outcome;
+    }
+    let wake = wake_at(&failure, attempts - 1, now);
+    termide_panel_agent::live::park(
+        panel,
+        termide_panel_agent::live::Parked {
+            call: task.call.to_string(),
+            agent: task.agent.to_string(),
+            task: task.prompt.to_string(),
+            session: session.map(Path::to_path_buf).or(outcome.session.clone()),
+            failure,
+            wake_at: wake,
+            connection: connection.to_string(),
+            attempts,
+            since: now,
+            asked: false,
+            launching: false,
+        },
+    );
+    outcome.parked = true;
+    outcome.answer = Ok(parked_words(task.agent, &failure, connection, wake));
+    outcome
+}
+
+impl Subagents {
     /// Run the task; an error is one that came before anything was spent.
     fn delegate(
         &self,
@@ -1898,6 +2076,7 @@ impl Subagents {
             );
             let run = CliSubagent {
                 name: name.to_string(),
+                connection: active.connection.clone(),
                 max_turns,
                 reviewer,
                 config,
@@ -1935,6 +2114,7 @@ impl Subagents {
                 );
                 let run = CliSubagent {
                     name: format!("{connection_name}:{name}"),
+                    connection: connection_name.clone(),
                     max_turns,
                     reviewer,
                     config,
@@ -2042,7 +2222,7 @@ impl Subagents {
         let mut noted = noting(&live, on_update);
         let on_update: &mut dyn FnMut(ToolUpdate) = &mut noted;
         let mut hooks = hooks;
-        let mut report = SubagentReport::new(max_turns);
+        let mut report = SubagentReport::new(max_turns, &connection_name);
         let mut noted = false;
         let finished = std::sync::atomic::AtomicBool::new(false);
         std::thread::scope(|scope| {
@@ -2096,16 +2276,23 @@ impl Subagents {
         if report.answer.is_none() && report.error.is_none() {
             report.error = run_error(agent.messages());
         }
-        // Held at its panel's pause when termide or the panel stopped it: the
-        // reopened session asks to carry the task on. One that answered is
-        // over, whatever pause came after its last step.
-        log.note_run_end(live.control().is_paused() && report.answer.is_none());
-        Ok(with_reviews(log.into_outcome(
-            match live.control().ended_by_user() {
+        let answered = report.answer.is_some();
+        let session = log.path();
+        let outcome = self.after_run(
+            ctx.panel,
+            task,
+            with_reviews(match live.control().ended_by_user() {
                 Some(why) if !cancel.is_cancelled() => report.ended_by_user(why),
                 _ => report.into_outcome(cancel.is_cancelled()),
-            },
-        )))
+            }),
+            &connection_name,
+            session.as_deref(),
+        );
+        // Held at its panel's pause, or parked at a limit that will pass: the
+        // reopened session asks to carry the task on. One that answered is
+        // over, whatever pause or limit came after its last step.
+        log.note_run_end(!answered && (live.control().is_paused() || outcome.parked));
+        Ok(log.into_outcome(outcome))
     }
 
     /// Run `run` as a session of its own of its CLI agent, which calls the
@@ -2175,6 +2362,7 @@ impl Subagents {
         let drive = CliDrive {
             control: live.control(),
             name: &run.name,
+            connection: &run.connection,
             model: &run.model,
             permission_rx: permission_rx.as_ref(),
             refusal: &self.refusals.unattended_subagent,
@@ -2183,6 +2371,9 @@ impl Subagents {
             budget,
             cancel,
         };
+        let session = log.path();
+        let panel = run.panel;
+        let connection = run.connection.clone();
         // The process goes with the runtime, once the task is over.
         let outcome = drive.run(
             &runtime,
@@ -2191,8 +2382,88 @@ impl Subagents {
             &mut log,
             on_update,
         );
-        log.note_run_end(false);
+        let outcome = match outcome {
+            Ok(outcome) => {
+                Ok(self.after_run(panel, task, outcome, &connection, session.as_deref()))
+            }
+            Err(error) => {
+                if let Some(panel) = panel {
+                    termide_panel_agent::live::unpark(panel, task.call);
+                }
+                Err(error)
+            }
+        };
+        // Parked at a limit that will pass: the task stands unfinished, and a
+        // reopen of its session offers to carry it on.
+        log.note_run_end(outcome.as_ref().is_ok_and(|outcome| outcome.parked));
         outcome.map(|outcome| log.into_outcome(outcome))
+    }
+}
+
+impl App {
+    /// The parked delegates whose wait is over go again: at the reset their
+    /// limit named, when the panel that delegated them stands on another
+    /// connection — which is how a spent subscription is got past — or when the
+    /// user asks their row to. Each runs out of its own log, on the connection
+    /// its panel is on now, and answers back there as any background task does.
+    pub(in crate::app) fn wake_parked_delegates(&mut self) {
+        if !termide_panel_agent::live::any_parked() {
+            return;
+        }
+        let now = unix_now();
+        // The panels are taken first: a restart reaches the runner behind the
+        // panel, not the panel itself.
+        let panels: Vec<(u64, String, String, Arc<dyn AgentCatalog>)> = self
+            .layout_manager
+            .iter_all_panels_mut()
+            .filter_map(|panel| {
+                let agent = panel.as_any_mut().downcast_mut::<AgentPanel>()?;
+                Some((
+                    agent.panel_id(),
+                    agent.agent_name().to_string(),
+                    agent.connection_name().to_string(),
+                    agent.catalog(),
+                ))
+            })
+            .collect();
+        let mut woke = false;
+        for (panel, caller, connection, catalog) in panels {
+            for parked in termide_panel_agent::live::parked_of(panel) {
+                let due = parked.wake_at <= now || parked.asked;
+                // The connection it stopped on is not the one in use: waiting
+                // for its reset would wait out a limit that no longer applies.
+                let switched = parked.connection != connection;
+                if !(due || switched) {
+                    continue;
+                }
+                let Some(entry) = termide_panel_agent::live::launch(panel, &parked.call) else {
+                    continue;
+                };
+                let Some(session) = entry.session else {
+                    // Nothing was logged to go on from: the task ends here, and
+                    // its parent has already been told the limit stopped it.
+                    termide_panel_agent::live::abandon(panel, &parked.call);
+                    continue;
+                };
+                let item = termide_core::DelegateRestart {
+                    agent: entry.agent.clone(),
+                    session,
+                    call: entry.call.clone(),
+                    task: entry.task.clone(),
+                };
+                if !catalog.restart_delegate(panel, &caller, &item) {
+                    // The log is open elsewhere or unreadable: it asks again
+                    // shortly, rather than every tick.
+                    termide_panel_agent::live::sleep_until(panel, &parked.call, now + 60);
+                    continue;
+                }
+                log::info!("{}'s parked task goes again on {connection}", entry.agent);
+                woke = true;
+            }
+        }
+        if woke {
+            self.state.needs_redraw = true;
+        }
     }
 }
 
@@ -2272,6 +2543,8 @@ struct CliDrive<'a> {
     max_turns: usize,
     /// Where it works: its calls' paths are shown relative to it.
     cwd: &'a Path,
+    /// The connection its agent runs on, named when the task stops there.
+    connection: &'a str,
     budget: &'a CancelToken,
     cancel: &'a CancelToken,
 }
@@ -2323,7 +2596,7 @@ impl CliDrive<'_> {
         backend
             .prompt(message)
             .map_err(|error| format!("the subagent did not start: {error:?}"))?;
-        let mut report = SubagentReport::new(self.max_turns);
+        let mut report = SubagentReport::new(self.max_turns, self.connection);
         let mut aborted: Option<std::time::Instant> = None;
         let mut idle = 0;
         'run: loop {
@@ -2378,6 +2651,8 @@ impl CliDrive<'_> {
 struct CliSubagent {
     /// How its process is named in the logs.
     name: String,
+    /// The connection it runs on, named when the task stops there.
+    connection: String,
     /// The model calls it may take before it is cut off.
     max_turns: usize,
     /// Reviews its requests in `auto` mode.
@@ -3472,6 +3747,7 @@ mod tests {
         let drive = CliDrive {
             control: &control,
             name: "claude:search",
+            connection: "claude-code",
             model: "haiku",
             permission_rx: Some(&permission_rx),
             refusal: "nobody to ask",
@@ -4092,6 +4368,207 @@ mod tests {
         assert_eq!(kinds, vec!["start", "end"]);
     }
 
+    /// A delegated task stopped by a limit that passes answers nothing: it is
+    /// parked, with the connection it stopped on and the moment it goes again,
+    /// so a switch off that connection is what gets it done.
+    #[test]
+    fn a_delegate_stopped_by_a_limit_is_parked_rather_than_answered() {
+        let panel = 7101;
+        let task = SubagentTask {
+            agent: "methodical",
+            prompt: "cut the release",
+            call: "call-1",
+            background: false,
+        };
+        let quota = Failure::from_text("You've hit your session limit · resets 9:50pm");
+        let outcome = park_or_answer(
+            LimitPolicy::Ask,
+            Some(panel),
+            &task,
+            SubagentOutcome {
+                answer: Err("the subagent failed: session limit".into()),
+                spent: Usage::default(),
+                session: Some(PathBuf::from("/logs/d1.jsonl")),
+                parked: false,
+                failure: Some(quota),
+            },
+            "claude-code",
+            Some(Path::new("/logs/d1.jsonl")),
+        );
+        assert!(outcome.parked, "the limit is not the task's answer");
+        // What the delegating agent reads says where it waits and that its
+        // answer comes later — not a limit to be repeated back.
+        let words = outcome.answer.as_deref().unwrap_or_default();
+        assert!(words.contains("claude-code"), "{words}");
+        assert!(words.contains("Do not re-issue this task"), "{words}");
+
+        let parked = termide_panel_agent::live::parked_of(panel);
+        assert_eq!(parked.len(), 1);
+        assert_eq!(parked[0].connection, "claude-code");
+        assert_eq!(parked[0].agent, "methodical");
+        assert_eq!(
+            parked[0].session,
+            Some(PathBuf::from("/logs/d1.jsonl")),
+            "it goes on from its own log"
+        );
+        assert_eq!(parked[0].attempts, 1);
+        assert!(parked[0].wake_at > unix_now(), "it waits, not runs");
+
+        // Answered at last: nothing is parked any longer.
+        let done = park_or_answer(
+            LimitPolicy::Ask,
+            Some(panel),
+            &task,
+            SubagentOutcome {
+                answer: Ok("shipped".into()),
+                spent: Usage::default(),
+                session: Some(PathBuf::from("/logs/d1.jsonl")),
+                parked: false,
+                failure: None,
+            },
+            "omlx",
+            Some(Path::new("/logs/d1.jsonl")),
+        );
+        assert_eq!(done.answer.as_deref(), Ok("shipped"));
+        assert!(termide_panel_agent::live::parked_of(panel).is_empty());
+    }
+
+    /// `on_limit = "stop"` ends the task as it always did — but with the
+    /// connection and the reset named, so the agent knows what to do next.
+    #[test]
+    fn a_stopped_policy_ends_a_parked_task_with_words_that_point_forward() {
+        let panel = 7102;
+        let task = SubagentTask {
+            agent: "methodical",
+            prompt: "cut the release",
+            call: "call-2",
+            background: false,
+        };
+        let report = {
+            let mut report = SubagentReport::new(4, "claude-code");
+            let mut reply = AssistantMessage::failed(
+                "m",
+                "m",
+                termide_agent_core::StopReason::Error,
+                "You've hit your usage limit",
+            );
+            reply.failure = Some(Failure::from_text(
+                "You've hit your usage limit · resets 9:50pm",
+            ));
+            report.said(&reply, &mut |_| {});
+            report
+        };
+        let outcome = park_or_answer(
+            LimitPolicy::Stop,
+            Some(panel),
+            &task,
+            report.into_outcome(false),
+            "claude-code",
+            None,
+        );
+        assert!(!outcome.parked);
+        let words = outcome.answer.unwrap_err();
+        assert!(words.contains("claude-code"), "{words}");
+        assert!(words.contains("resets"), "{words}");
+        assert!(words.contains("switch the connection"), "{words}");
+        assert!(termide_panel_agent::live::parked_of(panel).is_empty());
+    }
+
+    /// A failure waiting does not cure — a sign-in, a refused request — is
+    /// the task's own end: parking it would wait out a moment that never
+    /// comes.
+    #[test]
+    fn a_failure_that_waits_for_nothing_is_not_parked() {
+        let panel = 7103;
+        let task = SubagentTask {
+            agent: "methodical",
+            prompt: "cut the release",
+            call: "call-3",
+            background: false,
+        };
+        for kind in [FailureKind::Auth, FailureKind::BadRequest] {
+            let outcome = park_or_answer(
+                LimitPolicy::Wait,
+                Some(panel),
+                &task,
+                SubagentOutcome {
+                    answer: Err("no".into()),
+                    spent: Usage::default(),
+                    session: None,
+                    parked: false,
+                    failure: Some(Failure::new(kind)),
+                },
+                "claude-code",
+                None,
+            );
+            assert!(!outcome.parked, "{kind:?} waits for nothing");
+        }
+        // A task with no panel of its own has nowhere to wait and nobody to
+        // answer later: the limit is all it can say.
+        let outcome = park_or_answer(
+            LimitPolicy::Wait,
+            None,
+            &task,
+            SubagentOutcome {
+                answer: Err("limit".into()),
+                spent: Usage::default(),
+                session: None,
+                parked: false,
+                failure: Some(Failure::new(FailureKind::QuotaExhausted)),
+            },
+            "claude-code",
+            None,
+        );
+        assert_eq!(outcome.answer.unwrap_err(), "limit");
+    }
+
+    /// A task parked too many times is given up rather than left waiting: the
+    /// delegating agent hears the limit with its reset, and acts.
+    #[test]
+    fn a_task_parked_past_its_tries_is_given_up() {
+        let panel = 7104;
+        let task = SubagentTask {
+            agent: "methodical",
+            prompt: "cut the release",
+            call: "call-4",
+            background: false,
+        };
+        let quota = Failure::new(FailureKind::QuotaExhausted);
+        // Each try of a parked task is its own run, and each ends the same way.
+        let stopped = || SubagentOutcome {
+            answer: Err("the subagent failed: usage limit".into()),
+            spent: Usage::default(),
+            session: Some(PathBuf::from("/logs/d4.jsonl")),
+            parked: false,
+            failure: Some(quota),
+        };
+        for attempt in 1..=MAX_PARK_ATTEMPTS {
+            let outcome = park_or_answer(
+                LimitPolicy::Wait,
+                Some(panel),
+                &task,
+                stopped(),
+                "claude-code",
+                Some(Path::new("/logs/d4.jsonl")),
+            );
+            assert!(outcome.parked, "try {attempt} parks");
+            let parked = termide_panel_agent::live::parked_of(panel);
+            assert_eq!(parked[0].attempts, attempt);
+            // The wait it sleeps by grows with the tries.
+            assert!(parked[0].wake_at >= unix_now(), "try {attempt} waits");
+        }
+        let outcome = park_or_answer(
+            LimitPolicy::Wait,
+            Some(panel),
+            &task,
+            stopped(),
+            "claude-code",
+            Some(Path::new("/logs/d4.jsonl")),
+        );
+        assert!(!outcome.parked, "past its tries it ends");
+        assert!(termide_panel_agent::live::parked_of(panel).is_empty());
+    }
+
     /// A task held at its panel's pause when termide quits leaves its log
     /// standing at a pause: opened again, the session asks to carry it on.
     #[test]
@@ -4139,7 +4616,7 @@ mod tests {
                 vec![termide_agent_core::AssistantContent::Text { text: text.into() }];
             message
         };
-        let mut report = SubagentReport::new(2);
+        let mut report = SubagentReport::new(2, "local");
         assert!(!report.turn());
         assert!(!report.turn());
         report.said(&said("half done"), &mut |_| {});
@@ -4148,7 +4625,7 @@ mod tests {
             Ok("half done")
         );
 
-        let mut report = SubagentReport::new(2);
+        let mut report = SubagentReport::new(2, "local");
         for _ in 0..2 {
             report.turn();
         }
@@ -4163,7 +4640,7 @@ mod tests {
     #[test]
     fn a_waiting_subagent_says_so_under_what_it_said() {
         let t = termide_i18n::t();
-        let mut report = SubagentReport::new(SUBAGENT_MAX_TURNS);
+        let mut report = SubagentReport::new(SUBAGENT_MAX_TURNS, "local");
         let mut shown = Vec::new();
         report.waiting(Some(2), &mut |ToolUpdate::Output(text)| shown.push(text));
         assert_eq!(
