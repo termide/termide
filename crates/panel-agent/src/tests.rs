@@ -11,11 +11,11 @@ use ratatui::text::Line;
 use termide_agent_core::{
     now_millis, permission_channel, question_channel, suggestion_channel, Agent, AgentEvent,
     AssistantContent, AssistantMessage, Autorun, CancelToken, CompactionCall, CompactionReason,
-    EntryKind, GoalRecord, LastRun, LimitPolicy, LoopRecord, Message, PermissionAnswer,
-    PermissionPrompter, QuestionAnswer, QuestionReply, Request, ShellOutput, ShellRunner,
-    StopReason, StreamEvent, Suggestion, SuggestionReply, ThinkingLevel, Timing, ToolCall,
-    ToolContext, ToolDecision, ToolResultMessage, ToolUpdate, Usage, UserMessage, ACP_PROVIDER,
-    MODEL_OPTION,
+    EntryKind, Failure, FailureKind, GoalRecord, LastRun, LimitPolicy, LoopRecord, Message,
+    PermissionAnswer, PermissionPrompter, QuestionAnswer, QuestionReply, Request, ShellOutput,
+    ShellRunner, StopReason, StreamEvent, Suggestion, SuggestionReply, ThinkingLevel, Timing,
+    ToolCall, ToolContext, ToolDecision, ToolResultMessage, ToolUpdate, Usage, UserMessage,
+    ACP_PROVIDER, MODEL_OPTION,
 };
 use termide_core::{ConfirmAction, LinkTarget, PanelConfig, SegmentKind};
 use termide_ui::{ChoiceAction, ChoiceForm};
@@ -11126,6 +11126,140 @@ fn a_background_task_has_a_row_that_stops_or_follows_it() {
     let rows = render_text(&mut panel, width, height);
     assert!(rows.iter().all(|line| !line.contains("find the loader")));
     assert!(panel.needs_close_confirmation().is_none());
+}
+
+/// A delegate parked at a limit keeps its row, says when it goes again, and
+/// asks what to do: try now, keep waiting, or give the task up. Giving it up
+/// tells the panel's own agent, so it waits on no answer that will not come.
+#[test]
+fn a_parked_delegate_holds_a_row_and_asks_what_to_do() {
+    let mut panel = panel(vec![]);
+    let id = panel.panel_id();
+    let now = crate::failure::unix_now();
+    crate::live::park(
+        id,
+        crate::live::Parked {
+            call: "task-1".into(),
+            agent: "methodical".into(),
+            task: "cut the release\nand tag it".into(),
+            session: Some(std::path::PathBuf::from("/logs/d.jsonl")),
+            failure: Failure::new(FailureKind::QuotaExhausted).with_reset(Some(now + 600)),
+            wake_at: now + 600,
+            connection: "claude-code".into(),
+            attempts: 1,
+            since: now,
+            asked: false,
+            launching: false,
+        },
+    );
+
+    let (width, height) = (80, 30);
+    // The tick raises the card; the strip draws the row.
+    assert!(panel.poll_parked());
+    let rows = render_text(&mut panel, width, height);
+    let row = strip_row(&panel, crate::strip::StripTarget::Parked(0));
+    let line = &rows[row as usize];
+    assert!(line.starts_with("\u{23f8} "), "{line}");
+    assert!(line.contains("methodical"), "{line}");
+    assert!(line.contains("cut the release"), "{line}");
+    assert!(line.trim_end().ends_with('\u{2715}'), "{line}");
+
+    // The card asks once, and names the reset.
+    assert!(matches!(panel.pending, Some(Pending::DelegateLimit { .. })));
+    let detail = panel
+        .pending
+        .as_ref()
+        .unwrap()
+        .form()
+        .detail()
+        .unwrap_or_default();
+    assert!(detail.contains("methodical"), "{detail}");
+
+    // The first row sends it again now; the registry is told, not the run.
+    assert!(panel.apply_form_action(ChoiceAction::Chosen(0)));
+    assert!(crate::live::parked_of(id)[0].asked);
+
+    // The same try is not asked about twice: it is on its way.
+    panel.poll_parked();
+    assert!(!matches!(
+        panel.pending,
+        Some(Pending::DelegateLimit { .. })
+    ));
+    // Parked at a later try, the card comes back.
+    let mut again = crate::live::parked_of(id)
+        .into_iter()
+        .next()
+        .expect("parked");
+    again.attempts = 2;
+    again.launching = false;
+    crate::live::park(id, again);
+    panel.poll_parked();
+    assert!(matches!(panel.pending, Some(Pending::DelegateLimit { .. })));
+    // Leaving it: the task waits on, unasked.
+    panel.apply_form_action(ChoiceAction::Cancelled);
+    assert!(panel.pending.is_none());
+    assert!(crate::live::parked_of(id)[0].asked, "it still waits");
+
+    // `\u{2715}` asks first, then gives the task up and tells the panel's agent.
+    render_text(&mut panel, width, height);
+    let row = strip_row(&panel, crate::strip::StripTarget::Parked(0));
+    let events = panel.handle_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: panel.strip_stop_x,
+            row,
+            modifiers: KeyModifiers::NONE,
+        },
+        Rect::new(0, 0, width, height),
+    );
+    let Some(PanelEvent::ShowConfirm {
+        on_confirm: ConfirmAction::Custom(action),
+        ..
+    }) = events.into_iter().next()
+    else {
+        panic!("no confirmation");
+    };
+    panel.pending = None;
+    panel.handle_command(PanelCommand::Confirmed { action });
+    assert!(crate::live::parked_of(id).is_empty(), "given up");
+}
+
+/// `on_limit = "wait"` asks nothing: the parked delegate only holds its row,
+/// and goes again at its reset on its own.
+#[test]
+fn a_parked_delegate_asks_nothing_when_the_policy_waits() {
+    let mut panel = panel(vec![]);
+    panel.on_limit = LimitPolicy::Wait;
+    let id = panel.panel_id();
+    let now = crate::failure::unix_now();
+    crate::live::park(
+        id,
+        crate::live::Parked {
+            call: "task-2".into(),
+            agent: "clear".into(),
+            task: "sweep the docs".into(),
+            session: None,
+            failure: Failure::new(FailureKind::RateLimited),
+            wake_at: now + 120,
+            connection: "omlx".into(),
+            attempts: 2,
+            since: now,
+            asked: false,
+            launching: false,
+        },
+    );
+    render_text(&mut panel, 80, 30);
+    assert!(matches!(
+        panel.pending,
+        None | Some(Pending::DelegateLimit { .. })
+    ));
+    panel.poll_parked();
+    assert!(!matches!(
+        panel.pending,
+        Some(Pending::DelegateLimit { .. })
+    ));
+    assert_eq!(crate::live::parked_of(id).len(), 1);
+    crate::live::clear_parked_of(id);
 }
 
 /// Past three running subagents the strip counts the rest; a click on the

@@ -87,6 +87,13 @@ pub(crate) enum Pending {
     Unfinished {
         form: ChoiceForm,
     },
+    /// A delegated task parked at a limit that passes on its own: try it
+    /// again now, keep waiting for the reset its row names, or give it up.
+    DelegateLimit {
+        form: ChoiceForm,
+        /// The `task` call the parked task was handed over under.
+        call: String,
+    },
 }
 
 impl Pending {
@@ -102,6 +109,7 @@ impl Pending {
             | Pending::Suggestion { form, .. }
             | Pending::Failure { form, .. }
             | Pending::Unfinished { form } => form,
+            Pending::DelegateLimit { form, .. } => form,
         }
     }
 
@@ -117,6 +125,7 @@ impl Pending {
             | Pending::Suggestion { form, .. }
             | Pending::Failure { form, .. }
             | Pending::Unfinished { form } => form,
+            Pending::DelegateLimit { form, .. } => form,
         }
     }
 }
@@ -977,6 +986,27 @@ impl AgentPanel {
                 Some(Pending::Unfinished { .. }),
                 ChoiceAction::Cancelled | ChoiceAction::Custom(_),
             ) => {
+                self.pending = None;
+            }
+            // A parked delegate: the first row sends it again now, the second
+            // gives its task up; leaving the card lets it wait out its limit,
+            // which is what its row already says it will do.
+            (Some(Pending::DelegateLimit { call, .. }), ChoiceAction::Chosen(0)) => {
+                let call = call.clone();
+                self.pending = None;
+                self.try_parked_now(&call);
+            }
+            (Some(Pending::DelegateLimit { call, .. }), ChoiceAction::Chosen(_)) => {
+                let call = call.clone();
+                self.pending = None;
+                self.give_up_parked(&call);
+            }
+            (Some(Pending::DelegateLimit { .. }), ChoiceAction::Cancelled) => {
+                self.pending = None;
+            }
+            // Dismissed by `Esc`: the task keeps waiting, and is not asked
+            // about again until it is parked at a later try.
+            (Some(Pending::DelegateLimit { .. }), ChoiceAction::Custom(_)) => {
                 self.pending = None;
             }
             (None, _) => {}

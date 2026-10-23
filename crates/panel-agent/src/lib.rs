@@ -13,6 +13,7 @@ mod held;
 mod input;
 pub mod live;
 mod mcp;
+mod parked;
 mod peers;
 mod pending;
 mod pickers;
@@ -67,6 +68,7 @@ use crate::runtime::{
 use crate::session_ops::discard_if_empty;
 use crate::toolset::{served_skills, Blocked, TOOLSET_ACTION};
 
+pub use failure::clock;
 pub use peers::PeerState;
 pub use pending::Card;
 pub use runtime::local_minute;
@@ -93,6 +95,9 @@ const STOP_TASK_ACTION: &str = "agent_stop_task:";
 /// Stop a call the agent moved to the background, once confirmed; its id
 /// follows the colon.
 const STOP_CALL_ACTION: &str = "agent_stop_call:";
+/// Give up a delegate's task parked at a limit, once confirmed; the `task`
+/// call's id follows the colon.
+const GIVE_UP_PARKED_ACTION: &str = "agent_give_up_parked:";
 /// Confirmation action that forks the session into a new panel (also `F5`).
 const FORK_SESSION_ACTION: &str = "agent_fork_session";
 /// Confirmation action that deletes the recent session picked in the banner.
@@ -1026,6 +1031,15 @@ pub struct AgentPanel {
     /// The calls of the tasks handed over in the background, as the strip
     /// last listed them: a click on one of their rows maps back to one.
     strip_delegates: Vec<String>,
+    /// The calls of the delegates parked at a limit, as the strip last listed
+    /// them; their card has been asked of the user for these tries.
+    strip_parked: Vec<String>,
+    /// Which parked tasks have had their card raised, by `task` call and the
+    /// try it was parked at: a later park asks again.
+    parked_asked: Vec<(String, u32)>,
+    /// The parked delegates' strip text as last drawn, so a redraw happens
+    /// only when the countdown's text moves.
+    parked_shown: String,
     /// The strip shows every running subagent, not the first few and a
     /// count of the rest.
     strip_tasks_open: bool,
@@ -1099,6 +1113,13 @@ impl AgentPanel {
     /// panel's own connections, rules and working directory.
     pub fn catalog(&self) -> Arc<dyn AgentCatalog> {
         Arc::clone(&self.catalog)
+    }
+
+    /// The connection the panel runs on now: a parked delegate wakes on it
+    /// when it is no longer the one the delegate stopped on.
+    #[must_use]
+    pub fn connection_name(&self) -> &str {
+        &self.connection
     }
 
     pub fn new(mut setup: AgentPanelSetup) -> Self {
@@ -1358,6 +1379,9 @@ impl AgentPanel {
             task_clocks: HashMap::new(),
             strip_hits: Vec::new(),
             strip_delegates: Vec::new(),
+            strip_parked: Vec::new(),
+            parked_asked: Vec::new(),
+            parked_shown: String::new(),
             strip_tasks_open: false,
             strip_stop_x: 0,
             run_buttons: Vec::new(),
@@ -2081,6 +2105,13 @@ impl Panel for AgentPanel {
             }
             PanelCommand::Confirmed { action } if action.starts_with(STOP_TASK_ACTION) => {
                 live::stop(self.panel_id, &action[STOP_TASK_ACTION.len()..]);
+                CommandResult::Handled(true)
+            }
+            // The user gave a parked delegate's task up: it waits no longer,
+            // and the panel's agent is told it did not finish.
+            PanelCommand::Confirmed { action } if action.starts_with(GIVE_UP_PARKED_ACTION) => {
+                let call = &action[GIVE_UP_PARKED_ACTION.len()..];
+                self.give_up_parked(call);
                 CommandResult::Handled(true)
             }
             PanelCommand::Confirmed { action } if action.starts_with(STOP_CALL_ACTION) => {

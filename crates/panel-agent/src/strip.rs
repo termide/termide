@@ -31,6 +31,9 @@ pub(crate) enum StripTarget {
     /// A task handed over in the background that still runs, by its place
     /// among the strip's last such rows.
     Delegate(usize),
+    /// A delegate parked at a limit, by its place among the strip's last such
+    /// rows.
+    Parked(usize),
     /// A command the agent moved to the background, by its block's index.
     Background(usize),
     /// A delegated task left unfinished when termide closed, by its place
@@ -269,6 +272,7 @@ impl AgentPanel {
         }
         let mut tasks = self.running_tasks();
         tasks.extend(self.background_tasks());
+        tasks.extend(self.parked_tasks());
         let more = tasks.len().saturating_sub(STATE_QUEUED_ROWS);
         if more == 0 {
             // Nothing left out: the next time there is, it starts folded.
@@ -409,6 +413,43 @@ impl AgentPanel {
             .collect()
     }
 
+    /// The rows of the delegates this panel parked at a limit: each waits for
+    /// its reset — or for the panel to move to another connection, which wakes
+    /// it at once — and answers where a running one would. `✕` gives the task
+    /// up; elsewhere on the row its session opens, where it stands paused.
+    fn parked_tasks(&mut self) -> Vec<StripRow> {
+        let t = termide_i18n::t();
+        let now = crate::failure::unix_now();
+        let parked = crate::live::parked_of(self.panel_id);
+        self.strip_parked = parked.iter().map(|p| p.call.clone()).collect();
+        parked
+            .into_iter()
+            .enumerate()
+            .map(|(index, p)| {
+                let first = p
+                    .task
+                    .lines()
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                let mut row = StripRow::new(
+                    "⏸",
+                    t.agent_parked_strip().to_string(),
+                    first,
+                    StripTarget::Parked(index),
+                )
+                .stoppable();
+                row.notes.push(p.agent);
+                // When it goes again: the reset it named, else the backoff.
+                let at = p.failure.resets_at.filter(|at| *at > now);
+                row.notes
+                    .push(crate::failure::clock(at.unwrap_or(p.wake_at)));
+                row
+            })
+            .collect()
+    }
+
     /// The rows of the commands the agent moved to the background that
     /// termide still runs, each worded as its block's headline.
     fn background_rows(&self, width: u16) -> Vec<StripRow> {
@@ -542,6 +583,35 @@ impl AgentPanel {
                         call,
                     },
                 ];
+            }
+            // A delegate parked at a limit: `✕` gives the task up, once
+            // confirmed; elsewhere on the row its session opens, where it
+            // stands paused. Going again now is the card's, or the panel
+            // moving to another connection.
+            StripTarget::Parked(index) => {
+                let Some(call) = self.strip_parked.get(index).cloned() else {
+                    return vec![PanelEvent::NeedsRedraw];
+                };
+                let parked = crate::live::parked_of(self.panel_id)
+                    .into_iter()
+                    .find(|p| p.call == call);
+                let Some(parked) = parked else {
+                    return vec![PanelEvent::NeedsRedraw];
+                };
+                if on_stop {
+                    return vec![PanelEvent::ShowConfirm {
+                        message: termide_i18n::t().agent_stop_task_confirm_fmt(&parked.agent),
+                        on_confirm: termide_core::ConfirmAction::Custom(format!(
+                            "{}{}",
+                            crate::GIVE_UP_PARKED_ACTION,
+                            parked.call
+                        )),
+                    }];
+                }
+                return match parked.session {
+                    Some(session) => vec![PanelEvent::OpenAgentSession(session)],
+                    None => vec![PanelEvent::NeedsRedraw],
+                };
             }
             // A delegated task left unfinished: its session, where the card
             // asks there to carry it on.

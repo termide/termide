@@ -715,6 +715,7 @@ impl AgentPanel {
         }
         changed |= self.follow_open_sessions();
         changed |= self.check_held();
+        changed |= self.poll_parked();
         changed |= self.drop_withdrawn_card();
         if let Some((start, before)) = self.permission_wait {
             if matches!(

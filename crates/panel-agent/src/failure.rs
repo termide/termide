@@ -53,7 +53,7 @@ pub(crate) fn unix_now() -> u64 {
 }
 
 /// `21:50` today, or `2026-10-09 17:00` on another day, local time.
-pub(crate) fn clock(wall: u64) -> String {
+pub fn clock(wall: u64) -> String {
     let Some(at) = i64::try_from(wall)
         .ok()
         .and_then(|secs| Local.timestamp_opt(secs, 0).single())
