@@ -662,6 +662,9 @@ would try again — the reset, or the backoff when none is stated — tries the
 request again by itself; the card names that moment. A card brought back on
 reopen whose reset has already passed gives about half a minute first. A
 sign-in, a refused request and a full context always ask.
+A delegated task stopped by the same kind of limit is not asked about here: it
+is parked, keeps a row of its own, and goes again at its reset or the moment
+the panel moves to another connection — see [Subagents](#subagents).
 
 Waits go by the wall clock as well, so a reset that passes while the machine
 sleeps is tried as soon as it wakes. Projects of the last run whose agent left
@@ -1679,6 +1682,28 @@ servers connected when its task starts — like the panel's agent, whatever
 its `tools` list says; a server still connecting then is left out of that
 task. A run that will not stop is cut off after fifty
 model calls (the delegate's `max_turns` changes that), and one that fails reports why, the endpoint's error included.
+A limit is not among those failures: a delegate stopped by one that passes on
+its own — a usage limit, a rate limit, an outage — answers nothing and is
+**parked**. Its own session stays where it stopped, marked `⏸`, and the panel
+that delegated it holds a row for it (`⏸ Parked at a limit · methodical 21:50 …✕`),
+naming when it goes again. It goes again by itself at the reset the limit
+named, or after a wait that doubles with each try when none was stated — and
+**at once when the panel moves to another connection**, which is how a spent
+subscription is got past: switch to a local or second connection in the status
+strip and every parked task of that panel starts again there on the spot, out
+of its own log, without repeating what it already did. `on_limit` governs them
+too: `ask` and `ask_else_wait` raise a card over the parked tasks (`Try again
+now` / `Give up the task`, with `Keep waiting` to leave them be), `wait` asks
+nothing, `stop` ends the task as any other failure does. A card left unanswered
+under `ask_else_wait` goes again at the moment its row already names. Six
+tries is the most one task parks at; past that the limit comes back to the
+delegating agent with the connection and the reset named, so it can switch or
+wait rather than repeat the limit to you. `✕` on the row gives the task up
+once confirmed, and tells the delegating agent it did not finish; elsewhere on
+the row opens the delegate's session, where it stands paused. The calling agent
+is told the task is parked, not failed, and that its answer arrives later as a
+message of its own — so it does not re-issue the task and does not mistake the
+limit for the delegate's work.
 While the delegate works, its block shows what it has said and, among it,
 a line for each tool it calls (`· read src/main.rs`, marked `✗` when the call
 fails); once it is done, the block holds its answer. While a delegate's
