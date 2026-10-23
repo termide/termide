@@ -925,6 +925,16 @@ pub trait Translation: Send + Sync {
     fn agent_failure_compact(&self) -> &str;
     fn agent_failure_stop(&self) -> &str;
     fn agent_failure_auth_hint(&self) -> &str;
+    /// A delegated task stopped by a limit that passes: it waits, it does not
+    /// answer. The state strip's label for one.
+    fn agent_parked_strip(&self) -> &str;
+    /// The card asking what to do with a delegated task parked at a limit.
+    fn agent_parked_title(&self) -> &str;
+    fn agent_parked_give_up(&self) -> &str;
+    /// Leaving a parked delegate's card: it waits out its limit as asked.
+    fn agent_parked_keep_waiting(&self) -> &str;
+    /// What the delegating agent is told when a parked task is given up.
+    fn agent_parked_given_up_fmt(&self, agent: &str) -> String;
     fn agent_notice_agent_restarting(&self) -> &str;
     fn agent_notice_retrying(&self) -> &str;
     /// A failure card left unanswered until its time (`on_limit = "ask_else_wait"`).

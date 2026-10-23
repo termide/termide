@@ -691,6 +691,10 @@ impl Translation for RuntimeTranslation {
         agent_failure_compact,
         agent_failure_stop,
         agent_failure_auth_hint,
+        agent_parked_strip,
+        agent_parked_title,
+        agent_parked_give_up,
+        agent_parked_keep_waiting,
         agent_notice_agent_restarting,
         agent_notice_retrying,
         agent_notice_unanswered_retry,
@@ -1239,6 +1243,10 @@ impl Translation for RuntimeTranslation {
 
     fn agent_failure_reset_passed_fmt(&self, time: &str) -> String {
         self.format("agent_failure_reset_passed_fmt", &[("time", time)])
+    }
+
+    fn agent_parked_given_up_fmt(&self, agent: &str) -> String {
+        self.format("agent_parked_given_up_fmt", &[("agent", agent)])
     }
 
     fn agent_failure_auto_retry_fmt(&self, time: &str, left: &str) -> String {
