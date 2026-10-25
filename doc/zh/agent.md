@@ -1,6 +1,6 @@
 # 编码代理
 
-TermIDE 内置了一个编码代理：在这个面板里，你用自然语言描述任务，语言模型通过读取文件、编辑文件并在项目中运行 shell 命令来完成它。代理的每个可能改变内容的操作都会先征求你的许可。
+Termide 内置了一个编码代理：在这个面板里，你用自然语言描述任务，语言模型通过读取文件、编辑文件并在项目中运行 shell 命令来完成它。代理的每个可能改变内容的操作都会先征求你的许可。
 
 用 `Alt+A`、**窗口 → 代理** 或命令面板（**打开代理**）打开它。
 
@@ -54,7 +54,7 @@ API 密钥从 `api_key_env` 指定的环境变量中读取，因此配置文件�
 
 对于托管的 OpenAI 兼容端点，保持 `provider = "openai_compatible"`，并将连接的 `base_url` 和 `api_key_env` 指向它，例如 OpenAI 本身（`https://api.openai.com/v1`、`OPENAI_API_KEY`）、OpenRouter（`https://openrouter.ai/api/v1`、`OPENROUTER_API_KEY`）或 Gemini API（`https://generativelanguage.googleapis.com/v1beta/openai`、`GEMINI_API_KEY`）。模型为工具调用附加的签名（Gemini 的 thought signature，位于调用的 `extra_content` 中）会保存在会话日志里，并按端点的要求随该调用一并发回。对于 Anthropic 订阅，设置 `provider = "anthropic_compatible"`，去掉 `base_url`（API 根地址已内置；仅在使用网关时设置），并将 `api_key_env` 指向你的 `ANTHROPIC_API_KEY`；此时推理级别会让模型进行思考。**Model** 标签会列出各端点的模型。
 
-`provider = "claude_code"`、`provider = "codex"` 和 `provider = "gemini_cli"` 在性质上不同：面板不是用内置循环与模型端点对话，而是通过 ACP 把该工具自己的 CLI 作为[外部代理](#外部代理)来驱动（`@agentclientprotocol/claude-agent-acp` / `@agentclientprotocol/codex-acp` / `@google/gemini-cli --acp`，最新版本，通过 `npx` 运行；npm 缓存中的副本无需询问软件源即可启动，TermIDE 每次运行时在后台检查一次是否有新版本，新版本从下一个面板起生效）。端点和登录由 CLI 负责——使用它自己的订阅或 API 密钥——因此连接的 `base_url`、`api_key_env` 和回退上下文窗口不适用；设置模态窗口会为这些提供方隐藏它们，并从文件中清除。代理的窗口可以设得比模型的**更小**：`context_window_limit`（模态窗口中为**上下文窗口上限**，留空则用代理自己的）以 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` 传给 Claude Code（至少 100000，更小的值模态窗口不接受），以 `CODEX_CONFIG` 中的 `model_context_window` 传给 Codex，并在窗口的 90% 处压缩，你自己的 `CODEX_CONFIG` 会保留。Gemini CLI 没有这种设置，因此不显示该字段。代理按这个窗口压缩对话，面板显示的 `Context:` 也不会超过它。`model` 保留：它是代理上**预选**的模型——会话启动后通过 ACP 应用——运行时 **Model** 标签会列出并切换该代理自己的模型。必须先安装该工具并登录（`npx` 需在 `PATH` 中）；termide 本身不执行登录，因此请先单独运行一次 Gemini CLI（`npx @google/gemini-cli`）并选择登录方式。
+`provider = "claude_code"`、`provider = "codex"` 和 `provider = "gemini_cli"` 在性质上不同：面板不是用内置循环与模型端点对话，而是通过 ACP 把该工具自己的 CLI 作为[外部代理](#外部代理)来驱动（`@agentclientprotocol/claude-agent-acp` / `@agentclientprotocol/codex-acp` / `@google/gemini-cli --acp`，最新版本，通过 `npx` 运行；npm 缓存中的副本无需询问软件源即可启动，Termide 每次运行时在后台检查一次是否有新版本，新版本从下一个面板起生效）。端点和登录由 CLI 负责——使用它自己的订阅或 API 密钥——因此连接的 `base_url`、`api_key_env` 和回退上下文窗口不适用；设置模态窗口会为这些提供方隐藏它们，并从文件中清除。代理的窗口可以设得比模型的**更小**：`context_window_limit`（模态窗口中为**上下文窗口上限**，留空则用代理自己的）以 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` 传给 Claude Code（至少 100000，更小的值模态窗口不接受），以 `CODEX_CONFIG` 中的 `model_context_window` 传给 Codex，并在窗口的 90% 处压缩，你自己的 `CODEX_CONFIG` 会保留。Gemini CLI 没有这种设置，因此不显示该字段。代理按这个窗口压缩对话，面板显示的 `Context:` 也不会超过它。`model` 保留：它是代理上**预选**的模型——会话启动后通过 ACP 应用——运行时 **Model** 标签会列出并切换该代理自己的模型。必须先安装该工具并登录（`npx` 需在 `PATH` 中）；termide 本身不执行登录，因此请先单独运行一次 Gemini CLI（`npx @google/gemini-cli`）并选择登录方式。
 
 termide 会在这些代理允许的范围内尽量接管它们，使会话无论使用哪个连接都表现一致：
 
@@ -161,7 +161,7 @@ termide 中所有计时器——运行时钟、子代理、暂停、停止、文
 
 重试不会发送新消息：内置代理在现有对话上再次询问模型；外部代理会再次收到同一请求，若其失败的回合已经调用过工具，则收到一条从中断处继续的提示，因此已做过的事不会重做。进程死掉的外部代理每个请求会不经询问重启一次；再次死掉则显示卡片。
 
-在卡片打开期间或等待重试期间退出 TermIDE 并不会丢失这个选择。会话日志记录了被留住的失败请求，重新打开该会话时同一张卡片会再次出现——倒计时按当时的时间计算，所以已经过去的重置不会再被提供——在你回答之前不会运行任何请求。**立即重试**会照当时应有的样子重发该请求；外部代理在退出后不再保留该请求的副本，改为收到一条从中断处继续的提示。**停止**则是一次性的回答：卡片不会再回来。这样留下的会话在会话列表中标记为 `⏸`。该请求所属的 `/goal` 或 `/loop` 会随卡片一起回来并等待它。
+在卡片打开期间或等待重试期间退出 Termide 并不会丢失这个选择。会话日志记录了被留住的失败请求，重新打开该会话时同一张卡片会再次出现——倒计时按当时的时间计算，所以已经过去的重置不会再被提供——在你回答之前不会运行任何请求。**立即重试**会照当时应有的样子重发该请求；外部代理在退出后不再保留该请求的副本，改为收到一条从中断处继续的提示。**停止**则是一次性的回答：卡片不会再回来。这样留下的会话在会话列表中标记为 `⏸`。该请求所属的 `/goal` 或 `/loop` 会随卡片一起回来并等待它。
 
 请求等待重试期间，输入框上方的状态条显示 `↻`、原因和下次尝试的时间并倒计时；`[▶]` 或 `/continue` 立即重试，`[■]` 或该行的 `✕` 放弃等待，发送新请求也会放弃等待。卡片关闭后，`/continue` 也会重试失败的请求。
 
@@ -438,8 +438,8 @@ model = "haiku"         # 该连接的模型；留空则使用连接的模型
 代理自己的文件位于一个 `ai` 目录中，该目录存在于三个层级，优先级从高到低：
 
 1. 面板工作目录中的 `.termide/ai/`；
-2. TermIDE 项目根目录中的 `.termide/ai/`（当它是另一个目录时）；
-3. TermIDE 配置目录中的 `ai/`（Linux 上为 `~/.config/termide/ai/`，macOS 上为 `~/Library/Application Support/termide/ai/`）。
+2. Termide 项目根目录中的 `.termide/ai/`（当它是另一个目录时）；
+3. Termide 配置目录中的 `ai/`（Linux 上为 `~/.config/termide/ai/`，macOS 上为 `~/Library/Application Support/termide/ai/`）。
 
 单个文件取自第一个拥有它的层级。由命名条目组成的目录（代理、技能和提示词模板）是所有层级的并集，较高层级定义的名称会遮蔽较低层级的同名条目。
 
@@ -524,11 +524,11 @@ command: npx -y @agentclientprotocol/claude-agent-acp
 ---
 ```
 
-`command` 是程序及其参数，按 shell 的方式拆分为单词（引号保留参数中的空格），但不经过 shell 运行，因此其中的内容不会被展开。程序继承 TermIDE 的环境；每个变量一行 `env.<NAME>: value`，用于添加或覆盖变量，值中的 `$NAME` 和 `${NAME}` 取自 TermIDE 的环境（`env.ANTHROPIC_BASE_URL: http://localhost:8080`）。`timeout` 是等待其启动的秒数，默认 120。
+`command` 是程序及其参数，按 shell 的方式拆分为单词（引号保留参数中的空格），但不经过 shell 运行，因此其中的内容不会被展开。程序继承 Termide 的环境；每个变量一行 `env.<NAME>: value`，用于添加或覆盖变量，值中的 `$NAME` 和 `${NAME}` 取自 Termide 的环境（`env.ANTHROPIC_BASE_URL: http://localhost:8080`）。`timeout` 是等待其启动的秒数，默认 120。
 
 `adapter` 说明这是哪种代理，以便 termide 像对待相应的 [CLI 连接](#配置模型) 那样尽可能接管它：`claude_code`、`codex`、`gemini_cli`，或 `generic`（termide 对其一无所知的代理）。没有该字段时由命令判断：能识别 Claude Code 和 Codex 的 ACP 适配器以及带 `--acp` 的 Gemini CLI，因此上面的示例会让 Claude Code 使用 termide 的提示词和工具；如果适配器包在你自己的包装脚本里，请显式指定。`model` 是代理列出其模型后要选中的模型，与 CLI 连接的 `model` 相同；`mode` 设置面板的权限模式，termide 认识的适配器会把它映射到自己的模式上；`tools` 不适用。
 
-切换到该代理时，程序在后台启动；第一个请求会等待它。它的回答、思考和工具调用像内置代理一样出现在会话中，它通过 TermIDE 读写文件，因此打开的编辑器会跟随它的编辑。它的权限请求按与内置代理相同的规则判断：只读命令，或已被 `[ai.permissions]` 规则或会话授权覆盖的请求，无需卡片即可通过，只有剩下的才会交给你——因此已授权或只读的命令从不会被询问两次。**权限** 标签对 termide 认识的适配器显示，对 generic 代理则消失——它有自己的模式。**Model**、**Reasoning** 和 **选项** 标签显示代理通过 ACP 提供的内容（它的模型、推理强度和其他设置），并可随时切换，与 [CLI 连接](#配置模型) 相同；什么都不提供的代理不显示这些标签，generic 代理自己的模式放在 **选项** 中。工作期间输入的消息、它自己的 `/` 命令、`/goal` 和 `/handoff` 也如那里所述工作。generic 代理的技能、提示词模板和 MCP 服务器由它自行负责。
+切换到该代理时，程序在后台启动；第一个请求会等待它。它的回答、思考和工具调用像内置代理一样出现在会话中，它通过 Termide 读写文件，因此打开的编辑器会跟随它的编辑。它的权限请求按与内置代理相同的规则判断：只读命令，或已被 `[ai.permissions]` 规则或会话授权覆盖的请求，无需卡片即可通过，只有剩下的才会交给你——因此已授权或只读的命令从不会被询问两次。**权限** 标签对 termide 认识的适配器显示，对 generic 代理则消失——它有自己的模式。**Model**、**Reasoning** 和 **选项** 标签显示代理通过 ACP 提供的内容（它的模型、推理强度和其他设置），并可随时切换，与 [CLI 连接](#配置模型) 相同；什么都不提供的代理不显示这些标签，generic 代理自己的模式放在 **选项** 中。工作期间输入的消息、它自己的 `/` 命令、`/goal` 和 `/handoff` 也如那里所述工作。generic 代理的技能、提示词模板和 MCP 服务器由它自行负责。
 
 代理可能在回答之后自行继续工作：Claude Code 就是如此——为了接收运行期间输入的消息，它会把命令移到后台，命令结束后它会接着工作。这段工作算作它自己的一次运行：运行计时会走动，期间不能切换或删除会话，`Esc` 可以停止它。代理移到后台的 termide 工具命令只要还在运行，在回答你的消息之后也会让这样的运行继续，计时显示工作尚未结束，输入框上方的状态条也会为它固定一行——标题与其块相同，带有自己走动的计时；单击该行会显示其块，其 `✕` 经确认后只停止这条命令。`Esc` 也会停止该命令。当代理没有未完成的调用、termide 也没有在为它执行调用并且代理保持安静时，运行结束——回答文字之后 5 秒，其他情况之后 30 秒；期间输入的消息会结束这次运行，并作为下一个请求发送。
 
@@ -536,7 +536,7 @@ command: npx -y @agentclientprotocol/claude-agent-acp
 
 ### 系统提示词
 
-模型收到的提示词由文件组装而成：默认代理 `ai/agents/default/AGENT.md` 的正文，即带有由代理填充的占位符的模板。TermIDE 中没有内置任何提示词文本；下面的模板作为数据文件（`crates/agent-core/assets/agents/default/AGENT.md`）提供，首次使用时写入配置层级，此后以该文件为准。它是所有代理的后备模板，因此项目中的 `.termide/ai/agents/default/` 会被忽略，只有当你选择一个 `AGENT.md` 带有正文的代理时模板才会改变。项目自身的约定写在其 `AGENTS.md` 中，模板会将其作为项目说明纳入（见下文）：
+模型收到的提示词由文件组装而成：默认代理 `ai/agents/default/AGENT.md` 的正文，即带有由代理填充的占位符的模板。Termide 中没有内置任何提示词文本；下面的模板作为数据文件（`crates/agent-core/assets/agents/default/AGENT.md`）提供，首次使用时写入配置层级，此后以该文件为准。它是所有代理的后备模板，因此项目中的 `.termide/ai/agents/default/` 会被忽略，只有当你选择一个 `AGENT.md` 带有正文的代理时模板才会改变。项目自身的约定写在其 `AGENTS.md` 中，模板会将其作为项目说明纳入（见下文）：
 
 ```markdown
 You are a coding agent working inside termide, an all-in-one terminal workspace (editor, file manager, terminal, git). You help with software tasks in the current project: you read code, make targeted edits, run commands and report what you did and what you found.
@@ -569,7 +569,7 @@ When a task matches one of these, load it with the `skill` tool before starting.
 
 ### 服务提示词
 
-TermIDE 自己的提示词也是文件，位于 `system/` 下，并像默认代理的 `AGENT.md` 一样在首次使用时写入。只读取配置层级的 `system/`：项目中的同名目录会被忽略，因此检出的仓库无法改写 termide 的总结、计划和评审方式。压缩（用总结替换长会话中较早部分）使用其中两个：`compact.md` 是总结调用的系统提示词，其前置元数据（`request:`）中是最后的用户轮次，`{{focus}}` 处放入传给 `/compact` 的文字；`compacted.md` 是总结在上下文中变成的消息，`{{summary}}` 代表模型的文本。编辑它们可以改变总结保留的内容或其引入方式。
+Termide 自己的提示词也是文件，位于 `system/` 下，并像默认代理的 `AGENT.md` 一样在首次使用时写入。只读取配置层级的 `system/`：项目中的同名目录会被忽略，因此检出的仓库无法改写 termide 的总结、计划和评审方式。压缩（用总结替换长会话中较早部分）使用其中两个：`compact.md` 是总结调用的系统提示词，其前置元数据（`request:`）中是最后的用户轮次，`{{focus}}` 处放入传给 `/compact` 的文字；`compacted.md` 是总结在上下文中变成的消息，`{{summary}}` 代表模型的文本。编辑它们可以改变总结保留的内容或其引入方式。
 
 ```
 /compact              立即总结
@@ -683,13 +683,13 @@ tools = ["search_issues", "get_issue", "create_issue"]      # 可选：子集
 timeout_secs = 60                                            # 启动和单次调用
 ```
 
-服务器要么是 TermIDE 启动并通过 stdio 通信的程序，要么是 TermIDE 以 Streamable HTTP 访问的 URL（每个请求一个 POST，密钥放在 `headers` 里，其中的 `$NAME` 与 `env` 一样取自你的环境）。非 `https` 的 URL 会被拒绝，loopback 除外——这些服务器携带令牌。两种情况下面板都在打开时于后台连接，并在会话中报告已连接或未连接的原因。其工具以 `<server>__<tool>` 的形式出现（例如 `github__search_issues`），这是 OpenAI 兼容端点接受的格式；它们不会列在系统提示词中，模型直接看到它们的模式。每个请求都会携带所有模式，因此对于拥有数十个工具的服务器，值得用 `tools` 缩小范围；当服务器有二十个以上工具且没有这样的列表时，日志会提示这一点。
+服务器要么是 Termide 启动并通过 stdio 通信的程序，要么是 Termide 以 Streamable HTTP 访问的 URL（每个请求一个 POST，密钥放在 `headers` 里，其中的 `$NAME` 与 `env` 一样取自你的环境）。非 `https` 的 URL 会被拒绝，loopback 除外——这些服务器携带令牌。两种情况下面板都在打开时于后台连接，并在会话中报告已连接或未连接的原因。其工具以 `<server>__<tool>` 的形式出现（例如 `github__search_issues`），这是 OpenAI 兼容端点接受的格式；它们不会列在系统提示词中，模型直接看到它们的模式。每个请求都会携带所有模式，因此对于拥有数十个工具的服务器，值得用 `tools` 缩小范围；当服务器有二十个以上工具且没有这样的列表时，日志会提示这一点。
 
-服务器可以在运行中更换工具。程序在自己的管道上告知；URL 服务器则通过握手后 TermIDE 保持打开的流告知，流断开时会重新打开。两种情况下都会重新列出工具，会话换上新的一组，并用一行提示说明。和任何工具变化一样，这会让下一个请求失去提示词缓存。
+服务器可以在运行中更换工具。程序在自己的管道上告知；URL 服务器则通过握手后 Termide 保持打开的流告知，流断开时会重新打开。两种情况下都会重新列出工具，会话换上新的一组，并用一行提示说明。和任何工具变化一样，这会让下一个请求失去提示词缓存。
 
 配置在面板打开时读取。`/mcp reload` 会在所有层级、从所有 `.mcp.json` 重新读取：不再配置的服务器连同其工具一起离开，新的或改动过的服务器开始连接，失败过的再试一次，已连接且未改动的保持原样。`/mcp reload <server>` 只对一个服务器这样做，即使没有改动也会重新连接它——与工具清单中其标题上的 `[↻]` 相同。单独的 `/mcp` 列出各服务器及其状态。
 
-`headers` 中没有 `Authorization`、却回答 `401` 的 URL 服务器需要 OAuth 登录，会话会提示这一点。`/mcp login <server>` 在浏览器中打开服务器的授权页面；你同意之后，浏览器回到 `127.0.0.1` 上的一次性监听器，服务器随即连接。端点来自服务器自身的元数据；服务器允许时，TermIDE 会把自己注册为客户端；交换使用 PKCE。登录信息保存在配置 `ai/` 目录下的 `mcp-auth.json` 中，仅你可读，按服务器 URL 存放——因此配置了同一 URL 的所有面板和项目共用它——并在过期时续期。`/mcp logout <server>` 会忘记它。浏览器没有打开时（例如通过 SSH），会话会显示地址供手动打开；此时浏览器必须能访问监听器，因此请转发其端口并用 `callback_port` 固定它。不自行注册客户端的服务器需要手动注册的客户端：
+`headers` 中没有 `Authorization`、却回答 `401` 的 URL 服务器需要 OAuth 登录，会话会提示这一点。`/mcp login <server>` 在浏览器中打开服务器的授权页面；你同意之后，浏览器回到 `127.0.0.1` 上的一次性监听器，服务器随即连接。端点来自服务器自身的元数据；服务器允许时，Termide 会把自己注册为客户端；交换使用 PKCE。登录信息保存在配置 `ai/` 目录下的 `mcp-auth.json` 中，仅你可读，按服务器 URL 存放——因此配置了同一 URL 的所有面板和项目共用它——并在过期时续期。`/mcp logout <server>` 会忘记它。浏览器没有打开时（例如通过 SSH），会话会显示地址供手动打开；此时浏览器必须能访问监听器，因此请转发其端口并用 `callback_port` 固定它。不自行注册客户端的服务器需要手动注册的客户端：
 
 ```toml
 [jira]
@@ -697,7 +697,7 @@ url = "https://mcp.example.com/mcp"
 oauth = { client_id = "termide", client_secret = "$JIRA_SECRET", scopes = ["read"], callback_port = 8765 }
 ```
 
-面板工作目录、其上任意一级目录或项目根目录下的 `.mcp.json` 会与它们一并读取，为 Claude Code、Cursor 或 VS Code 配置的仓库无需改动即可带来自己的服务器——这与读取 `CLAUDE.md` 和 `.agents/skills/` 是同样的姿态。这个文件没有标准：MCP 规范把配置留给每个客户端。因此只接受与 termide 相符的部分：`command`、`args`、`env`、`cwd` 和 `tools`，或带 `headers` 和 `oauth`（`clientId`、`clientSecret`、`scopes`、`callbackPort`）的 `url`；根键两者皆可（`mcpServers`，或 VS Code 的 `servers`）；`disabled` 与 `enabled = false` 都读作关闭；`${workspaceFolder}`、`${userHome}` 和 `${env:NAME}` 会被展开。`sse` 服务器会跳过——那是较早的传输方式，请求要发往流先给出的地址，TermIDE 不使用它——带 `${input:…}` 引用的同样跳过：那个引用由另一个工具向你索要密钥，而 termide 只会带着空的密钥启动它。每次跳过都记入日志。同一目录内同名时 `mcp.toml` 胜出；离面板更近的目录优先于两者——但配置层级的服务器除外：项目可以关闭它（`enabled = false`、`disabled`），却不能替换它。因此放在一组仓库之上的一个 `.mcp.json` 会服务于在其中打开的每个面板，这与 Claude Code 的读取方式相同。
+面板工作目录、其上任意一级目录或项目根目录下的 `.mcp.json` 会与它们一并读取，为 Claude Code、Cursor 或 VS Code 配置的仓库无需改动即可带来自己的服务器——这与读取 `CLAUDE.md` 和 `.agents/skills/` 是同样的姿态。这个文件没有标准：MCP 规范把配置留给每个客户端。因此只接受与 termide 相符的部分：`command`、`args`、`env`、`cwd` 和 `tools`，或带 `headers` 和 `oauth`（`clientId`、`clientSecret`、`scopes`、`callbackPort`）的 `url`；根键两者皆可（`mcpServers`，或 VS Code 的 `servers`）；`disabled` 与 `enabled = false` 都读作关闭；`${workspaceFolder}`、`${userHome}` 和 `${env:NAME}` 会被展开。`sse` 服务器会跳过——那是较早的传输方式，请求要发往流先给出的地址，Termide 不使用它——带 `${input:…}` 引用的同样跳过：那个引用由另一个工具向你索要密钥，而 termide 只会带着空的密钥启动它。每次跳过都记入日志。同一目录内同名时 `mcp.toml` 胜出；离面板更近的目录优先于两者——但配置层级的服务器除外：项目可以关闭它（`enabled = false`、`disabled`），却不能替换它。因此放在一组仓库之上的一个 `.mcp.json` 会服务于在其中打开的每个面板，这与 Claude Code 的读取方式相同。
 
 来自配置层级以外的服务器——项目的 `mcp.toml`、任何 `.mcp.json`——会启动程序或把你的密钥发往仓库选定的地址，因此它要等你批准：会话会说明它将运行什么（`mcp ext: from the project, runs npx ext-server — /trust ext to start it`），它会被列出但不会启动。`/trust` 列出项目带来的所有这样等待的内容，`/trust <name>`（或在工具清单中勾选其标题）批准并连接它。批准针对的是当前的启动方式——命令、参数、环境、工作目录，或 URL、请求头和 OAuth 客户端——保存在 termide 数据目录中该项目名下（`trust/<项目路径>/approved.toml`），绝不保存在项目中。如果仓库改动了其中任何一项，它会再次等待。
 
@@ -710,7 +710,7 @@ MCP 工具像命令一样请求权限：在 `all` 中运行，在 `plan` 中被�
 
 ### 钩子
 
-钩子是 TermIDE 在工具调用前后运行的程序，在 `hooks.toml` 中声明，可以位于三个层级中的任何一个（合并方式与 MCP 服务器相同）。它从标准输入获得 JSON 格式的事件，并在标准输出上以 JSON 回答，这是 Claude Code、Gemini CLI 和 Cursor 共用的格式：
+钩子是 Termide 在工具调用前后运行的程序，在 `hooks.toml` 中声明，可以位于三个层级中的任何一个（合并方式与 MCP 服务器相同）。它从标准输入获得 JSON 格式的事件，并在标准输出上以 JSON 回答，这是 Claude Code、Gemini CLI 和 Cursor 共用的格式：
 
 ```toml
 [no-force-push]
@@ -743,9 +743,9 @@ exec /usr/bin/rg --max-count 5 "$@"
 
 ## 会话历史
 
-每个会话都以 JSON Lines 格式写入日志，每个会话一个文件，位于 TermIDE 配置目录中的 `ai/sessions/<面板目录的路径>/` 下，与代理并列。日志记录会话开始时的模型和代理以及每次切换，因此重新打开的会话会在最后使用的模型上、以最后使用的代理身份继续。当会话接近模型的上下文窗口时，代理会用自己写的总结替换较早的部分，并原样保留最近的消息；面板会在发生时提示，`/compact` 可按需执行（见[服务提示词](#服务提示词)）。`/undo` 和回退都会写入一条 `rewind` 条目：日志保留所有消息，但分支从被撤销的请求之前继续，重新打开时也是如此。
+每个会话都以 JSON Lines 格式写入日志，每个会话一个文件，位于 Termide 配置目录中的 `ai/sessions/<面板目录的路径>/` 下，与代理并列。日志记录会话开始时的模型和代理以及每次切换，因此重新打开的会话会在最后使用的模型上、以最后使用的代理身份继续。当会话接近模型的上下文窗口时，代理会用自己写的总结替换较早的部分，并原样保留最近的消息；面板会在发生时提示，`/compact` 可按需执行（见[服务提示词](#服务提示词)）。`/undo` 和回退都会写入一条 `rewind` 条目：日志保留所有消息，但分支从被撤销的请求之前继续，重新打开时也是如此。
 
-当 TermIDE 重新打开保存的布局时，代理面板会随之恢复，并继续它原来所在的会话，使用该会话的模型和代理。如果日志已被删除，面板会开始一个新会话；如果不再配置任何模型，该面板会从布局中省略。
+当 Termide 重新打开保存的布局时，代理面板会随之恢复，并继续它原来所在的会话，使用该会话的模型和代理。如果日志已被删除，面板会开始一个新会话；如果不再配置任何模型，该面板会从布局中省略。
 
 ## 从命令行使用
 

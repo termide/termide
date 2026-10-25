@@ -1,6 +1,6 @@
 # Руководство по установке
 
-Это руководство описывает различные способы установки TermIDE на вашу систему.
+Это руководство описывает различные способы установки Termide на вашу систему.
 
 ## Скачать готовый бинарный файл (Рекомендуется)
 
@@ -55,7 +55,7 @@ tar xzf termide-*.tar.gz
 
 ### Шаг 4: Установка в систему (Опционально)
 
-Чтобы установить TermIDE системно, переместите бинарный файл в директорию из PATH:
+Чтобы установить Termide системно, переместите бинарный файл в директорию из PATH:
 
 ```bash
 # Linux
@@ -166,7 +166,7 @@ cargo install --path .
 cargo install --git https://github.com/termide/termide --locked
 ```
 
-> **Примечание:** TermIDE **не** публикуется на crates.io. `cargo install termide`
+> **Примечание:** Termide **не** публикуется на crates.io. `cargo install termide`
 > скачает устаревший посторонний ранний релиз — всегда собирайте из исходников
 > (клонирование выше) или используйте `cargo install --git …`.
 
@@ -262,7 +262,7 @@ xattr -d com.apple.quarantine termide
 
 ### Windows (нативный)
 
-TermIDE работает нативно на Windows 10+ через ConPTY. Для лучшего опыта рекомендуется Windows Terminal.
+Termide работает нативно на Windows 10+ через ConPTY. Для лучшего опыта рекомендуется Windows Terminal.
 
 1. Скачайте `.zip` архив со страницы [GitHub Releases](https://github.com/termide/termide/releases):
    - `termide-VERSION-x86_64-pc-windows-msvc.zip`
@@ -276,7 +276,7 @@ TermIDE работает нативно на Windows 10+ через ConPTY. Дл
 
 ### Windows (WSL)
 
-TermIDE также работает в Windows Subsystem for Linux (WSL и WSL2):
+Termide также работает в Windows Subsystem for Linux (WSL и WSL2):
 
 1. Установите WSL2, если еще не установлен
 2. Скачайте Linux x86_64 бинарный файл внутри WSL:
@@ -288,7 +288,7 @@ TermIDE также работает в Windows Subsystem for Linux (WSL и WSL2)
 
 ### Android (Termux)
 
-TermIDE работает в [Termux](https://termux.dev). Используйте **статическую
+Termide работает в [Termux](https://termux.dev). Используйте **статическую
 сборку ARM64 musl** — glibc-сборка `aarch64-unknown-linux-gnu` не запустится на
 Android (libc Bionic):
 

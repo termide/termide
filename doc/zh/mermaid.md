@@ -1,6 +1,6 @@
 # Mermaid 图表查看器
 
-TermIDE 将 [Mermaid](https://mermaid.js.org/) 源文件（`.mmd`、`.mermaid`）渲染为
+Termide 将 [Mermaid](https://mermaid.js.org/) 源文件（`.mmd`、`.mermaid`）渲染为
 只读的文本伪图形图表，而不是打开原始源码。同一渲染器也会绘制
 [Markdown 预览](markdown.md)中嵌入的 ```` ```mermaid ```` 代码块。
 

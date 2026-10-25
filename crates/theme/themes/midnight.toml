@@ -1,4 +1,4 @@
-# Classic Midnight Commander theme for TermIDE
+# Classic Midnight Commander theme for Termide
 # Based on actual MC color scheme from screenshot
 name = "midnight"
 is_light = false

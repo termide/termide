@@ -1,8 +1,8 @@
-# Contributing to TermIDE
+# Contributing to Termide
 
-Thank you for your interest in contributing to TermIDE! We welcome contributions from everyone, no matter how small. Whether you're fixing a typo, adding a feature, or improving documentation, your help is appreciated.
+Thank you for your interest in contributing to Termide! We welcome contributions from everyone, no matter how small. Whether you're fixing a typo, adding a feature, or improving documentation, your help is appreciated.
 
-This document provides guidelines for contributing to TermIDE. Please read through it before submitting your contribution.
+This document provides guidelines for contributing to Termide. Please read through it before submitting your contribution.
 
 ## Code of Conduct
 
@@ -10,7 +10,7 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 
 ## Ways to Contribute
 
-There are many ways to contribute to TermIDE:
+There are many ways to contribute to Termide:
 
 - 🐛 **Bug Reports** - Help us identify and fix issues
 - 💡 **Feature Requests** - Suggest new features or improvements
@@ -302,7 +302,7 @@ Use the [Bug Report template](.github/ISSUE_TEMPLATE/bug_report.md) when reporti
 
 **Include:**
 - Operating system and version (Linux/macOS/WSL)
-- TermIDE version (`termide --version`)
+- Termide version (`termide --version`)
 - Terminal emulator and size
 - Steps to reproduce
 - Expected vs. actual behavior
@@ -345,7 +345,7 @@ Use the [Feature Request template](.github/ISSUE_TEMPLATE/feature_request.md) wh
 
 ## Internationalization (i18n)
 
-TermIDE supports 15 languages: Bengali, Chinese, English, French, German, Hindi, Indonesian, Japanese, Korean, Portuguese, Russian, Spanish, Thai, Turkish, and Vietnamese.
+Termide supports 15 languages: Bengali, Chinese, English, French, German, Hindi, Indonesian, Japanese, Korean, Portuguese, Russian, Spanish, Thai, Turkish, and Vietnamese.
 
 ### Adding a New Language
 
@@ -371,7 +371,7 @@ To add support for a new language:
 
 ## Theme Contributions
 
-TermIDE has a flexible theming system. You can create and contribute new themes.
+Termide has a flexible theming system. You can create and contribute new themes.
 
 ### Creating a New Theme
 
@@ -399,7 +399,7 @@ The theme file format and its color keys are described in
 
 ## File Locations
 
-TermIDE follows the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html) for organizing application files:
+Termide follows the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html) for organizing application files:
 
 ### Configuration
 **Linux/BSD:** `$XDG_CONFIG_HOME/termide/` (default: `~/.config/termide/`)
@@ -433,13 +433,13 @@ Logs live in the project directory, not in a cache directory — see
 
 ## License
 
-By contributing to TermIDE, you agree that your contributions will be licensed under the [MIT License](LICENSE). You keep the copyright to your contributions; there is no CLA or copyright assignment.
+By contributing to Termide, you agree that your contributions will be licensed under the [MIT License](LICENSE). You keep the copyright to your contributions; there is no CLA or copyright assignment.
 
 ---
 
 ## Thank You! ❤️
 
-Every contribution, no matter how small, makes TermIDE better. We appreciate your time and effort in helping improve this project.
+Every contribution, no matter how small, makes Termide better. We appreciate your time and effort in helping improve this project.
 
 If you have questions or need help, don't hesitate to ask in GitHub Issues or Discussions, or in the [@termide_talks](https://t.me/termide_talks) Telegram group. We're here to help!
 

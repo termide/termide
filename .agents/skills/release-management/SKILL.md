@@ -5,7 +5,7 @@ description: Prepare and publish a project release with version updates, changel
 
 # Release Management Skill
 
-Comprehensive release management workflow for TermIDE project that ensures code quality, version consistency, and proper changelog documentation before creating releases.
+Comprehensive release management workflow for Termide project that ensures code quality, version consistency, and proper changelog documentation before creating releases.
 
 Platform note: agents that support extra frontmatter fields may add their own permission hints around this skill. Agents that do not support them should ignore unsupported fields and follow the workflow below. When interactive prompts or inline editing are unavailable, use the closest equivalent workflow the platform provides.
 

@@ -1,6 +1,6 @@
 # Mermaid Diagram Viewer
 
-TermIDE renders [Mermaid](https://mermaid.js.org/) source files (`.mmd`,
+Termide renders [Mermaid](https://mermaid.js.org/) source files (`.mmd`,
 `.mermaid`) as a read-only diagram drawn in text pseudographics, instead of
 opening the raw source. The same renderer draws embedded ```` ```mermaid ````
 blocks in the [Markdown preview](markdown.md).

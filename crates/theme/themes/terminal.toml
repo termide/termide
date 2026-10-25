@@ -1,4 +1,4 @@
-# Classic terminal theme for TermIDE
+# Classic terminal theme for Termide
 # Pure black background with bright text, like a traditional terminal
 name = "terminal"
 is_light = false

@@ -30,11 +30,11 @@ The terminal panel provides a full-featured terminal emulator with pseudotermina
 
 **Keyboard Layout Support:**
 
-TermIDE supports Cyrillic keyboard layouts for common shortcuts. When using a Russian/Cyrillic layout, paste (`Ctrl+V`) works without switching to a Latin layout — pressing it with the Cyrillic letter on the same physical key is recognized automatically. The same goes for the control chords sent to the program: `Ctrl+С` interrupts it as `Ctrl+C` does, `Ctrl+В` sends end-of-file as `Ctrl+D` does.
+Termide supports Cyrillic keyboard layouts for common shortcuts. When using a Russian/Cyrillic layout, paste (`Ctrl+V`) works without switching to a Latin layout — pressing it with the Cyrillic letter on the same physical key is recognized automatically. The same goes for the control chords sent to the program: `Ctrl+С` interrupts it as `Ctrl+C` does, `Ctrl+В` sends end-of-file as `Ctrl+D` does.
 
 All other key combinations are passed directly to the application running in the terminal.
 
-When an application inside the terminal requests modern keyboard reporting, TermIDE switches from legacy xterm-style key encoding to the negotiated compatibility mode. This helps applications distinguish ambiguous combinations such as `Ctrl+I` vs `Tab`, `Ctrl+M` vs `Enter`, and modified `Esc`/`Backspace`.
+When an application inside the terminal requests modern keyboard reporting, Termide switches from legacy xterm-style key encoding to the negotiated compatibility mode. This helps applications distinguish ambiguous combinations such as `Ctrl+I` vs `Tab`, `Ctrl+M` vs `Enter`, and modified `Esc`/`Backspace`.
 
 **Modified arrow keys and Home/End** are encoded as the standard xterm CSI
 `1;{mod}{final}` escape sequence (`{mod}` is the xterm modifier parameter:
@@ -126,17 +126,17 @@ When the shell announces a directory, the announcement wins over the process.
 
 ## Mouse Support
 
-- **Text Selection**: In the normal shell/scrollback view, click and drag with the left mouse button to select text, then `Ctrl+C` copies it. When the application inside the terminal enables xterm mouse tracking (e.g. an editor or agent), the mouse belongs to that application (it draws its own selection); hold `Alt+drag` for a local TermIDE selection instead, which `Ctrl+C` then copies
+- **Text Selection**: In the normal shell/scrollback view, click and drag with the left mouse button to select text, then `Ctrl+C` copies it. When the application inside the terminal enables xterm mouse tracking (e.g. an editor or agent), the mouse belongs to that application (it draws its own selection); hold `Alt+drag` for a local Termide selection instead, which `Ctrl+C` then copies
 - **Double-click**: Select the word under the cursor; **triple-click**: select the whole line
 - **Scroll Wheel**: Scroll through terminal output history until the application inside the terminal enables mouse tracking. After that, the wheel is passed through to the application
 - **Ctrl+hover on a URL/path**: Highlight it — whole, across the rows it wraps over — and copy it to the clipboard. A path counts when it exists: absolute, `./`, `../` or `~/`; a `:line:col` after it is not part of it
 - **Ctrl+Click on URL/path**: Follow it inside termide, as a viewer link opens (see [HTML preview](html.md)): a web address in the built-in viewer, a directory in the file manager, a file where **Open…** would open it
 - **Ctrl+Alt+Click on URL/path**: Open it outside — a web address in the browser, a file in its system application
 - **Ctrl+Click on hex color**: Show color preview popup (e.g. `#ff0000`, `#abc`) — visible while button is held, disappears on release
-- **Application Interaction**: If a console application (e.g., `htop` or `mc`) enables xterm mouse tracking, TermIDE gives it priority for click, drag, move, and wheel events inside the terminal content area
+- **Application Interaction**: If a console application (e.g., `htop` or `mc`) enables xterm mouse tracking, Termide gives it priority for click, drag, move, and wheel events inside the terminal content area
 
 ## Application Compatibility Notes
 
-- **Keyboard negotiation**: TermIDE answers the common keyboard capability queries used by modern TUI applications and supports negotiated `CSI u` / `modifyOtherKeys` compatibility modes when requested by the application
-- **Focus reporting**: If an application enables xterm focus events (`?1004`), TermIDE forwards host terminal focus gain/loss as `CSI I` / `CSI O`
+- **Keyboard negotiation**: Termide answers the common keyboard capability queries used by modern TUI applications and supports negotiated `CSI u` / `modifyOtherKeys` compatibility modes when requested by the application
+- **Focus reporting**: If an application enables xterm focus events (`?1004`), Termide forwards host terminal focus gain/loss as `CSI I` / `CSI O`
 - **Terminal identity**: The inner PTY keeps the regular `xterm-256color` baseline and adds compatibility through runtime negotiation rather than by pretending to be a different terminal

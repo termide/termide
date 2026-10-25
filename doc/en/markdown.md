@@ -1,6 +1,6 @@
 # Markdown Preview
 
-TermIDE renders Markdown files (`.md`, `.markdown`) as a read-only preview panel
+Termide renders Markdown files (`.md`, `.markdown`) as a read-only preview panel
 instead of opening the raw source.
 
 ## Opening

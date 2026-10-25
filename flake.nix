@@ -1,5 +1,5 @@
 {
-  description = "TermIDE - All-in-one terminal workspace: editor, file manager, terminal, git and coding agent";
+  description = "Termide - All-in-one terminal workspace: editor, file manager, terminal, git and coding agent";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

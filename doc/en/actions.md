@@ -2,7 +2,7 @@
 
 > **Note:** this document covers **user-defined commands** in the `Commands` menu. For keyboard shortcuts and UI actions, see [ui.md](ui.md#keyboard-navigation-and-panel-management).
 
-A command is a named shell command line that TermIDE can run from the `Commands` menu or by its own hotkey: in a new terminal panel, silently in the background, or in the background with its output shown in a window when it finishes. Commands are defined in `commands.toml` files, either by hand or through the `Add command...` form.
+A command is a named shell command line that Termide can run from the `Commands` menu or by its own hotkey: in a new terminal panel, silently in the background, or in the background with its output shown in a window when it finishes. Commands are defined in `commands.toml` files, either by hand or through the `Add command...` form.
 
 ## Where commands live
 
@@ -10,7 +10,7 @@ There are two files, and the menu shows both:
 
 | Scope | File |
 |-------|------|
-| Global (all projects) | `commands.toml` in the TermIDE configuration directory |
+| Global (all projects) | `commands.toml` in the Termide configuration directory |
 | Project | `<project>/.termide/commands.toml` |
 
 The configuration directory depends on the platform:
@@ -132,7 +132,7 @@ When a report command finishes, a window titled with the command's label and `�
 
 ## Parameters
 
-A command can declare parameters. Before it runs, TermIDE shows a form titled `Parameters: <id>` with one field per parameter and the buttons `Run` and `Cancel`. Each value goes into the command line where its [placeholder](#placeholders) `{name}` stands, and is also passed as an environment variable `TERMIDE_PARAM_<NAME>`: the name upper-cased, with `-` replaced by `_`.
+A command can declare parameters. Before it runs, Termide shows a form titled `Parameters: <id>` with one field per parameter and the buttons `Run` and `Cancel`. Each value goes into the command line where its [placeholder](#placeholders) `{name}` stands, and is also passed as an environment variable `TERMIDE_PARAM_<NAME>`: the name upper-cased, with `-` replaced by `_`.
 
 ```toml
 [deploy]
@@ -203,17 +203,17 @@ A placeholder may stand anywhere: as a word of its own (`p4 edit {file}`), in qu
 
 ## Hotkeys
 
-`key` uses the same notation as the keybindings in `config.toml` (see [keybindings.md](keybindings.md)), e.g. `Ctrl+Shift+D` or `Alt+F6`. `Ctrl+Shift+<letter>` reaches TermIDE only in terminals with the Kitty keyboard protocol (see [Universal vs Enhanced bindings](keybindings.md#universal-vs-enhanced-bindings)). A command hotkey is checked together with the global TermIDE shortcuts, so it works whichever panel has focus. A project command and a global command with the same identifier keep separate hotkeys.
+`key` uses the same notation as the keybindings in `config.toml` (see [keybindings.md](keybindings.md)), e.g. `Ctrl+Shift+D` or `Alt+F6`. `Ctrl+Shift+<letter>` reaches Termide only in terminals with the Kitty keyboard protocol (see [Universal vs Enhanced bindings](keybindings.md#universal-vs-enhanced-bindings)). A command hotkey is checked together with the global Termide shortcuts, so it works whichever panel has focus. A project command and a global command with the same identifier keep separate hotkeys.
 
 Commands with a hotkey are also listed in the command palette (`Ctrl+P`) as `Run command: <label>`.
 
-The form's `Hotkey:` field accepts `Ctrl`, `Alt` and `Shift` combined with a letter, a digit, `F1`–`F12` or a named key (`Enter`, `Tab`, `Space`, `Home`, `PageUp`, arrows and so on), and it rejects a hotkey that another command or a global TermIDE shortcut already uses (`Hotkey is already in use`). A hotkey written into the file by hand is not checked: if it matches a global shortcut, the shortcut wins and the command never runs from the keyboard. It takes effect the next time the `Commands` menu is opened or the file is saved from TermIDE.
+The form's `Hotkey:` field accepts `Ctrl`, `Alt` and `Shift` combined with a letter, a digit, `F1`–`F12` or a named key (`Enter`, `Tab`, `Space`, `Home`, `PageUp`, arrows and so on), and it rejects a hotkey that another command or a global Termide shortcut already uses (`Hotkey is already in use`). A hotkey written into the file by hand is not checked: if it matches a global shortcut, the shortcut wins and the command never runs from the keyboard. It takes effect the next time the `Commands` menu is opened or the file is saved from Termide.
 
 ## Debugging
 
 A command with `debugger` debugs a program with the breakpoints placed in the editor (see [Breakpoints](editor.md#breakpoints-and-debugging)) set, and runs it to the first one. `command` is then what to debug. Two kinds of debugger are supported:
 
-- a **debug adapter**, driven by TermIDE over the Debug Adapter Protocol and shown in the [debug panel](#the-debug-panel): `lldb-dap`, `gdb-dap`, `debugpy`, `dlv-dap`;
+- a **debug adapter**, driven by Termide over the Debug Adapter Protocol and shown in the [debug panel](#the-debug-panel): `lldb-dap`, `gdb-dap`, `debugpy`, `dlv-dap`;
 - a **command-line debugger** started in a new terminal panel, where you step, print and continue with its own commands: `lldb`, `gdb`, `dlv`, `pdb`.
 
 | `debugger` | `command` is | Runs as |
@@ -236,7 +236,7 @@ build = "cargo build"
 key = "Ctrl+Alt+D"
 ```
 
-`debugger_args` gives the debugger flags of its own, as an array of words, added to those TermIDE starts it with:
+`debugger_args` gives the debugger flags of its own, as an array of words, added to those Termide starts it with:
 
 ```toml
 [debug-go]
@@ -279,11 +279,11 @@ args = ["--log"]                                 # flags for every launch
 
 - `command` names the debugger's program: a path (`~/` stands for the home directory), or a name looked up on `PATH`. For `debugpy` and `pdb` it is the Python to run. A path that does not exist makes the debugger count as not installed rather than falling back to another.
 - `args` are the debugger's flags for every launch, in place of its default ones; a launch's `debugger_args` come after them. Unset keeps the defaults, `[]` drops them. The only default today is `--only-same-user=false` for `dlv-dap` where `/proc/net/tcp` cannot be read (Termux on Android): Delve's same-user check would refuse every connection there. Setting `args` for `dlv-dap` in such a system replaces it, so list it again if you still need it.
-- The arguments TermIDE needs to talk to an adapter (`dap --listen=…` for Delve, `-i dap` for GDB, `-m debugpy.adapter`) and its scripts for command-line debuggers are always given and cannot be changed.
+- The arguments Termide needs to talk to an adapter (`dap --listen=…` for Delve, `-i dap` for GDB, `-m debugpy.adapter`) and its scripts for command-line debuggers are always given and cannot be changed.
 - `native` is tried in order for a Rust file debugged without a command; it takes `lldb-dap`, `gdb-dap`, `lldb` and `gdb`.
 - `console` applies to launches that do not set their own `console`.
 
-The **Debug** tab of the settings window edits the same: the order and the console, then every debugger TermIDE knows with its program and flags, the defaults shown as such. A debugger opens on a page of its own; its flags are typed as a shell would split them (quotes keep a value whole, commas are part of a flag), emptying them means no flags, and **Reset** brings back the program on `PATH` and the default flags — in a project's settings, the global ones.
+The **Debug** tab of the settings window edits the same: the order and the console, then every debugger Termide knows with its program and flags, the defaults shown as such. A debugger opens on a page of its own; its flags are typed as a shell would split them (quotes keep a value whole, commas are part of a flag), emptying them means no flags, and **Reset** brings back the program on `PATH` and the default flags — in a project's settings, the global ones.
 
 ### The debug panel
 
@@ -310,7 +310,7 @@ When the program stops, the editor that has the file moves its cursor to the lin
 
 ### The program's terminal
 
-By default (`console = "terminal"`) the program runs in a terminal panel of its own, opened beside the others: it reads the keyboard there — focus that panel to type to it — and its output, colours and full-screen interfaces show there as in any terminal, while the debug panel keeps the adapter's messages. debugpy and Delve ask TermIDE to start the program in that panel; lldb-dap starts it itself and is told the panel's terminal device through lldb's `target.input-path`, `output-path` and `error-path` settings, which every lldb-dap version takes. `Ctrl+C` in a terminal lldb-dap uses is not passed to the program: pause it with `p` in the debug panel. GDB's adapter has no such mode, so its programs always write to the debug panel and read nothing; so do the sessions an agent starts, whose output it reads from the session. `console = "panel"` asks for that for any adapter, for a program that does not read input.
+By default (`console = "terminal"`) the program runs in a terminal panel of its own, opened beside the others: it reads the keyboard there — focus that panel to type to it — and its output, colours and full-screen interfaces show there as in any terminal, while the debug panel keeps the adapter's messages. debugpy and Delve ask Termide to start the program in that panel; lldb-dap starts it itself and is told the panel's terminal device through lldb's `target.input-path`, `output-path` and `error-path` settings, which every lldb-dap version takes. `Ctrl+C` in a terminal lldb-dap uses is not passed to the program: pause it with `p` in the debug panel. GDB's adapter has no such mode, so its programs always write to the debug panel and read nothing; so do the sessions an agent starts, whose output it reads from the session. `console = "panel"` asks for that for any adapter, for a program that does not read input.
 
 ## Tips
 

@@ -1,6 +1,6 @@
 # Database Viewer
 
-TermIDE includes a built-in database browser for **SQLite**, **PostgreSQL** and
+Termide includes a built-in database browser for **SQLite**, **PostgreSQL** and
 **MySQL/MariaDB**. It connects over the native wire protocol (no external client
 tools required), lists a database's tables, and shows rows in a scrollable grid
 with sorting and per-column filtering.
@@ -42,7 +42,7 @@ part of the panel's URL, so the saved layout does not contain it.
 Password-less authentication (PostgreSQL `~/.pgpass`/peer/trust, a Unix
 socket, `PGPASSWORD`, …) keeps working as before. A password written into
 the URL (`postgres://user:secret@host/db`) is still used. When you save
-such a URL as a bookmark, TermIDE offers to move the password into the
+such a URL as a bookmark, Termide offers to move the password into the
 vault.
 
 ## Layout

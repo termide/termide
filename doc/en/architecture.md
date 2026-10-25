@@ -1,10 +1,10 @@
 # Architecture
 
-This document describes the technical architecture of TermIDE.
+This document describes the technical architecture of Termide.
 
 ## High-Level Overview
 
-TermIDE is a terminal-based IDE built with Rust using the `ratatui` TUI framework. It features an adaptive **split panel layout** that resizes to terminal width and gives every stacked panel an independently adjustable height — with a one-key fullscreen preset for the focused panel.
+Termide is a terminal-based IDE built with Rust using the `ratatui` TUI framework. It features an adaptive **split panel layout** that resizes to terminal width and gives every stacked panel an independently adjustable height — with a one-key fullscreen preset for the focused panel.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -788,11 +788,11 @@ termide runs, where a key is sent, or how freely the agent acts.
 
 ## Conclusion
 
-TermIDE's architecture prioritizes:
+Termide's architecture prioritizes:
 - **Flexibility** - Dynamic panel system adapts to user needs
 - **Efficiency** - Adjustable split layout with a one-key fullscreen preset maximises usable space without giving up multi-panel views
 - **Extensibility** - Trait-based design allows easy additions
 - **Robustness** - Defensive programming prevents crashes
 - **Performance** - Efficient rendering and event handling
 
-The split-with-fullscreen layout system is the key innovation that differentiates TermIDE from traditional multi-panel terminal applications.
+The split-with-fullscreen layout system is the key innovation that differentiates Termide from traditional multi-panel terminal applications.

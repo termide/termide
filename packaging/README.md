@@ -1,4 +1,4 @@
-# TermIDE Packaging
+# Termide Packaging
 
 This directory contains packaging configurations for various Linux and macOS package managers.
 

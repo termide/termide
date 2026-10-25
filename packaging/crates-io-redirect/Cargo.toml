@@ -1,13 +1,13 @@
 # Standalone "tombstone" crate that reclaims the `termide` name on crates.io.
 #
-# TermIDE itself is a multi-crate Cargo workspace and is NOT published to
+# Termide itself is a multi-crate Cargo workspace and is NOT published to
 # crates.io. The name there belongs to a very early release that cannot be
 # removed, so `cargo install termide` used to fetch that obsolete code. This
 # tiny crate replaces it: its crates.io page and the installed binary both
 # point users at the GitHub distribution.
 #
 # It is intentionally its OWN workspace (the empty `[workspace]` table below)
-# so the parent TermIDE workspace ignores it and `cargo publish` here is
+# so the parent Termide workspace ignores it and `cargo publish` here is
 # self-contained.
 #
 # Publish steps (run from this directory, needs crates.io credentials):
@@ -18,7 +18,7 @@
 name = "termide"
 version = "0.0.0" # ⚠ REPLACE before publishing: must be > current crates.io max version
 edition = "2021"
-description = "Obsolete crates.io placeholder — TermIDE is distributed via GitHub, not crates.io. Install with: cargo install --git https://github.com/termide/termide"
+description = "Obsolete crates.io placeholder — Termide is distributed via GitHub, not crates.io. Install with: cargo install --git https://github.com/termide/termide"
 license = "MIT"
 repository = "https://github.com/termide/termide"
 homepage = "https://github.com/termide/termide"
@@ -30,5 +30,5 @@ categories = ["command-line-utilities"]
 name = "termide"
 path = "main.rs"
 
-# Detach from the parent TermIDE workspace.
+# Detach from the parent Termide workspace.
 [workspace]

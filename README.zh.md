@@ -1,4 +1,4 @@
-# TermIDE
+# Termide
 
 [![GitHub Release](https://img.shields.io/github/v/release/termide/termide)](https://github.com/termide/termide/releases)
 [![CI](https://github.com/termide/termide/actions/workflows/release.yml/badge.svg)](https://github.com/termide/termide/actions)
@@ -10,13 +10,13 @@
 
 **[网站](https://termide.github.io)** | **[文档](doc/zh/README.md)** | **[版本发布](https://github.com/termide/termide/releases)** | **[截图](https://termide.github.io/zh/#screenshots)** | **[Telegram](https://t.me/termide_news)**
 
-<p align="center"><img src="https://termide.github.io/assets/screenshots/tour.gif" alt="TermIDE — 编辑器、文件管理器、终端和查看器合为一个 TUI" width="900"></p>
+<p align="center"><img src="https://termide.github.io/assets/screenshots/tour.gif" alt="Termide — 编辑器、文件管理器、终端和查看器合为一个 TUI" width="900"></p>
 
-## 为什么选择 TermIDE？
+## 为什么选择 Termide？
 
-终端编辑器负责代码；而代码之外的一切 —— 远程主机上的文件、数据库、git、长时间运行的 shell、编程智能体 —— 通常需要插件或单独的工具。TermIDE 将这些全部集成在一个二进制文件中，在笔记本、服务器或手机上都能开箱即用。它并不试图取代这些工具，而是把你每天都要用到的那部分集中到一处：
+终端编辑器负责代码；而代码之外的一切 —— 远程主机上的文件、数据库、git、长时间运行的 shell、编程智能体 —— 通常需要插件或单独的工具。Termide 将这些全部集成在一个二进制文件中，在笔记本、服务器或手机上都能开箱即用。它并不试图取代这些工具，而是把你每天都要用到的那部分集中到一处：
 
-| 任务 | 通常使用 | 在 TermIDE 中 |
+| 任务 | 通常使用 | 在 Termide 中 |
 |------|----------|---------------|
 | SSH 断开后保持工作不中断 | tmux、screen | 可分离实例 |
 | 在主机之间传输文件 | mc、ranger、scp | 支持 SFTP / FTP 的双栏文件管理器 |
@@ -28,7 +28,7 @@
 
 编辑器、LSP、终端、git 和项目布局在终端编辑器中已是标配；下表列出的是其他编辑器所缺少或需要插件才能实现的功能：
 
-| 功能 | TermIDE | Fresh | Vim/Neovim | Helix | Micro |
+| 功能 | Termide | Fresh | Vim/Neovim | Helix | Micro |
 |---------|:-------:|:-----:|:----------:|:-----:|:-----:|
 | 内置编程智能体（本地或云端模型） | ✓ | ✗ | 插件 | ✗ | ✗ |
 | MCP 服务器 | ✓ | ✗ | 插件 | ✗ | ✗ |
@@ -42,7 +42,7 @@
 | 图片查看器 | ✓ | ✗ | 插件 | ✗ | ✗ |
 | 资源监控 | ✓ | ✗ | ✗ | ✗ | ✗ |
 
-**TermIDE = 编辑器 + 文件管理器 + 终端 + Git + 智能体，集成于一个 TUI 应用程序中。**
+**Termide = 编辑器 + 文件管理器 + 终端 + Git + 智能体，集成于一个 TUI 应用程序中。**
 
 ## 设计原则
 
@@ -119,7 +119,7 @@
 
 **必须使用 AI 智能体吗？** 不必。默认没有设置任何提供商或模型，因此在你配置之前，智能体不会做任何事，也不会发送任何内容。其他功能都可以独立使用。
 
-**TermIDE 会回传数据吗？** 没有遥测、无需账号，也不检查更新。只有在你要求时才会联网：访问远程位置、网页、`git push` 或 `pull`，或调用智能体的模型。
+**Termide 会回传数据吗？** 没有遥测、无需账号，也不检查更新。只有在你要求时才会联网：访问远程位置、网页、`git push` 或 `pull`，或调用智能体的模型。
 
 **它能取代 tmux 吗？** 对于通过 SSH 保持工作不中断这一常见场景，可以：`termide --detached` 让整个工作区保持运行，`--attach` 可将其恢复。它不像 tmux 那样管理任意会话和窗口，也可以在 tmux 中正常运行。
 
@@ -194,7 +194,7 @@ tar xzf termide-0.45.0-aarch64-unknown-linux-musl.tar.gz
 <details>
 <summary><b>🪟 Windows (.zip)</b></summary>
 
-TermIDE 通过 ConPTY 在 Windows 10+ 上原生运行。建议使用 **Windows Terminal**
+Termide 通过 ConPTY 在 Windows 10+ 上原生运行。建议使用 **Windows Terminal**
 以获得最佳体验。
 
 1. 从 [GitHub Releases](https://github.com/termide/termide/releases) 下载 `termide-0.45.0-x86_64-pc-windows-msvc.zip`。
@@ -386,7 +386,7 @@ nix build github:termide/termide#termide-static
 termide [OPTIONS] [FILE]...
 
 参数:
-  [FILE]...            要打开的文件或目录。给定路径时，TermIDE 以干净的视图启动
+  [FILE]...            要打开的文件或目录。给定路径时，Termide 以干净的视图启动
                        （不恢复也不保存项目布局）。文本在编辑器中打开，因此可作为
                        git、crontab、visudo 等的 $EDITOR 使用；图片、SQLite 文件、
                        其他二进制文件和目录会在相应的查看器、十六进制编辑器或
@@ -428,7 +428,7 @@ export EDITOR=termide   # git commit, crontab -e, visudo, ...
 
 ### 快速开始
 
-启动 TermIDE 后，您将看到自适应宽度的布局：
+启动 Termide 后，您将看到自适应宽度的布局：
 - **宽终端（>= 160 列）：** 侧边栏（Git 状态与 Operations 同列堆叠）+ 两个文件管理器面板
 - **普通终端（< 160 列）：** 侧边栏（Git 状态、文件管理器与 Operations 同列堆叠）+ 文件管理器面板
 - 顶部为菜单栏，底部为状态栏
@@ -458,7 +458,7 @@ export EDITOR=termide   # git commit, crontab -e, visudo, ...
 
 ## 配置
 
-TermIDE 遵循 [XDG Base Directory 规范](https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html) 进行文件组织。
+Termide 遵循 [XDG Base Directory 规范](https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html) 进行文件组织。
 
 **配置文件位置：**
 - Linux/BSD: `~/.config/termide/config.toml`（或 `$XDG_CONFIG_HOME/termide/config.toml`）

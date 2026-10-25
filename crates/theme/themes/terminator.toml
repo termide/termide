@@ -1,4 +1,4 @@
-# Terminator theme for TermIDE
+# Terminator theme for Termide
 # Inspired by Skynet HUD / Mars red aesthetics from The Terminator
 name = "terminator"
 is_light = false

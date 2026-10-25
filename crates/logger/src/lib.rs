@@ -127,7 +127,7 @@ impl Logger {
             .truncate(true)
             .open(&file_path)
         {
-            let _ = writeln!(file, "=== TermIDE Log Start ===");
+            let _ = writeln!(file, "=== Termide Log Start ===");
         }
 
         Self {

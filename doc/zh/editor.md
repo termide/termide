@@ -142,7 +142,7 @@
 
 内置语言通过 tree-sitter 高亮。对于尚无 tree-sitter 语法的文件类型——例如你正在
 设计的语言——可以在 `config.toml` 中定义**轻量级关键字高亮器**，无需重新编译
-TermIDE。它会着色行/块注释、字符串、数字以及你的关键字/类型词表，并复用当前主题
+Termide。它会着色行/块注释、字符串、数字以及你的关键字/类型词表，并复用当前主题
 的配色。
 
 ```toml
@@ -344,7 +344,7 @@ show_blame = true  # 或 false（默认：true）
 
 ## LSP（语言服务器协议）
 
-TermIDE 内置 LSP 支持，提供智能代码辅助。当配置了可用的语言服务器时，您将获得：
+Termide 内置 LSP 支持，提供智能代码辅助。当配置了可用的语言服务器时，您将获得：
 
 - **代码补全** - 输入时的上下文感知建议
 - **诊断** - 实时错误和警告指示
@@ -400,7 +400,7 @@ root_markers = ["package.json", "tsconfig.json"]
 `[lsp.servers]` 中的条目会覆盖或补充[支持的语言](#支持的语言)中列出的内置服务器；
 未提及的内置服务器仍然有效。针对内置语言的条目只修改其中设置的字段，因此仅写
 `command = "/opt/rust-analyzer"` 会保留内置的 `root_markers`。针对其他语言的条目会为
-该语言新增一个服务器。键名是 TermIDE 为文件识别出的语言标识，例如 `.tsx` 对应
+该语言新增一个服务器。键名是 Termide 为文件识别出的语言标识，例如 `.tsx` 对应
 `typescriptreact`。
 
 服务器在文件上方最近的、含有其某个 `root_markers` 的目录中启动，每种语言、每个根目录
@@ -408,7 +408,7 @@ root_markers = ["package.json", "tsconfig.json"]
 所属的 cargo 工作区（`cargo locate-project --workspace`），或在 `use` 指令中列出该模块的
 `go.work`。于是一个工作区的所有成员共用一个服务器。独立的 crate 或模块、位于某个工作区之下
 却不属于它的 crate 或模块，或者缺少 `cargo`/`go` 时，仍使用最近的标记。该结果会一直记住，
-直到 TermIDE 重启。
+直到 Termide 重启。
 
 库代码在其来源项目的服务器中打开，而不是单独启动一个服务器：对于 Rust，是工具链的源码
 （`rustlib/src`）以及 cargo 拉取的 crate（`~/.cargo/registry`、`~/.cargo/git`）；对于 Go，
@@ -474,9 +474,9 @@ LSP 可与任何实现了 LSP 协议的语言服务器配合使用。常见示�
 
 Docker 文件没有特征扩展名，因此按文件名识别，且不区分大小写：`Dockerfile`、`Dockerfile.*`、`*.Dockerfile`，以及带任意中缀的 `compose.yaml`/`docker-compose.yaml`，例如 `compose.override.yaml` 或 `docker-compose.prod.yml`。
 
-TermIDE 在启动 `docker-language-server` 时会要求它不发送遥测数据；否则该服务器默认会收集遥测。
+Termide 在启动 `docker-language-server` 时会要求它不发送遥测数据；否则该服务器默认会收集遥测。
 
-**注意：** 您需要单独安装语言服务器。TermIDE 仅提供 LSP 客户端集成。
+**注意：** 您需要单独安装语言服务器。Termide 仅提供 LSP 客户端集成。
 
 ## 断点与调试
 
@@ -493,7 +493,7 @@ TermIDE 在启动 `docker-language-server` 时会要求它不发送遥测数据�
 
 ## Vim 模式
 
-TermIDE 包含可选的 Vim 风格编辑模式，完整支持西里尔文键盘。
+Termide 包含可选的 Vim 风格编辑模式，完整支持西里尔文键盘。
 
 ### 启用 Vim 模式
 

@@ -1,6 +1,6 @@
 # Coding Agent
 
-TermIDE has a built-in coding agent: a panel where you describe a task in
+Termide has a built-in coding agent: a panel where you describe a task in
 plain language and a language model carries it out by reading files, editing
 them and running shell commands in your project. Every action it takes that
 could change something asks for your permission first.
@@ -168,7 +168,7 @@ endpoint, the panel drives that tool's own CLI as an
 (`@agentclientprotocol/claude-agent-acp` / `@agentclientprotocol/codex-acp`
 / `@google/gemini-cli --acp`, the latest release, run through
 `npx`; the copy in npm's cache starts without asking the registry, and
-TermIDE looks for a newer release once per run in the background, so a new
+Termide looks for a newer release once per run in the background, so a new
 one starts from the next panel on). The CLI owns the endpoint and the sign-in — its own subscription or
 API key — so the connection's `base_url`, `api_key_env` and fallback context
 window do not apply; the settings modal hides them for these providers and
@@ -1547,9 +1547,9 @@ The agent's own files live in an `ai` directory that exists at three
 levels, highest priority first:
 
 1. `.termide/ai/` in the directory the panel works in;
-2. `.termide/ai/` in the TermIDE project root, when that is another
+2. `.termide/ai/` in the Termide project root, when that is another
    directory;
-3. `ai/` in the TermIDE configuration directory
+3. `ai/` in the Termide configuration directory
    (`~/.config/termide/ai/` on Linux,
    `~/Library/Application Support/termide/ai/` on macOS).
 
@@ -1840,9 +1840,9 @@ command: npx -y @agentclientprotocol/claude-agent-acp
 
 `command` is the program and its arguments, split as a shell splits words
 (quotes keep spaces in an argument) but not run through a shell, so nothing
-in it is expanded. The program inherits TermIDE's environment; an
+in it is expanded. The program inherits Termide's environment; an
 `env.<NAME>: value` line per variable adds to it or overrides it, `$NAME` and
-`${NAME}` in the value coming from TermIDE's environment
+`${NAME}` in the value coming from Termide's environment
 (`env.ANTHROPIC_BASE_URL: http://localhost:8080`). `timeout` is how many
 seconds to wait for it to start, 120 by default.
 
@@ -1859,7 +1859,7 @@ adapter termide knows has mapped onto its own; `tools` does not apply.
 The program starts in the background when you switch to the agent; the first
 request waits for it. Its answers, thoughts and tool calls appear in the
 session like the built-in agent's, and it reads and writes files through
-TermIDE, so an open editor follows its edits. Its permission requests are
+Termide, so an open editor follows its edits. Its permission requests are
 judged by the same rules as the built-in agent's: a read-only command or a
 request a `[ai.permissions]` rule or a session grant already covers passes
 without a card, and only what is left reaches you — so a granted or read-only
@@ -1915,7 +1915,7 @@ is long. Neither is written to the log.
 
 The prompt the model receives is assembled from files: the body of the
 default agent's `ai/agents/default/AGENT.md`, a template with placeholders the
-agent fills in. No prompt text is built into TermIDE; the template below ships
+agent fills in. No prompt text is built into Termide; the template below ships
 as a data file (`crates/agent-core/assets/agents/default/AGENT.md`) and is
 written to the configuration level on first use, and from then on the file is
 what counts. It is the fallback of every agent, so a project's
@@ -1975,7 +1975,7 @@ can see exactly what the model gets.
 
 ### Service prompts
 
-TermIDE's own prompts are files too, under `system/`, seeded on first use like
+Termide's own prompts are files too, under `system/`, seeded on first use like
 the default agent's `AGENT.md`. Only the configuration level's `system/` is read: a project's is
 ignored, so a checked-out repository cannot rewrite how termide summarises,
 plans or judges. Compaction, the summary that
@@ -2229,7 +2229,7 @@ tools = ["search_issues", "get_issue", "create_issue"]      # optional: a subset
 timeout_secs = 60                                            # startup and one call
 ```
 
-A server is either a program TermIDE starts or a URL it reaches. A program
+A server is either a program Termide starts or a URL it reaches. A program
 speaks over stdio; a URL speaks Streamable HTTP, one request per POST, with
 its keys in `headers` (`$NAME` in a header value comes from your environment,
 as in `env`). Non-`https` URLs are refused except on the loopback, since
@@ -2243,7 +2243,7 @@ worth narrowing with `tools`; the log says so when a server has more than
 twenty and no such list.
 
 A server may change its tools while it runs. A program says so on its pipe; a
-URL server on a stream TermIDE holds open to it after the handshake, opened
+URL server on a stream Termide holds open to it after the handshake, opened
 again when it drops. Either way the tools are listed again and the session
 takes the new set, with a line saying so. Like any change of tools, it costs
 the next request its prompt cache.
@@ -2260,7 +2260,7 @@ A URL server with no `Authorization` among its `headers` that answers `401`
 wants an OAuth sign-in, and the session says so. `/mcp login <server>` opens
 the browser on the server's authorization page; once you approve, the browser
 returns to a one-off listener on `127.0.0.1` and the server connects. The
-endpoints come from the server's own metadata, TermIDE registers itself as a
+endpoints come from the server's own metadata, Termide registers itself as a
 client where the server allows it, and the exchange uses PKCE. The sign-in is
 kept in `mcp-auth.json` in the configuration's `ai/` directory, readable by
 you only, filed by the server's URL — so every panel and every project that
@@ -2287,7 +2287,7 @@ or `url` with `headers` and `oauth` (`clientId`, `clientSecret`, `scopes`,
 `servers`); with `disabled` read as `enabled = false` and `${workspaceFolder}`,
 `${userHome}` and `${env:NAME}` resolved. An `sse` server is skipped — the
 older transport, where requests go to an address a stream names first, is not
-the one TermIDE speaks — and so is one
+the one Termide speaks — and so is one
 holding a `${input:…}` reference: that asks you for a secret in the other
 tool, and termide would start it on an empty one. Every skip is in the log. Within one directory `mcp.toml` wins the
 same name; the directory nearer the panel wins both — except over a server of
@@ -2322,7 +2322,7 @@ always" writes a rule for the tool name:
 
 ### Hooks
 
-A hook is a program TermIDE runs around a tool call, declared in
+A hook is a program Termide runs around a tool call, declared in
 `hooks.toml` at any of the three levels (same merging as MCP servers). It
 gets the event as JSON on standard input and answers with JSON on standard
 output, the shape Claude Code, Gemini CLI and Cursor share:
@@ -2388,7 +2388,7 @@ template, the default agent's `AGENT.md`, itself. Files over 32 KiB are skipped.
 ## Session history
 
 Every session is written to a log in JSON Lines, one file per session, under
-`ai/sessions/<path of the panel's directory>/` in the TermIDE configuration
+`ai/sessions/<path of the panel's directory>/` in the Termide configuration
 directory, beside the agents. The log records the model and the agent the
 session started with and every switch, so a reopened session continues on
 the model and as the agent it last used. When a session approaches the
@@ -2399,7 +2399,7 @@ happens, and `/compact` does it on request (see
 entry: the log keeps every message, but the branch continues from before the
 undone request, on reopening too.
 
-When TermIDE reopens a saved layout, the agent panel comes back with it and
+When Termide reopens a saved layout, the agent panel comes back with it and
 continues the session it was in, on that session's model and as its agent. If
 the log has been
 deleted the panel starts a fresh session; if no model is configured any more

@@ -5,8 +5,8 @@ Close the SSH connection, come back hours later, attach again — the editors,
 shells, LSP servers and long-running jobs are exactly where you left them.
 
 This is the same guarantee `tmux` and `screen` give, without a second
-multiplexer between you and TermIDE: there is no prefix key competing with
-TermIDE's own bindings, and no second layer to configure for colours or mouse
+multiplexer between you and Termide: there is no prefix key competing with
+Termide's own bindings, and no second layer to configure for colours or mouse
 reporting.
 
 > Unix only (Linux, macOS, BSD). Windows has no `fork`/`setsid`, and its
@@ -85,19 +85,19 @@ client is gone and carries on; the next `--attach` picks it up.
 Everything. The instance is not saved and restored — it never stops.
 
 `termide --detached` starts a small host process that owns a PTY and runs an
-ordinary TermIDE inside it. Your shells, LSP servers, watchers and background
-jobs are children of that TermIDE, so they are untouched by a client coming and
+ordinary Termide inside it. Your shells, LSP servers, watchers and background
+jobs are children of that Termide, so they are untouched by a client coming and
 going. Attaching connects a terminal to the host; detaching disconnects it.
 
 This is a different thing from the saved project layout in
 `~/.local/share/termide/projects/`, which records which panels were open so a
-*new* TermIDE can reopen them. That still works as before, and still applies
+*new* Termide can reopen them. That still works as before, and still applies
 when you start an instance for the first time.
 
 ## Reattaching from a different terminal
 
 You can attach from a terminal that is nothing like the one you started in — a
-different size, a different emulator, a different `TERM`. On attach, TermIDE
+different size, a different emulator, a different `TERM`. On attach, Termide
 re-negotiates the alternate screen, mouse reporting, bracketed paste and
 keyboard protocol against the terminal that is now looking at it, re-detects
 colour support from the client's `TERM`, and repaints in full.
@@ -132,9 +132,9 @@ and `--kill` offers the ids from this table.
 | `Alt+D` | The normal way. Rebind it as `detach_instance` in the `[general.keybindings]` section. |
 | Close the terminal | Safe. The instance notices and keeps running. |
 | `Ctrl+Z` | Does **not** work, and cannot: termide reads keys in raw mode, so the key never reaches the tty line discipline to become a SIGTSTP. `Alt+D` is the binding that does what you meant. |
-| `Ctrl+\` three times | Emergency only — if TermIDE itself has stopped responding. Handled by the client, so it works even when the app does not. |
+| `Ctrl+\` three times | Emergency only — if Termide itself has stopped responding. Handled by the client, so it works even when the app does not. |
 
-Ending a instance is the same as ending any TermIDE: quit it (`Alt+Q`) while
+Ending a instance is the same as ending any Termide: quit it (`Alt+Q`) while
 attached. That stops the host process too, and removes the instance.
 
 When you cannot attach to quit it — the instance is wedged, or you simply want
@@ -144,7 +144,7 @@ it gone — end it from outside:
 termide --kill my-project
 ```
 
-TermIDE inside gets SIGTERM, then SIGKILL if it is still there three seconds
+Termide inside gets SIGTERM, then SIGKILL if it is still there three seconds
 later; if the host process does not go either, `--kill` kills it too. Unsaved
 changes in that instance are lost, and its shells and jobs end with it. A
 client attached at the time is told the instance ended.
@@ -166,7 +166,7 @@ The other client is detached with a note that the instance was taken over, and
 the instance repaints for the new terminal. Nothing inside it is disturbed. A
 client that has stopped reading entirely is cut off without the note.
 
-An instance started by an older TermIDE does not understand `--force`: detach
+An instance started by an older Termide does not understand `--force`: detach
 its client the ordinary way, or end it with `--kill`.
 
 ## Where the instance state lives

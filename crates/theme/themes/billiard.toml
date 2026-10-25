@@ -1,4 +1,4 @@
-# Billiard theme for TermIDE
+# Billiard theme for Termide
 # Classic billiard table aesthetic: dark baize green surface with bright accents.
 name = "billiard"
 is_light = false

@@ -1,4 +1,4 @@
-# Gruvbox Dark theme for TermIDE
+# Gruvbox Dark theme for Termide
 # https://github.com/morhetz/gruvbox
 name = "gruvbox"
 is_light = false

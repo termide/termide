@@ -1,6 +1,6 @@
 # Markdown 预览
 
-TermIDE 将 Markdown 文件（`.md`、`.markdown`）渲染为只读预览面板，而不是打开原始源码。
+Termide 将 Markdown 文件（`.md`、`.markdown`）渲染为只读预览面板，而不是打开原始源码。
 
 ## 打开
 

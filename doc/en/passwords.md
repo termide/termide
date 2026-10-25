@@ -1,6 +1,6 @@
 # Password Vault
 
-TermIDE keeps the passwords of remote connections in an encrypted vault
+Termide keeps the passwords of remote connections in an encrypted vault
 protected by a master password, so bookmarks and saved layouts never have
 to contain them.
 
@@ -17,9 +17,9 @@ The vault serves:
 1. A connection is refused: SFTP after the SSH agent and keys, FTP after
    the anonymous login, a database without a password, git without
    credentials.
-2. If the vault holds a password for that server and user, TermIDE uses it.
+2. If the vault holds a password for that server and user, Termide uses it.
    When the vault is locked, it asks for the master password first.
-3. Otherwise TermIDE asks for the password. Tick **Save in password vault**
+3. Otherwise Termide asks for the password. Tick **Save in password vault**
    to keep it.
 4. A password you asked to keep is saved only after the server accepted it,
    so a typo never lands in the vault.
@@ -27,11 +27,11 @@ The vault serves:
    type it twice.
 
 If a stored password is refused, for example because it was changed on the
-server, TermIDE asks again. The checkbox is ticked already, so the new
+server, Termide asks again. The checkbox is ticked already, so the new
 password replaces the old one.
 
 Cancelling the master password prompt does not cancel the connection.
-TermIDE asks for the login password itself instead.
+Termide asks for the login password itself instead.
 
 Passwords are filed by server: scheme, host and port (default ports are
 left out) plus the user name. A database password belongs to the server
@@ -41,7 +41,7 @@ finding it. The passphrase of the SSH key used by git is kept as one entry.
 ## Bookmarks with a password in the URL
 
 When you add or edit a bookmark whose URL contains a password
-(`postgres://user:secret@host/db`), TermIDE offers to move the password into
+(`postgres://user:secret@host/db`), Termide offers to move the password into
 the vault. Answer **Yes**:
 
 - the password is stored in the vault;
@@ -74,13 +74,13 @@ is one vault per user, never one per project.
   encrypted with a key derived from the master password by Argon2id
   (64 MiB, 3 passes).
 - **Saving needs no unlock.** Only the public key is used for it, so
-  TermIDE asks for the master password only when a stored password is
+  Termide asks for the master password only when a stored password is
   actually needed.
 - **Metadata is readable.** Kind, server and user name are stored in
-  clear, so TermIDE can tell whether a password exists without unlocking.
+  clear, so Termide can tell whether a password exists without unlocking.
   They are bound to the encrypted secret: an edited entry fails to decrypt
   instead of sending the password to another host.
-- **Concurrent writes are safe.** Several TermIDE processes may share the
+- **Concurrent writes are safe.** Several Termide processes may share the
   vault. Writes are atomic and serialised by a lock file.
 
 **A forgotten master password cannot be recovered.** Delete `vault.toml` to
@@ -92,7 +92,7 @@ The vault protects passwords from anyone who reads your config files,
 backups, synced dotfiles or a repository a bookmark file was committed to.
 
 It does not protect against a program running as your user while the vault
-is unlocked: such a program can read TermIDE's memory or log your
+is unlocked: such a program can read Termide's memory or log your
 keystrokes.
 
 ## Limitations

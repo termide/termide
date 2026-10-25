@@ -1,6 +1,6 @@
 # Installation Guide
 
-This guide covers different methods to install TermIDE on your system.
+This guide covers different methods to install Termide on your system.
 
 ## Download Pre-built Binary (Recommended)
 
@@ -55,7 +55,7 @@ tar xzf termide-*.tar.gz
 
 ### Step 4: Install System-wide (Optional)
 
-To install TermIDE system-wide, move the binary to a directory in your PATH:
+To install Termide system-wide, move the binary to a directory in your PATH:
 
 ```bash
 # Linux
@@ -165,7 +165,7 @@ cargo install --path .
 cargo install --git https://github.com/termide/termide --locked
 ```
 
-> **Note:** TermIDE is **not** published to crates.io. `cargo install termide`
+> **Note:** Termide is **not** published to crates.io. `cargo install termide`
 > would fetch an obsolete, unrelated early release — always build from source
 > (the clone above) or use `cargo install --git …`.
 
@@ -260,7 +260,7 @@ xattr -d com.apple.quarantine termide
 
 ### Windows (Native)
 
-TermIDE runs natively on Windows 10+ using ConPTY. Requires Windows Terminal for best experience.
+Termide runs natively on Windows 10+ using ConPTY. Requires Windows Terminal for best experience.
 
 1. Download the `.zip` archive from [GitHub Releases](https://github.com/termide/termide/releases):
    - `termide-VERSION-x86_64-pc-windows-msvc.zip`
@@ -274,7 +274,7 @@ TermIDE runs natively on Windows 10+ using ConPTY. Requires Windows Terminal for
 
 ### Windows (WSL)
 
-TermIDE also works in Windows Subsystem for Linux (WSL and WSL2):
+Termide also works in Windows Subsystem for Linux (WSL and WSL2):
 
 1. Install WSL2 if you haven't already
 2. Download the Linux x86_64 binary inside WSL:
@@ -286,7 +286,7 @@ TermIDE also works in Windows Subsystem for Linux (WSL and WSL2):
 
 ### Android (Termux)
 
-TermIDE runs in [Termux](https://termux.dev). Use the **static ARM64 musl**
+Termide runs in [Termux](https://termux.dev). Use the **static ARM64 musl**
 build — the glibc `aarch64-unknown-linux-gnu` build won't run on Android's
 Bionic libc:
 

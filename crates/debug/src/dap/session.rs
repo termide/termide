@@ -558,7 +558,7 @@ impl Session {
             "initialize",
             json!({
                 "clientID": "termide",
-                "clientName": "TermIDE",
+                "clientName": "Termide",
                 "adapterID": self.spec.adapter.id(),
                 "locale": "en",
                 "linesStartAt1": true,

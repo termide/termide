@@ -166,7 +166,7 @@ scrolls), `Enter` / click to apply, `Esc` to dismiss.
 Built-in languages are highlighted with tree-sitter. For a file type that has
 no tree-sitter grammar yet — for example a language you are still designing —
 you can define a **lightweight keyword highlighter** in `config.toml` without
-rebuilding TermIDE. It colours line/block comments, strings, numbers, and your
+rebuilding Termide. It colours line/block comments, strings, numbers, and your
 keyword/type word lists, reusing the active theme's palette.
 
 ```toml
@@ -371,7 +371,7 @@ show_blame = true
 
 ## LSP (Language Server Protocol)
 
-TermIDE includes built-in LSP support for intelligent code assistance. When a language server is configured and available, you get:
+Termide includes built-in LSP support for intelligent code assistance. When a language server is configured and available, you get:
 
 - **Code Completion** - Context-aware suggestions as you type
 - **Diagnostics** - Real-time error and warning indicators
@@ -428,7 +428,7 @@ Entries under `[lsp.servers]` override or add to the built-in servers listed in
 [Supported Languages](#supported-languages); the built-ins you do not mention stay
 in use. An entry for a built-in language changes only the fields it sets, so
 `command = "/opt/rust-analyzer"` alone keeps the built-in `root_markers`. An entry
-for any other language adds a server for it. The key is the language id TermIDE
+for any other language adds a server for it. The key is the language id Termide
 detects for the file, such as `typescriptreact` for `.tsx`.
 
 A server starts in the nearest directory above the file that holds one of its
@@ -438,7 +438,7 @@ cargo workspace a crate is a member of (`cargo locate-project --workspace`), or
 the `go.work` that lists the module in a `use` directive. All members of a
 workspace then share one server. A standalone crate or module, one under a
 workspace without belonging to it, or a missing `cargo`/`go` keeps the nearest
-marker. The answer is remembered until TermIDE restarts.
+marker. The answer is remembered until Termide restarts.
 
 Library code opens in the server of the project it came from, not in one of its
 own: for Rust the toolchain's sources (`rustlib/src`) and the crates cargo
@@ -509,9 +509,9 @@ Built-in server definitions, used automatically when the binary is on `PATH`:
 
 Docker files have no distinctive extension, so they are recognized by file name, case-insensitively: `Dockerfile`, `Dockerfile.*`, `*.Dockerfile`, and `compose.yaml`/`docker-compose.yaml` with any infix, such as `compose.override.yaml` or `docker-compose.prod.yml`.
 
-TermIDE tells `docker-language-server` to send no telemetry when it starts; the server collects it by default otherwise.
+Termide tells `docker-language-server` to send no telemetry when it starts; the server collects it by default otherwise.
 
-**Note:** You need to install the language server separately. TermIDE only provides the LSP client integration.
+**Note:** You need to install the language server separately. Termide only provides the LSP client integration.
 
 ## Breakpoints and Debugging
 
@@ -528,7 +528,7 @@ A breakpoint stays with its text as you edit: lines added or removed above move 
 
 ## Vim Mode
 
-TermIDE includes an optional Vim-style editing mode with full Cyrillic keyboard support.
+Termide includes an optional Vim-style editing mode with full Cyrillic keyboard support.
 
 ### Enabling Vim Mode
 

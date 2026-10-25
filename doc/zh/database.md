@@ -1,6 +1,6 @@
 # 数据库查看器
 
-TermIDE 内置了一个数据库浏览器，支持 **SQLite**、**PostgreSQL** 和
+Termide 内置了一个数据库浏览器，支持 **SQLite**、**PostgreSQL** 和
 **MySQL/MariaDB**。它通过原生协议连接（无需外部客户端工具），列出数据库的表，
 并在可滚动的表格中显示行，支持排序和按列过滤。
 
@@ -38,7 +38,7 @@ TermIDE 内置了一个数据库浏览器，支持 **SQLite**、**PostgreSQL** �
 
 免密码的认证方式（PostgreSQL 的 `~/.pgpass`/peer/trust、Unix 套接字、
 `PGPASSWORD` 等）照常可用。写入 URL 的密码（`postgres://user:secret@host/db`）
-仍会被使用。将这样的 URL 保存为书签时，TermIDE 会提议将密码移入密码库。
+仍会被使用。将这样的 URL 保存为书签时，Termide 会提议将密码移入密码库。
 
 ## 布局
 

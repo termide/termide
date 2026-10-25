@@ -1,6 +1,6 @@
 # Remote Filesystems (VFS)
 
-TermIDE includes a pure-Rust VFS layer that lets the [file
+Termide includes a pure-Rust VFS layer that lets the [file
 manager](file-manager.md) browse remote servers as if they were local
 directories. Files can be opened in the editor, copied between local
 and remote panels, renamed, and so on — the same UI, with progress
@@ -45,7 +45,7 @@ Notes:
 - Omitting the user makes the SFTP provider fall back to your SSH
   config (see Authentication).
 - Omitting the port uses the protocol default (22 / 21 / 990).
-- A password in the URL is not used. When a server asks for one, TermIDE
+- A password in the URL is not used. When a server asks for one, Termide
   prompts for it and can keep it in the
   [password vault](passwords.md); for SFTP, key-based authentication
   remains the better choice.
@@ -78,7 +78,7 @@ SFTP supports four authentication modes:
 - **SSH agent** — uses an SSH agent if `SSH_AUTH_SOCK` points at one.
 - **SSH key** — explicit private-key file, optionally with a
   passphrase.
-- **Password** — when the methods above are refused, TermIDE takes the
+- **Password** — when the methods above are refused, Termide takes the
   password from the [password vault](passwords.md) or asks for it.
 
 FTP and FTPS log in with the user from the URL; a refused login asks for
@@ -127,7 +127,7 @@ connection issues a remote-side rename, not download-then-upload.
 ## Projects
 
 A project layout that includes a remote file manager panel persists the
-URL just like a local path. On the next start TermIDE reconnects in the
+URL just like a local path. On the next start Termide reconnects in the
 background and shows the panel with a loading placeholder until the
 listing arrives — the rest of the UI is responsive immediately.
 
@@ -235,9 +235,9 @@ if needed; several archives go into a directory each, named after the
 archive, under it. A relative path is taken from the archive's directory.
 
 Unpacking runs in the [Operations panel](operations.md) with progress,
-pause and cancel. When a target directory already holds files, TermIDE
+pause and cancel. When a target directory already holds files, Termide
 asks first, since files with the same names are replaced. Only local
-archives can be unpacked. For an encrypted zip archive TermIDE asks for
+archives can be unpacked. For an encrypted zip archive Termide asks for
 the password before starting and asks again after a wrong one.
 
 ## Limitations / known gaps

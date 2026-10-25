@@ -1,12 +1,12 @@
 # ⚠ This crates.io package is obsolete
 
 The `termide` package on crates.io is a **very early, unmaintained release**.
-The current **TermIDE** is a multi-crate Cargo workspace that is **not published
+The current **Termide** is a multi-crate Cargo workspace that is **not published
 to crates.io**, and the original package name here cannot be removed.
 
-**Please do not install this package** — it is not the TermIDE IDE.
+**Please do not install this package** — it is not the Termide IDE.
 
-## Install the real TermIDE
+## Install the real Termide
 
 From source via Cargo:
 

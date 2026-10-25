@@ -2,7 +2,7 @@
 
 > **注意：** 本文介绍 `命令` 菜单中的**用户自定义命令**。键盘快捷键与界面操作请参阅 [ui.md](ui.md#键盘导航和面板管理)。
 
-命令是一条具名的 shell 命令行，TermIDE 可以从 `命令` 菜单或通过它自己的快捷键运行它：在新的终端面板中运行、在后台静默运行，或在后台运行并在结束时于窗口中显示其输出。命令定义在 `commands.toml` 文件中，可以手动编写，也可以通过 `添加命令...` 表单创建。
+命令是一条具名的 shell 命令行，Termide 可以从 `命令` 菜单或通过它自己的快捷键运行它：在新的终端面板中运行、在后台静默运行，或在后台运行并在结束时于窗口中显示其输出。命令定义在 `commands.toml` 文件中，可以手动编写，也可以通过 `添加命令...` 表单创建。
 
 ## 命令存放位置
 
@@ -10,7 +10,7 @@
 
 | 范围 | 文件 |
 |------|------|
-| 全局（所有项目） | TermIDE 配置目录中的 `commands.toml` |
+| 全局（所有项目） | Termide 配置目录中的 `commands.toml` |
 | 项目 | `<项目>/.termide/commands.toml` |
 
 配置目录因平台而异：
@@ -130,7 +130,7 @@ mode = "background"
 
 ## 参数
 
-命令可以声明参数。运行前，TermIDE 会显示标题为 `Parameters: <id>` 的表单，每个参数一个字段，并带有 `Run` 和 `Cancel` 按钮。每个值都会替换命令行中对应的[占位符](#占位符) `{name}`，同时以环境变量 `TERMIDE_PARAM_<NAME>` 的形式传给命令：名称转为大写，`-` 替换为 `_`。
+命令可以声明参数。运行前，Termide 会显示标题为 `Parameters: <id>` 的表单，每个参数一个字段，并带有 `Run` 和 `Cancel` 按钮。每个值都会替换命令行中对应的[占位符](#占位符) `{name}`，同时以环境变量 `TERMIDE_PARAM_<NAME>` 的形式传给命令：名称转为大写，`-` 替换为 `_`。
 
 ```toml
 [deploy]
@@ -201,17 +201,17 @@ key = "Alt+E"
 
 ## 快捷键
 
-`key` 使用与 `config.toml` 中键绑定相同的写法（参见 [keybindings.md](keybindings.md)），例如 `Ctrl+Shift+D` 或 `Alt+F6`。`Ctrl+Shift+<字母>` 只有在支持 Kitty 键盘协议的终端中才能到达 TermIDE（参见[通用层 vs 增强层](keybindings.md#通用层-vs-增强层)）。命令快捷键与 TermIDE 全局快捷键一起检查，因此无论哪个面板拥有焦点都能生效。标识符相同的项目命令和全局命令各自保留独立的快捷键。
+`key` 使用与 `config.toml` 中键绑定相同的写法（参见 [keybindings.md](keybindings.md)），例如 `Ctrl+Shift+D` 或 `Alt+F6`。`Ctrl+Shift+<字母>` 只有在支持 Kitty 键盘协议的终端中才能到达 Termide（参见[通用层 vs 增强层](keybindings.md#通用层-vs-增强层)）。命令快捷键与 Termide 全局快捷键一起检查，因此无论哪个面板拥有焦点都能生效。标识符相同的项目命令和全局命令各自保留独立的快捷键。
 
 带快捷键的命令也会以 `Run command: <label>` 的形式列在命令面板（`Ctrl+P`）中。
 
-表单的 `Hotkey:` 字段接受 `Ctrl`、`Alt` 和 `Shift` 与字母、数字、`F1`–`F12` 或具名按键（`Enter`、`Tab`、`Space`、`Home`、`PageUp`、方向键等）的组合，并拒绝已被其他命令或 TermIDE 全局快捷键占用的快捷键（`Hotkey is already in use`）。手动写入文件的快捷键不会被检查：如果它与全局快捷键冲突，以全局快捷键为准，该命令将永远无法通过键盘运行。它会在下次打开 `命令` 菜单或从 TermIDE 保存该文件后生效。
+表单的 `Hotkey:` 字段接受 `Ctrl`、`Alt` 和 `Shift` 与字母、数字、`F1`–`F12` 或具名按键（`Enter`、`Tab`、`Space`、`Home`、`PageUp`、方向键等）的组合，并拒绝已被其他命令或 Termide 全局快捷键占用的快捷键（`Hotkey is already in use`）。手动写入文件的快捷键不会被检查：如果它与全局快捷键冲突，以全局快捷键为准，该命令将永远无法通过键盘运行。它会在下次打开 `命令` 菜单或从 Termide 保存该文件后生效。
 
 ## 调试
 
 带 `debugger` 的命令会调试一个程序：设置好在编辑器中放置的断点（参见[断点](editor.md#断点与调试)），并将程序运行到第一个断点。此时 `command` 就是要调试的对象。支持两类调试器：
 
-- **调试适配器**，由 TermIDE 通过 Debug Adapter Protocol 驱动，显示在[调试面板](#调试面板)中：`lldb-dap`、`gdb-dap`、`debugpy`、`dlv-dap`；
+- **调试适配器**，由 Termide 通过 Debug Adapter Protocol 驱动，显示在[调试面板](#调试面板)中：`lldb-dap`、`gdb-dap`、`debugpy`、`dlv-dap`；
 - **命令行调试器**，在新的终端面板中启动，在其中用调试器自己的命令单步、打印和继续：`lldb`、`gdb`、`dlv`、`pdb`。
 
 | `debugger` | `command` 是 | 运行方式 |
@@ -234,7 +234,7 @@ build = "cargo build"
 key = "Ctrl+Alt+D"
 ```
 
-`debugger_args` 以单词数组的形式给出调试器自身的选项，追加到 TermIDE 启动它时使用的选项之后：
+`debugger_args` 以单词数组的形式给出调试器自身的选项，追加到 Termide 启动它时使用的选项之后：
 
 ```toml
 [debug-go]
@@ -277,11 +277,11 @@ args = ["--log"]                                 # 每次启动都使用的选�
 
 - `command` 指定调试器的程序：路径（`~/` 表示主目录），或在 `PATH` 中查找的名称。对于 `debugpy` 和 `pdb`，它是要运行的 Python。不存在的路径会使该调试器被视为未安装，而不会回退到另一个。
 - `args` 是每次启动时调试器的选项，取代其默认选项；启动项的 `debugger_args` 放在它们之后。不设置则保留默认值，`[]` 则去掉默认值。目前唯一的默认值是在无法读取 `/proc/net/tcp` 的环境（Android 上的 Termux）中为 `dlv-dap` 加上的 `--only-same-user=false`：Delve 的同用户检查在那里会拒绝所有连接。在这类系统中为 `dlv-dap` 设置 `args` 会取代它，因此如果仍然需要，请把它再列出来。
-- TermIDE 与适配器通信所需的参数（Delve 的 `dap --listen=…`、GDB 的 `-i dap`、`-m debugpy.adapter`）以及它为命令行调试器准备的脚本总会传入，无法更改。
+- Termide 与适配器通信所需的参数（Delve 的 `dap --listen=…`、GDB 的 `-i dap`、`-m debugpy.adapter`）以及它为命令行调试器准备的脚本总会传入，无法更改。
 - `native` 用于在没有命令的情况下调试 Rust 文件时按顺序尝试；它接受 `lldb-dap`、`gdb-dap`、`lldb` 和 `gdb`。
 - `console` 适用于没有设置自己的 `console` 的启动项。
 
-设置窗口的 **调试** 选项卡编辑的是同样的内容：先是顺序和控制台，然后是 TermIDE 所知的每个调试器及其程序和选项，默认值会标明为默认值。每个调试器在单独的页面中打开；其选项按 shell 的拆分方式输入（引号使值保持完整，逗号是选项的一部分），清空表示没有选项，**重置** 会恢复 `PATH` 中的程序和默认选项；在项目设置中则恢复全局设置。
+设置窗口的 **调试** 选项卡编辑的是同样的内容：先是顺序和控制台，然后是 Termide 所知的每个调试器及其程序和选项，默认值会标明为默认值。每个调试器在单独的页面中打开；其选项按 shell 的拆分方式输入（引号使值保持完整，逗号是选项的一部分），清空表示没有选项，**重置** 会恢复 `PATH` 中的程序和默认选项；在项目设置中则恢复全局设置。
 
 ### 调试面板
 
@@ -308,7 +308,7 @@ args = ["--log"]                                 # 每次启动都使用的选�
 
 ### 程序的终端
 
-默认情况下（`console = "terminal"`），程序在一个单独的终端面板中运行，该面板在其他面板旁边打开：程序在那里读取键盘输入——聚焦该面板即可向它输入——其输出、颜色和全屏界面也像在任何终端中一样显示在那里，而调试面板保留适配器的消息。debugpy 和 Delve 会请求 TermIDE 在该面板中启动程序；lldb-dap 则自己启动程序，并通过 lldb 的 `target.input-path`、`output-path` 和 `error-path` 设置获知该面板的终端设备，所有版本的 lldb-dap 都支持这些设置。在 lldb-dap 使用的终端中按 `Ctrl+C` 不会传给程序：请在调试面板中按 `p` 暂停它。GDB 的适配器没有这种模式，因此其程序总是输出到调试面板，且不读取任何输入；智能体启动的会话也是如此，智能体从会话中读取其输出。`console = "panel"` 会让任何适配器都这样运行，适用于不读取输入的程序。
+默认情况下（`console = "terminal"`），程序在一个单独的终端面板中运行，该面板在其他面板旁边打开：程序在那里读取键盘输入——聚焦该面板即可向它输入——其输出、颜色和全屏界面也像在任何终端中一样显示在那里，而调试面板保留适配器的消息。debugpy 和 Delve 会请求 Termide 在该面板中启动程序；lldb-dap 则自己启动程序，并通过 lldb 的 `target.input-path`、`output-path` 和 `error-path` 设置获知该面板的终端设备，所有版本的 lldb-dap 都支持这些设置。在 lldb-dap 使用的终端中按 `Ctrl+C` 不会传给程序：请在调试面板中按 `p` 暂停它。GDB 的适配器没有这种模式，因此其程序总是输出到调试面板，且不读取任何输入；智能体启动的会话也是如此，智能体从会话中读取其输出。`console = "panel"` 会让任何适配器都这样运行，适用于不读取输入的程序。
 
 ## 提示
 

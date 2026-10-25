@@ -1,6 +1,6 @@
 # 安装指南
 
-本指南介绍在您的系统上安装 TermIDE 的不同方法。
+本指南介绍在您的系统上安装 Termide 的不同方法。
 
 ## 下载预编译二进制文件（推荐）
 
@@ -55,7 +55,7 @@ tar xzf termide-*.tar.gz
 
 ### 第 4 步：全局安装（可选）
 
-要将 TermIDE 安装到系统中，请将二进制文件移动到 PATH 中的目录：
+要将 Termide 安装到系统中，请将二进制文件移动到 PATH 中的目录：
 
 ```bash
 # Linux
@@ -163,7 +163,7 @@ cargo install --path .
 cargo install --git https://github.com/termide/termide --locked
 ```
 
-> **注意：** TermIDE **未**发布到 crates.io。`cargo install termide` 会拉取一个
+> **注意：** Termide **未**发布到 crates.io。`cargo install termide` 会拉取一个
 > 过时且不相关的早期版本——请始终从源码构建（上面的克隆方式）或使用
 > `cargo install --git …`。
 
@@ -255,7 +255,7 @@ xattr -d com.apple.quarantine termide
 
 ### Windows（原生）
 
-TermIDE 通过 ConPTY 在 Windows 10+ 上原生运行。建议使用 Windows Terminal 以获得最佳体验。
+Termide 通过 ConPTY 在 Windows 10+ 上原生运行。建议使用 Windows Terminal 以获得最佳体验。
 
 1. 从 [GitHub Releases](https://github.com/termide/termide/releases) 下载 `.zip` 压缩包：
    - `termide-VERSION-x86_64-pc-windows-msvc.zip`
@@ -269,7 +269,7 @@ TermIDE 通过 ConPTY 在 Windows 10+ 上原生运行。建议使用 Windows Ter
 
 ### Windows (WSL)
 
-TermIDE 也可在 Windows Subsystem for Linux（WSL 和 WSL2）中运行：
+Termide 也可在 Windows Subsystem for Linux（WSL 和 WSL2）中运行：
 
 1. 如果尚未安装，请先安装 WSL2
 2. 在 WSL 中下载 Linux x86_64 二进制文件：
@@ -281,7 +281,7 @@ TermIDE 也可在 Windows Subsystem for Linux（WSL 和 WSL2）中运行：
 
 ### Android (Termux)
 
-TermIDE 可在 [Termux](https://termux.dev) 中运行。请使用**静态 ARM64 musl**
+Termide 可在 [Termux](https://termux.dev) 中运行。请使用**静态 ARM64 musl**
 构建 —— glibc 的 `aarch64-unknown-linux-gnu` 构建无法在 Android 的 Bionic libc 上运行：
 
 ```bash

@@ -8,7 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// TermIDE fork of the upstream `unicode-width` 0.2.2 tables. The only change
+// Termide fork of the upstream `unicode-width` 0.2.2 tables. The only change
 // is `bengali_spacing_mark_override` below: glibc `wcwidth()` gives the
 // Bengali spacing marks width 1 while Unicode marks two of them
 // Grapheme_Extend (width 0), which desynced the cursor in bn/hi locales.

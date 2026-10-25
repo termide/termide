@@ -1,4 +1,4 @@
-# Matrix theme for TermIDE
+# Matrix theme for Termide
 # Inspired by the green "digital rain" from The Matrix (1999)
 name = "matrix"
 is_light = false

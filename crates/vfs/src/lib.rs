@@ -1,4 +1,4 @@
-//! Virtual File System (VFS) abstraction for TermIDE.
+//! Virtual File System (VFS) abstraction for Termide.
 //!
 //! This crate provides a unified interface for accessing local and remote filesystems,
 //! enabling seamless file operations across different protocols (SFTP, FTP, SMB, NFS).

@@ -1,4 +1,4 @@
-# Kanagawa theme for TermIDE
+# Kanagawa theme for Termide
 # https://github.com/rebelot/kanagawa.nvim
 name = "kanagawa"
 is_light = false

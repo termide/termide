@@ -1,6 +1,6 @@
 # HTML Preview
 
-TermIDE renders HTML files (`.html`, `.htm`) as a read-only preview panel —
+Termide renders HTML files (`.html`, `.htm`) as a read-only preview panel —
 text pseudographics, not the raw source. It is *not* a browser: author CSS and
 scripts are ignored, and layout is a fixed tag→style mapping.
 

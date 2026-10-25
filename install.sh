@@ -1,5 +1,5 @@
 #!/bin/sh
-# TermIDE Installer
+# Termide Installer
 # https://github.com/termide/termide
 #
 # Usage: curl -fsSL https://raw.githubusercontent.com/termide/termide/main/install.sh | sh
@@ -129,7 +129,7 @@ install_homebrew() {
 
 # Install using Cargo
 install_cargo() {
-    # Build from the Git repository, not crates.io: TermIDE is a Cargo
+    # Build from the Git repository, not crates.io: Termide is a Cargo
     # workspace and is not published to crates.io (the name there points at
     # an obsolete early release). `--locked` builds against the committed
     # Cargo.lock for a reproducible result.
@@ -145,7 +145,7 @@ install_nix() {
 
 # Show menu and get choice
 show_menu() {
-    printf "\n${BOLD}TermIDE Installer${RESET}\n"
+    printf "\n${BOLD}Termide Installer${RESET}\n"
     printf "Version: ${GREEN}%s${RESET}\n" "$VERSION"
     printf "System:  %s/%s" "$OS" "$ARCH"
     [ "$OS" = "linux" ] && printf " (%s)" "$DISTRO"
@@ -252,7 +252,7 @@ main() {
     esac
 
     printf "\n"
-    info "TermIDE $VERSION installed successfully!"
+    info "Termide $VERSION installed successfully!"
     info "Run 'termide' to start."
 }
 

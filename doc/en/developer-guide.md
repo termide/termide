@@ -1,6 +1,6 @@
 # Developer Guide
 
-This guide is for developers who want to contribute to TermIDE or understand its codebase.
+This guide is for developers who want to contribute to Termide or understand its codebase.
 
 ## Development Setup
 
@@ -103,7 +103,7 @@ cargo fmt --check
 
 ## Project Structure
 
-TermIDE uses a Cargo workspace with modular crates:
+Termide uses a Cargo workspace with modular crates:
 
 ```
 termide/
@@ -343,7 +343,7 @@ When making changes, test:
 
 ### Logging
 
-TermIDE writes logs to:
+Termide writes logs to:
 - Linux: `~/.cache/termide/termide.log`
 - macOS: `~/Library/Caches/termide/termide.log`
 - Windows: `%LOCALAPPDATA%\\termide\\cache\\termide.log`
@@ -417,4 +417,4 @@ Open with `Alt+L`:
 
 ## License
 
-TermIDE is licensed under the MIT License. By contributing, you agree to license your contributions under the same terms.
+Termide is licensed under the MIT License. By contributing, you agree to license your contributions under the same terms.

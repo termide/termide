@@ -1,4 +1,4 @@
-# TermIDE
+# Termide
 
 [![GitHub Release](https://img.shields.io/github/v/release/termide/termide)](https://github.com/termide/termide/releases)
 [![CI](https://github.com/termide/termide/actions/workflows/release.yml/badge.svg)](https://github.com/termide/termide/actions)
@@ -10,13 +10,13 @@ An all-in-one terminal workspace for your workstation and your servers: code edi
 
 **[Website](https://termide.github.io)** | **[Documentation](doc/en/README.md)** | **[Releases](https://github.com/termide/termide/releases)** | **[Screenshots](https://termide.github.io/#screenshots)** | **[Telegram](https://t.me/termide_news)**
 
-<p align="center"><img src="https://termide.github.io/assets/screenshots/tour.gif" alt="TermIDE — editor, file manager, terminal and viewers in one TUI" width="900"></p>
+<p align="center"><img src="https://termide.github.io/assets/screenshots/tour.gif" alt="Termide — editor, file manager, terminal and viewers in one TUI" width="900"></p>
 
-## Why TermIDE?
+## Why Termide?
 
-Terminal editors cover the code; everything around it — files on remote hosts, databases, git, long-running shells, a coding agent — usually takes plugins or separate tools. TermIDE ships all of it in one binary that works out of the box on a laptop, a server, or a phone. It does not try to replace those tools; it covers the part you reach for every day, in one place:
+Terminal editors cover the code; everything around it — files on remote hosts, databases, git, long-running shells, a coding agent — usually takes plugins or separate tools. Termide ships all of it in one binary that works out of the box on a laptop, a server, or a phone. It does not try to replace those tools; it covers the part you reach for every day, in one place:
 
-| Task | Usually | In TermIDE |
+| Task | Usually | In Termide |
 |------|---------|------------|
 | Keep work alive after SSH drops | tmux, screen | Detached instances |
 | Move files between hosts | mc, ranger, scp | Dual-pane file manager with SFTP / FTP |
@@ -28,7 +28,7 @@ Terminal editors cover the code; everything around it — files on remote hosts,
 
 Editor, LSP, terminal, git and project layouts are a given among terminal editors; this table lists what the others lack or leave to plugins:
 
-| Feature | TermIDE | Fresh | Vim/Neovim | Helix | Micro |
+| Feature | Termide | Fresh | Vim/Neovim | Helix | Micro |
 |---------|:-------:|:-----:|:----------:|:-----:|:-----:|
 | Built-in Coding Agent (local or hosted models) | ✓ | ✗ | plugin | ✗ | ✗ |
 | MCP Servers | ✓ | ✗ | plugin | ✗ | ✗ |
@@ -42,7 +42,7 @@ Editor, LSP, terminal, git and project layouts are a given among terminal editor
 | Image Viewer | ✓ | ✗ | plugin | ✗ | ✗ |
 | Resource Monitor | ✓ | ✗ | ✗ | ✗ | ✗ |
 
-**TermIDE = Editor + File Manager + Terminal + Git + Agent in one TUI application.**
+**Termide = Editor + File Manager + Terminal + Git + Agent in one TUI application.**
 
 ## Principles
 
@@ -119,7 +119,7 @@ Editor, LSP, terminal, git and project layouts are a given among terminal editor
 
 **Do I have to use the AI agent?** No. No provider or model is set by default, so the agent does nothing and sends nothing until you configure one. Everything else works without it.
 
-**Does TermIDE phone home?** No telemetry, no account and no update checks. It goes online only when you ask: a remote location, a web page, `git push` or `pull`, or a model for the agent.
+**Does Termide phone home?** No telemetry, no account and no update checks. It goes online only when you ask: a remote location, a web page, `git push` or `pull`, or a model for the agent.
 
 **Does it replace tmux?** For keeping work alive over SSH, yes: `termide --detached` keeps the whole workspace running and `--attach` brings it back. It does not manage arbitrary sessions and windows the way tmux does, and runs fine inside tmux.
 
@@ -194,7 +194,7 @@ tar xzf termide-0.45.0-aarch64-unknown-linux-musl.tar.gz
 <details>
 <summary><b>🪟 Windows (.zip)</b></summary>
 
-TermIDE runs natively on Windows 10+ via ConPTY. Use **Windows Terminal** for
+Termide runs natively on Windows 10+ via ConPTY. Use **Windows Terminal** for
 the best experience.
 
 1. Download `termide-0.45.0-x86_64-pc-windows-msvc.zip` from [GitHub Releases](https://github.com/termide/termide/releases).
@@ -389,7 +389,7 @@ musl-dev or glibc installed.
 termide [OPTIONS] [FILE]...
 
 Arguments:
-  [FILE]...            File(s) or directories to open. With a path, TermIDE
+  [FILE]...            File(s) or directories to open. With a path, Termide
                        starts in a clean view (no project layout restored or
                        saved). Text opens in the editor, so it works as
                        $EDITOR for git, crontab, visudo, etc.; images, SQLite
@@ -432,7 +432,7 @@ export EDITOR=termide   # git commit, crontab -e, visudo, ...
 
 ### Quick Start
 
-After launching TermIDE, you'll see a width-adaptive layout:
+After launching Termide, you'll see a width-adaptive layout:
 - **Wide terminals (>= 160 cols):** Sidebar (Git Status stacked with Operations) + two File Manager panels
 - **Normal terminals (< 160 cols):** Sidebar (Git Status, File Manager and Operations stacked) + File Manager panel
 - Menu bar at the top, status bar at the bottom
@@ -462,7 +462,7 @@ All shortcuts are customizable in `config.toml` (see [Configuration](#configurat
 
 ## Configuration
 
-TermIDE follows the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html) for file organization.
+Termide follows the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html) for file organization.
 
 **Configuration file location:**
 - Linux/BSD: `~/.config/termide/config.toml` (or `$XDG_CONFIG_HOME/termide/config.toml`)
