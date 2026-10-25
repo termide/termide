@@ -845,6 +845,25 @@ mod layered_load_tests {
     }
 
     #[test]
+    fn a_project_file_saved_against_a_new_global_value_drops_its_own() {
+        // A theme picked from the menu goes to the global layer; the
+        // project file saved again then keeps only its other overrides.
+        let (loaded, dir) = layered(
+            "[general]\ntheme = \"gruvbox\"\n",
+            Some("[general]\ntheme = \"dry-path\"\n[editor]\ntab_size = 2\n"),
+        );
+        let mut global = loaded.global_layer;
+        global.general.theme = "nord".into();
+        let mut running = loaded.effective;
+        running.general.theme = "nord".into();
+
+        running.save_project(dir.path(), &global).unwrap();
+        let saved = std::fs::read_to_string(project_config_path(dir.path())).unwrap();
+        assert!(!saved.contains("theme"), "{saved}");
+        assert!(saved.contains("tab_size = 2"), "{saved}");
+    }
+
+    #[test]
     fn plugin_mode_comes_from_the_global_file_and_the_switch_from_the_project() {
         let (loaded, _dir) = layered(
             "[plugins.deploy]\nmode = \"opt-in\"\nenabled = true\n\

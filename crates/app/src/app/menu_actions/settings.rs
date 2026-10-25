@@ -122,11 +122,9 @@ impl App {
         Ok(())
     }
 
-    /// Save language preference to the active config target.
+    /// Save language preference to the global settings.
     fn save_language_preference(&mut self, lang_code: &str) -> Result<()> {
-        let mut config = (*self.state.config).clone();
-        config.general.language = lang_code.to_string();
-        self.save_config_to_active_target(config)
+        self.save_global_preference(|config| config.general.language = lang_code.to_string())
     }
 
     /// Apply theme by name and save preference
@@ -145,10 +143,8 @@ impl App {
         Ok(())
     }
 
-    /// Save theme preference to the active config target.
+    /// Save theme preference to the global settings.
     fn save_theme_preference(&mut self, theme_name: &str) -> Result<()> {
-        let mut config = (*self.state.config).clone();
-        config.general.theme = theme_name.to_string();
-        self.save_config_to_active_target(config)
+        self.save_global_preference(|config| config.general.theme = theme_name.to_string())
     }
 }

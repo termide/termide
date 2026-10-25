@@ -43,8 +43,9 @@ Opened with `Alt+P` or menu **Options → Edit preferences**. The previous horiz
 
 **Reset** asks first and acts where the settings are stored: a project goes back to the global settings, the global settings to the defaults.
 
-Theme and language chosen from the menus are stored the same way; a shell
-chosen from the menu is stored globally.
+Theme, language and shell chosen from the menus are stored globally; a
+project's own theme or language gives way to the choice. To keep one per
+project, set it here with `Stored: Project`.
 
 **What only the global settings set.** A project's file comes with the
 repository, so it may not name a program termide starts, a file it writes or

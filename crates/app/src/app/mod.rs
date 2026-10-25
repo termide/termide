@@ -588,34 +588,27 @@ impl App {
         }
     }
 
-    /// Persist `config` to the currently-active config target.
+    /// Persist a preference chosen from the menus (theme, language) in the
+    /// global settings, and make it the running config.
     ///
-    /// Active target is derived from the existence of
-    /// `<project_root>/.termide/config.toml`:
-    /// - **Exists** → save the project-level diff against
-    ///   `state.global_baseline`. Only fields that differ from
-    ///   `defaults + global` survive in the project file.
-    /// - **Absent** → save the global-level diff against
-    ///   `Config::default()`. The user's `~/.config/termide/config.toml`
-    ///   keeps only fields they have explicitly changed.
-    ///
-    /// On success the in-memory `state.config` is replaced with the
-    /// new value so callers and panels see the change immediately.
-    ///
-    /// `config` is a running config: what the session forces on it is put
-    /// back before the save (see [`termide_config::RuntimeOverrides`]).
-    pub fn save_config_to_active_target(&mut self, config: Config) -> anyhow::Result<()> {
-        let config = self.state.runtime_overrides.strip(config);
-        let project_path = termide_config::project_config_path(&self.project_root);
-        if project_path.exists() {
-            config.save_project(&self.project_root, &self.state.global_baseline)?;
-        } else {
-            config.save_global()?;
-            // Without a project file the effective config is the global
-            // layer: a project file created later diffs against it.
-            self.state.global_baseline = std::sync::Arc::new(config.clone());
+    /// `set` is applied to the global layer, which is saved, and to the
+    /// running config. A project file, if any, is saved again against the
+    /// new global layer: being a diff, it drops a value of its own for the
+    /// preference, so the choice holds in every project. A per-project value
+    /// is set in the settings with `Stored: Project`.
+    pub(super) fn save_global_preference(&mut self, set: impl Fn(&mut Config)) -> Result<()> {
+        let mut global = (*self.state.global_baseline).clone();
+        set(&mut global);
+        global.save_global()?;
+        self.state.global_baseline = std::sync::Arc::new(global);
+
+        let mut running = (*self.state.config).clone();
+        set(&mut running);
+        let running = self.state.runtime_overrides.strip(running);
+        if termide_config::project_config_path(&self.project_root).exists() {
+            running.save_project(&self.project_root, &self.state.global_baseline)?;
         }
-        self.adopt_stored_config(config);
+        self.adopt_stored_config(running);
         Ok(())
     }
 
