@@ -1,9 +1,25 @@
 # Changelog
 
-All notable changes to TermIDE will be documented in this file.
+All notable changes to Termide will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.46.0] - 2026-10-26
+
+[0.46.0]: https://github.com/termide/termide/releases/tag/0.46.0
+
+### Added
+- **`{file}`, `{line}` and parameters right in a command's line.** A command reached its parameters only as `TERMIDE_PARAM_*` environment variables, so running `p4 edit` on the file at hand took a form, a typed path and `"$TERMIDE_PARAM_FILE"`, which PowerShell and cmd do not even read. A `{name}` in `command` or `build` is now replaced before the command runs: by the parameter of that name, or by what the focused panel has — `{file}` and `{line}`/`{col}` of the editor's cursor, `{file}` under the file manager's cursor and `{files}` it has selected, `{dir}`, and the `{project}` root. `command = "p4 edit {file}"` is the whole command. A value is always taken literally, wherever its placeholder stands — bare, in single quotes or inside a double-quoted string — quoted by the rules of whatever reads the line: sh for background and report commands, the terminal's own shell (sh, fish, PowerShell, cmd) in terminal mode, one word per value for a debugger's program; a file named `$(rm -rf ~).c` is only a name. Without a value to give — a terminal focused, a remote file, `{line}` outside an editor — the command does not run and says what to focus. Only these names are replaced: `awk '{print $1}'`, `{{.Name}}` templates, brace expansion, `${VAR}` and a placeholder escaped for the shell stay as written, and the environment variables stay too.
+- **A delegate stopped by a limit waits it out.** A delegated task that hit a quota, rate or transient limit answered its call with the limit's text, and the work was lost to the agent that handed it over. It now parks: its row above the input shows `⏸`, the delegate and when it goes again, and it wakes by itself at the reset, when you ask, or when the panel's connection has changed — so a subscription that ran out and was swapped for a local model picks the work back up from its own log. The delegating agent is told the task is parked and will report back, so it does not hand it over again. With `on_limit` asking, a card offers to try now or give up; giving up tells the agent the task did not finish. After six tries the limit reaches the agent, naming the connection and the reset. A failure that waiting does not cure — auth, a bad request, an overflowing context — is answered at once as before.
+
+### Fixed
+- **A theme or language picked from the menus holds across projects.** In a project with its own settings file the choice went into that file, so every other project opened with the old one and the choice seemed lost on a switch. The menus now save it globally; a per-project theme is still set in the settings with Stored: Project.
+- **Git selectors show which repository and branch they hold.** Long repository paths and branch names share their start (`github.com/team/`, `feature/`) and differ at the end, yet were cut at the end. They now keep the end behind a leading `…`. The repository selector also takes what a short branch leaves instead of stopping at half the header, and every git dropdown is as wide as its widest option, within the panel.
+- **A word wider than the row wraps instead of being cut off.** A long URL in an agent prompt or a path in an answer or a Markdown file ran past the edge. It now breaks onto rows of its own; copied, the rows join back without a space, and a link stays clickable on every row it spans.
+
+### Changed
+- **The name is written Termide** throughout the documentation, the READMEs and the program's own texts, where it was TermIDE.
 
 ## [0.45.0] - 2026-10-21
 
@@ -82,7 +98,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Breakpoints and a debug launch.** `Ctrl+F8` in the editor, or a click on a line number, sets a breakpoint on the line, drawn as `●` beside the number; it stays with its text as lines are added or removed above it, and is saved per file across restarts. `F5` starts a command-line debugger in a new terminal panel with the project's breakpoints set and runs the program to the first one: a command in `commands.toml` with `debugger = "lldb"`, `"gdb"`, `"dlv"` or `"pdb"` names the program to debug (with an optional `build` to run first), and a Python or Go file needs no command at all. Several launches are offered as a list. The command palette has **Start debugging** and **Remove all breakpoints** from any panel, and so does the editor's `[≡]` menu, and debug commands show 🐞 in the Commands menu.
-- **Debugging inside TermIDE over DAP.** `debugger = "lldb-dap"`, `"gdb-dap"`, `"debugpy"` or `"dlv-dap"` drives a debug adapter and shows the session in a new debug panel: where it stopped and why, the call stack, the variables of the selected frame as a tree that opens on demand, and the program's output. `c` continues, `n`, `s` and `o` step over, into and out, `p` pauses, `x` stops, `r` runs the launch again — its build first, with the same parameters — and `e` evaluates an expression; `F5` in the editor continues too. The line the program stopped at is marked `→` in the editor's gutter and followed as you step, without taking the focus from the panel, and breakpoints changed during the session reach the adapter at once. A Python file debugs under debugpy and a Go file's package under `dlv dap` with no command when they are installed.
+- **Debugging inside Termide over DAP.** `debugger = "lldb-dap"`, `"gdb-dap"`, `"debugpy"` or `"dlv-dap"` drives a debug adapter and shows the session in a new debug panel: where it stopped and why, the call stack, the variables of the selected frame as a tree that opens on demand, and the program's output. `c` continues, `n`, `s` and `o` step over, into and out, `p` pauses, `x` stops, `r` runs the launch again — its build first, with the same parameters — and `e` evaluates an expression; `F5` in the editor continues too. The line the program stopped at is marked `→` in the editor's gutter and followed as you step, without taking the focus from the panel, and breakpoints changed during the session reach the adapter at once. A Python file debugs under debugpy and a Go file's package under `dlv dap` with no command when they are installed.
 - **The agent drives the debugger.** The panel's agent gets `debug`: it sets breakpoints, starts a debug command or a Python or Go file, steps, selects frames and evaluates expressions, and each answer is the session as text — where it stopped, the call stack, the variables and the last output. Starting and stepping wait for the next stop. The session is the one in the debug panel, opened beside the others without taking the focus, so the user can watch and step it too. In plan mode only `state` is allowed.
 - **The debugged program reads the keyboard.** A program debugged through an adapter runs in a terminal panel of its own beside the debug panel, so it can be typed to and shows its output as in any terminal. debugpy and Delve ask for it with `runInTerminal`; lldb-dap, whose own terminal launcher fails on macOS, is pointed at the panel's terminal device through lldb's target settings. `console = "panel"` in `commands.toml` keeps the output in the debug panel instead, as GDB's adapter and the agent's sessions always do.
 
@@ -563,7 +579,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.29.7] - 2026-08-01
 
 ### Security
-- Updated the `russh` SSH library to 0.62.5, clearing advisory GHSA-m65r-rprj-r5rg (a server-side channel-lifecycle flaw). TermIDE only uses russh as an SFTP client, so the vulnerable server path isn't exercised, but the dependency is bumped to the patched release.
+- Updated the `russh` SSH library to 0.62.5, clearing advisory GHSA-m65r-rprj-r5rg (a server-side channel-lifecycle flaw). Termide only uses russh as an SFTP client, so the vulnerable server path isn't exercised, but the dependency is bumped to the patched release.
 
 ### Fixed
 - A single invalid field in the config (most easily an `[lsp.servers.*]` entry with no `command`) no longer discards every other setting — configuration now degrades to the largest valid subset instead of silently falling back to defaults.
@@ -1819,7 +1835,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Terminal paste**: Removed explicit flush preventing React/Ink TUI app overflow errors (e.g., Claude Code)
 
 ### Changed
-- **README**: Added "Why TermIDE?" comparison table and quick navigation links
+- **README**: Added "Why Termide?" comparison table and quick navigation links
 - **README**: Fixed theme screenshot paths
 
 ## [0.8.5] - 2026-01-07
@@ -2328,7 +2344,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2025-11-25
 
 ### Added
-- Initial TermIDE release with complete feature set
+- Initial Termide release with complete feature set
 - Terminal-based IDE with syntax highlighting for 15+ programming languages
   - Rust, Python, JavaScript, TypeScript, Go, C/C++, Java, Ruby, PHP
   - Haskell, Nix, HTML, CSS, JSON, TOML, YAML, Bash, Markdown
