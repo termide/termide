@@ -345,7 +345,12 @@ impl App {
                     values.insert(name.to_string(), value);
                 }
                 None => {
-                    return Err(termide_i18n::t().command_needs_context_fmt(&format!("{{{name}}}")))
+                    let placeholder = format!("{{{name}}}");
+                    // Only an editor has a cursor in a file.
+                    return Err(match name {
+                        "line" | "col" => termide_i18n::t().command_needs_editor_fmt(&placeholder),
+                        _ => termide_i18n::t().command_needs_context_fmt(&placeholder),
+                    });
                 }
             }
         }
@@ -421,8 +426,7 @@ fn expand_debug_command(
     };
     let mut command = command.clone();
     if let Some(line) = command.command.clone().filter(|line| uses(line)) {
-        if let Some(words) = termide_config::split_words(&line) {
-            let words = termide_config::expand_placeholder_words(&words, values);
+        if let Some(words) = termide_config::expand_placeholder_line(&line, values) {
             command.command = Some(
                 words
                     .iter()
@@ -735,13 +739,13 @@ mod placeholder_tests {
             ("line", PlaceholderValue::One("7".into())),
         ]);
         let expanded = expand_debug_command(
-            &debug_command("python3 {file} --line={line}", Some("make {file}")),
+            &debug_command("python3 {file} --line={line} \\{file}", Some("make {file}")),
             &v,
         );
         let line = expanded.command.as_deref().unwrap();
         assert_eq!(
             termide_config::split_words(line).unwrap(),
-            ["python3", "a b's.py", "--line=7"]
+            ["python3", "a b's.py", "--line=7", "{file}"]
         );
         assert_eq!(
             expanded.metadata.unwrap().build.as_deref(),

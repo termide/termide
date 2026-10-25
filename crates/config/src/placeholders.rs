@@ -1,8 +1,8 @@
 //! `{name}` placeholders in a custom command's line: a parameter's value or
 //! something of the focused panel's (`{file}`, `{line}`, …), put in by
-//! TermIDE before the command runs, quoted for whatever reads the line.
+//! Termide before the command runs, quoted for whatever reads the line.
 //!
-//! Only a name TermIDE has a value for is replaced; any other text between
+//! Only a name Termide has a value for is replaced; any other text between
 //! braces stays as written, so `awk '{print $1}'`, `docker -f '{{.Name}}'`
 //! and shell brace expansion are left alone.
 //!
@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-/// The placeholders TermIDE fills from the focused panel and the project;
+/// The placeholders Termide fills from the focused panel and the project;
 /// a parameter of the same name takes precedence.
 pub const CONTEXT_PLACEHOLDERS: &[&str] = &["file", "files", "dir", "line", "col", "project"];
 
@@ -211,10 +211,39 @@ pub fn expand_placeholders(
     out
 }
 
-/// Words already split, a program and its arguments that no shell reads,
-/// with the placeholders in them replaced as they are: a word that is a
-/// `Many` placeholder alone becomes as many words.
-pub fn expand_placeholder_words(
+/// Stands for the `{` of a placeholder escaped in a line while the line is
+/// split into words, so that the split, which drops the escape, does not
+/// make it a placeholder again.
+const ESCAPED_BRACE: char = '\u{E000}';
+
+/// `line`, a program and its arguments written as sh would read them, split
+/// into words with the placeholders in them replaced by their values as they
+/// are, since no shell reads the words: a word that is a `Many` placeholder
+/// alone becomes as many words, and an escaped one (`\{file}`) stays as
+/// written, without its escape. `None` when a quote is left open.
+pub fn expand_placeholder_line(
+    line: &str,
+    values: &HashMap<String, PlaceholderValue>,
+) -> Option<Vec<String>> {
+    let found: Vec<usize> = placeholders(line)
+        .filter(|(_, name, _)| values.contains_key(*name))
+        .map(|(start, _, _)| start)
+        .collect();
+    let positions = Quoting::Posix.positions(line, &found);
+    let mut marked = line.to_string();
+    // From the end, so that the starts before stay where they are.
+    for (start, within) in found.into_iter().zip(positions).rev() {
+        if within.is_none() {
+            marked.replace_range(start..start + 1, &ESCAPED_BRACE.to_string());
+        }
+    }
+    let words = crate::split_words(&marked)?;
+    Some(expand_placeholder_words(&words, values))
+}
+
+/// Words already split, with the placeholders in them replaced as they
+/// are: a word that is a `Many` placeholder alone becomes as many words.
+fn expand_placeholder_words(
     words: &[String],
     values: &HashMap<String, PlaceholderValue>,
 ) -> Vec<String> {
@@ -230,18 +259,19 @@ pub fn expand_placeholder_words(
         }
         let mut expanded = String::with_capacity(word.len());
         let mut copied = 0;
+        let written = |text: &str| text.replace(ESCAPED_BRACE, "{");
         for (start, name, end) in placeholders(word) {
             let Some(value) = values.get(name) else {
                 continue;
             };
-            expanded.push_str(&word[copied..start]);
+            expanded.push_str(&written(&word[copied..start]));
             match value {
                 PlaceholderValue::One(v) => expanded.push_str(v),
                 PlaceholderValue::Many(vs) => expanded.push_str(&vs.join(" ")),
             }
             copied = end;
         }
-        expanded.push_str(&word[copied..]);
+        expanded.push_str(&written(&word[copied..]));
         out.push(expanded);
     }
     out
@@ -413,5 +443,25 @@ mod tests {
             expand_placeholder_words(&words, &v),
             ["app", "a 'b'", "--at=3"]
         );
+    }
+
+    #[test]
+    fn a_line_splits_before_values_go_in_and_keeps_escapes() {
+        let v = values(&[
+            ("file", one("a b")),
+            (
+                "files",
+                PlaceholderValue::Many(vec!["x".into(), "y".into()]),
+            ),
+        ]);
+        assert_eq!(
+            expand_placeholder_line(
+                r#"app {file} "at {file}" \{file} '{file}' {files} \{files}"#,
+                &v
+            )
+            .unwrap(),
+            ["app", "a b", "at a b", "{file}", "a b", "x", "y", "{files}"]
+        );
+        assert_eq!(expand_placeholder_line("app '{file}", &v), None);
     }
 }

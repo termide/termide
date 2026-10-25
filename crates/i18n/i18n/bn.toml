@@ -1305,6 +1305,7 @@ projects_delete_failed_fmt = "সংরক্ষিত লেআউট মোছ
 command_edit_title_fmt = "কমান্ড সম্পাদনা: {name}"
 command_run_failed_fmt = "কমান্ড চালানো যায়নি: {error}"
 command_needs_context_fmt = "এই কমান্ড {placeholder} ব্যবহার করে, যা ফোকাস করা প্যানেলে নেই: আগে একটি এডিটর বা ফাইল ম্যানেজারে ফোকাস করুন"
+command_needs_editor_fmt = "এই কমান্ড {placeholder} ব্যবহার করে, যা শুধু এডিটরে থাকে: আগে একটি এডিটরে ফোকাস করুন"
 debug_current_file_fmt = "{debugger}-এর অধীনে {file}"
 debug_unknown_debugger_fmt = "অজানা ডিবাগার \"{name}\": lldb, gdb, dlv বা pdb, অথবা একটি অ্যাডাপ্টার ব্যবহার করুন: lldb-dap, gdb-dap, debugpy বা dlv-dap"
 debug_cargo_failed_fmt = "Cargo বাইনারির তালিকা পাওয়া যায়নি: {error}"

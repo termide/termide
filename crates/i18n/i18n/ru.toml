@@ -1339,6 +1339,7 @@ projects_delete_failed_fmt = "Не удалось удалить сохранё�
 command_edit_title_fmt = "Изменить команду: {name}"
 command_run_failed_fmt = "Не удалось запустить команду: {error}"
 command_needs_context_fmt = "Команда использует {placeholder}, а у панели в фокусе его нет: сначала перейдите в редактор или файловый менеджер"
+command_needs_editor_fmt = "Команда использует {placeholder}, а он есть только у редактора: сначала перейдите в редактор"
 debug_current_file_fmt = "{file} под {debugger}"
 debug_unknown_debugger_fmt = "Неизвестный отладчик «{name}»: укажите lldb, gdb, dlv или pdb либо адаптер: lldb-dap, gdb-dap, debugpy или dlv-dap"
 debug_cargo_failed_fmt = "Не удалось получить бинарники Cargo: {error}"
