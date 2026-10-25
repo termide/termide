@@ -1304,6 +1304,7 @@ settings_ai_connection_context_limit_min_fmt = "al menos {value} para Claude Cod
 projects_delete_failed_fmt = "No se pudo eliminar la disposición guardada: {error}"
 command_edit_title_fmt = "Editar comando: {name}"
 command_run_failed_fmt = "No se pudo ejecutar el comando: {error}"
+command_needs_context_fmt = "Este comando usa {placeholder}, que el panel enfocado no tiene: enfoque primero un editor o un gestor de archivos"
 debug_current_file_fmt = "{file} con {debugger}"
 debug_unknown_debugger_fmt = "Depurador desconocido «{name}»: use lldb, gdb, dlv o pdb, o un adaptador: lldb-dap, gdb-dap, debugpy o dlv-dap"
 debug_cargo_failed_fmt = "No se pueden listar los binarios de Cargo: {error}"

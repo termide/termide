@@ -892,6 +892,7 @@ pub trait Translation: Send + Sync {
     fn projects_delete_failed_fmt(&self, error: &str) -> String;
     fn command_edit_title_fmt(&self, name: &str) -> String;
     fn command_run_failed_fmt(&self, error: &str) -> String;
+    fn command_needs_context_fmt(&self, placeholder: &str) -> String;
     fn debug_current_file_fmt(&self, file: &str, debugger: &str) -> String;
     fn debug_unknown_debugger_fmt(&self, name: &str) -> String;
     fn debug_cargo_failed_fmt(&self, error: &str) -> String;

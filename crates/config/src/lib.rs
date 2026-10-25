@@ -11,6 +11,7 @@ pub mod diff;
 pub mod keybindings;
 mod layer_rules;
 mod overrides;
+mod placeholders;
 mod plugins;
 mod settings;
 mod words;
@@ -31,6 +32,10 @@ pub use keybindings::{
 };
 use layer_rules::Layer;
 pub use overrides::{RuntimeOverrides, CONSOLE_THEME};
+pub use placeholders::{
+    expand_placeholder_words, expand_placeholders, placeholder_names, PlaceholderValue, Quoting,
+    CONTEXT_PLACEHOLDERS,
+};
 pub use plugins::{plugin_enabled, PluginMode, PluginSettings};
 pub use settings::{builtin_web_engines, WEB_BACKENDS, WEB_DISPLAYS};
 pub use settings::{is_cli_provider, permission_modes};

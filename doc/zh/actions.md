@@ -130,12 +130,12 @@ mode = "background"
 
 ## 参数
 
-命令可以声明参数。运行前，TermIDE 会显示标题为 `Parameters: <id>` 的表单，每个参数一个字段，并带有 `Run` 和 `Cancel` 按钮。每个值都以环境变量 `TERMIDE_PARAM_<NAME>` 的形式传给命令：名称转为大写，`-` 替换为 `_`。
+命令可以声明参数。运行前，TermIDE 会显示标题为 `Parameters: <id>` 的表单，每个参数一个字段，并带有 `Run` 和 `Cancel` 按钮。每个值都会替换命令行中对应的[占位符](#占位符) `{name}`，同时以环境变量 `TERMIDE_PARAM_<NAME>` 的形式传给命令：名称转为大写，`-` 替换为 `_`。
 
 ```toml
 [deploy]
 name = "Deploy"
-command = "./deploy.sh \"$TERMIDE_PARAM_TARGET\" \"$TERMIDE_PARAM_DRY_RUN\""
+command = "./deploy.sh {target} {dry-run}"
 mode = "report"
 key = "Ctrl+Shift+D"
 
@@ -155,7 +155,7 @@ default = true
 
 | 字段 | 说明 |
 |------|------|
-| `name` | 必填；对应的变量为 `TERMIDE_PARAM_<NAME>` |
+| `name` | 必填；对应的占位符为 `{name}`，变量为 `TERMIDE_PARAM_<NAME>` |
 | `label` | 表单中的字段标签；默认为 `name` |
 | `type` | `text`（默认）、`number`、`bool` 或 `select` |
 | `options` | `select` 的可选项 |
@@ -169,6 +169,35 @@ default = true
 | `select` | 用 `←` / `→` 切换的选项；初始为 `default`，否则为第一个选项 | 选中的选项 |
 
 无论命令以何种方式启动——从 `命令` 菜单、通过快捷键或从命令面板——都会显示该表单。变量在所有模式下都会传给命令；在 `terminal` 模式下，它们设置在新终端的 shell 中，命令结束后仍然保留。
+
+## 占位符
+
+`command`（以及 `build`）中的 `{name}` 会在命令运行前被替换：替换为参数 `name` 的值，或替换为当前聚焦面板或项目提供的值。同名参数优先。
+
+| 占位符 | 值 |
+|--------|----|
+| `{file}` | 编辑器中的文件；在文件管理器中为光标所在的条目 |
+| `{files}` | 文件管理器中选中的文件，每个为一个独立的词；未选中时为光标所在的条目；在编辑器中为其文件 |
+| `{line}`、`{col}` | 编辑器光标位置，从 1 开始 |
+| `{dir}` | 当前聚焦面板的工作目录 |
+| `{project}` | 项目根目录 |
+
+路径为绝对路径。没有可用的文件时（例如聚焦的是终端，或文件位于远程服务器上），使用 `{file}`、`{files}`、`{line}` 或 `{col}` 的命令不会运行，并会显示提示；提示会在参数表单打开之前出现。
+
+```toml
+[p4-edit]
+name = "p4 edit"
+command = "p4 edit {file}"
+key = "Alt+E"
+```
+
+每个值都会按读取该命令行的程序进行引用，因此包含空格、引号或 `;` 的路径始终是一个参数，绝不会被当作命令执行：
+
+- `background` 和 `report` 命令通过 `sh -c` 运行：使用 POSIX 引用。
+- `terminal` 命令按终端的 shell 引用：sh、bash、zsh 等使用 POSIX，fish 使用其自身的规则，PowerShell 使用 `'…'`，cmd 使用 `"…"`。cmd 没有字面引用，因此值中的 `%name%` 在那里仍会被展开。
+- 调试命令的命令行先拆分为词，再把值放入其中，每个值为一个词（`{files}` 为多个）；其 `build` 使用 POSIX 引用。
+
+占位符可以写在任何位置：作为独立的词（`p4 edit {file}`）、写在引号中（`"{file}"`），或位于更长的引号字符串中（`"at {file}"`、`'at {file}'`）。值会按其所在位置进行引用，因此在任何情况下都按字面理解：名为 `$(rm -rf ~).c` 的文件只是一个名称。引号中的 `{files}` 会成为一个词，与引号中的其他内容一样。为 shell 转义过的占位符（sh 中的 `\{file}`、PowerShell 中的 `` `{file} ``、cmd 中的 `^{file}`）保持原样。只有上面列出的名称和命令的参数会被替换：其他花括号保持原样，因此 `awk '{print $1}'`、`docker inspect -f '{{.Name}}'`、花括号展开和 `${VAR}` 都不受影响。
 
 ## 快捷键
 

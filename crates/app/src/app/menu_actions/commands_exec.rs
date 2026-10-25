@@ -4,6 +4,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use termide_config::commands::{decode_command_menu_key, CommandItem, CommandMenuKeyKind};
+use termide_config::{PlaceholderValue, Quoting, CONTEXT_PLACEHOLDERS};
 
 use super::super::App;
 
@@ -89,6 +90,12 @@ impl App {
             );
             return Ok(());
         }
+        // A placeholder the focused panel cannot fill is told before the
+        // parameters are asked for, not after.
+        if let Err(message) = self.placeholder_values(&command, &declared_params(&command)) {
+            self.show_error_modal(message);
+            return Ok(());
+        }
         if let Some(meta) = command.metadata.as_ref().filter(|m| !m.params.is_empty()) {
             let modal =
                 termide_modal::CommandParamsModal::new(command.name.clone(), meta.params.clone());
@@ -109,12 +116,25 @@ impl App {
         params: &HashMap<String, String>,
     ) -> Result<()> {
         use termide_config::commands::{CommandCwd, CommandMode};
+        use termide_config::expand_placeholders;
         use termide_panel_terminal::Terminal;
 
+        let values = match self.placeholder_values(command, params) {
+            Ok(values) => values,
+            Err(message) => {
+                self.show_error_modal(message);
+                return Ok(());
+            }
+        };
         let env = param_env(params);
         if command.debugger().is_some() {
-            return self.run_debug_command(command, &env);
+            return self.run_debug_command(&expand_debug_command(command, &values), &env);
         }
+        // `sh -c` runs the line of a background or report command.
+        let sh_line = || {
+            let line = command.command.clone().unwrap_or_default();
+            expand_placeholders(&line, &values, Quoting::Posix)
+        };
         // A command runs where it says: the focused panel's directory, or the
         // project root — the static point its relative paths are written against.
         let cwd = match command.cwd {
@@ -132,12 +152,12 @@ impl App {
 
         match command.mode {
             CommandMode::Report => {
-                let mut cmd = build_command_command(command, &cwd);
+                let mut cmd = build_command_command(&sh_line(), &cwd);
                 cmd.envs(env);
                 self.run_report_command_with_cmd(command, cmd)?;
             }
             CommandMode::Background => {
-                let mut cmd = build_command_command(command, &cwd);
+                let mut cmd = build_command_command(&sh_line(), &cwd);
                 cmd.envs(env);
                 match cmd
                     .stdout(std::process::Stdio::null())
@@ -180,7 +200,10 @@ impl App {
                 let term_width = self.state.terminal.width.saturating_sub(2);
                 match Terminal::new_with_cwd_env(term_height, term_width, Some(cwd), &env) {
                     Ok(mut terminal) => {
-                        let _ = terminal.send_command(&command_terminal_command(command));
+                        let line = command.command.clone().unwrap_or_default();
+                        let line =
+                            expand_placeholders(&line, &values, terminal.shell_kind().quoting());
+                        let _ = terminal.send_command(&line);
                         self.add_panel(Box::new(terminal));
                         self.auto_save_layout();
                     }
@@ -270,6 +293,65 @@ impl App {
         Ok(())
     }
 
+    /// The values of the placeholders `command` uses: its parameters', then
+    /// the focused panel's and the project's; the message to show when the
+    /// panel has no value for one it uses.
+    fn placeholder_values(
+        &self,
+        command: &CommandItem,
+        params: &HashMap<String, String>,
+    ) -> Result<HashMap<String, PlaceholderValue>, String> {
+        let meta = command.metadata.as_ref();
+        let texts = [
+            command.command.as_deref(),
+            meta.and_then(|m| m.build.as_deref()),
+        ];
+        let mut values: HashMap<String, PlaceholderValue> = params
+            .iter()
+            .map(|(name, value)| (name.clone(), PlaceholderValue::One(value.clone())))
+            .collect();
+        let used: Vec<&str> = texts
+            .into_iter()
+            .flatten()
+            .flat_map(termide_config::placeholder_names)
+            .filter(|name| CONTEXT_PLACEHOLDERS.contains(name) && !values.contains_key(*name))
+            .collect();
+        if used.is_empty() {
+            return Ok(values);
+        }
+        let context = self
+            .layout_manager
+            .active_panel()
+            .map(|panel| panel.command_context())
+            .unwrap_or_default();
+        let path = |p: &std::path::Path| p.to_string_lossy().into_owned();
+        for name in used {
+            let value = match name {
+                "file" => context
+                    .file
+                    .as_deref()
+                    .map(|f| PlaceholderValue::One(path(f))),
+                "files" => (!context.files.is_empty()).then(|| {
+                    PlaceholderValue::Many(context.files.iter().map(|f| path(f)).collect())
+                }),
+                "line" => context.line.map(|l| PlaceholderValue::One(l.to_string())),
+                "col" => context.col.map(|c| PlaceholderValue::One(c.to_string())),
+                "dir" => Some(PlaceholderValue::One(path(&self.get_focused_panel_cwd()))),
+                "project" => Some(PlaceholderValue::One(path(&self.project_root))),
+                _ => None,
+            };
+            match value {
+                Some(value) => {
+                    values.insert(name.to_string(), value);
+                }
+                None => {
+                    return Err(termide_i18n::t().command_needs_context_fmt(&format!("{{{name}}}")))
+                }
+            }
+        }
+        Ok(values)
+    }
+
     /// Get the working directory from the focused panel
     fn get_focused_panel_cwd(&self) -> PathBuf {
         // Use the Panel::get_working_directory() method
@@ -313,23 +395,59 @@ fn param_env(params: &HashMap<String, String>) -> Vec<(String, String)> {
     env
 }
 
-/// Get the command string to send to a terminal panel.
-fn command_terminal_command(command: &CommandItem) -> String {
-    command.command.clone().unwrap_or_default()
+/// The parameters `command` declares, with no values yet: what its
+/// placeholders may take from the form rather than from the panel.
+fn declared_params(command: &CommandItem) -> HashMap<String, String> {
+    command
+        .metadata
+        .iter()
+        .flat_map(|m| &m.params)
+        .map(|p| (p.name.clone(), String::new()))
+        .collect()
+}
+
+/// A debug command with its placeholders filled. Its line is a program and
+/// its arguments, split into words before any value goes in, so a value
+/// stays one word (`{files}` as many); the build runs through a shell. A line
+/// with no placeholder stays as written.
+fn expand_debug_command(
+    command: &CommandItem,
+    values: &HashMap<String, PlaceholderValue>,
+) -> CommandItem {
+    let uses = |text: &str| {
+        termide_config::placeholder_names(text)
+            .iter()
+            .any(|name| values.contains_key(*name))
+    };
+    let mut command = command.clone();
+    if let Some(line) = command.command.clone().filter(|line| uses(line)) {
+        if let Some(words) = termide_config::split_words(&line) {
+            let words = termide_config::expand_placeholder_words(&words, values);
+            command.command = Some(
+                words
+                    .iter()
+                    .map(|w| Quoting::Posix.quote(w))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
+        }
+    }
+    if let Some(meta) = command.metadata.as_mut() {
+        if let Some(build) = meta.build.clone().filter(|b| uses(b)) {
+            meta.build = Some(termide_config::expand_placeholders(
+                &build,
+                values,
+                Quoting::Posix,
+            ));
+        }
+    }
+    command
 }
 
 /// Build a Command for executing a command via `sh -c`.
-fn build_command_command(
-    command: &termide_config::commands::CommandItem,
-    cwd: &std::path::Path,
-) -> std::process::Command {
-    let command_str = match &command.command {
-        Some(cmd) => cmd.clone(),
-        None => String::new(),
-    };
-
+fn build_command_command(line: &str, cwd: &std::path::Path) -> std::process::Command {
     let mut cmd = std::process::Command::new("sh");
-    cmd.arg("-c").arg(&command_str);
+    cmd.arg("-c").arg(line);
     cmd.current_dir(cwd);
 
     #[cfg(unix)]
@@ -550,6 +668,98 @@ mod approval_tests {
         assert_eq!(
             command_text(&command("./run", Some("cargo build"))),
             "cargo build\n./run"
+        );
+    }
+}
+
+#[cfg(test)]
+mod placeholder_tests {
+    use super::*;
+    use termide_config::commands::{CommandCwd, CommandMetadata};
+
+    fn values(pairs: &[(&str, PlaceholderValue)]) -> HashMap<String, PlaceholderValue> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
+    }
+
+    fn debug_command(run: &str, build: Option<&str>) -> CommandItem {
+        CommandItem {
+            name: "dbg".into(),
+            command: Some(run.into()),
+            mode: Default::default(),
+            cwd: CommandCwd::Project,
+            is_project: false,
+            metadata: Some(CommandMetadata {
+                build: build.map(str::to_string),
+                debugger: Some("debugpy".into()),
+                ..Default::default()
+            }),
+        }
+    }
+
+    // What `sh -c` gets is what the program sees: one argument per value,
+    // however the value is spelled.
+    #[cfg(unix)]
+    #[test]
+    fn a_shell_command_gets_each_value_as_one_argument() {
+        let v = values(&[
+            (
+                "file",
+                PlaceholderValue::One("my dir/it's $HOME \"x\".c".into()),
+            ),
+            (
+                "files",
+                PlaceholderValue::Many(vec!["a b".into(), "c;rm".into()]),
+            ),
+        ]);
+        let line = termide_config::expand_placeholders(
+            "printf '[%s]\\n' edit {file} \"{file}\" {files}",
+            &v,
+            Quoting::Posix,
+        );
+        let out = build_command_command(&line, std::path::Path::new("."))
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            "[edit]\n[my dir/it's $HOME \"x\".c]\n[my dir/it's $HOME \"x\".c]\n[a b]\n[c;rm]\n"
+        );
+    }
+
+    #[test]
+    fn a_debug_command_keeps_each_value_one_word() {
+        let v = values(&[
+            ("file", PlaceholderValue::One("a b's.py".into())),
+            ("line", PlaceholderValue::One("7".into())),
+        ]);
+        let expanded = expand_debug_command(
+            &debug_command("python3 {file} --line={line}", Some("make {file}")),
+            &v,
+        );
+        let line = expanded.command.as_deref().unwrap();
+        assert_eq!(
+            termide_config::split_words(line).unwrap(),
+            ["python3", "a b's.py", "--line=7"]
+        );
+        assert_eq!(
+            expanded.metadata.unwrap().build.as_deref(),
+            Some(r"make 'a b'\''s.py'")
+        );
+    }
+
+    #[test]
+    fn a_debug_command_without_placeholders_stays_as_written() {
+        let command = debug_command("target/debug/app \"x y\" {other}", Some("cargo build"));
+        let expanded = expand_debug_command(
+            &command,
+            &values(&[("file", PlaceholderValue::One("f".into()))]),
+        );
+        assert_eq!(expanded.command, command.command);
+        assert_eq!(
+            expanded.metadata.unwrap().build.as_deref(),
+            Some("cargo build")
         );
     }
 }

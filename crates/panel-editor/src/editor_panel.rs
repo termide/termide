@@ -731,6 +731,20 @@ impl Panel for Editor {
         self.file_path()
             .and_then(|p| p.parent().map(|parent| parent.to_path_buf()))
     }
+
+    fn command_context(&self) -> termide_core::CommandContext {
+        // A remote file is edited through a temporary copy: no command
+        // should run on that.
+        let Some(file) = self.file_path().filter(|_| !self.file_state.is_remote()) else {
+            return termide_core::CommandContext::default();
+        };
+        termide_core::CommandContext {
+            file: Some(file.to_path_buf()),
+            files: vec![file.to_path_buf()],
+            line: Some(self.cursor.line + 1),
+            col: Some(self.cursor.column + 1),
+        }
+    }
 }
 
 impl Editor {

@@ -973,6 +973,22 @@ impl Panel for FileManager {
         // For remote paths, return the full URL; for local paths, return the path string
         Some(self.display_path())
     }
+
+    fn command_context(&self) -> termide_core::CommandContext {
+        if self.is_remote() {
+            return termide_core::CommandContext::default();
+        }
+        let file = self
+            .entry_under_cursor()
+            .filter(|te| te.file_entry.name != "..")
+            .map(|te| te.full_path.clone());
+        termide_core::CommandContext {
+            file,
+            files: self.get_selected_paths(),
+            line: None,
+            col: None,
+        }
+    }
 }
 
 // Additional methods used by app layer (not part of Panel trait)

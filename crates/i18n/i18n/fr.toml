@@ -1304,6 +1304,7 @@ settings_ai_connection_context_limit_min_fmt = "au moins {value} pour Claude Cod
 projects_delete_failed_fmt = "Échec de la suppression de la disposition enregistrée : {error}"
 command_edit_title_fmt = "Modifier la commande : {name}"
 command_run_failed_fmt = "Échec de l'exécution de la commande : {error}"
+command_needs_context_fmt = "Cette commande utilise {placeholder}, que le panneau actif n'a pas : placez d'abord le focus sur un éditeur ou un gestionnaire de fichiers"
 debug_current_file_fmt = "{file} sous {debugger}"
 debug_unknown_debugger_fmt = "Débogueur inconnu « {name} » : utilisez lldb, gdb, dlv ou pdb, ou un adaptateur : lldb-dap, gdb-dap, debugpy ou dlv-dap"
 debug_cargo_failed_fmt = "Impossible de lister les binaires Cargo : {error}"

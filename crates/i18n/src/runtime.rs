@@ -2226,6 +2226,10 @@ impl Translation for RuntimeTranslation {
         self.format("command_run_failed_fmt", &[("error", error)])
     }
 
+    fn command_needs_context_fmt(&self, placeholder: &str) -> String {
+        self.format("command_needs_context_fmt", &[("placeholder", placeholder)])
+    }
+
     fn debug_current_file_fmt(&self, file: &str, debugger: &str) -> String {
         self.format(
             "debug_current_file_fmt",

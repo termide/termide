@@ -1304,6 +1304,7 @@ settings_ai_connection_context_limit_min_fmt = "Claude Code では {value} 以�
 projects_delete_failed_fmt = "保存済みのレイアウトを削除できませんでした: {error}"
 command_edit_title_fmt = "コマンドを編集: {name}"
 command_run_failed_fmt = "コマンドを実行できませんでした: {error}"
+command_needs_context_fmt = "このコマンドは {placeholder} を使いますが、フォーカス中のパネルにはありません。先にエディタかファイルマネージャーにフォーカスしてください"
 debug_current_file_fmt = "{file}（{debugger}）"
 debug_unknown_debugger_fmt = "不明なデバッガー「{name}」: lldb、gdb、dlv、pdb、またはアダプター lldb-dap、gdb-dap、debugpy、dlv-dap を使用してください"
 debug_cargo_failed_fmt = "Cargo のバイナリを取得できません: {error}"

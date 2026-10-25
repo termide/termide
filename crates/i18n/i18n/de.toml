@@ -1305,6 +1305,7 @@ settings_ai_connection_context_limit_min_fmt = "für Claude Code mindestens {val
 projects_delete_failed_fmt = "Gespeichertes Layout konnte nicht gelöscht werden: {error}"
 command_edit_title_fmt = "Befehl bearbeiten: {name}"
 command_run_failed_fmt = "Befehl konnte nicht ausgeführt werden: {error}"
+command_needs_context_fmt = "Dieser Befehl verwendet {placeholder}, das das fokussierte Panel nicht hat: Fokussieren Sie zuerst einen Editor oder Dateimanager"
 debug_current_file_fmt = "{file} unter {debugger}"
 debug_unknown_debugger_fmt = "Unbekannter Debugger „{name}“: Verwenden Sie lldb, gdb, dlv oder pdb oder einen Adapter: lldb-dap, gdb-dap, debugpy oder dlv-dap"
 debug_cargo_failed_fmt = "Cargo-Binärdateien lassen sich nicht ermitteln: {error}"

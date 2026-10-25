@@ -352,9 +352,11 @@ fn shell_name(shell_path: &str) -> String {
 /// Command syntax family of a shell, as far as typing a command into it goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ShellKind {
-    /// sh, bash (Git Bash included), zsh, fish and anything unrecognised.
+    /// sh, bash (Git Bash included), zsh and anything unrecognised.
     #[default]
     Posix,
+    /// fish: POSIX-like, but its single quotes take escapes.
+    Fish,
     /// cmd.exe.
     Cmd,
     /// Windows PowerShell and PowerShell Core.
@@ -366,6 +368,7 @@ impl ShellKind {
         match shell_name(shell_path).as_str() {
             "cmd" => Self::Cmd,
             "pwsh" | "powershell" => Self::PowerShell,
+            "fish" => Self::Fish,
             _ => Self::Posix,
         }
     }
@@ -374,13 +377,27 @@ impl ShellKind {
     /// `/d` to switch drives; neither cmd nor PowerShell understands POSIX
     /// quoting.
     pub fn cd_command(self, path: &std::path::Path) -> String {
-        let path = path.to_string_lossy();
+        let path = self.quote(&path.to_string_lossy());
         match self {
-            Self::Posix => format!("cd '{}'", path.replace('\'', "'\\''")),
-            // A Windows path cannot contain `"`, so plain quoting is enough.
-            Self::Cmd => format!("cd /d \"{path}\""),
-            Self::PowerShell => format!("Set-Location -LiteralPath '{}'", path.replace('\'', "''")),
+            Self::Posix | Self::Fish => format!("cd {path}"),
+            Self::Cmd => format!("cd /d {path}"),
+            Self::PowerShell => format!("Set-Location -LiteralPath {path}"),
         }
+    }
+
+    /// The quoting rules of this shell, for a line typed into it.
+    pub fn quoting(self) -> termide_config::Quoting {
+        match self {
+            Self::Posix => termide_config::Quoting::Posix,
+            Self::Fish => termide_config::Quoting::Fish,
+            Self::Cmd => termide_config::Quoting::Cmd,
+            Self::PowerShell => termide_config::Quoting::PowerShell,
+        }
+    }
+
+    /// `value` as one literal word of this shell's command line.
+    pub fn quote(self, value: &str) -> String {
+        self.quoting().quote(value)
     }
 }
 
@@ -402,6 +419,10 @@ mod tests {
         );
         assert_eq!(ShellKind::from_shell_path("/bin/zsh"), ShellKind::Posix);
         assert_eq!(
+            ShellKind::from_shell_path("/opt/homebrew/bin/fish"),
+            ShellKind::Fish
+        );
+        assert_eq!(
             ShellKind::from_shell_path("wsl -d Ubuntu"),
             ShellKind::Posix
         );
@@ -415,6 +436,16 @@ mod tests {
         assert_eq!(
             ShellKind::PowerShell.cd_command(path),
             r"Set-Location -LiteralPath 'D:\it''s here'"
+        );
+    }
+
+    #[test]
+    fn quote_makes_one_literal_word() {
+        assert_eq!(ShellKind::Posix.quote("a b'c $x"), r"'a b'\''c $x'");
+        assert_eq!(ShellKind::Cmd.quote(r#"a b"c"#), r#""a b""c""#);
+        assert_eq!(
+            ShellKind::PowerShell.quote("a b'c\u{2019}d $x"),
+            "'a b''c\u{2019}\u{2019}d $x'"
         );
     }
 }

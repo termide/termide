@@ -1304,6 +1304,7 @@ settings_ai_connection_context_limit_min_fmt = "minimal {value} untuk Claude Cod
 projects_delete_failed_fmt = "Gagal menghapus tata letak tersimpan: {error}"
 command_edit_title_fmt = "Edit perintah: {name}"
 command_run_failed_fmt = "Gagal menjalankan perintah: {error}"
+command_needs_context_fmt = "Perintah ini memakai {placeholder}, yang tidak dimiliki panel yang aktif: fokuskan dulu editor atau pengelola berkas"
 debug_current_file_fmt = "{file} dengan {debugger}"
 debug_unknown_debugger_fmt = "Debugger \"{name}\" tidak dikenal: gunakan lldb, gdb, dlv, atau pdb, atau adaptor: lldb-dap, gdb-dap, debugpy, atau dlv-dap"
 debug_cargo_failed_fmt = "Tidak dapat mengambil daftar biner Cargo: {error}"

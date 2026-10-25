@@ -1338,6 +1338,7 @@ settings_ai_connection_context_limit_min_fmt = "для Claude Code не мень
 projects_delete_failed_fmt = "Не удалось удалить сохранённую раскладку: {error}"
 command_edit_title_fmt = "Изменить команду: {name}"
 command_run_failed_fmt = "Не удалось запустить команду: {error}"
+command_needs_context_fmt = "Команда использует {placeholder}, а у панели в фокусе его нет: сначала перейдите в редактор или файловый менеджер"
 debug_current_file_fmt = "{file} под {debugger}"
 debug_unknown_debugger_fmt = "Неизвестный отладчик «{name}»: укажите lldb, gdb, dlv или pdb либо адаптер: lldb-dap, gdb-dap, debugpy или dlv-dap"
 debug_cargo_failed_fmt = "Не удалось получить бинарники Cargo: {error}"

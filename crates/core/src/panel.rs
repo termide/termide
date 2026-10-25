@@ -176,6 +176,19 @@ pub trait Searchable {
     fn get_search_match_info(&self) -> Option<(usize, usize)>;
 }
 
+/// What a panel offers a custom command's placeholders (`{file}`, `{files}`,
+/// `{line}`, `{col}`): local paths only, lines and columns 1-based.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CommandContext {
+    /// The file the panel is on: an editor's file, the entry under a file
+    /// manager's cursor.
+    pub file: Option<PathBuf>,
+    /// The files the panel has selected; the file alone when nothing is.
+    pub files: Vec<PathBuf>,
+    pub line: Option<usize>,
+    pub col: Option<usize>,
+}
+
 /// Panel width preference for auto-stacking into existing groups.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WidthPreference {
@@ -464,6 +477,12 @@ pub trait Panel: Any {
     /// Get current working directory (for file manager and terminals).
     fn get_working_directory(&self) -> Option<PathBuf> {
         None
+    }
+
+    /// The file, selection and cursor a custom command run from this panel
+    /// may refer to; empty for a panel with none.
+    fn command_context(&self) -> CommandContext {
+        CommandContext::default()
     }
 
     /// Get working directory as display string (includes URL for remote paths).

@@ -132,12 +132,12 @@ When a report command finishes, a window titled with the command's label and `�
 
 ## Parameters
 
-A command can declare parameters. Before it runs, TermIDE shows a form titled `Parameters: <id>` with one field per parameter and the buttons `Run` and `Cancel`. Each value is passed to the command as an environment variable `TERMIDE_PARAM_<NAME>`: the name upper-cased, with `-` replaced by `_`.
+A command can declare parameters. Before it runs, TermIDE shows a form titled `Parameters: <id>` with one field per parameter and the buttons `Run` and `Cancel`. Each value goes into the command line where its [placeholder](#placeholders) `{name}` stands, and is also passed as an environment variable `TERMIDE_PARAM_<NAME>`: the name upper-cased, with `-` replaced by `_`.
 
 ```toml
 [deploy]
 name = "Deploy"
-command = "./deploy.sh \"$TERMIDE_PARAM_TARGET\" \"$TERMIDE_PARAM_DRY_RUN\""
+command = "./deploy.sh {target} {dry-run}"
 mode = "report"
 key = "Ctrl+Shift+D"
 
@@ -157,7 +157,7 @@ default = true
 
 | Field | Description |
 |-------|-------------|
-| `name` | Required; the variable is `TERMIDE_PARAM_<NAME>` |
+| `name` | Required; the placeholder is `{name}`, the variable `TERMIDE_PARAM_<NAME>` |
 | `label` | Field label in the form; defaults to `name` |
 | `type` | `text` (default), `number`, `bool` or `select` |
 | `options` | Choices for `select` |
@@ -171,6 +171,35 @@ default = true
 | `select` | Choice switched with `←` / `→`; starts at `default`, otherwise at the first option | The selected option |
 
 The form is shown however the command is started: from the `Commands` menu, by its hotkey or from the command palette. The variables reach the command in every mode; in `terminal` mode they are set in the new terminal's shell, so they stay there after the command ends.
+
+## Placeholders
+
+`{name}` in `command` (and in `build`) is replaced before the command runs: by the value of the parameter `name`, or by something of the focused panel's or the project's. A parameter of the same name takes precedence.
+
+| Placeholder | Value |
+|-------------|-------|
+| `{file}` | The editor's file; in a file manager, the entry under the cursor |
+| `{files}` | The files selected in a file manager, each a word of its own; the entry under the cursor when none is selected; in an editor, its file |
+| `{line}`, `{col}` | The editor's cursor, 1-based |
+| `{dir}` | The working directory of the focused panel |
+| `{project}` | The project root |
+
+Paths are absolute. Without a file to give — a terminal focused, say, or a file on a remote server — a command using `{file}`, `{files}`, `{line}` or `{col}` does not run, and a message says so; it says so before the parameter form opens.
+
+```toml
+[p4-edit]
+name = "p4 edit"
+command = "p4 edit {file}"
+key = "Alt+E"
+```
+
+Each value is quoted for whatever reads the line, so a path with spaces, quotes or `;` stays one argument and is never run as a command:
+
+- `background` and `report` commands run through `sh -c`: POSIX quoting.
+- `terminal` commands are quoted for the terminal's shell: POSIX for sh, bash, zsh and the like, fish's own rules for fish, `'…'` for PowerShell, `"…"` for cmd. cmd has no literal quoting, so a `%name%` in a value is still expanded there.
+- A debug command's line is split into words first and the values put into them, each one word (`{files}` as many); its `build` gets POSIX quoting.
+
+A placeholder may stand anywhere: as a word of its own (`p4 edit {file}`), in quotes (`"{file}"`) or inside a longer quoted string (`"at {file}"`, `'at {file}'`). Its value is quoted to match where it stands, so it is taken literally in each case: a file named `$(rm -rf ~).c` is only a name. A `{files}` in quotes gives one word, as anything in quotes does. A placeholder escaped for the shell (`\{file}` in sh, `` `{file} `` in PowerShell, `^{file}` in cmd) is left as written. Only the names above and the command's parameters are replaced: other braces stay as written, so `awk '{print $1}'`, `docker inspect -f '{{.Name}}'`, brace expansion and `${VAR}` are left alone.
 
 ## Hotkeys
 

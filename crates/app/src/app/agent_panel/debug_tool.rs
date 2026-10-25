@@ -314,6 +314,22 @@ impl App {
                         command.name
                     ));
                 }
+                let texts = [
+                    command.command.as_deref(),
+                    command.metadata.as_ref().and_then(|m| m.build.as_deref()),
+                ];
+                if let Some(name) = texts
+                    .into_iter()
+                    .flatten()
+                    .flat_map(termide_config::placeholder_names)
+                    .find(|name| termide_config::CONTEXT_PLACEHOLDERS.contains(name))
+                {
+                    return Err(format!(
+                        "`{}` takes {{{name}}} from the panel the user has focused; ask the user \
+                         to start it",
+                        command.name
+                    ));
+                }
                 if termide_debug::dap::Adapter::parse(command.debugger().unwrap_or_default())
                     .is_none()
                 {

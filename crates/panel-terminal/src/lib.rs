@@ -734,6 +734,11 @@ impl Terminal {
         Ok(())
     }
 
+    /// The syntax family of the shell this terminal runs.
+    pub fn shell_kind(&self) -> shell_utils::ShellKind {
+        self.shell_kind
+    }
+
     /// Change the shell's directory to `path`, quoted for this shell.
     pub fn send_cd(&mut self, path: &std::path::Path) -> Result<()> {
         self.send_command(&self.shell_kind.cd_command(path))
