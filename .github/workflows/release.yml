@@ -448,7 +448,8 @@ jobs:
           chmod 600 ~/.ssh/site
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-      - name: Set the version and download size, rebuild the pages
+      # The site builds itself (Astro, its own deploy workflow) on this push.
+      - name: Set the version and download size
         env:
           VERSION: ${{ github.ref_name }}
           GH_TOKEN: ${{ github.token }}
@@ -471,12 +472,10 @@ jobs:
           end = "\n" if raw.endswith("\n") else ""
           open(path, "w", encoding="utf-8").write(json.dumps(data, ensure_ascii=False, indent=2) + end)
           EOF
-          python3 build.py
-          python3 build.py --check
 
           git config user.email "github-actions@termide.dev"
           git config user.name "GitHub Actions"
-          git add src/data.json index.html ru/index.html zh/index.html
+          git add src/data.json
           if git diff --cached --quiet; then
             echo "Website already up to date for ${VERSION}"
           else
