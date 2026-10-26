@@ -22,7 +22,7 @@ use crate::compaction::{CompactionCall, CompactionPrompts};
 use crate::context::file_timestamp;
 use crate::failure::Failure;
 use crate::fit::{fit, FitStep};
-use crate::message::{now_millis, Message, StopReason};
+use crate::message::{now_millis, Message, StopReason, UserMessage};
 use crate::permissions::Mode;
 use crate::provider::ThinkingLevel;
 use crate::prune::{prune_by, prune_to_decisions};
@@ -205,6 +205,14 @@ pub enum EntryKind {
     Retry {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         failure: Option<Failure>,
+    },
+    /// The answers of the tasks handed over in the background that the user
+    /// stopped with a run, kept for the next request rather than starting
+    /// one; empty once they went with it. A reopened session sends them with
+    /// its next request, see [`Session::held_reports`].
+    HeldReports {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        reports: Vec<UserMessage>,
     },
 }
 
@@ -1017,6 +1025,7 @@ impl Session {
                 | EntryKind::RunStart
                 | EntryKind::RunEnd { .. }
                 | EntryKind::Retry { .. }
+                | EntryKind::HeldReports { .. }
                 | EntryKind::Autorun { .. }
                 | EntryKind::CompactionFailed { .. } => {}
                 EntryKind::Compaction {
@@ -1064,6 +1073,7 @@ impl Session {
                 | EntryKind::RunStart
                 | EntryKind::RunEnd { .. }
                 | EntryKind::Retry { .. }
+                | EntryKind::HeldReports { .. }
                 | EntryKind::Autorun { .. }
                 | EntryKind::CompactionFailed { .. } => {}
                 EntryKind::Compaction {
@@ -1242,6 +1252,7 @@ impl Session {
                 | EntryKind::RunStart
                 | EntryKind::RunEnd { .. }
                 | EntryKind::Retry { .. }
+                | EntryKind::HeldReports { .. }
                 | EntryKind::Autorun { .. }
                 | EntryKind::CompactionFailed { .. }
                 | EntryKind::Fitted { .. } => None,
@@ -1377,6 +1388,7 @@ impl Session {
                 | EntryKind::RunStart
                 | EntryKind::RunEnd { .. }
                 | EntryKind::Retry { .. }
+                | EntryKind::HeldReports { .. }
                 | EntryKind::Autorun { .. }
                 | EntryKind::CompactionFailed { .. } => {}
             }
@@ -1434,6 +1446,29 @@ impl Session {
     /// see [`Self::pending_retry`].
     pub fn append_retry(&mut self, failure: Option<Failure>) -> std::io::Result<String> {
         self.append(EntryKind::Retry { failure })
+    }
+
+    /// Record the answers held for the next request (empty: they went with
+    /// it), see [`Self::held_reports`].
+    pub fn append_held_reports(&mut self, reports: &[UserMessage]) -> std::io::Result<String> {
+        self.append(EntryKind::HeldReports {
+            reports: reports.to_vec(),
+        })
+    }
+
+    /// The answers of the background tasks stopped with a run that the
+    /// branch last left held for its next request: see
+    /// [`EntryKind::HeldReports`].
+    #[must_use]
+    pub fn held_reports(&self) -> Vec<UserMessage> {
+        self.branch()
+            .into_iter()
+            .rev()
+            .find_map(|entry| match &entry.kind {
+                EntryKind::HeldReports { reports } => Some(reports.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
     }
 
     /// The failed request the branch last left held by a card or a wait, when
@@ -1658,6 +1693,7 @@ impl From<&Session> for SessionSummary {
             | EntryKind::RunStart
             | EntryKind::RunEnd { .. }
             | EntryKind::Retry { .. }
+            | EntryKind::HeldReports { .. }
             | EntryKind::Autorun { .. }
             | EntryKind::CompactionFailed { .. }
             | EntryKind::Fitted { .. } => None,
@@ -1832,6 +1868,28 @@ mod tests {
             .unwrap();
         assert_eq!(session.last_run(), LastRun::CutOff);
         assert!(SessionSummary::from(&session).unfinished);
+    }
+
+    /// The answers held for the next request survive a reopen, and the
+    /// last record wins: once they went, none is held.
+    #[test]
+    fn held_reports_survive_reopen_until_they_go() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
+        assert!(session.held_reports().is_empty());
+        let report = UserMessage::text("The background task is over");
+        session
+            .append_held_reports(std::slice::from_ref(&report))
+            .unwrap();
+        let path = session.path().to_path_buf();
+        drop(session);
+
+        let mut reopened = Session::open(&path).unwrap();
+        assert_eq!(reopened.held_reports(), vec![report]);
+        assert_eq!(reopened.last_run(), LastRun::Ended, "no run of its own");
+        reopened.append_held_reports(&[]).unwrap();
+        drop(reopened);
+        assert!(Session::open(&path).unwrap().held_reports().is_empty());
     }
 
     /// A held request survives a reopen and is taken back when it is

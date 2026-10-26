@@ -1656,6 +1656,30 @@ impl DelegateLog {
         }
     }
 
+    /// Record the session an external agent opened for the task, so the
+    /// task carried on from this log goes on in it.
+    fn note_external_session(&mut self, agent: &str, session_id: &str) {
+        if let Some(session) = &mut self.0 {
+            if let Err(error) = session.append_external_session(agent, session_id) {
+                log::warn!("delegate session write failed: {error}");
+            }
+        }
+    }
+
+    /// The external agent's session the task ran in, when the agent still
+    /// holds it, and what the log holds of the task, for an agent that does
+    /// not: told it as a recap.
+    fn external_resume(&self) -> (Option<termide_agent_core::ExternalSessionRef>, Vec<Message>) {
+        self.0.as_ref().map_or((None, Vec::new()), |session| {
+            (session.external_session(), session.context_messages())
+        })
+    }
+
+    /// Where the task works: the directory its log names.
+    fn cwd(&self) -> Option<PathBuf> {
+        self.0.as_ref().map(|session| session.header().cwd.clone())
+    }
+
     /// The log's path, when there is one.
     fn path(&self) -> Option<PathBuf> {
         self.0.as_ref().map(|session| session.path().to_path_buf())
@@ -1770,7 +1794,8 @@ impl Subagents {
                     return;
                 }
                 let text = background_report(&prompt, &thread_agent, &outcome);
-                peers::report(&this.project_root, parent, &thread_agent, text);
+                let held = termide_panel_agent::live::take_quiet(parent, &call);
+                peers::report(&this.project_root, parent, &thread_agent, text, held);
             })
             .map_err(|error| format!("cannot start the task: {error}"))?;
         Ok(format!(
@@ -1857,7 +1882,8 @@ impl Subagents {
                 // The report names the task as it was handed over, not the
                 // words that carried it on.
                 let text = background_report(&original, &thread_agent, &outcome);
-                peers::report(&this.project_root, parent, &thread_agent, text);
+                let held = termide_panel_agent::live::take_quiet(parent, &call);
+                peers::report(&this.project_root, parent, &thread_agent, text, held);
             })
             .map_err(|error| log::warn!("cannot carry the task on: {error}"))
             .is_ok()
@@ -2058,22 +2084,36 @@ impl Subagents {
             .as_ref()
             .map(|session| IntentLog::delegated(&session.intent))
             .unwrap_or_default();
+        // A task carried on runs out of the log it already made: what it did
+        // stands there, and the run goes on from where it stopped, in the
+        // directory it worked in then. It holds the log as a panel does: a
+        // log open in a panel, or in another termide, is not run twice.
+        let resumed = match ctx.resume.as_ref() {
+            Some(path) => Some(Session::open_exclusive(path).map_err(|error| {
+                format!("cannot carry the task on from {}: {error}", path.display())
+            })?),
+            None => None,
+        };
         // An external agent runs its own program, whatever the session's
         // connection: out of sight as a Claude Code copy does, asking the
-        // user of its parent's panel what its rules leave open.
+        // user of its parent's panel what its rules leave open. Carried on,
+        // it goes on in its own session of the agent's, from its log.
         if let Some(config) = definition.spec.acp.clone() {
-            let log = DelegateLog::start(
-                self.session_dir.as_deref(),
-                &self.cwd,
-                lineage,
-                &DelegateRun {
-                    connection: name,
-                    provider: termide_agent_core::ACP_PROVIDER,
-                    model: "",
-                    context_window: None,
-                    agent: name,
-                },
-            );
+            let log = match resumed {
+                Some(session) => DelegateLog::resume(session),
+                None => DelegateLog::start(
+                    self.session_dir.as_deref(),
+                    &self.cwd,
+                    lineage,
+                    &DelegateRun {
+                        connection: name,
+                        provider: termide_agent_core::ACP_PROVIDER,
+                        model: "",
+                        context_window: None,
+                        agent: name,
+                    },
+                ),
+            };
             let run = CliSubagent {
                 name: name.to_string(),
                 connection: active.connection.clone(),
@@ -2100,18 +2140,21 @@ impl Subagents {
             SubagentTarget::Cli(connection_name, connection) => {
                 let config = cli_acp_config(&connection)
                     .ok_or_else(|| format!("{} is not a CLI agent", connection.provider))?;
-                let log = DelegateLog::start(
-                    self.session_dir.as_deref(),
-                    &self.cwd,
-                    lineage,
-                    &DelegateRun {
-                        connection: &connection_name,
-                        provider: &connection.provider,
-                        model: connection.model.trim(),
-                        context_window: None,
-                        agent: name,
-                    },
-                );
+                let log = match resumed {
+                    Some(session) => DelegateLog::resume(session),
+                    None => DelegateLog::start(
+                        self.session_dir.as_deref(),
+                        &self.cwd,
+                        lineage,
+                        &DelegateRun {
+                            connection: &connection_name,
+                            provider: &connection.provider,
+                            model: connection.model.trim(),
+                            context_window: None,
+                            agent: name,
+                        },
+                    ),
+                };
                 let run = CliSubagent {
                     name: format!("{connection_name}:{name}"),
                     connection: connection_name.clone(),
@@ -2164,16 +2207,6 @@ impl Subagents {
             max_tokens: self.max_tokens,
             thinking: self.reasoning,
         };
-        // A task carried on runs out of the log it already made: what it did
-        // stands there, and the run goes on from where it stopped, in the
-        // directory it worked in then. It holds the log as a panel does: a
-        // log open in a panel, or in another termide, is not run twice.
-        let resumed = match ctx.resume.as_ref() {
-            Some(path) => Some(Session::open_exclusive(path).map_err(|error| {
-                format!("cannot carry the task on from {}: {error}", path.display())
-            })?),
-            None => None,
-        };
         let cwd = resumed
             .as_ref()
             .map(|session| session.header().cwd.clone())
@@ -2215,7 +2248,7 @@ impl Subagents {
         }
 
         // Followed from its parent's panel while it runs.
-        let live = register_live(ctx.panel, caller, task, &log, true);
+        let live = register_live(ctx.panel, caller, task, &log);
         // The panel's pause holds this run at its step boundaries.
         agent = agent.with_pause_gate(live.control().gate());
         let user_stop = live.control().stop_token().clone();
@@ -2313,9 +2346,7 @@ impl Subagents {
         on_update: &mut dyn FnMut(ToolUpdate),
     ) -> Result<SubagentOutcome, String> {
         // Followed from its parent's panel while it runs.
-        // An external agent runs its own program: the panel's pause cannot
-        // hold it, only stop it.
-        let live = register_live(run.panel, caller, task, &log, false);
+        let live = register_live(run.panel, caller, task, &log);
         let mut noted = noting(&live, on_update);
         let on_update: &mut dyn FnMut(ToolUpdate) = &mut noted;
         let config = run.config;
@@ -2328,8 +2359,12 @@ impl Subagents {
                 (prompter, Some(rx))
             }
         };
+        // Carried on, the task goes on in the agent's own session when it
+        // still holds it, else the agent is told a recap of the log.
+        let (resume, history) = log.external_resume();
+        let cwd = log.cwd().unwrap_or_else(|| self.cwd.clone());
         let setup = BackendSetup {
-            cwd: self.cwd.clone(),
+            cwd: cwd.clone(),
             prompter,
             cancel: budget.clone(),
             mode: ModeHandle::new(run.rules.mode),
@@ -2346,13 +2381,13 @@ impl Subagents {
                 context: ToolContext {
                     asker: run.asker,
                     panel: run.panel,
-                    ..ToolContext::new(self.cwd.clone())
+                    ..ToolContext::new(cwd.clone())
                 },
                 skills: run.skills,
                 session_id: None,
             }),
-            resume: None,
-            history: Vec::new(),
+            resume,
+            history,
         };
         let runtime = AcpRuntime::start(&run.name, &config, setup)?;
         // The task's run is recorded in its own log, as a panel's is: cut
@@ -2367,9 +2402,10 @@ impl Subagents {
             permission_rx: permission_rx.as_ref(),
             refusal: &self.refusals.unattended_subagent,
             max_turns: run.max_turns,
-            cwd: &self.cwd,
+            cwd: &cwd,
             budget,
             cancel,
+            held_at_end: std::cell::Cell::new(false),
         };
         let session = log.path();
         let panel = run.panel;
@@ -2393,9 +2429,12 @@ impl Subagents {
                 Err(error)
             }
         };
-        // Parked at a limit that will pass: the task stands unfinished, and a
-        // reopen of its session offers to carry it on.
-        log.note_run_end(outcome.as_ref().is_ok_and(|outcome| outcome.parked));
+        // Parked at a limit that will pass, or held at its panel's pause when
+        // the panel closed: the task stands unfinished, and a reopen of its
+        // session offers to carry it on.
+        let unfinished =
+            drive.held_at_end.get() || outcome.as_ref().is_ok_and(|outcome| outcome.parked);
+        log.note_run_end(unfinished);
         outcome.map(|outcome| log.into_outcome(outcome))
     }
 }
@@ -2499,7 +2538,6 @@ fn register_live(
     caller: &str,
     task: &SubagentTask,
     log: &DelegateLog,
-    pausable: bool,
 ) -> termide_panel_agent::live::Registration {
     termide_panel_agent::live::register(termide_panel_agent::live::LiveTask {
         panel,
@@ -2509,7 +2547,6 @@ fn register_live(
         task: task.prompt,
         session: log.path(),
         background: task.background,
-        pausable,
     })
 }
 
@@ -2547,6 +2584,9 @@ struct CliDrive<'a> {
     connection: &'a str,
     budget: &'a CancelToken,
     cancel: &'a CancelToken,
+    /// The run ended while its panel's pause held it — the panel closed —
+    /// so its log reads as paused, to be carried on.
+    held_at_end: std::cell::Cell<bool>,
 }
 
 impl CliDrive<'_> {
@@ -2593,19 +2633,29 @@ impl CliDrive<'_> {
         if stopped() {
             return Err("the subagent was stopped".into());
         }
+        let origin = message.origin.clone();
         backend
             .prompt(message)
             .map_err(|error| format!("the subagent did not start: {error:?}"))?;
         let mut report = SubagentReport::new(self.max_turns, self.connection);
         let mut aborted: Option<std::time::Instant> = None;
         let mut idle = 0;
+        // The agent runs its own loop, which no pause reaches: held at its
+        // panel's pause, its turn is cut short, and once the pause is lifted
+        // the same session is asked to carry on.
+        let mut holding: Option<std::time::Instant> = None;
+        // Something came of the turn: an agent cut short before that may go
+        // on with the cut prompt out of sight, so the cut waits for it.
+        let mut heard = false;
         'run: loop {
             for envelope in self.permission_rx.into_iter().flat_map(|rx| rx.try_iter()) {
                 let _ = envelope
                     .reply
                     .send(PermissionAnswer::DenyWithReason(self.refusal.to_string()));
             }
+            let mut ended = false;
             for event in backend.drain() {
+                heard = true;
                 if let AgentEvent::MessageEnd(message) = &event {
                     log.note(message);
                 }
@@ -2623,19 +2673,56 @@ impl CliDrive<'_> {
                     AgentEvent::ToolExecutionEnd { result } => {
                         report.call_ended(&result, on_update);
                     }
-                    AgentEvent::AgentEnd => break 'run,
+                    AgentEvent::ExternalSession { agent, session_id } => {
+                        log.note_external_session(&agent, &session_id);
+                    }
+                    AgentEvent::AgentEnd => {
+                        ended = true;
+                        break;
+                    }
                     _ => {}
                 }
             }
             // An agent that went away without saying it ended is over too,
             // as is one that does not end within a while of being stopped.
             idle = if backend.is_busy() { 0 } else { idle + 1 };
-            if idle > 1 || aborted.is_some_and(|at| at.elapsed() > CLI_SUBAGENT_ABORT_WAIT) {
+            // A cut that does not end the turn within a while is taken as
+            // ended, as a stop's is.
+            let over = ended
+                || idle > 1
+                || holding.is_some_and(|at| at.elapsed() > CLI_SUBAGENT_ABORT_WAIT);
+            if over && holding.is_some() && !stopped() {
+                // The cut turn is over: wait out the pause, then go on.
+                while self.control.is_paused() && !stopped() {
+                    std::thread::sleep(CLI_SUBAGENT_POLL);
+                }
+                if stopped() {
+                    // A pause still on: its panel closed, holding it.
+                    self.held_at_end.set(self.control.is_paused());
+                    break 'run;
+                }
+                let mut carry_on = UserMessage::text(CLI_SUBAGENT_CARRY_ON);
+                carry_on.origin.clone_from(&origin);
+                if backend.prompt(carry_on).is_err() {
+                    break 'run;
+                }
+                (holding, heard, idle) = (None, false, 0);
+                continue;
+            }
+            if over || aborted.is_some_and(|at| at.elapsed() > CLI_SUBAGENT_ABORT_WAIT) {
                 break;
             }
             if aborted.is_none() && stopped() {
                 aborted = Some(std::time::Instant::now());
+                // Stopped while its turn was being cut for the pause: the
+                // pause still on means its panel closed, holding it.
+                if holding.is_some() {
+                    self.held_at_end.set(self.control.is_paused());
+                }
                 self.budget.cancel();
+                backend.abort();
+            } else if holding.is_none() && heard && self.control.is_paused() {
+                holding = Some(std::time::Instant::now());
                 backend.abort();
             }
             std::thread::sleep(CLI_SUBAGENT_POLL);
@@ -2690,6 +2777,11 @@ const CLI_SUBAGENT_POLL: std::time::Duration = std::time::Duration::from_millis(
 
 /// How long a stopped subagent on a CLI agent may take to end its turn.
 const CLI_SUBAGENT_ABORT_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// What a subagent on a CLI agent is told once the pause that cut its turn
+/// short is lifted.
+const CLI_SUBAGENT_CARRY_ON: &str = "You were paused, not stopped: carry the task on from where \
+     you were cut off. Do not start it over.";
 
 /// Everything the panel needs, resolved from `settings` for a panel working
 /// in `cwd` inside the termide project at `project_root` as the agent named
@@ -3636,6 +3728,9 @@ mod tests {
         prompted: std::sync::Mutex<Vec<String>>,
         events: std::sync::Mutex<std::collections::VecDeque<AgentEvent>>,
         busy: std::sync::atomic::AtomicBool,
+        /// Its first turn stops after its first words, going on until it is
+        /// cut short, as a turn under way when its panel pauses.
+        long_first_turn: bool,
     }
 
     impl Backend for FakeCli {
@@ -3675,6 +3770,18 @@ mod tests {
                 "bash",
                 serde_json::json!({ "command": "cargo test\n--quiet" }),
             );
+            if self.long_first_turn && self.prompted.lock().unwrap().len() == 1 {
+                self.events.lock().unwrap().extend([
+                    AgentEvent::ExternalSession {
+                        agent: "claude".into(),
+                        session_id: "ext-1".into(),
+                    },
+                    AgentEvent::AgentStart,
+                    AgentEvent::MessageEnd(Message::User(message)),
+                    said("working"),
+                ]);
+                return Ok(());
+            }
             // As an ACP agent's turn does, the task is logged first.
             self.events.lock().unwrap().extend([
                 AgentEvent::AgentStart,
@@ -3755,6 +3862,7 @@ mod tests {
             cwd: Path::new("/proj"),
             budget: &budget,
             cancel: &cancel,
+            held_at_end: std::cell::Cell::new(false),
         };
         let cli = FakeCli::default();
         let mut progress = Vec::new();
@@ -3834,6 +3942,75 @@ mod tests {
         );
         assert!(answer.is_err());
         assert!(stopped.prompted.lock().unwrap().is_empty());
+    }
+
+    /// Held at its panel's pause, a subagent on a CLI agent has its turn cut
+    /// short and, once the pause is lifted, is told to carry on in the same
+    /// session; the session the agent opened is in its log, for a task
+    /// carried on later.
+    #[test]
+    fn a_paused_subagent_on_a_cli_agent_carries_on_in_its_session() {
+        let (budget, cancel) = (CancelToken::new(), CancelToken::new());
+        let control = termide_panel_agent::DelegateControl::new();
+        let drive = CliDrive {
+            control: &control,
+            name: "claude:search",
+            connection: "claude-code",
+            model: "",
+            permission_rx: None,
+            refusal: "nobody to ask",
+            max_turns: SUBAGENT_MAX_TURNS,
+            cwd: Path::new("/proj"),
+            budget: &budget,
+            cancel: &cancel,
+            held_at_end: std::cell::Cell::new(false),
+        };
+        let cli = FakeCli {
+            long_first_turn: true,
+            ..FakeCli::default()
+        };
+        let logs = tempfile::tempdir().unwrap();
+        let mut log = DelegateLog::start(
+            Some(logs.path()),
+            Path::new("/proj"),
+            SessionParent {
+                session: Some("p1".into()),
+                agent: "lead".into(),
+                call: "call-8".into(),
+            },
+            &DelegateRun {
+                connection: "claude",
+                provider: termide_agent_core::ACP_PROVIDER,
+                model: "",
+                context_window: None,
+                agent: "search",
+            },
+        );
+        control.pause();
+        let lift = {
+            let control = control.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                control.resume();
+            })
+        };
+        let answer = drive.run(
+            &cli,
+            &|| false,
+            UserMessage::text("find it"),
+            &mut log,
+            &mut |_| {},
+        );
+        lift.join().unwrap();
+        assert_eq!(answer.unwrap().answer.as_deref(), Ok("the answer"));
+        let prompted = cli.prompted.lock().unwrap().clone();
+        assert_eq!(prompted.len(), 2, "{prompted:?}");
+        assert!(prompted[1].contains("paused, not stopped"), "{prompted:?}");
+        assert!(!drive.held_at_end.get());
+        assert_eq!(
+            log.external_resume().0.map(|session| session.session_id),
+            Some("ext-1".to_string())
+        );
     }
 
     #[test]

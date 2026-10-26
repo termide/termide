@@ -491,14 +491,19 @@ last block, with the time it ended and how: `✻ 3m41s · 21:03:41 ✗`.
 `/pause` takes effect as soon as the tool call or model reply in progress
 finishes — not at the end of the whole step, so a step that fetches several
 pages stops after the current one. The tasks the panel handed to delegates
-in the background wait with it: each holds before its next request or call,
-and `/continue` lets every one of them go on where it stood. A task the run
-waits on is the call in progress, so the pause comes once it returns. The pause's row in the state
-strip counts them (`‖ Paused · 2 waiting`); a delegate run by an external
-agent runs its own program, which no pause can hold, so it is counted apart
-(`· 1 keeps running`) and only stops. A held delegate's view says so on the
+wait with it: each holds before its next request or call, and `/continue`
+lets every one of them go on where it stood. That includes the task the run
+waits on: the call in progress, it holds the run's pause with it, so the
+pause stays asked for, its `[▶]` withdrawing it and letting the delegate go
+on. A delegate run by an external agent runs its own loop, which no pause
+reaches: its turn is cut short, and once the pause is lifted the same
+session is told to carry the task on. The pause's row in the state strip
+counts the held ones (`‖ Paused · 2 waiting`). A held delegate's view says so on the
 rule above its buttons (`‖ paused`), since its log stops growing with nothing
-else to tell why. The calls it leaves unrun wait for
+else to tell why. Stopping the run, paused or not, stops every task it handed
+over, in the background too; what those answer reaches the agent with your
+next request instead of starting a turn, kept in the session's log until
+then, so a reopened session sends it too. The calls it leaves unrun wait for
 `/continue`, which runs them first; a new request instead closes them as not
 run. A run stopped with `/pause` gets a pause line instead, `‖ 1m12s`: it counts
 how long the pause has lasted, its `‖` marked while the pause is on, and
@@ -567,7 +572,9 @@ of a delegate opens by itself.
 it, every delegate it left behind: each runs again out of sight under the
 `task` call that handed it over, taking its steps back from its own log —
 what it did before stands there, so it goes on rather than starts over — and
-answering the panel that delegated it when it is over. Its permission requests
+answering the panel that delegated it when it is over. A delegate run by an
+external agent goes on in the agent's own session, which its log names, or,
+when the agent no longer holds it, is told a recap of the log. Its permission requests
 come to that panel as cards, since a task run out of sight has none of its
 own. A panel with nothing of its own left unfinished asks about its delegates
 alone, and there **Continue** starts only those. **Decide later** leaves the
@@ -1772,9 +1779,9 @@ running for it, each has a row above the delegating panel's input
 (`& Delegating to · agent  task`, what it did last and its time) with a `✕`
 that stops it, after a confirmation, as a waited-for task's row has; a click elsewhere on the row, or `o` on the `task` block,
 shows a view of it, as for any delegate (above). Its permission
-requests and questions come to the delegating panel as a delegate's do, and
-stay up when that panel's own run stops: stopping the run does not reach a
-task handed over in the background. Closing the delegating panel stops its
+requests and questions come to the delegating panel as a delegate's do.
+Stopping that panel's run stops its background tasks too, and their answers
+wait for your next request there rather than start a turn. Closing the delegating panel stops its
 tasks, after a confirmation that counts them, and the agent hears that each
 was stopped; so does closing its project. They ask and answer through the
 panel's session, so the session stays while they run, as it does during a

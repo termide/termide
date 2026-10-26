@@ -121,6 +121,31 @@ impl AgentPanel {
         Ok(())
     }
 
+    /// Take `message`, the answer of a task handed over in the background
+    /// and stopped with this panel's run: it goes with the next request
+    /// rather than start one the user has just stopped. A run under way that
+    /// is not stopping reads it at its next step, as any answer.
+    pub fn deliver_held(&mut self, message: UserMessage) -> Result<(), String> {
+        // A panel that takes no messages says why, as for any answer.
+        let running = self.is_busy() && self.stop_requested.is_none();
+        if running || self.is_delegate() || self.held.is_some() {
+            return self.deliver(message);
+        }
+        self.held_reports.push(message);
+        self.log_held_reports();
+        Ok(())
+    }
+
+    /// Write the answers held for the next request to the log, so a session
+    /// reopened after termide closed still sends them with it.
+    pub(crate) fn log_held_reports(&mut self) {
+        if let Some(session) = &mut self.session {
+            if let Err(error) = session.append_held_reports(&self.held_reports) {
+                log::warn!("agent session write failed: {error}");
+            }
+        }
+    }
+
     /// Count `message` into the messages passed without the user: one of
     /// the user's starts the count again; another agent's carries its own,
     /// the highest counting while a run takes several.

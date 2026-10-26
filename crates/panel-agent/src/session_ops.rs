@@ -178,6 +178,7 @@ impl AgentPanel {
             // panel were the session left's, not the next one's.
             self.restored_delegates.clear();
             self.carry_back = None;
+            self.held_reports.clear();
         }
         self.session = session;
         self.model = model;

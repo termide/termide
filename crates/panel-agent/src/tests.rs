@@ -10896,7 +10896,6 @@ fn a_running_task_is_stopped_from_its_row() {
         task: "find the loader",
         session: None,
         background: false,
-        pausable: true,
     });
     let (width, height) = (80, 20);
     let rows = render_text(&mut panel, width, height);
@@ -11064,7 +11063,6 @@ fn a_background_task_has_a_row_that_stops_or_follows_it() {
         task: "find the loader\nin src/",
         session: None,
         background: true,
-        pausable: true,
     });
     registration.set_status("· read src/main.rs");
     let (width, height) = (80, 30);
@@ -11282,7 +11280,6 @@ fn the_strip_count_of_subagents_unfolds_and_folds_back() {
                 task,
                 session: None,
                 background: true,
-                pausable: true,
             })
         })
         .collect();
@@ -11705,9 +11702,8 @@ fn a_carried_on_delegate_answers_the_panel_that_delegated_it() {
     assert!(panel.carry_back.is_none(), "the answer is owed once");
 }
 
-/// The panel's pause holds the tasks it handed over, and its resume lets
-/// them go; a task an external agent runs keeps going, and the pause's row
-/// says which is which.
+/// The panel's pause holds the tasks it handed over, the one its run waits on
+/// too, and its withdrawal lets them go; the pause's row counts them.
 #[test]
 fn pausing_the_panel_holds_its_delegates_and_resumes_them() {
     let mut panel = panel(vec![]);
@@ -11720,17 +11716,15 @@ fn pausing_the_panel_holds_its_delegates_and_resumes_them() {
         task: "find the loader",
         session: None,
         background: true,
-        pausable: true,
     });
-    let external = crate::live::register(crate::live::LiveTask {
+    let waited = crate::live::register(crate::live::LiveTask {
         panel: Some(id),
-        call: "call-ext",
+        call: "call-sync",
         from: "default",
         agent: "claude",
         task: "review the diff",
         session: None,
-        background: true,
-        pausable: false,
+        background: false,
     });
 
     panel.busy = true;
@@ -11740,8 +11734,8 @@ fn pausing_the_panel_holds_its_delegates_and_resumes_them() {
         "the delegate waits with the run"
     );
     assert!(
-        !external.control().is_paused(),
-        "an external agent runs its own program"
+        waited.control().is_paused(),
+        "so does the one the run waits on"
     );
     let rows = panel.strip_rows(80);
     let notes = &rows
@@ -11749,17 +11743,53 @@ fn pausing_the_panel_holds_its_delegates_and_resumes_them() {
         .find(|r| r.target == crate::strip::StripTarget::Pause)
         .expect("the pause row")
         .notes;
-    assert_eq!(notes.len(), 2, "{notes:?}: one held, one still going");
+    assert_eq!(notes.len(), 1, "{notes:?}: the held ones counted");
 
     panel.cancel_pause();
     assert!(!held.control().is_paused(), "withdrawing frees it");
+    assert!(!waited.control().is_paused());
+}
 
-    panel.request_pause();
-    assert!(held.control().is_paused());
-    panel.stop_paused();
+/// Stopping the run stops the work it handed over, held at a pause or not,
+/// and the answer of a background task stopped with it waits for the next
+/// request rather than starting a run.
+#[test]
+fn stopping_the_run_stops_its_delegates_and_holds_their_answers() {
+    let mut panel = panel(vec![]);
+    let id = panel.panel_id();
+    let background = crate::live::register(crate::live::LiveTask {
+        panel: Some(id),
+        call: "call-bg",
+        from: "default",
+        agent: "search",
+        task: "find the loader",
+        session: None,
+        background: true,
+    });
+    panel.busy = true;
+    assert!(panel.request_pause());
+    panel.abort();
+    assert!(background.control().stop_token().is_cancelled());
+    assert!(!background.control().is_paused(), "stopped, not paused");
+    assert!(crate::live::take_quiet(id, "call-bg"));
+
+    // The run has not ended yet: the answer is held, not queued to it.
+    let answer = UserMessage::text("The background task is over");
+    panel.deliver_held(answer.clone()).unwrap();
+    assert_eq!(panel.held_reports.len(), 1);
+    assert_eq!(panel.queued, (0, 0));
+
+    // The next request takes it along.
+    panel.busy = false;
+    panel.stop_requested = None;
+    panel.send_message(UserMessage::text("go on with the docs"));
+    assert!(panel.held_reports.is_empty());
     assert!(
-        !held.control().is_paused(),
-        "a stopped run frees what it held"
+        panel
+            .queued_texts
+            .iter()
+            .any(|(text, _)| text.contains("background task is over")),
+        "queued to the new run"
     );
 }
 
@@ -11820,7 +11850,6 @@ fn a_delegates_cards_follow_the_view_of_its_task() {
         task: "find it",
         session: Some(std::path::PathBuf::from("/nonexistent/x.jsonl")),
         background: false,
-        pausable: true,
     });
     let watch = crate::live::watch(id, "call-cards").unwrap();
     let mut view = panel(vec![]);
@@ -11911,7 +11940,6 @@ fn the_session_waits_for_the_tasks_handed_over_in_the_background() {
         task: "find it",
         session: None,
         background: true,
-        pausable: true,
     });
     assert!(!panel.switch_session(None));
     assert!(panel.transcript.items().iter().any(|item| matches!(
@@ -12117,7 +12145,6 @@ fn a_pause_the_run_never_reached_frees_its_delegates() {
         task: "find the loader",
         session: None,
         background: true,
-        pausable: true,
     });
     panel.apply(AgentEvent::AgentStart);
     assert!(panel.request_pause());
@@ -12175,4 +12202,32 @@ fn a_new_session_forgets_the_unfinished_delegates_of_the_last() {
     assert!(panel.switch_session(None));
     assert!(panel.restored_delegates.is_empty());
     assert!(panel.carry_back.is_none());
+}
+
+/// The answers held for the next request are in the session's log: a panel
+/// reopened on it after termide closed still sends them with that request.
+#[test]
+fn held_answers_survive_a_reopen_and_go_with_the_next_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = {
+        let mut log = Session::create(dir.path(), Path::new("/tmp")).unwrap();
+        log.append_message(&Message::User(UserMessage::text("hand the search over")))
+            .unwrap();
+        log.path().to_path_buf()
+    };
+    {
+        let mut panel = reopen(&path, dir.path(), vec![]);
+        panel
+            .deliver_held(UserMessage::text("The background task is over"))
+            .unwrap();
+        assert_eq!(panel.held_reports.len(), 1);
+    }
+    let mut panel = reopen(&path, dir.path(), vec![reply("noted")]);
+    assert_eq!(panel.held_reports.len(), 1, "taken up from the log");
+    panel.send_message(UserMessage::text("go on with the docs"));
+    assert!(panel.held_reports.is_empty());
+    assert!(
+        panel.session.as_ref().unwrap().held_reports().is_empty(),
+        "the log no longer holds them"
+    );
 }

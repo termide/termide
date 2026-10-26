@@ -776,12 +776,8 @@ pub trait Translation: Send + Sync {
     fn agent_strip_after_step(&self) -> &str;
     /// Agent panel state strip: a delegated task held at the panel's pause.
     fn agent_strip_paused(&self) -> &str;
-    /// Agent panel state strip: a delegated task a pause cannot hold.
-    fn agent_strip_keeps_running(&self) -> &str;
     /// Agent panel state strip: the delegates held at the panel's pause.
     fn agent_strip_pause_held_fmt(&self, count: usize) -> String;
-    /// Agent panel state strip: the delegated tasks still going at it.
-    fn agent_strip_pause_running_fmt(&self, count: usize) -> String;
     /// Agent panel state strip: a goal's judge deciding whether it is reached.
     fn agent_strip_checking(&self) -> &str;
     /// Agent panel state strip: when a failed request is tried again; the

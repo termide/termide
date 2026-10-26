@@ -48,7 +48,7 @@ use termide_agent_core::{
     ModeHandle, ModelInfo, ModelSpec, PermissionEnvelope, PermissionRules, PersistScope,
     PlanPrompt, PromptError, PromptTemplate, Provider, QuestionEnvelope, Refusals, ReviewerSetup,
     Session, SessionSummary, ShellOutput, ShellRunner, SkillInfo, SuggestionEnvelope, Tool,
-    ToolRegistry, DEFAULT_AGENT,
+    ToolRegistry, UserMessage, DEFAULT_AGENT,
 };
 use termide_config::Config;
 use termide_core::{
@@ -985,6 +985,9 @@ pub struct AgentPanel {
     /// When a stop was asked for, while the run has not ended yet: the stop
     /// control is red and the live line ticks how long the stop takes.
     stop_requested: Option<Instant>,
+    /// The answers of the background tasks stopped with the user's stop of
+    /// a run: they go with the next request rather than start one.
+    held_reports: Vec<UserMessage>,
     /// When the current pause began, while the run is paused: its closing
     /// line ticks the pause's length until `/continue`.
     pause_start: Option<Instant>,
@@ -1370,6 +1373,7 @@ impl AgentPanel {
             resuming: false,
             restored: None,
             restored_delegates: Vec::new(),
+            held_reports: Vec::new(),
             carry_back: None,
             held,
             logged_autorun: Autorun::default(),

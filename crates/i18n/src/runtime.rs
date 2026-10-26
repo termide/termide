@@ -649,7 +649,6 @@ impl Translation for RuntimeTranslation {
         agent_strip_pause,
         agent_strip_after_step,
         agent_strip_paused,
-        agent_strip_keeps_running,
         agent_notice_no_parent_panel,
         agent_unfinished_delegates_title,
         agent_strip_left_unfinished,
@@ -1735,13 +1734,6 @@ impl Translation for RuntimeTranslation {
     fn agent_strip_pause_held_fmt(&self, count: usize) -> String {
         self.format(
             "agent_strip_pause_held_fmt",
-            &[("count", &count.to_string())],
-        )
-    }
-
-    fn agent_strip_pause_running_fmt(&self, count: usize) -> String {
-        self.format(
-            "agent_strip_pause_running_fmt",
             &[("count", &count.to_string())],
         )
     }

@@ -465,7 +465,18 @@ impl AgentPanel {
                     .begin_run(leaf);
             }
             match self.runtime.prompt(message) {
-                Ok(()) => self.busy = true,
+                Ok(()) => {
+                    self.busy = true;
+                    // The answers of the delegates stopped with the last run
+                    // go with this one, as messages queued to it.
+                    let held = std::mem::take(&mut self.held_reports);
+                    if !held.is_empty() {
+                        self.log_held_reports();
+                    }
+                    for report in held {
+                        self.send_message(report);
+                    }
+                }
                 Err(error) => self.notice(
                     termide_i18n::t().agent_notice_cannot_start_fmt(&error.to_string()),
                     NoticeKind::Error,
@@ -877,10 +888,10 @@ impl AgentPanel {
     }
 
     pub fn abort(&mut self) {
-        // A task held at the pause is released rather than left waiting: a
-        // sync one stops with this run, one handed over in the background
-        // goes on with it, as it does when nothing held it.
-        crate::live::resume_all(self.panel_id);
+        // The work handed to delegates stops with the run, held at a pause or
+        // not; what those in the background answer waits for the next
+        // request rather than starting a run the user has just stopped.
+        crate::live::stop_with_run(self.panel_id);
         // Stopping also ends any running loop or goal, and withdraws what
         // the loop still has waiting in the queue, so it does not reach the
         // model later as a plain message.
@@ -954,9 +965,9 @@ impl AgentPanel {
         self.runtime.pause();
         self.pause_requested = true;
         self.pause_requested_at = Instant::now();
-        // The work handed to delegates waits with the run. An external
-        // agent's task runs its own program and cannot be held, so the strip
-        // says which of the two it is looking at.
+        // The work handed to delegates waits with the run: the tasks in the
+        // background, and the one the run waits on, which then holds the
+        // run's pause with it until it is let go.
         crate::live::pause_all(self.panel_id);
         true
     }
@@ -1001,9 +1012,8 @@ impl AgentPanel {
     /// abort; the pause ends where it stood, and so do a loop or goal it was
     /// part of. The calls it left unrun are closed by the next request.
     pub(crate) fn stop_paused(&mut self) {
-        // The pause is over with the run: what it held is released, a task
-        // handed over in the background going on as it would have.
-        crate::live::resume_all(self.panel_id);
+        // The pause is over with the run, and so is the work it held.
+        crate::live::stop_with_run(self.panel_id);
         self.paused = false;
         self.restored = None;
         self.run_start = None;

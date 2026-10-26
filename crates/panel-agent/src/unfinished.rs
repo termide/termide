@@ -299,6 +299,12 @@ impl AgentPanel {
         self.restored = None;
         self.adopt_logged_autorun();
         self.adopt_logged_retry();
+        // The answers held for the next request wait for it still.
+        self.held_reports = self
+            .session
+            .as_ref()
+            .map(Session::held_reports)
+            .unwrap_or_default();
         let Some(mark) = self.session.as_ref().map(Session::unfinished_run) else {
             return;
         };

@@ -199,9 +199,8 @@ impl AgentPanel {
                 .stoppable(),
             );
         } else if self.pause_requested {
-            // The work handed to delegates stands with the run; an external
-            // agent's runs its own program, so it is named as still going.
-            let held = crate::live::state_of(self.panel_id);
+            // The work handed to delegates stands with the run.
+            let held = crate::live::held_of(self.panel_id);
             let mut row = StripRow::new(
                 transcript::PAUSED_GLYPH,
                 t.agent_strip_pause().to_string(),
@@ -210,12 +209,8 @@ impl AgentPanel {
             )
             .since(self.pause_requested_at)
             .stoppable();
-            if held.held > 0 {
-                row.notes.push(t.agent_strip_pause_held_fmt(held.held));
-            }
-            if held.running > 0 {
-                row.notes
-                    .push(t.agent_strip_pause_running_fmt(held.running));
+            if held > 0 {
+                row.notes.push(t.agent_strip_pause_held_fmt(held));
             }
             rows.push(row);
         }
@@ -397,15 +392,11 @@ impl AgentPanel {
                 .stoppable();
                 row.notes.push(task.agent);
                 // Held at the panel's pause, its last step no longer stands:
-                // what it does is wait. An external agent's task cannot be
-                // held, so it says it is still going.
+                // what it does is wait.
                 if task.paused {
                     row.notes.push(t.agent_strip_paused().to_string());
                     row.status = String::new();
                 } else {
-                    if !task.pausable {
-                        row.notes.push(t.agent_strip_keeps_running().to_string());
-                    }
                     row.status = task.status;
                 }
                 row

@@ -53,6 +53,9 @@ enum Request {
         /// The delegate.
         agent: String,
         text: String,
+        /// The task was stopped with the panel's run: its answer waits for
+        /// the panel's next request rather than start one.
+        held: bool,
     },
     /// How many messages agents passed one another to get the run of a
     /// panel going.
@@ -156,13 +159,15 @@ pub(super) fn may_hand_over(project_root: &Path, panel: u64) -> Result<(), Strin
 
 /// Hand the answer of a background task the delegate `agent` ran to the
 /// panel `to` that handed it over; the app delivers it on its tick. Nobody
-/// waits for it: one that cannot be delivered is logged.
-pub(super) fn report(project_root: &Path, to: u64, agent: &str, text: String) {
+/// waits for it: one that cannot be delivered is logged. `held`: the task
+/// was stopped with the panel's run, so its answer waits for the next request.
+pub(super) fn report(project_root: &Path, to: u64, agent: &str, text: String, held: bool) {
     let request = Request::Report {
         project_root: project_root.to_path_buf(),
         to,
         agent: agent.to_string(),
         text,
+        held,
     };
     if !SERVED.load(Ordering::Acquire) || port().0.send(request).is_err() {
         log::warn!("the answer of {agent}'s background task found no panel to go to");
@@ -239,8 +244,11 @@ impl App {
                     to,
                     agent,
                     text,
+                    held,
                 } => match self
-                    .in_project(&project_root, |app| app.report_to_panel(to, agent, text))
+                    .in_project(&project_root, |app| {
+                        app.report_to_panel(to, agent, text, held)
+                    })
                     .and_then(|delivered| delivered)
                 {
                     Ok(()) => self.state.needs_redraw = true,
@@ -282,18 +290,29 @@ impl App {
     /// Deliver a background task's answer to the panel `to` that handed it
     /// over, as the delegate's reply: one more message passed without the
     /// user.
-    fn report_to_panel(&mut self, to: u64, agent: String, text: String) -> Result<(), String> {
+    fn report_to_panel(
+        &mut self,
+        to: u64,
+        agent: String,
+        text: String,
+        held: bool,
+    ) -> Result<(), String> {
         let Some(target) = self.agent_panels().find(|p| p.panel_id() == to) else {
             return Err(format!("panel {to} that handed it over is closed"));
         };
         let hops = target.agent_hops() + 1;
-        target.deliver(UserMessage::text(text).with_origin(MessageOrigin {
+        let message = UserMessage::text(text).with_origin(MessageOrigin {
             session: String::new(),
             agent,
             kind: OriginKind::Reply,
             panel: None,
             hops,
-        }))
+        });
+        if held {
+            target.deliver_held(message)
+        } else {
+            target.deliver(message)
+        }
     }
 
     /// A delegated task carried on in a panel of its own after termide closed
@@ -315,7 +334,7 @@ impl App {
             .map(|panel| panel.panel_id());
         let missed = match target {
             // Reported: the panel takes it as a reply and works on it.
-            Some(to) => self.report_to_panel(to, agent.clone(), text).err(),
+            Some(to) => self.report_to_panel(to, agent.clone(), text, false).err(),
             None => Some(termide_i18n::t().agent_notice_no_parent_panel().to_string()),
         };
         if let Some(notice) = missed {
