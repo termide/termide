@@ -29,6 +29,7 @@ mod text;
 
 pub use git::RepoRoot;
 pub use rank::{Hit, Source};
+pub use sessions::find_log;
 
 use filter::{parse_date, PathFilter};
 

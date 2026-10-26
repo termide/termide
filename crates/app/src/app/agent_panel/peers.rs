@@ -2,8 +2,10 @@
 //! the agents' threads, the panels live on the UI thread, so a call sends its
 //! request down a process-wide channel and the app answers it on its tick.
 //!
-//! A message goes in as the sending agent's, headed with its name and panel,
-//! and counts how many messages agents have passed one another since the user
+//! A message goes to a session, not a panel: to the panel the session is
+//! open in when it arrives, or, when it is open in none, into its log, to go
+//! with its next request once the user opens it again. It goes in as the
+//! sending agent's, headed with its name and panel, and counts how many messages agents have passed one another since the user
 //! last wrote: past [`MAX_HOPS`] the next is refused, so two agents cannot
 //! keep each other going without anyone watching.
 
@@ -13,7 +15,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
-use termide_agent_core::{MessageOrigin, OriginKind, Tool, ToolContext, UserMessage};
+use termide_agent_core::{MessageOrigin, OriginKind, Session, Tool, ToolContext, UserMessage};
 use termide_agent_tools::{AgentsTool, PeerInfo, SendMessageTool};
 use termide_panel_agent::AgentPanel;
 
@@ -36,11 +38,12 @@ enum Request {
     },
     Send {
         from: Option<u64>,
-        /// The sending session, when termide's loop runs it.
+        /// The sending session.
         session: Option<String>,
         agent: String,
         project_root: PathBuf,
-        to: u64,
+        /// The session written to.
+        to: String,
         kind: OriginKind,
         text: String,
         reply: Sender<Result<String, String>>,
@@ -49,7 +52,11 @@ enum Request {
     Report {
         /// The project of the panel.
         project_root: PathBuf,
+        /// The panel that handed it over.
         to: u64,
+        /// The session that handed it over, which the answer is for
+        /// wherever it is by then; `None` leaves it to the panel.
+        parent: Option<String>,
         /// The delegate.
         agent: String,
         text: String,
@@ -112,7 +119,7 @@ pub(super) fn peer_tools(caller: &str, project_root: &Path) -> [Arc<dyn Tool>; 2
     let root = project_root.to_path_buf();
     let agent = caller.to_string();
     let send = Arc::new(
-        move |ctx: &ToolContext, to: u64, kind: OriginKind, text: &str| {
+        move |ctx: &ToolContext, to: &str, kind: OriginKind, text: &str| {
             let (reply, answer) = mpsc::channel();
             ask(
                 Request::Send {
@@ -120,7 +127,7 @@ pub(super) fn peer_tools(caller: &str, project_root: &Path) -> [Arc<dyn Tool>; 2
                     session: ctx.session.as_ref().and_then(|session| session.id.clone()),
                     agent: agent.clone(),
                     project_root: root.clone(),
-                    to,
+                    to: to.to_string(),
                     kind,
                     text: text.to_string(),
                     reply,
@@ -158,13 +165,22 @@ pub(super) fn may_hand_over(project_root: &Path, panel: u64) -> Result<(), Strin
 }
 
 /// Hand the answer of a background task the delegate `agent` ran to the
-/// panel `to` that handed it over; the app delivers it on its tick. Nobody
-/// waits for it: one that cannot be delivered is logged. `held`: the task
-/// was stopped with the panel's run, so its answer waits for the next request.
-pub(super) fn report(project_root: &Path, to: u64, agent: &str, text: String, held: bool) {
+/// session `parent` that handed it over from panel `to`; the app delivers
+/// it on its tick. Nobody waits for it: one that cannot be delivered is
+/// logged. `held`: the task was stopped with the panel's run, so its answer
+/// waits for the next request.
+pub(super) fn report(
+    project_root: &Path,
+    to: u64,
+    parent: Option<String>,
+    agent: &str,
+    text: String,
+    held: bool,
+) {
     let request = Request::Report {
         project_root: project_root.to_path_buf(),
         to,
+        parent,
         agent: agent.to_string(),
         text,
         held,
@@ -242,12 +258,13 @@ impl App {
                 Request::Report {
                     project_root,
                     to,
+                    parent,
                     agent,
                     text,
                     held,
                 } => match self
                     .in_project(&project_root, |app| {
-                        app.report_to_panel(to, agent, text, held)
+                        app.report_to_session(to, parent.as_deref(), agent, text, held)
                     })
                     .and_then(|delivered| delivered)
                 {
@@ -269,14 +286,35 @@ impl App {
     fn list_peers(&mut self, from: Option<u64>) -> Result<Vec<PeerInfo>, String> {
         Ok(self
             .agent_panels()
-            .map(|panel| PeerInfo {
-                panel: panel.panel_id(),
-                agent: panel.agent_name().to_string(),
-                state: panel.peer_state().label(),
-                cwd: panel.cwd().to_path_buf(),
-                own: Some(panel.panel_id()) == from,
+            .filter_map(|panel| {
+                Some(PeerInfo {
+                    session: panel.session_id()?,
+                    panel: panel.panel_id(),
+                    agent: panel.agent_name().to_string(),
+                    state: panel.peer_state().label(),
+                    cwd: panel.cwd().to_path_buf(),
+                    own: Some(panel.panel_id()) == from,
+                })
             })
             .collect())
+    }
+
+    /// The panel the session `id` is open in.
+    pub(in crate::app) fn panel_of_session(&mut self, id: &str) -> Option<&mut AgentPanel> {
+        self.agent_panels()
+            .find(|panel| panel.session_id().as_deref() == Some(id))
+    }
+
+    /// Leave `message` in the log of the session `id`, which no panel has
+    /// open: the project's own sessions are looked through first, then
+    /// those of directories outside it that its panels worked in.
+    fn leave_in_log(&self, id: &str, message: UserMessage) -> Result<(), String> {
+        let root = termide_config::get_config_dir().ok().map(|dir| {
+            dir.join(termide_agent_core::GLOBAL_AGENT_DIR)
+                .join(termide_agent_core::SESSIONS_DIR)
+        });
+        let dirs = self.state.ai_sessions_dir().into_iter().chain(root);
+        leave_in_log(dirs, id, message)
     }
 
     /// How many messages agents passed one another to get the run of panel
@@ -287,27 +325,41 @@ impl App {
             .map_or(0, |panel| panel.agent_hops())
     }
 
-    /// Deliver a background task's answer to the panel `to` that handed it
-    /// over, as the delegate's reply: one more message passed without the
-    /// user.
-    fn report_to_panel(
+    /// Deliver a background task's answer to the session `parent` that
+    /// handed it over from panel `to`, as the delegate's reply: one more
+    /// message passed without the user. The session may show in another
+    /// panel by then, or in none: its log keeps the answer then. Without a
+    /// session it goes to the panel.
+    fn report_to_session(
         &mut self,
         to: u64,
+        parent: Option<&str>,
         agent: String,
         text: String,
         held: bool,
     ) -> Result<(), String> {
-        let Some(target) = self.agent_panels().find(|p| p.panel_id() == to) else {
-            return Err(format!("panel {to} that handed it over is closed"));
-        };
-        let hops = target.agent_hops() + 1;
-        let message = UserMessage::text(text).with_origin(MessageOrigin {
+        let origin = |hops| MessageOrigin {
             session: String::new(),
             agent,
             kind: OriginKind::Reply,
             panel: None,
             hops,
-        });
+        };
+        let target = match parent {
+            Some(id) => self.panel_of_session(id),
+            None => self.agent_panels().find(|p| p.panel_id() == to),
+        };
+        let Some(target) = target else {
+            return match parent {
+                Some(id) => {
+                    // The count it started on is gone with the panel's run.
+                    let message = UserMessage::text(text).with_origin(origin(1));
+                    self.leave_in_log(id, message)
+                }
+                None => Err(format!("panel {to} that handed it over is closed")),
+            };
+        };
+        let message = UserMessage::text(text).with_origin(origin(target.agent_hops() + 1));
         if held {
             target.deliver_held(message)
         } else {
@@ -329,12 +381,13 @@ impl App {
         text: String,
     ) {
         let target = self
-            .agent_panels()
-            .find(|panel| panel.session_id().as_deref() == Some(parent_session.as_str()))
+            .panel_of_session(&parent_session)
             .map(|panel| panel.panel_id());
         let missed = match target {
             // Reported: the panel takes it as a reply and works on it.
-            Some(to) => self.report_to_panel(to, agent.clone(), text, false).err(),
+            Some(to) => self
+                .report_to_session(to, Some(&parent_session), agent.clone(), text, false)
+                .err(),
             None => Some(termide_i18n::t().agent_notice_no_parent_panel().to_string()),
         };
         if let Some(notice) = missed {
@@ -350,48 +403,79 @@ impl App {
     }
 
     fn send_to_peer(&mut self, message: Outgoing) -> Result<String, String> {
-        if Some(message.to) == message.from {
-            return Err(format!("panel {} is this one", message.to));
-        }
+        let to = message.to;
         let from = message.from;
+        if message.session.as_deref() == Some(to.as_str()) {
+            return Err(format!("session {to} is this one"));
+        }
         let sender = self
             .agent_panels()
             .find(|panel| Some(panel.panel_id()) == from)
             .map(|panel| (panel.agent_hops(), panel.delegated_by()));
-        // A task's answer goes back as the delegate's last message; one sent
-        // as well would reach the delegating agent twice.
-        if let Some((_, Some(by))) = sender {
-            if by == message.to {
-                return Err(format!(
-                    "you run a task panel {by} handed you: your answer goes back to it as \
-                     your final message, so do not message it"
-                ));
-            }
-        }
         let hops = next_hops(sender.map_or(0, |(hops, _)| hops))?;
-        let Some(target) = self
-            .agent_panels()
-            .find(|panel| panel.panel_id() == message.to)
-        else {
-            return Err(format!(
-                "no agent panel {} is open; `agents` lists them",
-                message.to
-            ));
-        };
-        let state = target.peer_state().label();
-        let agent = target.agent_name().to_string();
-        target.deliver(UserMessage::text(message.text).with_origin(MessageOrigin {
+        let delivered = UserMessage::text(message.text).with_origin(MessageOrigin {
             session: message.session.unwrap_or_default(),
             agent: message.agent,
             kind: message.kind,
             panel: from,
             hops,
-        }))?;
+        });
+        let Some(target) = self.panel_of_session(&to) else {
+            // The user left the session the message is for: it is not the
+            // one the panel shows now, so it waits in the session's log.
+            self.leave_in_log(&to, delivered)?;
+            return Ok(format!(
+                "Session {to} is open in no panel: the message waits in its log, and its agent \
+                 reads it when the user opens the session again. Do not wait for an answer."
+            ));
+        };
+        let panel = target.panel_id();
+        if Some(panel) == from {
+            return Err(format!("session {to} is this one"));
+        }
+        // A task's answer goes back as the delegate's last message; one sent
+        // as well would reach the delegating agent twice.
+        if let Some((_, Some(by))) = sender {
+            if by == panel {
+                return Err(format!(
+                    "you run a task session {to} handed you: your answer goes back to it as \
+                     your final message, so do not message it"
+                ));
+            }
+        }
+        let state = target.peer_state().label();
+        let agent = target.agent_name().to_string();
+        target.deliver(delivered)?;
         Ok(format!(
-            "Delivered to panel {} ({agent}, {state}). An answer, if any, comes as a message of its own.",
-            message.to
+            "Delivered to session {to} ({agent}, {state}, panel {panel}). An answer, if any, \
+             comes as a message of its own."
         ))
     }
+}
+
+/// Leave `message` in the log of the session `id`, found in the first of
+/// `dirs` that has it: it goes with the session's next request once the user
+/// opens it again, as the answers held for that request do. A session open
+/// anywhere — a panel of this termide or another — is not written to.
+fn leave_in_log(
+    dirs: impl IntoIterator<Item = PathBuf>,
+    id: &str,
+    message: UserMessage,
+) -> Result<(), String> {
+    let path = dirs
+        .into_iter()
+        .find_map(|dir| termide_agent_recall::find_log(&dir, id))
+        .ok_or_else(|| {
+            format!("no session {id} is open in a panel or kept; `agents` lists the open ones")
+        })?;
+    let mut session = Session::open_exclusive(&path)
+        .map_err(|error| format!("session {id} cannot take the message: {error}"))?;
+    let mut held = session.held_reports();
+    held.push(message);
+    session
+        .append_held_reports(&held)
+        .map(drop)
+        .map_err(|error| format!("session {id} cannot take the message: {error}"))
 }
 
 /// The count a message from a panel whose run `sent` messages got going
@@ -412,7 +496,7 @@ struct Outgoing {
     from: Option<u64>,
     session: Option<String>,
     agent: String,
-    to: u64,
+    to: String,
     kind: OriginKind,
     text: String,
 }
@@ -429,6 +513,47 @@ mod tests {
         assert!(next_hops(MAX_HOPS)
             .unwrap_err()
             .contains("without the user"));
+    }
+
+    fn from_peer(text: &str) -> UserMessage {
+        UserMessage::text(text).with_origin(MessageOrigin {
+            session: "s1".into(),
+            agent: "default".into(),
+            kind: OriginKind::Reply,
+            panel: Some(1),
+            hops: 1,
+        })
+    }
+
+    #[test]
+    fn a_message_to_a_closed_session_waits_in_its_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("sub");
+        let session = Session::create(&nested, dir.path()).unwrap();
+        let (id, path) = (session.id().to_string(), session.path().to_path_buf());
+        drop(session);
+        let dirs = || [other.path().to_path_buf(), dir.path().to_path_buf()];
+        leave_in_log(dirs(), &id, from_peer("first")).unwrap();
+        leave_in_log(dirs(), &id, from_peer("second")).unwrap();
+        // They wait for the next request, one after another, as they came.
+        let held = Session::open(&path).unwrap().held_reports();
+        let texts: Vec<String> = held.iter().map(UserMessage::plain_text).collect();
+        assert_eq!(texts, ["first", "second"]);
+        assert_eq!(held[0].origin, from_peer("first").origin);
+        assert!(leave_in_log(dirs(), "00000000", from_peer("x"))
+            .unwrap_err()
+            .contains("no session 00000000"));
+    }
+
+    #[test]
+    fn a_session_open_in_a_panel_is_not_written_to_from_outside() {
+        let dir = tempfile::tempdir().unwrap();
+        let open = Session::create_exclusive(dir.path(), dir.path()).unwrap();
+        let id = open.id().to_string();
+        let refused = leave_in_log([dir.path().to_path_buf()], &id, from_peer("x"));
+        assert!(refused.unwrap_err().contains("cannot take the message"));
+        assert!(open.held_reports().is_empty());
     }
 
     #[test]
@@ -451,7 +576,7 @@ mod tests {
         let sent = send.execute(
             &call(
                 "send_message",
-                serde_json::json!({ "to": 2, "kind": "info", "text": "hi" }),
+                serde_json::json!({ "to": "1a2b3c4d", "kind": "info", "text": "hi" }),
             ),
             &ctx,
             &mut |_| {},

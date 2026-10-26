@@ -5,6 +5,11 @@ All notable changes to Termide will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **A message between agents reaches the session it is for, not whatever its panel shows.** Agents wrote to a panel by its number, so an answer meant for a session you had left — gone back to the session list, or opened another — started a new session in that panel, or landed in an unrelated conversation. `agents` now lists the open sessions, each with its id, agent, state, directory and panel, and `send_message` writes to a session: to the panel it is open in now, wherever that is; when it is open in none, the message waits in its log, no new session starts, and the sender is told so. Opening that session again says how many messages wait, and they go with your next request there. A background task's answer goes to the session that handed it over the same way. A message sent reads `& Asking session 1a2b3c4d · …`.
+
 ## [0.46.0] - 2026-10-26
 
 [0.46.0]: https://github.com/termide/termide/releases/tag/0.46.0

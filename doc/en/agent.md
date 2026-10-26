@@ -1771,7 +1771,8 @@ to their own connection.
 
 A `task` call with `background` does not wait: the task runs out of sight
 as a delegate the call waits for does, and the call returns at once. The delegating agent carries on, and when the task is
-over its answer reaches the agent as a message of the delegate's, a step
+over its answer reaches the session that handed it over, wherever it is
+open by then, as a message of the delegate's, a step
 reading `& Receiving reply from <delegate> · …`, the way an answer to
 `send_message` does: an idle agent starts a turn on it, a busy one reads it
 at its next step. Several background tasks can run at once. With no block
@@ -1795,27 +1796,33 @@ headless run has nowhere to take the answer.
 
 The panel's own agent, and Claude Code on termide's tools, can write to the
 agents of the other agent panels open in the project, on screen or in the
-background. **agents** lists them —
-each panel's number, its agent, what it is doing (free, idle, working,
-waiting for you, following another agent's task) and where it works — and
+background. **agents** lists the sessions open in them — each one's id, its
+agent, what it is doing (free, idle, working, waiting for you, following
+another agent's task), where it works and the panel it is open in — and
 **send_message** sends one of them a message: `info` to tell it something,
-`question` to ask it something, `reply` to answer a message it got. The
+`question` to ask it something, `reply` to answer a message it got. A
+message goes to a session, not to a panel: if the session is now open in
+another panel, it goes there; if you left it — went back to the session
+list, opened another one — it waits in that session's log, the panel
+starts no new session for it, and the sender is told so. When you open
+that session again, a notice says how many messages wait, and they go with
+your next request there. The
 message reaches the other agent at once — an idle one starts a turn on it, a
 busy one reads it at its next step — as that agent's words, never yours: the
 transcript shows it as a step, not on the plate of your messages —
 `& Receiving reply from reviewer (panel 3) · …`, `& Receiving question
 from …`, `& Receiving note from …`, `& Taking task from …`, its text folded
 under it — and the model reads it framed with the
-sender's name and panel, so it knows where to answer, and the `auto`
+sender's name and session, so it knows where to answer, and the `auto`
 reviewer does not take it for a request of yours. An answer comes back the
 same way, as a message of its own, not as the call's result. A panel following
 another agent's task takes no messages until the task is over. A free panel,
 nothing asked in it yet, takes no `question`: its agent knows nothing of the
 work so far and has nothing to answer from. Every exchange with another
 agent opens with `&` in the transcript, the verb saying which way it goes:
-`& Delegating to …` for a task, `& Asking panel 3 · …`, `& Replying to
-panel 1 · …` and `& Telling panel 3 · …` for a message sent, `& Listing agent
-panels` for `agents`. `send_message` acts outside the
+`& Delegating to …` for a task, `& Asking session 1a2b3c4d · …`,
+`& Replying to session 5e6f7a8b · …` and `& Telling session 1a2b3c4d · …`
+for a message sent, `& Listing agent panels` for `agents`. `send_message` acts outside the
 panel, so it asks as such tools do: in `ask` mode you confirm each message,
 in plan mode none goes; `agents` only reads. Agents may pass ten messages to
 one another without you; the next is refused and the agent told to finish

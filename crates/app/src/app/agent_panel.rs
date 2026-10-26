@@ -1765,6 +1765,9 @@ impl Subagents {
         // Its answer starts the delegating agent anew, so it counts among the
         // messages agents pass one another.
         peers::may_hand_over(&self.project_root, parent)?;
+        // Its answer is for the session that handed it over, wherever that
+        // is by the time it comes.
+        let parent_session = ctx.session.as_ref().and_then(|session| session.id.clone());
         let this = Arc::clone(self);
         let ctx = ctx.clone();
         let (caller, agent, prompt, call) = (
@@ -1795,7 +1798,14 @@ impl Subagents {
                 }
                 let text = background_report(&prompt, &thread_agent, &outcome);
                 let held = termide_panel_agent::live::take_quiet(parent, &call);
-                peers::report(&this.project_root, parent, &thread_agent, text, held);
+                peers::report(
+                    &this.project_root,
+                    parent,
+                    parent_session,
+                    &thread_agent,
+                    text,
+                    held,
+                );
             })
             .map_err(|error| format!("cannot start the task: {error}"))?;
         Ok(format!(
@@ -1841,6 +1851,11 @@ impl Subagents {
             "Carry this task on from where you stopped. What you did before is in your log; \
              do not start it over.\n\n{task}"
         );
+        let parent_session = log
+            .header()
+            .parent
+            .as_ref()
+            .and_then(|parent| parent.session.clone());
         let this = Arc::clone(self);
         let cwd = log.header().cwd.clone();
         let (caller, agent, carried, call, session, original) = (
@@ -1883,7 +1898,14 @@ impl Subagents {
                 // words that carried it on.
                 let text = background_report(&original, &thread_agent, &outcome);
                 let held = termide_panel_agent::live::take_quiet(parent, &call);
-                peers::report(&this.project_root, parent, &thread_agent, text, held);
+                peers::report(
+                    &this.project_root,
+                    parent,
+                    parent_session,
+                    &thread_agent,
+                    text,
+                    held,
+                );
             })
             .map_err(|error| log::warn!("cannot carry the task on: {error}"))
             .is_ok()

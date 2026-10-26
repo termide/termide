@@ -1731,6 +1731,13 @@ impl Translation for RuntimeTranslation {
         )
     }
 
+    fn agent_notice_held_messages_fmt(&self, count: usize) -> String {
+        self.format(
+            "agent_notice_held_messages_fmt",
+            &[("count", &count.to_string())],
+        )
+    }
+
     fn agent_strip_pause_held_fmt(&self, count: usize) -> String {
         self.format(
             "agent_strip_pause_held_fmt",

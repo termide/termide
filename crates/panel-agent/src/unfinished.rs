@@ -18,7 +18,7 @@ use termide_ui::ChoiceForm;
 
 use crate::pending::Pending;
 use crate::runtime::{hms_from_millis, push_history};
-use crate::transcript::Item;
+use crate::transcript::{Item, NoticeKind};
 use crate::{single_line, truncate_title, AgentPanel, GoalTask, LoopTask, LOOP_MAX_ITERATIONS};
 
 /// What a call a cut-off run left without a result is told: it may have run
@@ -305,6 +305,14 @@ impl AgentPanel {
             .as_ref()
             .map(Session::held_reports)
             .unwrap_or_default();
+        // Another agent's message to a session the user had closed waits
+        // here too: the user should know it goes with what they write next.
+        if !self.held_reports.is_empty() {
+            self.notice(
+                termide_i18n::t().agent_notice_held_messages_fmt(self.held_reports.len()),
+                NoticeKind::Info,
+            );
+        }
         let Some(mark) = self.session.as_ref().map(Session::unfinished_run) else {
             return;
         };

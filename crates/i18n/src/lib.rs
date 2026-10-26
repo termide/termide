@@ -754,6 +754,9 @@ pub trait Translation: Send + Sync {
     /// Nowhere to return a carried-on delegate's answer: no panel holds the
     /// session that delegated it.
     fn agent_notice_no_parent_panel(&self) -> &str;
+    /// Agent panel notice: a session opened with messages from other agents
+    /// waiting in its log for the next request.
+    fn agent_notice_held_messages_fmt(&self, count: usize) -> String;
     fn agent_unfinished_continue(&self) -> &str;
     fn agent_unfinished_drop(&self) -> &str;
     fn agent_unfinished_later(&self) -> &str;

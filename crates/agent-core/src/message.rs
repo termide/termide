@@ -215,14 +215,14 @@ pub struct UserMessage {
 /// Who sent a message between agents, and what it is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageOrigin {
-    /// The id of the sending agent's session; empty when it has none termide
-    /// knows of (an external agent's).
+    /// The id of the sending agent's session, where an answer goes; empty
+    /// when it has none (a background task's answer).
     pub session: String,
     /// The sending agent's name.
     pub agent: String,
     pub kind: OriginKind,
-    /// The agent panel it was sent from, by its number: where an answer
-    /// goes.
+    /// The agent panel it was sent from, by its number, for the user to
+    /// see; an answer goes to `session`, wherever it is open by then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub panel: Option<u64>,
     /// How many messages agents have passed one another since the user last
@@ -364,18 +364,15 @@ impl UserMessage {
     /// The text with, for another agent's message, the frame that says who
     /// sent it and what it is, so the model never takes it for the user's:
     /// `<agent-message from="…" session="…" kind="…">`, without the session
-    /// when there is none.
+    /// when there is none. The session is where an answer goes; the panel
+    /// it was sent from is the user's to see, not the model's to write to.
     #[must_use]
     pub fn framed_text(&self) -> String {
         let text = self.plain_text();
         match &self.origin {
             Some(origin) => format!(
-                "<agent-message from=\"{}\"{}{} kind=\"{}\">\n{}\n</agent-message>",
+                "<agent-message from=\"{}\"{} kind=\"{}\">\n{}\n</agent-message>",
                 attribute(&origin.agent),
-                origin
-                    .panel
-                    .map(|panel| format!(" panel=\"{panel}\""))
-                    .unwrap_or_default(),
                 if origin.session.is_empty() {
                     String::new()
                 } else {

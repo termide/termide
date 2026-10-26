@@ -242,6 +242,28 @@ while steered ones join it) and zero from anything the user sends. A panel
 running a delegated task refuses messages. Codex and Gemini CLI get only
 `COMPANION_TOOLS`, which leave these two out for now.
 
+Changed after: a message goes to a session, not a panel. Addressed by panel
+number, an answer for a session the user had left — gone back to the
+banner's list, or opened another — started a new session in that panel, or
+landed in an unrelated one. A conversation is between sessions; the panel
+is only where one is shown at the moment. So `agents` lists sessions (id,
+agent, state, cwd, and the panel for reference) and `send_message` takes a
+session id; the frame carries `session="…"` and no longer `panel`, which
+stays in `MessageOrigin` for the transcript's `(panel N)`. Every panel
+holds a session from the start (`Session::create_exclusive`), a free one
+included, and the built-in loop and an external agent's host tools both
+carry its id in `ToolContext::session`, so every sender has one. The app
+finds the panel by session (`App::panel_of_session`); with none, it writes
+the message to the session's log as a held report (`EntryKind::HeldReports`,
+found by `find_log`, opened exclusively so a session another termide holds
+is refused), and the session sends it with its next request once reopened,
+the panel saying how many wait. A background task's answer goes the same
+way, to the delegating session (`ctx.session`, or the delegate log's
+`SessionParent::session` when carried on), the panel number only a
+fallback. Considered: binding by panel and refusing when its session
+changed — the answer was then lost; waking a closed session by reopening
+it — that would change the layout under the user.
+
 Not planned: automatic isolation. Two agents in one tree may edit the same
 file; rather than guessing when to isolate or how to merge, the first step
 is to detect it exactly — an edit of a file another live session changed

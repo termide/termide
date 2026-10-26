@@ -1745,8 +1745,8 @@ fn tool_headline(
             action("¿", t.agent_tool_question(), subject)
         }
         // Every exchange with another agent opens with `&`, as a task does;
-        // the verb tells which way it goes. A message to a panel, by its
-        // number: what it is says the verb, then its first line.
+        // the verb tells which way it goes. A message to a session, by its
+        // id: what it is says the verb, then its first line.
         "send_message" => {
             let text = arg("text");
             let first = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
@@ -2623,28 +2623,29 @@ mod tests {
             ),
             "& Delegating to reviewer · check the diff"
         );
-        // Another agent panel: addressed by its number, the verb saying
+        // Another agent's session: addressed by its id (a number, from an
+        // older log, as it was written), the verb saying
         // what the message is, or listed — all with the `&` of a task.
         assert_eq!(
             headline(
                 "send_message",
-                json!({ "to": 7, "kind": "info", "text": "\nI edit submit.rs\nmore" })
+                json!({ "to": "1a2b3c4d", "kind": "info", "text": "\nI edit submit.rs\nmore" })
             ),
-            "& Telling panel 7 · I edit submit.rs"
+            "& Telling session 1a2b3c4d · I edit submit.rs"
         );
         assert_eq!(
             headline(
                 "send_message",
-                json!({ "to": 2, "kind": "question", "text": "Which?" })
+                json!({ "to": "5e6f7a8b", "kind": "question", "text": "Which?" })
             ),
-            "& Asking panel 2 · Which?"
+            "& Asking session 5e6f7a8b · Which?"
         );
         assert_eq!(
             headline(
                 "send_message",
                 json!({ "to": 1, "kind": "reply", "text": "Done" })
             ),
-            "& Replying to panel 1 · Done"
+            "& Replying to session 1 · Done"
         );
         assert_eq!(headline("agents", json!({})), "& Listing agent panels ");
         assert_eq!(
