@@ -1779,7 +1779,9 @@ at its next step. Several background tasks can run at once. With no block
 running for it, each has a row above the delegating panel's input
 (`& Delegating to · agent  task`, what it did last and its time) with a `✕`
 that stops it, after a confirmation, as a waited-for task's row has; a click elsewhere on the row, or `o` on the `task` block,
-shows a view of it, as for any delegate (above). Its permission
+shows a view of it, as for any delegate (above). The delegating agent can
+stop the task itself, without asking you, once it no longer needs it — see
+[What the agent set going](#what-the-agent-set-going). Its permission
 requests and questions come to the delegating panel as a delegate's do.
 Stopping that panel's run stops its background tasks too, and their answers
 wait for your next request there rather than start a turn. Closing the delegating panel stops its
@@ -1791,6 +1793,22 @@ them, with a notice saying how many still run. Each answer counts among the mess
 without you, so a chain of background tasks is cut off as such messages
 are. Only an agent in a panel can hand a task over in the background: a
 headless run has nowhere to take the answer.
+
+#### What the agent set going
+
+An agent can set work going that runs on while it does something else: tasks
+it hands over in the background, those of them parked at a limit, and —
+with Claude Code, which moves a long call to the background to take a
+message typed meanwhile — a delegate or a command it was waiting for. Any of
+it can stop mattering before it ends. **jobs** lists what the agent set going
+that still runs, each with its id (the hand-over of a background task gives
+the id too), what it is and how long it has run (`& Listing background
+work`), and with `stop` set to an id stops that one (`& Stopping <id>`): a
+task stops, a parked one is given up, a call is cancelled, and no answer
+comes from it afterwards. It asks you nothing in any mode, since it touches
+only the agent's own work; a `/goal` or `/loop` is yours and is not listed.
+The tool comes with `task`: an agent whose `tools` list leaves `task` out
+gets `jobs` only by naming it. Subagents have neither.
 
 ### Talking to other panels
 
@@ -2094,7 +2112,7 @@ to change how the answer is drawn or cited.
 What the model is told about each built-in tool is a file too:
 `tools/<name>.md` for `read`, `edit`, `write`, `bash`, `question`,
 `suggest_command`, `task`, `skill`, `fetch`, `web_search`, `recall`, `agents`,
-`send_message` and `debug`, seeded
+`send_message`, `debug` and `jobs`, seeded
 and kept current like the `system/` files, and read from the configuration
 level only. The body is the description the model sees with the tool;
 `snippet:` in the front matter is its line in the system prompt's tool list

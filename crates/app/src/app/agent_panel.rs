@@ -26,8 +26,8 @@ use termide_agent_providers::{
 };
 use termide_agent_recall::{PanelDir, RecallSetup, RecallTool, RepoFinder, Solver, TimeLimits};
 use termide_agent_tools::{
-    builtin_tools, BashTool, QuestionTool, SkillTool, SubagentOutcome, SubagentRun, SubagentTask,
-    SuggestCommandTool, TaskTool,
+    builtin_tools, BashTool, JobsTool, OwnTasks, QuestionTool, SkillTool, SubagentOutcome,
+    SubagentRun, SubagentTask, SuggestCommandTool, TaskTool,
 };
 use termide_agent_web::{web_tools, Web, WebConfig};
 use termide_config::{AiSettings, Connection, WebSettings};
@@ -660,6 +660,10 @@ impl AgentCatalog for FsCatalog {
                 }
             }
         }
+        // What the agent set going is its own to see and stop.
+        if backend.is_none() {
+            tools.insert(Arc::new(JobsTool::new(Arc::new(PanelTasks))));
+        }
         restrict_tools(&mut tools, &definition.spec.tools, name);
         // Skills are instructions, not a capability, so an agent's `tools`
         // list does not govern them: the tool comes with the skills.
@@ -825,7 +829,9 @@ fn restrict_tools(tools: &mut ToolRegistry, allowed: &Option<Vec<String>>, agent
         .map(str::to_string)
         .collect::<Vec<_>>()
     {
-        if !allowed.contains(&tool) {
+        // `jobs` stops what `task` hands over, so it comes with it.
+        let with_task = tool == "jobs" && allowed.iter().any(|name| name == "task");
+        if !allowed.contains(&tool) && !with_task {
             tools.remove(&tool);
         }
     }
@@ -1796,8 +1802,12 @@ impl Subagents {
                 if outcome.parked {
                     return;
                 }
-                let text = background_report(&prompt, &thread_agent, &outcome);
                 let held = termide_panel_agent::live::take_quiet(parent, &call);
+                // Stopped by the agent that handed it over: it knows.
+                if termide_panel_agent::live::take_withdrawn(parent, &call) {
+                    return;
+                }
+                let text = background_report(&prompt, &thread_agent, &outcome);
                 peers::report(
                     &this.project_root,
                     parent,
@@ -1809,9 +1819,11 @@ impl Subagents {
             })
             .map_err(|error| format!("cannot start the task: {error}"))?;
         Ok(format!(
-            "{agent} took the task and works on it out of sight. Carry on: its answer comes \
-             to you later as a message of its own. Do not wait for it with tools, and do not \
-             hand the same task over again."
+            "{agent} took the task and works on it out of sight; its id is {}. Carry on: its \
+             answer comes to you later as a message of its own. Do not wait for it with tools, \
+             and do not hand the same task over again. Should you no longer need it, stop it \
+             with `jobs`.",
+            task.call
         ))
     }
 
@@ -1870,6 +1882,11 @@ impl Subagents {
         std::thread::Builder::new()
             .name(format!("carried-{thread_agent}"))
             .spawn(move || {
+                // The agent that handed it over stopped it before this try
+                // got going: nothing is run, nothing answered.
+                if termide_panel_agent::live::take_withdrawn(parent, &call) {
+                    return;
+                }
                 // Nobody waits on the call, as for any task handed over in the
                 // background: its cards stay up until the user answers them.
                 let (prompter, rx) = permission_channel(CancelToken::new());
@@ -1896,8 +1913,11 @@ impl Subagents {
                 }
                 // The report names the task as it was handed over, not the
                 // words that carried it on.
-                let text = background_report(&original, &thread_agent, &outcome);
                 let held = termide_panel_agent::live::take_quiet(parent, &call);
+                if termide_panel_agent::live::take_withdrawn(parent, &call) {
+                    return;
+                }
+                let text = background_report(&original, &thread_agent, &outcome);
                 peers::report(
                     &this.project_root,
                     parent,
@@ -2524,6 +2544,72 @@ impl App {
         }
         if woke {
             self.state.needs_redraw = true;
+        }
+    }
+}
+
+/// The tasks a panel's agent handed over that run on without a call waiting
+/// for them — in the background, or parked at a limit — for `jobs` to list
+/// and stop. The task is the agent's own, so a stop asks nothing, and its
+/// answer does not come.
+struct PanelTasks;
+
+impl OwnTasks for PanelTasks {
+    fn list(&self, ctx: &ToolContext) -> Vec<String> {
+        use termide_agent_tools::jobs_text::{duration, first_line};
+        let Some(panel) = ctx.panel else {
+            return Vec::new();
+        };
+        let mut lines: Vec<String> = termide_panel_agent::live::background_of(panel)
+            .into_iter()
+            .map(|task| {
+                let state = if task.paused {
+                    "held at the panel's pause".to_string()
+                } else {
+                    format!("running {}", duration(task.started.elapsed()))
+                };
+                let last = if task.status.is_empty() {
+                    String::new()
+                } else {
+                    format!(" · last: {}", first_line(&task.status, 80))
+                };
+                format!(
+                    "- {} · background task · {}: {} · {state}{last}",
+                    task.call,
+                    task.agent,
+                    first_line(&task.task, 100)
+                )
+            })
+            .collect();
+        let now = unix_now();
+        lines.extend(
+            termide_panel_agent::live::parked_of(panel)
+                .into_iter()
+                .filter(|parked| !parked.launching)
+                .map(|parked| {
+                    let wait = std::time::Duration::from_secs(parked.wake_at.saturating_sub(now));
+                    format!(
+                        "- {} · task waiting out a limit · {}: {} · goes again in {}",
+                        parked.call,
+                        parked.agent,
+                        first_line(&parked.task, 100),
+                        duration(wait)
+                    )
+                }),
+        );
+        lines
+    }
+
+    fn stop(&self, id: &str, ctx: &ToolContext) -> Option<String> {
+        use termide_panel_agent::live::{withdraw, Withdrawn};
+        match withdraw(ctx.panel?, id) {
+            Withdrawn::Running(agent) => Some(format!(
+                "Stopped {agent}'s task {id}; no answer will come from it."
+            )),
+            Withdrawn::Parked(agent) => Some(format!(
+                "Gave up {agent}'s task {id}, which waited out a limit; no answer will come from it."
+            )),
+            Withdrawn::None => None,
         }
     }
 }
@@ -3525,6 +3611,7 @@ mod tests {
             tools.insert(tool);
         }
         tools.insert(debug_tool::debug_tool(tmp.path()));
+        tools.insert(Arc::new(JobsTool::new(Arc::new(PanelTasks))));
 
         let mut names: Vec<&str> = tools.iter().map(|tool| tool.name()).collect();
         names.sort_unstable();
@@ -4995,7 +5082,7 @@ done"#;
         assert_eq!(catalog.resolve("search").unwrap().tools.names(), ["read"]);
         assert_eq!(
             catalog.resolve("lead").unwrap().tools.names(),
-            ["read", "task"]
+            ["read", "task", "jobs"]
         );
         assert!(catalog
             .resolve(DEFAULT_AGENT)
@@ -5130,7 +5217,8 @@ done"#;
                 "suggest_command",
                 "agents",
                 "send_message",
-                "debug"
+                "debug",
+                "jobs"
             ]
         );
         assert!(default

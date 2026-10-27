@@ -156,7 +156,7 @@ pub fn is_running(panel: u64, call: &str) -> bool {
 
 /// A task handed over in the background, as its row shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct BackgroundTask {
+pub struct BackgroundTask {
     pub call: String,
     pub agent: String,
     pub task: String,
@@ -168,7 +168,7 @@ pub(crate) struct BackgroundTask {
 
 /// The tasks panel `panel` handed over in the background that still run,
 /// oldest first.
-pub(crate) fn background_of(panel: u64) -> Vec<BackgroundTask> {
+pub fn background_of(panel: u64) -> Vec<BackgroundTask> {
     let mut tasks: Vec<BackgroundTask> = lock()
         .iter()
         .filter(|((owner, _), live)| *owner == panel && live.background)
@@ -224,6 +224,64 @@ pub(crate) fn stop(panel: u64, call: &str) {
     if let Some(live) = lock().get(&(panel, call.to_string())) {
         live.control.stop();
     }
+}
+
+/// What [`withdraw`] found under the call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Withdrawn {
+    /// A task running in the background, now stopped; its delegate.
+    Running(String),
+    /// A task parked at a limit, now given up; its delegate.
+    Parked(String),
+    /// No task of the panel's in the background under that call.
+    None,
+}
+
+/// The delegating agent no longer needs the task it handed over in the
+/// background under the `task` call `call` of panel `panel`: stop it, or
+/// give it up where it is parked, without asking — the task is the agent's
+/// own. Its answer is not delivered (see [`take_withdrawn`]): the agent
+/// already knows. A task the run waits on is not the agent's to stop: the
+/// call stands in the way.
+pub fn withdraw(panel: u64, call: &str) -> Withdrawn {
+    let key = (panel, call.to_string());
+    let parked = parked_lock().remove(&key);
+    // A try of it already set off and not yet registered still answers
+    // when done: that answer is dropped too.
+    if parked.as_ref().is_some_and(|parked| parked.launching) {
+        withdrawn_lock().insert(key.clone());
+    }
+    let parked = parked.map(|parked| parked.agent);
+    let registry = lock();
+    let running = registry
+        .get(&key)
+        .filter(|live| live.background && !live.control.is_done());
+    if let Some(live) = running {
+        withdrawn_lock().insert(key.clone());
+        live.control.stop();
+        return Withdrawn::Running(live.agent.clone());
+    }
+    match parked {
+        Some(agent) => Withdrawn::Parked(agent),
+        None => Withdrawn::None,
+    }
+}
+
+/// The background tasks their delegating agent stopped, whose answer is not
+/// to go.
+fn withdrawn_lock() -> std::sync::MutexGuard<'static, HashSet<(u64, String)>> {
+    static WITHDRAWN: OnceLock<Mutex<HashSet<(u64, String)>>> = OnceLock::new();
+    WITHDRAWN
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Whether the delegating agent stopped the task the `task` call `call` of
+/// panel `panel` handed over in the background, so its answer is dropped.
+/// Asked once, as the answer would go.
+pub fn take_withdrawn(panel: u64, call: &str) -> bool {
+    withdrawn_lock().remove(&(panel, call.to_string()))
 }
 
 /// Stop every task panel `panel` handed over: it is closing. A pause that
@@ -550,6 +608,26 @@ mod tests {
         assert!(!take_quiet(7008, "a"), "asked once");
         assert!(!take_quiet(7008, "b"), "the call's result goes as it does");
         assert!(!take_quiet(7009, "c"));
+    }
+
+    /// The agent stops its own background task, or gives up its parked one,
+    /// with nothing asked; the task its run waits on is not its to stop.
+    #[test]
+    fn an_agent_withdraws_its_own_background_task() {
+        let background = register(task(Some(7015), "a", true));
+        let sync = register(task(Some(7015), "b", false));
+        assert_eq!(withdraw(7015, "a"), Withdrawn::Running("search".into()));
+        assert!(background.control().stop_token().is_cancelled());
+        assert_eq!(withdraw(7015, "b"), Withdrawn::None);
+        assert!(!sync.control().stop_token().is_cancelled());
+        assert_eq!(withdraw(7016, "a"), Withdrawn::None, "another panel's");
+        assert!(take_withdrawn(7015, "a"));
+        assert!(!take_withdrawn(7015, "a"), "asked once");
+
+        park(7015, parked("c", 100, 400));
+        assert_eq!(withdraw(7015, "c"), Withdrawn::Parked("methodical".into()));
+        assert!(parked_of(7015).is_empty());
+        assert!(!take_withdrawn(7015, "c"), "nothing runs to answer");
     }
 
     /// A task parked at a usage limit resetting at `wake_at`.

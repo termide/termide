@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **An agent stops what it set going.** A task handed over in the background ran to its end even when the agent no longer needed it — the plan had changed, another source had answered — and so did a delegate or command Claude Code had moved to the background to take your message: only you could stop them, from their row's `✕`, and asked to, the agent could only say it had no way to. The new `jobs` tool lists what the agent set going that still runs — background tasks, tasks parked at a limit, calls moved to the background — each with its id, what it is and how long it has run, and `stop` stops one of them without asking you, since it is the agent's own work; no answer then comes from it, so the agent is not woken for nothing. The steps read `& Listing background work` and `& Stopping <id>`. A `/goal` or `/loop` stays yours. `jobs` comes with `task`.
+
 ### Fixed
 - **A message between agents reaches the session it is for, not whatever its panel shows.** Agents wrote to a panel by its number, so an answer meant for a session you had left — gone back to the session list, or opened another — started a new session in that panel, or landed in an unrelated conversation. `agents` now lists the open sessions, each with its id, agent, state, directory and panel, and `send_message` writes to a session: to the panel it is open in now, wherever that is; when it is open in none, the message waits in its log, no new session starts, and the sender is told so. Opening that session again says how many messages wait, and they go with your next request there. A background task's answer goes to the session that handed it over the same way. A message sent reads `& Asking session 1a2b3c4d · …`.
 

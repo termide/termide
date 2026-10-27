@@ -1260,6 +1260,7 @@ impl Agent {
             panel: self.panel,
             tool: crate::ToolTraits::default(),
             resume: None,
+            running: None,
         }
     }
 

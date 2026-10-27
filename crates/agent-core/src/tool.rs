@@ -50,6 +50,39 @@ pub struct ToolContext {
     /// its steps back from there and goes on from where they stopped, instead
     /// of starting a log of its own. `None` starts a fresh run.
     pub resume: Option<PathBuf>,
+    /// The agent's other calls that run beside this one — those an external
+    /// agent moved to the background to go on meanwhile — to list and stop.
+    /// `None` where no call outlives its step: termide's own loop.
+    pub running: Option<RunningCalls>,
+}
+
+/// A call of the agent's that runs beside the one asking: its id as the
+/// agent knows it, its tool and arguments, and how long it has run.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunningCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: Value,
+    pub elapsed: std::time::Duration,
+}
+
+/// What runs the agent's calls, seen from one of them: the others it runs,
+/// and a way to stop one.
+pub trait CallsBeside: Send + Sync {
+    /// The calls running beside the asking one, longest first.
+    fn list(&self) -> Vec<RunningCall>;
+    /// Stop the call `id`; false when none such runs.
+    fn stop(&self, id: &str) -> bool;
+}
+
+/// A shared [`CallsBeside`], for the context.
+#[derive(Clone)]
+pub struct RunningCalls(pub Arc<dyn CallsBeside>);
+
+impl std::fmt::Debug for RunningCalls {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RunningCalls")
+    }
 }
 
 /// What a tool says of itself that the permission hooks weigh.
@@ -77,6 +110,7 @@ impl ToolContext {
             panel: None,
             tool: ToolTraits::default(),
             resume: None,
+            running: None,
         }
     }
 }

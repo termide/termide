@@ -164,6 +164,8 @@ fn not_read_only(call: &ToolCall) -> Option<String> {
         // which only reads the project's history and code, or `agents`,
         // which lists the panels.
         "read" | "skill" | "fetch" | "web_search" | "question" | "recall" | "agents" => None,
+        // Listing what the agent set going changes nothing; stopping it does.
+        "jobs" if call.arguments.get("stop").is_none() => None,
         // Reading the debug session changes nothing; every other action runs
         // or stops the program.
         "debug" if call.arguments["action"] == "state" => None,
@@ -225,7 +227,7 @@ impl PlanGuard {
 impl Hooks for PlanGuard {
     fn before_tool_call(&mut self, call: &ToolCall, ctx: &ToolContext) -> ToolDecision {
         if self.mode.get() != Mode::Plan
-            || matches!(call.name.as_str(), "task" | "suggest_command")
+            || matches!(call.name.as_str(), "task" | "suggest_command" | "jobs")
             || ctx.tool.mcp
         {
             return ToolDecision::Allow;
@@ -848,6 +850,9 @@ impl PermissionHooks {
             // logs (under the configuration directory), its git history and
             // its code, and writes nothing.
             (_, "skill" | "question" | "suggest_command" | "recall") => Decision::Allow,
+            // `jobs` lists and stops only what the agent itself set going:
+            // its own work, which it is not asked about in any mode.
+            (_, "jobs") => Decision::Allow,
             (Mode::Plan | Mode::Edit, "fetch" | "web_search") => Decision::Allow,
             // The subagent is held to plan mode too, so it only reads.
             (Mode::Plan, "task") => Decision::Allow,

@@ -15,6 +15,7 @@ mod bash;
 mod clean;
 mod debug;
 mod edit;
+mod jobs;
 mod peers;
 mod question;
 mod read;
@@ -33,11 +34,16 @@ pub use bash::BashTool;
 pub use clean::{clean_output, Cleaned};
 pub use debug::{parse_action as parse_debug_action, DebugAction, DebugRun, DebugTool};
 pub use edit::EditTool;
+pub use jobs::{JobsTool, OwnTasks};
 pub use peers::{AgentsTool, PeerInfo, PeerList, PeerSend, SendMessageTool};
 pub use question::QuestionTool;
 pub use read::ReadTool;
 pub use skill::SkillTool;
 pub use suggest::SuggestCommandTool;
+/// How `jobs` words a line, for the sources that fill it.
+pub mod jobs_text {
+    pub use crate::jobs::{duration, first_line};
+}
 pub use task::{SubagentOutcome, SubagentRun, SubagentTask, TaskTool};
 pub use write::WriteTool;
 

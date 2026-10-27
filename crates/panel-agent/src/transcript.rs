@@ -1763,6 +1763,11 @@ fn tool_headline(
             action("&", verb, format!("{to} · {}", first.trim()))
         }
         "agents" => action("&", t.agent_tool_agents(), String::new()),
+        // What the agent set going: listed, or one of it stopped by its id.
+        "jobs" => match arg("stop").trim() {
+            "" => action("&", t.agent_tool_jobs(), String::new()),
+            id => action("&", t.agent_tool_jobs_stop(), id.to_string()),
+        },
         // Another agent's message to this one: from whom, what it is, and
         // its first line; the rest folds under it.
         PEER_MESSAGE_TOOL if is_peer_message(call) => {
@@ -2648,6 +2653,12 @@ mod tests {
             "& Replying to session 1 · Done"
         );
         assert_eq!(headline("agents", json!({})), "& Listing agent panels ");
+        // What the agent set going, listed or stopped by its id.
+        assert_eq!(headline("jobs", json!({})), "& Listing background work ");
+        assert_eq!(
+            headline("jobs", json!({ "stop": "call_7" })),
+            "& Stopping call_7"
+        );
         assert_eq!(
             headline(
                 "github__create_issue",

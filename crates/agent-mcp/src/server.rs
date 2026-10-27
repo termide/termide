@@ -65,7 +65,7 @@ struct Shared {
     token: String,
     /// Each call in flight, by its JSON-RPC id: its cancel token, for
     /// `notifications/cancelled`, and what it is.
-    running: Mutex<HashMap<String, Running>>,
+    running: Arc<Mutex<HashMap<String, Running>>>,
     /// The details of finished calls — for termide's UI, never sent to the
     /// agent — as name, arguments and details, oldest first.
     details: Mutex<VecDeque<(String, Value, Value)>>,
@@ -135,7 +135,7 @@ impl McpServer {
             hooks: Mutex::new(hooks),
             context,
             token: new_token(),
-            running: Mutex::new(HashMap::new()),
+            running: Arc::new(Mutex::new(HashMap::new())),
             details: Mutex::new(VecDeque::new()),
             stop: AtomicBool::new(false),
             keepalive,
@@ -624,6 +624,44 @@ fn client_gone(stream: &TcpStream) -> bool {
     gone
 }
 
+/// The server's other calls, seen from the call `own`.
+struct CallsBeside {
+    running: Arc<Mutex<HashMap<String, Running>>>,
+    /// The asking call's key in `running`.
+    own: String,
+}
+
+impl termide_agent_core::CallsBeside for CallsBeside {
+    fn list(&self) -> Vec<termide_agent_core::RunningCall> {
+        let mut calls: Vec<termide_agent_core::RunningCall> = self
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|(key, _)| **key != self.own)
+            .map(|(_, call)| termide_agent_core::RunningCall {
+                id: call.id.clone(),
+                name: call.name.clone(),
+                arguments: call.arguments.clone(),
+                elapsed: call.started.elapsed(),
+            })
+            .collect();
+        calls.sort_by(|a, b| b.elapsed.cmp(&a.elapsed));
+        calls
+    }
+
+    fn stop(&self, id: &str) -> bool {
+        let running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
+        let call = running
+            .iter()
+            .find(|(key, call)| **key != self.own && call.id == id);
+        if let Some((_, call)) = call {
+            call.cancel.cancel();
+        }
+        call.is_some()
+    }
+}
+
 /// Run a `tools/call` the way the built-in loop runs a call; `cancel` stops
 /// it, and is cancelled too by a `notifications/cancelled` for its id.
 fn call_tool(shared: &Shared, id: &Value, params: &Value, cancel: CancelToken) -> Value {
@@ -670,6 +708,12 @@ fn call_tool(shared: &Shared, id: &Value, params: &Value, cancel: CancelToken) -
     }
     let ctx = ToolContext {
         withdrawn: Some(cancel.clone()),
+        // The agent may have moved its other calls to the background and
+        // gone on: this one sees them, to list and stop.
+        running: Some(termide_agent_core::RunningCalls(Arc::new(CallsBeside {
+            running: Arc::clone(&shared.running),
+            own: key.clone(),
+        }))),
         ..shared.context.clone()
     };
     let hooks = || shared.hooks.lock().unwrap_or_else(PoisonError::into_inner);
@@ -931,6 +975,76 @@ mod tests {
         }
         assert_eq!(server.running_calls()[0].id, "toolu_b");
         server.cancel_running();
+    }
+
+    /// Lists the calls running beside it and stops the one its `stop` names.
+    struct Beside;
+
+    impl Tool for Beside {
+        fn name(&self) -> &str {
+            "beside"
+        }
+        fn description(&self) -> &str {
+            "lists and stops the others"
+        }
+        fn parameters(&self) -> Value {
+            json!({ "type": "object" })
+        }
+        fn execute(
+            &self,
+            call: &ToolCall,
+            ctx: &ToolContext,
+            _on_update: &mut dyn FnMut(ToolUpdate),
+            _cancel: &CancelToken,
+        ) -> ToolResultMessage {
+            let running = ctx.running.as_ref().expect("the server says what runs");
+            let listed: Vec<String> = running.0.list().into_iter().map(|c| c.id).collect();
+            let stopped = call.arguments["stop"]
+                .as_str()
+                .is_some_and(|id| running.0.stop(id));
+            ToolResultMessage::text(call, format!("{} {stopped}", listed.join(",")))
+        }
+    }
+
+    /// A call sees the agent's other calls running beside it, not itself,
+    /// and stops one of them by the agent's id.
+    #[test]
+    fn a_call_sees_and_stops_the_calls_beside_it() {
+        let done = Arc::new(AtomicBool::new(false));
+        let mut tools = ToolRegistry::new();
+        tools.insert(Arc::new(UntilCancelled(Arc::clone(&done))));
+        tools.insert(Arc::new(Beside));
+        let server = McpServer::start(tools, Box::new(Guard), ToolContext::new("/tmp")).unwrap();
+        server.set_call_ids(Box::new(|name, _| match name {
+            "wait" => vec!["toolu_wait".to_string()],
+            "beside" => vec!["toolu_me".to_string(), "toolu_me2".to_string()],
+            _ => Vec::new(),
+        }));
+        let _waiting = post_streamed(
+            &server,
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                     "params": { "name": "wait", "arguments": {} } }),
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while server.running_calls().is_empty() {
+            assert!(std::time::Instant::now() < deadline, "the call never ran");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let token = server.token().to_string();
+        let beside = |id: u64, args: Value| {
+            json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call",
+                    "params": { "name": "beside", "arguments": args } })
+        };
+        let (_, body) = post(&server, &token, &beside(2, json!({})));
+        assert!(body.contains("toolu_wait false"), "{body}");
+        assert!(!body.contains("toolu_me"), "not itself: {body}");
+        let (_, body) = post(&server, &token, &beside(3, json!({ "stop": "toolu_wait" })));
+        assert!(body.contains("toolu_wait true"), "{body}");
+        while server.is_running() {
+            assert!(std::time::Instant::now() < deadline, "the call went on");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(done.load(Ordering::Acquire));
     }
 
     /// Says which of the context's people a call was given.
