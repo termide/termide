@@ -88,7 +88,9 @@ subdirectories — the operation is refused before anything is written.
 Copy, move, [pack](vfs.md#packing), [unpack](vfs.md#unpacking) and Save As
 ask for a path in a field that opens a directory tree under it: press `Tab`
 or click the `▼` at its right end. While the field still holds the suggested
-path, the tree lists the other panels' directories. Once the path is edited,
+path, the tree lists the panels' directories, then the directories this
+project's prompts were recently confirmed with (kept until termide quits,
+never written to disk). Once the path is edited,
 it lists the directory the path names up to its last `/`, narrowed fuzzily by
 what follows; a name starting with `.` brings in hidden directories.
 

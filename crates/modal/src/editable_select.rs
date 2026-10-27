@@ -142,6 +142,13 @@ impl EditableSelectModal {
         }
     }
 
+    /// Offer `dirs` as the quick destinations instead of the options given
+    /// at construction.
+    pub fn set_quick_destinations(&mut self, dirs: Vec<String>) {
+        self.widest_option = dirs.iter().map(|d| d.width()).max().unwrap_or(0);
+        self.field.set_roots(dirs);
+    }
+
     /// Take a relative path from `dir`.
     pub fn with_base_dir(mut self, dir: PathBuf) -> Self {
         self.field.set_base_dir(dir);

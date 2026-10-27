@@ -182,6 +182,7 @@ impl App {
                     self.state.stash.include_untracked = modal.is_checkbox_checked();
                 }
                 self.capture_vault_checkbox();
+                self.remember_destination(&result);
                 self.state.close_modal();
                 if let ModalResult::Confirmed(value) = result {
                     self.handle_modal_result(value)?;
@@ -270,6 +271,7 @@ impl App {
                     return Ok(());
                 }
                 self.capture_vault_checkbox();
+                self.remember_destination(&result);
                 self.state.close_modal();
                 if let ModalResult::Confirmed(value) = result {
                     self.handle_modal_result(value)?;

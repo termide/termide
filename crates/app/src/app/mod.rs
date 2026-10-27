@@ -57,6 +57,7 @@ mod plugin_providers;
 mod plugin_windows;
 mod plugins;
 mod project_layout;
+mod recent_destinations;
 mod vault;
 mod watcher;
 mod workspace_edit;
@@ -133,6 +134,8 @@ pub struct App {
     vault: vault::VaultState,
     /// An open project held by the mouse to reorder.
     project_drag: Option<mouse::project_drag::ProjectDrag>,
+    /// Destinations confirmed in the path prompts, per project, this run.
+    recent_destinations: recent_destinations::RecentDestinations,
 }
 
 /// Keep the windows external agents report in `<config>/ai/acp-windows.json`,
@@ -236,6 +239,7 @@ impl App {
             settings_model_fetch: None,
             settings_save: None,
             vault: vault::VaultState::default(),
+            recent_destinations: Default::default(),
         }
     }
 
@@ -341,6 +345,7 @@ impl App {
             settings_model_fetch: None,
             settings_save: None,
             vault: vault::VaultState::default(),
+            recent_destinations: Default::default(),
         }
     }
 
