@@ -9,8 +9,8 @@ use termide_agent_core::{
     DecidedBy, Lasting, PermissionNote, ToolCall, ToolResultMessage, UserMessage,
 };
 use termide_core::ThemeColors;
-use termide_panel_markdown::render_markdown;
-use termide_richtext::{Builder, RowCopy};
+use termide_panel_markdown::render_markdown_with;
+use termide_richtext::{Builder, DiagramCard, RowCopy};
 
 /// Lines of tool output shown when a call is expanded.
 const EXPANDED_OUTPUT_LINES: usize = 60;
@@ -102,9 +102,31 @@ fn is_foldable(item: &Item, fold: FoldMode) -> bool {
             let command = shell_command(call).map_or(0, |c| c.lines().count());
             output || command > 1
         }
-        // The answer is always shown in full, so it never folds.
-        Item::Assistant { .. } | Item::Notice { .. } | Item::RunEnd { .. } => false,
+        // The answer's text is always shown in full; only the diagrams in it
+        // fold, each to a one-line card. A fence is a cheap first look:
+        // `render_item` confirms a diagram is drawn from it.
+        Item::Assistant { text, .. } => has_mermaid_fence(text),
+        Item::Notice { .. } | Item::RunEnd { .. } => false,
     }
+}
+
+/// Whether `text` opens a ```` ```mermaid ```` code block.
+fn has_mermaid_fence(text: &str) -> bool {
+    text.lines().any(|line| {
+        let line = line.trim_start();
+        line.strip_prefix("```")
+            .or_else(|| line.strip_prefix("~~~"))
+            .is_some_and(|rest| {
+                rest.trim_start_matches(['`', '~'])
+                    .trim()
+                    .eq_ignore_ascii_case("mermaid")
+            })
+    })
+}
+
+/// The card a folded diagram shows in place of its `rows`.
+fn diagram_card(rows: usize) -> String {
+    format!("mermaid {}", termide_i18n::t().agent_more_lines(rows))
 }
 
 /// Whether `item` is an annotation — a notice or a run's closing line — rather
@@ -367,6 +389,10 @@ pub struct Transcript {
     /// of a long message). Parallel to `items`. The assistant's answer always
     /// shows; collapsing only folds its thinking away.
     collapsed: Vec<bool>,
+    /// Whether each item's fold was set by hand, parallel to `items`: an
+    /// answer's diagrams fold by themselves once scrolled out of sight
+    /// ([`Transcript::fold_diagrams_above`]) only while this is unset.
+    pinned: Vec<bool>,
     cache: Vec<Option<Cached>>,
     /// Flattened lines of every item, rebuilt when any cache entry changed.
     flat: Vec<Line<'static>>,
@@ -429,9 +455,13 @@ impl Transcript {
         // closing line);
         // an item's primary content still shows, only its detail is hidden.
         // Set never to fold, nothing does.
-        let collapsed = self.fold != FoldMode::Never && !is_annotation(&item);
+        // A fresh answer shows its diagrams; they fold once scrolled away.
+        let collapsed = self.fold != FoldMode::Never
+            && !is_annotation(&item)
+            && !matches!(item, Item::Assistant { .. });
         self.items.push(item);
         self.collapsed.push(collapsed);
+        self.pinned.push(false);
         self.cache.push(None);
         self.flat_dirty = true;
     }
@@ -439,6 +469,7 @@ impl Transcript {
     pub fn clear(&mut self) {
         self.items.clear();
         self.collapsed.clear();
+        self.pinned.clear();
         self.cache.clear();
         self.flat.clear();
         self.line_item.clear();
@@ -565,6 +596,7 @@ impl Transcript {
             if text.trim().is_empty() && error.is_none() {
                 self.items.remove(index);
                 self.collapsed.remove(index);
+                self.pinned.remove(index);
                 self.cache.remove(index);
                 self.flat_dirty = true;
                 return;
@@ -768,8 +800,44 @@ impl Transcript {
             return false;
         };
         *slot = !*slot;
+        self.pin(index);
         self.invalidate(index);
         true
+    }
+
+    /// Mark item `index`'s fold as set by hand, so nothing refolds it.
+    fn pin(&mut self, index: usize) {
+        if let Some(slot) = self.pinned.get_mut(index) {
+            *slot = true;
+        }
+    }
+
+    /// Fold the diagrams of every answer wholly above flattened line `line`
+    /// (the top of the view) that shows them and was not unfolded by hand.
+    /// Returns whether any folded; the caller lays out again and moves its
+    /// view up by the rows that went, so what is on screen stays put.
+    pub fn fold_diagrams_above(&mut self, line: usize) -> bool {
+        if self.fold == FoldMode::Never {
+            return false;
+        }
+        // Items are laid out in order, so every item before the one on
+        // `line` lies wholly above it.
+        let Some(limit) = self.item_at_line(line) else {
+            return false;
+        };
+        let mut folded = false;
+        for index in 0..limit {
+            if matches!(self.items[index], Item::Assistant { .. })
+                && !self.collapsed[index]
+                && !self.pinned[index]
+                && self.foldable(index)
+            {
+                self.collapsed[index] = true;
+                self.invalidate(index);
+                folded = true;
+            }
+        }
+        folded
     }
 
     /// Show (`expanded` true) or hide the detail of item `index`; false when
@@ -781,6 +849,7 @@ impl Transcript {
         match self.collapsed.get_mut(index) {
             Some(slot) if *slot == expanded => {
                 *slot = !expanded;
+                self.pin(index);
                 self.invalidate(index);
                 true
             }
@@ -796,6 +865,7 @@ impl Transcript {
             }
             if self.collapsed[index] == value {
                 self.collapsed[index] = !value;
+                self.pin(index);
                 self.invalidate(index);
             }
         }
@@ -1863,6 +1933,18 @@ fn render_item(
         .len()
             > 1;
     }
+    // An answer folds only when a fence in it does draw a diagram.
+    if let (true, Item::Assistant { text, .. }) = (foldable, item) {
+        foldable = render_markdown_with(
+            text.trim(),
+            width.saturating_sub(2),
+            colors,
+            is_light,
+            Some(diagram_card),
+        )
+        .diagrams
+            > 0;
+    }
     let mut marks = Marks::default();
     let mut lines = render_body(
         item,
@@ -2139,7 +2221,14 @@ fn render_body(
             if !answer.is_empty() {
                 // Reserve the marker's width and indent wrapped lines under it,
                 // so the accent `›` never pushes the first line over the edge.
-                let body = render_markdown(answer, width.saturating_sub(2), colors, is_light);
+                // Folded, each diagram in it is a one-line card.
+                let body = render_markdown_with(
+                    answer,
+                    width.saturating_sub(2),
+                    colors,
+                    is_light,
+                    collapsed.then_some(diagram_card as DiagramCard),
+                );
                 // Past the `› ` mark the answer's links sit two columns in.
                 // Copied, the mark and the indent under it are decoration.
                 marks

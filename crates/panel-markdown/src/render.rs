@@ -9,14 +9,28 @@
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use termide_core::ThemeColors;
 use termide_html::HtmlState;
-use termide_richtext::Builder;
+use termide_richtext::{Builder, DiagramCard};
 
 pub use termide_richtext::{LinkSpan, Rendered};
 
 /// Render `src` for the given inner `width`.
 #[must_use]
 pub fn render_markdown(src: &str, width: u16, colors: &ThemeColors, is_light: bool) -> Rendered {
+    render_markdown_with(src, width, colors, is_light, None)
+}
+
+/// Render `src` as [`render_markdown`] does, with every diagram folded to a
+/// card reading `diagram_card(rows)` when one is given.
+#[must_use]
+pub fn render_markdown_with(
+    src: &str,
+    width: u16,
+    colors: &ThemeColors,
+    is_light: bool,
+    diagram_card: Option<DiagramCard>,
+) -> Rendered {
     let mut b = Builder::new(width, colors, is_light);
+    b.fold_diagrams(diagram_card);
     // Embedded HTML (block and inline) is driven through the shared HTML engine
     // with a persistent state, so elements that CommonMark splits across events
     // (e.g. a `<details>` wrapping Markdown) still nest correctly.
@@ -439,6 +453,26 @@ mod tests {
         // The diagram (boxes + arrow), not the raw source line.
         assert!(joined.contains('┌'), "no diagram boxes: {out:?}");
         assert!(joined.contains('▶'), "no arrowhead: {out:?}");
+    }
+
+    #[test]
+    fn a_folded_diagram_is_one_card_line() {
+        let md = "before\n\n```mermaid\nsequenceDiagram\nA->>B: hi\n```\n\nafter";
+        let whole = render_markdown(md, 80, &colors(), false);
+        let folded = render_markdown_with(md, 80, &colors(), false, Some(|n| format!("{n} rows")));
+        assert_eq!((whole.diagrams, folded.diagrams), (1, 1));
+        let text: Vec<String> = folded
+            .lines
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect();
+        let rows = whole.lines.len() - folded.lines.len() + 1;
+        assert!(
+            text.iter().any(|l| l == &format!("┊ ▸ {rows} rows")),
+            "{text:?}"
+        );
+        assert!(!text.join("\n").contains('┌'), "{text:?}");
+        assert!(text.iter().any(|l| l.contains("after")), "{text:?}");
     }
 
     #[test]

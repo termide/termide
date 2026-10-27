@@ -478,6 +478,14 @@ with `▸`, an unfolded one with `▾`, right after the step's action
 (`@ Thinking ▸`, `$ Running ▸`, `< Reading ▸ src/main.rs`) or the system
 prompt's `#` (`# ▸`).
 
+A ```` ```mermaid ```` block in an answer is drawn as the diagram itself. A
+fresh answer shows its diagrams whole; once the answer has scrolled wholly
+above the view, each of its diagrams folds to one row,
+`┊ ▸ mermaid … N more lines`, and the view moves with it, so what is on screen
+stays where it was. Unfold them as any block — `Enter`, `→` or a second click
+on the answer; an answer folded or unfolded by hand stays that way. With
+`fold_blocks = "never"` diagrams never fold.
+
 While a run works, a run clock sits right-aligned under its last block: an
 animated `✽` and the time since the request was sent. It has its own glyph
 rather than `🕒` because the figures under each block describe that block
