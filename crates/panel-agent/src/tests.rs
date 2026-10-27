@@ -1684,6 +1684,35 @@ fn summary_call() -> CompactionCall {
 }
 
 #[test]
+fn a_compaction_that_kept_nothing_says_so_without_a_count_of_zero() {
+    let mut panel = AgentPanel::new(setup(vec![reply("ok")]));
+    let t = termide_i18n::t();
+    panel.apply(AgentEvent::Compacted {
+        summary: "the gist".into(),
+        kept: 2,
+        tokens_before: 90_000,
+        tokens_after: 3_000,
+        call: summary_call(),
+    });
+    // An external agent keeps nothing verbatim: the summary stands for all.
+    panel.apply(AgentEvent::Compacted {
+        summary: String::new(),
+        kept: 0,
+        tokens_before: 92_000,
+        tokens_after: 0,
+        call: summary_call(),
+    });
+    let shown = notices(&panel);
+    assert_eq!(
+        shown[shown.len() - 2..],
+        [
+            t.agent_notice_compacted_fmt(90_000, 2),
+            t.agent_notice_compacted_summary_fmt(92_000),
+        ]
+    );
+}
+
+#[test]
 fn a_compaction_and_a_refused_summary_call_are_logged_with_how_the_call_went() {
     let dir = tempfile::tempdir().unwrap();
     let mut panel = AgentPanel::new(AgentPanelSetup {

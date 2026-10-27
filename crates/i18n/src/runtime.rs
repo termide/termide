@@ -1615,6 +1615,13 @@ impl Translation for RuntimeTranslation {
         )
     }
 
+    fn agent_notice_compacted_summary_fmt(&self, tokens: u64) -> String {
+        self.format(
+            "agent_notice_compacted_summary_fmt",
+            &[("tokens", &tokens.to_string())],
+        )
+    }
+
     fn agent_notice_fitted_fmt(&self, before: u64, after: u64) -> String {
         self.format(
             "agent_notice_fitted_fmt",
